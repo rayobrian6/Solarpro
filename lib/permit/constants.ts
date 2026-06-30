@@ -13,7 +13,11 @@ const PDF_PAGE_CONFIG = {
 } as const;
 
 /** Engine version for staleness detection. Bump with every planset-affecting release. */
-const PLANSET_ENGINE_VERSION = 47345;
+// 47346 (2026-06-30): aerial centering now pin-authoritative (no neighbor-segment
+// override), battery gated on the permit payload, PV-2B branch-colored real-roof plan,
+// PV-1 panels removed. Bumped so cached plansets generated before these fixes are treated
+// as stale and force a fresh regenerate instead of serving the old (wrong-aerial) HTML.
+const PLANSET_ENGINE_VERSION = 47346;
 
 
 

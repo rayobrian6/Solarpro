@@ -97,7 +97,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           ${scaleBar}
         </svg>
       </div>
-      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">📡 Satellite · Zoom ${aerial.zoom||20} · ${aerial.lat?.toFixed(5)}, ${aerial.lng?.toFixed(5)}</div>`;
+      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">📡 Satellite · Zoom ${aerial.zoom||20} · ${aerial.lat?.toFixed(5)}, ${aerial.lng?.toFixed(5)} · ctr:${aerial.centerSource||'?'}</div>`;
   } else {
     // ── SCHEMATIC MODE: proper GPS-projected roof planes + panels ──────────
     const schemSVG = buildSchemSVG(
@@ -238,6 +238,7 @@ export interface AerialRoofData {
   lat?: number;
   lng?: number;
   zoom?: number;
+  centerSource?: 'array' | 'segment' | 'pin'; // why the image is centered where it is (diagnostic)
   roofSegments?: Array<{
     center?: { lat: number; lng: number };
     azimuthDegrees: number;
@@ -441,6 +442,7 @@ export async function fetchAerialRoofData(
       lat: centerLat,   // image is centered here → overlay projects relative to it
       lng: centerLng,
       zoom: usedZoom,
+      centerSource: _center.source,
       roofSegments,
     };
 

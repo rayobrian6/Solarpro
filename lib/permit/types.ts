@@ -457,6 +457,7 @@ export interface PermitInput {
     lat?: number;
     lng?: number;
     zoom?: number;
+    centerSource?: 'array' | 'segment' | 'pin';
     roofSegments?: Array<{
       pitchDegrees: number;
       azimuthDegrees: number;
