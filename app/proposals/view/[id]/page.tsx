@@ -21,7 +21,7 @@ import { calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { buildArraysFromLayout, buildSystemConfig, getArrayProposalText } from '@/lib/multiArrayEngine';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { UtilityRateGraph } from '@/components/proposal/UtilityRateGraph';
-import { UtilityCostProjectionChart } from '@/components/proposal/UtilityCostProjectionChart';
+import { CashFlowStoryCard } from '@/components/proposal/CashFlowStoryCard';
 import {
   buildUtilityProfile,
   validateProposalTruth,
@@ -1115,14 +1115,8 @@ function PublicProposalView({
               </p>
               <UtilityRateGraph utility={cp.utility} financial={cp.financial} />
             </div>
-            <div className="proposal-sec card p-4" data-block-id="cost-projection-chart">
-              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
-                <Zap size={15} style={{ color: primaryColor }} /> 25-Year Cost Comparison
-              </h3>
-              <p className="text-xs text-slate-400 mb-3">
-                The green line shows your total cost with solar. The red line shows what you&apos;d pay staying on grid power.
-              </p>
-              <UtilityCostProjectionChart
+            <div data-block-id="cost-projection-chart">
+              <CashFlowStoryCard
                 utility={cp.utility}
                 financial={cp.financial}
                 truth25yr={cp.truth25yr}
