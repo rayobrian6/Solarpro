@@ -254,6 +254,12 @@ interface Props {
     setbackInsets: number;
     /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
     roofPlaneEntityCount: number;
+    /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
+     *  bands hug edges (not roof middle). cf0dd96b regression guard. */
+    setbackBandCentroids: Array<{ lat: number; lng: number }>;
+    /** Count of full rebuilds triggered during panel drag/move — should stay 0
+     *  for smooth moves. 2176e4d3 regression guard. */
+    panelMoveRebuildCount: number;
   }) => void;
   /** v47.122: ID of the currently selected roof plane (highlights it, dims others) */
   selectedRoofPlaneId?: string;
@@ -508,11 +514,15 @@ function SolarEngine3D({
   // Performance: snapshot of last rendered panel list for incremental diff
   const lastRenderedPanelsRef = useRef<PlacedPanel[]>([]);
   const fullRebuildCountRef = useRef(0);
+  const panelMoveRebuildCountRef = useRef(0);
+  const setbackBandCentroidsRef = useRef<Array<{ lat: number; lng: number }>>([]);
   const publishE2EDiagnostics = useCallback(() => {
     onE2EDiagnostics?.({
       fullRebuildCount: fullRebuildCountRef.current,
       setbackInsets: setbackZoneEntitiesRef.current.length,
       roofPlaneEntityCount: plane3DEntityMap.current.size,
+      setbackBandCentroids: setbackBandCentroidsRef.current,
+      panelMoveRebuildCount: panelMoveRebuildCountRef.current,
     });
   }, [onE2EDiagnostics]);
   // Row tool context: tracks which systemType to use for row-placed panels
@@ -2891,6 +2901,7 @@ function SolarEngine3D({
 
   function renderFireSetbackZones(viewer: any, C: any) {
     clearFireSetbackZones(viewer);
+    setbackBandCentroidsRef.current = []; // reset centroids for fresh render
     const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
     const eaveSB  = fireSetbacks?.eaveSetbackM  ?? 0;
     const edgeSB  = fireSetbacks?.edgeSetbackM  ?? 0.457;
@@ -2996,6 +3007,20 @@ function SolarEngine3D({
           },
         });
         setbackZoneEntitiesRef.current.push(ent);
+        // E2E: compute centroid of this setback band (lat/lng) so tests can verify
+        // bands hug edges, not the roof interior. cf0dd96b regression guard.
+        try {
+          const cx = positions.reduce((s: number, p: any) => s + p.x, 0) / positions.length;
+          const cy = positions.reduce((s: number, p: any) => s + p.y, 0) / positions.length;
+          const cz = positions.reduce((s: number, p: any) => s + p.z, 0) / positions.length;
+          const carto = C.Cartographic.fromCartesian(new C.Cartesian3(cx, cy, cz));
+          if (carto) {
+            setbackBandCentroidsRef.current.push({
+              lat: C.Math.toDegrees(carto.latitude),
+              lng: C.Math.toDegrees(carto.longitude),
+            });
+          }
+        } catch {}
       }
     });
     publishE2EDiagnostics();
@@ -3249,6 +3274,12 @@ function SolarEngine3D({
     // Full rebuild path: shade mode changed, or first render, or forced
     if (forceFullRebuild || (prev.length === 0 && panelList.length > 0)) {
       fullRebuildCountRef.current += 1;
+      // E2E: track if this full rebuild happened while panel count was stable
+      // (position-only move). Incrementing panelMoveRebuildCount during a drag
+      // means the 2176e4d3 regression is back — jerky rebuilds on panel move.
+      if (prev.length > 0 && prev.length === panelList.length && forceFullRebuild) {
+        panelMoveRebuildCountRef.current += 1;
+      }
       panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
       panelMapRef.current.clear();
       // v48.7: pre-compute skipGrid for entire batch — consistent rendering across all panels

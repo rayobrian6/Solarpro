@@ -84,6 +84,12 @@ type SolarE2EState = {
   fullRebuildCount: number;
   /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
   roofPlaneEntityCount: number;
+  /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
+   *  bands hug edges (not roof middle). cf0dd96b regression guard. */
+  setbackBandCentroids: Array<{ lat: number; lng: number }>;
+  /** Count of full rebuilds triggered during panel drag/move — should stay 0
+   *  for smooth moves. 2176e4d3 regression guard. */
+  panelMoveRebuildCount: number;
 };
 
 declare global {
@@ -561,7 +567,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [panels, setPanels] = useState<PlacedPanel[]>([]);
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([]);
   const [e2eStitchedCorners, setE2EStitchedCorners] = useState<Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>>([]);
-  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0 });
+  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0, setbackBandCentroids: [] as Array<{ lat: number; lng: number }>, panelMoveRebuildCount: 0 });
   const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
   const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
   
@@ -591,6 +597,8 @@ export default function DesignStudio({ project, onSave }: Props) {
       setbackInsets: e2eDiagnostics.setbackInsets,
       fullRebuildCount: e2eDiagnostics.fullRebuildCount,
       roofPlaneEntityCount: e2eDiagnostics.roofPlaneEntityCount,
+      setbackBandCentroids: e2eDiagnostics.setbackBandCentroids,
+      panelMoveRebuildCount: e2eDiagnostics.panelMoveRebuildCount,
     };
   }, [roofPlanes, panels, e2eStitchedCorners, e2eDiagnostics]);
 
