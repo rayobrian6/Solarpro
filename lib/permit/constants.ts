@@ -36,7 +36,11 @@ const PDF_PAGE_CONFIG = {
 // bug, present with Google too); + subject roof outlined on the aerial (projected).
 // 47356 (2026-07-01): removed the PV-1 roof-outline overlay — trace sits ~1m off
 // Nearmap registration; the HD aerial shows the roof clearly on its own. Keep clean.
-const PLANSET_ENGINE_VERSION = 47356;
+// 47357 (2026-07-01): PV-1 aerial re-center threshold 12m→3m (a 7-8m geocode-vs-
+// design gap on the neighbour parcel was under the old gate → never re-centred, so
+// the aerial stayed on the neighbour); + temp [dbg] tag on PV-1 caption to surface
+// image source + centre in prod. Remove the dbg tag once verified.
+const PLANSET_ENGINE_VERSION = 47357;
 
 
 

@@ -1017,10 +1017,12 @@ export async function POST(req: NextRequest) {
           (_designCenter.lat - _centerLat) * 111320,
           (_designCenter.lng - _centerLng) * 111320 * _cosLat,
         );
-        // Only re-fetch when the design centroid is a meaningful (>12 m) shift from
-        // the geocode-centered image, and not obvious corruption (>1 km). The guard
-        // in chooseAerialCenter re-checks the 300 m threshold on the fetch itself.
-        if (_offM > 12 && _offM < 1000) {
+        // Re-fetch whenever the design centroid differs meaningfully (>3 m) from the
+        // geocode-centered image — the DESIGN is authoritative for framing ("3D drives
+        // 2D"), and a 7-8 m geocode-vs-design gap (neighbour parcel) was under the old
+        // 12 m gate so it never re-centred. Skip only near-identical (<3 m) or obvious
+        // corruption (>1 km); chooseAerialCenter re-checks the 300 m guard on the fetch.
+        if (_offM > 3 && _offM < 1000) {
           console.log('[permit/aerial] re-centering on design geometry', _offM.toFixed(0), 'm from geocode');
           const _recentered = await fetchAerialRoofData(_centerLat, _centerLng, _addr, _designCenter)
             .catch((e: any) => { console.warn('[permit/aerial] re-center fetch failed (keeping geocode image):', e?.message); return null; });

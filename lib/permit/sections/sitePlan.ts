@@ -98,7 +98,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           ${scaleBar}
         </svg>
       </div>
-      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">${aerial.imageSource === 'nearmap' ? '🛰️ Nearmap HD aerial · 7.5 cm/px orthophoto' : '🛰️ Satellite aerial'}</div>`;
+      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">${aerial.imageSource === 'nearmap' ? '🛰️ Nearmap HD aerial · 7.5 cm/px orthophoto' : '🛰️ Satellite aerial'} · [dbg src:${aerial.imageSource || '?'} ctr:${aerial.centerSource || '?'} ${aerial.lat?.toFixed(5)},${aerial.lng?.toFixed(5)} z${aerial.zoom}]</div>`;
   } else {
     // ── SCHEMATIC MODE: proper GPS-projected roof planes + panels ──────────
     const schemSVG = buildSchemSVG(
