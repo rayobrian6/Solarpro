@@ -50,6 +50,29 @@ function ringSignedArea(p: { x: number; y: number }[]): number {
   return a / 2;
 }
 
+// Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
+function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+    if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// Plan-view (horizontal footprint) area of a facet ring, in ft². drawRoofPlan
+// receives fake-degree CAD units where 1 unit ≈ 1 ft (see header), so the raw
+// shoelace is already ft² — no lat/lng metre conversion. This is the "PLAN VIEW"
+// roof area the pro sets report, not the sloped surface area.
+function planViewAreaFt2(ring: Array<{ lat: number; lng: number }>): number {
+  if (ring.length < 3) return 0;
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    a += ring[j].lng * ring[i].lat - ring[i].lng * ring[j].lat;
+  }
+  return Math.abs(a / 2);   // ft² (1 CAD unit = 1 ft)
+}
+
 // Inset a screen-space polygon inward by `dist` px, orientation-agnostic.
 // insetPolygon() assumes one winding; our pixel rings can be either (toY flips
 // lat), so if the first inset EXPANDS the ring we retry with reversed winding.
@@ -254,6 +277,80 @@ export function drawRoofPlan(
       }));
     });
   });
+
+  // ── ROOF DESCRIPTION + ARRAY CALC tables (PV-2 only) ──────────────────────
+  // Mirrors the pro reference: a per-facet "MAIN HOME ROOF DESCRIPTION" table
+  // (roof # / modules / azimuth / tilt / truss) + an "ARRAY & ROOF CALC" summary
+  // (plan-view roof area / array area / % coverage). Rendered top-left, opaque.
+  if (!isBranchColorMode) {
+    const trussSize    = ((project as any).rafterSize || (project as any).trussSize || '2×4').toString();
+    const trussSpacing = `${rafterSp}" O.C.`;
+    const facets = validPlanes.map((rp: any, i: number) => ({
+      n: i + 1,
+      mods: validPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices)).length,
+      az: rp.azimuth != null && isFinite(rp.azimuth) ? `${Math.round(rp.azimuth)}°` : '—',
+      tilt: rp.pitch != null && isFinite(rp.pitch) ? `${Math.round(rp.pitch)}°` : '—',
+    }));
+    const roofAreaFt2  = validPlanes.reduce((s: number, rp: any) => s + planViewAreaFt2(rp.vertices), 0);
+    const panelAreaFt2 = (panelLenIn * panelWidIn) / 144;
+    const arrayAreaFt2 = totalPanels * panelAreaFt2;
+    const coverPct     = roofAreaFt2 > 0 ? (arrayAreaFt2 / roofAreaFt2) * 100 : 0;
+    const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+    const cols = [
+      { key: 'n',    hdr: 'ROOF',    w: 30 },
+      { key: 'mods', hdr: 'MODULES', w: 40 },
+      { key: 'az',   hdr: 'AZIMUTH', w: 38 },
+      { key: 'tilt', hdr: 'TILT',    w: 30 },
+    ] as const;
+    const tblW = cols.reduce((s, c) => s + c.w, 0);
+    const rowH = 10, hdrH = 11, titleH = 12;
+    const tx = 8, ty = 30;
+    const tblH = titleH + hdrH + facets.length * rowH;
+
+    const t: string[] = [];
+    t.push(`<rect x="${tx}" y="${ty}" width="${tblW}" height="${tblH}" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
+    t.push(`<rect x="${tx}" y="${ty}" width="${tblW}" height="${titleH}" fill="#000"/>`);
+    t.push(drawText(tx + tblW / 2, ty + 8.5, 'MAIN HOME ROOF DESCRIPTION', { anchor: 'middle', fontSize: 5.6, fontWeight: 'bold', fill: '#fff' }));
+    // header row
+    let cxp = tx;
+    for (const c of cols) {
+      t.push(`<rect x="${cxp}" y="${ty + titleH}" width="${c.w}" height="${hdrH}" fill="#e8ebf0" stroke="#999" stroke-width="0.3"/>`);
+      t.push(drawText(cxp + c.w / 2, ty + titleH + 7.5, c.hdr, { anchor: 'middle', fontSize: 5.2, fontWeight: 'bold', fill: '#1a1a1a' }));
+      cxp += c.w;
+    }
+    // data rows
+    facets.forEach((f, ri) => {
+      const ry = ty + titleH + hdrH + ri * rowH;
+      cxp = tx;
+      for (const c of cols) {
+        t.push(`<rect x="${cxp}" y="${ry}" width="${c.w}" height="${rowH}" fill="none" stroke="#ccc" stroke-width="0.3"/>`);
+        t.push(drawText(cxp + c.w / 2, ry + 7, String((f as any)[c.key]), { anchor: 'middle', fontSize: 5.4, fill: '#333' }));
+        cxp += c.w;
+      }
+    });
+    // truss note under the table
+    t.push(drawText(tx, ty + tblH + 8, `TRUSS: ${trussSize} @ ${trussSpacing}`, { anchor: 'start', fontSize: 5, fill: '#555' }));
+
+    // ── ARRAY & ROOF CALC — TOTAL ──
+    const cy2 = ty + tblH + 14;
+    const calc: Array<[string, string]> = [
+      ['ROOF AREA (PLAN VIEW)', `${fmt(roofAreaFt2)} ft²`],
+      ['NEW ARRAY AREA', `${fmt(arrayAreaFt2)} ft²`],
+      ['ROOF COVERED BY ARRAY', `${coverPct.toFixed(1)}%`],
+    ];
+    const calcH = titleH + calc.length * rowH;
+    t.push(`<rect x="${tx}" y="${cy2}" width="${tblW}" height="${calcH}" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
+    t.push(`<rect x="${tx}" y="${cy2}" width="${tblW}" height="${titleH}" fill="#000"/>`);
+    t.push(drawText(tx + tblW / 2, cy2 + 8.5, 'ARRAY & ROOF CALC — TOTAL', { anchor: 'middle', fontSize: 5.6, fontWeight: 'bold', fill: '#fff' }));
+    calc.forEach(([label, val], ri) => {
+      const ry = cy2 + titleH + ri * rowH;
+      t.push(`<rect x="${tx}" y="${ry}" width="${tblW}" height="${rowH}" fill="none" stroke="#ccc" stroke-width="0.3"/>`);
+      t.push(drawText(tx + 3, ry + 7, label, { anchor: 'start', fontSize: 5, fill: '#333' }));
+      t.push(drawText(tx + tblW - 3, ry + 7, val, { anchor: 'end', fontSize: 5.2, fontWeight: 'bold', fill: '#1a1a1a' }));
+    });
+    els.push(...t);
+  }
 
   // ── DIMENSION HIERARCHY ── (PV-2 only — skipped for PV-2B branch-color mode)
   const roofMinX = toX(minLng);

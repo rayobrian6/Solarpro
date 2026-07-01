@@ -26,7 +26,10 @@ const PDF_PAGE_CONFIG = {
 // chooseAerialCenter's corruption check (centroid >300m from pin = rejected).
 // 47352 (2026-07-01): PV-1/site-plan aerial now prefers Nearmap HD (7.5cm, stitched
 // Vert tiles) over Google Static Maps satellite; Google is the fallback.
-const PLANSET_ENGINE_VERSION = 47352;
+// 47353 (2026-07-01): PV-2 gains the pro "MAIN HOME ROOF DESCRIPTION" (per-facet
+// modules/azimuth/tilt/truss) + "ARRAY & ROOF CALC" (plan-view area/array/%) tables;
+// escapeXml now actually escapes &<>" (was a no-op → broke SVG on those chars).
+const PLANSET_ENGINE_VERSION = 47353;
 
 
 
