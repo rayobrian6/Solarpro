@@ -132,6 +132,24 @@ describe('filterToSubjectBuilding (Design Studio RoofPlane guard)', () => {
     expect(res.kept.map(p => p.id)).toEqual(['mine']);
   });
 
+  it('drops a far bridged/spurious plane via maxDistM even if clustered', () => {
+    // A chain of planes that adjacency-bridges from the subject out to a plane on
+    // another building 80 m away. Without a cap the whole chain is one cluster; the
+    // cap drops the far members (the "84 panels elsewhere" symptom).
+    const mine = plane('mine', subject.lat, subject.lng, 12, 10);
+    const b1 = offset(subject.lat, subject.lng, 10, 0);
+    const b2 = offset(subject.lat, subject.lng, 20, 0);
+    const far = offset(subject.lat, subject.lng, 80, 0);
+    const chain = [
+      mine,
+      plane('b1', b1.lat, b1.lng, 8, 8),
+      plane('b2', b2.lat, b2.lng, 8, 8),
+      plane('far', far.lat, far.lng, 10, 10),
+    ];
+    const res = filterToSubjectBuilding(chain, p => p.vertices, subject, { maxDistM: 60 });
+    expect(res.kept.map(p => p.id)).not.toContain('far');
+  });
+
   it('keeps all planes of the subject building (multi-facet hip roof)', () => {
     // Two adjacent facets sharing a ridge = one building — both kept.
     const s = offset(subject.lat, subject.lng, 0, -2.5);

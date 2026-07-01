@@ -18,6 +18,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
+import { filterToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { getSunPosition } from '@/lib/solarMath';
 import type { PlacedPanel, RoofPlane } from '@/types';
 import {
@@ -7697,6 +7698,27 @@ function SolarEngine3D({
     const planes = roofPlanesRef.current ?? [];
     const confirmedPlanes = planes.filter(rp => rp.vertices && rp.vertices.length >= 3 && rp.confirmed !== false);
     let eligiblePlanes = confirmedPlanes.length > 0 ? confirmedPlanes : planes.filter(rp => rp.vertices && rp.vertices.length >= 3);
+
+    // ── "Only my building" (Ray, 2026-06-30) ────────────────────────────────
+    // Auto-fill must panel ONLY the subject building, never the neighbours whose
+    // planes are also in roofPlanes (from a block-wide detect / saved data) — that
+    // was the "50 on my roof + 84 elsewhere = 134" bug. Applied HERE, the single
+    // 3D-fill chokepoint, so it covers EVERY trigger (Design Studio buttons AND the
+    // in-scene "Auto Fill" tool). Keep the facet cluster under the house (lat,lng)
+    // + a 60 m hard cap so a bridged/spurious far plane can't survive.
+    if (eligiblePlanes.length > 1) {
+      const before = eligiblePlanes.length;
+      const { kept } = filterToSubjectBuilding(
+        eligiblePlanes,
+        (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+        { lat, lng },
+        { maxDistM: 60 },
+      );
+      if (kept.length > 0 && kept.length < before) {
+        eligiblePlanes = kept;
+        addLog('AUTO', `handleAutoRoof: subject-building filter kept ${kept.length}/${before} planes (dropped neighbour roofs)`);
+      }
+    }
 
     // ── v62: AUTO-DETECT — no hand-drawn planes → build CLEAN planes from Google
     // Solar's detected roof segments and run them through the SAME flush grid engine

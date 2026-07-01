@@ -36,6 +36,11 @@ const DEG_TO_RAD = Math.PI / 180;
 export interface CropOptions {
   adjacencyGapM?: number;
   obstructionMarginM?: number;
+  /** Hard cap (m): drop any kept facet whose centroid is farther than this from
+   *  the subject point, even if adjacency clustering bridged to it. Guards against
+   *  spurious/over-segmented planes that land on another building ("elsewhere").
+   *  Unset = no cap (the Nearmap AOI crop wants the full connected cluster). */
+  maxDistM?: number;
 }
 
 export interface CropResult {
@@ -161,8 +166,18 @@ export function subjectBuildingIndices(
 
   // 3. Keep only the seed's cluster.
   const seedRoot = uf.find(seed);
-  const keptIndices: number[] = [];
+  let keptIndices: number[] = [];
   for (let i = 0; i < polys.length; i++) if (uf.find(i) === seedRoot) keptIndices.push(i);
+
+  // 4. Optional hard distance cap from the subject point (0,0 in the local frame)
+  //    — drops far spurious/bridged facets that landed on another building.
+  if (opts.maxDistM != null) {
+    const capped = keptIndices.filter(i => {
+      const c = centroidXY(polys[i]);
+      return Math.hypot(c.x, c.y) <= opts.maxDistM!;
+    });
+    if (capped.length > 0) keptIndices = capped;   // never let the cap empty the result
+  }
 
   return { keptIndices, seedIndex: seed, cropped: keptIndices.length < rings.length };
 }

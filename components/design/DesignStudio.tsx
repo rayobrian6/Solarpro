@@ -3223,6 +3223,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       roofPlanes,
       (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
       { lat: mapCenter.lat, lng: mapCenter.lng },
+      { maxDistM: 60 },  // hard cap: no plane >60m from the subject house
     );
     if (!cropped || kept.length === 0) return roofPlanes;
     const removed = roofPlanes.length - kept.length;
