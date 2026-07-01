@@ -121,20 +121,22 @@ class UnionFind {
 }
 
 /**
- * Crop raw Nearmap roof planes down to the single building under `subject`.
- * Pure — no I/O. Fails open (returns input) on degenerate input.
+ * Core clustering: given each facet's outline ring (lat/lng) and a subject point,
+ * return the indices of the facets belonging to the SINGLE building under the
+ * subject. Provider-agnostic — used by both the Nearmap crop and the Design
+ * Studio "only my building" fill guard. Fails open (keeps all) on degenerate input.
  */
-export function cropToSubjectBuilding(
-  planes: NearmapRoofPlane[],
+export function subjectBuildingIndices(
+  rings: LatLng[][],
   subject: LatLng,
   opts: CropOptions = {},
-): CropResult {
-  if (planes.length <= 1) {
-    return { planes, keptIndices: planes.map((_, i) => i), seedIndex: planes.length ? 0 : null, cropped: false };
-  }
+): { keptIndices: number[]; seedIndex: number | null; cropped: boolean } {
+  const all = { keptIndices: rings.map((_, i) => i), seedIndex: rings.length ? 0 : null, cropped: false };
+  if (rings.length <= 1) return all;
+
   const gap = opts.adjacencyGapM ?? DEFAULT_ADJACENCY_GAP_M;
   const project = makeProject(subject);
-  const polys = planes.map(p => p.worldPolygon.map(project));
+  const polys = rings.map(r => r.map(project));
   const subjXY: XY = { x: 0, y: 0 };
 
   // 1. Seed: facet under the subject point, else nearest facet centroid.
@@ -147,9 +149,7 @@ export function cropToSubjectBuilding(
       if (d < best) { best = d; seed = i; }
     }
   }
-  if (seed === -1) {
-    return { planes, keptIndices: planes.map((_, i) => i), seedIndex: null, cropped: false };
-  }
+  if (seed === -1) return all;
 
   // 2. Cluster facets into buildings by adjacency.
   const uf = new UnionFind(polys.length);
@@ -164,12 +164,37 @@ export function cropToSubjectBuilding(
   const keptIndices: number[] = [];
   for (let i = 0; i < polys.length; i++) if (uf.find(i) === seedRoot) keptIndices.push(i);
 
-  return {
-    planes: keptIndices.map(i => planes[i]),
-    keptIndices,
-    seedIndex: seed,
-    cropped: keptIndices.length < planes.length,
-  };
+  return { keptIndices, seedIndex: seed, cropped: keptIndices.length < rings.length };
+}
+
+/**
+ * Filter any array of roof-plane-like objects down to the subject building,
+ * given an accessor for each object's lat/lng outline ring. Generic sibling of
+ * cropToSubjectBuilding for the Design Studio (RoofPlane.vertices) side.
+ */
+export function filterToSubjectBuilding<T>(
+  items: T[],
+  getRing: (item: T) => LatLng[],
+  subject: LatLng,
+  opts: CropOptions = {},
+): { kept: T[]; keptIndices: number[]; cropped: boolean } {
+  const { keptIndices, cropped } = subjectBuildingIndices(items.map(getRing), subject, opts);
+  return { kept: keptIndices.map(i => items[i]), keptIndices, cropped };
+}
+
+/**
+ * Crop raw Nearmap roof planes down to the single building under `subject`.
+ * Pure — no I/O. Fails open (returns input) on degenerate input.
+ */
+export function cropToSubjectBuilding(
+  planes: NearmapRoofPlane[],
+  subject: LatLng,
+  opts: CropOptions = {},
+): CropResult {
+  const { keptIndices, seedIndex, cropped } = subjectBuildingIndices(
+    planes.map(p => p.worldPolygon), subject, opts,
+  );
+  return { planes: keptIndices.map(i => planes[i]), keptIndices, seedIndex, cropped };
 }
 
 /**

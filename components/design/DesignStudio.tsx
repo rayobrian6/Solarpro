@@ -35,7 +35,19 @@ import {
   type ObstructionKeepOut,
 } from '@/lib/placementEngine';
 import { type NearmapObstruction, OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
+import { filterToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
+
+// Ray-cast point-in-polygon on a lat/lng ring (planar approx — fine at parcel
+// scale). Used to prune panels that fall outside the subject building's planes.
+function pointInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+    if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
 // Phase 2: Compute & Recommend — provenance-aware form fields
 import { ComputedField, type ComputedFieldValue } from '@/components/recommend/ComputedField';
 import { ConfidenceBadge, type ConfidenceSource } from '@/components/recommend/ConfidenceBadge';
@@ -3198,12 +3210,40 @@ export default function DesignStudio({ project, onSave }: Props) {
   }, [panels, roofPlanes, groundArea, selectedPanel, setback, panelSpacing, rowSpacing,
       tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks, alignToEdge, show3D, setPlacementMode3D]);
 
+  // ── "Only my building" guard (Ray, 2026-06-30) ──────────────────────────────
+  // Restrict the design to the SUBJECT building — the roof-plane cluster under the
+  // map centre (the house the user picked / is designing). Stray neighbour roofs
+  // (from a prior block-wide detect or saved data) must NOT get papered by Fill /
+  // Auto-Layout — that was the "997 panels on 10 houses" bug. Removes non-subject
+  // planes AND their panels from state and returns the kept planes (for the 2D
+  // path to iterate; the 3D auto_roof engine reads the now-cleaned roofPlanes).
+  const keepSubjectBuilding = useCallback((): RoofPlane[] => {
+    if (roofPlanes.length <= 1) return roofPlanes;
+    const { kept, cropped } = filterToSubjectBuilding(
+      roofPlanes,
+      (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+      { lat: mapCenter.lat, lng: mapCenter.lng },
+    );
+    if (!cropped || kept.length === 0) return roofPlanes;
+    const removed = roofPlanes.length - kept.length;
+    setRoofPlanes(kept);
+    setPanels(prev => prev.filter(pan => kept.some(pl => pointInLatLngRing(pan.lat, pan.lng, pl.vertices ?? []))));
+    toast.info('Kept your building', `Ignored ${removed} neighbor roof${removed !== 1 ? 's' : ''} — panels go on your building only`);
+    return kept;
+  }, [roofPlanes, mapCenter, toast]);
+
   const autoLayoutAll = useCallback(() => {
     const hasZones = roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0;
     if (!hasZones) {
       toast.error('No zones defined', 'Draw a roof, ground, or fence zone first, then click Auto Layout.');
       return;
     }
+
+    // "Only my building": drop neighbour roofs before laying out (both 2D + 3D).
+    // For 3D this setRoofPlanes lands before the engine fills: handleAutoRoof runs
+    // via setTimeout(100ms) off the placementMode effect, by which point the
+    // synchronous roofPlanesRef-sync effect has already applied the cleaned planes.
+    const subjectPlanes = keepSubjectBuilding();
 
     // v48.35: In 3D mode, the 2D layout engines produce panels without terrain heights,
     // which render underground. Route through SolarEngine3D's auto_roof engine instead,
@@ -3219,7 +3259,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
     let allNew: PlacedPanel[] = [];
 
-    roofPlanes.forEach(plane => {
+    subjectPlanes.forEach(plane => {
       const layoutId = uuidv4();
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
@@ -3268,7 +3308,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [panels, roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D, keepOutZones]);
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D, keepOutZones, keepSubjectBuilding]);
 
   // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
   const fillRoof = useCallback(() => {
@@ -3277,11 +3317,12 @@ export default function DesignStudio({ project, onSave }: Props) {
       return;
     }
     setAutoLayoutRunning(true);
+    const subjectPlanes = keepSubjectBuilding();  // "only my building" — skip neighbour roofs
     const minSetback = 0;    // v47.95: no minimum -- AHJ fire setbacks handle clearances
     const tightSpacing = midClampGapM; // v63: mid-clamp gap from selected racking (was hardcoded ¼")
     let allNew: PlacedPanel[] = [];
 
-    roofPlanes.forEach(plane => {
+    subjectPlanes.forEach(plane => {
       const layoutId = uuidv4();
       // v30.9: fire setback takes precedence over minSetback
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
@@ -3323,7 +3364,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       `${filteredNew.length} panels · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW (max density)` +
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
-  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge]);
+  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding]);
 
   // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
   const optimizeLayout = useCallback(() => {
@@ -3339,9 +3380,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     const optRowSpacingRoof   = rowSpacing; // roof: user-controlled, no shadow calc
     const optRowSpacingGround = Math.max(rowSpacing, selectedPanel.height + shadowLength * 0.5); // ground: shade avoidance
     const optSetback = setback; // v47.95: AHJ fire setbacks handle clearances
+    const subjectPlanes = keepSubjectBuilding();  // "only my building" — skip neighbour roofs
     let allNew: PlacedPanel[] = [];
 
-    roofPlanes.forEach(plane => {
+    subjectPlanes.forEach(plane => {
       const layoutId = uuidv4();
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
@@ -3379,7 +3421,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       `${filteredNew.length} panels · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW · min shading` +
       (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
-  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge]);
+  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding]);
 
   // ── Calculate production ───────────────────────────────────
   const buildSystemDefinition = () => {

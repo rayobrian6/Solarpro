@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   cropToSubjectBuilding,
   cropObstructionsToPlanes,
+  filterToSubjectBuilding,
   DEFAULT_ADJACENCY_GAP_M,
 } from './subjectBuildingCrop';
 import type { NearmapRoofPlane, NearmapObstruction } from './nearmap';
@@ -107,6 +108,40 @@ describe('cropToSubjectBuilding', () => {
     expect(res.planes).toHaveLength(0);
     expect(res.seedIndex).toBeNull();
     expect(res.cropped).toBe(false);
+  });
+});
+
+describe('filterToSubjectBuilding (Design Studio RoofPlane guard)', () => {
+  const subject = { lat: REF_LAT, lng: -89.954 };
+
+  // Minimal RoofPlane-like object: an id + lat/lng vertices ring.
+  function plane(id: string, lat: number, lng: number, wM: number, hM: number) {
+    return { id, vertices: rect(lat, lng, wM, hM).worldPolygon };
+  }
+
+  it('keeps the subject building and drops neighbour roofs (the 997-panel bug)', () => {
+    const mine = plane('mine', subject.lat, subject.lng, 12, 10);
+    const nb1 = offset(subject.lat, subject.lng, 30, 0);
+    const nb2 = offset(subject.lat, subject.lng, -30, 5);
+    const neighbours = [
+      plane('n1', nb1.lat, nb1.lng, 10, 10),
+      plane('n2', nb2.lat, nb2.lng, 10, 10),
+    ];
+    const res = filterToSubjectBuilding([neighbours[0], mine, neighbours[1]], p => p.vertices, subject);
+    expect(res.cropped).toBe(true);
+    expect(res.kept.map(p => p.id)).toEqual(['mine']);
+  });
+
+  it('keeps all planes of the subject building (multi-facet hip roof)', () => {
+    // Two adjacent facets sharing a ridge = one building — both kept.
+    const s = offset(subject.lat, subject.lng, 0, -2.5);
+    const n = offset(subject.lat, subject.lng, 0, +2.5);
+    const facetS = plane('S', s.lat, s.lng, 12, 5);
+    const facetN = plane('N', n.lat, n.lng, 12, 5);
+    const far = offset(subject.lat, subject.lng, 30, 0);
+    const neighbour = plane('nb', far.lat, far.lng, 10, 10);
+    const res = filterToSubjectBuilding([facetS, neighbour, facetN], p => p.vertices, subject);
+    expect(res.kept.map(p => p.id).sort()).toEqual(['N', 'S']);
   });
 });
 
