@@ -41,6 +41,28 @@ import {
 import {
   drawCallout, drawCalloutWithLeader, drawLeaderLine, drawWindArrow,
 } from '../callouts';
+import { insetPolygon } from '../../cad/geometry';
+
+// Signed area of a screen-space ring (used only to detect winding / collapse).
+function ringSignedArea(p: { x: number; y: number }[]): number {
+  let a = 0;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += p[j].x * p[i].y - p[i].x * p[j].y;
+  return a / 2;
+}
+
+// Inset a screen-space polygon inward by `dist` px, orientation-agnostic.
+// insetPolygon() assumes one winding; our pixel rings can be either (toY flips
+// lat), so if the first inset EXPANDS the ring we retry with reversed winding.
+// Returns null when the setback would collapse the facet (nothing sensible to draw).
+function insetRingPx(ring: { x: number; y: number }[], dist: number): { x: number; y: number }[] | null {
+  if (ring.length < 3 || dist <= 0) return null;
+  const orig = Math.abs(ringSignedArea(ring));
+  let out = insetPolygon(ring, dist);
+  if (Math.abs(ringSignedArea(out)) > orig) out = insetPolygon(ring.slice().reverse(), dist);
+  const area = Math.abs(ringSignedArea(out));
+  if (out.length < 3 || area > orig || area < 1) return null;
+  return out;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // drawRoofPlan — PV-2 Top-Down GPS Array Layout (PRIMARY)
@@ -150,9 +172,8 @@ export function drawRoofPlan(
   // never paint over them (the old "ANE 2 / E FAC" clipping).
   const planeLabels: Array<{ cx: number; cy: number; ri: number; pitch: any; azimuth: any }> = [];
   validPlanes.forEach((rp: any, ri: number) => {
-    const pts = rp.vertices!.map(
-      (v: any) => toX(v.lng).toFixed(1) + ',' + toY(v.lat).toFixed(1)
-    ).join(' ');
+    const ptsXY = rp.vertices!.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
+    const pts = ptsXY.map((p: { x: number; y: number }) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
 
     // Roof plane fill — clean light cool-gray (was a busy beige + double hatch).
     const roofFill = ri % 2 === 0 ? '#eceef1' : '#e3e6ea';
@@ -166,8 +187,16 @@ export function drawRoofPlan(
     // Clean structural outline
     els.push(`<polygon points="${pts}" fill="none" stroke="#2b2f36" stroke-width="2" stroke-linejoin="miter"/>`);
 
-    // Fire setback inset (dashed red outline)
-    els.push(`<polygon points="${pts}" fill="none" class="line-setbk"/>`);
+    // Fire setback inset (dashed red outline) — REAL inward offset by the AHJ
+    // setback. Was drawn on the roof edge itself (zero inset) so no setback band
+    // showed. Now offsets each facet inward by setbackFt; falls back to no band
+    // if the setback would collapse the facet (tiny/degenerate).
+    const sbPx = setbackFt * scale;
+    const insetXY = insetRingPx(ptsXY, sbPx);
+    if (insetXY) {
+      const ip = insetXY.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+      els.push(`<polygon points="${ip}" fill="none" class="line-setbk"/>`);
+    }
 
     // Plane label — collected, rendered after panels (see planeLabels render below)
     const cx = rp.vertices!.reduce((s: number, v: any) => s + toX(v.lng), 0) / rp.vertices!.length;
@@ -205,8 +234,11 @@ export function drawRoofPlan(
   planeLabels.forEach(L => {
     const lines: string[] = ['PLANE ' + (L.ri + 1)];
     if (L.pitch !== undefined) {
+      // One-decimal rise:12 so the plane label matches the SYSTEM-DATA table /
+      // header (they show e.g. "4.8:12"); rounding to a whole "5:12" here made
+      // the same sheet show two different pitches.
       const rise12 = typeof L.pitch === 'number'
-        ? Math.round(Math.tan(L.pitch * Math.PI / 180) * 12)
+        ? Math.round(Math.tan(L.pitch * Math.PI / 180) * 12 * 10) / 10
         : L.pitch;
       lines.push(rise12 + ':12 PITCH');
     }

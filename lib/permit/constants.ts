@@ -17,7 +17,11 @@ const PDF_PAGE_CONFIG = {
 // override), battery gated on the permit payload, PV-2B branch-colored real-roof plan,
 // PV-1 panels removed. Bumped so cached plansets generated before these fixes are treated
 // as stale and force a fresh regenerate instead of serving the old (wrong-aerial) HTML.
-const PLANSET_ENGINE_VERSION = 47349;
+// 47350 (2026-06-30): PV-2/PV-2B roof plan — fire setback now drawn as a REAL
+// inward inset (was zero-inset = no visible setback band); plane-label pitch
+// rounded to one decimal so it matches the SYSTEM-DATA table (was "5:12" vs
+// "4.8:12" on the same sheet).
+const PLANSET_ENGINE_VERSION = 47350;
 
 
 
