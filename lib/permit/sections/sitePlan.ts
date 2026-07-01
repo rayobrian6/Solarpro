@@ -9,6 +9,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
 import { mercPx, buildSchemSVG } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
+import { nearmapConfigured, fetchNearmapStaticAerial } from '@/lib/aerial/nearmap';
 
 
 // ─── PV-1: Site Plan with Roof Plan ──────────────────────────────────────────
@@ -239,6 +240,7 @@ export interface AerialRoofData {
   lng?: number;
   zoom?: number;
   centerSource?: 'array' | 'segment' | 'pin'; // why the image is centered where it is (diagnostic)
+  imageSource?: 'nearmap' | 'google';         // which provider produced the aerial (diagnostic)
   roofSegments?: Array<{
     center?: { lat: number; lng: number };
     azimuthDegrees: number;
@@ -386,15 +388,37 @@ export async function fetchAerialRoofData(
     console.log('[permit/aerial] Centering on', _center.source,
       _center.source === 'segment' ? '(nearest on-parcel roof segment)' : '');
 
-    // ── Step 3: Google Maps Static API — satellite image (multi-zoom rural fallback) ──
+    // ── Step 3: Aerial image ──
     const imgSize = '640x640';
     let imageBase64: string | undefined;
     let imageWidth  = 640;
     let imageHeight = 640;
     let usedZoom    = 20;
+    let imageSource: 'nearmap' | 'google' = 'google';
 
+    // Step 3a: Nearmap HD (7.5cm @ z21) — PREFERRED. Stitched Vert tiles look far
+    // sharper than Google Static Maps satellite. Fails safe → Google below.
+    if (nearmapConfigured()) {
+      try {
+        const nm = await fetchNearmapStaticAerial(centerLat, centerLng, { sizePx: 1024 });
+        if (nm?.imageBase64) {
+          imageBase64 = nm.imageBase64;
+          imageWidth  = nm.imageWidth;
+          imageHeight = nm.imageHeight;
+          usedZoom    = nm.zoom;
+          imageSource = 'nearmap';
+          console.log(`[permit/aerial] Nearmap HD aerial OK — z${nm.zoom}, ${nm.tilesFetched} tiles`);
+        } else {
+          console.log('[permit/aerial] Nearmap returned no image — falling back to Google');
+        }
+      } catch (nmErr: unknown) {
+        console.log('[permit/aerial] Nearmap aerial EXCEPTION — falling back to Google:', (nmErr as Error)?.message);
+      }
+    }
+
+    // Step 3b: Google Maps Static API — satellite fallback (multi-zoom rural fallback).
     const zoomLevels = [20, 18, 17];
-    for (const tryZoom of zoomLevels) {
+    for (const tryZoom of imageBase64 ? [] : zoomLevels) {
       const tryUrl =
         `https://maps.googleapis.com/maps/api/staticmap` +
         `?center=${centerLat},${centerLng}` +
@@ -468,6 +492,7 @@ export async function fetchAerialRoofData(
       lng: centerLng,
       zoom: usedZoom,
       centerSource: _center.source,
+      imageSource,
       roofSegments,
     };
 

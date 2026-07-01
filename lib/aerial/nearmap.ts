@@ -25,7 +25,114 @@
 
 const COVERAGE_URL = 'https://api.nearmap.com/coverage/v2/point';
 const AI_FEATURE_URL = 'https://api.nearmap.com/ai/features/v4/features.json';
+const TILE_URL = 'https://api.nearmap.com/tiles/v3/Vert';   // {z}/{x}/{y}.jpg
 const TIMEOUT_MS = 30000;
+
+// ── Web-Mercator tile math (pure — standard XYZ / EPSG:3857, 256px tiles) ──
+// Nearmap Vert tiles share Google/OSM's projection, so a stitched Nearmap image
+// is geometrically interchangeable with the Google Static Maps aerial.
+const TILE_SIZE = 256;
+
+/** Global pixel X of a longitude at zoom z (0 … 256·2^z). */
+export function lngToGlobalPx(lng: number, z: number): number {
+  return ((lng + 180) / 360) * TILE_SIZE * 2 ** z;
+}
+/** Global pixel Y of a latitude at zoom z. */
+export function latToGlobalPx(lat: number, z: number): number {
+  const s = Math.max(-0.9999, Math.min(0.9999, Math.sin((lat * Math.PI) / 180)));
+  return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * TILE_SIZE * 2 ** z;
+}
+
+export interface TilePlacement { z: number; x: number; y: number; left: number; top: number; }
+export interface TileGrid {
+  tiles: TilePlacement[];       // tile coords + composite offset within the full tile canvas
+  tx0: number; ty0: number;     // top-left tile index of the canvas
+  canvasW: number; canvasH: number;
+  cropLeft: number; cropTop: number;   // where to extract the centred WxH image
+  W: number; H: number;
+}
+
+/** Tiles needed to render a W×H image centred on (lat,lng) at zoom z, plus the
+ *  crop offset into the whole-tile canvas. Pure — no I/O (testable). */
+export function nearmapTileGrid(lat: number, lng: number, z: number, W: number, H: number): TileGrid {
+  const cx = lngToGlobalPx(lng, z), cy = latToGlobalPx(lat, z);
+  const left = cx - W / 2, top = cy - H / 2;
+  const tx0 = Math.floor(left / TILE_SIZE), ty0 = Math.floor(top / TILE_SIZE);
+  const tx1 = Math.floor((left + W - 1) / TILE_SIZE), ty1 = Math.floor((top + H - 1) / TILE_SIZE);
+  const tiles: TilePlacement[] = [];
+  for (let x = tx0; x <= tx1; x++) {
+    for (let y = ty0; y <= ty1; y++) {
+      tiles.push({ z, x, y, left: (x - tx0) * TILE_SIZE, top: (y - ty0) * TILE_SIZE });
+    }
+  }
+  return {
+    tiles, tx0, ty0,
+    canvasW: (tx1 - tx0 + 1) * TILE_SIZE, canvasH: (ty1 - ty0 + 1) * TILE_SIZE,
+    cropLeft: Math.round(left - tx0 * TILE_SIZE), cropTop: Math.round(top - ty0 * TILE_SIZE),
+    W, H,
+  };
+}
+
+export interface NearmapStaticAerial {
+  imageBase64: string;
+  imageWidth: number;
+  imageHeight: number;
+  zoom: number;
+  tilesFetched: number;
+}
+
+/**
+ * Stitch a centred top-down Nearmap Vert aerial (7.5cm @ z21) as a single JPEG.
+ * Server-only (uses the key directly + sharp). Tries zooms in order, first with
+ * enough real tiles wins. Fails safe → null so callers fall back to Google.
+ */
+export async function fetchNearmapStaticAerial(
+  lat: number, lng: number,
+  opts: { zoom?: number; sizePx?: number } = {},
+): Promise<NearmapStaticAerial | null> {
+  const key = process.env.NEARMAP_API_KEY;
+  if (!key) return null;
+  const size = opts.sizePx ?? 1024;
+  const zooms = opts.zoom ? [opts.zoom] : [21, 20, 19];
+  let sharp: typeof import('sharp');
+  try { sharp = (await import('sharp')).default as unknown as typeof import('sharp'); }
+  catch { return null; }
+
+  for (const z of zooms) {
+    try {
+      const grid = nearmapTileGrid(lat, lng, z, size, size);
+      const results = await Promise.all(grid.tiles.map(async (t) => {
+        try {
+          const r = await fetch(`${TILE_URL}/${t.z}/${t.x}/${t.y}.jpg?apikey=${key}`, {
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!r.ok) return null;
+          const buf = Buffer.from(await r.arrayBuffer());
+          if (buf.byteLength < 500) return null;   // blank/placeholder tile
+          return { input: buf, left: t.left, top: t.top };
+        } catch { return null; }
+      }));
+      const composites = results.filter(c => c !== null) as Array<{ input: Buffer; left: number; top: number }>;
+      if (composites.length === 0) continue;
+
+      const out = await sharp({
+        create: { width: grid.canvasW, height: grid.canvasH, channels: 3, background: { r: 20, g: 20, b: 20 } },
+      })
+        .composite(composites)
+        .extract({ left: grid.cropLeft, top: grid.cropTop, width: size, height: size })
+        .jpeg({ quality: 88 })
+        .toBuffer();
+
+      return {
+        imageBase64: `data:image/jpeg;base64,${out.toString('base64')}`,
+        imageWidth: size, imageHeight: size, zoom: z, tilesFetched: composites.length,
+      };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
 export interface NearmapCoverage {
   covered: boolean;

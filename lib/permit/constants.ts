@@ -24,7 +24,9 @@ const PDF_PAGE_CONFIG = {
 // 47351 (2026-06-30): "3D drives 2D" — PV-1 aerial re-centers on the design's
 // array centroid (post-enrichment) instead of the address geocode, guarded by
 // chooseAerialCenter's corruption check (centroid >300m from pin = rejected).
-const PLANSET_ENGINE_VERSION = 47351;
+// 47352 (2026-07-01): PV-1/site-plan aerial now prefers Nearmap HD (7.5cm, stitched
+// Vert tiles) over Google Static Maps satellite; Google is the fallback.
+const PLANSET_ENGINE_VERSION = 47352;
 
 
 
