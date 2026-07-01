@@ -67,7 +67,18 @@ const PDF_PAGE_CONFIG = {
 // headless-rendering the sheets while reviewing SN Phases 6-8. Also: VAL-1 no
 // longer crashes when compliance.jurisdiction is absent (optional in the type);
 // PV-1 legend label 18\" backslash typo fixed.
-const PLANSET_ENGINE_VERSION = 47363;
+// 47364 (2026-07-01): structural honesty + pro-visual pass (Ray's review of the
+// v47363 render). LOGIC: PE-1 certification is now CONDITIONAL — it never says
+// "confirmed adequate" while its own checks fail (red DO-NOT-ISSUE box instead);
+// the "145%" mislabel fixed on PE-1 + PV-4C (that was the GOVERNING/deflection
+// ratio printed beside a passing 90% bending check); PV-4C dead-load table now
+// sums correctly (TOTAL ADDED 3.2 ≠ 17.6 — that's the new COMBINED row); E-1
+// interconnection no longer hardcoded LOAD_SIDE (reads project method). VISUAL:
+// PV-2 restyled to the PE-sealed reference language — white sheet + white roof
+// linework, red HATCHED setback bands, white modules w/ blue attachment dots
+// (was gray fills + solid navy modules); PE-1 restyled as an engineering letter
+// (ruled headings via .pe-letter scope, RE:/DATE block, quiet label cells).
+const PLANSET_ENGINE_VERSION = 47364;
 
 
 

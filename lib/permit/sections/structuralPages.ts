@@ -626,12 +626,28 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
   const maxSpacing  = structural?.attachment?.maxAllowedSpacing || '—';
-  const _utilRatio = structural?.rafter?.utilizationRatio;
+  const _utilRatio = structural?.rafter?.utilizationRatio; // GOVERNING ratio (max of bending/deflection)
   const utilization = _utilRatio != null ? (_utilRatio * 100).toFixed(0) : '—';
   const rafterBM    = structural?.rafter?.bendingMoment?.toFixed(0) || '—';
   const rafterABM   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
   const rafterDefl  = structural?.rafter?.deflection?.toFixed(3) || '—';
   const rafterAD    = structural?.rafter?.allowableDeflection?.toFixed(3) || '—';
+  // Per-check ratios — printing the governing ratio beside the bending numbers
+  // read as "1116 of 1246 allowable = 145%", an impossible line an AHJ rejects.
+  const _bmRaw   = structural?.rafter?.bendingMoment;
+  const _abmRaw  = structural?.rafter?.allowableBendingMoment;
+  const _bendRatio = (_bmRaw != null && _abmRaw) ? _bmRaw / _abmRaw : null;
+  const _deflRaw = structural?.rafter?.deflection;
+  const _adRaw   = structural?.rafter?.allowableDeflection;
+  const _deflRatio = (_deflRaw != null && _adRaw) ? _deflRaw / _adRaw : null;
+  const bendUtil = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : '—';
+  const _governs = (_deflRatio ?? 0) > (_bendRatio ?? 0) ? 'deflection' : 'bending';
+  // "TOTAL ADDED DEAD LOAD" must equal the sum of the component rows above it —
+  // totalDeadLoadPsf is EXISTING roof + PV, a different (also useful) number.
+  const _addedRaw = (structural?.moduleLoadPsf != null || structural?.rackingLoadPsf != null)
+    ? (structural?.moduleLoadPsf ?? 0) + (structural?.rackingLoadPsf ?? 0) + 0.2
+    : null;
+  const addedDL = _addedRaw != null ? _addedRaw.toFixed(1) : '—';
   // Truss framing is analyzed by load capacity (PSF), not rafter bending (ft-lbs).
   // Rendering its 0-demand / capacity-in-PSF as "0 ft-lbs / 45 ft-lbs" read as broken.
   const _isTruss      = (structural?.rafter?.framingType === 'truss') || (structural?.rafter?.bendingMoment === 0 && (structural?.rafter?.allowableBendingMoment || 0) > 0);
@@ -685,8 +701,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             ` : `
             <tr><td>Bending Moment</td><td class="cv">${rafterBM} ft-lbs</td></tr>
             <tr><td>Allowable Moment</td><td class="cv">${rafterABM} ft-lbs</td></tr>
-            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${utilization}${_utilRatio != null ? '%' : ''}</td></tr>
-            <tr><td>Deflection / Allowed</td><td class="cv">${rafterDefl}" / ${rafterAD}"</td></tr>
+            <tr><td>Bending Utilization</td><td class="cv" style="font-weight:bold;color:${_bendRatio != null && _bendRatio > 1.0 ? '#cc0000' : '#000'};">${bendUtil}${_bendRatio != null ? '%' : ''}</td></tr>
+            <tr><td>Deflection / Allowed</td><td class="cv" style="color:${_deflRatio != null && _deflRatio > 1.0 ? '#cc0000' : '#000'};">${rafterDefl}" / ${rafterAD}"</td></tr>
+            <tr><td>Governing Check</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${_utilRatio != null ? `${_governs} — ${utilization}%` : '—'}</td></tr>
             `}
           </table>
         </div>
@@ -711,16 +728,18 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <tr><td class="fw7">PV Modules</td><td class="tr mono">${moduleDL} PSF</td><td>Per manufacturer spec sheet, distributed over array area</td></tr>
           <tr class="bg-lt"><td class="fw7">Racking / Rails</td><td class="tr mono">${rackDL} PSF</td><td>Aluminum rail + L-foot + clamp assembly</td></tr>
           <tr><td class="fw7">Electrical (Wiring, Conduit)</td><td class="tr mono">0.2 PSF</td><td>Estimate for home-run conduit + module leads</td></tr>
-          <tr class="bg-lt" style="font-weight:bold;border-top:2px solid #000"><td class="fw7">TOTAL ADDED DEAD LOAD</td><td class="tr mono fw7">${totalDL} PSF</td><td>Added to existing roof dead load (typically 8–12 PSF)</td></tr>
+          <tr class="bg-lt" style="font-weight:bold;border-top:2px solid #000"><td class="fw7">TOTAL ADDED DEAD LOAD</td><td class="tr mono fw7">${addedDL} PSF</td><td>Sum of PV components above — added to the existing roof</td></tr>
+          <tr style="font-weight:bold;"><td class="fw7">COMBINED ROOF DEAD LOAD</td><td class="tr mono fw7">${totalDL} PSF</td><td>Existing roof construction (typically 8–12 PSF) + PV system</td></tr>
         </tbody>
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>DEAD LOAD INTERPRETATION:</strong>
-        The total added dead load of ${totalDL} PSF is distributed uniformly over the array footprint on the existing roof.
-        This represents a minimal addition relative to the existing roof dead load (typically 8–12 PSF for asphalt shingle
-        on plywood sheathing). The existing roof structure is evaluated to confirm adequate capacity for the combined
-        loading condition per IBC Section 1607. Rafter utilization ratio of ${utilization}% confirms the existing framing
-        ${Number(utilization) <= 100 ? 'has adequate capacity' : 'requires reinforcement'} for the additional PV loading.
+        The added PV dead load of ${addedDL} PSF is distributed uniformly over the array footprint, for a combined roof
+        dead load of ${totalDL} PSF. This represents a minimal addition relative to the existing roof dead load (typically
+        8–12 PSF for asphalt shingle on plywood sheathing). The existing roof structure is evaluated to confirm adequate
+        capacity for the combined loading condition per IBC Section 1607. The governing ${_governs} check at ${utilization}%
+        ${_utilRatio != null && _utilRatio <= 1.0 ? 'confirms the existing framing has adequate capacity' : 'indicates the modeled framing requires field verification of actual framing type/span or reinforcement'}
+        for the additional PV loading${_utilRatio != null && _utilRatio > 1.0 ? ' (bending utilization ' + bendUtil + '%; deflection ' + rafterDefl + '" vs ' + rafterAD + '" allowable)' : ''}.
       </div>
 
       <!-- Standard Detail: Roof Attachment -->

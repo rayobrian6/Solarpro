@@ -1119,6 +1119,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .section-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
   .section-title:first-child { margin-top: 0; }
 
+  /* ── PE letter (PE-1) — engineering-letter typography. Ruled small-cap headings
+     instead of solid black banner bars, quiet label cells, hairline row rules:
+     the bar-heavy layout read "cartoony" beside the PE-sealed reference set. */
+  .pe-letter .section-title { background: transparent; color: #000; border-bottom: 2px solid #000; padding: 3px 0 2px; letter-spacing: 1.6px; margin-top: var(--sm); }
+  .pe-letter .sec-hdr { background: transparent; color: #000; border-bottom: 1.5px solid #000; letter-spacing: 1.6px; padding-left: 0; }
+  .pe-letter .sec { border: none; border-top: 1px solid #000; }
+  .pe-letter .il { background: transparent; border-right: none; color: #555; font-weight: 700; }
+  .pe-letter .info-table { border: none; }
+  .pe-letter .info-table tr { border-bottom: 1px solid #e2e2e2; }
+  .pe-letter .info-table tr.bg-lt { background: transparent; border-bottom: 1.5px solid #000; }
+  .pe-letter .info-table tr.bg-lt td { padding-top: 6px; letter-spacing: 1px; text-align: left !important; text-transform: uppercase; font-size: var(--f-sm); }
+
   /* ── Utility: dark header bar (reused across pages) ─────────────────────── */
   .sec-hdr-dark {
     background: #000; color: #fff;

@@ -1119,7 +1119,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
       ['AC Disconnect',`${acOCPD}A Non-Fused`],
       ['Main Panel',`${mainAmps} A`],
       ['Utility',esc(utilityName)],
-      ['Interconnection','LOAD_SIDE — NEC 705'],
+      ['Interconnection',interconnectionLabel(project.interconnectionMethod)],
       ['Rapid Shutdown','INTEGRATED — NEC 690.12'],
       ['Battery Storage',hasBattery?esc(batteryModel):'NONE'],
       ...(hasBattery&&batteryKwh?[['Battery Capacity',`${batteryKwh.toFixed(1)} kWh`] as [string,string]]:[]),
@@ -1214,7 +1214,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
       ['MODEL',esc(inverterModel)],
       ['SERVICE',`${mainAmps}A`],
       ['UTILITY',esc(utilityName)],
-      ['INTERCONN.','LOAD_SIDE'],
+      ['INTERCONN.',interconnectionLabel(project.interconnectionMethod).split(' — ')[0]],
     ];
     let sysY2=sysY+12;
     const sysRH=16;

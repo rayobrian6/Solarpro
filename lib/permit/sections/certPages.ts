@@ -384,6 +384,25 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const uplift      = structural?.wind?.upliftPerAttachment?.toFixed(0) || '—';
   const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
+  // utilizationRatio carries the GOVERNING ratio (max of bending/deflection) —
+  // labelling it as bending utilization made PE-1 print "145%" beside a passing
+  // 90% bending check. Compute each check's own ratio and certify CONDITIONALLY:
+  // the letter must never say "confirmed adequate" while its own numbers fail.
+  const _bmRaw   = structural?.rafter?.bendingMoment;
+  const _abmRaw  = structural?.rafter?.allowableBendingMoment;
+  const _deflRaw = structural?.rafter?.deflection;
+  const _adRaw   = structural?.rafter?.allowableDeflection;
+  const _bendRatio = (_bmRaw != null && _abmRaw) ? _bmRaw / _abmRaw : null;
+  const _deflRatio = (_deflRaw != null && _adRaw) ? _deflRaw / _adRaw : null;
+  const _sfRaw     = structural?.attachment?.safetyFactor;
+  const _bendPass  = _bendRatio == null || _bendRatio <= 1.0;
+  const _deflPass  = _deflRatio == null || _deflRatio <= 1.0;
+  const _lagPass   = _sfRaw == null || _sfRaw >= 2.0;
+  const _allPass   = _bendPass && _deflPass && _lagPass;
+  const bendUtil   = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : '—';
+  const deflUtil   = _deflRatio != null ? (_deflRatio * 100).toFixed(0) : '—';
+  const _governs   = (_deflRatio ?? 0) > (_bendRatio ?? 0) ? 'deflection' : 'bending';
+  const _utilRatioPresent = structural?.rafter?.utilizationRatio != null;
   const utilization = ((structural?.rafter?.utilizationRatio || 0) * 100).toFixed(0);
   const fbPrime     = structural?.rafter?.Fb_prime ? structural.rafter.Fb_prime.toFixed(0) : '—';
   const lineLoad    = structural?.rafter?.lineLoad ? structural.rafter.lineLoad.toFixed(1) : '—';
@@ -406,12 +425,18 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   return `
   <div class="page">
     ${titleBlock(input, 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
-    <div class="page-content">
+    <div class="page-content pe-letter">
 
-      <div class="bb-hvy pb-xs mb-sm">
-        <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
-        <div class="f-lg c555 mt-xs">Solar Photovoltaic System — Roof-Mounted Array</div>
-        <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
+      <div class="bb-hvy pb-xs mb-sm" style="display:flex;justify-content:space-between;align-items:flex-end;">
+        <div>
+          <div class="f-3xl fw9" style="letter-spacing:1px;">LETTER OF STRUCTURAL COMPLIANCE</div>
+          <div class="f-lg c555 mt-xs">Solar Photovoltaic System — Roof-Mounted Array</div>
+          <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
+        </div>
+        <div class="f-sm" style="text-align:right;color:#555;line-height:1.6;">
+          <div>RE: <strong style="color:#000;">${project.address || '—'}</strong></div>
+          <div>DATE: ${project.date || '—'}</div>
+        </div>
       </div>
 
       <div class="two-col-layout">
@@ -443,11 +468,11 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                                     <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Rafter Bending & Deflection Analysis</td></tr>
             <tr><td class="il">F’b (Adjusted)</td><td class="iv">${fbPrime} psi</td><td class="il">Framing</td><td class="iv">${_isTruss ? 'Truss' : 'Stick'} (${framingType})</td></tr>
             <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Rafter Span</td><td class="iv">${rafterSpanFt} ft</td></tr>
-            <tr><td class="il">Line Load</td><td class="iv">${lineLoad} lb/ft</td><td class="il">Bending Moment</td><td class="iv">${bendingMoment} lb-ft</td></tr>
-            <tr><td class="il">Utilization</td><td class="iv">${utilization}%</td><td class="il">Deflection</td><td class="iv">${deflection} in (Δ_allow = ${allowableDefl} in)</td></tr>
+            <tr><td class="il">Line Load</td><td class="iv">${lineLoad} lb/ft</td><td class="il">Bending Moment</td><td class="iv">${bendingMoment} / ${allowableBM} lb-ft</td></tr>
+            <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflPass ? '#000' : '#cc0000'};">${deflection} in (Δ_allow = ${allowableDefl} in — ${deflUtil}%)</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Utilization Ratio</td><td class="iv">${utilization}%</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} — ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : '—'}</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.9D + 1.0W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §26/27</td></tr>
           </table>
@@ -458,21 +483,35 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
               <div class="f-xs" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the roof-mounted solar
-                photovoltaic array installation at <strong>${project.address || '—'}</strong> and determined that the <strong>existing roof structure and lag bolt
+                photovoltaic array installation at <strong>${project.address || '—'}</strong> and determined that ${_allPass
+                  ? `the <strong>existing roof structure and lag bolt
                 attachment system are adequate to support the additional loads imposed by the proposed roof-mounted
-                PV array</strong>, based on the structural analysis performed in accordance with
+                PV array</strong>,`
+                  : `<strong>the modeled framing does not satisfy all code checks — see below</strong>,`}
+                based on the structural analysis performed in accordance with
                 <strong>ASCE 7-22 §26/27</strong>, <strong>${ibcVer} IBC</strong>, <strong>${ibcVer} IRC</strong>,
                 and NEC ${necVer}.
               </div>
+              ${_allPass ? `
               <div class="f-sm mt-xs" style="line-height:1.6;">
-                Lag bolt attachment capacity (safety factor ${safetyFact}), rafter bending stress (F’b = ${fbPrime} psi, utilization ${utilization}%),
+                Lag bolt attachment capacity (safety factor ${safetyFact}), rafter bending stress (F’b = ${fbPrime} psi, bending utilization ${bendUtil}%),
                 and deflection (Δ = ${deflection} in vs Δ_allow = ${allowableDefl} in) are confirmed adequate for
                 the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
-                per ASCE 7-22 §26/27. Rafter framing of ${rafterSize} @ ${rafterSpace}" O.C. (${_isTruss ? 'truss' : 'stick'} construction, span ${rafterSpanFt} ft) confirmed adequate for
+                per ASCE 7-22 §26/27. Roof framing of ${rafterSize} @ ${rafterSpace}" O.C. (${_isTruss ? 'truss' : 'stick'} construction, span ${rafterSpanFt} ft) confirmed adequate for
                 the combined dead load (${totalLoadPsf} psf), wind, and snow loading per IBC Section 1607 and ASCE 7-22 §2.3.
                 Field conditions shall be verified by the installing contractor.
                 Any deviations from the approved design shall be reported to the engineer of record prior to installation.
-              </div>
+              </div>` : `
+              <div class="f-sm mt-xs" style="line-height:1.6;border:2px solid #cc0000;padding:var(--xs);">
+                <strong style="color:#cc0000;">STRUCTURAL REVIEW REQUIRED — DO NOT ISSUE:</strong>
+                under the modeled assumptions (${rafterSize} ${_isTruss ? 'truss' : 'stick'} framing @ ${rafterSpace}" O.C., span ${rafterSpanFt} ft,
+                combined load ${totalLoadPsf} psf), the ${_governs} check exceeds its code limit
+                (bending ${bendUtil}% of allowable; deflection Δ = ${deflection} in vs Δ_allow = ${allowableDefl} in).
+                Lag bolt attachment safety factor is ${safetyFact}${_lagPass ? ' (adequate)' : ' (below the 2.0 minimum)'}.
+                Field-verify the actual framing type, member size, and clear span (pre-engineered trusses frequently
+                resolve this check), correct the structural inputs, and re-run the analysis — or provide reinforcement
+                designed by the engineer of record — before this letter is signed or sealed.
+              </div>`}
             </div>
           </div>
 

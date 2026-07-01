@@ -158,7 +158,12 @@ export function drawRoofPlan(
   const isBranchColorMode = !!(panelColorById && panelColorById.size > 0);
 
   els.push(drawSVGOpen(W, H));
-  els.push(drawBackground(W, H, '#f5f7f0'));
+  // Pro-reference restyle (Ray, 2026-07-01: match the PE-sealed set): white sheet,
+  // white roof linework, red-HATCHED setback bands, white modules w/ attachment
+  // dots — monochrome CAD language instead of tinted fills ("cartoony").
+  els.push(drawBackground(W, H, '#ffffff'));
+  // Red diagonal hatch for the fire-setback band (the reference's signature mark).
+  els.push(`<defs><pattern id="hatch-setback" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="#cc2222" stroke-width="0.9"/></pattern></defs>`);
   // v65: PV-2B branch-color mode gets a distinct title bar
   const svgTitle = isBranchColorMode
     ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP'
@@ -198,25 +203,21 @@ export function drawRoofPlan(
     const ptsXY = rp.vertices!.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
     const pts = ptsXY.map((p: { x: number; y: number }) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
 
-    // Roof plane fill — clean light cool-gray (was a busy beige + double hatch).
-    const roofFill = ri % 2 === 0 ? '#eceef1' : '#e3e6ea';
-    els.push(`<polygon points="${pts}" fill="${roofFill}" stroke="none"/>`);
-    // Subtle shingle texture only — dropped to a whisper (was opaque 0.92) and the
-    // second diagonal wood hatch removed entirely, which was the main "busy" look.
-    const tileClipId = `rtc${ri}`;
-    els.push(`<defs><clipPath id="${tileClipId}"><polygon points="${pts}"/></clipPath></defs>`);
-    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-roof-tile)" opacity="0.22" clip-path="url(#${tileClipId})"/>`);
+    // Roof plane — WHITE with fine black linework (reference CAD style; the gray
+    // fills + shingle texture were the "cartoony" read).
+    els.push(`<polygon points="${pts}" fill="#ffffff" stroke="none"/>`);
+    els.push(`<polygon points="${pts}" fill="none" stroke="#000" stroke-width="1.3" stroke-linejoin="miter"/>`);
 
-    // Clean structural outline
-    els.push(`<polygon points="${pts}" fill="none" stroke="#2b2f36" stroke-width="2" stroke-linejoin="miter"/>`);
-
-    // Fire setback inset (dashed red outline) — REAL inward offset by the AHJ
-    // setback. Was drawn on the roof edge itself (zero inset) so no setback band
-    // showed. Now offsets each facet inward by setbackFt; falls back to no band
-    // if the setback would collapse the facet (tiny/degenerate).
+    // Fire setback — red HATCHED band between the facet edge and the inward
+    // setback offset (the reference's signature mark), plus a thin red dashed
+    // line on the inset itself. Falls back to no band if the setback would
+    // collapse the facet (tiny/degenerate).
     const sbPx = setbackFt * scale;
     const insetXY = insetRingPx(ptsXY, sbPx);
     if (insetXY) {
+      const outerPath = ptsXY.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+      const innerPath = insetXY.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+      els.push(`<path d="${outerPath} ${innerPath}" fill="url(#hatch-setback)" fill-rule="evenodd" opacity="0.6" stroke="none"/>`);
       const ip = insetXY.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
       els.push(`<polygon points="${ip}" fill="none" class="line-setbk"/>`);
     }
@@ -233,8 +234,9 @@ export function drawRoofPlan(
   const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
   const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
-  // Flat, crisp PV modules — uniform fill + thin frame (no gradient/reflection/
-  // busbar clip-art, which muddied to a blue smear at plan scale).
+  // Reference-style modules: WHITE rectangle, fine dark-blue frame, and a small
+  // blue attachment/micro dot at center. (Solid navy fills read "cartoony".)
+  // PV-2B keeps solid branch-colored fills — that sheet IS a color map.
   validPanels.forEach((p: any) => {
     const px = toX(p.lng), py = toY(p.lat);
     const isLandscape = (p.orientation || 'landscape') === 'landscape';
@@ -242,14 +244,13 @@ export function drawRoofPlan(
     const ph = isLandscape ? panWidPx : panLenPx;
     const x0 = px - pw / 2, y0 = py - ph / 2;
 
-    // Module body — branch-colored fill (PV-2B) or default navy (PV-2)
-    const branchFill = panelColorById?.get(p.id) ?? '#1b3f74';
-    els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
-    // Thin aluminum frame inset
-    els.push(`<rect x="${(x0 + 0.7).toFixed(1)}" y="${(y0 + 0.7).toFixed(1)}" width="${Math.max(pw - 1.4, 0).toFixed(1)}" height="${Math.max(ph - 1.4, 0).toFixed(1)}" fill="none" stroke="rgba(190,210,235,0.5)" stroke-width="0.35"/>`);
-    // One subtle mid seam for the half-cell read (only when large enough)
-    if (ph > 12) {
-      els.push(`<line x1="${(x0 + 1).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(x0 + pw - 1).toFixed(1)}" y2="${py.toFixed(1)}" stroke="rgba(150,180,220,0.4)" stroke-width="0.4"/>`);
+    const branchFill = panelColorById?.get(p.id);
+    if (branchFill) {
+      els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
+      els.push(`<rect x="${(x0 + 0.7).toFixed(1)}" y="${(y0 + 0.7).toFixed(1)}" width="${Math.max(pw - 1.4, 0).toFixed(1)}" height="${Math.max(ph - 1.4, 0).toFixed(1)}" fill="none" stroke="rgba(190,210,235,0.5)" stroke-width="0.35"/>`);
+    } else {
+      els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>`);
+      els.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="1.3" fill="#2a5db0"/>`);
     }
   });
 
@@ -421,9 +422,9 @@ export function drawRoofPlan(
 
     // Legend — documents the symbols/line-styles actually on this sheet.
     const lg: Array<{ swatch: string; label: string }> = [
-      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#1b3f74" stroke="#0a1e4a" stroke-width="0.5" rx="0.4"/>`, label: 'PV MODULE' },
-      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#c0392b" stroke-width="1.1" stroke-dasharray="3 2"/>`, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
-      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#2b2f36" stroke-width="1.6"/>`, label: 'ROOF EDGE / RIDGE' },
+      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="7" cy="-0.5" r="1.2" fill="#2a5db0"/>`, label: 'PV MODULE' },
+      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
+      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.3"/>`, label: 'ROOF EDGE / RIDGE' },
       { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
     ];
     const lgW = 128, rowH = 13, lgX = W - zones.dims.right - lgW + 8, lgY = zones.dims.top + 6;
