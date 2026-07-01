@@ -1382,6 +1382,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSolarApiStatus('loaded');
       if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
 
+      // Cropped to the subject building? Note how many block roofs were dropped.
+      const cropNote = data.crop?.applied
+        ? ` · cropped to this building (${data.crop.planesKept} of ${data.crop.planesBefore} roofs on the block)`
+        : '';
+
       // ── Obstruction keep-out zones from Nearmap AI ──
       const fetchedObs: NearmapObstruction[] = Array.isArray(data.obstructions) ? data.obstructions : [];
       setObstructions(fetchedObs);
@@ -1391,9 +1396,9 @@ export default function DesignStudio({ project, onSave }: Props) {
         const typeCounts: Record<string, number> = {};
         for (const o of fetchedObs) typeCounts[o.type] = (typeCounts[o.type] || 0) + 1;
         const summary = Object.entries(typeCounts).map(([t, c]) => `${c} ${t}${c !== 1 ? 's' : ''}`).join(', ');
-        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''}, ${fetchedObs.length} obstruction${fetchedObs.length !== 1 ? 's' : ''} (${summary}) · review & confirm`);
+        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''}, ${fetchedObs.length} obstruction${fetchedObs.length !== 1 ? 's' : ''} (${summary})${cropNote} · review & confirm`);
       } else {
-        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap · review pitch & azimuth, then confirm`);
+        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap${cropNote} · review pitch & azimuth, then confirm`);
       }
     } catch (e) {
       setSolarApiStatus('unavailable');
