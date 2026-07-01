@@ -31,7 +31,10 @@ const PDF_PAGE_CONFIG = {
 // escapeXml now actually escapes &<>" (was a no-op → broke SVG on those chars).
 // 47354 (2026-07-01): PV-2 gains a full N/E/S/W compass rose + a LEGEND box (PV
 // module / fire setback / roof edge / callout ref) to match the pro reference.
-const PLANSET_ENGINE_VERSION = 47354;
+// 47355 (2026-07-01): PV-1 aerial is now LANDSCAPE 16:9 (was square → clipped by
+// the wide column, shoving the centred roof to the bottom edge — the "not centered"
+// bug, present with Google too); + subject roof outlined on the aerial (projected).
+const PLANSET_ENGINE_VERSION = 47355;
 
 
 

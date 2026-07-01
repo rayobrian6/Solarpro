@@ -60,16 +60,36 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     const imgW = aerial.imageWidth  || 640;
     const imgH = aerial.imageHeight || 640;
     const cLat = aerial.lat!;
+    const cLng = aerial.lng!;
     const z    = aerial.zoom || 20;
     const mppEq = 156543.03392 / Math.pow(2, z);
     const mpp   = mppEq * Math.cos(cLat * Math.PI / 180);
     const ppm   = 1 / mpp;  // pixels per meter — drives the scale bar
 
-    // PV-1 SITE PLAN: PV modules are intentionally NOT drawn on the aerial (Ray,
-    // 2026-06-30). The site plan shows property context + equipment locations; the
-    // module layout lives on PV-2 (real roof plan) and PV-2B (circuit plan). We keep
-    // the satellite framing, north arrow, scale bar, and the system-size badge.
-    const pSvg = '';
+    // PV-1 SITE PLAN: PV modules are NOT drawn on the aerial (module layout lives on
+    // PV-2). We DO outline the subject roof (projected from the design's GPS roof
+    // planes via mercPx) so the site plan clearly marks the building being permitted,
+    // and place equipment markers along its street-facing edge with a keyed legend.
+    const svgCx = imgW / 2, svgCy = imgH / 2;
+    const project = (lat: number, lng: number) => mercPx(lat, lng, cLat, cLng, ppm, svgCx, svgCy);
+
+    // Roof outline — each design facet as a crisp yellow polygon (shared edges read
+    // as ridges/hips). Drop-shadow stroke underneath for contrast on any imagery.
+    let roofOutline = '';
+    const projedPts: Array<{ x: number; y: number }> = [];
+    if (roofPlanes && roofPlanes.length) {
+      for (const rp of roofPlanes) {
+        if (!rp.vertices || rp.vertices.length < 3) continue;
+        const pts = rp.vertices
+          .filter(v => isFinite(v.lat) && isFinite(v.lng))
+          .map(v => { const p = project(v.lat, v.lng); projedPts.push(p); return `${p.x.toFixed(1)},${p.y.toFixed(1)}`; })
+          .join(' ');
+        if (!pts) continue;
+        roofOutline += `<polygon points="${pts}" fill="none" stroke="#000" stroke-width="3.5" stroke-opacity="0.45" stroke-linejoin="round"/>`;
+        roofOutline += `<polygon points="${pts}" fill="none" stroke="#ffd400" stroke-width="1.8" stroke-linejoin="round"/>`;
+      }
+    }
+    const pSvg = roofOutline;
 
     const scalePx = Math.round(10*ppm);
     const scaleBar = scalePx>0&&scalePx<250 ? `
@@ -389,10 +409,14 @@ export async function fetchAerialRoofData(
       _center.source === 'segment' ? '(nearest on-parcel roof segment)' : '');
 
     // ── Step 3: Aerial image ──
-    const imgSize = '640x640';
+    // LANDSCAPE 16:9 to match the PV-1 drawing area — a square image overflows the
+    // wide column (aerial-wrap is height:auto) and gets clipped to the top band,
+    // which shoved the (correctly-centred) roof to the bottom edge. A 16:9 image
+    // fills the area and keeps the roof centred.
+    const imgSize = '640x360';
     let imageBase64: string | undefined;
     let imageWidth  = 640;
-    let imageHeight = 640;
+    let imageHeight = 360;
     let usedZoom    = 20;
     let imageSource: 'nearmap' | 'google' = 'google';
 
@@ -400,7 +424,7 @@ export async function fetchAerialRoofData(
     // sharper than Google Static Maps satellite. Fails safe → Google below.
     if (nearmapConfigured()) {
       try {
-        const nm = await fetchNearmapStaticAerial(centerLat, centerLng, { sizePx: 1024 });
+        const nm = await fetchNearmapStaticAerial(centerLat, centerLng, { widthPx: 1440, heightPx: 810 });
         if (nm?.imageBase64) {
           imageBase64 = nm.imageBase64;
           imageWidth  = nm.imageWidth;
@@ -443,7 +467,7 @@ export async function fetchAerialRoofData(
           imageBase64 = `data:${ct};base64,` + Buffer.from(buf).toString('base64');
           usedZoom    = tryZoom;
           imageWidth  = 640;
-          imageHeight = 640;
+          imageHeight = 360;
           break;
         } else {
           const errBody = await imgRes.text().catch(() => '');

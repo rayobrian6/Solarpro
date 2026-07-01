@@ -88,11 +88,12 @@ export interface NearmapStaticAerial {
  */
 export async function fetchNearmapStaticAerial(
   lat: number, lng: number,
-  opts: { zoom?: number; sizePx?: number } = {},
+  opts: { zoom?: number; sizePx?: number; widthPx?: number; heightPx?: number } = {},
 ): Promise<NearmapStaticAerial | null> {
   const key = process.env.NEARMAP_API_KEY;
   if (!key) return null;
-  const size = opts.sizePx ?? 1024;
+  const W = opts.widthPx ?? opts.sizePx ?? 1024;
+  const H = opts.heightPx ?? opts.sizePx ?? 1024;
   const zooms = opts.zoom ? [opts.zoom] : [21, 20, 19];
   let sharp: typeof import('sharp');
   try { sharp = (await import('sharp')).default as unknown as typeof import('sharp'); }
@@ -100,7 +101,7 @@ export async function fetchNearmapStaticAerial(
 
   for (const z of zooms) {
     try {
-      const grid = nearmapTileGrid(lat, lng, z, size, size);
+      const grid = nearmapTileGrid(lat, lng, z, W, H);
       const results = await Promise.all(grid.tiles.map(async (t) => {
         try {
           const r = await fetch(`${TILE_URL}/${t.z}/${t.x}/${t.y}.jpg?apikey=${key}`, {
@@ -119,13 +120,13 @@ export async function fetchNearmapStaticAerial(
         create: { width: grid.canvasW, height: grid.canvasH, channels: 3, background: { r: 20, g: 20, b: 20 } },
       })
         .composite(composites)
-        .extract({ left: grid.cropLeft, top: grid.cropTop, width: size, height: size })
+        .extract({ left: grid.cropLeft, top: grid.cropTop, width: W, height: H })
         .jpeg({ quality: 88 })
         .toBuffer();
 
       return {
         imageBase64: `data:image/jpeg;base64,${out.toString('base64')}`,
-        imageWidth: size, imageHeight: size, zoom: z, tilesFetched: composites.length,
+        imageWidth: W, imageHeight: H, zoom: z, tilesFetched: composites.length,
       };
     } catch {
       continue;
