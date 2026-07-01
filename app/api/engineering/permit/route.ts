@@ -994,11 +994,40 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // NOTE: a previous post-enrichment "re-center on the design geometry" step was REMOVED
-    // here (Ray, 2026-06-30). It re-centered the aerial on the panel/roof centroid, which is
-    // exactly the wrong-house bug — the design can be anchored on the neighbor. The aerial is
-    // now centered authoritatively on the fresh address geocode (see the aerial fetch above),
-    // so re-centering on the design would defeat that.
+    // ── Re-center the aerial on the DESIGN geometry (Ray, 2026-06-30: "3D drives 2D") ──
+    // The planset must frame whatever the user built in 3D. The design's real
+    // roof/panel GPS only lands on enrichedBody AFTER canonical/survey enrichment
+    // (above), so the initial aerial fetch used the address geocode. Now that we
+    // have the geometry, re-fetch centered on the array centroid — passed as
+    // arrayCenter so chooseAerialCenter's corruption guard still applies (a centroid
+    // implausibly far from the geocode pin is rejected as cross-contaminated).
+    {
+      const _mean = (pts: Array<{ lat?: number; lng?: number }>) => {
+        const v = pts.filter(p => p && isFinite(Number(p.lat)) && isFinite(Number(p.lng)) && Math.abs(Number(p.lat)) > 0.001);
+        if (!v.length) return null;
+        return { lat: v.reduce((s, p) => s + Number(p.lat), 0) / v.length, lng: v.reduce((s, p) => s + Number(p.lng), 0) / v.length };
+      };
+      const _panels = (enrichedBody.project?.panelPositions ?? []) as Array<{ lat?: number; lng?: number }>;
+      const _verts = ((enrichedBody.project?.roofPlanes ?? []) as Array<{ vertices?: Array<{ lat?: number; lng?: number }> }>)
+        .flatMap(rp => rp.vertices ?? []);
+      const _designCenter = _mean(_panels) ?? _mean(_verts);
+      if (_designCenter) {
+        const _cosLat = Math.cos((_centerLat || 0) * Math.PI / 180);
+        const _offM = Math.hypot(
+          (_designCenter.lat - _centerLat) * 111320,
+          (_designCenter.lng - _centerLng) * 111320 * _cosLat,
+        );
+        // Only re-fetch when the design centroid is a meaningful (>12 m) shift from
+        // the geocode-centered image, and not obvious corruption (>1 km). The guard
+        // in chooseAerialCenter re-checks the 300 m threshold on the fetch itself.
+        if (_offM > 12 && _offM < 1000) {
+          console.log('[permit/aerial] re-centering on design geometry', _offM.toFixed(0), 'm from geocode');
+          const _recentered = await fetchAerialRoofData(_centerLat, _centerLng, _addr, _designCenter)
+            .catch((e: any) => { console.warn('[permit/aerial] re-center fetch failed (keeping geocode image):', e?.message); return null; });
+          if (_recentered && _recentered.imageBase64) enrichedBody.aerialData = _recentered;
+        }
+      }
+    }
 
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });

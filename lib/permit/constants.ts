@@ -21,7 +21,10 @@ const PDF_PAGE_CONFIG = {
 // inward inset (was zero-inset = no visible setback band); plane-label pitch
 // rounded to one decimal so it matches the SYSTEM-DATA table (was "5:12" vs
 // "4.8:12" on the same sheet).
-const PLANSET_ENGINE_VERSION = 47350;
+// 47351 (2026-06-30): "3D drives 2D" — PV-1 aerial re-centers on the design's
+// array centroid (post-enrichment) instead of the address geocode, guarded by
+// chooseAerialCenter's corruption check (centroid >300m from pin = rejected).
+const PLANSET_ENGINE_VERSION = 47351;
 
 
 

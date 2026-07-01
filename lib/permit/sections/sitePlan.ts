@@ -252,27 +252,52 @@ export interface AerialRoofData {
 // Decides where to center the aerial image. Pure + exported so it can be unit
 // tested without the Google network calls.
 //
-// Priority (Ray, 2026-06-30 — "the map fly-in flies to the correct house"):
-//   1. The design's array centroid (caller-supplied) — most accurate; the panels
-//      sit exactly here.
-//   2. The geocoded address pin. The Design Studio address fly-in geocodes to this
-//      exact point (/api/geocode) and lands on the CORRECT house, and persists it back
-//      to project.lat/lng. So for a real street address the pin IS the building. A
-//      Google Solar roof SEGMENT must NEVER override a valid pin: buildingInsights
-//      :findClosest routinely returns a NEIGHBOR's building, and centering on its
-//      segment is exactly the "wrong house" bug we kept hitting.
+// Priority (Ray, 2026-06-30 — "3D design drives 2D"):
+//   1. The design's array centroid (caller-supplied) — AUTHORITATIVE. The planset
+//      must faithfully frame whatever the user built in 3D; the panels sit exactly
+//      here. Guarded: a centroid > ARRAY_CENTER_MAX_OFFSET_M from a valid pin is
+//      corrupt (cross-project contamination) and is rejected, not trusted.
+//   2. The geocoded address pin — fallback when there's no design geometry (or the
+//      centroid failed the corruption guard). The Design Studio fly-in geocodes to
+//      this point and lands on the building. A Google Solar roof SEGMENT must NEVER
+//      override a valid pin: buildingInsights:findClosest routinely returns a
+//      NEIGHBOR's building — centering on its segment was the "wrong house" bug.
 //   3. A roof segment — ONLY as a last resort when the pin is missing/invalid (e.g.
 //      a city-level geocode with no building), where any nearby roof beats (0,0).
 type AerialSegment = { center?: { lat: number; lng: number }; azimuthDegrees: number; areaM2: number };
+
+// Max distance (m) the design's array centroid may sit from the address pin and
+// still be trusted. Real designs sit within a parcel of the geocode (tens of m);
+// a centroid hundreds of m off means the design geometry is cross-contaminated
+// (the observed "panels in another state" corruption) — reject it and fall back
+// to the pin rather than fly the aerial to the wrong location.
+export const ARRAY_CENTER_MAX_OFFSET_M = 300;
+
 export function chooseAerialCenter(
   pinLat: number,
   pinLng: number,
   arrayCenter: { lat: number; lng: number } | undefined,
   roofSegments: AerialSegment[] | undefined,
 ): { lat: number; lng: number; source: 'array' | 'segment' | 'pin' } {
-  // 1) Placed-array centroid — most precise.
+  const pinValid = isFinite(pinLat) && isFinite(pinLng) && Math.abs(pinLat) > 0.001;
+
+  // 1) Placed-array centroid — most precise (the design drives the 2D framing).
+  //    Guard: if a valid pin exists and the centroid is implausibly far from it,
+  //    the design geometry is corrupt — don't let it drag the aerial away.
   if (arrayCenter && isFinite(arrayCenter.lat) && isFinite(arrayCenter.lng) && Math.abs(arrayCenter.lat) > 0.001) {
-    return { lat: arrayCenter.lat, lng: arrayCenter.lng, source: 'array' };
+    let trusted = true;
+    if (pinValid) {
+      const cosLat = Math.cos(pinLat * Math.PI / 180);
+      const offsetM = Math.hypot(
+        (arrayCenter.lat - pinLat) * 111320,
+        (arrayCenter.lng - pinLng) * 111320 * cosLat,
+      );
+      trusted = offsetM <= ARRAY_CENTER_MAX_OFFSET_M;
+      if (!trusted) {
+        console.warn('[permit/aerial] array centroid', offsetM.toFixed(0), 'm from pin — rejecting as corrupt, using pin');
+      }
+    }
+    if (trusted) return { lat: arrayCenter.lat, lng: arrayCenter.lng, source: 'array' };
   }
 
   // 2) The geocoded address pin — authoritative for a real street address. Never let a

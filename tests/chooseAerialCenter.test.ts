@@ -46,6 +46,30 @@ describe('chooseAerialCenter', () => {
     expect(r.lng).toBe(PIN_LNG);
   });
 
+  it('trusts an array centroid that sits a few metres off the pin (real design)', () => {
+    // The design centroid is normally a short hop from the geocode pin — trust it.
+    const arrayCenter = { lat: PIN_LAT + mLat(25), lng: PIN_LNG + mLng(10) };
+    const r = chooseAerialCenter(PIN_LAT, PIN_LNG, arrayCenter, []);
+    expect(r.source).toBe('array');
+  });
+
+  it('REJECTS a corrupt array centroid hundreds of metres from the pin (cross-contamination)', () => {
+    // Observed bug: design geometry saved under the wrong project → panels in another
+    // town/state. A centroid that far must not drag the aerial off the real house.
+    const corrupt = { lat: PIN_LAT + mLat(5000), lng: PIN_LNG + mLng(5000) };
+    const r = chooseAerialCenter(PIN_LAT, PIN_LNG, corrupt, []);
+    expect(r.source).toBe('pin');
+    expect(r.lat).toBe(PIN_LAT);
+  });
+
+  it('still trusts a far array centroid when the pin itself is invalid', () => {
+    // No usable pin → the design centroid is all we have; use it.
+    const arrayCenter = { lat: 40.5, lng: -80.2 };
+    const r = chooseAerialCenter(0, 0, arrayCenter, []);
+    expect(r.source).toBe('array');
+    expect(r.lat).toBe(40.5);
+  });
+
   it('falls back to the nearest segment ONLY when the pin is missing/invalid', () => {
     const far1 = { center: { lat: 38.80, lng: -90.10 }, azimuthDegrees: 180, areaM2: 300 };
     const near = { center: { lat: 38.70, lng: -90.15 }, azimuthDegrees: 90, areaM2: 80 };
