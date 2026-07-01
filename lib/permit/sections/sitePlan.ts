@@ -7,7 +7,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
-import { mercPx, buildSchemSVG } from '../utils/drawing';
+import { buildSchemSVG } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
 import { nearmapConfigured, fetchNearmapStaticAerial } from '@/lib/aerial/nearmap';
 
@@ -60,36 +60,16 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     const imgW = aerial.imageWidth  || 640;
     const imgH = aerial.imageHeight || 640;
     const cLat = aerial.lat!;
-    const cLng = aerial.lng!;
     const z    = aerial.zoom || 20;
     const mppEq = 156543.03392 / Math.pow(2, z);
     const mpp   = mppEq * Math.cos(cLat * Math.PI / 180);
     const ppm   = 1 / mpp;  // pixels per meter — drives the scale bar
 
-    // PV-1 SITE PLAN: PV modules are NOT drawn on the aerial (module layout lives on
-    // PV-2). We DO outline the subject roof (projected from the design's GPS roof
-    // planes via mercPx) so the site plan clearly marks the building being permitted,
-    // and place equipment markers along its street-facing edge with a keyed legend.
-    const svgCx = imgW / 2, svgCy = imgH / 2;
-    const project = (lat: number, lng: number) => mercPx(lat, lng, cLat, cLng, ppm, svgCx, svgCy);
-
-    // Roof outline — each design facet as a crisp yellow polygon (shared edges read
-    // as ridges/hips). Drop-shadow stroke underneath for contrast on any imagery.
-    let roofOutline = '';
-    const projedPts: Array<{ x: number; y: number }> = [];
-    if (roofPlanes && roofPlanes.length) {
-      for (const rp of roofPlanes) {
-        if (!rp.vertices || rp.vertices.length < 3) continue;
-        const pts = rp.vertices
-          .filter(v => isFinite(v.lat) && isFinite(v.lng))
-          .map(v => { const p = project(v.lat, v.lng); projedPts.push(p); return `${p.x.toFixed(1)},${p.y.toFixed(1)}`; })
-          .join(' ');
-        if (!pts) continue;
-        roofOutline += `<polygon points="${pts}" fill="none" stroke="#000" stroke-width="3.5" stroke-opacity="0.45" stroke-linejoin="round"/>`;
-        roofOutline += `<polygon points="${pts}" fill="none" stroke="#ffd400" stroke-width="1.8" stroke-linejoin="round"/>`;
-      }
-    }
-    const pSvg = roofOutline;
+    // PV-1 SITE PLAN: the HD Nearmap aerial already shows the roof clearly, so we do
+    // NOT overlay the projected roof outline (the design trace sits ~1m off Nearmap's
+    // registration, which read as a slightly-off outline). Keep the clean landscape
+    // aerial + north + scale + system badge. (Overlay code removed 2026-07-01.)
+    const pSvg = '';
 
     const scalePx = Math.round(10*ppm);
     const scaleBar = scalePx>0&&scalePx<250 ? `

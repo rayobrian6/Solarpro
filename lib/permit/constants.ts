@@ -34,7 +34,9 @@ const PDF_PAGE_CONFIG = {
 // 47355 (2026-07-01): PV-1 aerial is now LANDSCAPE 16:9 (was square → clipped by
 // the wide column, shoving the centred roof to the bottom edge — the "not centered"
 // bug, present with Google too); + subject roof outlined on the aerial (projected).
-const PLANSET_ENGINE_VERSION = 47355;
+// 47356 (2026-07-01): removed the PV-1 roof-outline overlay — trace sits ~1m off
+// Nearmap registration; the HD aerial shows the roof clearly on its own. Keep clean.
+const PLANSET_ENGINE_VERSION = 47356;
 
 
 
