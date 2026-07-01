@@ -16,13 +16,23 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
   const necVer = compliance.jurisdiction?.necVersion || '2020';
   const state = compliance.jurisdiction?.state || '—';
   const ahj = compliance.jurisdiction?.ahj || '—';
+  const system = input.system;
+  const sysSize = system?.totalDcKw?.toFixed(2) ?? '—';
+  const sysAc = system?.totalAcKw?.toFixed(2) ?? '—';
+  const panelCount = system?.totalPanels ?? 0;
+  const eq_cert = getEquipmentContext(input, cad);
+  const invModel = eq_cert.inverterModel !== '—' ? eq_cert.inverterModel : '';
+  const address = project.address || '—';
   return `
   <div class="page">
     ${titleBlock(input, 'CERT', 'ENGINEER CERTIFICATION', pageNum, totalPages)}
     <div class="page-content">
       <div class="cert-header">ENGINEER OF RECORD CERTIFICATION</div>
+      <div class="cert-subject">
+        <strong>PROJECT:</strong> ${project.projectName || '—'} | <strong>ADDRESS:</strong> ${address} | <strong>SYSTEM:</strong> ${panelCount} modules, ${sysSize} kW DC / ${sysAc} kW AC | <strong>INVERTER:</strong> ${invModel}
+      </div>
       <div class="cert-statement">
-        I hereby certify that this solar photovoltaic system design has been prepared under my direct supervision
+        I hereby certify that the solar photovoltaic system design at <strong>${address}</strong> has been prepared under my direct supervision
         and complies with the following applicable codes and standards:
         <ul style="margin-top:var(--xs);line-height:1.6;padding-left:var(--md);">
           <li>National Electrical Code (NEC) ${necVer}, Article 690 — Solar Photovoltaic Systems</li>
@@ -375,6 +385,16 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
   const utilization = ((structural?.rafter?.utilizationRatio || 0) * 100).toFixed(0);
+  const fbPrime     = structural?.rafter?.Fb_prime ? structural.rafter.Fb_prime.toFixed(0) : '—';
+  const lineLoad    = structural?.rafter?.lineLoad ? structural.rafter.lineLoad.toFixed(1) : '—';
+  const totalLoadPsf = structural?.rafter?.totalLoadPsf ? structural.rafter.totalLoadPsf.toFixed(1) : '—';
+  const rafterSpanFt = structural?.rafter?.rafterSpan ? structural.rafter.rafterSpan.toFixed(1) : (project.rafterSpan ?? '—');
+  const framingType = structural?.rafter?.framingType ?? '—';
+  const _isTruss    = framingType === 'truss';
+  const bendingMoment = structural?.rafter?.bendingMoment ? structural.rafter.bendingMoment.toFixed(1) : '—';
+  const allowableBM = structural?.rafter?.allowableBendingMoment ? structural.rafter.allowableBendingMoment.toFixed(1) : '—';
+  const deflection = structural?.rafter?.deflection ? structural.rafter.deflection.toFixed(3) : '—';
+  const allowableDefl = structural?.rafter?.allowableDeflection ? structural.rafter.allowableDeflection.toFixed(3) : '—';
   const rafterSize  = project.rafterSize  || '2×6';
   const rafterSpace = project.rafterSpacing || 24;
   const attachSpace = project.attachmentSpacing || 48;
@@ -420,6 +440,11 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <div class=\\"section-title\\">Structural Analysis Results (ASCE 7-22)</div>
           <table class=\\"info-table\\" class=\\"mb-xs\\">
             ${_peSiteLoading(input)}
+                                    <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Rafter Bending & Deflection Analysis</td></tr>
+            <tr><td class=\\"il\\">F’b (Adjusted)</td><td class=\\"iv\\">${fbPrime} psi</td><td class=\\"il\\">Framing</td><td class=\\"iv\\">${_isTruss ? 'Truss' : 'Stick'} (${framingType})</td></tr>
+            <tr><td class=\\"il\\">Total Load</td><td class=\\"iv\\">${totalLoadPsf} psf</td><td class=\\"il\\">Rafter Span</td><td class=\\"iv\\">${rafterSpanFt} ft</td></tr>
+            <tr><td class=\\"il\\">Line Load</td><td class=\\"iv\\">${lineLoad} lb/ft</td><td class=\\"il\\">Bending Moment</td><td class=\\"iv\\">${bendingMoment} lb-ft</td></tr>
+            <tr><td class=\\"il\\">Utilization</td><td class=\\"iv\\">${utilization}%</td><td class=\\"il\\">Deflection</td><td class=\\"iv\\">${deflection} in (Δ_allow = ${allowableDefl} in)</td></tr>
             <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Lag Bolt Attachment Capacity Analysis</td></tr>
             <tr><td class=\\"il\\">Net Uplift per Attachment</td><td class=\\"iv\\">${uplift} lbs</td><td class=\\"il\\">Lag Bolt Capacity</td><td class=\\"iv\\">${lagCap} lbs</td></tr>
             <tr><td class=\\"il\\">Safety Factor</td><td class=\\"iv\\" style=\\"font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};\\">${safetyFact} (min. 2.0 req.)</td><td class=\\"il\\">Utilization Ratio</td><td class=\\"iv\\">${utilization}%</td></tr>
@@ -432,18 +457,19 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <div class=\\"sec-body\\">
               <div class=\\"f-xs\\" style=\\"line-height:1.6;\\">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
-                hereby certify that I have reviewed the structural design of the above-described roof-mounted solar
-                photovoltaic array installation and determined that the <strong>existing roof structure and lag bolt
+                hereby certify that I have reviewed the structural design of the roof-mounted solar
+                photovoltaic array installation at <strong>${project.address || '—'}</strong> and determined that the <strong>existing roof structure and lag bolt
                 attachment system are adequate to support the additional loads imposed by the proposed roof-mounted
                 PV array</strong>, based on the structural analysis performed in accordance with
                 <strong>ASCE 7-22 §26/27</strong>, <strong>${ibcVer} IBC</strong>, <strong>${ibcVer} IRC</strong>,
                 and NEC ${necVer}.
               </div>
               <div class=\\"f-sm mt-xs\\" style=\\"line-height:1.6;\\">
-                Lag bolt attachment capacity, rafter capacity (utilization ratio ${utilization}%), and flashing installation
-                are confirmed adequate for the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
-                per ASCE 7-22 §26/27. Rafter framing of ${rafterSize} @ ${rafterSpace}" O.C. confirmed adequate for
-                the combined dead load, wind, and snow loading per IBC Section 1607 and ASCE 7-22 §2.3.
+                Lag bolt attachment capacity (safety factor ${safetyFact}), rafter bending stress (F’b = ${fbPrime} psi, utilization ${utilization}%),
+                and deflection (Δ = ${deflection} in vs Δ_allow = ${allowableDefl} in) are confirmed adequate for
+                the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
+                per ASCE 7-22 §26/27. Rafter framing of ${rafterSize} @ ${rafterSpace}" O.C. (${_isTruss ? 'truss' : 'stick'} construction, span ${rafterSpanFt} ft) confirmed adequate for
+                the combined dead load (${totalLoadPsf} psf), wind, and snow loading per IBC Section 1607 and ASCE 7-22 §2.3.
                 Field conditions shall be verified by the installing contractor.
                 Any deviations from the approved design shall be reported to the engineer of record prior to installation.
               </div>

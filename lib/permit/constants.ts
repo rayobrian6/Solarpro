@@ -60,7 +60,7 @@ const PDF_PAGE_CONFIG = {
 // shift. Proved on the saved 3 Melvin render: measured scene shift +200,+112 px
 // == the design-centre crop offset (190,112). Fix: two-pass stitchAndCropTiles
 // (composite → PNG buffer → extract), locked by nearmapStitch.test.ts.
-const PLANSET_ENGINE_VERSION = 47361;
+const PLANSET_ENGINE_VERSION = 47362;
 
 
 

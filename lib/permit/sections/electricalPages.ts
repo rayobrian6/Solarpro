@@ -940,18 +940,18 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(callout(utilCX+mR+14,utilCY-mR-5,6));
 
     // Callout legend box (top-left of schematic)
-    const lgdX=SCH_X+8, lgdY=SCH_Y+8, lgdW=130, lgdH=hasBattery?115:90;
+    const lgdX=SCH_X+8, lgdY=SCH_Y+8, lgdW=230, lgdH=hasBattery?140:115;
     parts.push(rect(lgdX,lgdY,lgdW,lgdH,{fill:WHT,stroke:BLK,sw:SW_HAIR}));
     parts.push(rect(lgdX,lgdY,lgdW,13,{fill:BLK,sw:0}));
     parts.push(txt(lgdX+lgdW/2,lgdY+10,'CALLOUT LEGEND',{sz:6,bold:true,anc:'middle',fill:WHT}));
     const lgdItems: [number,string][] = [
-      [1,'PV Array / Microinverters'],
+      [1,`PV Array — ${totalPanels}×${panelWatts}W — ${panelVoc.toFixed(0)}Voc/${panelIsc.toFixed(1)}Isc`],
       [2,isRoof(_sldSysType) ? 'Roof J-Box (AC)' : 'Array J-Box (AC)'],
-      [3,'AC Combiner (IQ Combiner 5C)'],
-      [4,'AC Disconnect'],
-      [5,'Main Service Panel (MSP)'],
-      [6,'Utility Meter'],
-      ...(hasBattery ? ([[7,'IQ System Controller 3'],[8,'IQ Battery Storage']] as [number,string][]) : []),
+      [3,'AC Combiner — IQ Combiner 5C'],
+      [4,`AC Disconnect — ${acOCPD}A Non-Fused`],
+      [5,`MSP — ${mainAmps}A Main / ${pvBreakerAmps}A PV`],
+      [6,'Utility Meter — 120/240V 1Ø'],
+      ...(hasBattery ? ([[7,'IQ System Controller 3 — 200A'],[8,`IQ Battery — ${batteryKwh.toFixed(0)}kWh`]] as [number,string][]) : []),
     ];
     lgdItems.forEach(([n,lbl],i)=>{
       const ly=lgdY+22+i*13;
@@ -1052,9 +1052,24 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(rect(p2x,CALC_Y,cW,CALC_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
     parts.push(rect(p2x,CALC_Y,cW,14,{fill:BLK,sw:0}));
     parts.push(txt(p2x+cW/2,CALC_Y+10,'AC SYSTEM CALCULATIONS',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    // NEC 690.8(A) Source Circuit Current (per microinv./string)
+    const _srcIsc = panelIsc > 0 ? panelIsc : 0;
+    const _srcImax = _srcIsc * 1.25;                         // NEC 690.8(A)(1)(a)
+    const _srcOcpd = _srcImax > 0 ? Math.ceil(_srcImax / 5) * 5 : branchOcpd; // next standard size
+    // NEC 690.8(B) PV Output Circuit Current
+    const _outImax = acOutputAmps * 1.25;                    // NEC 690.8(B)(1)(a)
+    const _outOcpd = _outImax > 0 ? Math.ceil(_outImax / 5) * 5 : acOCPD;     // next standard size
     const rows2: [string,string][]=[
       ['AC Output (kW)',`${totalAcKw.toFixed(2)} kW`],
       ['AC Output Amps',`${acOutputAmps.toFixed(1)} A`],
+      ['─ NEC 690.8(A) Source ─',''],
+      ['Isc (per module)',`${_srcIsc.toFixed(2)} A`],
+      ['Imax = Isc×1.25',`${_srcImax.toFixed(2)} A`],
+      ['Src OCPD',`${_srcOcpd} A`],
+      ['─ NEC 690.8(B) Output ─',''],
+      ['Iout = P÷V',`${acOutputAmps.toFixed(2)} A`],
+      ['Imax = Iout×1.25',`${_outImax.toFixed(2)} A`],
+      ['Out OCPD',`${_outOcpd} A`],
       ['AC OCPD (125%)',`${acOCPD} A`],
       ['AC Wire Gauge',acWireGauge],
       ['AC Conduit Type',acCondType],
@@ -1084,21 +1099,28 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(rect(p3x,CALC_Y,cW,CALC_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
     parts.push(rect(p3x,CALC_Y,cW,14,{fill:BLK,sw:0}));
     parts.push(txt(p3x+cW/2,CALC_Y+10,'EQUIPMENT SCHEDULE',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    const _invAcKw = eq_sld.inverterAcOutputKw || 0;
+    const _invAcA = _invAcKw > 0 ? (_invAcKw * 1000 / 240) : 0;
     const rows3: [string,string][]=[
       ['PV Module',esc(panelModel)],
       ['Module Wattage',`${panelWatts} W`],
+      ['Module Voc',`${panelVoc.toFixed(1)} V`],
+      ['Module Isc',`${panelIsc.toFixed(2)} A`],
       ['Total Modules',`${totalPanels}`],
+      ['─ Inverter ─',''],
       ['Microinverters',`${md} units`],
-      ['Branch Circuits',`${ab}`],
       ['Inverter Mfr.',esc(inverterMfr)],
       ['Inverter Model',esc(inverterModel)],
+      ['Inverter Max I',_invAcA > 0 ? `${_invAcA.toFixed(1)} A` : '—'],
       ['Inverter Output',`${totalAcKw.toFixed(2)} kW AC`],
+      ['Branch Circuits',`${ab}`],
+      ['─ System ─',''],
       ['AC Combiner','Enphase IQ Combiner 5C'],
       ['AC Disconnect',`${acOCPD}A Non-Fused`],
       ['Main Panel',`${mainAmps} A`],
       ['Utility',esc(utilityName)],
-      ['Interconnection','LOAD_SIDE'],
-      ['Rapid Shutdown','INTEGRATED'],
+      ['Interconnection','LOAD_SIDE — NEC 705'],
+      ['Rapid Shutdown','INTEGRATED — NEC 690.12'],
       ['Battery Storage',hasBattery?esc(batteryModel):'NONE'],
       ...(hasBattery&&batteryKwh?[['Battery Capacity',`${batteryKwh.toFixed(1)} kWh`] as [string,string]]:[]),
       ...(hasBattery?[['Batt. Backfeed',`${batteryBackfeedA}A — NEC 705.12(B)`] as [string,string]]:[]),

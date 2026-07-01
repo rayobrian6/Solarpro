@@ -1512,6 +1512,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     margin-bottom: var(--xs);
   }
   .cert-statement li { margin-bottom: 2px; margin-left: var(--md); }
+  .cert-subject { font-size: var(--f-sm); line-height: 1.5; color: #333; background: #f8f8f8; border: var(--border); padding: var(--xs) var(--md); margin-bottom: var(--xs); }
   .cert-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; margin-bottom: var(--xs); }
   .cert-block-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
   .cert-block-title:first-child { margin-top: 0; }

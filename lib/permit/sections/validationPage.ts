@@ -7,7 +7,9 @@ import type { PermitInput, CanonicalInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { PLANSET_ENGINE_VERSION } from '../constants';
-import { isFence, isGround, isRoof } from '@/lib/system';
+import { isFence, isGround, isRoof, getEquipmentContext } from '@/lib/system';
+import { getInverterTopology, topologyToLegacy } from '@/lib/system/systemAccessors';
+import { topologyDisplayLabel } from '../utils/helpers';
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -23,6 +25,9 @@ export function pageValidationSummary(
   totalPages: number
 ): string {
   const sys     = canonical.systemType;
+  const { project, system, compliance } = input;
+  const structural = compliance.structural;
+  const jurisdiction = compliance.jurisdiction as Record<string, any>;
   const _isFence = isFence(sys);
   const _isGround = isGround(sys);
   const _isRoof = isRoof(sys);
@@ -350,8 +355,43 @@ export function pageValidationSummary(
           <div style="font-size:8px;color:#555;margin-top:2px;">Canonical validation gate — ${passCount}/${checks.length} checks passed before planset generation</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:10px;font-weight:bold;">PLANSET ENGINE v47.323</div>
+          <div style="font-size:10px;font-weight:bold;">PLANSET ENGINE v${PLANSET_ENGINE_VERSION}</div>
           <div style="font-size:7px;color:#555;">Canonical pipeline — explicit visible fallbacks only</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:var(--xs);">
+        <div style="border:var(--border);padding:var(--xs);background:#f8f9fa;">
+          <div style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:3px;">System</div>
+          <div style="font-size:8px;line-height:1.4;">
+            <div><strong>${system.totalPanels ?? '—'}</strong> modules</div>
+            <div><strong>${system.totalDcKw?.toFixed(2) ?? '—'}</strong> kW DC</div>
+            <div><strong>${system.totalAcKw?.toFixed(2) ?? '—'}</strong> kW AC</div>
+          </div>
+        </div>
+        <div style="border:var(--border);padding:var(--xs);background:#f8f9fa;">
+          <div style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:3px;">Wind / Snow</div>
+          <div style="font-size:8px;line-height:1.4;">
+            <div>Wind: <strong>${structural?.wind?.windSpeed ?? '—'}</strong> mph</div>
+            <div>Exposure: <strong>${structural?.wind?.exposureCategory ?? '—'}</strong></div>
+            <div>Snow: <strong>${structural?.snow?.groundSnowLoad ?? '—'}</strong> psf</div>
+          </div>
+        </div>
+        <div style="border:var(--border);padding:var(--xs);background:#f8f9fa;">
+          <div style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:3px;">Inverter</div>
+          <div style="font-size:8px;line-height:1.4;">
+            <div>${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.inverterManufacturer, _eq.inverterModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</div>
+            <div>Output: <strong>${system.totalAcKw?.toFixed(2) ?? '—'}</strong> kW AC</div>
+            <div>Topology: <strong>${topologyDisplayLabel(topologyToLegacy(getInverterTopology(input, cad)))}</strong></div>
+          </div>
+        </div>
+        <div style="border:var(--border);padding:var(--xs);background:#f8f9fa;">
+          <div style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:3px;">Jurisdiction</div>
+          <div style="font-size:8px;line-height:1.4;">
+            <div>AHJ: <strong>${jurisdiction.ahj || '—'}</strong></div>
+            <div>State: <strong>${jurisdiction.state || '—'}</strong></div>
+            <div>NEC: <strong>${jurisdiction.necVersion || '—'}</strong></div>
+          </div>
         </div>
       </div>
 
@@ -568,7 +608,7 @@ export function pageValidationSummary(
         This validation summary confirms that all engineering data required for the permit planset has been
         resolved through the canonical pipeline and verified before planset generation.
         Required canonical engineering fields are validated before planset generation; survey evidence fallbacks, when used, are explicitly labeled and visible.
-        The planset engine version is v47.323 (PLANSET_ENGINE_VERSION=${PLANSET_ENGINE_VERSION}).
+        The planset engine version is v${PLANSET_ENGINE_VERSION} (PLANSET_ENGINE_VERSION=${PLANSET_ENGINE_VERSION}).
         All structural calculations use canonical.site.windSpeed, canonical.structure, and canonical.module as
         authoritative inputs. The planset generation was blocked if any required field was missing.
       </div>
