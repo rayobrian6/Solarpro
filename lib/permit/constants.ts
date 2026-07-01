@@ -29,7 +29,9 @@ const PDF_PAGE_CONFIG = {
 // 47353 (2026-07-01): PV-2 gains the pro "MAIN HOME ROOF DESCRIPTION" (per-facet
 // modules/azimuth/tilt/truss) + "ARRAY & ROOF CALC" (plan-view area/array/%) tables;
 // escapeXml now actually escapes &<>" (was a no-op → broke SVG on those chars).
-const PLANSET_ENGINE_VERSION = 47353;
+// 47354 (2026-07-01): PV-2 gains a full N/E/S/W compass rose + a LEGEND box (PV
+// module / fire setback / roof edge / callout ref) to match the pro reference.
+const PLANSET_ENGINE_VERSION = 47354;
 
 
 

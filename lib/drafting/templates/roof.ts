@@ -392,10 +392,51 @@ export function drawRoofPlan(
   }
 
   // ── North arrow + scale bar ──
-  els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
+  // North: PV-2B keeps the simple arrow; PV-2 gets a full N/E/S/W compass rose below.
+  if (isBranchColorMode) {
+    els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
+  }
   const scaleBarPx = Math.round(10 * scale);   // 10-foot scale bar
   els.push(drawScaleBar(zones.dims.left + 4, H - zones.dims.bottom + 28,
     Math.max(scaleBarPx, 30), '0    10 FT'));
+
+  // ── Compass rose + LEGEND (PV-2 only) ─────────────────────────────────────
+  if (!isBranchColorMode) {
+    // Compass rose — 4-point star with N/E/S/W, bottom-right corner.
+    const crX = W - zones.dims.right - 6, crY = H - zones.dims.bottom - 2, cr = 20;
+    const rose: string[] = [];
+    rose.push(`<circle cx="${crX}" cy="${crY}" r="${cr}" fill="rgba(255,255,255,0.9)" stroke="#2b2f36" stroke-width="0.9"/>`);
+    // vertical (N/S) star — N solid, S light
+    rose.push(`<polygon points="${crX},${crY - cr + 2} ${crX + 4},${crY} ${crX},${crY - 3} ${crX - 4},${crY}" fill="#1a1a1a"/>`);
+    rose.push(`<polygon points="${crX},${crY + cr - 2} ${crX + 4},${crY} ${crX},${crY + 3} ${crX - 4},${crY}" fill="#b0b4bc"/>`);
+    // horizontal (E/W) minor star
+    rose.push(`<polygon points="${crX + cr - 2},${crY} ${crX},${crY + 4} ${crX + 3},${crY} ${crX},${crY - 4}" fill="#6b7078"/>`);
+    rose.push(`<polygon points="${crX - cr + 2},${crY} ${crX},${crY + 4} ${crX - 3},${crY} ${crX},${crY - 4}" fill="#6b7078"/>`);
+    rose.push(`<circle cx="${crX}" cy="${crY}" r="1.4" fill="#1a1a1a"/>`);
+    rose.push(drawText(crX, crY - cr - 3, 'N', { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#1a1a1a' }));
+    rose.push(drawText(crX, crY + cr + 7, 'S', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    rose.push(drawText(crX + cr + 5, crY + 2.5, 'E', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    rose.push(drawText(crX - cr - 5, crY + 2.5, 'W', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    els.push(...rose);
+
+    // Legend — documents the symbols/line-styles actually on this sheet.
+    const lg: Array<{ swatch: string; label: string }> = [
+      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#1b3f74" stroke="#0a1e4a" stroke-width="0.5" rx="0.4"/>`, label: 'PV MODULE' },
+      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#c0392b" stroke-width="1.1" stroke-dasharray="3 2"/>`, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
+      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#2b2f36" stroke-width="1.6"/>`, label: 'ROOF EDGE / RIDGE' },
+      { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
+    ];
+    const lgW = 128, rowH = 13, lgX = W - zones.dims.right - lgW + 8, lgY = zones.dims.top + 6;
+    const lgH = 13 + lg.length * rowH;
+    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="${lgH}" rx="2" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
+    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="12" fill="#000"/>`);
+    els.push(drawText(lgX + lgW / 2, lgY + 8.5, 'LEGEND', { anchor: 'middle', fontSize: 6, fontWeight: 'bold', fill: '#fff', letterSpacing: 1 }));
+    lg.forEach((e, i) => {
+      const ry = lgY + 12 + i * rowH + rowH / 2;
+      els.push(`<g transform="translate(${lgX + 8},${ry})">${e.swatch}</g>`);
+      els.push(drawText(lgX + 30, ry + 2.3, e.label, { anchor: 'start', fontSize: 5.6, fill: '#1a1a1a' }));
+    });
+  }
 
   // ── Callout bubbles ── (PV-2 only — PV-2B shows branch legend instead)
   if (!isBranchColorMode) {
