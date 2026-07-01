@@ -3219,11 +3219,20 @@ export default function DesignStudio({ project, onSave }: Props) {
   // path to iterate; the 3D auto_roof engine reads the now-cleaned roofPlanes).
   const keepSubjectBuilding = useCallback((): RoofPlane[] => {
     if (roofPlanes.length <= 1) return roofPlanes;
+    // Subject reference: prefer the user's MARKED planes (source 'manual' /
+    // createdFrom3D) over mapCenter — the geocode can land on the NEIGHBOUR (e.g.
+    // 3 Melvin Dr sits ~17m onto the next house), which would seed the filter on the
+    // wrong building and delete the roof the user actually drew. Marked plane = truth.
+    const marked = roofPlanes.filter(p => ((p as any).source === 'manual' || (p as any).createdFrom3D) && p.vertices && p.vertices.length >= 3);
+    const sv = marked.flatMap(p => p.vertices ?? []);
+    const subject = sv.length > 0
+      ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
+      : { lat: mapCenter.lat, lng: mapCenter.lng };
     const { kept, cropped } = filterToSubjectBuilding(
       roofPlanes,
       (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
-      { lat: mapCenter.lat, lng: mapCenter.lng },
-      { maxDistM: 60 },  // hard cap: no plane >60m from the subject house
+      subject,
+      { maxDistM: 60 },  // hard cap: no plane >60m from the subject building
     );
     if (!cropped || kept.length === 0) return roofPlanes;
     const removed = roofPlanes.length - kept.length;

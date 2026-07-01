@@ -7708,15 +7708,24 @@ function SolarEngine3D({
     // + a 60 m hard cap so a bridged/spurious far plane can't survive.
     if (eligiblePlanes.length > 1) {
       const before = eligiblePlanes.length;
+      // Subject reference: prefer the user's MARKED planes (source 'manual' /
+      // createdFrom3D). The geocode (lat,lng) can land on the NEIGHBOUR (3 Melvin
+      // Dr geocodes ~17m onto the next house), seeding the filter on the wrong
+      // building and skipping the roof the user drew. The marked plane is truth.
+      const marked = eligiblePlanes.filter(p => ((p as any).source === 'manual' || (p as any).createdFrom3D) && p.vertices && p.vertices.length >= 3);
+      const sv = marked.flatMap(p => p.vertices ?? []);
+      const subjectPt = sv.length > 0
+        ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
+        : { lat, lng };
       const { kept } = filterToSubjectBuilding(
         eligiblePlanes,
         (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
-        { lat, lng },
+        subjectPt,
         { maxDistM: 60 },
       );
       if (kept.length > 0 && kept.length < before) {
         eligiblePlanes = kept;
-        addLog('AUTO', `handleAutoRoof: subject-building filter kept ${kept.length}/${before} planes (dropped neighbour roofs)`);
+        addLog('AUTO', `handleAutoRoof: subject filter kept ${kept.length}/${before} planes (seed=${marked.length > 0 ? 'marked-plane' : 'geocode'})`);
       }
     }
 
