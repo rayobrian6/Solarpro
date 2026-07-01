@@ -82,6 +82,34 @@ export interface NearmapStaticAerial {
 }
 
 /**
+ * Compose fetched tiles onto the whole-tile canvas, then crop the centred W×H
+ * window — in TWO sharp passes. In a single chain sharp applies .composite()
+ * at the END of its pipeline (after .extract()), so the extract cropped the
+ * BLANK canvas and the tiles were then pasted at full-canvas offsets onto the
+ * already-cropped image: the whole scene rendered shifted by (cropLeft,
+ * cropTop) — a centre-dependent 0-255px (≈0-15 m @ z21) offset. That was the
+ * "house not centred" planset bug (proved against the 3 Melvin Dr render:
+ * measured scene shift +200,+112 px == the design-centre crop offset 190,112).
+ * Exported for the regression test.
+ */
+export async function stitchAndCropTiles(
+  sharpLib: typeof import('sharp'),
+  grid: TileGrid,
+  composites: Array<{ input: Buffer; left: number; top: number }>,
+): Promise<Buffer> {
+  const canvas = await sharpLib({
+    create: { width: grid.canvasW, height: grid.canvasH, channels: 3, background: { r: 20, g: 20, b: 20 } },
+  })
+    .composite(composites)
+    .png() // lossless intermediate — jpeg here would double-compress the tiles
+    .toBuffer();
+  return sharpLib(canvas)
+    .extract({ left: grid.cropLeft, top: grid.cropTop, width: grid.W, height: grid.H })
+    .jpeg({ quality: 88 })
+    .toBuffer();
+}
+
+/**
  * Stitch a centred top-down Nearmap Vert aerial (7.5cm @ z21) as a single JPEG.
  * Server-only (uses the key directly + sharp). Tries zooms in order, first with
  * enough real tiles wins. Fails safe → null so callers fall back to Google.
@@ -116,13 +144,7 @@ export async function fetchNearmapStaticAerial(
       const composites = results.filter(c => c !== null) as Array<{ input: Buffer; left: number; top: number }>;
       if (composites.length === 0) continue;
 
-      const out = await sharp({
-        create: { width: grid.canvasW, height: grid.canvasH, channels: 3, background: { r: 20, g: 20, b: 20 } },
-      })
-        .composite(composites)
-        .extract({ left: grid.cropLeft, top: grid.cropTop, width: W, height: H })
-        .jpeg({ quality: 88 })
-        .toBuffer();
+      const out = await stitchAndCropTiles(sharp, grid, composites);
 
       return {
         imageBase64: `data:image/jpeg;base64,${out.toString('base64')}`,

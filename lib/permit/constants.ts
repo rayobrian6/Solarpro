@@ -52,7 +52,15 @@ const PDF_PAGE_CONFIG = {
 // Coverage-gated, cached (1 AI credit/generate), fails safe to the unsnapped center.
 // Also: fetchAerialRoofData no longer hard-requires a Google key when coords exist
 // (the old early-return silently disabled Nearmap in Google-key-less envs).
-const PLANSET_ENGINE_VERSION = 47360;
+// 47361 (2026-07-01): ROOT CAUSE of every "aerial not centred" report — the
+// Nearmap tile stitcher chained .composite().extract() in ONE sharp pipeline,
+// but sharp applies composite at the END (after extract): the crop was taken
+// from the BLANK canvas and tiles pasted un-shifted, so the whole scene rendered
+// offset by (cropLeft, cropTop) — a centre-dependent 0-255px (≈0-15 m @ z21)
+// shift. Proved on the saved 3 Melvin render: measured scene shift +200,+112 px
+// == the design-centre crop offset (190,112). Fix: two-pass stitchAndCropTiles
+// (composite → PNG buffer → extract), locked by nearmapStitch.test.ts.
+const PLANSET_ENGINE_VERSION = 47361;
 
 
 
