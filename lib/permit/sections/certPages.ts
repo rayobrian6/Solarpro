@@ -126,20 +126,20 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
 // Signature block and footer are identical across all families — extracted once
 function _peSigBlock(): string {
   return `
-  <div class=\\"sec\\">
-    <div class=\\"sec-hdr\\">PROFESSIONAL ENGINEER OF RECORD</div>
-    <div class=\\"sig-grid\\">
-      <div class=\\"sig-col\\">
-        <div class=\\"mb-sm f-sm\\">NAME: <span class=\\"sig-underline-md\\">&nbsp;</span></div>
-        <div class=\\"mb-sm f-sm\\">PE LICENSE #: <span class=\\"sig-underline-sm\\">&nbsp;</span></div>
-        <div class=\\"mb-sm f-sm\\">STATE OF LICENSURE: <span class=\\"sig-underline-110\\">&nbsp;</span></div>
-        <div class=\\"mb-sm f-sm\\">DATE: <span class=\\"sig-underline-md\\">&nbsp;</span></div>
-        <div style=\\"margin-top:20px;margin-bottom:4px;\\" class=\\"f-sm\\">SIGNATURE: <span style=\\"border-bottom:var(--border-hvy);display:inline-block;width:155px;\\">&nbsp;</span></div>
+  <div class="sec">
+    <div class="sec-hdr">PROFESSIONAL ENGINEER OF RECORD</div>
+    <div class="sig-grid">
+      <div class="sig-col">
+        <div class="mb-sm f-sm">NAME: <span class="sig-underline-md">&nbsp;</span></div>
+        <div class="mb-sm f-sm">PE LICENSE #: <span class="sig-underline-sm">&nbsp;</span></div>
+        <div class="mb-sm f-sm">STATE OF LICENSURE: <span class="sig-underline-110">&nbsp;</span></div>
+        <div class="mb-sm f-sm">DATE: <span class="sig-underline-md">&nbsp;</span></div>
+        <div style="margin-top:20px;margin-bottom:4px;" class="f-sm">SIGNATURE: <span style="border-bottom:var(--border-hvy);display:inline-block;width:155px;">&nbsp;</span></div>
       </div>
-      <div class=\\"sig-col-stamp\\">
-        <div class=\\"f-sm fw9 caps mb-xs\\">PE SEAL / STAMP</div>
-        <div class=\\"stamp-box\\">
-          <span class=\\"f-xs fw7 caps c555\\">AFFIX<br/>SEAL<br/>HERE</span>
+      <div class="sig-col-stamp">
+        <div class="f-sm fw9 caps mb-xs">PE SEAL / STAMP</div>
+        <div class="stamp-box">
+          <span class="f-xs fw7 caps c555">AFFIX<br/>SEAL<br/>HERE</span>
         </div>
       </div>
     </div>
@@ -148,7 +148,7 @@ function _peSigBlock(): string {
 
 function _peFooter(): string {
   return `
-  <div class=\\"f-xs center mt-sm pt-xs\\" style=\\"border-top:var(--border);\\">
+  <div class="f-xs center mt-sm pt-xs" style="border-top:var(--border);">
     THIS LETTER IS PREPARED SPECIFICALLY FOR THE ABOVE-NAMED PROJECT AND INSTALLATION ADDRESS.
     IT IS NOT TRANSFERABLE TO OTHER PROJECTS OR LOCATIONS.
     STRUCTURAL DATA DERIVED FROM ASCE 7-22 AUTOMATED ANALYSIS. FIELD VERIFICATION REQUIRED.
@@ -160,13 +160,13 @@ function _peProjectInfo(input: PermitInput): string {
   const ahj   = compliance.jurisdiction?.ahj || '—';
   const state  = compliance.jurisdiction?.state || '—';
   return `
-  <div class=\\"section-title\\">Project Information</div>
-  <table class=\\"info-table\\" class=\\"mb-xs\\">
-    <tr><td class=\\"il\\">Project Name</td><td class=\\"iv\\" colspan=\\"3\\">${escapeH(project.projectName || '—')}</td></tr>
-    <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${escapeH(project.clientName || '—')}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${escapeH(String(project.date ?? ''))}</td></tr>
-    <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${escapeH(project.address || '—')}</td></tr>
-    <tr><td class=\\"il\\">AHJ</td><td class=\\"iv\\">${ahj}</td><td class=\\"il\\">State</td><td class=\\"iv\\">${state}</td></tr>
-    <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${project.apn || '___________________'}</td></tr>
+  <div class="section-title">Project Information</div>
+  <table class="info-table" class="mb-xs">
+    <tr><td class="il">Project Name</td><td class="iv" colspan="3">${escapeH(project.projectName || '—')}</td></tr>
+    <tr><td class="il">Client / Owner</td><td class="iv">${escapeH(project.clientName || '—')}</td><td class="il">Date</td><td class="iv">${escapeH(String(project.date ?? ''))}</td></tr>
+    <tr><td class="il">Installation Address</td><td class="iv" colspan="3">${escapeH(project.address || '—')}</td></tr>
+    <tr><td class="il">AHJ</td><td class="iv">${ahj}</td><td class="il">State</td><td class="iv">${state}</td></tr>
+    <tr><td class="il">Permit No.</td><td class="iv">___________________</td><td class="il">APN</td><td class="iv">${project.apn || '___________________'}</td></tr>
   </table>`;
 }
 
@@ -178,10 +178,10 @@ function _peSiteLoading(input: PermitInput): string {
   const exposure   = structural?.wind?.exposureCategory || '—';
   const sdc        = compliance.structural?.seismic?.sdc || 'D';
   return `
-  <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Site Loading Parameters</td></tr>
-  <tr><td class=\\"il\\">Design Wind Speed (Vult)</td><td class=\\"iv\\">${windSpeed} mph</td><td class=\\"il\\">Exposure Category</td><td class=\\"iv\\">Cat. ${exposure}</td></tr>
-  <tr><td class=\\"il\\">Ground Snow Load (pg)</td><td class=\\"iv\\">${snowLoad} psf</td><td class=\\"il\\">Risk Category</td><td class=\\"iv\\">II (Residential)</td></tr>
-  <tr><td class=\\"il\\">Seismic Design Category</td><td class=\\"iv\\">${sdc}</td><td class=\\"il\\">Importance Factor</td><td class=\\"iv\\">1.0</td></tr>`;
+  <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Site Loading Parameters</td></tr>
+  <tr><td class="il">Design Wind Speed (Vult)</td><td class="iv">${windSpeed} mph</td><td class="il">Exposure Category</td><td class="iv">Cat. ${exposure}</td></tr>
+  <tr><td class="il">Ground Snow Load (pg)</td><td class="iv">${snowLoad} psf</td><td class="il">Risk Category</td><td class="iv">II (Residential)</td></tr>
+  <tr><td class="il">Seismic Design Category</td><td class="iv">${sdc}</td><td class="il">Importance Factor</td><td class="iv">1.0</td></tr>`;
 }
 
 // ─── FENCE PE LETTER ──────────────────────────────────────────────────────────
@@ -204,53 +204,53 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
   const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'Solar Fence Rail System';
 
   return `
-  <div class=\\"page\\">
+  <div class="page">
     ${titleBlock(input, 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
-    <div class=\\"page-content\\">
+    <div class="page-content">
 
-      <div class=\\"bb-hvy pb-xs mb-sm\\">
-        <div class=\\"f-3xl fw9\\">LETTER OF STRUCTURAL COMPLIANCE</div>
-        <div class=\\"f-lg c555 mt-xs\\">Solar Photovoltaic System — Solar Fence Array</div>
-        <div class=\\"f-sm muted\\">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
+      <div class="bb-hvy pb-xs mb-sm">
+        <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
+        <div class="f-lg c555 mt-xs">Solar Photovoltaic System — Solar Fence Array</div>
+        <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
       </div>
 
-      <div class=\\"two-col-layout\\">
-        <div class=\\"col-left\\">
+      <div class="two-col-layout">
+        <div class="col-left">
           ${_peProjectInfo(input)}
 
-          <div class=\\"section-title\\">PV System Parameters</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
-            <tr><td class=\\"il\\">Total Modules</td><td class=\\"iv\\">${system.totalPanels || '—'}</td><td class=\\"il\\">System Size</td><td class=\\"iv\\">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
-            <tr><td class=\\"il\\">Module Model</td><td class=\\"iv\\" colspan=\\"3\\">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
-            <tr><td class=\\"il\\">Mounting System</td><td class=\\"iv\\" colspan=\\"3\\">${mountSys}</td></tr>
-            <tr><td class=\\"il\\">Rail Orientation</td><td class=\\"iv\\">Horizontal along fence line</td><td class=\\"il\\">Foundation</td><td class=\\"iv\\">Concrete footing</td></tr>
+          <div class="section-title">PV System Parameters</div>
+          <table class="info-table" class="mb-xs">
+            <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
+            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
+            <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${mountSys}</td></tr>
+            <tr><td class="il">Rail Orientation</td><td class="iv">Horizontal along fence line</td><td class="il">Foundation</td><td class="iv">Concrete footing</td></tr>
           </table>
 
-          <div class=\\"section-title\\">Solar Fence Construction</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
-            <tr><td class=\\"il\\">System Type</td><td class=\\"iv\\">Solar Fence Array</td><td class=\\"il\\">Panel Height</td><td class=\\"iv\\">${panelHIn}</td></tr>
-            <tr><td class=\\"il\\">Post Type</td><td class=\\"iv\\">Galvanized Steel Pipe / HSS</td><td class=\\"il\\">Post Spacing</td><td class=\\"iv\\">${postSpacing} ft O.C.</td></tr>
-            <tr><td class=\\"il\\">Foundation Type</td><td class=\\"iv\\">Concrete Footing (cast-in-place)</td><td class=\\"il\\">Embedment Depth</td><td class=\\"iv\\">${postEmbed} ft min.</td></tr>
-            <tr><td class=\\"il\\">Concrete Strength</td><td class=\\"iv\\">3,000 psi min.</td><td class=\\"il\\">Hardware</td><td class=\\"iv\\">Galvanized / Stainless Steel</td></tr>
-            <tr><td class=\\"il\\">Wind Code</td><td class=\\"iv\\">ASCE 7-22 §29.4, Cf = 1.3</td><td class=\\"il\\">Exposure</td><td class=\\"iv\\">Category ${exposure}</td></tr>
+          <div class="section-title">Solar Fence Construction</div>
+          <table class="info-table" class="mb-xs">
+            <tr><td class="il">System Type</td><td class="iv">Solar Fence Array</td><td class="il">Panel Height</td><td class="iv">${panelHIn}</td></tr>
+            <tr><td class="il">Post Type</td><td class="iv">Galvanized Steel Pipe / HSS</td><td class="il">Post Spacing</td><td class="iv">${postSpacing} ft O.C.</td></tr>
+            <tr><td class="il">Foundation Type</td><td class="iv">Concrete Footing (cast-in-place)</td><td class="il">Embedment Depth</td><td class="iv">${postEmbed} ft min.</td></tr>
+            <tr><td class="il">Concrete Strength</td><td class="iv">3,000 psi min.</td><td class="il">Hardware</td><td class="iv">Galvanized / Stainless Steel</td></tr>
+            <tr><td class="il">Wind Code</td><td class="iv">ASCE 7-22 §29.4, Cf = 1.3</td><td class="il">Exposure</td><td class="iv">Category ${exposure}</td></tr>
           </table>
         </div>
 
-        <div class=\\"col-right\\">
-          <div class=\\"section-title\\">Structural Analysis Results (ASCE 7-22)</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
+        <div class="col-right">
+          <div class="section-title">Structural Analysis Results (ASCE 7-22)</div>
+          <table class="info-table" class="mb-xs">
             ${_peSiteLoading(input)}
-            <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Post Foundation Capacity Analysis</td></tr>
-            <tr><td class=\\"il\\">Net Lateral Wind Load / Post</td><td class=\\"iv\\">${uplift} lbs</td><td class=\\"il\\">Post Embedment Capacity</td><td class=\\"iv\\">Per ASCE 7-22 §29.4</td></tr>
-            <tr><td class=\\"il\\">Safety Factor (Overturning)</td><td class=\\"iv\\" style=\\"font-weight:bold;color:${Number(safetyFact) >= 1.5 ? '#000' : '#cc0000'};\\">${safetyFact} (min. 1.5 req.)</td><td class=\\"il\\">Post Embedment Depth</td><td class=\\"iv\\">${postEmbed} ft min.</td></tr>
-            <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
-            <tr><td class=\\"il\\">Governing Combo</td><td class=\\"iv\\">0.9D + 1.0W (Overturning)</td><td class=\\"il\\">Code Reference</td><td class=\\"iv\\">ASCE 7-22 §29.4</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Post Foundation Capacity Analysis</td></tr>
+            <tr><td class="il">Net Lateral Wind Load / Post</td><td class="iv">${uplift} lbs</td><td class="il">Post Embedment Capacity</td><td class="iv">Per ASCE 7-22 §29.4</td></tr>
+            <tr><td class="il">Safety Factor (Overturning)</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 1.5 ? '#000' : '#cc0000'};">${safetyFact} (min. 1.5 req.)</td><td class="il">Post Embedment Depth</td><td class="iv">${postEmbed} ft min.</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.9D + 1.0W (Overturning)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §29.4</td></tr>
           </table>
 
-          <div class=\\"sec\\" style=\\"margin-bottom:var(--xs);\\">
-            <div class=\\"sec-hdr\\">ENGINEER'S CERTIFICATION STATEMENT</div>
-            <div class=\\"sec-body\\">
-              <div class=\\"f-xs\\" style=\\"line-height:1.6;\\">
+          <div class="sec" style="margin-bottom:var(--xs);">
+            <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT</div>
+            <div class="sec-body">
+              <div class="f-xs" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the above-described solar photovoltaic
                 fence array installation and determined that the <strong>proposed solar fence post foundation system
@@ -258,7 +258,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
                 based on the structural analysis performed in accordance with <strong>ASCE 7-22 §29.4</strong>,
                 <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
               </div>
-              <div class=\\"f-sm mt-xs\\" style=\\"line-height:1.6;\\">
+              <div class="f-sm mt-xs" style="line-height:1.6;">
                 Post embedment depth, concrete footing size, and post section are confirmed adequate to resist
                 wind overturning and lateral loads at the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
                 per ASCE 7-22 §29.4 (Cf = 1.3). Dead load and ground snow load per ASCE 7-22 §26 and §7 respectively.
@@ -299,52 +299,52 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
   const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'Ground Mount Racking System';
 
   return `
-  <div class=\\"page\\">
+  <div class="page">
     ${titleBlock(input, 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
-    <div class=\\"page-content\\">
+    <div class="page-content">
 
-      <div class=\\"bb-hvy pb-xs mb-sm\\">
-        <div class=\\"f-3xl fw9\\">LETTER OF STRUCTURAL COMPLIANCE</div>
-        <div class=\\"f-lg c555 mt-xs\\">Solar Photovoltaic System — Ground Mount Array</div>
-        <div class=\\"f-sm muted\\">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
+      <div class="bb-hvy pb-xs mb-sm">
+        <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
+        <div class="f-lg c555 mt-xs">Solar Photovoltaic System — Ground Mount Array</div>
+        <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
       </div>
 
-      <div class=\\"two-col-layout\\">
-        <div class=\\"col-left\\">
+      <div class="two-col-layout">
+        <div class="col-left">
           ${_peProjectInfo(input)}
 
-          <div class=\\"section-title\\">PV System Parameters</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
-            <tr><td class=\\"il\\">Total Modules</td><td class=\\"iv\\">${system.totalPanels || '—'}</td><td class=\\"il\\">System Size</td><td class=\\"iv\\">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
-            <tr><td class=\\"il\\">Module Model</td><td class=\\"iv\\" colspan=\\"3\\">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
-            <tr><td class=\\"il\\">Mounting System</td><td class=\\"iv\\" colspan=\\"3\\">${mountSys}</td></tr>
-            <tr><td class=\\"il\\">Array Tilt</td><td class=\\"iv\\">${tiltDeg}°</td><td class=\\"il\\">Foundation</td><td class=\\"iv\\">Pile / pier</td></tr>
+          <div class="section-title">PV System Parameters</div>
+          <table class="info-table" class="mb-xs">
+            <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
+            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
+            <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${mountSys}</td></tr>
+            <tr><td class="il">Array Tilt</td><td class="iv">${tiltDeg}°</td><td class="il">Foundation</td><td class="iv">Pile / pier</td></tr>
           </table>
 
-          <div class=\\"section-title\\">Ground Mount Construction</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
-            <tr><td class=\\"il\\">Foundation Type</td><td class=\\"iv\\">${structType}</td><td class=\\"il\\">Pile Depth</td><td class=\\"iv\\">${pileDepth} ft min.</td></tr>
-            <tr><td class=\\"il\\">Ground Clearance</td><td class=\\"iv\\">${groundClr}" min.</td><td class=\\"il\\">Tilt Angle</td><td class=\\"iv\\">${tiltDeg}°</td></tr>
-            <tr><td class=\\"il\\">Pile Spacing</td><td class=\\"iv\\">${pileSpacing} ft O.C.</td><td class=\\"il\\">Hardware</td><td class=\\"iv\\">Galvanized / Stainless Steel</td></tr>
-            <tr><td class=\\"il\\">Wind Code</td><td class=\\"iv\\">ASCE 7-22 §27 + §29.4</td><td class=\\"il\\">Exposure</td><td class=\\"iv\\">Category ${exposure}</td></tr>
+          <div class="section-title">Ground Mount Construction</div>
+          <table class="info-table" class="mb-xs">
+            <tr><td class="il">Foundation Type</td><td class="iv">${structType}</td><td class="il">Pile Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
+            <tr><td class="il">Ground Clearance</td><td class="iv">${groundClr}" min.</td><td class="il">Tilt Angle</td><td class="iv">${tiltDeg}°</td></tr>
+            <tr><td class="il">Pile Spacing</td><td class="iv">${pileSpacing} ft O.C.</td><td class="il">Hardware</td><td class="iv">Galvanized / Stainless Steel</td></tr>
+            <tr><td class="il">Wind Code</td><td class="iv">ASCE 7-22 §27 + §29.4</td><td class="il">Exposure</td><td class="iv">Category ${exposure}</td></tr>
           </table>
         </div>
 
-        <div class=\\"col-right\\">
-          <div class=\\"section-title\\">Structural Analysis Results (ASCE 7-22)</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
+        <div class="col-right">
+          <div class="section-title">Structural Analysis Results (ASCE 7-22)</div>
+          <table class="info-table" class="mb-xs">
             ${_peSiteLoading(input)}
-            <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Pile/Pier Capacity Analysis</td></tr>
-            <tr><td class=\\"il\\">Net Uplift / Pile</td><td class=\\"iv\\">${uplift} lbs</td><td class=\\"il\\">Pile Lateral Capacity</td><td class=\\"iv\\">Per geotechnical report</td></tr>
-            <tr><td class=\\"il\\">Safety Factor</td><td class=\\"iv\\" style=\\"font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};\\">${safetyFact} (min. 2.0 req.)</td><td class=\\"il\\">Pile Embedment Depth</td><td class=\\"iv\\">${pileDepth} ft min.</td></tr>
-            <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
-            <tr><td class=\\"il\\">Governing Combo</td><td class=\\"iv\\">0.9D + 1.0W (Uplift)</td><td class=\\"il\\">Code Reference</td><td class=\\"iv\\">ASCE 7-22 §27</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Pile/Pier Capacity Analysis</td></tr>
+            <tr><td class="il">Net Uplift / Pile</td><td class="iv">${uplift} lbs</td><td class="il">Pile Lateral Capacity</td><td class="iv">Per geotechnical report</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Pile Embedment Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.9D + 1.0W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §27</td></tr>
           </table>
 
-          <div class=\\"sec\\" style=\\"margin-bottom:var(--xs);\\">
-            <div class=\\"sec-hdr\\">ENGINEER'S CERTIFICATION STATEMENT</div>
-            <div class=\\"sec-body\\">
-              <div class=\\"f-xs\\" style=\\"line-height:1.6;\\">
+          <div class="sec" style="margin-bottom:var(--xs);">
+            <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT</div>
+            <div class="sec-body">
+              <div class="f-xs" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the above-described ground-mounted
                 solar photovoltaic array installation and determined that the <strong>proposed ground mount
@@ -352,7 +352,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
                 PV array</strong>, based on the structural analysis performed in accordance with
                 <strong>ASCE 7-22 §27</strong>, <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
               </div>
-              <div class=\\"f-sm mt-xs\\" style=\\"line-height:1.6;\\">
+              <div class="f-sm mt-xs" style="line-height:1.6;">
                 Pile embedment depth, pile capacity, and foundation system design are confirmed adequate to resist
                 wind uplift and lateral loads at the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
                 per ASCE 7-22 §27. Ground snow load per ASCE 7-22 §7 (slope reduction factor per array tilt angle
@@ -404,58 +404,58 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'IronRidge XR100';
 
   return `
-  <div class=\\"page\\">
+  <div class="page">
     ${titleBlock(input, 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
-    <div class=\\"page-content\\">
+    <div class="page-content">
 
-      <div class=\\"bb-hvy pb-xs mb-sm\\">
-        <div class=\\"f-3xl fw9\\">LETTER OF STRUCTURAL COMPLIANCE</div>
-        <div class=\\"f-lg c555 mt-xs\\">Solar Photovoltaic System — Roof-Mounted Array</div>
-        <div class=\\"f-sm muted\\">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
+      <div class="bb-hvy pb-xs mb-sm">
+        <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
+        <div class="f-lg c555 mt-xs">Solar Photovoltaic System — Roof-Mounted Array</div>
+        <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
       </div>
 
-      <div class=\\"two-col-layout\\">
-        <div class=\\"col-left\\">
+      <div class="two-col-layout">
+        <div class="col-left">
           ${_peProjectInfo(input)}
 
-          <div class=\\"section-title\\">PV System Parameters</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
-            <tr><td class=\\"il\\">Total Modules</td><td class=\\"iv\\">${system.totalPanels || '—'}</td><td class=\\"il\\">System Size</td><td class=\\"iv\\">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
-            <tr><td class=\\"il\\">Module Model</td><td class=\\"iv\\" colspan=\\"3\\">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
-            <tr><td class=\\"il\\">Mounting System</td><td class=\\"iv\\" colspan=\\"3\\">${mountSys}</td></tr>
-            <tr><td class=\\"il\\">Rail Orientation</td><td class=\\"iv\\">Perpendicular to rafters</td><td class=\\"il\\">Attachment</td><td class=\\"iv\\">Lag bolt w/ flashing</td></tr>
+          <div class="section-title">PV System Parameters</div>
+          <table class="info-table" class="mb-xs">
+            <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
+            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
+            <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${mountSys}</td></tr>
+            <tr><td class="il">Rail Orientation</td><td class="iv">Perpendicular to rafters</td><td class="il">Attachment</td><td class="iv">Lag bolt w/ flashing</td></tr>
           </table>
 
-          <div class=\\"section-title\\">Existing Roof Construction</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
-            <tr><td class=\\"il\\">Roof Type</td><td class=\\"iv\\">${roofType}</td><td class=\\"il\\">Roof Pitch</td><td class=\\"iv\\">${roofPitch}</td></tr>
-            <tr><td class=\\"il\\">Rafter / Framing</td><td class=\\"iv\\">${rafterSize} Lumber</td><td class=\\"il\\">Spacing</td><td class=\\"iv\\">${rafterSpace}" O.C.</td></tr>
-            <tr><td class=\\"il\\">Attachment Spacing</td><td class=\\"iv\\">${attachSpace}" max O.C.</td><td class=\\"il\\">Lag Diameter</td><td class=\\"iv\\">3/8" min.</td></tr>
-            <tr><td class=\\"il\\">Min. Embedment</td><td class=\\"iv\\">2.5" into rafter</td><td class=\\"il\\">Hardware</td><td class=\\"iv\\">Stainless Steel</td></tr>
-            <tr><td class=\\"il\\">Roof Sheathing</td><td class=\\"iv\\">No attachment to sheathing only</td><td class=\\"il\\">Underlayment</td><td class=\\"iv\\">Maintained per mfr. req.</td></tr>
+          <div class="section-title">Existing Roof Construction</div>
+          <table class="info-table" class="mb-xs">
+            <tr><td class="il">Roof Type</td><td class="iv">${roofType}</td><td class="il">Roof Pitch</td><td class="iv">${roofPitch}</td></tr>
+            <tr><td class="il">Rafter / Framing</td><td class="iv">${rafterSize} Lumber</td><td class="il">Spacing</td><td class="iv">${rafterSpace}" O.C.</td></tr>
+            <tr><td class="il">Attachment Spacing</td><td class="iv">${attachSpace}" max O.C.</td><td class="il">Lag Diameter</td><td class="iv">3/8" min.</td></tr>
+            <tr><td class="il">Min. Embedment</td><td class="iv">2.5" into rafter</td><td class="il">Hardware</td><td class="iv">Stainless Steel</td></tr>
+            <tr><td class="il">Roof Sheathing</td><td class="iv">No attachment to sheathing only</td><td class="il">Underlayment</td><td class="iv">Maintained per mfr. req.</td></tr>
           </table>
         </div>
 
-        <div class=\\"col-right\\">
-          <div class=\\"section-title\\">Structural Analysis Results (ASCE 7-22)</div>
-          <table class=\\"info-table\\" class=\\"mb-xs\\">
+        <div class="col-right">
+          <div class="section-title">Structural Analysis Results (ASCE 7-22)</div>
+          <table class="info-table" class="mb-xs">
             ${_peSiteLoading(input)}
-                                    <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Rafter Bending & Deflection Analysis</td></tr>
-            <tr><td class=\\"il\\">F’b (Adjusted)</td><td class=\\"iv\\">${fbPrime} psi</td><td class=\\"il\\">Framing</td><td class=\\"iv\\">${_isTruss ? 'Truss' : 'Stick'} (${framingType})</td></tr>
-            <tr><td class=\\"il\\">Total Load</td><td class=\\"iv\\">${totalLoadPsf} psf</td><td class=\\"il\\">Rafter Span</td><td class=\\"iv\\">${rafterSpanFt} ft</td></tr>
-            <tr><td class=\\"il\\">Line Load</td><td class=\\"iv\\">${lineLoad} lb/ft</td><td class=\\"il\\">Bending Moment</td><td class=\\"iv\\">${bendingMoment} lb-ft</td></tr>
-            <tr><td class=\\"il\\">Utilization</td><td class=\\"iv\\">${utilization}%</td><td class=\\"il\\">Deflection</td><td class=\\"iv\\">${deflection} in (Δ_allow = ${allowableDefl} in)</td></tr>
-            <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Lag Bolt Attachment Capacity Analysis</td></tr>
-            <tr><td class=\\"il\\">Net Uplift per Attachment</td><td class=\\"iv\\">${uplift} lbs</td><td class=\\"il\\">Lag Bolt Capacity</td><td class=\\"iv\\">${lagCap} lbs</td></tr>
-            <tr><td class=\\"il\\">Safety Factor</td><td class=\\"iv\\" style=\\"font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};\\">${safetyFact} (min. 2.0 req.)</td><td class=\\"il\\">Utilization Ratio</td><td class=\\"iv\\">${utilization}%</td></tr>
-            <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
-            <tr><td class=\\"il\\">Governing Combo</td><td class=\\"iv\\">0.9D + 1.0W (Uplift)</td><td class=\\"il\\">Code Reference</td><td class=\\"iv\\">ASCE 7-22 §26/27</td></tr>
+                                    <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Rafter Bending & Deflection Analysis</td></tr>
+            <tr><td class="il">F’b (Adjusted)</td><td class="iv">${fbPrime} psi</td><td class="il">Framing</td><td class="iv">${_isTruss ? 'Truss' : 'Stick'} (${framingType})</td></tr>
+            <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Rafter Span</td><td class="iv">${rafterSpanFt} ft</td></tr>
+            <tr><td class="il">Line Load</td><td class="iv">${lineLoad} lb/ft</td><td class="il">Bending Moment</td><td class="iv">${bendingMoment} lb-ft</td></tr>
+            <tr><td class="il">Utilization</td><td class="iv">${utilization}%</td><td class="il">Deflection</td><td class="iv">${deflection} in (Δ_allow = ${allowableDefl} in)</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
+            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Utilization Ratio</td><td class="iv">${utilization}%</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.9D + 1.0W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §26/27</td></tr>
           </table>
 
-          <div class=\\"sec\\" style=\\"margin-bottom:var(--xs);\\">
-            <div class=\\"sec-hdr\\">ENGINEER'S CERTIFICATION STATEMENT</div>
-            <div class=\\"sec-body\\">
-              <div class=\\"f-xs\\" style=\\"line-height:1.6;\\">
+          <div class="sec" style="margin-bottom:var(--xs);">
+            <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT</div>
+            <div class="sec-body">
+              <div class="f-xs" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the roof-mounted solar
                 photovoltaic array installation at <strong>${project.address || '—'}</strong> and determined that the <strong>existing roof structure and lag bolt
@@ -464,7 +464,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 <strong>ASCE 7-22 §26/27</strong>, <strong>${ibcVer} IBC</strong>, <strong>${ibcVer} IRC</strong>,
                 and NEC ${necVer}.
               </div>
-              <div class=\\"f-sm mt-xs\\" style=\\"line-height:1.6;\\">
+              <div class="f-sm mt-xs" style="line-height:1.6;">
                 Lag bolt attachment capacity (safety factor ${safetyFact}), rafter bending stress (F’b = ${fbPrime} psi, utilization ${utilization}%),
                 and deflection (Δ = ${deflection} in vs Δ_allow = ${allowableDefl} in) are confirmed adequate for
                 the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},

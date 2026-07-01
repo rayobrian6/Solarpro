@@ -25,9 +25,11 @@ export function pageValidationSummary(
   totalPages: number
 ): string {
   const sys     = canonical.systemType;
-  const { project, system, compliance } = input;
+  const { system, compliance } = input;
   const structural = compliance.structural;
-  const jurisdiction = compliance.jurisdiction as Record<string, any>;
+  // jurisdiction is OPTIONAL on PermitInput (types.ts) — AHJ enrichment can miss;
+  // a bare cast crashed VAL-1 (and the whole planset) on `.ahj` when undefined.
+  const jurisdiction = (compliance.jurisdiction ?? {}) as Record<string, any>;
   const _isFence = isFence(sys);
   const _isGround = isGround(sys);
   const _isRoof = isRoof(sys);

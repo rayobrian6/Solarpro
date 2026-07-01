@@ -269,7 +269,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       </table>
 
       <!-- General Notes -->
-      <div class=\\\"sec-hdr-dark\\\" style=\\\"margin-bottom:4px;\\">
+      <div class="sec-hdr-dark" style="margin-bottom:4px;\\">
         GENERAL NOTES &mdash; INSTALLATION REQUIREMENTS
       </div>
       <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.55;border:var(--border);margin-bottom:8px;">
@@ -294,10 +294,10 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       </div>
 
       <!-- Inspection Hold Points -->
-      <div class=\\\"sec-hdr-dark\\\" style=\\\"margin-bottom:4px;\\">
+      <div class="sec-hdr-dark" style="margin-bottom:4px;\\">
         INSPECTION HOLD POINTS
       </div>
-      <table class=\\\"equip-table\\\">
+      <table class="equip-table">
         <thead><tr><th style="width:6%;">#</th><th style="width:22%;">Inspection Point</th><th style="width:42%;">Verification Requirements</th><th style="width:15%;">Code Reference</th><th style="width:15%;text-align:center;">Inspector</th></tr></thead>
         <tbody>
           <tr><td class="fw9 mono">1</td><td class="fw7">Rough Electrical</td><td>Verify conductor sizing, conduit routing, grounding connections, junction box accessibility</td><td class="mono" style="font-size:8px;">NEC 690, 250</td><td class="center">\u25a1</td></tr>
@@ -447,9 +447,9 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">Material</td><td class="iv">6105-T5 Anodized Aluminum</td></tr>
             <tr><td class="il">Rail Profile</td><td class="iv">2.25" × 1.50" Heavy Duty</td></tr>
             <tr><td class="il">Max Span</td><td class="iv">72" (1829mm)</td></tr>
-            ${_isRoof ? '<tr><td class=\\\"il\\\">Attachment</td><td class=\\\"iv\\\">FlashFoot2 with L-Foot</td></tr>' : ''}
-            ${_isRoof ? '<tr><td class=\\\"il\\\">Lag Bolt</td><td class=\\\"iv\\\">5/16\\\" × 3\\\" Stainless Steel</td></tr>' : ''}
-            ${_isRoof ? '<tr><td class=\\\"il\\\">Embedment</td><td class=\\\"iv\\\">Min. 2.5\\\" into rafter</td></tr>' : _isFence ? '<tr><td class=\\\"il\\\">Post Type</td><td class=\\\"iv\\\">Steel Pipe / HSS</td></tr>' : '<tr><td class=\\\"il\\\">Pile Type</td><td class=\\\"iv\\\">Driven Pile / Helical Pier</td></tr>'}
+            ${_isRoof ? '<tr><td class="il">Attachment</td><td class="iv">FlashFoot2 with L-Foot</td></tr>' : ''}
+            ${_isRoof ? '<tr><td class="il">Lag Bolt</td><td class="iv">5/16" × 3" Stainless Steel</td></tr>' : ''}
+            ${_isRoof ? '<tr><td class="il">Embedment</td><td class="iv">Min. 2.5" into rafter</td></tr>' : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
             <tr><td class="il">UL Listing</td><td class="iv">UL 2703 / ICC-ES AC428</td></tr>
             <tr><td class="il">Wind Rating</td><td class="iv">Per ASCE 7-22 (see PV-4C)</td></tr>
           </table>

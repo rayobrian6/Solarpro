@@ -60,7 +60,14 @@ const PDF_PAGE_CONFIG = {
 // shift. Proved on the saved 3 Melvin render: measured scene shift +200,+112 px
 // == the design-centre crop offset (190,112). Fix: two-pass stitchAndCropTiles
 // (composite → PNG buffer → extract), locked by nearmapStitch.test.ts.
-const PLANSET_ENGINE_VERSION = 47362;
+// 47363 (2026-07-01): un-mangled the PE letters — certPages/peLetter (and 6 spots
+// in compliancePages) had literal \" sequences baked into their template output,
+// so every HTML attribute on PE-1 (roof/fence/ground variants) parsed as garbage
+// and the sheet rendered with NO CSS (class was literally '\"page\"'). Found by
+// headless-rendering the sheets while reviewing SN Phases 6-8. Also: VAL-1 no
+// longer crashes when compliance.jurisdiction is absent (optional in the type);
+// PV-1 legend label 18\" backslash typo fixed.
+const PLANSET_ENGINE_VERSION = 47363;
 
 
 

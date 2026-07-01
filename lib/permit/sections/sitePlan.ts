@@ -169,7 +169,7 @@ export function buildPv1Page(
         { fill:'#9ca3af', stroke:'#374151', dash:false, label:'EXISTING ROOF PLANE' },
         { fill:'rgba(30,80,200,0.80)', stroke:'#2060b0', dash:false, label:'PV MODULE (NEW)' },
         { fill:'none', stroke:'#374151', dash:true, label:'PROPERTY LINE' },
-        { fill:'none', stroke:'#cc0000', dash:true, label:'18\\" FIRE SETBACK' },
+        { fill:'none', stroke:'#cc0000', dash:true, label:'18" FIRE SETBACK' },
       ];
   const legendHtml = _legendItems.map(lr=>`
     <div style="margin-bottom:3px;">
