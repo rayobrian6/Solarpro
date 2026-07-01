@@ -44,7 +44,7 @@ const PDF_PAGE_CONFIG = {
 // the request body, available pre-enrichment) so the design always wins the framing
 // without relying on the post-enrichment re-center firing. + readable DBG box +
 // center crosshair on PV-1 (TEMP — remove once centering is confirmed).
-const PLANSET_ENGINE_VERSION = 47358;
+const PLANSET_ENGINE_VERSION = 47359;
 
 
 
