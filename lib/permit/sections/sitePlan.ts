@@ -87,6 +87,12 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         <img src="${aerial.imageBase64}" style="display:block;width:100%;height:auto;" alt="Aerial — ${addr}"/>
         <svg viewBox="0 0 ${imgW} ${imgH}" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
           ${pSvg}
+          <g transform="translate(8,8)">
+            <rect x="0" y="0" width="430" height="30" fill="rgba(255,0,0,0.82)"/>
+            <text x="6" y="21" font-family="monospace" font-size="20" font-weight="bold" fill="#fff">DBG src:${aerial.imageSource||'?'} ctr:${aerial.centerSource||'?'} ${aerial.lat?.toFixed(5)},${aerial.lng?.toFixed(5)}</text>
+          </g>
+          <line x1="${imgW/2}" y1="0" x2="${imgW/2}" y2="${imgH}" stroke="red" stroke-width="1.5" stroke-dasharray="10 8"/>
+          <line x1="0" y1="${imgH/2}" x2="${imgW}" y2="${imgH/2}" stroke="red" stroke-width="1.5" stroke-dasharray="10 8"/>
           <g transform="translate(${imgW-36},36)">
             <circle cx="0" cy="0" r="22" fill="rgba(0,0,0,0.7)" stroke="white" stroke-width="1.5"/>
             <polygon points="0,-14 5,7 0,2 -5,7" fill="white"/>

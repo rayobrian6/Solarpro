@@ -577,13 +577,27 @@ export async function POST(req: NextRequest) {
         console.warn('[permit/aerial] Census geocode failed (non-fatal), using stored coords:', (_ge as Error)?.message);
       }
     }
-    // Center the aerial on the authoritative geocode (passed as the pin; no design-derived
-    // arrayCenter — chooseAerialCenter then frames exactly this point, the real house).
+    // Center the aerial on the DESIGN geometry ("3D drives 2D" — the design is the
+    // authority for framing). The request body already carries the design
+    // roofPlanes/panels (read above), so compute the centroid NOW and pass it as
+    // arrayCenter; chooseAerialCenter frames on it, guarded to <300m from the geocode
+    // pin against cross-contamination. Falls back to the geocode pin when there's no
+    // design geometry on the body (the post-enrichment re-center covers that case).
+    const _bodyMean = (pts: Array<{ lat?: number; lng?: number }>) => {
+      const v = pts.filter(p => p && isFinite(Number(p.lat)) && isFinite(Number(p.lng)) && Math.abs(Number(p.lat)) > 0.001);
+      if (!v.length) return undefined;
+      return { lat: v.reduce((s, p) => s + Number(p.lat), 0) / v.length, lng: v.reduce((s, p) => s + Number(p.lng), 0) / v.length };
+    };
+    const _bodyPanels = (project.panelPositions ?? []) as Array<{ lat?: number; lng?: number }>;
+    const _bodyVerts = ((project.roofPlanes ?? []) as Array<{ vertices?: Array<{ lat?: number; lng?: number }> }>).flatMap(rp => rp.vertices ?? []);
+    const _bodyDesignCenter = _bodyMean(_bodyPanels) ?? _bodyMean(_bodyVerts);
+    if (_bodyDesignCenter) console.log('[permit/aerial] initial fetch centered on DESIGN centroid', _bodyDesignCenter.lat.toFixed(6), _bodyDesignCenter.lng.toFixed(6));
+
     const aerialData = await fetchAerialRoofData(
       _centerLat,
       _centerLng,
       _addr,
-      undefined,
+      _bodyDesignCenter,
     ).catch((aerialErr: any) => {
       console.log('[permit/POST] fetchAerialRoofData THREW:', aerialErr?.message);
       return { error: 'Aerial fetch threw: ' + aerialErr?.message } as AerialRoofData;

@@ -40,7 +40,11 @@ const PDF_PAGE_CONFIG = {
 // design gap on the neighbour parcel was under the old gate → never re-centred, so
 // the aerial stayed on the neighbour); + temp [dbg] tag on PV-1 caption to surface
 // image source + centre in prod. Remove the dbg tag once verified.
-const PLANSET_ENGINE_VERSION = 47357;
+// 47358 (2026-07-01): center the INITIAL aerial fetch on the design centroid (from
+// the request body, available pre-enrichment) so the design always wins the framing
+// without relying on the post-enrichment re-center firing. + readable DBG box +
+// center crosshair on PV-1 (TEMP — remove once centering is confirmed).
+const PLANSET_ENGINE_VERSION = 47358;
 
 
 
