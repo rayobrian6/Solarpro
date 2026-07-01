@@ -35,7 +35,7 @@ import {
   type ObstructionKeepOut,
 } from '@/lib/placementEngine';
 import { type NearmapObstruction, OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
-import { filterToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
+import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar approx — fine at parcel
@@ -3236,17 +3236,29 @@ export default function DesignStudio({ project, onSave }: Props) {
     const subject = sv.length > 0
       ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
       : { lat: mapCenter.lat, lng: mapCenter.lng };
-    const { kept, cropped } = filterToSubjectBuilding(
+    const { kept: subjectKept, cropped } = filterToSubjectBuilding(
       roofPlanes,
       (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
       subject,
       { maxDistM: 60 },  // hard cap: no plane >60m from the subject building
     );
-    if (!cropped || kept.length === 0) return roofPlanes;
+    // De-dup: drop a detected (aerial_*) plane that overlaps a hand-traced plane —
+    // the same roof captured twice was double-filling panels (Melvin 134 = 54+80).
+    const { kept, dropped } = dropDetectedPlanesOverlappingManual(
+      subjectKept,
+      (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+      (p) => (p as any).source === 'manual' || (p as any).createdFrom3D === true,
+    );
     const removed = roofPlanes.length - kept.length;
+    if (removed === 0 || kept.length === 0) return roofPlanes;  // never wipe the design
     setRoofPlanes(kept);
     setPanels(prev => prev.filter(pan => kept.some(pl => pointInLatLngRing(pan.lat, pan.lng, pl.vertices ?? []))));
-    toast.info('Kept your building', `Ignored ${removed} neighbor roof${removed !== 1 ? 's' : ''} — panels go on your building only`);
+    const neighborN = roofPlanes.length - subjectKept.length;
+    const msg = [
+      neighborN > 0 ? `${neighborN} neighbor roof${neighborN !== 1 ? 's' : ''}` : '',
+      dropped > 0 ? `${dropped} duplicate detection${dropped !== 1 ? 's' : ''}` : '',
+    ].filter(Boolean).join(' + ');
+    toast.info('Kept your building', `Ignored ${msg} — panels go on your traced roof only`);
     return kept;
   }, [roofPlanes, mapCenter, toast]);
 

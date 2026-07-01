@@ -182,6 +182,50 @@ export function subjectBuildingIndices(
   return { keptIndices, seedIndex: seed, cropped: keptIndices.length < rings.length };
 }
 
+// ── lat/lng ring helpers (planar — fine at building scale) ──
+function ringCentroidLL(ring: LatLng[]): LatLng {
+  let lat = 0, lng = 0;
+  for (const v of ring) { lat += v.lat; lng += v.lng; }
+  return { lat: lat / ring.length, lng: lng / ring.length };
+}
+function pointInRingLL(pt: LatLng, ring: LatLng[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+    if (((yi > pt.lat) !== (yj > pt.lat)) && (pt.lng < ((xj - xi) * (pt.lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Drop DETECTED roof planes (e.g. `aerial_nearmap`) that overlap a user-traced
+ * MANUAL plane — the same roof captured twice (once auto-detected as one big
+ * plane, once hand-traced into facets) was double-filling panels (54 real + 80
+ * on the duplicate = 134). The manual trace is authoritative ("3D drives 2D"),
+ * so the overlapping detection is removed. Overlap = either centroid inside the
+ * other's ring. No manual planes → nothing dropped (fail-safe).
+ */
+export function dropDetectedPlanesOverlappingManual<T>(
+  planes: T[],
+  getRing: (item: T) => LatLng[],
+  isManual: (item: T) => boolean,
+): { kept: T[]; dropped: number } {
+  const manualRings = planes.filter(isManual).map(getRing).filter(r => r.length >= 3);
+  if (manualRings.length === 0) return { kept: planes, dropped: 0 };
+  const manualCentroids = manualRings.map(ringCentroidLL);
+  const kept = planes.filter(p => {
+    if (isManual(p)) return true;
+    const ring = getRing(p);
+    if (ring.length < 3) return true;
+    const c = ringCentroidLL(ring);
+    const overlaps =
+      manualCentroids.some(mc => pointInRingLL(mc, ring)) ||  // a manual roof sits inside this detection
+      manualRings.some(mr => pointInRingLL(c, mr));           // this detection sits inside a manual roof
+    return !overlaps;
+  });
+  return { kept, dropped: planes.length - kept.length };
+}
+
 /**
  * Filter any array of roof-plane-like objects down to the subject building,
  * given an accessor for each object's lat/lng outline ring. Generic sibling of

@@ -18,7 +18,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
-import { filterToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
+import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { getSunPosition } from '@/lib/solarMath';
 import type { PlacedPanel, RoofPlane } from '@/types';
 import {
@@ -7757,6 +7757,21 @@ function SolarEngine3D({
       if (kept.length > 0 && kept.length < before) {
         eligiblePlanes = kept;
         addLog('AUTO', `handleAutoRoof: subject filter kept ${kept.length}/${before} planes (seed=${marked.length > 0 ? 'marked-plane' : 'geocode'})`);
+      }
+    }
+
+    // De-dup: drop a detected (aerial_*) plane that overlaps a hand-traced plane —
+    // the same roof captured twice was double-filling (Melvin: 54 traced + 80 on the
+    // overlapping aerial plane = 134). The manual trace wins.
+    if (eligiblePlanes.length > 1) {
+      const { kept: deduped, dropped } = dropDetectedPlanesOverlappingManual(
+        eligiblePlanes,
+        (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+        (p) => (p as any).source === 'manual' || (p as any).createdFrom3D === true,
+      );
+      if (dropped > 0 && deduped.length > 0) {
+        eligiblePlanes = deduped;
+        addLog('AUTO', `handleAutoRoof: dropped ${dropped} detected plane(s) overlapping your traced roof`);
       }
     }
 

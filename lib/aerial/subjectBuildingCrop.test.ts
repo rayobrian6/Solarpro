@@ -3,6 +3,7 @@ import {
   cropToSubjectBuilding,
   cropObstructionsToPlanes,
   filterToSubjectBuilding,
+  dropDetectedPlanesOverlappingManual,
   DEFAULT_ADJACENCY_GAP_M,
 } from './subjectBuildingCrop';
 import type { NearmapRoofPlane, NearmapObstruction } from './nearmap';
@@ -148,6 +149,28 @@ describe('filterToSubjectBuilding (Design Studio RoofPlane guard)', () => {
     ];
     const res = filterToSubjectBuilding(chain, p => p.vertices, subject, { maxDistM: 60 });
     expect(res.kept.map(p => p.id)).not.toContain('far');
+  });
+
+  it('drops a detected plane that overlaps the manual trace (Melvin 134-panel dup)', () => {
+    // The real bug: a big aerial_nearmap plane covering the whole roof sits on top
+    // of the user's 4 hand-traced hip facets → panels placed on both. Drop the aerial.
+    const bigAerial = { id: 'aerial', source: 'aerial_nearmap', vertices: rect(subject.lat, subject.lng, 24, 20).worldPolygon };
+    const s = offset(subject.lat, subject.lng, 0, -3);
+    const n = offset(subject.lat, subject.lng, 0, +3);
+    const manualS = { id: 'mS', source: 'manual', vertices: rect(s.lat, s.lng, 20, 6).worldPolygon };
+    const manualN = { id: 'mN', source: 'manual', vertices: rect(n.lat, n.lng, 20, 6).worldPolygon };
+    const res = dropDetectedPlanesOverlappingManual(
+      [bigAerial, manualS, manualN], p => p.vertices, p => p.source === 'manual',
+    );
+    expect(res.dropped).toBe(1);
+    expect(res.kept.map(p => p.id).sort()).toEqual(['mN', 'mS']);
+  });
+
+  it('keeps detected planes when there are no manual planes (fail-safe)', () => {
+    const a1 = { id: 'a1', source: 'aerial_nearmap', vertices: rect(subject.lat, subject.lng, 12, 10).worldPolygon };
+    const res = dropDetectedPlanesOverlappingManual([a1], p => p.vertices, p => p.source === 'manual');
+    expect(res.dropped).toBe(0);
+    expect(res.kept).toHaveLength(1);
   });
 
   it('keeps all planes of the subject building (multi-facet hip roof)', () => {
