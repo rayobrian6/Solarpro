@@ -6,6 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
+import { escapeH } from '../utils/drawing';
 import { roofTypeLabel } from '../utils/helpers';
 import { getEquipmentContext, isFence, isGround } from '@/lib/system';
 import { BUILD_VERSION } from '@/lib/version';
@@ -36,7 +37,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
       <div class="cert-grid">
         <div>
           <div class="cert-block-title">PREPARED BY</div>
-          <div class="cert-field"><div class="cf-val">${project.designer || '________________________________'}</div><div class="cf-lbl">Designer / Engineer of Record</div></div>
+          <div class="cert-field"><div class="cf-val">${escapeH(project.designer || '________________________________')}</div><div class="cf-lbl">Designer / Engineer of Record</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Firm / Company Name</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">PE License Number</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">State of Licensure</div></div>
@@ -60,7 +61,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
           <table class="equip-table" class="mt-sm">
             <thead><tr><th>Rev</th><th>Date</th><th>Description</th><th>By</th></tr></thead>
             <tbody>
-              <tr><td class="fw7">A</td><td>${project.date}</td><td>Initial Issue for Permit</td><td>${project.designer || '—'}</td></tr>
+              <tr><td class="fw7">A</td><td>${escapeH(String(project.date ?? ''))}</td><td>Initial Issue for Permit</td><td>${escapeH(project.designer || '—')}</td></tr>
               <tr><td class="c999">B</td><td class="c999">—</td><td class="c999">—</td><td class="c999">—</td></tr>
               <tr><td class="c999">C</td><td class="c999">—</td><td class="c999">—</td><td class="c999">—</td></tr>
             </tbody>
@@ -151,9 +152,9 @@ function _peProjectInfo(input: PermitInput): string {
   return `
   <div class=\\"section-title\\">Project Information</div>
   <table class=\\"info-table\\" class=\\"mb-xs\\">
-    <tr><td class=\\"il\\">Project Name</td><td class=\\"iv\\" colspan=\\"3\\">${project.projectName || '—'}</td></tr>
-    <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${project.clientName || '—'}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${project.date}</td></tr>
-    <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${project.address || '—'}</td></tr>
+    <tr><td class=\\"il\\">Project Name</td><td class=\\"iv\\" colspan=\\"3\\">${escapeH(project.projectName || '—')}</td></tr>
+    <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${escapeH(project.clientName || '—')}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${escapeH(String(project.date ?? ''))}</td></tr>
+    <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${escapeH(project.address || '—')}</td></tr>
     <tr><td class=\\"il\\">AHJ</td><td class=\\"iv\\">${ahj}</td><td class=\\"il\\">State</td><td class=\\"iv\\">${state}</td></tr>
     <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${project.apn || '___________________'}</td></tr>
   </table>`;

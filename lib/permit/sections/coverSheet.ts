@@ -6,6 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
+import { escapeH } from '../utils/drawing';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
@@ -99,7 +100,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
       <div style="background:#e8e8e8;width:100%;height:180px;display:flex;align-items:center;justify-content:center;text-align:center;">
         <div class="f-sm fw7" style="letter-spacing:0.5px;">
           VICINITY MAP — ATTACH SITE PHOTOGRAPH OR SATELLITE IMAGE<br/>
-          <span class="f-xs muted">${project.address || ''}</span>
+          <span class="f-xs muted">${escapeH(project.address || '')}</span>
         </div>
       </div>`;
   }
@@ -167,9 +168,12 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // Only renders row if value is present (data authority enforcement)
   function infoRow(label: string, value: string | number | null | undefined): string {
     if (value === null || value === undefined || value === '' || value === '—') return '';
+    // XSS FIX (audit P0): escape user-controlled values (projectName, clientName, address,
+    // designer, etc.) — the permit HTML is served to the browser for preview, so raw
+    // interpolation was a stored-XSS vector.
     return `<tr>
-      <td class="il">${label}</td>
-      <td class="iv">${value}</td>
+      <td class="il">${escapeH(label)}</td>
+      <td class="iv">${escapeH(String(value))}</td>
     </tr>`;
   }
 
@@ -382,7 +386,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
           <div class="sec-hdr">ENGINEERING SUMMARY</div>
           <div class="sec-body" style="font-size:var(--f-md);line-height:1.5;padding:var(--xs);">
             This permit package documents the design and engineering analysis for a ${system.totalDcKw?.toFixed(2) || '—'} kW DC
-            grid-tied photovoltaic system at ${project.address || '—'}. The system has been designed and evaluated in accordance with
+            grid-tied photovoltaic system at ${escapeH(project.address || '—')}. The system has been designed and evaluated in accordance with
             NEC ${compliance?.jurisdiction?.necVersion || '2020'}, ASCE 7-22, IBC ${ibcVer}, and all applicable local amendments.
             All calculations, equipment selections, and installation details contained herein have been prepared for permit submission
             and are intended to demonstrate full compliance with governing codes and standards.
@@ -517,7 +521,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
             ${vicinityMapHtml}
         <div class=\"df aic bt-1\" style=\"padding:2px var(--xs);gap:var(--xs);\">
               <span class="f-sm fw7 f1">
-                ${project.address || ''}${project.city ? ` — ${project.city}` : ''}${state ? `, ${state}` : ''}
+                ${escapeH(project.address || '')}${project.city ? ` — ${escapeH(project.city)}` : ''}${state ? `, ${state}` : ''}
               </span>
               <svg viewBox="0 0 40 40" width="28" height="28" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="20" cy="20" r="18" fill="#fff" stroke="#000" stroke-width="1.5"/>

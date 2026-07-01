@@ -17,7 +17,7 @@ const PDF_PAGE_CONFIG = {
 // override), battery gated on the permit payload, PV-2B branch-colored real-roof plan,
 // PV-1 panels removed. Bumped so cached plansets generated before these fixes are treated
 // as stale and force a fresh regenerate instead of serving the old (wrong-aerial) HTML.
-const PLANSET_ENGINE_VERSION = 47348;
+const PLANSET_ENGINE_VERSION = 47349;
 
 
 

@@ -6,6 +6,7 @@
 import type { PermitInput, CanonicalInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
 import { PLANSET_ENGINE_VERSION } from './constants';
+import { escapeH } from './utils/drawing';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import type { PermitInputShape } from '@/lib/drafting/permitInputShape';
@@ -801,7 +802,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 <head>
 <meta charset="UTF-8">
 <meta name="planset-version" content="${PLANSET_ENGINE_VERSION}">
-<title>Permit Package — ${project.projectName}</title>
+<title>Permit Package — ${escapeH(String(project.projectName ?? ''))}</title>
 <style>
   /* ═══════════════════════════════════════════════════════════════════════════
      SOLARPRO ENGINEERING DOCUMENT SYSTEM — CANONICAL STYLESHEET v47.270

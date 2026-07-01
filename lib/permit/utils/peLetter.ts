@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../types';
+import { escapeH } from './drawing';
 
 // ─── SHARED PE LETTER PRIMITIVES ─────────────────────────────────────────────
 // Signature block and footer are identical across all families — extracted once
@@ -45,9 +46,9 @@ export function _peProjectInfo(input: PermitInput): string {
   return `
   <div class=\\"section-title\\">Project Information</div>
   <table class=\\"info-table\\" class=\\"mb-xs\\">
-    <tr><td class=\\"il\\">Project Name</td><td class=\\"iv\\" colspan=\\"3\\">${project.projectName || '—'}</td></tr>
-    <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${project.clientName || '—'}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${project.date}</td></tr>
-    <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${project.address || '—'}</td></tr>
+    <tr><td class=\\"il\\">Project Name</td><td class=\\"iv\\" colspan=\\"3\\">${escapeH(project.projectName || '—')}</td></tr>
+    <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${escapeH(project.clientName || '—')}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${escapeH(String(project.date ?? ''))}</td></tr>
+    <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${escapeH(project.address || '—')}</td></tr>
     <tr><td class=\\"il\\">AHJ</td><td class=\\"iv\\">${ahj}</td><td class=\\"il\\">State</td><td class=\\"iv\\">${state}</td></tr>
     <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${project.apn || '___________________'}</td></tr>
   </table>`;

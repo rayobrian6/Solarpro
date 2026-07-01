@@ -5,6 +5,7 @@
 
 import type { PermitInput } from '../types';
 import { utilityDisplayName, resolveEquipment } from './helpers';
+import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
 
 
@@ -44,9 +45,9 @@ export function titleBlock(
   <div class="title-block">
     <div class="tb-left">
       <div class="tb-company">SOLARPRO ENGINEERING</div>
-      <div class="tb-project">${project.projectName || 'SOLAR PV SYSTEM'}</div>
-      <div class="tb-address">${project.address || '—'}</div>
-      <div class="tb-client">CLIENT: ${project.clientName || '—'}</div>
+      <div class="tb-project">${escapeH(project.projectName || 'SOLAR PV SYSTEM')}</div>
+      <div class="tb-address">${escapeH(project.address || '—')}</div>
+      <div class="tb-client">CLIENT: ${escapeH(project.clientName || '—')}</div>
       <div class="tb-meta">APN: ${apn} &nbsp;|&nbsp; UTILITY: ${utility}</div>
       <div class="tb-meta">AHJ: ${ahj} &nbsp;|&nbsp; ${state}</div>
     </div>
@@ -58,8 +59,8 @@ export function titleBlock(
     </div>
     <div class="tb-right">
       <table class="tb-table">
-        <tr><td class="tbl">DESIGNER</td><td class="tbv">${project.designer || '—'}</td></tr>
-        <tr><td class="tbl">DATE</td><td class="tbv">${project.date}</td></tr>
+        <tr><td class="tbl">DESIGNER</td><td class="tbv">${escapeH(project.designer || '—')}</td></tr>
+        <tr><td class="tbl">DATE</td><td class="tbv">${escapeH(String(project.date ?? ''))}</td></tr>
         <tr><td class="tbl">SHEET</td><td class="tbv">${pageNum} OF ${totalPages}</td></tr>
         <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
         <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
