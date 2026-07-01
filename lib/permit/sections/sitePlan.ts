@@ -9,7 +9,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
 import { buildSchemSVG } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
-import { nearmapConfigured, fetchNearmapStaticAerial } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapRoofPlanes, nearmapRoofSnapCenter } from '@/lib/aerial/nearmap';
 
 
 // ─── PV-1: Site Plan with Roof Plan ──────────────────────────────────────────
@@ -239,7 +239,7 @@ export interface AerialRoofData {
   lat?: number;
   lng?: number;
   zoom?: number;
-  centerSource?: 'array' | 'segment' | 'pin'; // why the image is centered where it is (diagnostic)
+  centerSource?: 'array' | 'segment' | 'pin' | 'nearmap_roof'; // why the image is centered where it is (diagnostic)
   imageSource?: 'nearmap' | 'google';         // which provider produced the aerial (diagnostic)
   roofSegments?: Array<{
     center?: { lat: number; lng: number };
@@ -332,8 +332,12 @@ export async function fetchAerialRoofData(
   arrayCenter?: { lat: number; lng: number }
 ): Promise<AerialRoofData> {
   const GKEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-  if (!GKEY) {
-    console.log('[permit/aerial] No Google Maps API key — skipping aerial fetch');
+  // Only a MISSING Google key + no usable coords is fatal (can't geocode). With
+  // coords in hand the Nearmap path works fine without a Google key — the old
+  // unconditional early-return silently disabled Nearmap in Google-key-less envs.
+  const hasCoords = isFinite(lat) && isFinite(lng) && Math.abs(lat) > 0.001;
+  if (!GKEY && !hasCoords) {
+    console.log('[permit/aerial] No Google Maps API key and no coordinates — skipping aerial fetch');
     return { error: 'No API key configured' };
   }
 
@@ -358,7 +362,7 @@ export async function fetchAerialRoofData(
 
     // ── Step 2: Google Solar API roof segments ────────────────────────────────
     let roofSegments: AerialRoofData['roofSegments'] = [];
-    try {
+    if (GKEY) try {
       const solarUrl = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${finalLat}&location.longitude=${finalLng}&requiredQuality=LOW&key=${GKEY}`;
       console.log('[permit/aerial] Step 2: Solar API...');
       const solarRes = await fetch(solarUrl, { signal: AbortSignal.timeout(10000) });
@@ -384,9 +388,37 @@ export async function fetchAerialRoofData(
     // Prefer an explicit array centroid from the caller, else the best (largest,
     // south-facing) Solar API roof segment center, else the geocode pin.
     const _center = chooseAerialCenter(finalLat, finalLng, arrayCenter, roofSegments);
-    const centerLat = _center.lat, centerLng = _center.lng;
+    let centerLat = _center.lat, centerLng = _center.lng;
+    let centerSource: AerialRoofData['centerSource'] = _center.source;
     console.log('[permit/aerial] Centering on', _center.source,
       _center.source === 'segment' ? '(nearest on-parcel roof segment)' : '');
+
+    // ── Step 2c: Snap the frame to Nearmap's OWN detected roof ────────────────
+    // (Ray, 2026-07-01 — "get this home into the center of the map".) The design
+    // centroid / geocode pin both live in GPS space; the imagery has its own
+    // registration, and a street-interpolated pin can sit ~15 m off the house.
+    // Nearmap's AI roof polygon is registered to the SAME imagery as the Vert
+    // tiles, so framing on its bbox center puts the home pixel-exact mid-frame.
+    // Trust rules: a roof CONTAINING the chosen center is unambiguous; a merely
+    // NEAREST roof is only trusted when the center came from the design ('array')
+    // — nearest-to-a-street-pin is how the wrong-house bug happened. Fails safe
+    // to the unsnapped center. Coverage-gated + cached (one AI credit/generate).
+    if (nearmapConfigured()) {
+      try {
+        const aiPlanes = await fetchNearmapRoofPlanes(centerLat, centerLng, { radiusM: 45 });
+        const snap = nearmapRoofSnapCenter(centerLat, centerLng, aiPlanes, { maxSnapM: 25 });
+        if (snap && (snap.contained || _center.source === 'array')) {
+          console.log(`[permit/aerial] frame snapped to Nearmap AI roof (${snap.contained ? 'containing' : 'nearest'} roof, ${snap.distM.toFixed(1)} m shift)`);
+          centerLat = snap.lat;
+          centerLng = snap.lng;
+          centerSource = 'nearmap_roof';
+        } else if (aiPlanes.length > 0) {
+          console.log('[permit/aerial] Nearmap AI roofs found but none qualified for snap — keeping', _center.source, 'center');
+        }
+      } catch (snapErr: unknown) {
+        console.log('[permit/aerial] Nearmap roof snap skipped:', (snapErr as Error)?.message);
+      }
+    }
 
     // ── Step 3: Aerial image ──
     // LANDSCAPE 16:9 to match the PV-1 drawing area — a square image overflows the
@@ -422,7 +454,7 @@ export async function fetchAerialRoofData(
 
     // Step 3b: Google Maps Static API — satellite fallback (multi-zoom rural fallback).
     const zoomLevels = [20, 18, 17];
-    for (const tryZoom of imageBase64 ? [] : zoomLevels) {
+    for (const tryZoom of (imageBase64 || !GKEY) ? [] : zoomLevels) {
       const tryUrl =
         `https://maps.googleapis.com/maps/api/staticmap` +
         `?center=${centerLat},${centerLng}` +
@@ -459,7 +491,7 @@ export async function fetchAerialRoofData(
     }
 
     // Hybrid maptype fallback if satellite failed completely
-    if (!imageBase64) {
+    if (!imageBase64 && GKEY) {
       console.log('[permit/aerial] Satellite failed — trying hybrid maptype fallback...');
       const hybridUrl =
         `https://maps.googleapis.com/maps/api/staticmap` +
@@ -495,7 +527,7 @@ export async function fetchAerialRoofData(
       lat: centerLat,   // image is centered here → overlay projects relative to it
       lng: centerLng,
       zoom: usedZoom,
-      centerSource: _center.source,
+      centerSource,
       imageSource,
       roofSegments,
     };

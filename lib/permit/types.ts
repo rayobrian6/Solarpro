@@ -457,7 +457,7 @@ export interface PermitInput {
     lat?: number;
     lng?: number;
     zoom?: number;
-    centerSource?: 'array' | 'segment' | 'pin';
+    centerSource?: 'array' | 'segment' | 'pin' | 'nearmap_roof';
     imageSource?: 'nearmap' | 'google';
     roofSegments?: Array<{
       pitchDegrees: number;

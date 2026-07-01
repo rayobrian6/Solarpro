@@ -135,6 +135,65 @@ export async function fetchNearmapStaticAerial(
   return null;
 }
 
+// ── Aerial frame snap: center the aerial on Nearmap's OWN detected roof ──────
+// The AI roof polygons live in the same imagery frame as the Vert tiles, so a
+// frame centered on the roof polygon's bbox center puts the HOME pixel-exact at
+// the image center — immune to street-interpolated geocode pins (~15m off at
+// 3 Melvin Dr) and to the imagery-vs-GPS registration offset a design-centroid
+// center inherits (Ray, 2026-07-01: circled home sat right-of-center on PV-1).
+
+export interface RoofSnapResult { lat: number; lng: number; distM: number; contained: boolean; }
+
+/** Ray-casting point-in-polygon on a lat/lng ring. */
+function pointInRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i].lat, xi = ring[i].lng, yj = ring[j].lat, xj = ring[j].lng;
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Pick the roof polygon the aerial should frame: the one CONTAINING (lat,lng),
+ * else the nearest bbox-center within maxSnapM meters. Returns that polygon's
+ * bbox center (the visual "home center" for framing), or null when nothing
+ * qualifies. Pure — exported for unit tests.
+ */
+export function nearmapRoofSnapCenter(
+  lat: number, lng: number,
+  planes: Array<Pick<NearmapRoofPlane, 'worldPolygon'>>,
+  opts: { maxSnapM?: number } = {},
+): RoofSnapResult | null {
+  const maxSnapM = opts.maxSnapM ?? 25;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  let best: RoofSnapResult | null = null;
+  for (const p of planes ?? []) {
+    const poly = p?.worldPolygon;
+    if (!Array.isArray(poly) || poly.length < 4) continue;
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    for (const v of poly) {
+      if (!v || !isFinite(v.lat) || !isFinite(v.lng)) { minLat = Infinity; break; }
+      if (v.lat < minLat) minLat = v.lat;
+      if (v.lat > maxLat) maxLat = v.lat;
+      if (v.lng < minLng) minLng = v.lng;
+      if (v.lng > maxLng) maxLng = v.lng;
+    }
+    if (!isFinite(minLat)) continue;
+    const cLat = (minLat + maxLat) / 2, cLng = (minLng + maxLng) / 2;
+    const distM = Math.hypot((cLat - lat) * 111320, (cLng - lng) * 111320 * cosLat);
+    const contained = pointInRing(lat, lng, poly);
+    const cand: RoofSnapResult = { lat: cLat, lng: cLng, distM, contained };
+    if (contained) {
+      // A containing roof always wins; among several (touching structures), nearest.
+      if (!best || !best.contained || distM < best.distM) best = cand;
+    } else if (distM <= maxSnapM && (!best || (!best.contained && distM < best.distM))) {
+      best = cand;
+    }
+  }
+  return best;
+}
+
 export interface NearmapCoverage {
   covered: boolean;
   surveyCount: number;
@@ -232,6 +291,9 @@ function isObstructionFeature(desc: string): boolean {
  *  Prevents re-charging Nearmap credits for the same location + survey. */
 const obstructionCache = new Map<string, { result: NearmapObstruction[]; ts: number }>();
 const OBSTRUCTION_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
+
+/** Roof-plane cache keyed by `${lat},${lng},${radiusM}` — same TTL as obstructions. */
+const roofPlanesCache = new Map<string, { result: NearmapRoofPlane[]; ts: number }>();
 
 export const nearmapConfigured = (): boolean => !!process.env.NEARMAP_API_KEY;
 
@@ -357,6 +419,15 @@ export async function fetchNearmapRoofPlanes(
 ): Promise<NearmapRoofPlane[]> {
   const key = process.env.NEARMAP_API_KEY;
   if (!key) return [];
+
+  // Cache per (lat,lng,radius) — the permit route fetches the aerial twice per
+  // generate (initial + design re-center); don't charge two AI credits for it.
+  const cacheKey = `${lat.toFixed(7)},${lng.toFixed(7)},${opts.radiusM ?? 40}`;
+  const cached = roofPlanesCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < OBSTRUCTION_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
   try {
     if (!opts.skipCoverageCheck) {
       const cov = await checkNearmapCoverage(lat, lng);
@@ -367,7 +438,9 @@ export async function fetchNearmapRoofPlanes(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!res.ok) return [];
-    return mapNearmapRoofPlanes(await res.json());
+    const planes = mapNearmapRoofPlanes(await res.json());
+    roofPlanesCache.set(cacheKey, { result: planes, ts: Date.now() });
+    return planes;
   } catch {
     return [];
   }

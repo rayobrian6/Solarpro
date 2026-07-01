@@ -44,7 +44,15 @@ const PDF_PAGE_CONFIG = {
 // the request body, available pre-enrichment) so the design always wins the framing
 // without relying on the post-enrichment re-center firing. + readable DBG box +
 // center crosshair on PV-1 (TEMP — remove once centering is confirmed).
-const PLANSET_ENGINE_VERSION = 47359;
+// 47360 (2026-07-01): "home in the center of the map" — the aerial frame now snaps
+// to Nearmap's OWN AI-detected roof polygon (bbox center) when it contains the
+// chosen center, or is nearest-within-25m of a design-centroid center. Same imagery
+// frame as the Vert tiles → the home lands pixel-exact mid-frame, immune to street-
+// interpolated geocode pins (~15m off at 3 Melvin) and GPS-vs-imagery registration.
+// Coverage-gated, cached (1 AI credit/generate), fails safe to the unsnapped center.
+// Also: fetchAerialRoofData no longer hard-requires a Google key when coords exist
+// (the old early-return silently disabled Nearmap in Google-key-less envs).
+const PLANSET_ENGINE_VERSION = 47360;
 
 
 
