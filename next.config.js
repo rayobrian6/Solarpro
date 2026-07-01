@@ -91,6 +91,11 @@ const BUILD_VERSION = versionMatch ? versionMatch[1] : 'unknown';
 
 const nextConfig = {
   reactStrictMode: true,
+  // Without this, Next 14.2+ blocks cross-origin dev requests from 127.0.0.1 vs
+  // localhost and every interactive click/input in the generator-estimator
+  // (and any other dev page that hits a same-origin /api route) appears dead.
+  // See https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   // NOTE: removeConsole was removed — the SWC transform was eating multi-line
   // console.log calls (e.g. the PARSED_DATA_OBJECT log in handleBillComplete)
   // and corrupting the surrounding bill-save logic in production builds.
