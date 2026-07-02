@@ -99,7 +99,15 @@ const PDF_PAGE_CONFIG = {
 // modules read as violations (Ray: "looks like shit"). PV-2 now draws thin
 // fire-setback bands (18") on all edges, keeps per-edge ridge/hip vs eave/rake
 // line weights, and reports the pathway in SYSTEM DATA / callout ② / plan note.
-const PLANSET_ENGINE_VERSION = 47367;
+// 47368 (2026-07-01): PV-2 drafting-quality push (Ray: "amateur hour"). (1) NEW
+// regularizeRoof.ts squares up hand-traced geometry for DISPLAY: welds shared
+// facet corners (union-find), straightens near-axis eaves/ridge via dominant-
+// axis snapping, caps vertex movement at 2 ft — kills the wavy eaves / dogleg
+// ridge / asymmetric hips. Stored geometry + panels untouched. (2) EAVES get NO
+// fire-setback band ("if there is no firewalk on the eave it needs to not
+// show") — perimeter edges are classified eave vs rake by outward-normal vs
+// plane azimuth; bands draw only on ridge/hips/rakes.
+const PLANSET_ENGINE_VERSION = 47368;
 
 
 

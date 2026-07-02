@@ -41,6 +41,7 @@ import {
 import {
   drawCallout, drawCalloutWithLeader, drawLeaderLine, drawWindArrow,
 } from '../callouts';
+import { regularizeRoofPlanes } from '../regularizeRoof';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -164,6 +165,12 @@ export function drawRoofPlan(
     );
   }
 
+  // ── Regularize the hand-traced geometry for DRAWING (display copy only) ──
+  // Welds shared facet corners, straightens near-axis eaves/ridge, squares the
+  // outline — ±1-2 ft trace noise rendered as amateur linework (wavy eaves,
+  // dogleg ridge, asymmetric hips). Stored geometry and panels are untouched.
+  const regPlanes = regularizeRoofPlanes(validPlanes as any[]);
+
   // ── Layout zones (STEP 3) ──
   const zones = getLayoutForSystem('roof', 'plan');
   const W = zones.canvas.width;
@@ -188,8 +195,8 @@ export function drawRoofPlan(
   els.push(drawTitleBar(W, svgTitle, 'SCALE: 3/32"=1\'-0"'));
 
   // ── GPS coordinate → SVG mapping ──
-  const allLats = validPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
-  const allLngs = validPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
+  const allLats = regPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
+  const allLngs = regPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
   const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
   const minLng = Math.min(...allLngs), maxLng = Math.max(...allLngs);
   const latSpan = maxLat - minLat || 0.001;
@@ -216,7 +223,7 @@ export function drawRoofPlan(
   // Plane labels are collected here and rendered AFTER the panels so the modules
   // never paint over them (the old "ANE 2 / E FAC" clipping).
   const planeLabels: Array<{ cx: number; cy: number; ri: number; pitch: any; azimuth: any }> = [];
-  validPlanes.forEach((rp: any, ri: number) => {
+  regPlanes.forEach((rp: any, ri: number) => {
     const ptsXY = rp.vertices!.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
     const pts = ptsXY.map((p: { x: number; y: number }) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
 
@@ -224,29 +231,48 @@ export function drawRoofPlan(
     // fills + shingle texture were the "cartoony" read).
     els.push(`<polygon points="${pts}" fill="#ffffff" stroke="none"/>`);
 
-    // Per-edge fire-setback bands + line weights, per the AHJ database's two
-    // requirements: interior (ridge/hip) edges hatch at the RIDGE setback and
-    // draw heavy; perimeter (eave/rake) edges hatch at the EDGE pathway setback
-    // and draw fine. Bands are clipped to the facet so corners merge cleanly.
+    // Per-edge fire-setback bands + line weights. Classification:
+    //   interior (shared with another facet) = RIDGE/HIP → band + heavy line
+    //   perimeter, outward normal ≈ downslope   = EAVE   → NO band (no code
+    //     requirement — panels run to the gutter; Ray: "if there is no firewalk
+    //     on the eave it needs to not show") + fine line
+    //   perimeter otherwise                     = RAKE   → band + fine line
     const nV = ptsXY.length;
     const clipId = `sbclip${ri}`;
     els.push(`<defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>`);
     const bands: string[] = [];
     const edgeLines: string[] = [];
+    const az = (typeof rp.azimuth === 'number' && isFinite(rp.azimuth)) ? rp.azimuth : null;
+    // downslope unit vector in (lng, lat) CAD space — azimuth 0° = faces north = +lat
+    const dsX = az != null ? Math.sin(az * Math.PI / 180) : 0;
+    const dsY = az != null ? Math.cos(az * Math.PI / 180) : 0;
     for (let ei = 0; ei < nV; ei++) {
       const a = ptsXY[ei], b = ptsXY[(ei + 1) % nV];
       if (Math.hypot(b.x - a.x, b.y - a.y) < 2) continue;   // degenerate/closing dup
-      const interior = isInteriorEdge(rp.vertices![ei], rp.vertices![(ei + 1) % nV], validPlanes, ri);
-      const dPx = setbackFt * scale;   // uniform fire setback; classification drives line weight
-      // Inward unit normal — probe a point just off the edge midpoint.
+      const va = rp.vertices![ei], vb = rp.vertices![(ei + 1) % nV];
+      const interior = isInteriorEdge(va, vb, regPlanes, ri);
+      // Eave test (perimeter only): CAD-space OUTWARD normal vs the downslope dir.
+      let isEave = false;
+      if (!interior && az != null) {
+        const eLng = vb.lng - va.lng, eLat = vb.lat - va.lat;
+        const eLen = Math.hypot(eLng, eLat) || 1;
+        let onX = -eLat / eLen, onY = eLng / eLen;
+        const mLng = (va.lng + vb.lng) / 2, mLat = (va.lat + vb.lat) / 2;
+        if (ptInLatLngRing(mLat + onY * 1.5, mLng + onX * 1.5, rp.vertices!)) { onX = -onX; onY = -onY; }
+        isEave = (onX * dsX + onY * dsY) > 0.64;   // within ~50° of downslope
+      }
+      const dPx = setbackFt * scale;
+      // Inward unit normal (screen space) — probe a point just off the midpoint.
       const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey);
       let nx = -ey / el, ny = ex / el;
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       if (!ptInRingXY(mx + nx * 3, my + ny * 3, ptsXY)) { nx = -nx; ny = -ny; }
-      const a2x = a.x + nx * dPx, a2y = a.y + ny * dPx;
-      const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
-      bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.6" stroke="none"/>`);
-      bands.push(`<line x1="${a2x.toFixed(1)}" y1="${a2y.toFixed(1)}" x2="${b2x.toFixed(1)}" y2="${b2y.toFixed(1)}" class="line-setbk"/>`);
+      if (interior || !isEave) {
+        const a2x = a.x + nx * dPx, a2y = a.y + ny * dPx;
+        const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
+        bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.6" stroke="none"/>`);
+        bands.push(`<line x1="${a2x.toFixed(1)}" y1="${a2y.toFixed(1)}" x2="${b2x.toFixed(1)}" y2="${b2y.toFixed(1)}" class="line-setbk"/>`);
+      }
       edgeLines.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#000" stroke-width="${interior ? 2.4 : 1.3}" stroke-linecap="square"/>`);
     }
     els.push(`<g clip-path="url(#${clipId})">${bands.join('')}</g>`);
@@ -316,13 +342,13 @@ export function drawRoofPlan(
   if (!isBranchColorMode) {
     const trussSize    = ((project as any).rafterSize || (project as any).trussSize || '2×4').toString();
     const trussSpacing = `${rafterSp}" O.C.`;
-    const facets = validPlanes.map((rp: any, i: number) => ({
+    const facets = regPlanes.map((rp: any, i: number) => ({
       n: i + 1,
       mods: validPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices)).length,
       az: rp.azimuth != null && isFinite(rp.azimuth) ? `${Math.round(rp.azimuth)}°` : '—',
       tilt: rp.pitch != null && isFinite(rp.pitch) ? `${Math.round(rp.pitch)}°` : '—',
     }));
-    const roofAreaFt2  = validPlanes.reduce((s: number, rp: any) => s + planViewAreaFt2(rp.vertices), 0);
+    const roofAreaFt2  = regPlanes.reduce((s: number, rp: any) => s + planViewAreaFt2(rp.vertices), 0);
     const panelAreaFt2 = (panelLenIn * panelWidIn) / 144;
     const arrayAreaFt2 = totalPanels * panelAreaFt2;
     const coverPct     = roofAreaFt2 > 0 ? (arrayAreaFt2 / roofAreaFt2) * 100 : 0;
