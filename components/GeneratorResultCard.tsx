@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import type { EstimateResult } from "@/lib/generatorEstimate";
-import { defaultLaborHours } from "@/lib/generatorProposal";
+import type { EstimateResult } from "@/lib/engineering/generatorEstimate";
+import { defaultLaborHours } from "@/lib/engineering/generatorProposal";
 
 export default function ResultCard({
   estimate,

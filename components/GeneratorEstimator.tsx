@@ -2,15 +2,15 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { APPLIANCES, CATEGORIES, type Appliance } from "@/lib/generatorData";
+import { APPLIANCES, CATEGORIES, type Appliance } from "@/lib/engineering/generatorData";
 import {
   LOAD_PROFILE_LABELS,
   calculateEstimate,
   formatWatts,
   formatUSD,
   type LoadProfile,
-} from "@/lib/generatorEstimate";
-import { calculateNec220_83, type HeatingType } from "@/lib/generatorNec22083";
+} from "@/lib/engineering/generatorEstimate";
+import { calculateNec220_83, type HeatingType } from "@/lib/engineering/generatorNec22083";
 import GeneratorResultCard from "./GeneratorResultCard";
 
 const LOAD_PROFILES: LoadProfile[] = ["whole-house", "managed", "essentials"];
