@@ -92,7 +92,14 @@ const PDF_PAGE_CONFIG = {
 // (shared-with-another-facet = ridge/hip, perimeter = eave/rake) and hatches
 // each at ITS OWN AHJ setback, with heavy ridge/hip vs fine eave/rake linework
 // (the per-edge line-style item) + dual legend/data-zone/callout display.
-const PLANSET_ENGINE_VERSION = 47366;
+// 47367 (2026-07-01): CORRECTED AHJ setback semantics — ahjRoofSetbackIn is the
+// IFC ACCESS PATHWAY width (a designated 36" route), NOT a uniform edge setback;
+// ahjRidgeSetbackIn is the fire setback drawn on edges. v47366 hatched every
+// eave/rake at the pathway width, flooding the sheet red and making compliant
+// modules read as violations (Ray: "looks like shit"). PV-2 now draws thin
+// fire-setback bands (18") on all edges, keeps per-edge ridge/hip vs eave/rake
+// line weights, and reports the pathway in SYSTEM DATA / callout ② / plan note.
+const PLANSET_ENGINE_VERSION = 47367;
 
 
 

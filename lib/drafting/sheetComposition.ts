@@ -337,8 +337,8 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
 export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   pitchStr: string;
   azimuthDeg: number;
-  edgeSetbackFt: number;
-  ridgeSetbackFt: number;
+  fireSetbackFt: number;
+  pathwayFt: number;
   roofType: string;
   mountSys: string;
   rafterSize: string;
@@ -371,22 +371,22 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     ? Math.round(Math.tan(rawPitch * Math.PI / 180) * 12 * 10) / 10
     : rawPitch;
 
-  // Fire setbacks — AHJ DATABASE SEMANTICS (single source of truth): the DB
-  // carries TWO requirements — ahjRoofSetbackIn = EDGE (eave/rake) pathway,
-  // ahjRidgeSetbackIn = ridge/hip (IL: 36"/18"). The old single "setbackFt"
-  // flattened them, so the data zone said 1.5' while the drawing hatched 3'.
-  const _edgeIn  = (p?.ahjRoofSetbackIn as number);
-  const _ridgeIn = (p?.ahjRidgeSetbackIn as number);
+  // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (per the IFC table behind
+  // applyCodeBasis): ahjRidgeSetbackIn = the FIRE SETBACK on roof edges;
+  // ahjRoofSetbackIn = the ACCESS PATHWAY width (a designated 36" route, not a
+  // uniform edge setback — treating it as one buried the drawing in hatch).
+  const _fireIn    = (p?.ahjRidgeSetbackIn as number);
+  const _pathwayIn = (p?.ahjRoofSetbackIn as number);
   const _fallbackFt = pl?.setbacks?.eaveM ? mToFt(pl.setbacks.eaveM) : ((p?.fireSetbackFt as number) ?? 1.5);
-  const edgeSetbackFt  = (_edgeIn && _edgeIn > 0) ? Math.round((_edgeIn / 12) * 10) / 10 : _fallbackFt;
-  const ridgeSetbackFt = (_ridgeIn && _ridgeIn > 0) ? Math.round((_ridgeIn / 12) * 10) / 10 : edgeSetbackFt;
+  const fireSetbackFt = (_fireIn && _fireIn > 0) ? Math.round((_fireIn / 12) * 10) / 10 : _fallbackFt;
+  const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;
 
   return {
     pitchStr:      `${pitchRatio}:12`,
     // Round azimuth — was leaking the raw geometry float (e.g. 180.00081202849463°).
     azimuthDeg:    Math.round(pl?.azimuth ?? (p?.roofAzimuth as number) ?? 180),
-    edgeSetbackFt,
-    ridgeSetbackFt,
+    fireSetbackFt,
+    pathwayFt,
     roofType:      ((p?.roofType as string) || 'SHINGLE').toUpperCase(),
     mountSys:      ((p?.mountingSystem as string) || 'IRONRIDGE XR100').toUpperCase(),
     rafterSize:    ((p?.rafterSize as string) || '2x6'),
@@ -563,7 +563,7 @@ function roofComposition(
         { label: 'ROOF TYPE',      value: d.roofType },
         { label: 'PITCH',          value: d.pitchStr,                        bold: true },
         { label: 'AZIMUTH',        value: `${d.azimuthDeg}° (${azLabel(d.azimuthDeg)})` },
-        { label: 'FIRE SETBACK',   value: d.edgeSetbackFt === d.ridgeSetbackFt ? `${d.edgeSetbackFt}' — ALL EDGES` : `${d.edgeSetbackFt}' EDGE / ${d.ridgeSetbackFt}' RIDGE`, bold: true },
+        { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' EDGES · ${d.pathwayFt}' PATHWAY`, bold: true },
         { label: 'RAFTER',         value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
         { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX` },
         { label: 'MODULES',        value: `${d.totalPanels} @ ${d.dcKw} kWdc`, bold: true },
@@ -584,7 +584,7 @@ function roofComposition(
   const callouts: CalloutItem[] = isPlan
     ? [
         { n: 1, label: 'PV MODULE ARRAY', sub: `${d.totalPanels} mod @ ${d.dcKw} kW DC` },
-        { n: 2, label: 'FIRE SETBACKS', sub: `${d.edgeSetbackFt}' eave/rake · ${d.ridgeSetbackFt}' ridge/hip — IFC §605.11 per AHJ` },
+        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' all edges · ${d.pathwayFt}' access pathway — IFC §605.11 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
         { n: 5, label: 'ATTACHMENT ZONE', sub: `L-foot @ ${d.attachSpacing}" O.C. into rafters` },

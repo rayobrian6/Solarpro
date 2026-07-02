@@ -123,16 +123,16 @@ export function drawRoofPlan(
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
   const attachSp    = project.attachmentSpacing || 48;
-  // Fire setbacks — AHJ DATABASE SEMANTICS (single source of truth, Ray
-  // 2026-07-01): ahjRoofSetbackIn = EDGE (eave/rake) pathway, ahjRidgeSetbackIn
-  // = ridge/hip. Two DIFFERENT requirements (IL: 36"/18") — flattening them to
-  // one number made the sheet contradict itself. Each edge is now classified
-  // (shared-with-another-facet = ridge/hip, perimeter = eave/rake) and hatched
-  // at ITS OWN setback distance.
-  const setbackIn   = project.ahjRoofSetbackIn  || 18;
-  const ridgeSetIn  = project.ahjRidgeSetbackIn || 18;
-  const setbackFt   = setbackIn / 12;
-  const ridgeSetFt  = ridgeSetIn / 12;
+  // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
+  // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
+  // (drawn as a band on every edge) and ahjRoofSetbackIn is the ACCESS PATHWAY
+  // WIDTH — a designated 36" route requirement, NOT a uniform edge moat.
+  // Hatching every eave/rake at the pathway width buried half the roof in red
+  // and made code-compliant modules read as violations.
+  const fireSetIn   = project.ahjRidgeSetbackIn || 18;
+  const pathwayIn   = project.ahjRoofSetbackIn  || 36;
+  const setbackFt   = fireSetIn / 12;
+  const pathwayFt   = pathwayIn / 12;
 
   // ── STEP 4: Geometry from CAD (via adapter fake-degree encoding) ──
   const rpData = project.roofPlanes    || [];
@@ -180,7 +180,7 @@ export function drawRoofPlan(
   // dots — monochrome CAD language instead of tinted fills ("cartoony").
   els.push(drawBackground(W, H, '#ffffff'));
   // Red diagonal hatch for the fire-setback band (the reference's signature mark).
-  els.push(`<defs><pattern id="hatch-setback" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="#cc2222" stroke-width="0.9"/></pattern></defs>`);
+  els.push(`<defs><pattern id="hatch-setback" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#cc2222" stroke-width="0.7"/></pattern></defs>`);
   // v65: PV-2B branch-color mode gets a distinct title bar
   const svgTitle = isBranchColorMode
     ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP'
@@ -237,7 +237,7 @@ export function drawRoofPlan(
       const a = ptsXY[ei], b = ptsXY[(ei + 1) % nV];
       if (Math.hypot(b.x - a.x, b.y - a.y) < 2) continue;   // degenerate/closing dup
       const interior = isInteriorEdge(rp.vertices![ei], rp.vertices![(ei + 1) % nV], validPlanes, ri);
-      const dPx = (interior ? ridgeSetFt : setbackFt) * scale;
+      const dPx = setbackFt * scale;   // uniform fire setback; classification drives line weight
       // Inward unit normal — probe a point just off the edge midpoint.
       const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey);
       let nx = -ey / el, ny = ex / el;
@@ -417,7 +417,7 @@ export function drawRoofPlan(
     els.push(drawLinearDimension(
       roofMinX, roofMinX + sbPixels,
       roofMinY - 12, 10,
-      ftToFtIn(setbackFt) + ' EDGE SETBACK'
+      ftToFtIn(setbackFt) + ' FIRE SETBACK'
     ));
   }
   }
@@ -454,12 +454,7 @@ export function drawRoofPlan(
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="7" cy="-0.5" r="1.2" fill="#2a5db0"/>`, label: 'PV MODULE' },
-      ...(setbackFt === ridgeSetFt
-        ? [{ swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` }]
-        : [
-            { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} EAVE/RAKE SETBACK` },
-            { swatch: _sbHatch, label: `${ftToFtIn(ridgeSetFt)} RIDGE/HIP SETBACK` },
-          ]),
+      { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="2.4"/>`, label: 'RIDGE / HIP' },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.1"/>`, label: 'EAVE / RAKE' },
       { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
@@ -531,7 +526,7 @@ export function drawRoofPlan(
   els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
     isBranchColorMode
       ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP — SEE DATA ZONE FOR BRANCH SCHEDULE'
-      : 'ROOF ARRAY PLAN — FIELD VERIFY ALL DIMENSIONS — SUBJECT TO RAFTER LOCATION + AHJ APPROVAL', {
+      : `ROOF ARRAY PLAN — FIELD VERIFY ALL DIMENSIONS — MAINTAIN ${ftToFtIn(pathwayFt)} ACCESS PATHWAY PER AHJ / IFC §605.11 — SUBJECT TO RAFTER LOCATION + AHJ APPROVAL`, {
       anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
     }));
 
