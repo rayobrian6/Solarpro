@@ -366,8 +366,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         ? `AC branch \xd7 1.25 continuous = conductor sizing basis`
         : `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
     { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${avgAz}\xb0 (${compassDir})` },
-    { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa7605.11 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
-       sub: isRoof(cadSystemType) ? 'Min 18" eave/ridge setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
+    { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa71204.2 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
+       sub: isRoof(cadSystemType) ? 'Min 18" ridge/hip setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
     { n: 4, label: 'DC Capacity', sub: `${system.totalDcKw?.toFixed(2) || '\u2014'} kW DC` },
   ].map(c =>
     `<div class="callout-row">` +
@@ -378,11 +378,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
   // System-specific supplemental data
   const agSupplemental = isRoof(cadSystemType) ? `
-    <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa7605.11)</div>
+    <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 Min 18" edge setback from eaves</div>
-      <div>\u2022 Min 18" setback from ridge</div>
-      <div>\u2022 36" access at hip/valley per AHJ</div>
+      <div>\u2022 Min 18" setback at ridge/hips/rakes</div>
+      <div>\u2022 Modules may extend to eave (no eave req.)</div>
+      <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
     </div>` :
     isFence(cadSystemType) ? `

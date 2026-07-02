@@ -41,7 +41,7 @@ import {
 import {
   drawCallout, drawCalloutWithLeader, drawLeaderLine, drawWindArrow,
 } from '../callouts';
-import { regularizeRoofPlanes } from '../regularizeRoof';
+import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -168,8 +168,11 @@ export function drawRoofPlan(
   // ── Regularize the hand-traced geometry for DRAWING (display copy only) ──
   // Welds shared facet corners, straightens near-axis eaves/ridge, squares the
   // outline — ±1-2 ft trace noise rendered as amateur linework (wavy eaves,
-  // dogleg ridge, asymmetric hips). Stored geometry and panels are untouched.
+  // dogleg ridge, asymmetric hips). Panels ride along via each facet's fitted
+  // affine so rows stay flush to the straightened edges (they overhung the new
+  // eave when only the planes moved). Stored geometry is untouched.
   const regPlanes = regularizeRoofPlanes(validPlanes as any[]);
+  const regPanels = coTransformPanels(validPlanes as any[], regPlanes as any[], validPanels as any[]);
 
   // ── Layout zones (STEP 3) ──
   const zones = getLayoutForSystem('roof', 'plan');
@@ -223,6 +226,7 @@ export function drawRoofPlan(
   // Plane labels are collected here and rendered AFTER the panels so the modules
   // never paint over them (the old "ANE 2 / E FAC" clipping).
   const planeLabels: Array<{ cx: number; cy: number; ri: number; pitch: any; azimuth: any }> = [];
+  const interiorEdgesXY: Array<{ ax: number; ay: number; bx: number; by: number }> = [];
   regPlanes.forEach((rp: any, ri: number) => {
     const ptsXY = rp.vertices!.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
     const pts = ptsXY.map((p: { x: number; y: number }) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
@@ -273,7 +277,8 @@ export function drawRoofPlan(
         bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.6" stroke="none"/>`);
         bands.push(`<line x1="${a2x.toFixed(1)}" y1="${a2y.toFixed(1)}" x2="${b2x.toFixed(1)}" y2="${b2y.toFixed(1)}" class="line-setbk"/>`);
       }
-      edgeLines.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#000" stroke-width="${interior ? 2.4 : 1.3}" stroke-linecap="square"/>`);
+      if (interior) interiorEdgesXY.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
+      edgeLines.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#000" stroke-width="${interior ? 2.4 : 1.3}"/>`);
     }
     els.push(`<g clip-path="url(#${clipId})">${bands.join('')}</g>`);
     els.push(...edgeLines);
@@ -290,28 +295,49 @@ export function drawRoofPlan(
   const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
   const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
-  // Reference-style modules: WHITE rectangle, fine dark-blue frame, and a small
-  // blue attachment/micro dot at center. (Solid navy fills read "cartoony".)
+  // Reference-style modules: WHITE rectangle, fine dark-blue frame, attachment
+  // dots at the rail-foot quarter points. Each module is ROTATED to its plane's
+  // fall line (portrait long axis runs up-slope) — drawing every module
+  // axis-aligned overlapped/poked-out the rotated end-plane (E/W) arrays.
   // PV-2B keeps solid branch-colored fills — that sheet IS a color map.
-  validPanels.forEach((p: any) => {
+  regPanels.forEach((p: any) => {
     const px = toX(p.lng), py = toY(p.lat);
     const isLandscape = (p.orientation || 'landscape') === 'landscape';
     const pw = isLandscape ? panLenPx : panWidPx;
     const ph = isLandscape ? panWidPx : panLenPx;
     const x0 = px - pw / 2, y0 = py - ph / 2;
+    const azRot = Number(p.azimuth ?? p.heading);
+    // rotate so the long axis follows the plane azimuth; 0/180 ≈ no-op
+    const rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
+    const gOpen = rot > 1 && rot < 179
+      ? `<g transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">` : '<g>';
 
     const branchFill = panelColorById?.get(p.id);
     if (branchFill) {
-      els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
-      els.push(`<rect x="${(x0 + 0.7).toFixed(1)}" y="${(y0 + 0.7).toFixed(1)}" width="${Math.max(pw - 1.4, 0).toFixed(1)}" height="${Math.max(ph - 1.4, 0).toFixed(1)}" fill="none" stroke="rgba(190,210,235,0.5)" stroke-width="0.35"/>`);
+      els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/></g>`);
     } else {
-      els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>`);
-      els.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="1.3" fill="#2a5db0"/>`);
+      els.push(
+        `${gOpen}` +
+        `<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
+        `<circle cx="${px.toFixed(1)}" cy="${(py - ph / 4).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
+        `<circle cx="${px.toFixed(1)}" cy="${(py + ph / 4).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
+        `</g>`);
     }
   });
 
-  // ── Plane labels (rendered last, on top of panels — opaque pill, sized to text) ──
+  // ── Plane labels (rendered last — placed in OPEN roof area, never over modules) ──
+  const _panelPts = regPanels.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
   planeLabels.forEach(L => {
+    // candidate positions: centroid, then nudges along both axes — first one
+    // clear of every module center wins (critique: labels were masking modules)
+    const _cands = [
+      { x: L.cx, y: L.cy },
+      { x: L.cx, y: L.cy - 26 }, { x: L.cx, y: L.cy + 26 },
+      { x: L.cx - 34, y: L.cy }, { x: L.cx + 34, y: L.cy },
+      { x: L.cx - 34, y: L.cy - 26 }, { x: L.cx + 34, y: L.cy - 26 },
+    ];
+    const _clear = _cands.find(c => !_panelPts.some(p => Math.abs(p.x - c.x) < 40 && Math.abs(p.y - c.y) < 26));
+    if (_clear) { L.cx = _clear.x; L.cy = _clear.y; }
     const lines: string[] = ['PLANE ' + (L.ri + 1)];
     if (L.pitch !== undefined) {
       // One-decimal rise:12 so the plane label matches the SYSTEM-DATA table /
@@ -344,7 +370,7 @@ export function drawRoofPlan(
     const trussSpacing = `${rafterSp}" O.C.`;
     const facets = regPlanes.map((rp: any, i: number) => ({
       n: i + 1,
-      mods: validPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices)).length,
+      mods: regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices)).length,
       az: rp.azimuth != null && isFinite(rp.azimuth) ? `${Math.round(rp.azimuth)}°` : '—',
       tilt: rp.pitch != null && isFinite(rp.pitch) ? `${Math.round(rp.pitch)}°` : '—',
     }));
@@ -386,8 +412,9 @@ export function drawRoofPlan(
         cxp += c.w;
       }
     });
-    // truss note under the table
-    t.push(drawText(tx, ty + tblH + 8, `TRUSS: ${trussSize} @ ${trussSpacing}`, { anchor: 'start', fontSize: 5, fill: '#555' }));
+    // framing note under the table (one term sheet-wide — was TRUSS here vs
+    // RAFTER in SYSTEM DATA, which structural reviewers flag)
+    t.push(drawText(tx, ty + tblH + 8, `FRAMING: ${trussSize} @ ${trussSpacing}`, { anchor: 'start', fontSize: 5, fill: '#555' }));
 
     // ── ARRAY & ROOF CALC — TOTAL ──
     const cy2 = ty + tblH + 14;
@@ -406,6 +433,26 @@ export function drawRoofPlan(
       t.push(drawText(tx + 3, ry + 7, label, { anchor: 'start', fontSize: 5, fill: '#333' }));
       t.push(drawText(tx + tblW - 3, ry + 7, val, { anchor: 'end', fontSize: 5.2, fontWeight: 'bold', fill: '#1a1a1a' }));
     });
+
+    // ── GENERAL NOTES — numbered, upright, in the left column (replaces the
+    // single low-contrast italic footer line the critique flagged) ──
+    const gnY = cy2 + calcH + 16;
+    const gn: string[] = [
+      '1. FIELD VERIFY ALL DIMENSIONS PRIOR',
+      '   TO INSTALLATION.',
+      `2. MAINTAIN ${ftToFtIn(pathwayFt)} ACCESS PATHWAY PER`,
+      '   AHJ — IFC §1204.2. HIP CLEARANCES',
+      '   PROVIDE EAVE-TO-RIDGE ROUTES.',
+      '3. ATTACHMENT SUBJECT TO FRAMING',
+      '   LOCATION — SEE PV-3.',
+      '4. NO ROOF OBSTRUCTIONS MODELED IN',
+      '   ARRAY AREA — FIELD VERIFY.',
+    ];
+    t.push(drawText(tx, gnY, 'GENERAL NOTES', { anchor: 'start', fontSize: 6, fontWeight: 'bold', fill: '#000' }));
+    t.push(`<line x1="${tx}" y1="${gnY + 2.5}" x2="${tx + tblW}" y2="${gnY + 2.5}" stroke="#000" stroke-width="0.8"/>`);
+    gn.forEach((line, i) => {
+      t.push(drawText(tx, gnY + 11 + i * 8, line, { anchor: 'start', fontSize: 5.2, fill: '#1a1a1a' }));
+    });
     els.push(...t);
   }
 
@@ -417,45 +464,41 @@ export function drawRoofPlan(
   const roofWFt  = lngSpan;   // because 1° == 1ft in fake-degree encoding
   const roofHFt  = latSpan;
 
-  // L1 — Overall width (bottom) — PV-2 only
+  // L1 — Overall width (bottom) — PV-2 only. Value only: the "VERIFY IN FIELD"
+  // qualifier moved to GENERAL NOTES (critique: dim string was heavy + crowded).
   if (!isBranchColorMode) {
   els.push(drawOverallDimension(
     roofMinX, roofMaxX,
     roofMaxY + 36, 24,
-    ftToFtIn(roofWFt) + ' — VERIFY IN FIELD'
+    ftToFtIn(roofWFt)
   ));
   }
 
-  // L1 — Overall height (left, vertical) — PV-2 only
+  // L1 — Overall height (vertical) — tight against the roof outline; at the old
+  // draw-zone edge its extension line struck through both data tables.
   if (!isBranchColorMode && roofHFt > 3) {
     els.push(drawVerticalDimension(
-      dz.x - 14,
+      roofMinX - 26,
       roofMinY, roofMaxY,
       14,
       ftToFtIn(roofHFt)
     ));
   }
-
-  // L2 — Fire setback (top of draw zone, if space) — PV-2 only
-  if (!isBranchColorMode) {
-  const sbPixels = setbackFt * scale;
-  if (sbPixels > 10 && roofMinX + sbPixels < roofMaxX) {
-    els.push(drawLinearDimension(
-      roofMinX, roofMinX + sbPixels,
-      roofMinY - 12, 10,
-      ftToFtIn(setbackFt) + ' FIRE SETBACK'
-    ));
-  }
-  }
+  // (fire-setback mini-dimension removed — it rendered as a broken-leader
+  // artifact; the legend + callout ② carry the value)
 
   // ── North arrow + scale bar ──
   // North: PV-2B keeps the simple arrow; PV-2 gets a full N/E/S/W compass rose below.
   if (isBranchColorMode) {
     els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
   }
-  const scaleBarPx = Math.round(10 * scale);   // 10-foot scale bar
-  els.push(drawScaleBar(zones.dims.left + 4, H - zones.dims.bottom + 28,
-    Math.max(scaleBarPx, 30), '0    10 FT'));
+  const scaleBarPx = Math.max(Math.round(10 * scale), 30);   // 10-foot scale bar
+  const sbX = zones.dims.left + 4, sbY = H - zones.dims.bottom + 28;
+  els.push(drawScaleBar(sbX, sbY, scaleBarPx, ''));
+  // labels aligned to the graduations (was one crammed '0    10 FT' string)
+  els.push(drawText(sbX, sbY + 12, '0', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
+  els.push(drawText(sbX + scaleBarPx / 2, sbY + 12, '5', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
+  els.push(drawText(sbX + scaleBarPx, sbY + 12, '10 FT', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
 
   // ── Compass rose + LEGEND (PV-2 only) ─────────────────────────────────────
   if (!isBranchColorMode) {
@@ -498,31 +541,42 @@ export function drawRoofPlan(
   }
 
   // ── Callout bubbles ── (PV-2 only — PV-2B shows branch legend instead)
-  if (!isBranchColorMode) {
-  const cbY    = zones.dims.top + 12;
-  // Callout bubbles spread across the TOP of the roof, each pointing straight down
-  // to the nearest panel below it — short, near-vertical leaders instead of long
-  // diagonals fanning across the whole array (the old crossing "spider-web").
-  // Clamp the row just below the title bar so bubbles never render off-screen when
-  // the roof reaches the top edge (verified via the render harness).
-  const cbN      = 5;
-  const cbSpanX  = roofMaxX - roofMinX;
-  const cbRowY   = Math.max(roofMinY - 16, zones.dims.top + 10);
-  for (let i = 0; i < cbN; i++) {
-    const frac = (i + 0.5) / cbN;
-    const bx   = roofMinX + cbSpanX * frac;
-    // nearest panel to this bubble's x
-    let best: any = null, bestD = Infinity;
-    for (const p of validPanels) {
-      const d = Math.abs(toX(p.lng) - bx);
-      if (d < bestD) { bestD = d; best = p; }
+  // TARGETED anchors (critique: a strip of bubbles with long vertical leaders
+  // slashing through the array, pointing at the wrong objects). Each bubble
+  // sits just outside the roof adjacent to its object with a short leader:
+  //   ① module array → outermost top-row module
+  //   ② fire setback → midpoint of the longest hip band
+  //   ③ ridge line   → west end of the ridge
+  //   ④ conduit run  → dashed route drawn from the array to the SE eave corner
+  //   ⑤ attachment   → outermost bottom-row module
+  if (!isBranchColorMode && _panelPts.length > 0) {
+    const topP  = _panelPts.reduce((m, p) => (p.y < m.y ? p : m), _panelPts[0]);
+    const botP  = _panelPts.reduce((m, p) => (p.y > m.y ? p : m), _panelPts[0]);
+    const eastP = _panelPts.reduce((m, p) => (p.x > m.x ? p : m), _panelPts[0]);
+    let ridge: any = null, hip: any = null;
+    for (const e of interiorEdgesXY) {
+      const len = Math.hypot(e.bx - e.ax, e.by - e.ay);
+      const horiz = Math.abs(e.by - e.ay) < Math.abs(e.bx - e.ax) * 0.4;
+      if (horiz) { if (!ridge || len > ridge.len) ridge = { ...e, len }; }
+      else       { if (!hip   || len > hip.len)   hip   = { ...e, len }; }
     }
-    if (best) {
-      els.push(drawCalloutWithLeader(bx, cbRowY, toX(best.lng), toY(best.lat), i + 1, 8));
+    const cbTopY = Math.max(roofMinY - 16, zones.dims.top + 10);
+    els.push(drawCalloutWithLeader(topP.x + 20, cbTopY, topP.x + 3, topP.y - 5, 1, 8));
+    if (hip) {
+      const hx = (hip.ax + hip.bx) / 2, hy = (hip.ay + hip.by) / 2;
+      const west = hx < (roofMinX + roofMaxX) / 2;
+      els.push(drawCalloutWithLeader(west ? roofMinX - 16 : roofMaxX + 16, hy - 16, hx, hy, 2, 8));
     }
+    if (ridge) {
+      const wEnd = ridge.ax < ridge.bx ? { x: ridge.ax, y: ridge.ay } : { x: ridge.bx, y: ridge.by };
+      els.push(drawCalloutWithLeader(roofMinX - 16, wEnd.y - 18, wEnd.x + 6, wEnd.y - 2, 3, 8));
+    }
+    // ④ conduit: dashed intended route from the east array edge to the SE corner
+    const cEndX = roofMaxX - 10, cEndY = roofMaxY - 8;
+    els.push(`<polyline points="${eastP.x.toFixed(1)},${eastP.y.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
+    els.push(drawCalloutWithLeader(roofMaxX + 16, roofMaxY + 6, cEndX, cEndY, 4, 8));
+    els.push(drawCalloutWithLeader(botP.x - 20, roofMaxY + 14, botP.x - 3, botP.y + 5, 5, 8));
   }
-
-  } // end PV-2 callout bubbles
 
   // ── v65: Branch legend overlay (PV-2B only) ──
   if (isBranchColorMode && panelColorById) {
@@ -548,13 +602,13 @@ export function drawRoofPlan(
     });
   }
 
-  // ── System summary line ──
-  els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
-    isBranchColorMode
-      ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP — SEE DATA ZONE FOR BRANCH SCHEDULE'
-      : `ROOF ARRAY PLAN — FIELD VERIFY ALL DIMENSIONS — MAINTAIN ${ftToFtIn(pathwayFt)} ACCESS PATHWAY PER AHJ / IFC §605.11 — SUBJECT TO RAFTER LOCATION + AHJ APPROVAL`, {
-      anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
-    }));
+  // ── System summary line (PV-2B only — PV-2 carries GENERAL NOTES instead) ──
+  if (isBranchColorMode) {
+    els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
+      'CIRCUIT LAYOUT — AC BRANCH COLOR MAP — SEE DATA ZONE FOR BRANCH SCHEDULE', {
+        anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
+      }));
+  }
 
   els.push(drawSVGClose());
   return els.join('');

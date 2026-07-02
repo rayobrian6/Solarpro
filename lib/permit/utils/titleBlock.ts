@@ -19,7 +19,9 @@ export function titleBlock(
   totalPages: number
 ): string {
   const { project, compliance, system } = input;
-  const necVer  = compliance.jurisdiction?.necVersion || '2023';
+  // Some AHJ records carry 'NEC 2023' rather than '2023' — strip the prefix so
+  // the code line never prints 'NEC NEC 2023' (critique/red-line item).
+  const necVer  = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
   const ibcVer  = '2021';
   const ircVer  = '2021';
   const ifcVer  = necVer === '2023' ? '2024' : '2021';
@@ -69,8 +71,8 @@ export function titleBlock(
         <tr><td class="tbl">AHJ</td><td class="tbv">${ahj}</td></tr>
         <tr class="tb-rev-hdr"><td class="tbl" colspan="2" style="text-align:center;font-weight:900;background:#000;color:#fff;letter-spacing:0.5px;">REVISIONS</td></tr>
         <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; ${project.date}</td></tr>
-        <tr><td class="tbl">SCALE</td><td class="tbv">NTS</td></tr>
-        <tr><td class="tbl">PE SEAL</td><td class="tbv"><div class="pe-seal-box">SEAL / STAMP REQUIRED</div></td></tr>
+        <tr><td class="tbl">SCALE</td><td class="tbv">AS NOTED</td></tr>
+        <tr><td class="tbl">PE SEAL</td><td class="tbv"><div class="pe-seal-box">&nbsp;</div></td></tr>
       </table>
     </div>
   </div>`;
@@ -97,7 +99,7 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC 705.12 and manufacturer requirements.`,
     `Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.`,
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
-    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a7605.11.6. See sheet PV-5 for complete label schedule and placement diagram.`,
+    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
     // FIX v47.295: Only include roof attachment / flashing notes for roof systems
     ...((input.project)?.systemType === 'fence' || input.project?.systemType === 'solar_fence'
       ? [

@@ -172,3 +172,88 @@ export function regularizeRoofPlanes<T extends RoofPlaneLike>(
     }),
   }));
 }
+
+// ── Panel co-transform ────────────────────────────────────────────────────────
+// Regularization moves roof edges by up to maxShiftFt; panels placed against the
+// ORIGINAL edges then overhang the straightened linework (the top eave row read
+// as a layout error). Each panel is carried along by the least-squares AFFINE
+// map fitted from its plane's original → regularized vertices, so relative
+// position within the facet is preserved. Display-only, like the planes.
+
+type LatLng = { lat: number; lng: number };
+
+/** Least-squares affine fit (x,y)→(x',y') from point correspondences. */
+function fitAffine(src: Pt[], dst: Pt[]): ((p: Pt) => Pt) | null {
+  const n = src.length;
+  if (n < 3) return null;
+  // Normal equations for [a b c] with basis (x, y, 1) — same matrix for both axes.
+  let sxx = 0, sxy = 0, sx = 0, syy = 0, sy = 0, s1 = n;
+  let bx1 = 0, bx2 = 0, bx3 = 0, by1 = 0, by2 = 0, by3 = 0;
+  for (let i = 0; i < n; i++) {
+    const { x, y } = src[i], u = dst[i].x, v = dst[i].y;
+    sxx += x * x; sxy += x * y; sx += x; syy += y * y; sy += y;
+    bx1 += x * u; bx2 += y * u; bx3 += u;
+    by1 += x * v; by2 += y * v; by3 += v;
+  }
+  // Solve the 3x3 symmetric system via Cramer's rule.
+  const M = [sxx, sxy, sx, sxy, syy, sy, sx, sy, s1];
+  const det = (m: number[]) =>
+    m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+  const D = det(M);
+  if (Math.abs(D) < 1e-9) return null;   // degenerate (collinear vertices)
+  const solve = (b1: number, b2: number, b3: number) => {
+    const c0 = det([b1, M[1], M[2], b2, M[4], M[5], b3, M[7], M[8]]) / D;
+    const c1 = det([M[0], b1, M[2], M[3], b2, M[5], M[6], b3, M[8]]) / D;
+    const c2 = det([M[0], M[1], b1, M[3], M[4], b2, M[6], M[7], b3]) / D;
+    return [c0, c1, c2];
+  };
+  const [a, b, c] = solve(bx1, bx2, bx3);
+  const [d, e, f] = solve(by1, by2, by3);
+  return (p: Pt) => ({ x: a * p.x + b * p.y + c, y: d * p.x + e * p.y + f });
+}
+
+/**
+ * Map panels through their containing plane's original→regularized affine.
+ * Panels not inside any original plane fall back to the nearest-centroid plane;
+ * panels stay untouched when no transform can be fitted. Pure, display-only.
+ */
+export function coTransformPanels<P extends LatLng>(
+  originalPlanes: RoofPlaneLike[],
+  regularizedPlanes: RoofPlaneLike[],
+  panels: P[],
+): P[] {
+  const xforms = originalPlanes.map((op, i) => {
+    const src = (op.vertices ?? []).map(v => ({ x: v.lng, y: v.lat }));
+    const dst = (regularizedPlanes[i]?.vertices ?? []).map(v => ({ x: v.lng, y: v.lat }));
+    return src.length === dst.length ? fitAffine(src, dst) : null;
+  });
+  const inRing = (lat: number, lng: number, ring: LatLng[]): boolean => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+      if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+  const centroids = originalPlanes.map(op => {
+    const vs = op.vertices ?? [];
+    return {
+      lat: vs.reduce((s, v) => s + v.lat, 0) / (vs.length || 1),
+      lng: vs.reduce((s, v) => s + v.lng, 0) / (vs.length || 1),
+    };
+  });
+  return panels.map(p => {
+    let pi = originalPlanes.findIndex(op => inRing(p.lat, p.lng, op.vertices ?? []));
+    if (pi === -1) {
+      let best = Infinity;
+      centroids.forEach((c, i) => {
+        const d = Math.hypot(c.lat - p.lat, c.lng - p.lng);
+        if (d < best) { best = d; pi = i; }
+      });
+    }
+    const xf = pi >= 0 ? xforms[pi] : null;
+    if (!xf) return p;
+    const q = xf({ x: p.lng, y: p.lat });
+    return { ...p, lat: q.y, lng: q.x };
+  });
+}

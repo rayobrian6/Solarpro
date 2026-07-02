@@ -107,7 +107,18 @@ const PDF_PAGE_CONFIG = {
 // fire-setback band ("if there is no firewalk on the eave it needs to not
 // show") — perimeter edges are classified eave vs rake by outward-normal vs
 // plane azimuth; bands draw only on ridge/hips/rakes.
-const PLANSET_ENGINE_VERSION = 47368;
+// 47369 (2026-07-01): three-lens critique batch (CAD drafter / reference-match /
+// AHJ plan-checker panel on the rendered sheet). Modules now ROTATE to their
+// plane's fall line (end-plane arrays overlapped drawn axis-aligned) and ride
+// the regularizer via per-facet affine (top row overhung the straightened
+// eave); two rail-foot dots per module. Targeted callout anchors (bubbles beside
+// their objects, short leaders — ③ ridge, ② hip band, ④ dashed conduit route to
+// the SE corner). Vertical dim moved off the data tables. GENERAL NOTES block
+// (numbered, upright) replaces the italic footer. Scale-bar tick labels 0/5/10.
+// Plane labels auto-dodge modules. Title block: SCALE 'AS NOTED' (was NTS vs a
+// scaled view), PE seal placeholder text removed, 'NEC NEC' dedup guard. IFC
+// citations updated §605.11 → §1204.2 (2018+ editions). FRAMING wording unified.
+const PLANSET_ENGINE_VERSION = 47369;
 
 
 
