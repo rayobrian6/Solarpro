@@ -18,6 +18,7 @@ import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/l
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
 import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
+import { fetchParcelBoundary } from '@/lib/aerial/parcelBoundary';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
 
@@ -1058,6 +1059,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Parcel boundary (county GIS registry) → PV-1 property line + APN ──────
+    // Verified county endpoints only (Madison IL live); fail-safe null keeps
+    // the sheet honest — no property line is better than a guessed one.
+    try {
+      const _plat = Number(enrichedBody.project?.lat), _plng = Number(enrichedBody.project?.lng);
+      const parcel = await fetchParcelBoundary(_plat, _plng,
+        (enrichedBody.project as any)?.county, (enrichedBody.project as any)?.state);
+      if (parcel) {
+        (enrichedBody.aerialData as any) = { ...(enrichedBody.aerialData ?? {}), parcel };
+        if (!enrichedBody.project.apn && parcel.apn) {
+          (enrichedBody.project as any).apn = parcel.apn;
+          console.log('[parcel] APN backfilled into title block:', parcel.apn);
+        }
+      }
+    } catch (parcelErr: unknown) {
+      console.log('[parcel] lookup skipped:', (parcelErr as Error)?.message);
+    }
+
     // ── Survey-photo GPS hints → PV-1 equipment markers (tier 1) ──────────────
     // SurveyV2 photo capture samples device geolocation at snap time (mig 099).
     // A meter/main-panel photo GPS pins the equipment to the correct wall, so
@@ -1133,6 +1152,9 @@ export async function POST(req: NextRequest) {
       try {
         const _ad = enrichedBody.aerialData as any;
         const _planes = (enrichedBody.project?.roofPlanes ?? []) as Array<{ vertices?: Array<{lat:number;lng:number}> }>;
+        if (!_ad?.imageBase64) console.log('[aerialVision] SKIPPED — no aerial image on this generate');
+        else if (_ad.imageSource !== 'nearmap') console.log('[aerialVision] SKIPPED — aerial source is', _ad.imageSource, '(needs nearmap HD)');
+        else if (_planes.length === 0) console.log('[aerialVision] SKIPPED — no roof planes on project');
         if (_ad?.imageBase64 && _ad.imageSource === 'nearmap' && _planes.length > 0) {
           const visionObs = await detectAerialVisionObstructions({
             imageBase64: _ad.imageBase64,

@@ -255,7 +255,28 @@ const PDF_PAGE_CONFIG = {
 // an agreement gate (raw centroid delta skewed when the subject crop
 // grabbed/dropped a plane — modules hung off the west eave); hull pad
 // tightened 1.28→1.12.
-const PLANSET_ENGINE_VERSION = 47378;
+// 47379 (2026-07-03): PV-1 TOP-DOWN REBUILT (Ray rejected it twice; worker
+// panel diagnosed "80% dead content under a black wash" + delivered the spec).
+// (1) CONTENT-DRIVEN CROP via SVG viewBox over the embedded aerial — subject
+// spans ~50% of the frame (34-70 m ground clamp, street-side bias), ~2x
+// effective print resolution, zero fetch changes. (2) WHITE contextual wash
+// (photo-on-paper) replaces the black dim. (3) PROPERTY LINES ARE REAL:
+// lib/aerial/parcelBoundary.ts — county-GIS registry (entry #1 Madison County
+// IL CCAO, VERIFIED live: Melvin parcel polygon + PIN 17-2-20-13-04-401-003
+// in 0.2 s), dashed phantom-line + rotated PROPERTY LINE label, APN
+// auto-backfills the title block; registry misses render honestly without
+// (national fallback = Regrid when Ray buys it). (4) Equipment restyled to
+// reference language: white square wall tags + straight fanned leaders to a
+// margin label column w/ halo text (no more white boxes piled on the focal
+// point). (5) Cartographic furniture: neatline, white-plate alternating
+// scale bar + computed 1"≈N' ratio, white north rose; module badge moved to
+// the caption strip. (6) Street name placed ON the road along its bearing
+// (degenerate-pin guard → bottom edge). (7) Near-opaque navy modules.
+// Also: aerial-vision sweep UPSCALE 2→3 (a 4" pipe ≈ 9 px) + LOUD skip-reason
+// logging at every gate (the "did it even run?" question answers itself in
+// the function logs — #1 suspect for the still-missing vent is
+// ANTHROPIC_API_KEY absent on Vercel).
+const PLANSET_ENGINE_VERSION = 47379;
 
 
 

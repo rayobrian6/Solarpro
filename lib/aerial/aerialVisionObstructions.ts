@@ -25,7 +25,9 @@ import { lngToGlobalPx, latToGlobalPx, mapObstructionDescription, type NearmapOb
 
 const VISION_MODEL = 'claude-opus-4-8';
 const TIMEOUT_MS = 45_000;
-const UPSCALE = 2;              // 7.5cm/px → 3.75cm/px effective; a vent ~6px
+const UPSCALE = 3;              // 7.5cm/px → 2.5cm/px effective; a 4" pipe ~9px
+                                // (Opus 4.8 accepts up to 2576px long edge —
+                                // a ~260px roof crop upscales well within that)
 const MAX_DETECTIONS = 24;      // sanity cap — a residential roof has < 24 penetrations
 const DEDUPE_M = 1.2;           // within 1.2m of a Nearmap detection = same object
 
@@ -96,13 +98,16 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
  * polygons around each point) with description marked "aerial vision".
  */
 export async function detectAerialVisionObstructions(input: AerialVisionInput): Promise<NearmapObstruction[]> {
+  // LOUD skip reasons — the #1 field question is "did the sweep even run?"
+  // One look at the function logs must answer it.
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key || !input.imageBase64?.startsWith('data:image/')) return [];
+  if (!key) { console.log('[aerialVision] SKIPPED — ANTHROPIC_API_KEY not set in this environment'); return []; }
+  if (!input.imageBase64?.startsWith('data:image/')) { console.log('[aerialVision] SKIPPED — no aerial image data'); return []; }
 
   const rings = (input.roofPlanes ?? [])
     .map(rp => (rp.vertices ?? []).filter(v => isFinite(v?.lat) && isFinite(v?.lng)))
     .filter(r => r.length >= 3);
-  if (!rings.length) return [];
+  if (!rings.length) { console.log('[aerialVision] SKIPPED — no design roof planes'); return []; }
 
   const cacheKey = `${input.lat.toFixed(7)},${input.lng.toFixed(7)},${input.zoom}`;
   const cached = visionCache.get(cacheKey);

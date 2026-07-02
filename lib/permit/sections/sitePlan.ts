@@ -94,6 +94,37 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     const _pin = isFinite(project.lat as any) && isFinite(project.lng as any)
       ? { lat: project.lat as number, lng: project.lng as number } : null;
 
+    // ── CONTENT-DRIVEN CROP (SVG viewBox over the embedded image) ─────────
+    // The raw frame is ~100 m wide for a ~15 m house — 80% dead content, the
+    // core of the "sloppy" read. Crop so the subject spans ~45-55% of the
+    // frame, biased toward the street side, floor 34 m / cap 70 m of ground.
+    // Zero fetch changes: the viewBox crops the already-embedded raster and
+    // roughly doubles the effective print resolution of the house.
+    let cropX = 0, cropY = 0, cropW = imgW, cropH = imgH;
+    if (_ring.length >= 3) {
+      const rpx = _ring.map((v: any) => toPx(v.lat, v.lng));
+      const hminX = Math.min(...rpx.map(p => p.x)), hmaxX = Math.max(...rpx.map(p => p.x));
+      const hminY = Math.min(...rpx.map(p => p.y)), hmaxY = Math.max(...rpx.map(p => p.y));
+      const hullW = hmaxX - hminX, hullH = hmaxY - hminY;
+      const aspect = imgH / imgW;   // keep the drawing column's aspect
+      let cw = Math.max(hullW, hullH / aspect) * 2.3;
+      cw = Math.max(34 * ppm, Math.min(70 * ppm, cw, imgW));
+      let ch = cw * aspect;
+      if (ch < hullH * 1.4) { ch = Math.min(imgH, hullH * 1.4); cw = Math.min(imgW, ch / aspect); ch = cw * aspect; }
+      let cx0 = (hminX + hmaxX) / 2, cy0 = (hminY + hmaxY) / 2;
+      if (_pin) {   // street-side bias: 0.12·frame toward the geocode pin
+        const pp = toPx(_pin.lat, _pin.lng);
+        const dx = pp.x - cx0, dy = pp.y - cy0, dl = Math.hypot(dx, dy) || 1;
+        cx0 += (dx / dl) * cw * 0.12;
+        cy0 += (dy / dl) * ch * 0.12;
+      }
+      cropX = Math.max(0, Math.min(imgW - cw, cx0 - cw / 2));
+      cropY = Math.max(0, Math.min(imgH - ch, cy0 - ch / 2));
+      cropW = cw; cropH = ch;
+    }
+    const inCrop = (p: { x: number; y: number }, pad = 4) =>
+      p.x > cropX - pad && p.x < cropX + cropW + pad && p.y > cropY - pad && p.y < cropY + cropH + pad;
+
     // ── Registration shift: design GPS → imagery GPS ──────────────────────
     // Nearmap's AI roof polygons are registered to the SAME imagery as the
     // tiles; the design trace sits ~1 m off. When subject polygons are in
@@ -171,18 +202,54 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const xs = padded.map(p => p.x), ys = padded.map(p => p.y);
         const hullArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
         // Skip the mask if the subject fills most of the frame (nothing to dim).
-        if (hullArea < imgW * imgH * 0.72) {
+        if (hullArea < cropW * cropH * 0.8) {
           const outlines = _subjPolys.map(poly => {
             const d = poly.map(v => { const p = toPx(v.lat, v.lng); return `${p.x.toFixed(1)},${p.y.toFixed(1)}`; }).join(' ');
             return `<polygon points="${d}" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="1"/>`;
           }).join('');
+          // WHITE contextual wash (Aurora-style "photo on paper"), not the
+          // old black night-vision dim — the drawing must read as a drawing.
           dimSvg = `
             <mask id="pv1-subj-dim">
-              <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="#fff"/>
+              <rect x="${cropX.toFixed(0)}" y="${cropY.toFixed(0)}" width="${cropW.toFixed(0)}" height="${cropH.toFixed(0)}" fill="#fff"/>
               <polygon points="${hullStr}" fill="#000"/>
             </mask>
-            <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="rgba(10,14,22,0.42)" mask="url(#pv1-subj-dim)"/>
+            <rect x="${cropX.toFixed(0)}" y="${cropY.toFixed(0)}" width="${cropW.toFixed(0)}" height="${cropH.toFixed(0)}" fill="rgba(255,255,255,0.40)" mask="url(#pv1-subj-dim)"/>
             ${outlines}`;
+        }
+      }
+    }
+
+    // ── Layer 0.5: PROPERTY LINE (county GIS parcel, when registered) ─────
+    // Classic site-plan treatment: long-dash line with a white halo. Large
+    // parcels extend past the frame — SVG clips them naturally and the label
+    // sits on the longest visible run.
+    let parcelSvg = '';
+    {
+      const _parcel = (aerial as any).parcel as { polygon?: Array<{lat:number;lng:number}> } | undefined;
+      const pv = (_parcel?.polygon ?? []).filter(v => isFinite(v?.lat) && isFinite(v?.lng));
+      if (pv.length >= 4) {
+        const pts = pv.map(v => toPx(v.lat, v.lng));
+        const inFrame = (p: {x:number;y:number}) => p.x > -4 && p.x < imgW + 4 && p.y > -4 && p.y < imgH + 4;
+        if (pts.some(inFrame)) {
+          const d = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+          parcelSvg = `<polygon points="${d}" fill="none" stroke="#fff" stroke-width="3" opacity="0.7" stroke-dasharray="14 7"/>` +
+                      `<polygon points="${d}" fill="none" stroke="#111" stroke-width="1.4" stroke-dasharray="14 7"/>`;
+          // Label the longest fully-visible segment
+          let li = -1, lLen = 0;
+          for (let i = 0; i < pts.length; i++) {
+            const a = pts[i], b = pts[(i + 1) % pts.length];
+            if (!inFrame(a) || !inFrame(b)) continue;
+            const L = Math.hypot(b.x - a.x, b.y - a.y);
+            if (L > lLen) { lLen = L; li = i; }
+          }
+          if (li >= 0 && lLen > 70) {
+            const a = pts[li], b = pts[(li + 1) % pts.length];
+            const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+            let ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+            if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+            parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="8.5" font-weight="900" letter-spacing="1.5" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="2.4" paint-order="stroke">PROPERTY LINE</text>`;
+          }
         }
       }
     }
@@ -207,7 +274,9 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const az = isFinite((p as any).azimuth) ? (p as any).azimuth : (planeAz(p) ?? 180);
         const landscape = (p.orientation || '').toLowerCase() === 'landscape';
         const w = (landscape ? lM : wM) * ppm, h = (landscape ? wM : lM) * ppm;
-        parts.push(`<g transform="translate(${c.x.toFixed(1)},${c.y.toFixed(1)}) rotate(${(az as number).toFixed(1)})"><rect x="${(-w/2).toFixed(1)}" y="${(-h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="rgba(30,80,200,0.50)" stroke="rgba(255,255,255,0.85)" stroke-width="0.7" rx="0.5"/></g>`);
+        // Near-opaque navy — a DESIGN layer, not a photo tint; also absorbs
+        // the sub-meter registration residual far better than a 50% wash.
+        parts.push(`<g transform="translate(${c.x.toFixed(1)},${c.y.toFixed(1)}) rotate(${(az as number).toFixed(1)})"><rect x="${(-w/2).toFixed(1)}" y="${(-h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="rgba(23,58,161,0.82)" stroke="rgba(255,255,255,0.95)" stroke-width="0.8" rx="0.5"/></g>`);
       }
       modSvg = parts.join('');
     }
@@ -245,11 +314,24 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
       const dy = _pin.lat - rLat;
       const streetName = (project.address || '').split(',')[0].replace(/^\s*\d+\s+/, '').replace(/\b(apt|unit|ste|#)\.?\s*\S*$/i, '').trim().toUpperCase();
       if (streetName && (Math.abs(dx) > 1e-9 || Math.abs(dy) > 1e-9)) {
-        const horiz = Math.abs(dx) > Math.abs(dy);
-        const lx = horiz ? (dx > 0 ? imgW - 16 : 16) : imgW / 2;
-        const ly = horiz ? imgH / 2 : (dy > 0 ? 26 : imgH - 16);
-        const rot = horiz ? (dx > 0 ? 90 : -90) : 0;
-        streetSvg = `<text x="${lx}" y="${ly}" transform="rotate(${rot} ${lx} ${ly})" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="900" letter-spacing="2" fill="#fff" stroke="rgba(0,0,0,0.75)" stroke-width="2.6" paint-order="stroke" text-decoration="underline">${streetName}</text>`;
+        // Place ON the street surface: ~65% of the way from the building
+        // centroid toward the geocode pin (which sits on the frontage),
+        // rotated to run along the road (perpendicular to that vector).
+        const cpx = toPx(rLat, rLng), ppx2 = _pin ? toPx(_pin.lat, _pin.lng) : cpx;
+        const pinDistM = Math.hypot((ppx2.x - cpx.x), (ppx2.y - cpx.y)) / ppm;
+        let sx: number, sy: number, rot: number;
+        if (pinDistM > 8) {
+          // Pin sits on the street frontage → label ~35% past it, along the road
+          sx = cpx.x + (ppx2.x - cpx.x) * 1.35; sy = cpx.y + (ppx2.y - cpx.y) * 1.35;
+          rot = Math.atan2(ppx2.y - cpx.y, ppx2.x - cpx.x) * 180 / Math.PI + 90;
+          if (rot > 90) rot -= 180; else if (rot < -90) rot += 180;
+        } else {
+          // Degenerate pin (at the building) → bottom edge, horizontal
+          sx = cropX + cropW / 2; sy = cropY + cropH - 44; rot = 0;
+        }
+        sx = Math.max(cropX + 60, Math.min(cropX + cropW - 60, sx));
+        sy = Math.max(cropY + 26, Math.min(cropY + cropH - 20, sy));
+        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" letter-spacing="3" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="3" paint-order="stroke">${streetName}</text>`;
       }
     }
 
@@ -267,71 +349,83 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           msp:           { tag: 'MSP', name: '(E) MAIN SERVICE PANEL' },
           ac_disconnect: { tag: 'AC',  name: '(N) AC DISCONNECT' },
         };
+        // Reference-style: small white SQUARE tags on the wall, straight
+        // fanned leaders to a margin column, halo text (no white boxes piled
+        // on the focal point — that was half the "sloppy").
         const parts: string[] = [];
-        let _lastLy = -Infinity;
-        located.forEach((eq, i) => {
-          const p = toPxD(eq.lat, eq.lng);
-          if (p.x < 8 || p.x > imgW - 8 || p.y < 8 || p.y > imgH - 8) return;
+        const visible = located
+          .map(eq => ({ eq, p: toPxD(eq.lat, eq.lng) }))
+          .filter(({ p }) => inCrop(p, -8))
+          .sort((a, b) => a.p.y - b.p.y);
+        const colRight = visible.length ? (visible[0].p.x > cropX + cropW / 2) : true;
+        const colX = colRight ? cropX + cropW - 14 : cropX + 14;
+        let ly = Math.max(cropY + cropH * 0.16, (visible[0]?.p.y ?? 0) - 34);
+        visible.forEach(({ eq, p }) => {
           const meta = TAGS[eq.kind];
-          const rightSide = p.x > imgW / 2;
-          const lx = rightSide ? Math.min(p.x + 120, imgW - 8) : Math.max(p.x - 120, 8);
-          let ly = Math.max(24, Math.min(imgH - 24, p.y - 34 + i * 26));
-          if (ly < _lastLy + 24) ly = _lastLy + 24;   // labels never overlap
-          _lastLy = ly;
           const prov = eq.provenance === 'survey_photo_gps' ? 'PER SURVEY PHOTO GPS' : 'APPROX. — FIELD VERIFY';
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#fff" stroke-width="2.2"/>`);
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#1e40af" stroke-width="1.1"/>`);
-          parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="7" fill="#1e40af" stroke="#fff" stroke-width="1.6"/>`);
-          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 2.6).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${meta.tag.length > 2 ? 5 : 6.5}" font-weight="900" fill="#fff">${meta.tag}</text>`);
-          const tw = Math.max(meta.name.length, prov.length) * 4.4 + 10;
-          const tx0 = rightSide ? lx - tw : lx;
-          parts.push(`<rect x="${tx0.toFixed(1)}" y="${(ly - 10).toFixed(1)}" width="${tw.toFixed(0)}" height="20" rx="2" fill="rgba(255,255,255,0.94)" stroke="#1e40af" stroke-width="0.8"/>`);
-          parts.push(`<text x="${(tx0 + 5).toFixed(1)}" y="${(ly - 2).toFixed(1)}" font-family="Arial,sans-serif" font-size="7" font-weight="900" fill="#111">${meta.name}</text>`);
-          parts.push(`<text x="${(tx0 + 5).toFixed(1)}" y="${(ly + 6.5).toFixed(1)}" font-family="Arial,sans-serif" font-size="5.6" fill="#555">${prov}</text>`);
+          ly = Math.max(ly, cropY + 22); ly = Math.min(ly, cropY + cropH - 26);
+          // leader: straight, white casing + dark line
+          const lexEnd = colRight ? colX - 4 : colX + 4;
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.9"/>`);
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#111" stroke-width="1.1"/>`);
+          // wall tag: white square + code
+          parts.push(`<rect x="${(p.x - 6).toFixed(1)}" y="${(p.y - 6).toFixed(1)}" width="12" height="12" fill="#fff" stroke="#111" stroke-width="1.3"/>`);
+          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${meta.tag.length > 2 ? 5.6 : 7}" font-weight="900" fill="#111">${meta.tag}</text>`);
+          // margin label: halo text, no box
+          const anchor = colRight ? 'end' : 'start';
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="9.5" font-weight="900" fill="#111" stroke="#fff" stroke-width="2.6" paint-order="stroke">${meta.name}</text>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="6.8" font-weight="bold" fill="#333" stroke="#fff" stroke-width="2" paint-order="stroke">${prov}</text>`);
+          ly += 30;
         });
         eqSvg = parts.join('');
       }
     } catch (eqErr: unknown) {
       console.log('[permit/pv1] equipment markers skipped:', (eqErr as Error)?.message);
     }
-    const pSvg = dimSvg + modSvg + canopySvg + streetSvg + eqSvg;
+    const pSvg = dimSvg + parcelSvg + modSvg + canopySvg + streetSvg + eqSvg;
 
-    // Graphic scale in FEET (permits are imperial) — 20 ft bar.
+    // ── Cartographic furniture (all in CROP coordinates) ──────────────────
+    // One white plate bottom-left: 20-ft alternating scale bar + computed
+    // ratio; white-circle north arrow top-right; 2px neatline. The floating
+    // blue module badge moved to the footer strip.
     const scalePx = Math.round(20 * 0.3048 * ppm);
-    const scaleBar = scalePx>0&&scalePx<300 ? `
-      <g transform="translate(24,${imgH-20})">
-        <rect x="0" y="-8" width="${scalePx}" height="12" rx="2" fill="rgba(0,0,0,0.65)"/>
-        <line x1="0" y1="0" x2="${scalePx}" y2="0" stroke="white" stroke-width="1.5"/>
-        <line x1="0" y1="-4" x2="0" y2="4" stroke="white" stroke-width="1.5"/>
-        <line x1="${scalePx/2}" y1="-3" x2="${scalePx/2}" y2="3" stroke="white" stroke-width="1"/>
-        <line x1="${scalePx}" y1="-4" x2="${scalePx}" y2="4" stroke="white" stroke-width="1.5"/>
-        <text x="${scalePx/2}" y="-11" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" fill="white">20 FT</text>
-      </g>` : '';
+    const seg = scalePx / 4;
+    const plateW = scalePx + 96;
+    const fx = cropX + 12, fy = cropY + cropH - 34;
+    const scaleFeetPerInch = Math.round(cropW / ppm / 0.3048 / 10.6);   // ~10.6in printed drawing width
+    const furniture = `
+      <g>
+        <rect x="${fx}" y="${fy}" width="${plateW}" height="26" rx="2" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1"/>
+        ${[0,1,2,3].map(i => `<rect x="${(fx + 8 + i*seg).toFixed(1)}" y="${fy + 8}" width="${seg.toFixed(1)}" height="7" fill="${i % 2 ? '#fff' : '#111'}" stroke="#111" stroke-width="0.8"/>`).join('')}
+        <text x="${fx + 8}" y="${fy + 23}" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">0</text>
+        <text x="${(fx + 8 + scalePx/2).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">10</text>
+        <text x="${(fx + 8 + scalePx).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">20 FT</text>
+        <text x="${(fx + scalePx + 18).toFixed(1)}" y="${fy + 16}" font-family="Arial,sans-serif" font-size="7.5" font-weight="900" fill="#111">1" ≈ ${scaleFeetPerInch}'</text>
+      </g>
+      <g transform="translate(${(cropX + cropW - 30).toFixed(0)},${(cropY + 30).toFixed(0)})">
+        <circle cx="0" cy="0" r="19" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1.5"/>
+        <polygon points="0,-13 5,8 0,3 -5,8" fill="#111"/>
+        <text x="0" y="-22" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.75)" stroke-width="2.4" paint-order="stroke">N</text>
+      </g>
+      <rect x="${(cropX + 1.5).toFixed(1)}" y="${(cropY + 1.5).toFixed(1)}" width="${(cropW - 3).toFixed(1)}" height="${(cropH - 3).toFixed(1)}" fill="none" stroke="#111" stroke-width="2"/>`;
 
     drawingContent = `
       <div class=\"f-lg fw9 caps center\">${addr}</div>
       <div class=\"aerial-wrap\">
-        <img src="${aerial.imageBase64}" style="display:block;width:100%;height:auto;" alt="Aerial — ${addr}"/>
-        <svg viewBox="0 0 ${imgW} ${imgH}" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="${cropX.toFixed(1)} ${cropY.toFixed(1)} ${cropW.toFixed(1)} ${cropH.toFixed(1)}" style="position:static;display:block;width:100%;height:auto;aspect-ratio:${(cropW / cropH).toFixed(4)};" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+          <image x="0" y="0" width="${imgW}" height="${imgH}" href="${aerial.imageBase64}" preserveAspectRatio="none"/>
           ${pSvg}
-          <g transform="translate(${imgW-36},36)">
-            <circle cx="0" cy="0" r="22" fill="rgba(0,0,0,0.7)" stroke="white" stroke-width="1.5"/>
-            <polygon points="0,-14 5,7 0,2 -5,7" fill="white"/>
-            <polygon points="0,14 5,-7 0,-2 -5,-7" fill="rgba(255,255,255,0.3)"/>
-            <text x="0" y="-18" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="900" fill="white">N</text>
-          </g>
-          <rect x="${imgW/2-90}" y="${imgH-22}" width="180" height="18" rx="3" fill="rgba(30,64,175,0.88)"/>
-          <text x="${imgW/2}" y="${imgH-10}" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="white">${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2)||'—'} kW DC</text>
-          ${scaleBar}
+          ${furniture}
         </svg>
       </div>
-      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">${aerial.imageSource === 'nearmap' ? '🛰️ Nearmap HD aerial · 7.5 cm/px orthophoto' : '🛰️ Satellite aerial'}</div>`;
+      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2)||'—'} kW DC &nbsp;|&nbsp; ${aerial.imageSource === 'nearmap' ? '🛰️ Nearmap HD aerial · 7.5 cm/px orthophoto' : '🛰️ Satellite aerial'}</div>`;
 
     // HONEST legend — list exactly what this aerial actually draws, nothing
     // else (the old hardcoded list promised PROPERTY LINE / FIRE SETBACK that
     // aerial mode never drew — an AHJ reads the legend as a content claim).
     aerialLegend = [
       ...(modSvg ? [{ fill:'rgba(30,80,200,0.60)', stroke:'#ffffff', dash:false, label:'PV MODULE (NEW)' }] : []),
+      ...(parcelSvg ? [{ fill:'none', stroke:'#111111', dash:true, label:'PROPERTY LINE (COUNTY GIS)' }] : []),
       ...(dimSvg ? [{ fill:'none', stroke:'#6b7280', dash:true,  label:'SUBJECT BUILDING' }] : []),
       ...(canopySvg ? [{ fill:'rgba(22,101,52,0.25)', stroke:'#1a7a2e', dash:true, label:'TREE CANOPY — VERIFY' }] : []),
       ...(eqSvg ? [{ fill:'#1e40af', stroke:'#ffffff', dash:false, label:'SERVICE EQUIPMENT (TAGGED)' }] : []),
