@@ -142,32 +142,58 @@ export function roofCAD(input: PermitInputShape): CADModel {
     .map((o: any, i: number) => {
       const pts = o.polygon.filter((p: any) => isFinite(p?.lat) && isFinite(p?.lng));
       if (pts.length < 3) return null;
-      const cLat = pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
-      const cLng = pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
+      let cLat = pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
+      let cLng = pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
       // The Nearmap AI query AOI (~45 m) covers NEIGHBORING buildings too —
       // an obstruction only belongs on this planset if its centroid sits on
       // one of THIS project's roof planes. (Neighbor vents scattered across
       // the sheet were the "all fucky" bug.)
-      const hostPlane = rawPlanes.find((rp: any) => _ptInRing(cLat, cLng, rp.vertices ?? []));
-      if (!hostPlane) { _droppedOffRoof++; return null; }
+      // CANOPY is the exception: a tree overhanging the eave has its centroid
+      // over the YARD — membership is vertex overlap either way, and the drawn
+      // marker re-centers on the part of the canopy actually over the roof
+      // (that's the area the aerial couldn't verify — possible hidden vents).
+      const isCanopy = o.type === 'canopy';
+      let hostPlane: any;
+      let radPts = pts;   // vertices that drive the drawn radius
+      if (isCanopy) {
+        hostPlane = rawPlanes.find((rp: any) =>
+          pts.some((p: any) => _ptInRing(p.lat, p.lng, rp.vertices ?? [])) ||
+          (rp.vertices ?? []).some((v: any) => _ptInRing(v.lat, v.lng, pts)));
+        if (!hostPlane) { _droppedOffRoof++; return null; }
+        const onRoof = pts.filter((p: any) =>
+          rawPlanes.some((rp: any) => _ptInRing(p.lat, p.lng, rp.vertices ?? [])));
+        if (onRoof.length >= 1) {
+          cLat = onRoof.reduce((s: number, p: any) => s + p.lat, 0) / onRoof.length;
+          cLng = onRoof.reduce((s: number, p: any) => s + p.lng, 0) / onRoof.length;
+          radPts = onRoof;   // size the marker by the OVER-ROOF part, not the whole tree
+        }
+      } else {
+        hostPlane = rawPlanes.find((rp: any) => _ptInRing(cLat, cLng, rp.vertices ?? []));
+        if (!hostPlane) { _droppedOffRoof++; return null; }
+      }
       const cosLat = Math.cos(cLat * Math.PI / 180);
       // LINEAR features (ridge vents, flashing runs) are not point obstructions —
       // a circle abstraction turns them into a giant blob mid-ridge. Drop them;
       // the ridge/hip setback bands already communicate that keep-out.
-      const _xs = pts.map((p: any) => (p.lng - cLng) * 111320 * cosLat);
-      const _ys = pts.map((p: any) => (p.lat - cLat) * 111320);
-      const _extX = Math.max(...(_xs as number[])) - Math.min(...(_xs as number[]));
-      const _extY = Math.max(...(_ys as number[])) - Math.min(...(_ys as number[]));
-      const _long = Math.max(_extX, _extY), _short = Math.max(Math.min(_extX, _extY), 0.05);
-      if (_long / _short > 3 && _long > 2) { _droppedOffRoof++; return null; }
+      // Linear-feature drop does not apply to canopy — a tree edge tracing the
+      // eave is exactly the shape we're flagging, not a ridge-vent artifact.
+      if (!isCanopy) {
+        const _xs = pts.map((p: any) => (p.lng - cLng) * 111320 * cosLat);
+        const _ys = pts.map((p: any) => (p.lat - cLat) * 111320);
+        const _extX = Math.max(...(_xs as number[])) - Math.min(...(_xs as number[]));
+        const _extY = Math.max(...(_ys as number[])) - Math.min(...(_ys as number[]));
+        const _long = Math.max(_extX, _extY), _short = Math.max(Math.min(_extX, _extY), 0.05);
+        if (_long / _short > 3 && _long > 2) { _droppedOffRoof++; return null; }
+      }
       const cXY = latLngToXY(cLat, cLng, originLat, originLng);
       // footprint radius = max vertex distance from the centroid, capped PER
       // TYPE — a vent is never 1.2 m across; coarse AI polygons at the ridge
-      // junctions were rendering as dominant circles mid-sheet.
+      // junctions were rendering as dominant circles mid-sheet. Canopy gets a
+      // wide cap + floor: the blind spot is genuinely large.
       const _radCap: Record<string, number> = {
-        vent: 0.3, chimney: 0.8, ac_unit: 0.6, satellite: 0.5, skylight: 1.2, other: 0.5,
+        vent: 0.3, chimney: 0.8, ac_unit: 0.6, satellite: 0.5, skylight: 1.2, canopy: 3.5, other: 0.5,
       };
-      const radiusM = Math.min(_radCap[o.type] ?? 0.5, Math.max(0.15, ...pts.map((p: any) =>
+      const radiusM = Math.min(_radCap[o.type] ?? 0.5, Math.max(isCanopy ? 1.0 : 0.15, ...radPts.map((p: any) =>
         Math.hypot((p.lat - cLat) * 111320, (p.lng - cLng) * 111320 * cosLat))));
       return {
         id:          `nm-obs-${i}`,

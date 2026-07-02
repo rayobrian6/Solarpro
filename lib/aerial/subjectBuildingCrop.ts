@@ -273,7 +273,15 @@ export function cropObstructionsToPlanes(
   const planePolys = keptPlanes.map(p => p.worldPolygon.map(project));
   return obstructions.filter(o => {
     if (o.polygon.length === 0) return false;
-    const c = centroidXY(o.polygon.map(project));
+    const ptsXY = o.polygon.map(project);
+    // CANOPY: an eave-overhanging tree has its centroid over the YARD — test
+    // every vertex (both directions), not the centroid, or the crop silently
+    // drops the exact blind spot we're flagging (tree-hidden vents).
+    if (o.type === 'canopy') {
+      return planePolys.some(poly => ptsXY.some(p => pointInPolygon(p, poly)) ||
+        poly.some(v => pointInPolygon(v, ptsXY)));
+    }
+    const c = centroidXY(ptsXY);
     return planePolys.some(poly => pointInPolygon(c, poly) || distPointToPolygonEdge(c, poly) <= margin);
   });
 }

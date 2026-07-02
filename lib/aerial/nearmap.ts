@@ -241,7 +241,7 @@ export interface NearmapRoofPlane {
 // the polygon when creating keep-out zones. Buffers are configurable constants.
 
 export type NearmapObstructionType =
-  | 'vent' | 'chimney' | 'ac_unit' | 'satellite' | 'skylight' | 'other';
+  | 'vent' | 'chimney' | 'ac_unit' | 'satellite' | 'skylight' | 'canopy' | 'other';
 
 export interface NearmapObstruction {
   type: NearmapObstructionType;
@@ -261,6 +261,8 @@ export const OBSTRUCTION_CLEARANCE_M: Record<NearmapObstructionType, number> = {
   ac_unit:   0.3,    // ~12" — HVAC service clearance
   satellite: 0.3,    // ~12" — dish swing radius
   skylight:  0.3,    // ~12" — glass + flashing edge
+  canopy:    0.3,    // tree canopy over roof — the AERIAL IS BLIND under it, so the
+                     // covered area is UNVERIFIED (hidden vents/pipes) + shaded anyway
   other:     0.15,   // default conservative buffer
 };
 
@@ -270,6 +272,7 @@ export const OBSTRUCTION_CLEARANCE_M: Record<NearmapObstructionType, number> = {
  *  Any unrecognised obstruction description maps to 'other'. */
 export function mapObstructionDescription(desc: string): NearmapObstructionType {
   const d = desc.toLowerCase();
+  if (d.includes('tree') || d.includes('vegetation') || d.includes('canopy')) return 'canopy';
   if (d.includes('vent') || d.includes('pipe')) return 'vent';
   if (d.includes('chimney')) return 'chimney';
   if (d.includes('a/c') || d.includes('condenser') || d.includes('hvac')) return 'ac_unit';
@@ -287,9 +290,15 @@ const OBSTRUCTION_DESCRIPTIONS = new Set([
   'roof hvac', 'antenna', 'flashing', 'dormer', 'roof jack',
 ]);
 
-/** Non-obstruction classes to explicitly skip (scenery / ground clutter). */
+/** Non-obstruction classes to explicitly skip (scenery / ground clutter).
+ *  NOTE: tree/vegetation are NOT skipped — they become 'canopy' candidates.
+ *  The aerial (and Nearmap AI) is BLIND under canopy, so tree cover that
+ *  reaches the roof must surface as an unverified keep-out, not read as
+ *  clean panel-ready roof (Ray, 2026-07-02: the tree-hidden-vent problem).
+ *  Canopy candidates are roof-overlap-filtered in fetchNearmapAIResult —
+ *  a yard tree that never touches the roof is still dropped. */
 const SKIP_DESCRIPTIONS = new Set([
-  'roof', 'car', 'tree', 'vegetation', 'shed', 'fence', 'wall', 'pool',
+  'roof', 'car', 'shed', 'fence', 'wall', 'pool',
   'deck', 'patio', 'driveway', 'sidewalk', 'road', 'building', 'structure',
   'swimming_pool', 'trampoline', 'solar_panel',
 ]);
@@ -299,6 +308,8 @@ function isObstructionFeature(desc: string): boolean {
   if (SKIP_DESCRIPTIONS.has(d)) return false;
   // Exact match on known obstruction classes
   if (OBSTRUCTION_DESCRIPTIONS.has(d)) return true;
+  // Tree canopy candidates (roof-overlap check happens downstream)
+  if (d.includes('tree') || d.includes('vegetation') || d.includes('canopy')) return true;
   // Heuristic: if it contains obstruction keywords but isn't in the skip list
   if (d.includes('vent') || d.includes('chimney') || d.includes('condenser') ||
       d.includes('hvac') || d.includes('satellite') || d.includes('dish') ||
@@ -504,6 +515,29 @@ export function mapNearmapObstructions(responseJson: unknown): NearmapObstructio
 }
 
 /**
+ * Canopy roof-overlap filter. Tree/vegetation features are only meaningful
+ * when they actually reach over a roof plane — a yard tree is scenery, an
+ * eave-overhanging tree is a blind spot that may hide vents/pipes from the
+ * aerial. Overlap = any canopy vertex inside a roof ring OR any roof vertex
+ * inside the canopy ring (tree blobs are densely vertexed, so vertex
+ * containment both ways is a reliable proxy without full polygon clipping).
+ * Non-canopy obstructions pass through untouched.
+ */
+export function filterCanopyToRoof(
+  obstructions: NearmapObstruction[],
+  roofPlanes: Array<{ worldPolygon: Array<{ lat: number; lng: number }> }>,
+): NearmapObstruction[] {
+  const rings = roofPlanes.map(rp => rp.worldPolygon).filter(r => (r?.length ?? 0) >= 3);
+  return obstructions.filter(o => {
+    if (o.type !== 'canopy') return true;
+    if (!rings.length) return false;  // no roof context → can't verify overlap → drop
+    return rings.some(ring =>
+      o.polygon.some(v => pointInRing(v.lat, v.lng, ring)) ||
+      ring.some(v => pointInRing(v.lat, v.lng, o.polygon)));
+  });
+}
+
+/**
  * Fetch obstructions for a location. Coverage-gated (free check first),
 //  cached per (lat,lng,survey) to avoid re-charging credits.
  * Uses the SAME AI Feature API call — one request returns both roof planes
@@ -536,7 +570,10 @@ export async function fetchNearmapObstructions(
     });
     if (!res.ok) return [];
 
-    const result = mapNearmapObstructions(await res.json());
+    // Standalone fetch has no roof-plane context to prove canopy overlaps THIS
+    // roof, so canopy is dropped here (yard trees would flood the AOI). The
+    // combined fetchNearmapAIResult path keeps roof-overlapping canopy.
+    const result = mapNearmapObstructions(await res.json()).filter(o => o.type !== 'canopy');
 
     // Cache the result
     obstructionCache.set(cacheKey, { result, ts: Date.now() });
@@ -592,7 +629,9 @@ export async function fetchNearmapAIResult(
 
     const json = await res.json();
     const roofPlanes = mapNearmapRoofPlanes(json);
-    const obstructions = mapNearmapObstructions(json);
+    // Canopy features survive only where they overlap a detected roof plane —
+    // that overlap region is roof the aerial cannot verify (tree-hidden vents).
+    const obstructions = filterCanopyToRoof(mapNearmapObstructions(json), roofPlanes);
 
     // Cache BOTH results — the permit route's aerial fetch runs twice per
     // generate (initial + design re-center); one AI credit covers both.

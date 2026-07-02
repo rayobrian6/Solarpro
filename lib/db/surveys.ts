@@ -35,6 +35,11 @@ export interface SiteSurveyFile {
   filename: string | null;
   mimeType: string | null;
   createdAt: string;
+  /** Capture-time device GPS (migration 099) — absent/null for photos taken
+   *  before the SurveyV2 geolocation capture or when location was denied. */
+  gpsLat?: number | null;
+  gpsLng?: number | null;
+  gpsAccuracyM?: number | null;
 }
 
 export interface SiteSurveyFileLabelRowMatchDiagnostic {
@@ -88,6 +93,9 @@ function rowToSiteSurveyFile(row: Record<string, unknown>): SiteSurveyFile {
     filename:  (row.filename as string | null) ?? null,
     mimeType:  (row.mime_type as string | null) ?? null,
     createdAt: row.created_at as string,
+    gpsLat:       row.gps_lat       != null ? Number(row.gps_lat)        : null,
+    gpsLng:       row.gps_lng       != null ? Number(row.gps_lng)        : null,
+    gpsAccuracyM: row.gps_accuracy_m != null ? Number(row.gps_accuracy_m) : null,
   };
 }
 
@@ -355,22 +363,48 @@ export async function bulkAddSiteSurveyFiles(
     label?: string | null;
     filename?: string | null;
     mimeType?: string | null;
+    gps?: { lat: number; lng: number; accuracyM?: number } | null;
   }>,
 ): Promise<number> {
   if (!files.length) return 0;
   const sql = await getDbReady();
   let inserted = 0;
+  // gps columns arrive with migration 099 — until it runs, fall back to the
+  // legacy insert so survey ingest NEVER breaks on a missing column.
+  let gpsColumnsAvailable = true;
   for (const f of files) {
-    const rows = await sql`
-      INSERT INTO site_survey_files (survey_id, file_url, file_type, label, filename, mime_type)
-      VALUES (
-        ${f.surveyId}, ${f.fileUrl},
-        ${f.fileType ?? 'photo'},
-        ${f.label ?? null}, ${f.filename ?? null}, ${f.mimeType ?? null}
-      )
-      ON CONFLICT DO NOTHING
-      RETURNING id
-    `;
+    let rows: unknown[] = [];
+    if (gpsColumnsAvailable) {
+      try {
+        rows = await sql`
+          INSERT INTO site_survey_files (survey_id, file_url, file_type, label, filename, mime_type, gps_lat, gps_lng, gps_accuracy_m)
+          VALUES (
+            ${f.surveyId}, ${f.fileUrl},
+            ${f.fileType ?? 'photo'},
+            ${f.label ?? null}, ${f.filename ?? null}, ${f.mimeType ?? null},
+            ${f.gps?.lat ?? null}, ${f.gps?.lng ?? null}, ${f.gps?.accuracyM ?? null}
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `;
+      } catch (e: unknown) {
+        if (!/gps_lat|column .* does not exist/i.test((e as Error)?.message ?? '')) throw e;
+        gpsColumnsAvailable = false;
+        console.warn('[surveys] site_survey_files gps columns missing (run migration 099) — inserting without GPS');
+      }
+    }
+    if (!gpsColumnsAvailable) {
+      rows = await sql`
+        INSERT INTO site_survey_files (survey_id, file_url, file_type, label, filename, mime_type)
+        VALUES (
+          ${f.surveyId}, ${f.fileUrl},
+          ${f.fileType ?? 'photo'},
+          ${f.label ?? null}, ${f.filename ?? null}, ${f.mimeType ?? null}
+        )
+        ON CONFLICT DO NOTHING
+        RETURNING id
+      `;
+    }
     // Count only rows actually inserted — ON CONFLICT skips were being counted,
     // so re-deliveries reported files as newly added when zero were.
     inserted += rows.length;

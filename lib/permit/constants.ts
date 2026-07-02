@@ -168,7 +168,22 @@ const PDF_PAGE_CONFIG = {
 // its modules in wiring order with a B# tag at the head; legend order = trunk
 // order by construction (panelColorById insertion order is the wiring order).
 // Obstruction radius caps per type (a vent is never 1.2 m across).
-const PLANSET_ENGINE_VERSION = 47374;
+// 47375 (2026-07-02): TREE CANOPY + METER VERIFICATION (Ray: "meter callout
+// bold-faced wrong" / "tree hidden vent"). (1) CANOPY: Nearmap tree/vegetation
+// features are no longer discarded — mapped to new 'canopy' obstruction type,
+// kept ONLY where they overlap a detected roof plane (filterCanopyToRoof).
+// Canopy-covered roof is a blind spot (AI can't see vents under it) so it now
+// renders on PV-2 as a dashed green hatched zone "TREE CANOPY — CONCEALED
+// AREA, FIELD VERIFY" (+ legend entry + GENERAL NOTE 5) and excludes panels
+// via the standard keep-out path. roofCAD: canopy membership = vertex overlap
+// (centroid-on-roof would drop eave-overhanging trees), marker re-centered on
+// the over-roof part, 3.5 m radius cap. (2) METER: SurveyV2 photo capture now
+// samples device geolocation at snap time (browser photos carry no EXIF GPS)
+// → mig 099 gps columns on site_survey_files → permit route builds
+// surveyPhotoHints → equipmentLocator tier 1 FINALLY has a data source, and
+// snaps the surveyor's GPS onto the nearest building wall (snapToBuildingRing,
+// 15 m cap) so the UM/MSP marker sits on the house, not the lawn.
+const PLANSET_ENGINE_VERSION = 47375;
 
 
 

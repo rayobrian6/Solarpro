@@ -409,6 +409,8 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
           label:    f.category ?? _guessPhotoLabel(f.name ?? f.url),
           filename: f.name ?? null,
           mimeType: f.mimeType ?? null,
+          // capture-time device GPS (v2.0) → PV-1 equipment-marker tier 1
+          gps:      f.gps ?? null,
         }));
         photosInserted = await bulkAddSiteSurveyFiles(surveyFiles);
         log(`STEP_E2 site_survey_files inserted count=${photosInserted}`);

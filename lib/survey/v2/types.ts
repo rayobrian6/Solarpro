@@ -166,6 +166,12 @@ export interface SurveyPhoto {
   url: string;       // blob/S3 URL after upload
   uploadKey: string; // storage key
   capturedAt: string;
+  // Device geolocation sampled AT CAPTURE TIME (browser file-input photos
+  // carry no EXIF GPS — this is the only reliable position source). The
+  // surveyor stands within a few meters of the subject, so this pins
+  // meter/panel photos to the correct wall for PV-1 equipment markers.
+  // null = permission denied / unavailable / timed out.
+  gps?: { lat: number; lng: number; accuracyM?: number } | null;
 }
 
 export const REQUIRED_PHOTO_CATEGORIES: PhotoCategory[] = [

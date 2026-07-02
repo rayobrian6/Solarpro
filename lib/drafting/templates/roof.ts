@@ -427,10 +427,27 @@ export function drawRoofPlan(
   // dashed red ring with light hatch, type label above — the reference-set
   // treatment for vents/chimneys/AC/skylights.
   const roofObs = (project.roofObstructions ?? []).filter((o: any) => isFinite(o.lat) && isFinite(o.lng));
+  // Canopy is an UNVERIFIED-area flag, not a surveyed fixture — notes and the
+  // legend treat it separately from hard obstructions (vents/chimneys/etc.).
+  const _canopyObs = roofObs.filter((o: any) => o.type === 'canopy');
+  const _hardObs   = roofObs.filter((o: any) => o.type !== 'canopy');
   roofObs.forEach((o: any) => {
     const ox = toX(o.lng), oy = toY(o.lat);
     const rPx = Math.max(o.radiusFt * scale, 2.5);
     const kPx = Math.max((o.radiusFt + o.clearanceFt) * scale, rPx + 2.5);
+    if (o.type === 'canopy') {
+      // Tree canopy over the roof: the aerial is BLIND here, so this is an
+      // UNVERIFIED zone (possible concealed vents/pipes), not a surveyed
+      // fixture — dashed green blob + hatch, no vent-style footprint dot.
+      els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${kPx.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.3" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="4 3"/>`);
+      els.push(drawText(ox, oy - kPx - 8.5, 'TREE CANOPY', {
+        anchor: 'middle', fontSize: 4.8, fontWeight: 'bold', fill: '#1a7a2e',
+      }));
+      els.push(drawText(ox, oy - kPx - 2.5, 'CONCEALED AREA — FIELD VERIFY', {
+        anchor: 'middle', fontSize: 4.2, fontWeight: 'bold', fill: '#1a7a2e',
+      }));
+      return;
+    }
     els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${kPx.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.6" stroke-dasharray="3 2"/>`);
     els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${rPx.toFixed(1)}" fill="#fff" stroke="#000" stroke-width="0.9"/>`);
     els.push(`<line x1="${(ox - rPx * 0.6).toFixed(1)}" y1="${(oy - rPx * 0.6).toFixed(1)}" x2="${(ox + rPx * 0.6).toFixed(1)}" y2="${(oy + rPx * 0.6).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
@@ -560,9 +577,9 @@ export function drawRoofPlan(
       '   PROVIDE EAVE-TO-RIDGE ROUTES.',
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
-      ...(roofObs.length > 0
+      ...(_hardObs.length > 0
         ? [
-            `4. ${roofObs.length} ROOF OBSTRUCTION(S) PLOTTED W/`,
+            `4. ${_hardObs.length} ROOF OBSTRUCTION(S) PLOTTED W/`,
             '   KEEP-OUT CLEARANCES (NEARMAP AI)',
             '   — FIELD VERIFY LOCATIONS.',
           ]
@@ -570,6 +587,15 @@ export function drawRoofPlan(
             '4. NO ROOF OBSTRUCTIONS MODELED IN',
             '   ARRAY AREA — FIELD VERIFY.',
           ]),
+      ...(_canopyObs.length > 0
+        ? [
+            '5. TREE CANOPY OVERHANGS ROOF —',
+            '   AERIAL COULD NOT VERIFY COVERED',
+            '   AREA (VENTS/PIPES MAY BE',
+            '   CONCEALED). FIELD VERIFY PRIOR',
+            '   TO MODULE LAYOUT.',
+          ]
+        : []),
     ];
     t.push(drawText(tx, gnY, 'GENERAL NOTES', { anchor: 'start', fontSize: 6, fontWeight: 'bold', fill: '#000' }));
     t.push(`<line x1="${tx}" y1="${gnY + 2.5}" x2="${tx + tblW}" y2="${gnY + 2.5}" stroke="#000" stroke-width="0.8"/>`);
@@ -650,9 +676,13 @@ export function drawRoofPlan(
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="2.4"/>`, label: 'RIDGE / HIP' },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.1"/>`, label: 'EAVE / RAKE' },
       { swatch: `<line x1="0" y1="-3" x2="14" y2="-3" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="0" x2="14" y2="0" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="3" x2="14" y2="3" stroke="#c8cdd5" stroke-width="0.7"/>`, label: `FRAMING @ ${rafterSp}" O.C.` },
-      ...(roofObs.length > 0 ? [{
+      ...(_hardObs.length > 0 ? [{
         swatch: `<circle cx="7" cy="-0.5" r="5.5" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.5" stroke-dasharray="2 1.5"/><circle cx="7" cy="-0.5" r="2.6" fill="#fff" stroke="#000" stroke-width="0.6"/>`,
         label: 'OBSTRUCTION + KEEP-OUT',
+      }] : []),
+      ...(_canopyObs.length > 0 ? [{
+        swatch: `<circle cx="7" cy="-0.5" r="5.5" fill="url(#hatch-setback)" opacity="0.3" stroke="#1a7a2e" stroke-width="0.8" stroke-dasharray="2.5 2"/>`,
+        label: 'TREE CANOPY — VERIFY',
       }] : []),
       { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
     ];

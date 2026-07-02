@@ -465,12 +465,21 @@ function extractPhotos(
       || 'photo';
     const photoName = `${photoLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${i + 1}.jpg`;
 
+    // Capture-time device GPS (SurveyV2 only) — validated here so a malformed
+    // client value can never poison the DB write.
+    const gps = photo.gps && isFinite(photo.gps.lat) && isFinite(photo.gps.lng)
+      && Math.abs(photo.gps.lat) <= 90 && Math.abs(photo.gps.lng) <= 180
+      && (Math.abs(photo.gps.lat) > 0.001 || Math.abs(photo.gps.lng) > 0.001)
+      ? { lat: photo.gps.lat, lng: photo.gps.lng, accuracyM: photo.gps.accuracyM }
+      : null;
+
     files.push({
       externalId: photo.id || `${surveyId}-photo-${i}`,
       name:       photoName,
       url:        photo.url,
       mimeType:   'image/jpeg',
       category,
+      gps,
     });
   }
 

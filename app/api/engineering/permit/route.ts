@@ -1056,6 +1056,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Survey-photo GPS hints → PV-1 equipment markers (tier 1) ──────────────
+    // SurveyV2 photo capture samples device geolocation at snap time (mig 099).
+    // A meter/main-panel photo GPS pins the equipment to the correct wall, so
+    // the PV-1 marker reads 'PER SURVEY PHOTO GPS' instead of the street-side
+    // guess (Ray, 2026-07-02: the heuristic is a coin flip on corner lots).
+    if (projectId && isValidUUID(projectId)) {
+      try {
+        const sqlHints = await getDbReady();
+        const hintRows = await sqlHints`
+          SELECT ssf.label, ssf.gps_lat, ssf.gps_lng, ssf.gps_accuracy_m
+          FROM site_survey_files ssf
+          JOIN site_surveys ss ON ss.id = ssf.survey_id
+          WHERE ss.project_id = ${projectId}
+            AND ssf.gps_lat IS NOT NULL AND ssf.gps_lng IS NOT NULL
+            AND ssf.label ~* '(meter|main_panel|msp|disconnect|service_entrance)'
+          ORDER BY ssf.created_at DESC
+          LIMIT 12
+        `;
+        if (hintRows.length > 0) {
+          (enrichedBody.project as any).surveyPhotoHints = (hintRows as Array<Record<string, unknown>>).map(r => ({
+            // equipmentLocator matches on label text: meter|utility / msp|main.?panel / disconnect
+            label: String(r.label ?? ''),
+            gps: { lat: Number(r.gps_lat), lng: Number(r.gps_lng) },
+          }));
+          console.log('[permit/equipment]', hintRows.length, 'survey photo GPS hint(s):',
+            (hintRows as Array<Record<string, unknown>>).map(r => `${r.label}@±${r.gps_accuracy_m ?? '?'}m`).join(', '));
+        }
+      } catch (hintErr: unknown) {
+        // gps columns may predate migration 099 — heuristic tier still runs
+        console.log('[permit/equipment] survey GPS hints unavailable:', (hintErr as Error)?.message);
+      }
+    }
+
     // ── Roof obstructions (Nearmap AI, from the same call as the frame snap) ──
     // Forward to project.roofObstructions: roofCAD projects them into the local
     // frame + filters colliding panels, and PV-2 draws them with keep-out rings.

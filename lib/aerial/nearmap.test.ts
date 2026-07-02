@@ -5,6 +5,7 @@ import {
   fetchNearmapRoofPlanes,
   checkNearmapCoverage,
   mapNearmapObstructions,
+  filterCanopyToRoof,
   mapObstructionDescription,
   OBSTRUCTION_CLEARANCE_M,
   fetchNearmapObstructions,
@@ -132,9 +133,11 @@ const OBSTRUCTION_SAMPLE = {
 describe('mapNearmapObstructions', () => {
   it('extracts obstructions and filters out non-obstruction features', () => {
     const obs = mapNearmapObstructions(OBSTRUCTION_SAMPLE);
-    // Roof, Car, Tree should be filtered out; Vent, Chimney, A/C, Dish should remain
-    expect(obs.length).toBe(4);
-    expect(obs.map(o => o.type)).toEqual(['vent', 'chimney', 'ac_unit', 'satellite']);
+    // Roof and Car are filtered out; Tree now survives as a CANOPY CANDIDATE
+    // (roof-overlap filtering happens downstream in filterCanopyToRoof) —
+    // tree cover over the roof is a blind spot that may hide vents.
+    expect(obs.length).toBe(5);
+    expect(obs.map(o => o.type)).toEqual(['vent', 'chimney', 'ac_unit', 'satellite', 'canopy']);
   });
 
   it('preserves real lat/lng geometry from Nearmap response', () => {
@@ -163,6 +166,46 @@ describe('mapNearmapObstructions', () => {
   });
 });
 
+describe('filterCanopyToRoof', () => {
+  const roof = { worldPolygon: [
+    { lat: 38.8110, lng: -89.9538 }, { lat: 38.8110, lng: -89.9534 },
+    { lat: 38.8113, lng: -89.9534 }, { lat: 38.8113, lng: -89.9538 },
+  ] };
+  const mk = (type: string, polygon: Array<{ lat: number; lng: number }>) => ({
+    type: type as any, description: type, polygon, confidence: 0.8, captureDate: null,
+  });
+  // canopy straddling the roof edge — vertices both inside and outside
+  const overhang = mk('canopy', [
+    { lat: 38.81115, lng: -89.95395 }, { lat: 38.81115, lng: -89.95365 },
+    { lat: 38.81125, lng: -89.95365 }, { lat: 38.81125, lng: -89.95395 },
+  ]);
+  // yard tree well clear of the roof
+  const yardTree = mk('canopy', [
+    { lat: 38.8100, lng: -89.9550 }, { lat: 38.8100, lng: -89.9549 },
+    { lat: 38.8101, lng: -89.9549 }, { lat: 38.8101, lng: -89.9550 },
+  ]);
+  const vent = mk('vent', yardTree.polygon);   // non-canopy passes through regardless
+
+  it('keeps canopy that overlaps a roof plane, drops yard trees', () => {
+    const out = filterCanopyToRoof([overhang, yardTree, vent] as any, [roof]);
+    expect(out.map(o => o.type)).toEqual(['canopy', 'vent']);
+  });
+
+  it('drops all canopy when no roof planes are available (cannot verify overlap)', () => {
+    const out = filterCanopyToRoof([overhang, vent] as any, []);
+    expect(out.map(o => o.type)).toEqual(['vent']);
+  });
+
+  it('keeps canopy that fully contains a small roof plane (roof vertices inside canopy)', () => {
+    const bigCanopy = mk('canopy', [
+      { lat: 38.8105, lng: -89.9545 }, { lat: 38.8105, lng: -89.9530 },
+      { lat: 38.8118, lng: -89.9530 }, { lat: 38.8118, lng: -89.9545 },
+    ]);
+    const out = filterCanopyToRoof([bigCanopy] as any, [roof]);
+    expect(out.length).toBe(1);
+  });
+});
+
 describe('mapObstructionDescription', () => {
   it('maps Nearmap class names to obstruction types', () => {
     expect(mapObstructionDescription('Vent')).toBe('vent');
@@ -172,6 +215,9 @@ describe('mapObstructionDescription', () => {
     expect(mapObstructionDescription('Skylight')).toBe('skylight');
     expect(mapObstructionDescription('Pipe Boot')).toBe('vent');
     expect(mapObstructionDescription('Exhaust Vent')).toBe('vent');
+    expect(mapObstructionDescription('Tree Overhang')).toBe('canopy');
+    expect(mapObstructionDescription('Tree')).toBe('canopy');
+    expect(mapObstructionDescription('Vegetation')).toBe('canopy');
   });
 
   it('maps unknown descriptions to "other"', () => {

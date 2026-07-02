@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { locateEquipment } from './equipmentLocator';
+import { locateEquipment, snapToBuildingRing } from './equipmentLocator';
 
 // 20m × 10m building at lat 38.7 (real-GPS frame)
 const RING = [
@@ -11,19 +11,35 @@ const RING = [
 const C = { lat: 38.700045, lng: -90.045885 };
 
 describe('locateEquipment', () => {
-  it('uses labeled survey photos with GPS first (exact placement)', () => {
+  it('uses labeled survey photos with GPS first (snapped onto the wall)', () => {
+    // Surveyor stood ~3 m SOUTH of the south wall shooting the meter — the
+    // marker must land ON the wall (photo GPS = surveyor position, not meter).
     const photos = [
-      { label: 'utility meter closeup', gps: { lat: 38.700001, lng: -90.045801 } },
-      { label: 'main panel interior',   gps: { lat: 38.700002, lng: -90.045803 } },
+      { label: 'utility meter closeup', gps: { lat: 38.699973, lng: -90.045801 } },
+      { label: 'main panel interior',   gps: { lat: 38.699975, lng: -90.045803 } },
     ];
     const out = locateEquipment(RING, { lat: 38.6998, lng: -90.04588 }, photos);
     const um = out.find(e => e.kind === 'utility_meter')!;
     const msp = out.find(e => e.kind === 'msp')!;
     expect(um.provenance).toBe('survey_photo_gps');
-    expect(um.lat).toBeCloseTo(38.700001, 9);
+    // snapped to the south wall (lat 38.70000), lng preserved along the wall
+    expect(Math.abs(um.lat - 38.70000) * 111320).toBeLessThan(0.5);
+    expect(um.lng).toBeCloseTo(-90.045801, 7);
     expect(msp.provenance).toBe('survey_photo_gps');
     // disconnect had no photo — falls to the heuristic
     expect(out.find(e => e.kind === 'ac_disconnect')!.provenance).toBe('street_side_heuristic');
+  });
+
+  it('snapToBuildingRing: projects onto the nearest wall, keeps far fixes raw', () => {
+    // 3 m south of the SW corner region → lands on the south wall
+    const near = snapToBuildingRing({ lat: 38.699973, lng: -90.04590 }, RING);
+    expect(Math.abs(near.lat - 38.70000) * 111320).toBeLessThan(0.5);
+    // 100+ m away (stale/cached fix) → returned unchanged
+    const far = snapToBuildingRing({ lat: 38.6990, lng: -90.04590 }, RING);
+    expect(far.lat).toBeCloseTo(38.6990, 9);
+    // degenerate ring → unchanged
+    const deg = snapToBuildingRing({ lat: 38.7, lng: -90.046 }, []);
+    expect(deg.lat).toBeCloseTo(38.7, 9);
   });
 
   it('street to the SOUTH places equipment on the south wall', () => {

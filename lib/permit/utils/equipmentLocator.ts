@@ -37,6 +37,35 @@ const KIND_PATTERNS: Array<{ kind: LocatedEquipment['kind']; re: RegExp }> = [
 ];
 
 /**
+ * Snap a point to the nearest point on the building outline. Photo GPS is
+ * where the SURVEYOR stood (a few meters off the wall, phone accuracy on
+ * top) — the equipment itself hangs ON the wall, so the marker belongs on
+ * the ring. Only snaps within `maxM` (default 15 m); beyond that the fix is
+ * suspect (stale cached position) and the raw point is returned unchanged.
+ */
+export function snapToBuildingRing(p: LatLng, ring: LatLng[], maxM = 15): LatLng {
+  if ((ring?.length ?? 0) < 2) return p;
+  const cosLat = Math.cos(p.lat * Math.PI / 180);
+  const toXY = (v: LatLng) => ({ x: (v.lng - p.lng) * 111320 * cosLat, y: (v.lat - p.lat) * 111320 });
+  let best: { d: number; x: number; y: number } | null = null;
+  for (let i = 0; i < ring.length; i++) {
+    const a = toXY(ring[i]), b = toXY(ring[(i + 1) % ring.length]);
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const len2 = abx * abx + aby * aby;
+    // p is the origin in this frame, so the projection of p onto AB is:
+    const t = len2 > 0 ? Math.max(0, Math.min(1, (-a.x * abx - a.y * aby) / len2)) : 0;
+    const qx = a.x + t * abx, qy = a.y + t * aby;
+    const d = Math.hypot(qx, qy);
+    if (!best || d < best.d) best = { d, x: qx, y: qy };
+  }
+  if (!best || best.d > maxM) return p;
+  return {
+    lat: p.lat + best.y / 111320,
+    lng: p.lng + best.x / (111320 * cosLat),
+  };
+}
+
+/**
  * Locate service equipment. `buildingRing` is the building outline (real GPS —
  * e.g. all roof-plane vertices), `streetPin` the geocoded address point.
  */
@@ -47,13 +76,15 @@ export function locateEquipment(
 ): LocatedEquipment[] {
   const out: LocatedEquipment[] = [];
   const found = new Set<string>();
+  const snapRing = (buildingRing ?? []).filter(v => isFinite(v?.lat) && isFinite(v?.lng));
 
   // ── Tier 1: labeled survey photos with GPS ──
   for (const p of surveyPhotos) {
     if (!p?.gps || !isFinite(p.gps.lat) || !isFinite(p.gps.lng) || !p.label) continue;
     for (const { kind, re } of KIND_PATTERNS) {
       if (!found.has(kind) && re.test(p.label)) {
-        out.push({ kind, lat: p.gps.lat, lng: p.gps.lng, provenance: 'survey_photo_gps' });
+        const snapped = snapToBuildingRing({ lat: p.gps.lat, lng: p.gps.lng }, snapRing);
+        out.push({ kind, lat: snapped.lat, lng: snapped.lng, provenance: 'survey_photo_gps' });
         found.add(kind);
       }
     }
