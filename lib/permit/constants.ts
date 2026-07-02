@@ -78,7 +78,12 @@ const PDF_PAGE_CONFIG = {
 // linework, red HATCHED setback bands, white modules w/ blue attachment dots
 // (was gray fills + solid navy modules); PE-1 restyled as an engineering letter
 // (ruled headings via .pe-letter scope, RE:/DATE block, quiet label cells).
-const PLANSET_ENGINE_VERSION = 47364;
+// 47365 (2026-07-01): PV-2 setback consistency + monochrome dims. The drawn hatch
+// band read ahjRoofSetbackIn alone (36" pathway on this AHJ) while SYSTEM DATA /
+// callout ② resolve ridge??edge (18") — one sheet printed two setbacks and the
+// oversized band swallowed modules. Drawing now uses the SAME resolution as the
+// data zone. Dimension linework black (was blue — reference sets are monochrome).
+const PLANSET_ENGINE_VERSION = 47365;
 
 
 

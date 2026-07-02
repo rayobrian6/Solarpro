@@ -112,7 +112,11 @@ export function drawRoofPlan(
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
   const attachSp    = project.attachmentSpacing || 48;
-  const setbackIn   = project.ahjRoofSetbackIn  || 18;  // IFC 605.11 access pathway (was hardcoded 36")
+  // Fire setback for the drawn hatch band — SAME resolution as the data zone /
+  // callout schedule (sheetComposition.getRoofData: ridge ?? edge, default 18").
+  // The drawing previously read ahjRoofSetbackIn alone (36" on some AHJs) while
+  // SYSTEM DATA / callout ② printed 1.5' — one sheet, two different setbacks.
+  const setbackIn   = project.ahjRidgeSetbackIn || project.ahjRoofSetbackIn || 18;
   const ridgeSetIn  = project.ahjRidgeSetbackIn || 18;
   const setbackFt   = setbackIn / 12;
   const ridgeSetFt  = ridgeSetIn / 12;
