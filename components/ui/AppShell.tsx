@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Sun, LayoutDashboard, Users, FolderOpen, Zap,
+  Sun, LayoutDashboard, Users, FolderOpen,
   FileText, Settings, ChevronLeft, ChevronRight, DollarSign,
   Bell, Search, Menu, X,
   Cpu, BarChart3, Map, Home,
@@ -40,7 +40,6 @@ const navItems: NavItem[] = [
   { label: 'Projects',      href: '/projects',   icon: <FolderOpen size={17} />, color: 'text-amber-400' },
   { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
   { label: 'Engineering',   href: '/engineering',icon: <Wrench size={17} />, color: 'text-blue-400' },
-  { label: 'Generator Estimator', href: '/generator-estimator', icon: <Zap size={17} />, color: 'text-amber-300' },
   { label: 'Proposals',     href: '/proposals',  icon: <FileText size={17} /> },
   { label: 'Marketplace',    href: '/network',    icon: <Network size={17} />, color: 'text-emerald-400' },
   { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
