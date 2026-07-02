@@ -122,10 +122,8 @@ export function drawRoofPlan(
   const roofType    = (project.roofType       || 'SHINGLE').toUpperCase();
   const condType    = (project.conduitType    || 'EMT').toUpperCase();
   const panelWatts  = engineering.panelWatts || 0;
-  const moduleStr   = [project.moduleMfr, project.moduleModel].filter(Boolean).join(' ').toUpperCase()
-    || 'PV MODULES — SEE EQUIPMENT SCHEDULE';
-  const inverterStr = [project.inverterMfr, project.inverterModel].filter(Boolean).join(' ').toUpperCase()
-    || 'MICROINVERTER — SEE EQUIPMENT SCHEDULE';
+  const _modNamed   = [project.moduleMfr, project.moduleModel].filter(Boolean).join(' ').toUpperCase();
+  const _invNamed   = [project.inverterMfr, project.inverterModel].filter(Boolean).join(' ').toUpperCase();
   const pitchNum    = project.roofPitch       || 5;
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
@@ -256,6 +254,32 @@ export function drawRoofPlan(
     // downslope unit vector in (lng, lat) CAD space — azimuth 0° = faces north = +lat
     const dsX = az != null ? Math.sin(az * Math.PI / 180) : 0;
     const dsY = az != null ? Math.cos(az * Math.PI / 180) : 0;
+
+    // ── Framing lines (rafters / truss top chords @ rafterSp O.C.) ──
+    // Thin light lines running along the fall line (eave → ridge), clipped to
+    // the facet — the reference sets show framing under the array, and the
+    // attachment dots land ON these lines. Snapped to the sheet axes like the
+    // modules so the grid reads drafted, not traced.
+    if (!isBranchColorMode && az != null) {
+      let fAz = ((az % 180) + 180) % 180;
+      if (fAz < 15 || fAz > 165) fAz = 0;
+      else if (Math.abs(fAz - 90) < 15) fAz = 90;
+      const fdX = Math.sin(fAz * Math.PI / 180), fdY = -Math.cos(fAz * Math.PI / 180); // screen dir (y down)
+      const fpX = -fdY, fpY = fdX;                                                     // across-slope
+      const bxs = ptsXY.map((p: { x: number; y: number }) => p.x);
+      const bys = ptsXY.map((p: { x: number; y: number }) => p.y);
+      const bcx = (Math.min(...bxs) + Math.max(...bxs)) / 2;
+      const bcy = (Math.min(...bys) + Math.max(...bys)) / 2;
+      const halfDiag = Math.hypot(Math.max(...bxs) - Math.min(...bxs), Math.max(...bys) - Math.min(...bys)) / 2 + 4;
+      const spacingPx = Math.max((rafterSp / 12) * scale, 6);
+      const nLines = Math.ceil(halfDiag / spacingPx);
+      const framing: string[] = [];
+      for (let k = -nLines; k <= nLines; k++) {
+        const oxp = bcx + fpX * k * spacingPx, oyp = bcy + fpY * k * spacingPx;
+        framing.push(`<line x1="${(oxp - fdX * halfDiag).toFixed(1)}" y1="${(oyp - fdY * halfDiag).toFixed(1)}" x2="${(oxp + fdX * halfDiag).toFixed(1)}" y2="${(oyp + fdY * halfDiag).toFixed(1)}" stroke="#c8cdd5" stroke-width="0.45"/>`);
+      }
+      els.push(`<g clip-path="url(#${clipId})">${framing.join('')}</g>`);
+    }
     for (let ei = 0; ei < nV; ei++) {
       const a = ptsXY[ei], b = ptsXY[(ei + 1) % nV];
       if (Math.hypot(b.x - a.x, b.y - a.y) < 2) continue;   // degenerate/closing dup
@@ -313,8 +337,12 @@ export function drawRoofPlan(
     const ph = isLandscape ? panWidPx : panLenPx;
     const x0 = px - pw / 2, y0 = py - ph / 2;
     const azRot = Number(p.azimuth ?? p.heading);
-    // rotate so the long axis follows the plane azimuth; 0/180 ≈ no-op
-    const rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
+    // rotate so the long axis follows the plane azimuth — SNAPPED to the sheet
+    // axes: rotating grid-placed rects by the raw 3-4° trace azimuth made every
+    // row read gapped + crooked against the regularized (axis-square) outline.
+    let rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
+    if (rot < 15 || rot > 165) rot = 0;
+    else if (Math.abs(rot - 90) < 15) rot = 90;
     const gOpen = rot > 1 && rot < 179
       ? `<g transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">` : '<g>';
 
@@ -322,11 +350,13 @@ export function drawRoofPlan(
     if (branchFill) {
       els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/></g>`);
     } else {
+      // attachment feet at the module's top/bottom clamp edges — they land on
+      // the framing lines behind (mounts bolt through the roof into framing)
       els.push(
         `${gOpen}` +
         `<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
-        `<circle cx="${px.toFixed(1)}" cy="${(py - ph / 4).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
-        `<circle cx="${px.toFixed(1)}" cy="${(py + ph / 4).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
+        `<circle cx="${px.toFixed(1)}" cy="${(y0 + 1.6).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
+        `<circle cx="${px.toFixed(1)}" cy="${(y0 + ph - 1.6).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
         `</g>`);
     }
   });
@@ -558,6 +588,7 @@ export function drawRoofPlan(
       { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="2.4"/>`, label: 'RIDGE / HIP' },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.1"/>`, label: 'EAVE / RAKE' },
+      { swatch: `<line x1="0" y1="-3" x2="14" y2="-3" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="0" x2="14" y2="0" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="3" x2="14" y2="3" stroke="#c8cdd5" stroke-width="0.7"/>`, label: `FRAMING @ ${rafterSp}" O.C.` },
       ...(roofObs.length > 0 ? [{
         swatch: `<circle cx="7" cy="-0.5" r="5.5" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.5" stroke-dasharray="2 1.5"/><circle cx="7" cy="-0.5" r="2.6" fill="#fff" stroke="#000" stroke-width="0.6"/>`,
         label: 'OBSTRUCTION + KEEP-OUT',
@@ -604,45 +635,41 @@ export function drawRoofPlan(
       els.push(`<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="1.4" fill="#000"/>`);
     };
     const wattStr = panelWatts ? ` (${panelWatts}W)` : '';
-    const topRowY = Math.max(roofMinY - 30, zones.dims.top + 10);
+    const modLine = _modNamed
+      ? `(N) ${totalPanels} — ${_modNamed}${wattStr} MODULES`
+      : `(N) ${totalPanels} PV MODULES${wattStr} — SEE EQUIPMENT SCHEDULE`;
+    const invLine = _invNamed
+      ? `(N) ${_invNamed} MICROINVERTER — 1 PER MODULE`
+      : `(N) MICROINVERTER (1 PER MODULE) — SEE EQUIPMENT SCHEDULE`;
+    const topRowY = Math.max(roofMinY - 26, zones.dims.top + 10);
 
-    // (N) modules — top-left white space, leader to a top-row module
-    txtCallout(roofMinX - 4, topRowY, 'start',
-      [`(N) ${totalPanels} — ${moduleStr}${wattStr}`, `MODULES ON ${mountSys}`],
-      topP.x - 6, topP.y - 4);
-    // (N) microinverters — top-right white space, leader to a nearby module dot
-    const invTarget = _panelPts.filter(p => p.y < roofMinY + (roofMaxY - roofMinY) * 0.5)
-      .reduce((m, p) => (p.x > m.x ? p : m), _panelPts[0]);
-    txtCallout(roofMaxX + 4, topRowY, 'end',
-      [`(N) ${inverterStr}`, `MICROINVERTER — 1 PER MODULE`],
-      invTarget.x + 4, invTarget.y);
-    // fire setback — left side, leader to the hip band
+    // (N) modules — label directly ABOVE its target module (short vertical leader)
+    txtCallout(Math.max(topP.x - 40, dz.x + 4), topRowY, 'start',
+      [modLine, `ON ${mountSys}`], topP.x - 2, topP.y - 4);
+    // (N) microinverters — label above the NE-most module (short leader)
+    const invTarget = _panelPts.reduce((m, p) => ((p.x - p.y) > (m.x - m.y) ? p : m), _panelPts[0]);
+    txtCallout(Math.min(invTarget.x + 40, roofMaxX + 26), topRowY, 'end',
+      [invLine], invTarget.x + 2, invTarget.y - 4);
+    // fire setback — short leader to the NW hip band midpoint
     if (hip) {
       const hx = (hip.ax + hip.bx) / 2, hy = (hip.ay + hip.by) / 2;
-      txtCallout(roofMinX - 34, hy - 24, 'start',
-        [`${ftToFtIn(setbackFt)} FIRE SETBACK (TYP.)`, `RIDGE / HIPS / RAKES`],
-        hx - (hx - hip.ax) / 2, hy - (hy - hip.ay) / 2);
+      const qx = (Math.min(hip.ax, hip.bx) + hx) / 2, qy = hip.ay < hip.by ? (hip.ay + hy) / 2 : (hip.by + hy) / 2;
+      txtCallout(roofMinX - 30, Math.max(qy - 26, zones.dims.top + 24), 'start',
+        [`${ftToFtIn(setbackFt)} FIRE SETBACK (TYP.)`, `RIDGE / HIPS / RAKES`], qx, qy);
     }
-    // ridge label — leader to the ridge west end
-    if (ridge) {
-      const wEnd = ridge.ax < ridge.bx ? { x: ridge.ax, y: ridge.ay } : { x: ridge.bx, y: ridge.by };
-      txtCallout(roofMinX - 34, wEnd.y + 30, 'start', ['(E) RIDGE'], wEnd.x + 10, wEnd.y - 1);
-    }
-    // (N) junction box — square symbol on the roof near the east array edge,
-    // then the dashed conduit route from the JB to the SE eave exit point
+    // (N) junction box + conduit — ONE label, JB symbol + dashed route to the
+    // SE eave exit ("two stacked labels on one corner read weird" — merged)
     const jbX = eastP.x + 12, jbY = eastP.y;
     els.push(`<rect x="${(jbX - 3.5).toFixed(1)}" y="${(jbY - 3.5).toFixed(1)}" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/>`);
     els.push(`<line x1="${(jbX - 3.5).toFixed(1)}" y1="${(jbY - 3.5).toFixed(1)}" x2="${(jbX + 3.5).toFixed(1)}" y2="${(jbY + 3.5).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
     const cEndX = roofMaxX - 8, cEndY = roofMaxY - 6;
     els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
-    txtCallout(roofMaxX + 4, jbY - 14, 'end', [`(N) JUNCTION BOX`], jbX + 3, jbY - 3);
-    txtCallout(roofMaxX + 4, roofMaxY + 10, 'end',
-      [`(N) 3/4" ${condType} CONDUIT RUN`, `ROUTE FIELD-VERIFIED`],
-      (jbX + cEndX) / 2, (jbY + cEndY) / 2);
-    // (N) attachments — bottom-left, leader to a bottom-row module dot
-    txtCallout(roofMinX - 4, roofMaxY + 14, 'start',
-      [`(N) ${mountSys} ATTACHMENTS`, `@ ${attachSp}" O.C. INTO FRAMING — SEE PV-3`],
-      botP.x - 4, botP.y + 4);
+    txtCallout(roofMaxX + 26, jbY - 10, 'end',
+      [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ROUTE FIELD-VERIFIED`], jbX + 4, jbY - 3);
+    // (N) attachments — below its target module (short leader)
+    txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 16, 'start',
+      [`(N) ${mountSys} ATTACHMENTS @ ${attachSp}" O.C.`, `INTO FRAMING — SEE PV-3`],
+      botP.x - 2, botP.y + 4);
   }
 
   // ── Viewport title (reference style): numbered circle + underlined title +

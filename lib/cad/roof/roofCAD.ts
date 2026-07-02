@@ -136,6 +136,7 @@ export function roofCAD(input: PermitInputShape): CADModel {
     }
     return inside;
   };
+  let _droppedOffRoof = 0;
   const nearmapObstructions: SysDefObstruction[] = ((input.project as any)?.roofObstructions ?? [])
     .filter((o: any) => Array.isArray(o?.polygon) && o.polygon.length >= 3)
     .map((o: any, i: number) => {
@@ -143,12 +144,26 @@ export function roofCAD(input: PermitInputShape): CADModel {
       if (pts.length < 3) return null;
       const cLat = pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
       const cLng = pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
-      const cXY = latLngToXY(cLat, cLng, originLat, originLng);
-      // footprint radius = max vertex distance from the centroid (meters)
-      const cosLat = Math.cos(cLat * Math.PI / 180);
-      const radiusM = Math.max(0.15, ...pts.map((p: any) =>
-        Math.hypot((p.lat - cLat) * 111320, (p.lng - cLng) * 111320 * cosLat)));
+      // The Nearmap AI query AOI (~45 m) covers NEIGHBORING buildings too —
+      // an obstruction only belongs on this planset if its centroid sits on
+      // one of THIS project's roof planes. (Neighbor vents scattered across
+      // the sheet were the "all fucky" bug.)
       const hostPlane = rawPlanes.find((rp: any) => _ptInRing(cLat, cLng, rp.vertices ?? []));
+      if (!hostPlane) { _droppedOffRoof++; return null; }
+      const cosLat = Math.cos(cLat * Math.PI / 180);
+      // LINEAR features (ridge vents, flashing runs) are not point obstructions —
+      // a circle abstraction turns them into a giant blob mid-ridge. Drop them;
+      // the ridge/hip setback bands already communicate that keep-out.
+      const _xs = pts.map((p: any) => (p.lng - cLng) * 111320 * cosLat);
+      const _ys = pts.map((p: any) => (p.lat - cLat) * 111320);
+      const _extX = Math.max(...(_xs as number[])) - Math.min(...(_xs as number[]));
+      const _extY = Math.max(...(_ys as number[])) - Math.min(...(_ys as number[]));
+      const _long = Math.max(_extX, _extY), _short = Math.max(Math.min(_extX, _extY), 0.05);
+      if (_long / _short > 3 && _long > 2) { _droppedOffRoof++; return null; }
+      const cXY = latLngToXY(cLat, cLng, originLat, originLng);
+      // footprint radius = max vertex distance from the centroid, CAPPED
+      const radiusM = Math.min(1.2, Math.max(0.15, ...pts.map((p: any) =>
+        Math.hypot((p.lat - cLat) * 111320, (p.lng - cLng) * 111320 * cosLat))));
       return {
         id:          `nm-obs-${i}`,
         type:        o.type || 'other',
@@ -158,14 +173,14 @@ export function roofCAD(input: PermitInputShape): CADModel {
         heightFt:    1,
         setbackIn:   Math.round(((o.clearanceM ?? 0.15) / 0.0254)),
         confidence:  typeof o.confidence === 'number' ? o.confidence : 0.8,
-        roofPlaneId: hostPlane?.id ?? null,
+        roofPlaneId: hostPlane.id ?? null,
         source:      'merged' as const,
       };
     })
     .filter(Boolean) as SysDefObstruction[];
-  if (nearmapObstructions.length > 0) {
+  if (nearmapObstructions.length > 0 || _droppedOffRoof > 0) {
     sysDefObstructions.push(...nearmapObstructions);
-    warnings.push(`roofCAD: ${nearmapObstructions.length} Nearmap AI obstruction(s) projected into the CAD frame`);
+    warnings.push(`roofCAD: ${nearmapObstructions.length} Nearmap AI obstruction(s) on-roof (${_droppedOffRoof} neighbor/off-roof dropped)`);
   }
 
   // ── GPS panel lookup map ──────────────────────────────────────

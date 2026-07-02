@@ -146,7 +146,19 @@ const PDF_PAGE_CONFIG = {
 // PV-1 draws blue UM/MSP/AC tags with white-haloed leaders + label boxes that
 // PRINT PROVENANCE ("PER SURVEY PHOTO GPS" vs "APPROX. — FIELD VERIFY") — the
 // sheet never claims surveyed precision it doesn't have.
-const PLANSET_ENGINE_VERSION = 47372;
+// 47373 (2026-07-02): Ray's regen punch list. OBSTRUCTIONS de-fucked: (a)
+// neighbor filter — the AI query AOI covers adjacent buildings; only
+// obstructions whose centroid sits on THIS project's roof planes survive;
+// (b) linear features (ridge vents/flashing runs, aspect>3 & >2m) dropped —
+// a circle abstraction turned them into a blob mid-ridge (ridge setback bands
+// already cover them); (c) radius cap 1.2m. PANELS un-crooked: module rotation
+// snaps to the sheet axes (raw 3-4° trace azimuth made grid rows read gapped/
+// crooked). FRAMING LINES drawn per facet @ rafter O.C. along the fall line
+// (legend entry) — attachment feet moved to the module clamp edges so they
+// land on framing. CALLOUTS: labels hug their targets w/ short leaders, JB +
+// conduit merged into one label, "(E) RIDGE" dropped, module/inverter fallback
+// text no longer reads as a broken sentence.
+const PLANSET_ENGINE_VERSION = 47373;
 
 
 
