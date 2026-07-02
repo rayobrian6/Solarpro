@@ -9,6 +9,28 @@
 //
 // Result is intentionally a CONSERVATIVE THEORETICAL MAX. Real homes draw
 // less. The BILL method (utility peak demand × 1.25) is the empirical truth.
+//
+// --- Boundary vs. other NEC 220 demand calcs in this codebase ---
+//
+// This file implements NEC 220.83 OPTIONAL METHOD (the 3-3000-120k formula:
+// first 3 kVA @ 100%, next 117 kVA @ 35%, balance @ 25%). It is used ONLY
+// by the standby-generator sizing flow (grafted with the Generator
+// Estimator tool) to recommend a generator kW rating — that is why we
+// expose `recommendedKw` (totalVa × 1.25) directly.
+//
+// `lib/permit/sections/electricalPages.ts` is a separate, INLINE NEC 220
+// computation rendered into the permit doc. It implements NEC 220.82
+// STANDARD METHOD (first 10 kVA @ 100%, remainder @ 40%) — note its HTML
+// label currently says "Optional Method" but the formula is actually the
+// Standard Method; that label discrepancy is a pre-existing doc issue
+// outside this commit's scope (flagged to PM).
+//
+// These two calcs coexist by design:
+//   - generatorNec22083.ts (Optional Method) -> generator kW
+//   - electricalPages.ts  (Standard Method)  -> service/feeder rating in the
+//                                              permit document
+// They are not interchangeable. Do not unify without first deciding which
+// NEC method each downstream consumer actually wants.
 
 export type HeatingType = "gas" | "electric-resistance" | "heat-pump" | "none";
 
