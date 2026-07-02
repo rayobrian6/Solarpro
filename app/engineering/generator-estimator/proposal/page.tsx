@@ -11,8 +11,8 @@ import {
   fmt,
   fmtCents,
   type ProposalInputs,
-} from "@/lib/generatorProposal";
-import { GENERATORS } from "@/lib/generatorData";
+} from "@/lib/engineering/generatorProposal";
+import { GENERATORS } from "@/lib/engineering/generatorData";
 
 function parseNum(v: string | null, fallback: number): number {
   if (v === null || v === "") return fallback;
