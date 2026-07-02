@@ -100,16 +100,43 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // hand, shifting the whole DESIGN layer (modules + equipment) by the
     // centroid delta pins the overlay to the pixels. Capped at 4 m — a big
     // delta means the crop grabbed the wrong cluster; better unshifted.
+    // Per-plane matched MEDIAN delta — a raw all-vertices centroid diff gets
+    // skewed whenever the Nearmap subject crop grabs an extra plane or drops
+    // one (that skew shoved the whole module layer off the west eave). Each
+    // DESIGN plane matches its nearest subject polygon; the median of those
+    // per-plane deltas is applied only when the matches AGREE (≥half within
+    // 1.2 m of the median) and the shift is plausibly registration-sized
+    // (< 2.5 m). Anything else → no shift (unshifted design GPS is ~1 m off,
+    // which the translucent fills absorb).
     const _subjPolys = (aerial as any).subjectRoofPolygons as Array<Array<{lat:number;lng:number}>> | undefined ?? [];
     let _dLat = 0, _dLng = 0;
-    if (_subjPolys.length > 0 && _ring.length >= 3) {
-      const sv = _subjPolys.flat();
-      const sLat = sv.reduce((s, v) => s + v.lat, 0) / sv.length;
-      const sLng = sv.reduce((s, v) => s + v.lng, 0) / sv.length;
-      const rLat = _ring.reduce((s: number, v: any) => s + v.lat, 0) / _ring.length;
-      const rLng = _ring.reduce((s: number, v: any) => s + v.lng, 0) / _ring.length;
-      const offM = Math.hypot((sLat - rLat) * 111320, (sLng - rLng) * 111320 * Math.cos(cLat * Math.PI / 180));
-      if (offM < 4) { _dLat = sLat - rLat; _dLng = sLng - rLng; }
+    if (_subjPolys.length > 0 && (project.roofPlanes?.length ?? 0) > 0) {
+      const _cent = (vs: Array<{lat:number;lng:number}>) => ({
+        lat: vs.reduce((s, v) => s + v.lat, 0) / vs.length,
+        lng: vs.reduce((s, v) => s + v.lng, 0) / vs.length,
+      });
+      const _cos = Math.cos(cLat * Math.PI / 180);
+      const _subjC = _subjPolys.filter(p => (p?.length ?? 0) >= 3).map(_cent);
+      const _deltas: Array<{ dLat: number; dLng: number }> = [];
+      for (const rp of (project.roofPlanes ?? []) as any[]) {
+        const vs = (rp.vertices ?? []).filter((v: any) => isFinite(v?.lat) && isFinite(v?.lng));
+        if (vs.length < 3 || !_subjC.length) continue;
+        const dc = _cent(vs);
+        let best = _subjC[0], bestD = Infinity;
+        for (const sc of _subjC) {
+          const d = Math.hypot((sc.lat - dc.lat) * 111320, (sc.lng - dc.lng) * 111320 * _cos);
+          if (d < bestD) { bestD = d; best = sc; }
+        }
+        if (bestD < 6) _deltas.push({ dLat: best.lat - dc.lat, dLng: best.lng - dc.lng });
+      }
+      if (_deltas.length) {
+        const _med = (arr: number[]) => [...arr].sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+        const mLat = _med(_deltas.map(d => d.dLat)), mLng = _med(_deltas.map(d => d.dLng));
+        const magM = Math.hypot(mLat * 111320, mLng * 111320 * _cos);
+        const agree = _deltas.filter(d =>
+          Math.hypot((d.dLat - mLat) * 111320, (d.dLng - mLng) * 111320 * _cos) < 1.2).length;
+        if (magM < 2.5 && agree * 2 >= _deltas.length) { _dLat = mLat; _dLng = mLng; }
+      }
     }
     const toPxD = (lat: number, lng: number) => toPx(lat + _dLat, lng + _dLng);
 
@@ -139,7 +166,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
       if (hull.length >= 3) {
         const hcx = hull.reduce((s, p) => s + p.x, 0) / hull.length;
         const hcy = hull.reduce((s, p) => s + p.y, 0) / hull.length;
-        const padded = hull.map(p => ({ x: hcx + (p.x - hcx) * 1.28 + Math.sign(p.x - hcx) * 8, y: hcy + (p.y - hcy) * 1.28 + Math.sign(p.y - hcy) * 8 }));
+        const padded = hull.map(p => ({ x: hcx + (p.x - hcx) * 1.12 + Math.sign(p.x - hcx) * 6, y: hcy + (p.y - hcy) * 1.12 + Math.sign(p.y - hcy) * 6 }));
         const hullStr = padded.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
         const xs = padded.map(p => p.x), ys = padded.map(p => p.y);
         const hullArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));

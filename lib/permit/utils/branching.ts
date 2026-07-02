@@ -59,6 +59,8 @@ export interface BranchPlanPanel {
   arrayId?: string | null;
   row?: number | null;
   col?: number | null;
+  lat?: number;
+  lng?: number;
 }
 
 export interface BranchPlan {
@@ -71,17 +73,26 @@ export interface BranchPlan {
 }
 
 /**
- * PLANE-AWARE branch plan — the installer-truth rule (Ray, 2026-07-03):
- * an AC branch is a physical daisy-chain on ONE roof face; crews do not run
- * a trunk over the ridge to the opposite side of the roof. So branches are
- * planned PER PLANE: each plane's modules chunk into ceil(n/max) balanced
- * branches, and a branch NEVER spans planes — small hip-cap planes get their
- * own (short) branch rather than piggybacking across the roof.
+ * ECONOMICAL branch plan — installer common sense (Ray, 2026-07-03: "the
+ * math needs to be logical... owners aren't going to spend extra money on
+ * wire to run 5 strings of 4").
  *
- * Plane grouping key: planeId, else arrayId. When NO panel carries either
- * (legacy payloads), falls back to one global group (old behavior, still
- * NEC-sized). Plane order: largest first, so B1 is the main field. Within a
- * plane: serpentine (row, then col alternating) — the physical wiring order.
+ * Rules, in priority order:
+ *   1. MINIMUM homeruns: branch count = ceil(total / per-model NEC max) —
+ *      never more. Every extra branch is trunk cable, a terminator, and a
+ *      breaker slot the owner pays for.
+ *   2. Fill within a plane first: each face contributes floor(n/max) FULL
+ *      branches wired serpentine on that face.
+ *   3. Leftovers merge with the NEAREST leftover group (panel-centroid
+ *      distance) — a hip-cap's 4 modules ride the adjacent face's remainder
+ *      across one hip, not a runt branch of their own and never a diagonal
+ *      run across the whole roof.
+ *
+ * Melvin (23/22/4/4 @ max 10): 10+10 north, 10+10 south, then 3N+4W and
+ * 2S+4E → 6 branches total, the theoretical minimum.
+ *
+ * Plane grouping key: planeId, else arrayId; no keys at all → one global
+ * group (legacy payloads — still NEC-sized, still minimal count).
  */
 export function planMicroBranches(
   panels: BranchPlanPanel[],
@@ -90,6 +101,26 @@ export function planMicroBranches(
   const maxPer = microMaxPerBranch(inverterModel);
   const assign = new Map<string, number>();
   if (!panels?.length) return { count: 1, sizes: [], assign };
+
+  const serp = (group: BranchPlanPanel[]) => [...group].sort((a, b) => {
+    const rr = (a.row ?? 0) - (b.row ?? 0);
+    if (rr !== 0) return rr;
+    const rev = ((a.row ?? 0) % 2) === 1;
+    return rev ? (b.col ?? 0) - (a.col ?? 0) : (a.col ?? 0) - (b.col ?? 0);
+  });
+  const centroid = (ps: BranchPlanPanel[]) => {
+    const v = ps.filter(p => isFinite(p.lat as any) && isFinite(p.lng as any));
+    if (!v.length) return null;
+    return {
+      lat: v.reduce((s, p) => s + (p.lat as number), 0) / v.length,
+      lng: v.reduce((s, p) => s + (p.lng as number), 0) / v.length,
+    };
+  };
+  const distM = (a: ReturnType<typeof centroid>, b: ReturnType<typeof centroid>) => {
+    if (!a || !b) return 0;
+    const cos = Math.cos(a.lat * Math.PI / 180);
+    return Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * cos);
+  };
 
   const keyOf = (p: BranchPlanPanel) => String(p.planeId ?? p.arrayId ?? '');
   const groups = new Map<string, BranchPlanPanel[]>();
@@ -104,23 +135,57 @@ export function planMicroBranches(
 
   const sizes: number[] = [];
   let branchIdx = 0;
+  // Leftover runs (per plane, already in serpentine order) awaiting merge.
+  const leftovers: Array<{ ps: BranchPlanPanel[]; c: ReturnType<typeof centroid> }> = [];
+
   for (const group of ordered) {
-    // Serpentine within the plane (alternate col direction per row).
-    const sorted = [...group].sort((a, b) => {
-      const rr = (a.row ?? 0) - (b.row ?? 0);
-      if (rr !== 0) return rr;
-      const rev = ((a.row ?? 0) % 2) === 1;
-      return rev ? (b.col ?? 0) - (a.col ?? 0) : (a.col ?? 0) - (b.col ?? 0);
-    });
-    const nBranches = Math.max(1, Math.ceil(sorted.length / maxPer));
-    const planeSizes = balancedBranchSizes(sorted.length, nBranches);
-    let cursor = 0;
-    planeSizes.forEach(sz => {
-      for (let i = 0; i < sz; i++) assign.set(String(sorted[cursor + i].id), branchIdx);
-      cursor += sz;
-      sizes.push(sz);
+    const sorted = serp(group);
+    const fulls = Math.floor(sorted.length / maxPer);
+    for (let f = 0; f < fulls; f++) {
+      for (let i = 0; i < maxPer; i++) assign.set(String(sorted[f * maxPer + i].id), branchIdx);
+      sizes.push(maxPer);
       branchIdx++;
-    });
+    }
+    const rem = sorted.slice(fulls * maxPer);
+    if (rem.length) leftovers.push({ ps: rem, c: centroid(rem) });
   }
+
+  // Merge leftovers into EXACTLY ceil(R/max) remainder branches — the count
+  // that keeps total homeruns at the theoretical minimum. Seed each branch
+  // with the largest remaining leftover, then attach every other leftover to
+  // the NEAREST seed with room (panel-centroid distance), so a hip cap joins
+  // the face it actually touches instead of forming a runt branch or pairing
+  // with the far side of the roof.
+  if (leftovers.length) {
+    const totalRem = leftovers.reduce((s, l) => s + l.ps.length, 0);
+    const remBranches = Math.max(1, Math.ceil(totalRem / maxPer));
+    leftovers.sort((a, b) => b.ps.length - a.ps.length);
+    const seeds = leftovers.slice(0, remBranches);
+    const rest = leftovers.slice(remBranches);
+    // Balanced capacity: without a target cap, everything gravitates to one
+    // seed and the other stays a runt — the exact waste being eliminated.
+    const target = Math.ceil(totalRem / remBranches);
+    for (const l of rest) {
+      let best = -1, bestD = Infinity;
+      for (const cap of [target, maxPer]) {
+        for (let i = 0; i < seeds.length; i++) {
+          if (seeds[i].ps.length + l.ps.length > cap) continue;
+          const d = distM(seeds[i].c, l.c);
+          if (d < bestD) { bestD = d; best = i; }
+        }
+        if (best >= 0) break;
+      }
+      // Nothing fits even at NEC max (many tiny planes) → most room wins.
+      if (best < 0) best = seeds.reduce((m, s, i) => s.ps.length < seeds[m].ps.length ? i : m, 0);
+      seeds[best].ps.push(...l.ps);
+      seeds[best].c = centroid(seeds[best].ps) ?? seeds[best].c;
+    }
+    for (const s of seeds) {
+      for (const p of s.ps) assign.set(String(p.id), branchIdx);
+      sizes.push(s.ps.length);
+      branchIdx++;
+    }
+  }
+
   return { count: branchIdx || 1, sizes, assign };
 }

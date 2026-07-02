@@ -271,8 +271,14 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // strings); inverters[].strings is the phantom "1 string of N" fallback, so derive
   // the legend from the same per-panel branch grouping the grid uses (panelStringMap)
   // — otherwise the legend ("String 1, Qty 52") contradicts the B1..Bn grid cells.
-  const _legendWatts = panels[0]?.wattage
-    || system.inverters?.[0]?.strings?.[0]?.panelWatts || 400;
+  // Wp from the SYSTEM record (kW ÷ modules), never the stale per-panel
+  // wattage field — layout panels carried 440W while the set said 400W,
+  // and a checker multiplies qty × Wp on page one.
+  const _sysWatts = (system.totalDcKw && totalPanels)
+    ? Math.round((system.totalDcKw * 1000) / totalPanels) : null;
+  const _legendWatts = _sysWatts
+    || system.inverters?.[0]?.strings?.[0]?.panelWatts
+    || panels[0]?.wattage || 400;
   const legendItems = _isMicro
     ? Array.from({ length: totalStrings }, (_, bi) => ({
         si: bi,
@@ -419,10 +425,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 Min 18" setback at ridge/hips/rakes</div>
+      <div>\u2022 18" ridge/hip setback per AHJ amendment \u2014 IFC 2021 \xa71204.2.1.1 (36" default; confirm exception w/ AHJ)</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
       <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
+      ${_isMicro && totalStrings > 4 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner accepts 4; remaining branches land on AC subpanel, see E-1</div>` : ''}
     </div>` :
     isFence(cadSystemType) ? `
     <div class="draw-zone-hdr">FENCE SEGMENTS</div>

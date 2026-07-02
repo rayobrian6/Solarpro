@@ -453,14 +453,36 @@ export function drawRoofPlan(
       for (let k = 1; k < order.length; k++) {
         const a = pts[order[k - 1]], b = pts[order[k]];
         const long = segs[k - 1] > Math.max(3 * medSeg, 40);
-        const dash = long ? ' stroke-dasharray="5 4"' : '';
-        els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.75"${dash}/>`);
-        els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="1.2"${dash}/>`);
+        if (long) {
+          // Plane-to-plane transition: MANHATTAN route (along the row, then
+          // across), dashed — a freehand diagonal slicing the setback hatch
+          // read as accidental wiring.
+          const midPts = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+          els.push(`<polyline points="${midPts}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.75" stroke-dasharray="5 4"/>`);
+          els.push(`<polyline points="${midPts}" fill="none" stroke="${g.color}" stroke-width="1.2" stroke-dasharray="5 4"/>`);
+        } else {
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.75"/>`);
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="1.2"/>`);
+        }
       }
       const h = pts[order[0]];
       els.push(`<rect x="${(h.x - 8).toFixed(1)}" y="${(h.y - 6).toFixed(1)}" width="16" height="12" rx="2" fill="#fff" stroke="${g.color}" stroke-width="1"/>`);
       els.push(drawText(h.x, h.y + 3, `B${bi + 1}`, { anchor: 'middle', fontSize: 6.5, fontWeight: '900', fill: '#111' }));
     });
+
+    // Branch TERMINUS — the circuits need somewhere to land. JB symbol at
+    // the SE eave (same spot PV-2 calls out the junction box + EMT drop),
+    // dashed collector run off the roof edge, count note beside it.
+    // (Local bounds — roofMaxX/_panelPts are declared later in this fn.)
+    if (branchGroups.length > 0 && regPanels.length > 0) {
+      const _bx = regPanels.map((p: any) => toX(p.lng)), _by = regPanels.map((p: any) => toY(p.lat));
+      const jbX = Math.max(..._bx) + 26, jbY = Math.max(..._by) + 6;
+      els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${(jbX + 16).toFixed(1)},${(jbY + 10).toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
+      els.push(`<rect x="${(jbX - 4).toFixed(1)}" y="${(jbY - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#000" stroke-width="1"/>`);
+      els.push(`<line x1="${(jbX - 4).toFixed(1)}" y1="${(jbY - 4).toFixed(1)}" x2="${(jbX + 4).toFixed(1)}" y2="${(jbY + 4).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+      els.push(drawText(jbX + 20, jbY + 16, `(N) JB — ${branchGroups.length} AC BRANCH CIRCUITS`, { anchor: 'end', fontSize: 5.8, fontWeight: 'bold', fill: '#000' }));
+      els.push(drawText(jbX + 20, jbY + 23, `¾" EMT — ROUTE FIELD-VERIFIED`, { anchor: 'end', fontSize: 5.2, fill: '#333' }));
+    }
   }
 
   // ── Roof obstructions + keep-out rings (Nearmap AI / vision / manual) ──

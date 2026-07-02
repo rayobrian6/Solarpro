@@ -235,7 +235,27 @@ const PDF_PAGE_CONFIG = {
 // subject polygons with the actual roof outlines drawn in white (imagery-
 // registered — the boxy dashed rect read sloppy); 20-FT scale bar moved
 // bottom-left off the module-count badge.
-const PLANSET_ENGINE_VERSION = 47377;
+// 47378 (2026-07-03): ECONOMICAL BRANCHES (Ray rejected 47377's never-cross-
+// planes rule — "owners aren't going to spend extra money on wire to run 5
+// strings of 4"). planMicroBranches now plans the MINIMUM homerun count:
+// ceil(total/NEC-max) branches, full branches within each face first, then
+// leftovers merge with the NEAREST leftover across ONE adjacent hip with
+// balanced capacity targets (Melvin: 10/10 N + 10/10 S + [3N+4W]=7 +
+// [2S+4E]=6 → 6 branches, the theoretical minimum; regression-locked in
+// branching.test.ts incl. the no-runt and never-pair-opposite-caps rules).
+// Review-panel fixes (installer/plan-checker/drafter agents vs the Wyssling
+// reference): branch legend Wp now computed from SYSTEM kW÷modules (stale
+// per-panel field said 440W on a 400W job); PV-2B plane transitions route
+// MANHATTAN (dashed) instead of freehand diagonals through the setback
+// hatch; JB terminus symbol + "N AC BRANCH CIRCUITS → 3/4-in EMT" note at
+// the SE eave; FIRE SETBACKS cites IFC 2021 §1204.2.1.1 (36" default,
+// confirm exception w/ AHJ) + combiner-capacity note when branches > 4
+// (IQ Combiner takes 4 — rest land on AC subpanel, see E-1). PV-1: the
+// design→imagery registration shift is now a per-plane-matched MEDIAN with
+// an agreement gate (raw centroid delta skewed when the subject crop
+// grabbed/dropped a plane — modules hung off the west eave); hull pad
+// tightened 1.28→1.12.
+const PLANSET_ENGINE_VERSION = 47378;
 
 
 
