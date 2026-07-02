@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import { systemTypeToInstallationType } from '@/lib/structural/types';
 import { resolveEquipment } from '@/lib/systemEquipmentResolver';
@@ -9394,6 +9395,34 @@ function EngineeringPageInner() {
                             </span>
                           ) : null}
                         </div>
+
+                          {/* v50.x: Generator Estimator entry-points — nest the moved
+                              tool under Engineering per JAMES
+                              (Quinn dispatch 2026-07-02). Three buttons inside this
+                              panel — no new TabId — link to:
+                                Size Generator     /engineering/generator-estimator
+                                Parse Bill         /engineering/generator-estimator/bill
+                                Build Proposal     /engineering/generator-estimator/proposal */}
+                          <div className="flex flex-wrap items-center gap-2 mb-3 -mt-1">
+                            <Link
+                              href="/engineering/generator-estimator"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 transition-colors"
+                            >
+                              <Wrench size={11} /> Size Generator →
+                            </Link>
+                            <Link
+                              href="/engineering/generator-estimator/bill"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:bg-blue-500/20 transition-colors"
+                            >
+                              <Zap size={11} /> Parse Bill →
+                            </Link>
+                            <Link
+                              href="/engineering/generator-estimator/proposal"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                            >
+                              <FileText size={11} /> Build Proposal →
+                            </Link>
+                          </div>
 
                           {/* Generator OFF state */}
                           {!config.generatorId && !config.atsId ? (
