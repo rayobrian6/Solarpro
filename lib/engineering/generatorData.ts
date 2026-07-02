@@ -1,3 +1,13 @@
+// Adapter shim — delegates to canonical @/lib/equipment-db (single source of
+// truth) and presents the legacy `Generator` shape used by the estimator and
+// proposal pages. Do NOT add new fields here; extend the canonical type.
+
+import {
+  GENERATORS as equipmentGenerators,
+  getGeneratorById as equipmentGetGeneratorById,
+  type GeneratorSystem,
+} from "@/lib/equipment-db";
+
 export type Appliance = {
   id: string;
   label: string;
@@ -52,30 +62,38 @@ export const APPLIANCES: Appliance[] = [
   { id: "pool-pump", label: "Pool pump (1 HP)", category: "Other", runningWatts: 1800, startingWatts: 5400 },
 ];
 
+// Legacy `Generator` shape used by the estimator and proposal pages — derived
+// from the canonical `GeneratorSystem` in equipment-db. Keep this in sync
+// rather than renaming call-sites; the engineering UI is not the canonical
+// catalog.
 export type Generator = {
-  brand: "Generac" | "Briggs & Stratton";
+  brand: string;
   model: string;
-  series: string;
+  series?: string;
   kw: number;
-  fuel: "NG/LP" | "NG" | "LP";
-  msrp: number;
+  fuel: string;
+  msrp?: number;
   motorStartingAmps?: number;
   url?: string;
 };
 
-export const GENERATORS: Generator[] = [
-  { brand: "Generac", model: "7291", series: "Guardian", kw: 26, fuel: "NG/LP", msrp: 7899, motorStartingAmps: 78, url: "https://www.generac.com/residential-products/standby-generators/" },
-  { brand: "Generac", model: "7210", series: "Guardian", kw: 24, fuel: "NG/LP", msrp: 7199, motorStartingAmps: 72, url: "https://www.generac.com/residential-products/standby-generators/" },
-  { brand: "Generac", model: "7043", series: "Guardian", kw: 22, fuel: "NG/LP", msrp: 14339, motorStartingAmps: 66, url: "https://www.generac.com/residential-products/standby-generators/" },
-  { brand: "Generac", model: "7228", series: "Guardian", kw: 18, fuel: "NG/LP", msrp: 5899, motorStartingAmps: 54, url: "https://www.generac.com/residential-products/standby-generators/" },
-  { brand: "Generac", model: "7225", series: "Guardian", kw: 14, fuel: "NG/LP", msrp: 5139, motorStartingAmps: 42, url: "https://www.generac.com/residential-products/standby-generators/" },
-  { brand: "Generac", model: "7172", series: "Guardian", kw: 10, fuel: "NG/LP", msrp: 3769, motorStartingAmps: 30, url: "https://www.generac.com/residential-products/standby-generators/" },
+function adaptGenerator(g: GeneratorSystem): Generator {
+  return {
+    brand: g.manufacturer,
+    model: g.model,
+    kw: g.ratedOutputKw,
+    fuel: g.fuelType,
+    msrp: g.msrpUsd,
+    url: g.datasheetUrl,
+  };
+}
 
-  { brand: "Briggs & Stratton", model: "040746", series: "PowerProtect", kw: 26, fuel: "NG/LP", msrp: 6499, motorStartingAmps: 81, url: "https://energy.briggsandstratton.com/en-us/products/residential-standby-generators" },
-  { brand: "Briggs & Stratton", model: "040744", series: "PowerProtect", kw: 22, fuel: "NG/LP", msrp: 5799, motorStartingAmps: 66, url: "https://energy.briggsandstratton.com/en-us/products/residential-standby-generators" },
-  { brand: "Briggs & Stratton", model: "040743", series: "PowerProtect", kw: 18, fuel: "NG/LP", msrp: 4999, motorStartingAmps: 54, url: "https://energy.briggsandstratton.com/en-us/products/residential-standby-generators" },
-  { brand: "Briggs & Stratton", model: "040742", series: "PowerProtect", kw: 13, fuel: "NG/LP", msrp: 4283, motorStartingAmps: 39, url: "https://energy.briggsandstratton.com/en-us/products/residential-standby-generators" },
-];
+export const GENERATORS: Generator[] = equipmentGenerators.map(adaptGenerator);
+
+export function getGeneratorById(id: string): Generator | undefined {
+  const g = equipmentGetGeneratorById(id);
+  return g ? adaptGenerator(g) : undefined;
+}
 
 export const CATEGORIES: Array<Appliance["category"]> = [
   "HVAC",
