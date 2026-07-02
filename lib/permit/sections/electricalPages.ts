@@ -9,6 +9,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, utilityDisplayName, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
+import { microBranchCount } from '../utils/branching';
 
 // ─── (Existing pages reused with minor upgrades) ─────────────────────────────
 
@@ -144,7 +145,8 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               const _csBranchAmps = (_csIsc * 1.25);
               const _csBranchOcpd = necNextStandardOcpd(_csBranchAmps * 1.25);
               const _csModules = system.totalPanels || 0;
-              const _csBranches = Math.ceil(_csModules / 16) || 1;  // NEC 690.8 max 16 micros per branch
+              // Per-model branch max (NEC 80% on 20A) — same resolver as PV-2B/SLD
+              const _csBranches = microBranchCount(_csModules, eq_cs.inverterModel);
               return Array.from({length: _csBranches}, (_, i) => `
               <tr>
                 <td class="fw7">AC Branch ${i + 1}</td>
@@ -800,7 +802,8 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const batteryBackfeedA = project.batteryBackfeedA ?? (hasBattery ? project.batteryCount * 20 : 0);
     const egcNum = '10';
     const branchOcpd = 20;
-    const nBranches = Math.ceil(totalPanels / 16);
+    // Per-model branch max (NEC 80% on 20A) — same resolver as PV-2B/SLD
+    const nBranches = microBranchCount(totalPanels, inverterModel);
     const deviceCount = totalPanels;
 
     // X positions

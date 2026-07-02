@@ -9,6 +9,7 @@ import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-prof
 import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
+import { microBranchCount } from './branching';
 
 /**
  * Build a live SLDProfessionalInput from PermitInput canonical data.
@@ -90,7 +91,9 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
 
   // ── Micro-specific ──
   const deviceCount = isMicro ? totalPanels : undefined;
-  const nBranches = isMicro ? Math.ceil(totalPanels / 16) : undefined;
+  // Per-model branch max (NEC 80% on 20A) — same resolver as PV-2B so the
+  // SLD branch count can never disagree with the array sheet.
+  const nBranches = isMicro ? microBranchCount(totalPanels, inv0?.model) : undefined;
 
   // ── DC OCPD (string topology only) ──
   // Error 5b fix: ocpd IS declared on string type — no need for `as any`

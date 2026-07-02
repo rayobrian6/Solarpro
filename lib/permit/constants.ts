@@ -183,7 +183,40 @@ const PDF_PAGE_CONFIG = {
 // surveyPhotoHints → equipmentLocator tier 1 FINALLY has a data source, and
 // snaps the surveyor's GPS onto the nearest building wall (snapToBuildingRing,
 // 15 m cap) so the UM/MSP marker sits on the house, not the lawn.
-const PLANSET_ENGINE_VERSION = 47375;
+// 47376 (2026-07-02 late): THE QUALITY BLITZ (Ray: "come back a hero" — 4-agent
+// cross-comparison vs the Wyssling PE reference + canonical-path root-causes).
+// PV-2B: (1) trunk STARBURST killed for real — wiring order now computed
+// GEOMETRICALLY inside drawRoofPlan (greedy nearest-neighbor per branch on
+// rendered coords; long plane-crossing hops drawn dashed); root cause was
+// planeId dropped at the permit-body build (now threaded, both page.tsx sites)
+// which collapsed the serpentine sort into a global row/col interleave.
+// (2) Overlay BRANCH LEGEND deleted (opaque box painted over the viewport
+// title → "UT — AC BRANCH COLOR MAP"). (3) NEC 690.8 FIX: branch max is now
+// PER MODEL from Enphase capability profiles via lib/permit/utils/branching
+// (IQ8A=10, IQ8M=11 — was hardcoded 16 → 14-module branches, a plan-check
+// violation); one resolver feeds PV-2B, circuit schedule, E-1 SLD; balanced
+// chunk sizes (9/9/9/9/9/8 not 14/14/14/11). (4) ARRAY PARAMETERS tilt shows
+// the facet RANGE, not plane[0]. (5) obstruction/canopy hatch suppressed on
+// the circuit map. PV-2: roof-plan canvas 1060×920 (was ×460 letterboxing 50%
+// of the sheet blank and rasterizing table text illegibly — Ray's "1/7°/2/3°"
+// was 5.4px type losing the 7's top bar); table typography ≥6.6px + TRUSS/
+// SPACING columns (reference parity); MODULES column now SUMS to the declared
+// count (point-in-poly + nearest-plane fallback; read 41 of 53); module/micro
+// callouts merged into one stacked block (they printed on top of each other);
+// JB callout margin-aware; attachments callout below the dim band; fire-
+// setback labels moved IN-BAND (rotated, reference-style — margin callout
+// leader crossed the array and collided with GENERAL NOTES); honest computed
+// scale note. roofCAD: CANOPY no longer hard-filters designed modules off the
+// drawing (header said 53, roof drew 41 — canopy flags, never deletes; vents/
+// chimneys still filter). PV-1: full overlay stack on the Nearmap aerial —
+// module footprints (rotated per-panel azimuth, translucent fill), subject-
+// building dimming mask + registration shift from imagery-registered Nearmap
+// AI polygons (new aerialData.subjectRoofPolygons via cropToSubjectBuilding),
+// canopy zones, street-name label (geocode-pin direction), equipment markers
+// ride the shift, 20-FT imperial scale bar, and an HONEST legend built from
+// what the sheet actually draws (PROPERTY LINE/FIRE SETBACK promises removed
+// until drawable — no parcel data source exists yet).
+const PLANSET_ENGINE_VERSION = 47376;
 
 
 

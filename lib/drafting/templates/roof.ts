@@ -314,6 +314,16 @@ export function drawRoofPlan(
         const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
         bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.6" stroke="none"/>`);
         bands.push(`<line x1="${a2x.toFixed(1)}" y1="${a2y.toFixed(1)}" x2="${b2x.toFixed(1)}" y2="${b2y.toFixed(1)}" class="line-setbk"/>`);
+        // Reference-style IN-BAND label on long bands (rotated to the band
+        // axis) — replaces the margin callout whose leader crossed the array
+        // and whose text collided with the GENERAL NOTES column.
+        if (!isBranchColorMode && el > 95) {
+          const bmx = (a.x + b.x) / 2 + nx * dPx * 0.5;
+          const bmy = (a.y + b.y) / 2 + ny * dPx * 0.5;
+          let angDeg = Math.atan2(ey, ex) * 180 / Math.PI;
+          if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;   // never upside-down
+          bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(setbackFt)} FIRE SETBACK</text>`);
+        }
       }
       if (interior) interiorEdgesXY.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
       edgeLines.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#000" stroke-width="${interior ? 2.4 : 1.3}"/>`);
@@ -397,10 +407,14 @@ export function drawRoofPlan(
   });
 
   // ── AC branch trunk routing (PV-2B): the daisy-chain per branch ──
-  // "No string/inverter logic" — each branch draws its trunk-cable run through
-  // its modules in WIRING ORDER, with a branch tag at the head. The order is
-  // the panelColorById map's INSERTION order (arrayPages builds it from the
-  // serpentine wiring sort), so assignment and routing can never desync.
+  // Branch MEMBERSHIP comes from panelColorById (arrayPages assignment; first-
+  // appearance order = B1..Bn = legend order). Wiring ORDER within a branch is
+  // computed HERE, geometrically, on the RENDERED coordinates — the canonical
+  // pipeline does not guarantee the map's insertion order matches rendered
+  // adjacency (prod panels arrive without planeId, so the upstream serpentine
+  // sort interleaved planes → the trunk polylines starburst through the roof
+  // center). Greedy nearest-neighbor chaining degenerates to a serpentine walk
+  // on any grid and never trusts upstream ordering.
   if (isBranchColorMode && panelColorById) {
     const byId = new Map<string, any>(regPanels.map((p: any) => [p.id, p]));
     const branchGroups: Array<{ color: string; ps: any[] }> = [];
@@ -413,12 +427,39 @@ export function drawRoofPlan(
     }
     branchGroups.forEach((g, bi) => {
       if (g.ps.length < 2) return;
-      const ptsStr = g.ps.map((p: any) => `${toX(p.lng).toFixed(1)},${toY(p.lat).toFixed(1)}`).join(' ');
-      els.push(`<polyline points="${ptsStr}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.75"/>`);
-      els.push(`<polyline points="${ptsStr}" fill="none" stroke="${g.color}" stroke-width="1.2"/>`);
-      const h = g.ps[0], hx = toX(h.lng), hy = toY(h.lat);
-      els.push(`<rect x="${(hx - 8).toFixed(1)}" y="${(hy - 6).toFixed(1)}" width="16" height="12" rx="2" fill="#fff" stroke="${g.color}" stroke-width="1"/>`);
-      els.push(drawText(hx, hy + 3, `B${bi + 1}`, { anchor: 'middle', fontSize: 6.5, fontWeight: '900', fill: '#111' }));
+      const pts = g.ps.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
+      // Greedy nearest-neighbor chain from the NW-most module of the branch.
+      const n = pts.length;
+      const used = new Array(n).fill(false);
+      let cur = 0;
+      for (let i = 1; i < n; i++) if (pts[i].x + pts[i].y < pts[cur].x + pts[cur].y) cur = i;
+      const order = [cur]; used[cur] = true;
+      for (let step = 1; step < n; step++) {
+        let best = -1, bestD = Infinity;
+        for (let i = 0; i < n; i++) {
+          if (used[i]) continue;
+          const d = (pts[i].x - pts[cur].x) ** 2 + (pts[i].y - pts[cur].y) ** 2;
+          if (d < bestD) { bestD = d; best = i; }
+        }
+        order.push(best); used[best] = true; cur = best;
+      }
+      // Segment lengths → any hop ≫ median is a plane-to-plane continuation,
+      // drawn dashed so it reads as "run continues", not as a cable over the ridge.
+      const segs = order.slice(1).map((oi, k) => {
+        const a = pts[order[k]], b = pts[oi];
+        return Math.hypot(b.x - a.x, b.y - a.y);
+      });
+      const medSeg = [...segs].sort((a, b) => a - b)[Math.floor(segs.length / 2)] || 1;
+      for (let k = 1; k < order.length; k++) {
+        const a = pts[order[k - 1]], b = pts[order[k]];
+        const long = segs[k - 1] > Math.max(3 * medSeg, 40);
+        const dash = long ? ' stroke-dasharray="5 4"' : '';
+        els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.75"${dash}/>`);
+        els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="1.2"${dash}/>`);
+      }
+      const h = pts[order[0]];
+      els.push(`<rect x="${(h.x - 8).toFixed(1)}" y="${(h.y - 6).toFixed(1)}" width="16" height="12" rx="2" fill="#fff" stroke="${g.color}" stroke-width="1"/>`);
+      els.push(drawText(h.x, h.y + 3, `B${bi + 1}`, { anchor: 'middle', fontSize: 6.5, fontWeight: '900', fill: '#111' }));
     });
   }
 
@@ -431,7 +472,9 @@ export function drawRoofPlan(
   // legend treat it separately from hard obstructions (vents/chimneys/etc.).
   const _canopyObs = roofObs.filter((o: any) => o.type === 'canopy');
   const _hardObs   = roofObs.filter((o: any) => o.type !== 'canopy');
-  roofObs.forEach((o: any) => {
+  // PV-2B is a CIRCUIT map — obstruction footprints/canopy hatch live on PV-2
+  // (they rendered as a giant faint circle mid-sheet under the wiring).
+  (isBranchColorMode ? [] : roofObs).forEach((o: any) => {
     const ox = toX(o.lng), oy = toY(o.lat);
     const rPx = Math.max(o.radiusFt * scale, 2.5);
     const kPx = Math.max((o.radiusFt + o.clearanceFt) * scale, rPx + 2.5);
@@ -500,11 +543,30 @@ export function drawRoofPlan(
   if (!isBranchColorMode) {
     const trussSize    = ((project as any).rafterSize || (project as any).trussSize || '2×4').toString();
     const trussSpacing = `${rafterSp}" O.C.`;
+    // Module→facet attribution: point-in-poly first, NEAREST-PLANE fallback
+    // for modules on regularized facet borders — the column MUST sum to the
+    // declared module count (it read 41 of 53; a plan checker adds it up).
+    const _facetCounts = new Array(regPlanes.length).fill(0);
+    regPanels.forEach((p: any) => {
+      let idx = regPlanes.findIndex((rp: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices));
+      if (idx < 0) {
+        let bestD = Infinity;
+        regPlanes.forEach((rp: any, i: number) => {
+          const cLa = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
+          const cLo = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
+          const d = (p.lat - cLa) ** 2 + (p.lng - cLo) ** 2;
+          if (d < bestD) { bestD = d; idx = i; }
+        });
+      }
+      if (idx >= 0) _facetCounts[idx]++;
+    });
     const facets = regPlanes.map((rp: any, i: number) => ({
       n: i + 1,
-      mods: regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices)).length,
+      mods: _facetCounts[i],
       az: rp.azimuth != null && isFinite(rp.azimuth) ? `${Math.round(rp.azimuth)}°` : '—',
       tilt: rp.pitch != null && isFinite(rp.pitch) ? `${Math.round(rp.pitch)}°` : '—',
+      truss: trussSize,
+      oc: trussSpacing,
     }));
     const roofAreaFt2  = regPlanes.reduce((s: number, rp: any) => s + planViewAreaFt2(rp.vertices), 0);
     const panelAreaFt2 = (panelLenIn * panelWidIn) / 144;
@@ -512,26 +574,32 @@ export function drawRoofPlan(
     const coverPct     = roofAreaFt2 > 0 ? (arrayAreaFt2 / roofAreaFt2) * 100 : 0;
     const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
+    // TRUSS SIZE + SPACING as real columns (reference parity) and typography
+    // sized to survive fit-to-width viewing — at the old 5.4px cells, "273°"
+    // rasterized as "2/3°" on Ray's screen (the 7 loses its top bar below
+    // ~5 rendered px). Data cells ≥7.2px + the larger roof canvas fix that.
     const cols = [
-      { key: 'n',    hdr: 'ROOF',    w: 30 },
-      { key: 'mods', hdr: 'MODULES', w: 40 },
-      { key: 'az',   hdr: 'AZIMUTH', w: 38 },
-      { key: 'tilt', hdr: 'TILT',    w: 30 },
+      { key: 'n',     hdr: 'ROOF',    w: 34 },
+      { key: 'mods',  hdr: 'MODULES', w: 52 },
+      { key: 'az',    hdr: 'AZIMUTH', w: 50 },
+      { key: 'tilt',  hdr: 'TILT',    w: 38 },
+      { key: 'truss', hdr: 'TRUSS',   w: 44 },
+      { key: 'oc',    hdr: 'SPACING', w: 50 },
     ] as const;
     const tblW = cols.reduce((s, c) => s + c.w, 0);
-    const rowH = 10, hdrH = 11, titleH = 12;
+    const rowH = 13, hdrH = 13, titleH = 14;
     const tx = 8, ty = 30;
     const tblH = titleH + hdrH + facets.length * rowH;
 
     const t: string[] = [];
     t.push(`<rect x="${tx}" y="${ty}" width="${tblW}" height="${tblH}" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
     t.push(`<rect x="${tx}" y="${ty}" width="${tblW}" height="${titleH}" fill="#000"/>`);
-    t.push(drawText(tx + tblW / 2, ty + 8.5, 'MAIN HOME ROOF DESCRIPTION', { anchor: 'middle', fontSize: 5.6, fontWeight: 'bold', fill: '#fff' }));
+    t.push(drawText(tx + tblW / 2, ty + 10, 'MAIN HOME ROOF DESCRIPTION', { anchor: 'middle', fontSize: 7.2, fontWeight: 'bold', fill: '#fff' }));
     // header row
     let cxp = tx;
     for (const c of cols) {
       t.push(`<rect x="${cxp}" y="${ty + titleH}" width="${c.w}" height="${hdrH}" fill="#e8ebf0" stroke="#999" stroke-width="0.3"/>`);
-      t.push(drawText(cxp + c.w / 2, ty + titleH + 7.5, c.hdr, { anchor: 'middle', fontSize: 5.2, fontWeight: 'bold', fill: '#1a1a1a' }));
+      t.push(drawText(cxp + c.w / 2, ty + titleH + 9, c.hdr, { anchor: 'middle', fontSize: 6.6, fontWeight: 'bold', fill: '#1a1a1a' }));
       cxp += c.w;
     }
     // data rows
@@ -540,13 +608,10 @@ export function drawRoofPlan(
       cxp = tx;
       for (const c of cols) {
         t.push(`<rect x="${cxp}" y="${ry}" width="${c.w}" height="${rowH}" fill="none" stroke="#ccc" stroke-width="0.3"/>`);
-        t.push(drawText(cxp + c.w / 2, ry + 7, String((f as any)[c.key]), { anchor: 'middle', fontSize: 5.4, fill: '#333' }));
+        t.push(drawText(cxp + c.w / 2, ry + 9, String((f as any)[c.key]), { anchor: 'middle', fontSize: 7.2, fill: '#333' }));
         cxp += c.w;
       }
     });
-    // framing note under the table (one term sheet-wide — was TRUSS here vs
-    // RAFTER in SYSTEM DATA, which structural reviewers flag)
-    t.push(drawText(tx, ty + tblH + 8, `FRAMING: ${trussSize} @ ${trussSpacing}`, { anchor: 'start', fontSize: 5, fill: '#555' }));
 
     // ── ARRAY & ROOF CALC — TOTAL ──
     const cy2 = ty + tblH + 14;
@@ -558,12 +623,12 @@ export function drawRoofPlan(
     const calcH = titleH + calc.length * rowH;
     t.push(`<rect x="${tx}" y="${cy2}" width="${tblW}" height="${calcH}" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
     t.push(`<rect x="${tx}" y="${cy2}" width="${tblW}" height="${titleH}" fill="#000"/>`);
-    t.push(drawText(tx + tblW / 2, cy2 + 8.5, 'ARRAY & ROOF CALC — TOTAL', { anchor: 'middle', fontSize: 5.6, fontWeight: 'bold', fill: '#fff' }));
+    t.push(drawText(tx + tblW / 2, cy2 + 10, 'ARRAY & ROOF CALC — TOTAL', { anchor: 'middle', fontSize: 7.2, fontWeight: 'bold', fill: '#fff' }));
     calc.forEach(([label, val], ri) => {
       const ry = cy2 + titleH + ri * rowH;
       t.push(`<rect x="${tx}" y="${ry}" width="${tblW}" height="${rowH}" fill="none" stroke="#ccc" stroke-width="0.3"/>`);
-      t.push(drawText(tx + 3, ry + 7, label, { anchor: 'start', fontSize: 5, fill: '#333' }));
-      t.push(drawText(tx + tblW - 3, ry + 7, val, { anchor: 'end', fontSize: 5.2, fontWeight: 'bold', fill: '#1a1a1a' }));
+      t.push(drawText(tx + 3, ry + 9, label, { anchor: 'start', fontSize: 6.4, fill: '#333' }));
+      t.push(drawText(tx + tblW - 3, ry + 9, val, { anchor: 'end', fontSize: 6.8, fontWeight: 'bold', fill: '#1a1a1a' }));
     });
 
     // ── GENERAL NOTES — numbered, upright, in the left column (replaces the
@@ -597,10 +662,10 @@ export function drawRoofPlan(
           ]
         : []),
     ];
-    t.push(drawText(tx, gnY, 'GENERAL NOTES', { anchor: 'start', fontSize: 6, fontWeight: 'bold', fill: '#000' }));
+    t.push(drawText(tx, gnY, 'GENERAL NOTES', { anchor: 'start', fontSize: 7.2, fontWeight: 'bold', fill: '#000' }));
     t.push(`<line x1="${tx}" y1="${gnY + 2.5}" x2="${tx + tblW}" y2="${gnY + 2.5}" stroke="#000" stroke-width="0.8"/>`);
     gn.forEach((line, i) => {
-      t.push(drawText(tx, gnY + 11 + i * 8, line, { anchor: 'start', fontSize: 5.2, fill: '#1a1a1a' }));
+      t.push(drawText(tx, gnY + 12 + i * 9.5, line, { anchor: 'start', fontSize: 6.4, fill: '#1a1a1a' }));
     });
     els.push(...t);
   }
@@ -734,31 +799,34 @@ export function drawRoofPlan(
       : `(N) MICROINVERTER (1 PER MODULE) — SEE EQUIPMENT SCHEDULE`;
     const topRowY = Math.max(roofMinY - 26, zones.dims.top + 10);
 
-    // (N) modules — label directly ABOVE its target module (short vertical leader)
-    txtCallout(Math.max(topP.x - 40, dz.x + 4), topRowY, 'start',
-      [modLine, `ON ${mountSys}`], topP.x - 2, topP.y - 4);
-    // (N) microinverters — label above the NE-most module (short leader)
-    const invTarget = _panelPts.reduce((m, p) => ((p.x - p.y) > (m.x - m.y) ? p : m), _panelPts[0]);
-    txtCallout(Math.min(invTarget.x + 40, roofMaxX + 26), topRowY, 'end',
-      [invLine], invTarget.x + 2, invTarget.y - 4);
-    // fire setback — short leader to the NW hip band midpoint
-    if (hip) {
-      const hx = (hip.ax + hip.bx) / 2, hy = (hip.ay + hip.by) / 2;
-      const qx = (Math.min(hip.ax, hip.bx) + hx) / 2, qy = hip.ay < hip.by ? (hip.ay + hy) / 2 : (hip.by + hy) / 2;
-      txtCallout(roofMinX - 30, Math.max(qy - 26, zones.dims.top + 24), 'start',
-        [`${ftToFtIn(setbackFt)} FIRE SETBACK (TYP.)`, `RIDGE / HIPS / RAKES`], qx, qy);
-    }
-    // (N) junction box + conduit — ONE label, JB symbol + dashed route to the
-    // SE eave exit ("two stacked labels on one corner read weird" — merged)
-    const jbX = eastP.x + 12, jbY = eastP.y;
+    // Modules + microinverters — ONE stacked block, ONE leader. The two
+    // separate top callouts targeted the same/adjacent top-row module from
+    // both sides and printed on top of each other (start-anchored left text
+    // met end-anchored right text at the same y with no width check).
+    txtCallout(Math.max(topP.x - 40, dz.x + 4), topRowY - 7.5, 'start',
+      [modLine, `ON ${mountSys}`, invLine], topP.x - 2, topP.y - 4);
+    // (fire-setback margin callout REMOVED — the value is now printed INSIDE
+    //  each long setback band, reference-style; the margin version's leader
+    //  crossed the array and its text collided with GENERAL NOTES)
+    // (N) junction box + conduit — JB symbol at the SE eave EXIT point (roof
+    // boundary, not on a module); text goes into the right margin when there
+    // is room, else drops below the SE corner.
+    const jbX = roofMaxX - 4, jbY = Math.min(eastP.y, roofMaxY - 14);
     els.push(`<rect x="${(jbX - 3.5).toFixed(1)}" y="${(jbY - 3.5).toFixed(1)}" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/>`);
     els.push(`<line x1="${(jbX - 3.5).toFixed(1)}" y1="${(jbY - 3.5).toFixed(1)}" x2="${(jbX + 3.5).toFixed(1)}" y2="${(jbY + 3.5).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
     const cEndX = roofMaxX - 8, cEndY = roofMaxY - 6;
     els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
-    txtCallout(roofMaxX + 26, jbY - 10, 'end',
-      [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ROUTE FIELD-VERIFIED`], jbX + 4, jbY - 3);
-    // (N) attachments — below its target module (short leader)
-    txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 16, 'start',
+    const _jbLines = [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ROUTE FIELD-VERIFIED`];
+    const _jbTextW = Math.max(..._jbLines.map(l => l.length)) * 3.5;
+    const _rightGap = (W - zones.dims.right) - roofMaxX;
+    if (_rightGap >= _jbTextW + 18) {
+      txtCallout(roofMaxX + 10, jbY - 4, 'start', _jbLines, jbX + 4, jbY);
+    } else {
+      txtCallout(Math.min(jbX + 8, roofMaxX - 4), roofMaxY + 24, 'end', _jbLines, jbX, jbY + 4);
+    }
+    // (N) attachments — BELOW the overall-dimension band (dim owns
+    // roofMaxY+24..+40; the callout used to print through the dim line)
+    txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 48, 'start',
       [`(N) ${mountSys} ATTACHMENTS @ ${attachSp}" O.C.`, `INTO FRAMING — SEE PV-3`],
       botP.x - 2, botP.y + 4);
   }
@@ -766,42 +834,26 @@ export function drawRoofPlan(
   // ── Viewport title (reference style): numbered circle + underlined title +
   // scale, directly below the drawing ──
   if (!isBranchColorMode) {
-    const vtX = roofMinX, vtY = roofMaxY + 62;
+    const vtX = roofMinX, vtY = roofMaxY + 74;   // below the relocated attachments callout
     els.push(`<circle cx="${vtX + 8}" cy="${vtY - 3}" r="8" fill="#fff" stroke="#000" stroke-width="1.4"/>`);
     els.push(drawText(vtX + 8, vtY, '1', { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#000' }));
     els.push(drawText(vtX + 22, vtY, svgTitle, { anchor: 'start', fontSize: 9, fontWeight: '900', fill: '#000', letterSpacing: 1 }));
     els.push(`<line x1="${vtX + 22}" y1="${vtY + 3.5}" x2="${vtX + 22 + svgTitle.length * 6.4}" y2="${vtY + 3.5}" stroke="#000" stroke-width="1.2"/>`);
-    els.push(drawText(vtX + 22, vtY + 11, 'SCALE: 3/32" = 1\'-0"', { anchor: 'start', fontSize: 6, fill: '#333' }));
+    // Honest scale: the drawing is fit-to-frame, so print the nearest standard
+    // architect scale actually achieved (px/ft ÷ 96dpi → in/ft) — "3/32"" was
+    // hardcoded and only coincidentally true for one roof size.
+    const _inPerFt = scale / 96;
+    const _stdScales: Array<[string, number]> = [['1/16"', 1/16], ['3/32"', 3/32], ['1/8"', 1/8], ['3/16"', 3/16], ['1/4"', 1/4], ['3/8"', 3/8], ['1/2"', 1/2]];
+    const _nearest = _stdScales.reduce((b, s) => Math.abs(s[1] - _inPerFt) < Math.abs(b[1] - _inPerFt) ? s : b, _stdScales[0]);
+    const _scaleErr = Math.abs(_nearest[1] - _inPerFt) / _inPerFt;
+    els.push(drawText(vtX + 22, vtY + 11, _scaleErr < 0.05 ? `SCALE: ${_nearest[0]} = 1'-0"` : 'GRAPHIC SCALE — SEE BAR', { anchor: 'start', fontSize: 6, fill: '#333' }));
   } else {
     els.push(drawText(dz.x + 8, zones.dims.top + 16, svgTitle, { anchor: 'start', fontSize: 9, fontWeight: '900', fill: '#000', letterSpacing: 1 }));
   }
 
-  // ── v65: Branch legend overlay (PV-2B only) ──
-  if (isBranchColorMode && panelColorById) {
-    // Unique branch colors in the map's INSERTION order — arrayPages inserts
-    // in wiring order, so legend B1..B4 = trunk tags B1..B4 by construction.
-    const branchEntries: string[] = [];
-    for (const c of panelColorById.values()) {
-      if (!branchEntries.includes(c)) branchEntries.push(c);
-    }
-    const legendX = dz.x + 8;
-    const legendY = zones.dims.top + 8;
-    const legendLineH = 12;
-    const legendW = 82;
-    const legendH = 14 + branchEntries.length * legendLineH;
-    // Semi-transparent background
-    els.push(`<rect x="${legendX}" y="${legendY}" width="${legendW}" height="${legendH}" rx="3" fill="rgba(255,255,255,0.92)" stroke="#555" stroke-width="0.8"/>`);
-    els.push(drawText(legendX + legendW / 2, legendY + 9, 'BRANCH LEGEND', {
-      anchor: 'middle', fontSize: 6.5, fill: '#000', fontWeight: 'bold',
-    }));
-    branchEntries.forEach((color, i) => {
-      const ly = legendY + 15 + i * legendLineH;
-      els.push(`<rect x="${legendX + 5}" y="${ly}" width="8" height="8" fill="${color}" stroke="#333" stroke-width="0.5" rx="1"/>`);
-      els.push(drawText(legendX + 17, ly + 7, 'B' + (i + 1), {
-        anchor: 'start', fontSize: 6, fill: '#000', fontWeight: 'bold',
-      }));
-    });
-  }
+  // (Branch legend overlay REMOVED — it duplicated the data-zone BRANCH LEGEND
+  //  table and its opaque box painted straight over the viewport title, which
+  //  is why the sheet read "UT — AC BRANCH COLOR MAP".)
 
   // ── System summary line (PV-2B only — PV-2 carries GENERAL NOTES instead) ──
   if (isBranchColorMode) {

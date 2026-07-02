@@ -10,7 +10,19 @@ import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnecti
 import { buildSchemSVG } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
 import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { cropToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { locateEquipment } from '../utils/equipmentLocator';
+
+// Ray-casting point-in-ring (lat/lng) — used to join a panel to its roof plane
+// for the azimuth fallback when the panel record carries no azimuth.
+function _pipRing(lat: number, lng: number, ring: Array<{lat:number;lng:number}>): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i].lat, xi = ring[i].lng, yj = ring[j].lat, xj = ring[j].lng;
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
 
 
 // ─── PV-1: Site Plan with Roof Plan ──────────────────────────────────────────
@@ -55,9 +67,14 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const svgW = 900, svgH = 620;
 
   let drawingContent: string;
+  // Aerial mode fills this with what it ACTUALLY drew; null = schematic
+  // fallback keeps the system-aware default legend in buildPv1Page.
+  let aerialLegend: Array<{fill:string;stroke:string;dash:boolean;label:string}> | null = null;
 
   if (aerial?.imageBase64) {
-    // ── AERIAL MODE: satellite image + SVG panel overlay ──────────────────
+    // ── AERIAL MODE: satellite image + SVG overlay layers ─────────────────
+    // Layers (bottom→top): subject-dimming mask → module footprints → canopy
+    // zones → street label → service-equipment markers → north/scale/badge.
     const imgW = aerial.imageWidth  || 640;
     const imgH = aerial.imageHeight || 640;
     const cLat = aerial.lat!;
@@ -66,29 +83,134 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     const mpp   = mppEq * Math.cos(cLat * Math.PI / 180);
     const ppm   = 1 / mpp;  // pixels per meter — drives the scale bar
 
-    // PV-1 SITE PLAN: the HD Nearmap aerial already shows the roof clearly, so we do
-    // NOT overlay the projected roof outline (the design trace sits ~1m off Nearmap's
-    // registration, which read as a slightly-off outline). Keep the clean landscape
-    // aerial + north + scale + system badge. (Overlay code removed 2026-07-01.)
+    const cLngA = aerial.lng!;
+    const toPx = (lat: number, lng: number) => ({
+      x: imgW / 2 + (lngToGlobalPx(lng, z) - lngToGlobalPx(cLngA, z)),
+      y: imgH / 2 + (latToGlobalPx(lat, z) - latToGlobalPx(cLat, z)),
+    });
 
-    // ── Service-equipment markers on the aerial (Ray item #3, 2026-07-02) ──
+    const _ring = (project.roofPlanes ?? []).flatMap((rp: any) => rp.vertices ?? [])
+      .filter((v: any) => isFinite(v?.lat) && isFinite(v?.lng) && Math.abs(v.lat) > 0.001);
+    const _pin = isFinite(project.lat as any) && isFinite(project.lng as any)
+      ? { lat: project.lat as number, lng: project.lng as number } : null;
+
+    // ── Registration shift: design GPS → imagery GPS ──────────────────────
+    // Nearmap's AI roof polygons are registered to the SAME imagery as the
+    // tiles; the design trace sits ~1 m off. When subject polygons are in
+    // hand, shifting the whole DESIGN layer (modules + equipment) by the
+    // centroid delta pins the overlay to the pixels. Capped at 4 m — a big
+    // delta means the crop grabbed the wrong cluster; better unshifted.
+    const _subjPolys = (aerial as any).subjectRoofPolygons as Array<Array<{lat:number;lng:number}>> | undefined ?? [];
+    let _dLat = 0, _dLng = 0;
+    if (_subjPolys.length > 0 && _ring.length >= 3) {
+      const sv = _subjPolys.flat();
+      const sLat = sv.reduce((s, v) => s + v.lat, 0) / sv.length;
+      const sLng = sv.reduce((s, v) => s + v.lng, 0) / sv.length;
+      const rLat = _ring.reduce((s: number, v: any) => s + v.lat, 0) / _ring.length;
+      const rLng = _ring.reduce((s: number, v: any) => s + v.lng, 0) / _ring.length;
+      const offM = Math.hypot((sLat - rLat) * 111320, (sLng - rLng) * 111320 * Math.cos(cLat * Math.PI / 180));
+      if (offM < 4) { _dLat = sLat - rLat; _dLng = sLng - rLng; }
+    }
+    const toPxD = (lat: number, lng: number) => toPx(lat + _dLat, lng + _dLng);
+
+    // ── Layer 0: dim everything except the subject building ───────────────
+    // An apartment-complex frame shows 4 identical roofs; the reviewer must
+    // see OURS instantly. Imagery-registered Nearmap polygons → no offset.
+    let dimSvg = '';
+    if (_subjPolys.length > 0) {
+      const pts = _subjPolys.flat().map(v => toPx(v.lat, v.lng));
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const padX = (Math.max(...xs) - Math.min(...xs)) * 0.22 + 14;
+      const padY = (Math.max(...ys) - Math.min(...ys)) * 0.22 + 14;
+      const bx = Math.max(0, Math.min(...xs) - padX), by = Math.max(0, Math.min(...ys) - padY);
+      const bw = Math.min(imgW, Math.max(...xs) + padX) - bx, bh = Math.min(imgH, Math.max(...ys) + padY) - by;
+      // Skip the mask if the subject fills most of the frame (nothing to dim).
+      if (bw * bh < imgW * imgH * 0.72 && bw > 20 && bh > 20) {
+        dimSvg = `
+          <mask id="pv1-subj-dim">
+            <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="#fff"/>
+            <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="#000"/>
+          </mask>
+          <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="rgba(10,14,22,0.42)" mask="url(#pv1-subj-dim)"/>
+          <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="1.4" stroke-dasharray="6 4"/>`;
+      }
+    }
+
+    // ── Layer 1: module footprints (the point of the sheet) ───────────────
+    // Real GPS centers + physical module dims + per-panel azimuth. Filled
+    // translucent (no crisp outline — the sub-meter registration residual
+    // reads on outlines, not on fills).
+    let modSvg = '';
+    if (panelPos && panelPos.length > 0 && panelPos.length <= 800) {
+      const wM = panelWidIn * 0.0254, lM = panelLenIn * 0.0254;
+      const planeAz = (p: {lat:number;lng:number}) => {
+        const rp = (project.roofPlanes ?? []).find((r: any) =>
+          (r.vertices?.length ?? 0) >= 3 && _pipRing(p.lat, p.lng, r.vertices));
+        return (rp as any)?.azimuth;
+      };
+      const parts: string[] = [];
+      for (const p of panelPos) {
+        if (!isFinite(p.lat) || !isFinite(p.lng)) continue;
+        const c = toPxD(p.lat, p.lng);
+        if (c.x < -30 || c.x > imgW + 30 || c.y < -30 || c.y > imgH + 30) continue;
+        const az = isFinite((p as any).azimuth) ? (p as any).azimuth : (planeAz(p) ?? 180);
+        const landscape = (p.orientation || '').toLowerCase() === 'landscape';
+        const w = (landscape ? lM : wM) * ppm, h = (landscape ? wM : lM) * ppm;
+        parts.push(`<g transform="translate(${c.x.toFixed(1)},${c.y.toFixed(1)}) rotate(${(az as number).toFixed(1)})"><rect x="${(-w/2).toFixed(1)}" y="${(-h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="rgba(30,80,200,0.50)" stroke="rgba(255,255,255,0.85)" stroke-width="0.7" rx="0.5"/></g>`);
+      }
+      modSvg = parts.join('');
+    }
+
+    // ── Layer 2: tree-canopy zones (aerial is blind under them) ───────────
+    // Real Nearmap polygons (imagery-registered — NOT design-shifted).
+    let canopySvg = '';
+    {
+      const canopies = ((project as any).roofObstructions ?? []).filter((o: any) =>
+        o?.type === 'canopy' && Array.isArray(o.polygon) && o.polygon.length >= 3);
+      const parts: string[] = [];
+      canopies.forEach((o: any, i: number) => {
+        const pts = o.polygon.filter((v: any) => isFinite(v?.lat) && isFinite(v?.lng)).map((v: any) => toPx(v.lat, v.lng));
+        if (pts.length < 3) return;
+        const d = pts.map((p: any) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+        const cx = pts.reduce((s: number, p: any) => s + p.x, 0) / pts.length;
+        const cy = pts.reduce((s: number, p: any) => s + p.y, 0) / pts.length;
+        parts.push(`<polygon points="${d}" fill="rgba(22,101,52,0.20)" stroke="#37c871" stroke-width="1.3" stroke-dasharray="5 3"/>`);
+        if (i === 0) {
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy - 4).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#eafff2" stroke="#14532d" stroke-width="2.2" paint-order="stroke">TREE CANOPY</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#eafff2" stroke="#14532d" stroke-width="1.8" paint-order="stroke">CONCEALED — FIELD VERIFY</text>`);
+        }
+      });
+      canopySvg = parts.join('');
+    }
+
+    // ── Layer 3: street-name label on the street-facing edge ──────────────
+    // Name = address minus house number; edge = geocode-pin direction from
+    // the building centroid (same heuristic equipmentLocator tier 2 uses).
+    let streetSvg = '';
+    if (_ring.length >= 3 && _pin) {
+      const rLat = _ring.reduce((s: number, v: any) => s + v.lat, 0) / _ring.length;
+      const rLng = _ring.reduce((s: number, v: any) => s + v.lng, 0) / _ring.length;
+      const dx = (_pin.lng - rLng) * Math.cos(cLat * Math.PI / 180);
+      const dy = _pin.lat - rLat;
+      const streetName = (project.address || '').split(',')[0].replace(/^\s*\d+\s+/, '').replace(/\b(apt|unit|ste|#)\.?\s*\S*$/i, '').trim().toUpperCase();
+      if (streetName && (Math.abs(dx) > 1e-9 || Math.abs(dy) > 1e-9)) {
+        const horiz = Math.abs(dx) > Math.abs(dy);
+        const lx = horiz ? (dx > 0 ? imgW - 16 : 16) : imgW / 2;
+        const ly = horiz ? imgH / 2 : (dy > 0 ? 26 : imgH - 16);
+        const rot = horiz ? (dx > 0 ? 90 : -90) : 0;
+        streetSvg = `<text x="${lx}" y="${ly}" transform="rotate(${rot} ${lx} ${ly})" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="900" letter-spacing="2" fill="#fff" stroke="rgba(0,0,0,0.75)" stroke-width="2.6" paint-order="stroke" text-decoration="underline">${streetName}</text>`;
+      }
+    }
+
+    // ── Layer 4: service-equipment markers (Ray item #3, 2026-07-02) ──────
     // locateEquipment() places UM/MSP/AC-disconnect from the best evidence:
-    // labeled survey photos w/ EXIF GPS when they exist, else the street-side
-    // wall heuristic — provenance is printed on the leader label so the sheet
-    // never claims surveyed precision it doesn't have.
+    // labeled survey photos w/ capture-time GPS when they exist, else the
+    // street-side wall heuristic — provenance is printed on the leader label
+    // so the sheet never claims surveyed precision it doesn't have.
     let eqSvg = '';
     try {
-      const _ring = (project.roofPlanes ?? []).flatMap((rp: any) => rp.vertices ?? [])
-        .filter((v: any) => isFinite(v?.lat) && isFinite(v?.lng) && Math.abs(v.lat) > 0.001);
-      const _pin = isFinite(project.lat as any) && isFinite(project.lng as any)
-        ? { lat: project.lat as number, lng: project.lng as number } : null;
-      const cLng = aerial.lng!;
       if (_ring.length >= 3 && aerial.lng != null) {
         const located = locateEquipment(_ring, _pin, (project as any).surveyPhotoHints ?? []);
-        const toPx = (lat: number, lng: number) => ({
-          x: imgW / 2 + (lngToGlobalPx(lng, z) - lngToGlobalPx(cLng, z)),
-          y: imgH / 2 + (latToGlobalPx(lat, z) - latToGlobalPx(cLat, z)),
-        });
         const TAGS: Record<string, { tag: string; name: string }> = {
           utility_meter: { tag: 'UM',  name: '(E) UTILITY METER' },
           msp:           { tag: 'MSP', name: '(E) MAIN SERVICE PANEL' },
@@ -97,7 +219,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const parts: string[] = [];
         let _lastLy = -Infinity;
         located.forEach((eq, i) => {
-          const p = toPx(eq.lat, eq.lng);
+          const p = toPxD(eq.lat, eq.lng);
           if (p.x < 8 || p.x > imgW - 8 || p.y < 8 || p.y > imgH - 8) return;
           const meta = TAGS[eq.kind];
           const rightSide = p.x > imgW / 2;
@@ -121,16 +243,18 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     } catch (eqErr: unknown) {
       console.log('[permit/pv1] equipment markers skipped:', (eqErr as Error)?.message);
     }
-    const pSvg = eqSvg;
+    const pSvg = dimSvg + modSvg + canopySvg + streetSvg + eqSvg;
 
-    const scalePx = Math.round(10*ppm);
-    const scaleBar = scalePx>0&&scalePx<250 ? `
+    // Graphic scale in FEET (permits are imperial) — 20 ft bar.
+    const scalePx = Math.round(20 * 0.3048 * ppm);
+    const scaleBar = scalePx>0&&scalePx<300 ? `
       <g transform="translate(${imgW/2-scalePx/2},${imgH-20})">
         <rect x="0" y="-8" width="${scalePx}" height="12" rx="2" fill="rgba(0,0,0,0.65)"/>
         <line x1="0" y1="0" x2="${scalePx}" y2="0" stroke="white" stroke-width="1.5"/>
         <line x1="0" y1="-4" x2="0" y2="4" stroke="white" stroke-width="1.5"/>
+        <line x1="${scalePx/2}" y1="-3" x2="${scalePx/2}" y2="3" stroke="white" stroke-width="1"/>
         <line x1="${scalePx}" y1="-4" x2="${scalePx}" y2="4" stroke="white" stroke-width="1.5"/>
-        <text x="${scalePx/2}" y="-11" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" fill="white">≈ 10 m</text>
+        <text x="${scalePx/2}" y="-11" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" fill="white">20 FT</text>
       </g>` : '';
 
     drawingContent = `
@@ -151,6 +275,16 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         </svg>
       </div>
       <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">${aerial.imageSource === 'nearmap' ? '🛰️ Nearmap HD aerial · 7.5 cm/px orthophoto' : '🛰️ Satellite aerial'}</div>`;
+
+    // HONEST legend — list exactly what this aerial actually draws, nothing
+    // else (the old hardcoded list promised PROPERTY LINE / FIRE SETBACK that
+    // aerial mode never drew — an AHJ reads the legend as a content claim).
+    aerialLegend = [
+      ...(modSvg ? [{ fill:'rgba(30,80,200,0.60)', stroke:'#ffffff', dash:false, label:'PV MODULE (NEW)' }] : []),
+      ...(dimSvg ? [{ fill:'none', stroke:'#6b7280', dash:true,  label:'SUBJECT BUILDING' }] : []),
+      ...(canopySvg ? [{ fill:'rgba(22,101,52,0.25)', stroke:'#1a7a2e', dash:true, label:'TREE CANOPY — VERIFY' }] : []),
+      ...(eqSvg ? [{ fill:'#1e40af', stroke:'#ffffff', dash:false, label:'SERVICE EQUIPMENT (TAGGED)' }] : []),
+    ];
   } else {
     // ── SCHEMATIC MODE: proper GPS-projected roof planes + panels ──────────
     const schemSVG = buildSchemSVG(
@@ -162,7 +296,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
       ${schemSVG}`;
   }
 
-  return buildPv1Page(input, pageNum, totalPages, equipItems, drawingContent, apn, ahj, utility, cad);  // FIX v47.295: pass cad for system-aware title
+  return buildPv1Page(input, pageNum, totalPages, equipItems, drawingContent, apn, ahj, utility, cad, aerialLegend);  // FIX v47.295: pass cad for system-aware title
 }
 
 export function buildPv1Page(
@@ -174,7 +308,8 @@ export function buildPv1Page(
   apn: string,
   ahj: string,
   utility: string,
-  cad?: CADModel  // FIX v47.295: optional cad for system-aware title/legend
+  cad?: CADModel,  // FIX v47.295: optional cad for system-aware title/legend
+  legendOverride?: Array<{fill:string;stroke:string;dash:boolean;label:string}> | null
 ): string {
   const { project } = input;
   // FIX v47.295: system-aware PV-1 subtitle
@@ -223,7 +358,9 @@ export function buildPv1Page(
         { fill:'none', stroke:'#374151', dash:true, label:'PROPERTY LINE' },
         { fill:'none', stroke:'#cc0000', dash:true, label:'18" FIRE SETBACK' },
       ];
-  const legendHtml = _legendItems.map(lr=>`
+  // Aerial mode passes the list of what it ACTUALLY drew — use it verbatim.
+  const _finalLegendItems = (legendOverride && legendOverride.length > 0) ? legendOverride : _legendItems;
+  const legendHtml = _finalLegendItems.map(lr=>`
     <div style="margin-bottom:3px;">
       <svg width="18" height="11" style="display:inline-block;vertical-align:middle;margin-right:4px;">
         ${lr.dash
@@ -298,6 +435,11 @@ export interface AerialRoofData {
    *  credit). Real lat/lng; the route forwards them to project.roofObstructions
    *  and roofCAD projects them into the drawing frame. */
   obstructions?: Array<NearmapObstruction & { clearanceM: number }>;
+  /** Nearmap AI roof polygons of the SUBJECT building only (imagery-registered
+   *  lat/lng — same registration as the tiles, so overlays drawn from these
+   *  are pixel-true). Drives the PV-1 subject-dimming mask + the design→
+   *  imagery registration shift. */
+  subjectRoofPolygons?: Array<Array<{ lat: number; lng: number }>>;
   roofSegments?: Array<{
     center?: { lat: number; lng: number };
     azimuthDegrees: number;
@@ -461,11 +603,19 @@ export async function fetchAerialRoofData(
     // — nearest-to-a-street-pin is how the wrong-house bug happened. Fails safe
     // to the unsnapped center. Coverage-gated + cached (one AI credit/generate).
     let aiObstructions: AerialRoofData['obstructions'];
+    let subjectRoofPolygons: AerialRoofData['subjectRoofPolygons'];
     if (nearmapConfigured()) {
       try {
         // ONE AI call returns both roof planes (for the frame snap) and roof
         // OBSTRUCTIONS (vents/chimneys/AC/skylights) for the PV-2 drawing.
         const ai = await fetchNearmapAIResult(centerLat, centerLng, { radiusM: 45 });
+        // Subject-building polygons (imagery-registered) → PV-1 dimming mask +
+        // design-layer registration shift. cropToSubjectBuilding fails open.
+        try {
+          const crop = cropToSubjectBuilding(ai.roofPlanes, { lat: centerLat, lng: centerLng });
+          const subj = (crop?.planes ?? []).map(p => p.worldPolygon).filter(p => (p?.length ?? 0) >= 3);
+          if (subj.length > 0) subjectRoofPolygons = subj;
+        } catch { /* fail open — mask is optional */ }
         const snap = nearmapRoofSnapCenter(centerLat, centerLng, ai.roofPlanes, { maxSnapM: 25 });
         if (snap && (snap.contained || _center.source === 'array')) {
           console.log(`[permit/aerial] frame snapped to Nearmap AI roof (${snap.contained ? 'containing' : 'nearest'} roof, ${snap.distM.toFixed(1)} m shift)`);
@@ -598,6 +748,7 @@ export async function fetchAerialRoofData(
       imageSource,
       roofSegments,
       obstructions: aiObstructions,
+      subjectRoofPolygons,
     };
 
   } catch (err: unknown) {

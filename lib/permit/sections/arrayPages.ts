@@ -14,6 +14,7 @@ import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
+import { microBranchCount, balancedBranchSizes } from '../utils/branching';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -130,13 +131,15 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   }> || [];
 
   const totalPanels = cadTotalPanels || system.totalPanels || panels.length || 0;
-  // Topology-aware circuit count: microinverters are AC BRANCH CIRCUITS (NEC 690.8
-  // ~16 micros/branch), NOT one DC string. A 52-micro system is ~4 branches, not
-  // "1 string of 52" (which is the default-fallback signature of an empty config).
+  // Topology-aware circuit count: microinverters are AC BRANCH CIRCUITS, NOT one
+  // DC string. Branch max is PER MODEL from the Enphase capability profiles
+  // (NEC 80% on a 20A branch: IQ8+ 13, IQ8A 10, ...) — the old hardcoded 16
+  // put 14 IQ8As on one branch, an NEC 690.8 plan-check violation.
   const _isMicro = (system.inverters?.[0]?.type === 'micro')
     || String((system as any).topology || '').toLowerCase().includes('micro');
+  const _invModel = system.inverters?.[0]?.model;
   const totalStrings = _isMicro
-    ? (Math.ceil(totalPanels / 16) || 1)
+    ? microBranchCount(totalPanels, _invModel)
     : (system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
   const circuitWord   = _isMicro ? 'BRANCH' : 'STRING';
   const circuitWordPl = _isMicro ? 'BRANCHES' : 'STRINGS';  // proper plural (not "BRANCHS")
@@ -164,8 +167,13 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     if (p.tilt != null) { sumTilt += p.tilt; count++; }
     if (p.azimuth != null) sumAz += p.azimuth;
   });
-  const avgTilt = isRoof(cadSystemType) && roofPlane0?.pitch != null
-    ? roofPlane0.pitch.toFixed(1)  // pitch is already in degrees from canonical model
+  // Multi-plane roofs: show the RANGE across facets, not plane[0] only —
+  // PV-2's per-facet table shows 17-19° while this sheet claimed "16.5°".
+  const _pitches = (cad.roof?.planes ?? []).map((p: any) => p.pitch).filter((v: any) => isFinite(v));
+  const avgTilt = isRoof(cadSystemType) && _pitches.length > 0
+    ? (Math.min(..._pitches).toFixed(0) === Math.max(..._pitches).toFixed(0)
+        ? Math.max(..._pitches).toFixed(1)
+        : `${Math.min(..._pitches).toFixed(0)}–${Math.max(..._pitches).toFixed(0)}`)
     : (count > 0 ? (sumTilt / count).toFixed(1) : (project.roofPitch || 20).toString());
   const avgAz = isRoof(cadSystemType) && roofPlane0?.azimuth != null
     ? roofPlane0.azimuth.toFixed(0)
@@ -214,8 +222,18 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     const rev = ((a.row ?? 0) % 2) === 1;
     return rev ? (b.col ?? 0) - (a.col ?? 0) : (a.col ?? 0) - (b.col ?? 0);
   });
-  const panelsPerString = totalStrings > 0 ? Math.ceil(totalPanels / totalStrings) : totalPanels;
-  sortedPanels.forEach((p, i) => { panelStringMap.set(p.id, Math.floor(i / panelsPerString)); });
+  // BALANCED chunk sizes (first branches take the remainder) — ceil-chunking
+  // gave 14/14/14/11; balanced gives 9/9/9/9/9/8 for 53 @ max-10.
+  const _sizes = balancedBranchSizes(sortedPanels.length, totalStrings);
+  {
+    let _bi = 0, _used = 0;
+    sortedPanels.forEach((p) => {
+      if (_used >= (_sizes[_bi] ?? Infinity) && _bi < _sizes.length - 1) { _bi++; _used = 0; }
+      panelStringMap.set(p.id, _bi);
+      _used++;
+    });
+  }
+  const panelsPerString = _sizes[0] ?? totalPanels;
 
   let svgCells = '';
   if (panels.length > 0 && panels.length <= 200) {

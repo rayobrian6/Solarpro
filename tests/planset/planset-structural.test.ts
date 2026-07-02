@@ -81,8 +81,11 @@ describe('planset structural/golden coverage — Design Studio to permit guardra
 
     // PV-2B SVG must contain CIRCUIT LAYOUT title (replaces PV-2's ROOF PLAN)
     expect(pv2bSvg).toContain('CIRCUIT LAYOUT');
-    // PV-2B SVG must contain BRANCH LEGEND overlay
-    expect(pv2bSvg).toContain('BRANCH LEGEND');
+    // v47376: the SVG BRANCH LEGEND overlay was REMOVED — it duplicated the
+    // data-zone HTML legend and painted over the viewport title. The legend
+    // must exist in the PAGE (data zone), not the drawing SVG.
+    expect(pv2bSvg).not.toContain('BRANCH LEGEND');
+    expect(pv2b).toContain('BRANCH LEGEND');
 
     // PV-2 must NOT contain CIRCUIT LAYOUT or BRANCH LEGEND in its SVG
     expect(pv2Svg).not.toContain('CIRCUIT LAYOUT');

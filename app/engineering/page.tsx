@@ -6400,6 +6400,7 @@ function EngineeringPageInner() {
               tilt: p.tilt, azimuth: p.azimuth, wattage: p.wattage,
               row: p.row, col: p.col, systemType: p.systemType, orientation: p.orientation,
               arrayId: (p as any).arrayId,
+              planeId: (p as any).planeId,  // branch wiring groups per plane (PV-2B)
             })),
             roofPlanes: (projectLayout?.roofPlanes || []).map((rp: any) => ({
               id: rp.id, vertices: rp.vertices || [],
@@ -13340,6 +13341,7 @@ function EngineeringPageInner() {
                                     tilt: p.tilt, azimuth: p.azimuth, wattage: p.wattage,
                                     row: p.row, col: p.col, systemType: p.systemType, orientation: p.orientation,
                                     arrayId: (p as any).arrayId,
+                                    planeId: (p as any).planeId,  // branch wiring groups per plane (PV-2B)
                                   })),
                                   roofPlanes: (projectLayout?.roofPlanes || []).map((rp: any) => ({
                                     id: rp.id, vertices: rp.vertices || [],

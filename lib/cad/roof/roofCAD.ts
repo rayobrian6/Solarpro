@@ -867,9 +867,14 @@ function buildCADElectricalNodes(nodes: SysDefElectricalNode[]): CADElectricalNo
  */
 function filterPanelsByObstructions(
   panels: CADPanel[],
-  obstructions: CADObstruction[],
+  allObstructions: CADObstruction[],
   warnings: string[],
 ): CADPanel[] {
+  // CANOPY never deletes designed modules: it flags an area the aerial could
+  // not verify (hatched zone + note on the sheet). Hard-filtering by it made
+  // the DRAWING silently drop modules the design carries (header said 53,
+  // roof showed 41) — the sheet must draw the design and flag the conflict.
+  const obstructions = allObstructions.filter(o => o.type !== 'canopy');
   if (obstructions.length === 0) return panels;
 
   return panels.filter(panel => {
