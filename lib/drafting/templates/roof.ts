@@ -119,6 +119,9 @@ export function drawRoofPlan(
   const panelLenIn  = project.panelLengthIn   || 66;
   const panelWidIn  = project.panelWidthIn    || 40;
   const mountSys    = (project.mountingSystem || 'IRONRIDGE XR100').toUpperCase();
+  // rail-less systems (RT-Mini etc.) draw per-module mounts; railed systems
+  // draw the two row rails + feet at framing crossings
+  const isRailless  = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(mountSys);
   const roofType    = (project.roofType       || 'SHINGLE').toUpperCase();
   const condType    = (project.conduitType    || 'EMT').toUpperCase();
   const panelWatts  = engineering.panelWatts || 0;
@@ -231,6 +234,8 @@ export function drawRoofPlan(
   // never paint over them (the old "ANE 2 / E FAC" clipping).
   const planeLabels: Array<{ cx: number; cy: number; ri: number; pitch: any; azimuth: any }> = [];
   const interiorEdgesXY: Array<{ ax: number; ay: number; bx: number; by: number }> = [];
+  // per-plane framing grid — attachment feet snap onto these lines
+  const framingGrids: Array<{ fAz: number; spacingPx: number; bcx: number; bcy: number } | null> = [];
   regPlanes.forEach((rp: any, ri: number) => {
     const ptsXY = rp.vertices!.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
     const pts = ptsXY.map((p: { x: number; y: number }) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
@@ -279,6 +284,9 @@ export function drawRoofPlan(
         framing.push(`<line x1="${(oxp - fdX * halfDiag).toFixed(1)}" y1="${(oyp - fdY * halfDiag).toFixed(1)}" x2="${(oxp + fdX * halfDiag).toFixed(1)}" y2="${(oyp + fdY * halfDiag).toFixed(1)}" stroke="#c8cdd5" stroke-width="0.45"/>`);
       }
       els.push(`<g clip-path="url(#${clipId})">${framing.join('')}</g>`);
+      framingGrids[ri] = { fAz, spacingPx, bcx, bcy };
+    } else {
+      framingGrids[ri] = null;
     }
     for (let ei = 0; ei < nV; ei++) {
       const a = ptsXY[ei], b = ptsXY[(ei + 1) % nV];
@@ -350,16 +358,69 @@ export function drawRoofPlan(
     if (branchFill) {
       els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/></g>`);
     } else {
-      // attachment feet at the module's top/bottom clamp edges — they land on
-      // the framing lines behind (mounts bolt through the roof into framing)
+      // ── System-aware rail + foot logic ──
+      // RAIL-LESS (RT-Mini etc.): 4 mounts under the module's long-side frame
+      // edges at the quarter points, X SNAPPED to the framing grid (mounts
+      // bolt into rafters/chords — feet floating between framing lines was
+      // the "doesn't make sense" read).
+      // RAILED (IronRidge etc.): two rail lines at 25/75% of module height
+      // (adjacent modules' segments join into continuous row rails) + one
+      // foot per rail snapped to the nearest framing line.
+      const hostIdx = regPlanes.findIndex((rp: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices ?? []));
+      const grid = hostIdx >= 0 ? framingGrids[hostIdx] : null;
+      const snapX = (x: number): number => {
+        if (!grid || rot !== 0 || grid.fAz !== 0) return x;
+        const s = grid.bcx + Math.round((x - grid.bcx) / grid.spacingPx) * grid.spacingPx;
+        return Math.max(x0 + 1, Math.min(x0 + pw - 1, s));
+      };
+      const fy1 = y0 + ph * 0.25, fy2 = y0 + ph * 0.75;
+      let hardware = '';
+      if (isRailless) {
+        const fxL = snapX(x0 + 1.6), fxR = snapX(x0 + pw - 1.6);
+        for (const [fx, fy] of [[fxL, fy1], [fxR, fy1], [fxL, fy2], [fxR, fy2]] as Array<[number, number]>) {
+          hardware += `<circle cx="${fx.toFixed(1)}" cy="${fy.toFixed(1)}" r="1.0" fill="#2a5db0"/>`;
+        }
+      } else {
+        const fxc = snapX(px);
+        hardware =
+          `<line x1="${x0.toFixed(1)}" y1="${fy1.toFixed(1)}" x2="${(x0 + pw).toFixed(1)}" y2="${fy1.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>` +
+          `<line x1="${x0.toFixed(1)}" y1="${fy2.toFixed(1)}" x2="${(x0 + pw).toFixed(1)}" y2="${fy2.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>` +
+          `<circle cx="${fxc.toFixed(1)}" cy="${fy1.toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
+          `<circle cx="${fxc.toFixed(1)}" cy="${fy2.toFixed(1)}" r="1.1" fill="#2a5db0"/>`;
+      }
       els.push(
         `${gOpen}` +
         `<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
-        `<circle cx="${px.toFixed(1)}" cy="${(y0 + 1.6).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
-        `<circle cx="${px.toFixed(1)}" cy="${(y0 + ph - 1.6).toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
+        hardware +
         `</g>`);
     }
   });
+
+  // ── AC branch trunk routing (PV-2B): the daisy-chain per branch ──
+  // "No string/inverter logic" — each branch draws its trunk-cable run through
+  // its modules in WIRING ORDER, with a branch tag at the head. The order is
+  // the panelColorById map's INSERTION order (arrayPages builds it from the
+  // serpentine wiring sort), so assignment and routing can never desync.
+  if (isBranchColorMode && panelColorById) {
+    const byId = new Map<string, any>(regPanels.map((p: any) => [p.id, p]));
+    const branchGroups: Array<{ color: string; ps: any[] }> = [];
+    const seen = new Map<string, number>();
+    for (const [pid, color] of panelColorById) {
+      const p = byId.get(pid);
+      if (!p) continue;
+      if (!seen.has(color)) { seen.set(color, branchGroups.length); branchGroups.push({ color, ps: [] }); }
+      branchGroups[seen.get(color)!].ps.push(p);
+    }
+    branchGroups.forEach((g, bi) => {
+      if (g.ps.length < 2) return;
+      const ptsStr = g.ps.map((p: any) => `${toX(p.lng).toFixed(1)},${toY(p.lat).toFixed(1)}`).join(' ');
+      els.push(`<polyline points="${ptsStr}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.75"/>`);
+      els.push(`<polyline points="${ptsStr}" fill="none" stroke="${g.color}" stroke-width="1.2"/>`);
+      const h = g.ps[0], hx = toX(h.lng), hy = toY(h.lat);
+      els.push(`<rect x="${(hx - 8).toFixed(1)}" y="${(hy - 6).toFixed(1)}" width="16" height="12" rx="2" fill="#fff" stroke="${g.color}" stroke-width="1"/>`);
+      els.push(drawText(hx, hy + 3, `B${bi + 1}`, { anchor: 'middle', fontSize: 6.5, fontWeight: '900', fill: '#111' }));
+    });
+  }
 
   // ── Roof obstructions + keep-out rings (Nearmap AI / vision / manual) ──
   // Footprint drawn as a white circle with a cross, keep-out clearance as a
@@ -687,9 +748,12 @@ export function drawRoofPlan(
 
   // ── v65: Branch legend overlay (PV-2B only) ──
   if (isBranchColorMode && panelColorById) {
-    // Collect unique branch colors and their labels
-    const branchColorSet = new Set(panelColorById.values());
-    const branchEntries = Array.from(branchColorSet).sort();
+    // Unique branch colors in the map's INSERTION order — arrayPages inserts
+    // in wiring order, so legend B1..B4 = trunk tags B1..B4 by construction.
+    const branchEntries: string[] = [];
+    for (const c of panelColorById.values()) {
+      if (!branchEntries.includes(c)) branchEntries.push(c);
+    }
     const legendX = dz.x + 8;
     const legendY = zones.dims.top + 8;
     const legendLineH = 12;

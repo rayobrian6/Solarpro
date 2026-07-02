@@ -158,7 +158,17 @@ const PDF_PAGE_CONFIG = {
 // land on framing. CALLOUTS: labels hug their targets w/ short leaders, JB +
 // conduit merged into one label, "(E) RIDGE" dropped, module/inverter fallback
 // text no longer reads as a broken sentence.
-const PLANSET_ENGINE_VERSION = 47373;
+// 47374 (2026-07-02): RAIL/FOOT + STRING/INVERTER LOGIC (Ray). Mount hardware
+// is now SYSTEM-AWARE: rail-less (RT-Mini) draws 4 mounts under the module's
+// long-side frame edges SNAPPED to the framing grid; railed systems draw the
+// two row rails + feet at framing crossings. AC branch assignment is now REAL
+// wiring logic: largest planes first + serpentine row order → contiguous
+// daisy-chain runs (was a global row/col sort that interleaved planes and
+// scattered every branch). PV-2B draws each branch's trunk-cable run through
+// its modules in wiring order with a B# tag at the head; legend order = trunk
+// order by construction (panelColorById insertion order is the wiring order).
+// Obstruction radius caps per type (a vent is never 1.2 m across).
+const PLANSET_ENGINE_VERSION = 47374;
 
 
 

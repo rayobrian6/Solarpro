@@ -188,9 +188,32 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // Color per string (up to 8 strings)
   const stringColors = ['#1b3f74','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d','#e5a100'];
 
-  // Assign string index to each panel (distribute evenly)
+  // Assign string index to each panel — CONTIGUOUS runs. An AC branch is a
+  // physical daisy-chain of adjacent modules; the old global (row, col) sort
+  // interleaved rows from DIFFERENT roof planes (row/col are per-plane grid
+  // indices), scattering every branch across the roof. Group by plane first,
+  // then row, then col, so each chunk is one continuous run.
   const panelStringMap: Map<string, number> = new Map();
-  const sortedPanels = [...panels].sort((a, b) => (a.row ?? 0) - (b.row ?? 0) || (a.col ?? 0) - (b.col ?? 0));
+  // Plane order: LARGEST planes first, so the big north/south fields get whole
+  // branches and only the tail branch picks up the small hip-cap planes
+  // (arbitrary first-appearance order made branch 1 span three planes).
+  const _planeCounts = new Map<string, number>();
+  panels.forEach((p: any) => {
+    const k = String(p.planeId ?? p.arrayId ?? '');
+    _planeCounts.set(k, (_planeCounts.get(k) ?? 0) + 1);
+  });
+  const _planeRank = new Map<string, number>();
+  [..._planeCounts.entries()].sort((a, b) => b[1] - a[1]).forEach(([k], i) => _planeRank.set(k, i));
+  // Serpentine within each plane (alternate column direction per row) so
+  // consecutive panels are physically adjacent — that IS the wiring order.
+  const sortedPanels = [...panels].sort((a: any, b: any) => {
+    const pr = (_planeRank.get(String(a.planeId ?? a.arrayId ?? '')) ?? 0) - (_planeRank.get(String(b.planeId ?? b.arrayId ?? '')) ?? 0);
+    if (pr !== 0) return pr;
+    const rr = (a.row ?? 0) - (b.row ?? 0);
+    if (rr !== 0) return rr;
+    const rev = ((a.row ?? 0) % 2) === 1;
+    return rev ? (b.col ?? 0) - (a.col ?? 0) : (a.col ?? 0) - (b.col ?? 0);
+  });
   const panelsPerString = totalStrings > 0 ? Math.ceil(totalPanels / totalStrings) : totalPanels;
   sortedPanels.forEach((p, i) => { panelStringMap.set(p.id, Math.floor(i / panelsPerString)); });
 

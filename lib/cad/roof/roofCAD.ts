@@ -161,8 +161,13 @@ export function roofCAD(input: PermitInputShape): CADModel {
       const _long = Math.max(_extX, _extY), _short = Math.max(Math.min(_extX, _extY), 0.05);
       if (_long / _short > 3 && _long > 2) { _droppedOffRoof++; return null; }
       const cXY = latLngToXY(cLat, cLng, originLat, originLng);
-      // footprint radius = max vertex distance from the centroid, CAPPED
-      const radiusM = Math.min(1.2, Math.max(0.15, ...pts.map((p: any) =>
+      // footprint radius = max vertex distance from the centroid, capped PER
+      // TYPE — a vent is never 1.2 m across; coarse AI polygons at the ridge
+      // junctions were rendering as dominant circles mid-sheet.
+      const _radCap: Record<string, number> = {
+        vent: 0.3, chimney: 0.8, ac_unit: 0.6, satellite: 0.5, skylight: 1.2, other: 0.5,
+      };
+      const radiusM = Math.min(_radCap[o.type] ?? 0.5, Math.max(0.15, ...pts.map((p: any) =>
         Math.hypot((p.lat - cLat) * 111320, (p.lng - cLng) * 111320 * cosLat))));
       return {
         id:          `nm-obs-${i}`,
