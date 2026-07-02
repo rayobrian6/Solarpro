@@ -138,7 +138,15 @@ const PDF_PAGE_CONFIG = {
 // (per-plane assignment + existing panel-collision filtering now actually run);
 // the adapter emits fake-degree circles; PV-2 draws footprint + dashed keep-out
 // ring + type label, with legend entry and an honest GENERAL NOTES line.
-const PLANSET_ENGINE_VERSION = 47371;
+// 47372 (2026-07-02): PV-1 SERVICE-EQUIPMENT MARKERS (Ray item #3). New
+// equipmentLocator (pure, 5 tests): source hierarchy = labeled survey photos
+// w/ EXIF GPS (exact — pipeline ready; Melvin's survey photos carry NO GPS,
+// the capture app strips location) → street-side wall heuristic (meter/MSP/AC
+// on the wall facing the geocoded address point, quarter-point placement).
+// PV-1 draws blue UM/MSP/AC tags with white-haloed leaders + label boxes that
+// PRINT PROVENANCE ("PER SURVEY PHOTO GPS" vs "APPROX. — FIELD VERIFY") — the
+// sheet never claims surveyed precision it doesn't have.
+const PLANSET_ENGINE_VERSION = 47372;
 
 
 

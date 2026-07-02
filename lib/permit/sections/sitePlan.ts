@@ -9,7 +9,8 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
 import { buildSchemSVG } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
-import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { locateEquipment } from '../utils/equipmentLocator';
 
 
 // ─── PV-1: Site Plan with Roof Plan ──────────────────────────────────────────
@@ -69,7 +70,58 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // NOT overlay the projected roof outline (the design trace sits ~1m off Nearmap's
     // registration, which read as a slightly-off outline). Keep the clean landscape
     // aerial + north + scale + system badge. (Overlay code removed 2026-07-01.)
-    const pSvg = '';
+
+    // ── Service-equipment markers on the aerial (Ray item #3, 2026-07-02) ──
+    // locateEquipment() places UM/MSP/AC-disconnect from the best evidence:
+    // labeled survey photos w/ EXIF GPS when they exist, else the street-side
+    // wall heuristic — provenance is printed on the leader label so the sheet
+    // never claims surveyed precision it doesn't have.
+    let eqSvg = '';
+    try {
+      const _ring = (project.roofPlanes ?? []).flatMap((rp: any) => rp.vertices ?? [])
+        .filter((v: any) => isFinite(v?.lat) && isFinite(v?.lng) && Math.abs(v.lat) > 0.001);
+      const _pin = isFinite(project.lat as any) && isFinite(project.lng as any)
+        ? { lat: project.lat as number, lng: project.lng as number } : null;
+      const cLng = aerial.lng!;
+      if (_ring.length >= 3 && aerial.lng != null) {
+        const located = locateEquipment(_ring, _pin, (project as any).surveyPhotoHints ?? []);
+        const toPx = (lat: number, lng: number) => ({
+          x: imgW / 2 + (lngToGlobalPx(lng, z) - lngToGlobalPx(cLng, z)),
+          y: imgH / 2 + (latToGlobalPx(lat, z) - latToGlobalPx(cLat, z)),
+        });
+        const TAGS: Record<string, { tag: string; name: string }> = {
+          utility_meter: { tag: 'UM',  name: '(E) UTILITY METER' },
+          msp:           { tag: 'MSP', name: '(E) MAIN SERVICE PANEL' },
+          ac_disconnect: { tag: 'AC',  name: '(N) AC DISCONNECT' },
+        };
+        const parts: string[] = [];
+        let _lastLy = -Infinity;
+        located.forEach((eq, i) => {
+          const p = toPx(eq.lat, eq.lng);
+          if (p.x < 8 || p.x > imgW - 8 || p.y < 8 || p.y > imgH - 8) return;
+          const meta = TAGS[eq.kind];
+          const rightSide = p.x > imgW / 2;
+          const lx = rightSide ? Math.min(p.x + 120, imgW - 8) : Math.max(p.x - 120, 8);
+          let ly = Math.max(24, Math.min(imgH - 24, p.y - 34 + i * 26));
+          if (ly < _lastLy + 24) ly = _lastLy + 24;   // labels never overlap
+          _lastLy = ly;
+          const prov = eq.provenance === 'survey_photo_gps' ? 'PER SURVEY PHOTO GPS' : 'APPROX. — FIELD VERIFY';
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#fff" stroke-width="2.2"/>`);
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#1e40af" stroke-width="1.1"/>`);
+          parts.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="7" fill="#1e40af" stroke="#fff" stroke-width="1.6"/>`);
+          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 2.6).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${meta.tag.length > 2 ? 5 : 6.5}" font-weight="900" fill="#fff">${meta.tag}</text>`);
+          const tw = Math.max(meta.name.length, prov.length) * 4.4 + 10;
+          const tx0 = rightSide ? lx - tw : lx;
+          parts.push(`<rect x="${tx0.toFixed(1)}" y="${(ly - 10).toFixed(1)}" width="${tw.toFixed(0)}" height="20" rx="2" fill="rgba(255,255,255,0.94)" stroke="#1e40af" stroke-width="0.8"/>`);
+          parts.push(`<text x="${(tx0 + 5).toFixed(1)}" y="${(ly - 2).toFixed(1)}" font-family="Arial,sans-serif" font-size="7" font-weight="900" fill="#111">${meta.name}</text>`);
+          parts.push(`<text x="${(tx0 + 5).toFixed(1)}" y="${(ly + 6.5).toFixed(1)}" font-family="Arial,sans-serif" font-size="5.6" fill="#555">${prov}</text>`);
+        });
+        eqSvg = parts.join('');
+      }
+    } catch (eqErr: unknown) {
+      console.log('[permit/pv1] equipment markers skipped:', (eqErr as Error)?.message);
+    }
+    const pSvg = eqSvg;
 
     const scalePx = Math.round(10*ppm);
     const scaleBar = scalePx>0&&scalePx<250 ? `
