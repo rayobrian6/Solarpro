@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { parseBill, type BillParseResult } from "@/lib/generatorParseBill";
+import { parseBill, type BillParseResult } from "@/lib/engineering/generatorParseBill";
 import {
   calculateEstimateFromBill,
   formatUSD,
   type EstimateResult,
-} from "@/lib/generatorEstimate";
+} from "@/lib/engineering/generatorEstimate";
 
 const EXAMPLE_BILL = `Statement period: 09/15/2024 - 10/14/2024
 Account number: 1234-5678-90
