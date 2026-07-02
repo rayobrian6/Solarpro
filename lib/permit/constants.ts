@@ -118,7 +118,18 @@ const PDF_PAGE_CONFIG = {
 // Plane labels auto-dodge modules. Title block: SCALE 'AS NOTED' (was NTS vs a
 // scaled view), PE seal placeholder text removed, 'NEC NEC' dedup guard. IFC
 // citations updated §605.11 → §1204.2 (2018+ editions). FRAMING wording unified.
-const PLANSET_ENGINE_VERSION = 47369;
+// 47370 (2026-07-01): the SET-WIDE pro restructure (Ray: "nowhere near the
+// detail of a professional planset"). (1) VERTICAL TITLE-BLOCK STRIP on the
+// right edge of EVERY sheet — firm block, project block, meta, REVISIONS, PE
+// seal, sheet name, and the big sheet ID in the extreme lower-right where a
+// set is indexed (the horizontal top banner was the biggest "generated" tell).
+// (2) PV-2 direct equipment callouts in reference style — real "(N) qty —
+// make/model (W)" text with short leaders for modules, microinverters,
+// mounts/attachments, fire setback, ridge, junction-box SYMBOL + labeled
+// dashed conduit route (numbered bubbles retired). (3) Viewport title below
+// the drawing (circled 1 + underlined name + scale) replacing the solid black
+// banner. Equipment identity now flows into the drafting layer (adapter).
+const PLANSET_ENGINE_VERSION = 47370;
 
 
 

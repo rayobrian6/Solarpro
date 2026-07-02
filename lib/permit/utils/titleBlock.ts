@@ -43,37 +43,51 @@ export function titleBlock(
   const systemSizeKw    = system?.totalDcKw ? `${system.totalDcKw.toFixed(2)} kW DC` : '—';
   const panelCount      = system?.totalPanels ? `${system.totalPanels} modules` : '';
 
+  // Industry-standard VERTICAL title-block strip on the right edge of every
+  // sheet — firm block, project block, meta, revisions, PE seal, sheet name,
+  // and the big sheet ID in the extreme lower-right where plan reviewers and
+  // printers index a set. (The old full-width horizontal banner across the top
+  // was the single biggest "generated, not drafted" tell vs the PE-sealed
+  // reference.) Rendered position/size comes from .title-block CSS.
   return `
   <div class="title-block">
-    <div class="tb-left">
-      <div class="tb-company">SOLARPRO ENGINEERING</div>
+    <div class="tbs-firm">
+      <div class="tb-company">SOLARPRO<br/>ENGINEERING</div>
+      <div class="tbs-firm-sub">SOLAR PERMIT PLANSETS</div>
+    </div>
+    <div class="tbs-block">
       <div class="tb-project">${escapeH(project.projectName || 'SOLAR PV SYSTEM')}</div>
       <div class="tb-address">${escapeH(project.address || '—')}</div>
       <div class="tb-client">CLIENT: ${escapeH(project.clientName || '—')}</div>
-      <div class="tb-meta">APN: ${apn} &nbsp;|&nbsp; UTILITY: ${utility}</div>
-      <div class="tb-meta">AHJ: ${ahj} &nbsp;|&nbsp; ${state}</div>
+      <div class="tb-meta">APN: ${apn}</div>
+      <div class="tb-meta">UTILITY: ${utility}</div>
+      <div class="tb-meta">AHJ: ${ahj} | ${state}</div>
     </div>
-    <div class="tb-center">
-      <div class="tb-sheet-id">${sheetId}</div>
+    <table class="tb-table">
+      <tr><td class="tbl">DESIGNER</td><td class="tbv">${escapeH(project.designer || '—')}</td></tr>
+      <tr><td class="tbl">DATE</td><td class="tbv">${escapeH(String(project.date ?? ''))}</td></tr>
+      <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
+      <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
+      <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
+      <tr><td class="tbl">SCALE</td><td class="tbv">AS NOTED</td></tr>
+    </table>
+    <div class="tbs-rev-hdr">REVISIONS</div>
+    <table class="tb-table">
+      <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; ${escapeH(String(project.date ?? ''))}</td></tr>
+    </table>
+    <div class="tbs-seal">
+      <div class="tbs-seal-caption">PE SEAL</div>
+      <div class="pe-seal-box">&nbsp;</div>
+    </div>
+    <div class="tbs-spacer"></div>
+    <div class="tbs-sheetname">
+      <div class="tbs-sn-label">SHEET NAME</div>
       <div class="tb-sheet-title">${pageTitle}</div>
       <div class="tb-codes">NEC ${necVer} &middot; IBC ${ibcVer} &middot; IRC ${ircVer} &middot; IFC ${ifcVer} &middot; ASCE 7-22</div>
-      <div class="tb-size">SHEET SIZE: ANSI B &mdash; 11&Prime; &times; 17&Prime;</div>
+      <div class="tb-size">ANSI B &mdash; 11&Prime; &times; 17&Prime; &nbsp;|&nbsp; SHEET ${pageNum} OF ${totalPages}</div>
     </div>
-    <div class="tb-right">
-      <table class="tb-table">
-        <tr><td class="tbl">DESIGNER</td><td class="tbv">${escapeH(project.designer || '—')}</td></tr>
-        <tr><td class="tbl">DATE</td><td class="tbv">${escapeH(String(project.date ?? ''))}</td></tr>
-        <tr><td class="tbl">SHEET</td><td class="tbv">${pageNum} OF ${totalPages}</td></tr>
-        <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
-        <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
-        <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
-        <tr><td class="tbl">UTILITY</td><td class="tbv">${utility}</td></tr>
-        <tr><td class="tbl">AHJ</td><td class="tbv">${ahj}</td></tr>
-        <tr class="tb-rev-hdr"><td class="tbl" colspan="2" style="text-align:center;font-weight:900;background:#000;color:#fff;letter-spacing:0.5px;">REVISIONS</td></tr>
-        <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; ${project.date}</td></tr>
-        <tr><td class="tbl">SCALE</td><td class="tbv">AS NOTED</td></tr>
-        <tr><td class="tbl">PE SEAL</td><td class="tbv"><div class="pe-seal-box">&nbsp;</div></td></tr>
-      </table>
+    <div class="tbs-id">
+      <div class="tb-sheet-id">${sheetId}</div>
     </div>
   </div>`;
 }

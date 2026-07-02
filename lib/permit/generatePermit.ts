@@ -878,10 +878,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .page {
     width: 17in;
     height: 11in;
-    padding: 0.28in 0.28in 0.16in 0.28in;
+    /* right padding reserves the vertical title-block strip (see .title-block) */
+    padding: 0.28in calc(0.28in + 1.72in) 0.16in 0.28in;
     page-break-after: always;
-    display: grid;
-    grid-template-rows: auto 1fr auto;
+    display: flex;
+    flex-direction: column;
     gap: 0;
     overflow: hidden;
     box-sizing: border-box;
@@ -1235,48 +1236,71 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   /* ── Title block (bottom strip on every sheet) ──────────────────────────── */
+  /* ── VERTICAL title-block strip (industry standard): absolutely positioned on
+     the right edge of every sheet, full height, with the big sheet ID in the
+     lower-right corner where reviewers/printers index a set. ── */
   .title-block {
-    display: table;
-    width: 100%;
+    position: absolute;
+    top: 0.34in;
+    right: 0.34in;
+    bottom: 0.22in;
+    width: 1.66in;
+    display: flex;
+    flex-direction: column;
     border: var(--border-hvy);
     background: #fff;
-    border-collapse: collapse;
-    flex-shrink: 0;
-    margin-bottom: var(--xs);
+    overflow: hidden;
+    z-index: 5;
   }
-  .tb-left {
-    display: table-cell;
-    width: 30%;
-    padding: var(--xs);
-    border-right: var(--border);
-    vertical-align: top;
-  }
-  .tb-center {
-    display: table-cell;
-    width: 40%;
-    padding: var(--xs);
-    border-right: var(--border);
-    vertical-align: middle;
+  .tbs-firm {
+    padding: 5px var(--xs);
+    border-bottom: var(--border-hvy);
     text-align: center;
   }
-  .tb-right {
-    display: table-cell;
-    width: 30%;
-    padding: 0;
-    vertical-align: top;
+  .tbs-firm-sub  { font-size: 6px; color: #555; letter-spacing: 1.5px; margin-top: 2px; }
+  .tbs-block {
+    padding: 4px var(--xs);
+    border-bottom: var(--border);
   }
-  .tb-company     { font-size: var(--f-xl); font-weight: 900; color: #000; letter-spacing: 2px; text-transform: uppercase; border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 2px; }
-  .tb-project     { font-size: var(--f-xl); font-weight: 700; color: #000; margin-top: 2px; text-transform: uppercase; }
-  .tb-address     { font-size: var(--f-sm); color: #333; margin-top: 1px; }
-  .tb-client      { font-size: var(--f-sm); color: #333; margin-top: 1px; }
-  .tb-meta        { font-size: var(--f-xs); color: #555; margin-top: 1px; }
-  .tb-sheet-id    { font-size: var(--f-4xl); font-weight: 900; color: #000; font-family: var(--mono); letter-spacing: 4px; border-bottom: var(--border-hvy); padding-bottom: 3px; margin-bottom: 2px; }
-  .tb-sheet-title { font-size: var(--f-2xl); font-weight: 900; color: #000; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
-  .tb-codes       { font-size: var(--f-xs); color: #555; margin-top: 3px; }
-  .tb-size        { font-size: var(--f-xs); color: #777; margin-top: 1px; }
+  .tbs-rev-hdr {
+    background: #000; color: #fff;
+    font-size: var(--f-xs); font-weight: 900;
+    letter-spacing: 1px; text-align: center;
+    padding: 2px 0;
+  }
+  .tbs-seal {
+    border-top: var(--border);
+    border-bottom: var(--border);
+    padding: 3px var(--xs) 5px;
+    text-align: center;
+  }
+  .tbs-seal-caption { font-size: 6px; color: #777; letter-spacing: 1.5px; margin-bottom: 2px; text-align: left; }
+  .tbs-seal .pe-seal-box { height: 1.35in; }
+  .tbs-spacer { flex: 1; }
+  .tbs-sheetname {
+    border-top: var(--border-hvy);
+    padding: 4px var(--xs);
+  }
+  .tbs-sn-label { font-size: 6px; color: #777; letter-spacing: 1.5px; }
+  .tbs-id {
+    border-top: var(--border-hvy);
+    text-align: center;
+    padding: 4px 0 5px;
+  }
+  .tb-company     { font-size: var(--f-lg); font-weight: 900; color: #000; letter-spacing: 2px; text-transform: uppercase; line-height: 1.25; }
+  .tb-project     { font-size: var(--f-sm); font-weight: 700; color: #000; text-transform: uppercase; line-height: 1.3; }
+  .tb-address     { font-size: var(--f-xs); color: #333; margin-top: 1px; line-height: 1.3; }
+  .tb-client      { font-size: var(--f-xs); color: #333; margin-top: 1px; }
+  .tb-meta        { font-size: 6.5px; color: #555; margin-top: 1px; line-height: 1.35; }
+  .tb-sheet-id    { font-size: 26px; font-weight: 900; color: #000; font-family: var(--mono); letter-spacing: 3px; line-height: 1; }
+  .tb-sheet-title { font-size: var(--f-sm); font-weight: 900; color: #000; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.3; }
+  .tb-codes       { font-size: 6px; color: #555; margin-top: 3px; line-height: 1.4; }
+  .tb-size        { font-size: 6px; color: #777; margin-top: 1px; }
 
-  /* Title block right column — meta table */
-  .tb-table { width: 100%; border-collapse: collapse; font-size: var(--f-sm); }
+  /* Title block meta table — compact for the narrow vertical strip */
+  .tb-table { width: 100%; border-collapse: collapse; font-size: 6.5px; }
+  .title-block .tbl { width: 34%; padding: 1.5px 3px; }
+  .title-block .tbv { padding: 1.5px 3px; word-break: break-word; }
   .tb-table tr { border-bottom: var(--border); }
   .tb-table tr:last-child { border-bottom: none; }
   .tbl {
@@ -1581,8 +1605,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 
   /* ── SLD page ───────────────────────────────────────────────────────────── */
   .sld-page { padding: var(--xl); height: 11in; }
-  .sld-page .title-block { margin-bottom: var(--xs); }
-  .sld-page svg { max-width: 100%; max-height: calc(11in - 1.8in); object-fit: contain; }
+  .sld-page svg { max-width: 100%; max-height: calc(11in - 0.9in); object-fit: contain; }
 
   /* ── Two-column layout helper (legacy) ──────────────────────────────────── */
   .two-col-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-section); width: 100%; overflow: hidden; }

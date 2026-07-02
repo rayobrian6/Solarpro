@@ -31,10 +31,14 @@ export interface PermitInputShape {
     totalAcKw: number;
     totalPanels: number;
     inverters?: Array<{
+      manufacturer?: string;
+      model?: string;
       strings?: Array<{
         panelWatts?: number;
         panelVoc?: number;
         panelIsc?: number;
+        panelManufacturer?: string;
+        panelModel?: string;
       }>;
     }>;
     [key: string]: any;

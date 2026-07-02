@@ -32,6 +32,12 @@ export interface DraftingProject {
   ahjRidgeSetbackIn?: number;
   // Electrical
   inverterType?: string;
+  // Equipment identity — the reference sets annotate the PLAN with real
+  // make/model strings ("(N) 30 — JINKO JKM420N-54HL4-B (420W)"), not bubbles.
+  moduleMfr?: string;
+  moduleModel?: string;
+  inverterMfr?: string;
+  inverterModel?: string;
   // Panel GPS positions from 3D engine
   panelPositions?: Array<{
     id: string;

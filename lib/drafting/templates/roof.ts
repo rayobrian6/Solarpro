@@ -120,6 +120,12 @@ export function drawRoofPlan(
   const panelWidIn  = project.panelWidthIn    || 40;
   const mountSys    = (project.mountingSystem || 'IRONRIDGE XR100').toUpperCase();
   const roofType    = (project.roofType       || 'SHINGLE').toUpperCase();
+  const condType    = (project.conduitType    || 'EMT').toUpperCase();
+  const panelWatts  = engineering.panelWatts || 0;
+  const moduleStr   = [project.moduleMfr, project.moduleModel].filter(Boolean).join(' ').toUpperCase()
+    || 'PV MODULES — SEE EQUIPMENT SCHEDULE';
+  const inverterStr = [project.inverterMfr, project.inverterModel].filter(Boolean).join(' ').toUpperCase()
+    || 'MICROINVERTER — SEE EQUIPMENT SCHEDULE';
   const pitchNum    = project.roofPitch       || 5;
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
@@ -191,11 +197,11 @@ export function drawRoofPlan(
   els.push(drawBackground(W, H, '#ffffff'));
   // Red diagonal hatch for the fire-setback band (the reference's signature mark).
   els.push(`<defs><pattern id="hatch-setback" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#cc2222" stroke-width="0.7"/></pattern></defs>`);
-  // v65: PV-2B branch-color mode gets a distinct title bar
+  // Viewport title (reference style) renders BELOW the drawing — the old
+  // full-width solid-black banner read as a web dashboard, not a CAD sheet.
   const svgTitle = isBranchColorMode
     ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP'
-    : 'ROOF PLAN — PHOTOVOLTAIC ARRAY LAYOUT';
-  els.push(drawTitleBar(W, svgTitle, 'SCALE: 3/32"=1\'-0"'));
+    : 'ROOF PLAN WITH MODULES';
 
   // ── GPS coordinate → SVG mapping ──
   const allLats = regPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
@@ -540,15 +546,11 @@ export function drawRoofPlan(
     });
   }
 
-  // ── Callout bubbles ── (PV-2 only — PV-2B shows branch legend instead)
-  // TARGETED anchors (critique: a strip of bubbles with long vertical leaders
-  // slashing through the array, pointing at the wrong objects). Each bubble
-  // sits just outside the roof adjacent to its object with a short leader:
-  //   ① module array → outermost top-row module
-  //   ② fire setback → midpoint of the longest hip band
-  //   ③ ridge line   → west end of the ridge
-  //   ④ conduit run  → dashed route drawn from the array to the SE eave corner
-  //   ⑤ attachment   → outermost bottom-row module
+  // ── Direct equipment callouts (PV-2 only — reference-set style) ──
+  // The pro sets annotate the PLAN with real "(N) make/model" text + short
+  // leaders — numbered bubbles wired to a remote schedule read as generated.
+  // Placement uses the white space above/below/beside the roof; every leader
+  // lands on a representative object and never crosses the array.
   if (!isBranchColorMode && _panelPts.length > 0) {
     const topP  = _panelPts.reduce((m, p) => (p.y < m.y ? p : m), _panelPts[0]);
     const botP  = _panelPts.reduce((m, p) => (p.y > m.y ? p : m), _panelPts[0]);
@@ -560,22 +562,70 @@ export function drawRoofPlan(
       if (horiz) { if (!ridge || len > ridge.len) ridge = { ...e, len }; }
       else       { if (!hip   || len > hip.len)   hip   = { ...e, len }; }
     }
-    const cbTopY = Math.max(roofMinY - 16, zones.dims.top + 10);
-    els.push(drawCalloutWithLeader(topP.x + 20, cbTopY, topP.x + 3, topP.y - 5, 1, 8));
+    const txtCallout = (
+      tx: number, ty: number, anchor: 'start' | 'end',
+      lines: string[], lx: number, ly: number,
+    ) => {
+      lines.forEach((ln, i) => {
+        els.push(drawText(tx, ty + i * 7.5, ln, { anchor, fontSize: 5.8, fontWeight: i === 0 ? 'bold' : 'normal', fill: '#000' }));
+      });
+      const sx = anchor === 'start' ? tx - 3 : tx + 3;
+      els.push(`<line x1="${sx.toFixed(1)}" y1="${(ty + (lines.length - 1) * 3.75).toFixed(1)}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#000" stroke-width="0.7"/>`);
+      els.push(`<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="1.4" fill="#000"/>`);
+    };
+    const wattStr = panelWatts ? ` (${panelWatts}W)` : '';
+    const topRowY = Math.max(roofMinY - 30, zones.dims.top + 10);
+
+    // (N) modules — top-left white space, leader to a top-row module
+    txtCallout(roofMinX - 4, topRowY, 'start',
+      [`(N) ${totalPanels} — ${moduleStr}${wattStr}`, `MODULES ON ${mountSys}`],
+      topP.x - 6, topP.y - 4);
+    // (N) microinverters — top-right white space, leader to a nearby module dot
+    const invTarget = _panelPts.filter(p => p.y < roofMinY + (roofMaxY - roofMinY) * 0.5)
+      .reduce((m, p) => (p.x > m.x ? p : m), _panelPts[0]);
+    txtCallout(roofMaxX + 4, topRowY, 'end',
+      [`(N) ${inverterStr}`, `MICROINVERTER — 1 PER MODULE`],
+      invTarget.x + 4, invTarget.y);
+    // fire setback — left side, leader to the hip band
     if (hip) {
       const hx = (hip.ax + hip.bx) / 2, hy = (hip.ay + hip.by) / 2;
-      const west = hx < (roofMinX + roofMaxX) / 2;
-      els.push(drawCalloutWithLeader(west ? roofMinX - 16 : roofMaxX + 16, hy - 16, hx, hy, 2, 8));
+      txtCallout(roofMinX - 34, hy - 24, 'start',
+        [`${ftToFtIn(setbackFt)} FIRE SETBACK (TYP.)`, `RIDGE / HIPS / RAKES`],
+        hx - (hx - hip.ax) / 2, hy - (hy - hip.ay) / 2);
     }
+    // ridge label — leader to the ridge west end
     if (ridge) {
       const wEnd = ridge.ax < ridge.bx ? { x: ridge.ax, y: ridge.ay } : { x: ridge.bx, y: ridge.by };
-      els.push(drawCalloutWithLeader(roofMinX - 16, wEnd.y - 18, wEnd.x + 6, wEnd.y - 2, 3, 8));
+      txtCallout(roofMinX - 34, wEnd.y + 30, 'start', ['(E) RIDGE'], wEnd.x + 10, wEnd.y - 1);
     }
-    // ④ conduit: dashed intended route from the east array edge to the SE corner
-    const cEndX = roofMaxX - 10, cEndY = roofMaxY - 8;
-    els.push(`<polyline points="${eastP.x.toFixed(1)},${eastP.y.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
-    els.push(drawCalloutWithLeader(roofMaxX + 16, roofMaxY + 6, cEndX, cEndY, 4, 8));
-    els.push(drawCalloutWithLeader(botP.x - 20, roofMaxY + 14, botP.x - 3, botP.y + 5, 5, 8));
+    // (N) junction box — square symbol on the roof near the east array edge,
+    // then the dashed conduit route from the JB to the SE eave exit point
+    const jbX = eastP.x + 12, jbY = eastP.y;
+    els.push(`<rect x="${(jbX - 3.5).toFixed(1)}" y="${(jbY - 3.5).toFixed(1)}" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/>`);
+    els.push(`<line x1="${(jbX - 3.5).toFixed(1)}" y1="${(jbY - 3.5).toFixed(1)}" x2="${(jbX + 3.5).toFixed(1)}" y2="${(jbY + 3.5).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+    const cEndX = roofMaxX - 8, cEndY = roofMaxY - 6;
+    els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
+    txtCallout(roofMaxX + 4, jbY - 14, 'end', [`(N) JUNCTION BOX`], jbX + 3, jbY - 3);
+    txtCallout(roofMaxX + 4, roofMaxY + 10, 'end',
+      [`(N) 3/4" ${condType} CONDUIT RUN`, `ROUTE FIELD-VERIFIED`],
+      (jbX + cEndX) / 2, (jbY + cEndY) / 2);
+    // (N) attachments — bottom-left, leader to a bottom-row module dot
+    txtCallout(roofMinX - 4, roofMaxY + 14, 'start',
+      [`(N) ${mountSys} ATTACHMENTS`, `@ ${attachSp}" O.C. INTO FRAMING — SEE PV-3`],
+      botP.x - 4, botP.y + 4);
+  }
+
+  // ── Viewport title (reference style): numbered circle + underlined title +
+  // scale, directly below the drawing ──
+  if (!isBranchColorMode) {
+    const vtX = roofMinX, vtY = roofMaxY + 62;
+    els.push(`<circle cx="${vtX + 8}" cy="${vtY - 3}" r="8" fill="#fff" stroke="#000" stroke-width="1.4"/>`);
+    els.push(drawText(vtX + 8, vtY, '1', { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#000' }));
+    els.push(drawText(vtX + 22, vtY, svgTitle, { anchor: 'start', fontSize: 9, fontWeight: '900', fill: '#000', letterSpacing: 1 }));
+    els.push(`<line x1="${vtX + 22}" y1="${vtY + 3.5}" x2="${vtX + 22 + svgTitle.length * 6.4}" y2="${vtY + 3.5}" stroke="#000" stroke-width="1.2"/>`);
+    els.push(drawText(vtX + 22, vtY + 11, 'SCALE: 3/32" = 1\'-0"', { anchor: 'start', fontSize: 6, fill: '#333' }));
+  } else {
+    els.push(drawText(dz.x + 8, zones.dims.top + 16, svgTitle, { anchor: 'start', fontSize: 9, fontWeight: '900', fill: '#000', letterSpacing: 1 }));
   }
 
   // ── v65: Branch legend overlay (PV-2B only) ──
