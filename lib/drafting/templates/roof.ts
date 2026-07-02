@@ -41,14 +41,6 @@ import {
 import {
   drawCallout, drawCalloutWithLeader, drawLeaderLine, drawWindArrow,
 } from '../callouts';
-import { insetPolygon } from '../../cad/geometry';
-
-// Signed area of a screen-space ring (used only to detect winding / collapse).
-function ringSignedArea(p: { x: number; y: number }[]): number {
-  let a = 0;
-  for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += p[j].x * p[i].y - p[i].x * p[j].y;
-  return a / 2;
-}
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -58,6 +50,39 @@ function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng
     if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
   }
   return inside;
+}
+
+// Screen-space point-in-ring (ray cast) — used to pick each edge's inward normal.
+function ptInRingXY(x: number, y: number, ring: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
+    if (((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// CAD-space vertex coincidence (fake-degrees, 1 unit ≈ 1 ft).
+function sameVert(a: { lat: number; lng: number }, b: { lat: number; lng: number }): boolean {
+  return Math.abs(a.lat - b.lat) < 0.75 && Math.abs(a.lng - b.lng) < 0.75;
+}
+
+// Edge classification: an edge shared with ANOTHER facet (same endpoints, either
+// order) is interior = ridge/hip; a perimeter edge is eave/rake. Drives both the
+// per-edge fire-setback distance and the per-edge line weight.
+function isInteriorEdge(
+  a: { lat: number; lng: number }, b: { lat: number; lng: number },
+  planes: any[], skipIdx: number,
+): boolean {
+  for (let pi = 0; pi < planes.length; pi++) {
+    if (pi === skipIdx) continue;
+    const vs = planes[pi].vertices as Array<{ lat: number; lng: number }>;
+    for (let i = 0; i < vs.length; i++) {
+      const u = vs[i], v = vs[(i + 1) % vs.length];
+      if ((sameVert(u, a) && sameVert(v, b)) || (sameVert(u, b) && sameVert(v, a))) return true;
+    }
+  }
+  return false;
 }
 
 // Plan-view (horizontal footprint) area of a facet ring, in ft². drawRoofPlan
@@ -71,20 +96,6 @@ function planViewAreaFt2(ring: Array<{ lat: number; lng: number }>): number {
     a += ring[j].lng * ring[i].lat - ring[i].lng * ring[j].lat;
   }
   return Math.abs(a / 2);   // ft² (1 CAD unit = 1 ft)
-}
-
-// Inset a screen-space polygon inward by `dist` px, orientation-agnostic.
-// insetPolygon() assumes one winding; our pixel rings can be either (toY flips
-// lat), so if the first inset EXPANDS the ring we retry with reversed winding.
-// Returns null when the setback would collapse the facet (nothing sensible to draw).
-function insetRingPx(ring: { x: number; y: number }[], dist: number): { x: number; y: number }[] | null {
-  if (ring.length < 3 || dist <= 0) return null;
-  const orig = Math.abs(ringSignedArea(ring));
-  let out = insetPolygon(ring, dist);
-  if (Math.abs(ringSignedArea(out)) > orig) out = insetPolygon(ring.slice().reverse(), dist);
-  const area = Math.abs(ringSignedArea(out));
-  if (out.length < 3 || area > orig || area < 1) return null;
-  return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,11 +123,13 @@ export function drawRoofPlan(
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
   const attachSp    = project.attachmentSpacing || 48;
-  // Fire setback for the drawn hatch band — SAME resolution as the data zone /
-  // callout schedule (sheetComposition.getRoofData: ridge ?? edge, default 18").
-  // The drawing previously read ahjRoofSetbackIn alone (36" on some AHJs) while
-  // SYSTEM DATA / callout ② printed 1.5' — one sheet, two different setbacks.
-  const setbackIn   = project.ahjRidgeSetbackIn || project.ahjRoofSetbackIn || 18;
+  // Fire setbacks — AHJ DATABASE SEMANTICS (single source of truth, Ray
+  // 2026-07-01): ahjRoofSetbackIn = EDGE (eave/rake) pathway, ahjRidgeSetbackIn
+  // = ridge/hip. Two DIFFERENT requirements (IL: 36"/18") — flattening them to
+  // one number made the sheet contradict itself. Each edge is now classified
+  // (shared-with-another-facet = ridge/hip, perimeter = eave/rake) and hatched
+  // at ITS OWN setback distance.
+  const setbackIn   = project.ahjRoofSetbackIn  || 18;
   const ridgeSetIn  = project.ahjRidgeSetbackIn || 18;
   const setbackFt   = setbackIn / 12;
   const ridgeSetFt  = ridgeSetIn / 12;
@@ -210,21 +223,34 @@ export function drawRoofPlan(
     // Roof plane — WHITE with fine black linework (reference CAD style; the gray
     // fills + shingle texture were the "cartoony" read).
     els.push(`<polygon points="${pts}" fill="#ffffff" stroke="none"/>`);
-    els.push(`<polygon points="${pts}" fill="none" stroke="#000" stroke-width="1.3" stroke-linejoin="miter"/>`);
 
-    // Fire setback — red HATCHED band between the facet edge and the inward
-    // setback offset (the reference's signature mark), plus a thin red dashed
-    // line on the inset itself. Falls back to no band if the setback would
-    // collapse the facet (tiny/degenerate).
-    const sbPx = setbackFt * scale;
-    const insetXY = insetRingPx(ptsXY, sbPx);
-    if (insetXY) {
-      const outerPath = ptsXY.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
-      const innerPath = insetXY.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
-      els.push(`<path d="${outerPath} ${innerPath}" fill="url(#hatch-setback)" fill-rule="evenodd" opacity="0.6" stroke="none"/>`);
-      const ip = insetXY.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
-      els.push(`<polygon points="${ip}" fill="none" class="line-setbk"/>`);
+    // Per-edge fire-setback bands + line weights, per the AHJ database's two
+    // requirements: interior (ridge/hip) edges hatch at the RIDGE setback and
+    // draw heavy; perimeter (eave/rake) edges hatch at the EDGE pathway setback
+    // and draw fine. Bands are clipped to the facet so corners merge cleanly.
+    const nV = ptsXY.length;
+    const clipId = `sbclip${ri}`;
+    els.push(`<defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>`);
+    const bands: string[] = [];
+    const edgeLines: string[] = [];
+    for (let ei = 0; ei < nV; ei++) {
+      const a = ptsXY[ei], b = ptsXY[(ei + 1) % nV];
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 2) continue;   // degenerate/closing dup
+      const interior = isInteriorEdge(rp.vertices![ei], rp.vertices![(ei + 1) % nV], validPlanes, ri);
+      const dPx = (interior ? ridgeSetFt : setbackFt) * scale;
+      // Inward unit normal — probe a point just off the edge midpoint.
+      const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey);
+      let nx = -ey / el, ny = ex / el;
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      if (!ptInRingXY(mx + nx * 3, my + ny * 3, ptsXY)) { nx = -nx; ny = -ny; }
+      const a2x = a.x + nx * dPx, a2y = a.y + ny * dPx;
+      const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
+      bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.6" stroke="none"/>`);
+      bands.push(`<line x1="${a2x.toFixed(1)}" y1="${a2y.toFixed(1)}" x2="${b2x.toFixed(1)}" y2="${b2y.toFixed(1)}" class="line-setbk"/>`);
+      edgeLines.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#000" stroke-width="${interior ? 2.4 : 1.3}" stroke-linecap="square"/>`);
     }
+    els.push(`<g clip-path="url(#${clipId})">${bands.join('')}</g>`);
+    els.push(...edgeLines);
 
     // Plane label — collected, rendered after panels (see planeLabels render below)
     const cx = rp.vertices!.reduce((s: number, v: any) => s + toX(v.lng), 0) / rp.vertices!.length;
@@ -391,7 +417,7 @@ export function drawRoofPlan(
     els.push(drawLinearDimension(
       roofMinX, roofMinX + sbPixels,
       roofMinY - 12, 10,
-      ftToFtIn(setbackFt) + ' SETBACK'
+      ftToFtIn(setbackFt) + ' EDGE SETBACK'
     ));
   }
   }
@@ -425,10 +451,17 @@ export function drawRoofPlan(
     els.push(...rose);
 
     // Legend — documents the symbols/line-styles actually on this sheet.
+    const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="7" cy="-0.5" r="1.2" fill="#2a5db0"/>`, label: 'PV MODULE' },
-      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
-      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.3"/>`, label: 'ROOF EDGE / RIDGE' },
+      ...(setbackFt === ridgeSetFt
+        ? [{ swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` }]
+        : [
+            { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} EAVE/RAKE SETBACK` },
+            { swatch: _sbHatch, label: `${ftToFtIn(ridgeSetFt)} RIDGE/HIP SETBACK` },
+          ]),
+      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="2.4"/>`, label: 'RIDGE / HIP' },
+      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.1"/>`, label: 'EAVE / RAKE' },
       { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
     ];
     const lgW = 128, rowH = 13, lgX = W - zones.dims.right - lgW + 8, lgY = zones.dims.top + 6;

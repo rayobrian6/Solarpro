@@ -511,28 +511,39 @@ export async function POST(req: NextRequest) {
               const overlayMod = await import('@/lib/jurisdictions/solartraceOverlay').catch(() => null);
               const ar = overlayMod?.enrichWithSolarTrace ? overlayMod.enrichWithSolarTrace(ahjResults[0]) : ahjResults[0];
               console.log('[permit/AHJ] Found:', ar.ahjName, '| wind:', ar.windSpeedMph, 'mph | snow:', ar.groundSnowLoadPsf, 'psf');
-              if (!body.project.ahjName) body.project.ahjName = ar.ahjName;
-              if (!body.project.ahjWindSpeedMph) body.project.ahjWindSpeedMph = ar.windSpeedMph;
-              if (!body.project.ahjGroundSnowPsf) body.project.ahjGroundSnowPsf = ar.groundSnowLoadPsf;
-              if (!body.project.ahjRoofSetbackIn) body.project.ahjRoofSetbackIn = ar.roofSetbackInches;
-              if (!body.project.ahjRidgeSetbackIn) body.project.ahjRidgeSetbackIn = ar.ridgeSetbackInches;
-              if (!body.project.ahjNecVersion) body.project.ahjNecVersion = ar.necVersion;
-              if (!body.project.ahjPermitFee) body.project.ahjPermitFee = ar.typicalPermitFee;
-              if (!body.project.ahjPlanCheckDays) body.project.ahjPlanCheckDays = ar.typicalPlanCheckDays;
-              // Error 5t fix: propagate seismic design category from AHJ to project.seismicCategory
-              if (!project.seismicCategory && ar.seismicDesignCategory) project.seismicCategory = ar.seismicDesignCategory;
+              // THE AHJ DATABASE IS THE SINGLE SOURCE OF TRUTH (Ray, 2026-07-01).
+              // These fields were fill-if-empty, so a per-project snapshot taken at
+              // design time silently beat later corrections to the database. DB now
+              // WINS at planset time; the project value survives only when the DB
+              // has nothing for that field. Overrides are logged for the audit trail.
+              const _ahjWins = <T>(cur: T | undefined | null, db: T | undefined | null, name: string): T | undefined => {
+                if (db == null || (db as unknown) === '') return cur ?? undefined;
+                if (cur != null && (cur as unknown) !== '' && cur !== db) {
+                  console.log(`[permit/AHJ] override ${name}: project=${cur} → ahjdb=${db}`);
+                }
+                return db;
+              };
+              body.project.ahjName          = _ahjWins(body.project.ahjName, ar.ahjName, 'ahjName');
+              body.project.ahjWindSpeedMph  = _ahjWins(body.project.ahjWindSpeedMph, ar.windSpeedMph, 'windSpeedMph');
+              body.project.ahjGroundSnowPsf = _ahjWins(body.project.ahjGroundSnowPsf, ar.groundSnowLoadPsf, 'groundSnowPsf');
+              body.project.ahjRoofSetbackIn  = _ahjWins(body.project.ahjRoofSetbackIn, ar.roofSetbackInches, 'roofSetbackIn');
+              body.project.ahjRidgeSetbackIn = _ahjWins(body.project.ahjRidgeSetbackIn, ar.ridgeSetbackInches, 'ridgeSetbackIn');
+              body.project.ahjNecVersion    = _ahjWins(body.project.ahjNecVersion, ar.necVersion, 'necVersion');
+              body.project.ahjPermitFee     = _ahjWins(body.project.ahjPermitFee, ar.typicalPermitFee, 'permitFee');
+              body.project.ahjPlanCheckDays = _ahjWins(body.project.ahjPlanCheckDays, ar.typicalPlanCheckDays, 'planCheckDays');
+              project.seismicCategory       = _ahjWins(project.seismicCategory, ar.seismicDesignCategory, 'seismicCategory');
               if (!body.project.ahjSpecialRequirements || body.project.ahjSpecialRequirements.length === 0) {
                 body.project.ahjSpecialRequirements = [
                   ...(ar.specialRequirements || []),
                   ...(ar.planSetRequirements || []).slice(0, 4),
                 ];
               }
-              // Propagate to compliance.jurisdiction
+              // Propagate to compliance.jurisdiction — DB-first, same rule as above.
               if (!body.compliance.jurisdiction) {
                 body.compliance.jurisdiction = { state: sc, necVersion: ar.necVersion, ahj: ar.ahjName };
               } else {
-                if (!body.compliance.jurisdiction.ahj) body.compliance.jurisdiction.ahj = ar.ahjName;
-                if (!body.compliance.jurisdiction.necVersion) body.compliance.jurisdiction.necVersion = ar.necVersion;
+                body.compliance.jurisdiction.ahj        = _ahjWins(body.compliance.jurisdiction.ahj, ar.ahjName, 'jurisdiction.ahj');
+                body.compliance.jurisdiction.necVersion = _ahjWins(body.compliance.jurisdiction.necVersion, ar.necVersion, 'jurisdiction.necVersion');
                 if (!body.compliance.jurisdiction.state) body.compliance.jurisdiction.state = sc;
               }
             }

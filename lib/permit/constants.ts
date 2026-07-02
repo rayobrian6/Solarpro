@@ -83,7 +83,16 @@ const PDF_PAGE_CONFIG = {
 // callout ② resolve ridge??edge (18") — one sheet printed two setbacks and the
 // oversized band swallowed modules. Drawing now uses the SAME resolution as the
 // data zone. Dimension linework black (was blue — reference sets are monochrome).
-const PLANSET_ENGINE_VERSION = 47365;
+// 47366 (2026-07-01): AHJ DATABASE = SINGLE SOURCE OF TRUTH (Ray). (1) Permit
+// route AHJ enrichment now DB-WINS over stale per-project snapshots (was fill-
+// if-empty) for wind/snow/setbacks/NEC/seismic/fees, logged overrides. (2) The
+// DB carries TWO setback semantics — roofSetbackInches = EDGE (eave/rake) path,
+// ridgeSetbackInches = ridge/hip — previously flattened to one number, which is
+// why the sheet contradicted itself. PV-2 now classifies every facet edge
+// (shared-with-another-facet = ridge/hip, perimeter = eave/rake) and hatches
+// each at ITS OWN AHJ setback, with heavy ridge/hip vs fine eave/rake linework
+// (the per-edge line-style item) + dual legend/data-zone/callout display.
+const PLANSET_ENGINE_VERSION = 47366;
 
 
 
