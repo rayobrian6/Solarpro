@@ -238,7 +238,7 @@ function ProposalInner() {
             <Card title="Equipment">
               <Field label="Quick pick (catalog)">
                 <select
-                  className={inputCls}
+                  className="eng-select"
                   value=""
                   onChange={(e) => {
                     if (e.target.value) pickGenerator(...e.target.value.split("|") as [string, string]);
@@ -307,7 +307,7 @@ function ProposalInner() {
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Amps">
                     <select
-                      className={inputCls}
+                      className="eng-select"
                       value={tsAmps}
                       onChange={(e) => {
                         const a = Number(e.target.value) as 100 | 200 | 400;
@@ -332,7 +332,7 @@ function ProposalInner() {
               )}
               <Field label="Site service size">
                 <select
-                  className={inputCls}
+                  className="eng-select"
                   value={serviceSize}
                   onChange={(e) => {
                     const s = e.target.value as "100A" | "200A" | "400A";
