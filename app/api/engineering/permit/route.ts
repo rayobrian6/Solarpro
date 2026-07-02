@@ -1056,6 +1056,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Roof obstructions (Nearmap AI, from the same call as the frame snap) ──
+    // Forward to project.roofObstructions: roofCAD projects them into the local
+    // frame + filters colliding panels, and PV-2 draws them with keep-out rings.
+    {
+      const _obs = (enrichedBody.aerialData as any)?.obstructions;
+      if (Array.isArray(_obs) && _obs.length > 0) {
+        (enrichedBody.project as any).roofObstructions = _obs.map((o: any) => ({
+          type: o.type, description: o.description, polygon: o.polygon, clearanceM: o.clearanceM,
+        }));
+        console.log('[permit/obstructions]', _obs.length, 'Nearmap AI obstruction(s) attached to project:', _obs.map((o: any) => o.type).join(', '));
+      }
+    }
+
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });
 

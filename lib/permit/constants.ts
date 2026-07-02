@@ -129,7 +129,16 @@ const PDF_PAGE_CONFIG = {
 // dashed conduit route (numbered bubbles retired). (3) Viewport title below
 // the drawing (circled 1 + underlined name + scale) replacing the solid black
 // banner. Equipment identity now flows into the drafting layer (adapter).
-const PLANSET_ENGINE_VERSION = 47370;
+// 47371 (2026-07-02): ROOF OBSTRUCTIONS ON PV-2 (Ray item #1 — "I don't think
+// this is implemented anywhere" — correct: the design studio fetched Nearmap AI
+// obstructions but never persisted them; nothing reached the planset). The
+// permit route's aerial pass now returns obstructions from the SAME AI call as
+// the frame snap (no extra credit, cache serves the double-fetch), forwards
+// them to project.roofObstructions; roofCAD projects them into the local frame
+// (per-plane assignment + existing panel-collision filtering now actually run);
+// the adapter emits fake-degree circles; PV-2 draws footprint + dashed keep-out
+// ring + type label, with legend entry and an honest GENERAL NOTES line.
+const PLANSET_ENGINE_VERSION = 47371;
 
 
 

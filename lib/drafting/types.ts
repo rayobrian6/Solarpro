@@ -38,6 +38,15 @@ export interface DraftingProject {
   moduleModel?: string;
   inverterMfr?: string;
   inverterModel?: string;
+  // Roof obstructions (Nearmap AI / vision / manual) in fake-degree coords —
+  // PV-2 draws the footprint + dashed keep-out ring + type label.
+  roofObstructions?: Array<{
+    lat: number;
+    lng: number;
+    radiusFt: number;
+    clearanceFt: number;
+    type: string;
+  }>;
   // Panel GPS positions from 3D engine
   panelPositions?: Array<{
     id: string;

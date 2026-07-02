@@ -159,10 +159,24 @@ function adaptRoof(
     note: '1 degree == 1 foot; scale = pixels/ft; panLenPx = (in/12)*scale = correct',
   });
 
+  // Roof obstructions (vents/chimneys/AC/skylights) → fake-degree circles so
+  // PV-2 can draw the footprint + keep-out ring. x/y are local meters.
+  const adaptedObstructions = (cad.obstructions ?? []).map(o => {
+    const fd = xyToFakeDeg(o.x, o.y);
+    return {
+      lat:         fd.lat,
+      lng:         fd.lng,
+      radiusFt:    o.radiusM * METERS_TO_FEET,
+      clearanceFt: o.setbackM * METERS_TO_FEET,
+      type:        o.type,
+    };
+  });
+
   const project: DraftingProject = {
     ...originalProject(original),
-    roofPlanes:     adaptedRoofPlanes,
-    panelPositions: adaptedPanelPositions,
+    roofPlanes:       adaptedRoofPlanes,
+    panelPositions:   adaptedPanelPositions,
+    roofObstructions: adaptedObstructions.length > 0 ? adaptedObstructions : undefined,
   };
 
   const layout: DraftingLayout = {

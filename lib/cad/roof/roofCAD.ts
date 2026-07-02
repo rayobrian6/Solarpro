@@ -65,8 +65,10 @@ export function roofCAD(input: PermitInputShape): CADModel {
   // filter panels that fall within (radiusM + setbackM) of each obstruction.
   // This is NON-BREAKING: if obstructions is undefined/empty, nothing changes.
   // Error 5w fix: _systemDefinition now declared on PermitInputShape — no `as any` needed
+  // (copied — Nearmap AI obstructions are appended below; never mutate the
+  // caller's SystemDefinition array)
   const sysDefObstructions: SysDefObstruction[] =
-    input._systemDefinition?.obstructions ?? [];
+    [...(input._systemDefinition?.obstructions ?? [])];
   const sysDefElecNodes: SysDefElectricalNode[] =
     input._systemDefinition?.electricalNodes ?? [];
   const canonicalCADObstructions: CADObstruction[] = canonicalBridge?.obstructions ?? [];
@@ -120,6 +122,51 @@ export function roofCAD(input: PermitInputShape): CADModel {
     : allLatLngs.length > 0
       ? allLatLngs.reduce((s, v) => s + v.lng, 0) / allLatLngs.length
       : (rawPanels[0]?.lng ?? -122.0);
+
+  // ── Nearmap AI obstructions (raw lat/lng polygons from the permit route) ──
+  // Projected HERE because only roofCAD knows the local origin. Each becomes a
+  // SysDefObstruction so the existing per-plane panel filtering + CADModel
+  // plumbing applies unchanged; roofPlaneId is assigned by point-in-polygon
+  // against the raw (real-GPS) plane rings.
+  const _ptInRing = (lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+      if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+  const nearmapObstructions: SysDefObstruction[] = ((input.project as any)?.roofObstructions ?? [])
+    .filter((o: any) => Array.isArray(o?.polygon) && o.polygon.length >= 3)
+    .map((o: any, i: number) => {
+      const pts = o.polygon.filter((p: any) => isFinite(p?.lat) && isFinite(p?.lng));
+      if (pts.length < 3) return null;
+      const cLat = pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
+      const cLng = pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
+      const cXY = latLngToXY(cLat, cLng, originLat, originLng);
+      // footprint radius = max vertex distance from the centroid (meters)
+      const cosLat = Math.cos(cLat * Math.PI / 180);
+      const radiusM = Math.max(0.15, ...pts.map((p: any) =>
+        Math.hypot((p.lat - cLat) * 111320, (p.lng - cLng) * 111320 * cosLat)));
+      const hostPlane = rawPlanes.find((rp: any) => _ptInRing(cLat, cLng, rp.vertices ?? []));
+      return {
+        id:          `nm-obs-${i}`,
+        type:        o.type || 'other',
+        worldX:      cXY.x,
+        worldY:      cXY.y,
+        radiusM,
+        heightFt:    1,
+        setbackIn:   Math.round(((o.clearanceM ?? 0.15) / 0.0254)),
+        confidence:  typeof o.confidence === 'number' ? o.confidence : 0.8,
+        roofPlaneId: hostPlane?.id ?? null,
+        source:      'merged' as const,
+      };
+    })
+    .filter(Boolean) as SysDefObstruction[];
+  if (nearmapObstructions.length > 0) {
+    sysDefObstructions.push(...nearmapObstructions);
+    warnings.push(`roofCAD: ${nearmapObstructions.length} Nearmap AI obstruction(s) projected into the CAD frame`);
+  }
 
   // ── GPS panel lookup map ──────────────────────────────────────
   // Map each GPS panel to local XY

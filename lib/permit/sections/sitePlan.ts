@@ -9,7 +9,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
 import { buildSchemSVG } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
-import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapRoofPlanes, nearmapRoofSnapCenter } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, type NearmapObstruction } from '@/lib/aerial/nearmap';
 
 
 // ─── PV-1: Site Plan with Roof Plan ──────────────────────────────────────────
@@ -241,6 +241,11 @@ export interface AerialRoofData {
   zoom?: number;
   centerSource?: 'array' | 'segment' | 'pin' | 'nearmap_roof'; // why the image is centered where it is (diagnostic)
   imageSource?: 'nearmap' | 'google';         // which provider produced the aerial (diagnostic)
+  /** Nearmap AI roof obstructions (vents/chimneys/AC/skylights) with the
+   *  per-type keep-out clearance — same AI call as the roof snap (no extra
+   *  credit). Real lat/lng; the route forwards them to project.roofObstructions
+   *  and roofCAD projects them into the drawing frame. */
+  obstructions?: Array<NearmapObstruction & { clearanceM: number }>;
   roofSegments?: Array<{
     center?: { lat: number; lng: number };
     azimuthDegrees: number;
@@ -403,17 +408,27 @@ export async function fetchAerialRoofData(
     // NEAREST roof is only trusted when the center came from the design ('array')
     // — nearest-to-a-street-pin is how the wrong-house bug happened. Fails safe
     // to the unsnapped center. Coverage-gated + cached (one AI credit/generate).
+    let aiObstructions: AerialRoofData['obstructions'];
     if (nearmapConfigured()) {
       try {
-        const aiPlanes = await fetchNearmapRoofPlanes(centerLat, centerLng, { radiusM: 45 });
-        const snap = nearmapRoofSnapCenter(centerLat, centerLng, aiPlanes, { maxSnapM: 25 });
+        // ONE AI call returns both roof planes (for the frame snap) and roof
+        // OBSTRUCTIONS (vents/chimneys/AC/skylights) for the PV-2 drawing.
+        const ai = await fetchNearmapAIResult(centerLat, centerLng, { radiusM: 45 });
+        const snap = nearmapRoofSnapCenter(centerLat, centerLng, ai.roofPlanes, { maxSnapM: 25 });
         if (snap && (snap.contained || _center.source === 'array')) {
           console.log(`[permit/aerial] frame snapped to Nearmap AI roof (${snap.contained ? 'containing' : 'nearest'} roof, ${snap.distM.toFixed(1)} m shift)`);
           centerLat = snap.lat;
           centerLng = snap.lng;
           centerSource = 'nearmap_roof';
-        } else if (aiPlanes.length > 0) {
+        } else if (ai.roofPlanes.length > 0) {
           console.log('[permit/aerial] Nearmap AI roofs found but none qualified for snap — keeping', _center.source, 'center');
+        }
+        if (ai.obstructions.length > 0) {
+          aiObstructions = ai.obstructions.map(o => ({
+            ...o,
+            clearanceM: OBSTRUCTION_CLEARANCE_M[o.type] ?? OBSTRUCTION_CLEARANCE_M.other,
+          }));
+          console.log(`[permit/aerial] Nearmap AI obstructions: ${aiObstructions.length} (${aiObstructions.map(o => o.type).join(', ')})`);
         }
       } catch (snapErr: unknown) {
         console.log('[permit/aerial] Nearmap roof snap skipped:', (snapErr as Error)?.message);
@@ -530,6 +545,7 @@ export async function fetchAerialRoofData(
       centerSource,
       imageSource,
       roofSegments,
+      obstructions: aiObstructions,
     };
 
   } catch (err: unknown) {

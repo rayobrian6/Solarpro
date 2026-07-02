@@ -331,6 +331,24 @@ export function drawRoofPlan(
     }
   });
 
+  // ── Roof obstructions + keep-out rings (Nearmap AI / vision / manual) ──
+  // Footprint drawn as a white circle with a cross, keep-out clearance as a
+  // dashed red ring with light hatch, type label above — the reference-set
+  // treatment for vents/chimneys/AC/skylights.
+  const roofObs = (project.roofObstructions ?? []).filter((o: any) => isFinite(o.lat) && isFinite(o.lng));
+  roofObs.forEach((o: any) => {
+    const ox = toX(o.lng), oy = toY(o.lat);
+    const rPx = Math.max(o.radiusFt * scale, 2.5);
+    const kPx = Math.max((o.radiusFt + o.clearanceFt) * scale, rPx + 2.5);
+    els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${kPx.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.6" stroke-dasharray="3 2"/>`);
+    els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${rPx.toFixed(1)}" fill="#fff" stroke="#000" stroke-width="0.9"/>`);
+    els.push(`<line x1="${(ox - rPx * 0.6).toFixed(1)}" y1="${(oy - rPx * 0.6).toFixed(1)}" x2="${(ox + rPx * 0.6).toFixed(1)}" y2="${(oy + rPx * 0.6).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+    els.push(`<line x1="${(ox - rPx * 0.6).toFixed(1)}" y1="${(oy + rPx * 0.6).toFixed(1)}" x2="${(ox + rPx * 0.6).toFixed(1)}" y2="${(oy - rPx * 0.6).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+    els.push(drawText(ox, oy - kPx - 2.5, String(o.type || 'obstruction').toUpperCase().replace(/_/g, ' '), {
+      anchor: 'middle', fontSize: 4.8, fontWeight: 'bold', fill: '#333',
+    }));
+  });
+
   // ── Plane labels (rendered last — placed in OPEN roof area, never over modules) ──
   const _panelPts = regPanels.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
   planeLabels.forEach(L => {
@@ -451,8 +469,16 @@ export function drawRoofPlan(
       '   PROVIDE EAVE-TO-RIDGE ROUTES.',
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
-      '4. NO ROOF OBSTRUCTIONS MODELED IN',
-      '   ARRAY AREA — FIELD VERIFY.',
+      ...(roofObs.length > 0
+        ? [
+            `4. ${roofObs.length} ROOF OBSTRUCTION(S) PLOTTED W/`,
+            '   KEEP-OUT CLEARANCES (NEARMAP AI)',
+            '   — FIELD VERIFY LOCATIONS.',
+          ]
+        : [
+            '4. NO ROOF OBSTRUCTIONS MODELED IN',
+            '   ARRAY AREA — FIELD VERIFY.',
+          ]),
     ];
     t.push(drawText(tx, gnY, 'GENERAL NOTES', { anchor: 'start', fontSize: 6, fontWeight: 'bold', fill: '#000' }));
     t.push(`<line x1="${tx}" y1="${gnY + 2.5}" x2="${tx + tblW}" y2="${gnY + 2.5}" stroke="#000" stroke-width="0.8"/>`);
@@ -532,6 +558,10 @@ export function drawRoofPlan(
       { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="2.4"/>`, label: 'RIDGE / HIP' },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.1"/>`, label: 'EAVE / RAKE' },
+      ...(roofObs.length > 0 ? [{
+        swatch: `<circle cx="7" cy="-0.5" r="5.5" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.5" stroke-dasharray="2 1.5"/><circle cx="7" cy="-0.5" r="2.6" fill="#fff" stroke="#000" stroke-width="0.6"/>`,
+        label: 'OBSTRUCTION + KEEP-OUT',
+      }] : []),
       { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
     ];
     const lgW = 128, rowH = 13, lgX = W - zones.dims.right - lgW + 8, lgY = zones.dims.top + 6;

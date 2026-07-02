@@ -568,6 +568,16 @@ export async function fetchNearmapAIResult(
   const empty: NearmapAIResult = { roofPlanes: [], obstructions: [] };
   if (!key) return empty;
 
+  // Serve from cache when BOTH halves are fresh — one AI credit per generate.
+  const _ck = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+  const _cachedObs = obstructionCache.get(_ck);
+  const _cachedPlanes = roofPlanesCache.get(`${_ck},${opts.radiusM ?? 40}`);
+  if (_cachedObs && _cachedPlanes &&
+      Date.now() - _cachedObs.ts < OBSTRUCTION_CACHE_TTL_MS &&
+      Date.now() - _cachedPlanes.ts < OBSTRUCTION_CACHE_TTL_MS) {
+    return { roofPlanes: _cachedPlanes.result, obstructions: _cachedObs.result };
+  }
+
   try {
     if (!opts.skipCoverageCheck) {
       const cov = await checkNearmapCoverage(lat, lng);
@@ -584,9 +594,11 @@ export async function fetchNearmapAIResult(
     const roofPlanes = mapNearmapRoofPlanes(json);
     const obstructions = mapNearmapObstructions(json);
 
-    // Cache obstructions for the combined fetch too
+    // Cache BOTH results — the permit route's aerial fetch runs twice per
+    // generate (initial + design re-center); one AI credit covers both.
     const cacheKey = `${lat.toFixed(7)},${lng.toFixed(7)}`;
     obstructionCache.set(cacheKey, { result: obstructions, ts: Date.now() });
+    roofPlanesCache.set(`${cacheKey},${opts.radiusM ?? 40}`, { result: roofPlanes, ts: Date.now() });
 
     return { roofPlanes, obstructions };
   } catch {
