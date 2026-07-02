@@ -116,23 +116,47 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // ── Layer 0: dim everything except the subject building ───────────────
     // An apartment-complex frame shows 4 identical roofs; the reviewer must
     // see OURS instantly. Imagery-registered Nearmap polygons → no offset.
+    // The mask hole is the CONVEX HULL of the subject polygons scaled ~1.28×
+    // about its centroid (a padded organic shape, not a boxy dashed rect),
+    // and the actual roof outlines draw as thin white lines — pixel-true,
+    // since these polygons share the imagery's own registration.
     let dimSvg = '';
     if (_subjPolys.length > 0) {
       const pts = _subjPolys.flat().map(v => toPx(v.lat, v.lng));
-      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-      const padX = (Math.max(...xs) - Math.min(...xs)) * 0.22 + 14;
-      const padY = (Math.max(...ys) - Math.min(...ys)) * 0.22 + 14;
-      const bx = Math.max(0, Math.min(...xs) - padX), by = Math.max(0, Math.min(...ys) - padY);
-      const bw = Math.min(imgW, Math.max(...xs) + padX) - bx, bh = Math.min(imgH, Math.max(...ys) + padY) - by;
-      // Skip the mask if the subject fills most of the frame (nothing to dim).
-      if (bw * bh < imgW * imgH * 0.72 && bw > 20 && bh > 20) {
-        dimSvg = `
-          <mask id="pv1-subj-dim">
-            <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="#fff"/>
-            <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="#000"/>
-          </mask>
-          <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="rgba(10,14,22,0.42)" mask="url(#pv1-subj-dim)"/>
-          <rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="1.4" stroke-dasharray="6 4"/>`;
+      // Monotone-chain convex hull (px space)
+      const sorted = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+      const cross = (o: any, a: any, b: any) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+      const lower: any[] = [], upper: any[] = [];
+      for (const p of sorted) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+        lower.push(p);
+      }
+      for (const p of [...sorted].reverse()) {
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+        upper.push(p);
+      }
+      const hull = [...lower.slice(0, -1), ...upper.slice(0, -1)];
+      if (hull.length >= 3) {
+        const hcx = hull.reduce((s, p) => s + p.x, 0) / hull.length;
+        const hcy = hull.reduce((s, p) => s + p.y, 0) / hull.length;
+        const padded = hull.map(p => ({ x: hcx + (p.x - hcx) * 1.28 + Math.sign(p.x - hcx) * 8, y: hcy + (p.y - hcy) * 1.28 + Math.sign(p.y - hcy) * 8 }));
+        const hullStr = padded.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+        const xs = padded.map(p => p.x), ys = padded.map(p => p.y);
+        const hullArea = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+        // Skip the mask if the subject fills most of the frame (nothing to dim).
+        if (hullArea < imgW * imgH * 0.72) {
+          const outlines = _subjPolys.map(poly => {
+            const d = poly.map(v => { const p = toPx(v.lat, v.lng); return `${p.x.toFixed(1)},${p.y.toFixed(1)}`; }).join(' ');
+            return `<polygon points="${d}" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="1"/>`;
+          }).join('');
+          dimSvg = `
+            <mask id="pv1-subj-dim">
+              <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="#fff"/>
+              <polygon points="${hullStr}" fill="#000"/>
+            </mask>
+            <rect x="0" y="0" width="${imgW}" height="${imgH}" fill="rgba(10,14,22,0.42)" mask="url(#pv1-subj-dim)"/>
+            ${outlines}`;
+        }
       }
     }
 
@@ -248,7 +272,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // Graphic scale in FEET (permits are imperial) — 20 ft bar.
     const scalePx = Math.round(20 * 0.3048 * ppm);
     const scaleBar = scalePx>0&&scalePx<300 ? `
-      <g transform="translate(${imgW/2-scalePx/2},${imgH-20})">
+      <g transform="translate(24,${imgH-20})">
         <rect x="0" y="-8" width="${scalePx}" height="12" rx="2" fill="rgba(0,0,0,0.65)"/>
         <line x1="0" y1="0" x2="${scalePx}" y2="0" stroke="white" stroke-width="1.5"/>
         <line x1="0" y1="-4" x2="0" y2="4" stroke="white" stroke-width="1.5"/>

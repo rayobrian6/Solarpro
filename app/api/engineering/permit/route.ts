@@ -17,6 +17,8 @@ import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
+import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
+import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
 
 // Site Survey pipeline imports — survey data enriches the permit plan set
@@ -1099,6 +1101,62 @@ export async function POST(req: NextRequest) {
           type: o.type, description: o.description, polygon: o.polygon, clearanceM: o.clearanceM,
         }));
         console.log('[permit/obstructions]', _obs.length, 'Nearmap AI obstruction(s) attached to project:', _obs.map((o: any) => o.type).join(', '));
+      }
+      // Canopy is meaningful only over OUR roof — the AI AOI covers neighbors,
+      // and a neighbor's tree rendered a giant green blob on PV-1 (Ray, 07-03).
+      {
+        const _ro = (enrichedBody.project as any).roofObstructions as any[] | undefined;
+        const _designPlanes = (enrichedBody.project?.roofPlanes ?? []) as Array<{ vertices?: Array<{lat:number;lng:number}> }>;
+        if (_ro?.length && _designPlanes.length) {
+          const _rings = _designPlanes.map(rp => (rp.vertices ?? [])).filter(r => r.length >= 3);
+          const _pip = (lat: number, lng: number, ring: Array<{lat:number;lng:number}>) => {
+            let ins = false;
+            for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+              const yi = ring[i].lat, xi = ring[i].lng, yj = ring[j].lat, xj = ring[j].lng;
+              if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) ins = !ins;
+            }
+            return ins;
+          };
+          const kept = _ro.filter((o: any) => o.type !== 'canopy' ||
+            (Array.isArray(o.polygon) && _rings.some(r =>
+              o.polygon.some((v: any) => _pip(v.lat, v.lng, r)) || r.some(v => _pip(v.lat, v.lng, o.polygon)))));
+          if (kept.length !== _ro.length) {
+            console.log('[permit/obstructions] dropped', _ro.length - kept.length, 'canopy blob(s) not over OUR roof (neighbor trees)');
+            (enrichedBody.project as any).roofObstructions = kept;
+          }
+        }
+      }
+      // ── Aerial-vision obstruction sweep (Ray, 2026-07-03: the tree-hidden
+      // vent Nearmap AI missed). Claude vision reads the SAME stitched HD
+      // aerial for roof penetrations; detections land in roofObstructions
+      // with 'aerial vision — field verify' provenance. Fail-safe to none.
+      try {
+        const _ad = enrichedBody.aerialData as any;
+        const _planes = (enrichedBody.project?.roofPlanes ?? []) as Array<{ vertices?: Array<{lat:number;lng:number}> }>;
+        if (_ad?.imageBase64 && _ad.imageSource === 'nearmap' && _planes.length > 0) {
+          const visionObs = await detectAerialVisionObstructions({
+            imageBase64: _ad.imageBase64,
+            imageWidth: _ad.imageWidth || 1440,
+            imageHeight: _ad.imageHeight || 810,
+            lat: _ad.lat, lng: _ad.lng, zoom: _ad.zoom || 21,
+            roofPlanes: _planes,
+            existing: ((enrichedBody.project as any).roofObstructions ?? []).filter((o: any) => Array.isArray(o.polygon)),
+          });
+          if (visionObs.length > 0) {
+            const withClearance = visionObs.map(o => ({
+              type: o.type, description: o.description, polygon: o.polygon,
+              clearanceM: OBSTRUCTION_CLEARANCE_M[o.type] ?? OBSTRUCTION_CLEARANCE_M.other,
+            }));
+            (enrichedBody.project as any).roofObstructions = [
+              ...(((enrichedBody.project as any).roofObstructions) ?? []),
+              ...withClearance,
+            ];
+            console.log('[permit/obstructions] aerial vision added', visionObs.length, 'obstruction(s):',
+              visionObs.map(o => o.description).join('; '));
+          }
+        }
+      } catch (visErr: unknown) {
+        console.log('[permit/obstructions] aerial vision sweep skipped:', (visErr as Error)?.message);
       }
     }
 

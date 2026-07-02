@@ -52,3 +52,75 @@ export function balancedBranchSizes(totalModules: number, branchCount: number): 
   const extra = totalModules % n;
   return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
 }
+
+export interface BranchPlanPanel {
+  id: string;
+  planeId?: string | null;
+  arrayId?: string | null;
+  row?: number | null;
+  col?: number | null;
+}
+
+export interface BranchPlan {
+  /** Total AC branch circuits across the whole system. */
+  count: number;
+  /** Modules per branch, in branch order (B1..Bn). */
+  sizes: number[];
+  /** panel id → 0-based branch index. */
+  assign: Map<string, number>;
+}
+
+/**
+ * PLANE-AWARE branch plan — the installer-truth rule (Ray, 2026-07-03):
+ * an AC branch is a physical daisy-chain on ONE roof face; crews do not run
+ * a trunk over the ridge to the opposite side of the roof. So branches are
+ * planned PER PLANE: each plane's modules chunk into ceil(n/max) balanced
+ * branches, and a branch NEVER spans planes — small hip-cap planes get their
+ * own (short) branch rather than piggybacking across the roof.
+ *
+ * Plane grouping key: planeId, else arrayId. When NO panel carries either
+ * (legacy payloads), falls back to one global group (old behavior, still
+ * NEC-sized). Plane order: largest first, so B1 is the main field. Within a
+ * plane: serpentine (row, then col alternating) — the physical wiring order.
+ */
+export function planMicroBranches(
+  panels: BranchPlanPanel[],
+  inverterModel?: string | null,
+): BranchPlan {
+  const maxPer = microMaxPerBranch(inverterModel);
+  const assign = new Map<string, number>();
+  if (!panels?.length) return { count: 1, sizes: [], assign };
+
+  const keyOf = (p: BranchPlanPanel) => String(p.planeId ?? p.arrayId ?? '');
+  const groups = new Map<string, BranchPlanPanel[]>();
+  for (const p of panels) {
+    const k = keyOf(p);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(p);
+  }
+
+  // Largest plane first → B1 lands on the main field.
+  const ordered = [...groups.values()].sort((a, b) => b.length - a.length);
+
+  const sizes: number[] = [];
+  let branchIdx = 0;
+  for (const group of ordered) {
+    // Serpentine within the plane (alternate col direction per row).
+    const sorted = [...group].sort((a, b) => {
+      const rr = (a.row ?? 0) - (b.row ?? 0);
+      if (rr !== 0) return rr;
+      const rev = ((a.row ?? 0) % 2) === 1;
+      return rev ? (b.col ?? 0) - (a.col ?? 0) : (a.col ?? 0) - (b.col ?? 0);
+    });
+    const nBranches = Math.max(1, Math.ceil(sorted.length / maxPer));
+    const planeSizes = balancedBranchSizes(sorted.length, nBranches);
+    let cursor = 0;
+    planeSizes.forEach(sz => {
+      for (let i = 0; i < sz; i++) assign.set(String(sorted[cursor + i].id), branchIdx);
+      cursor += sz;
+      sizes.push(sz);
+      branchIdx++;
+    });
+  }
+  return { count: branchIdx || 1, sizes, assign };
+}

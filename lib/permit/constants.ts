@@ -216,7 +216,26 @@ const PDF_PAGE_CONFIG = {
 // ride the shift, 20-FT imperial scale bar, and an HONEST legend built from
 // what the sheet actually draws (PROPERTY LINE/FIRE SETBACK promises removed
 // until drawable — no parcel data source exists yet).
-const PLANSET_ENGINE_VERSION = 47376;
+// 47377 (2026-07-03): INSTALLER-TRUTH BRANCHES + AERIAL-VISION VENT SWEEP +
+// PV-1 DE-SLOP (Ray's morning markup). (1) BRANCHES NEVER CROSS PLANES:
+// planMicroBranches (branching.ts) chunks each roof face independently —
+// crews don't run a trunk over the ridge; small hip caps get their own short
+// branch (Melvin: 8 branches 8/8/7|8/7/7|4|4, was 6 spanning opposite faces).
+// Same planner feeds PV-2B, the SLD, and the circuit schedule; 16-color
+// branch palette (color-keyed trunk grouping merged branch 1 with 9).
+// (2) AERIAL-VISION OBSTRUCTION SWEEP (lib/aerial/aerialVisionObstructions):
+// Claude vision reads the SAME stitched Nearmap HD aerial — subject-roof crop,
+// 2x upscale, strict-JSON detections → inverse Web-Mercator → real lat/lng →
+// on-design-roof filter + 1.2m dedupe vs Nearmap AI → roofObstructions with
+// "(aerial vision — field verify)" provenance. Finds the pipes the feature
+// layer misses (Ray's tree-shaded vent), generic for every property; fail-safe
+// to none without ANTHROPIC_API_KEY. (3) PV-1: neighbor-tree canopy dropped at
+// the route (canopy must overlap OUR roof planes — a neighbor's tree drew a
+// giant green blob); dimming mask is now the padded CONVEX HULL of the
+// subject polygons with the actual roof outlines drawn in white (imagery-
+// registered — the boxy dashed rect read sloppy); 20-FT scale bar moved
+// bottom-left off the module-count badge.
+const PLANSET_ENGINE_VERSION = 47377;
 
 
 

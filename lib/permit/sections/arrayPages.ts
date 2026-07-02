@@ -14,7 +14,7 @@ import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
-import { microBranchCount, balancedBranchSizes } from '../utils/branching';
+import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -138,8 +138,14 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const _isMicro = (system.inverters?.[0]?.type === 'micro')
     || String((system as any).topology || '').toLowerCase().includes('micro');
   const _invModel = system.inverters?.[0]?.model;
+  // PLANE-AWARE branch plan (never spans roof faces — installer truth). When
+  // panel positions are absent (degraded payload), fall back to the flat
+  // per-model NEC count.
+  const _plan = _isMicro && panels.length > 0
+    ? planMicroBranches(panels as any[], _invModel)
+    : null;
   const totalStrings = _isMicro
-    ? microBranchCount(totalPanels, _invModel)
+    ? (_plan?.count ?? microBranchCount(totalPanels, _invModel))
     : (system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
   const circuitWord   = _isMicro ? 'BRANCH' : 'STRING';
   const circuitWordPl = _isMicro ? 'BRANCHES' : 'STRINGS';  // proper plural (not "BRANCHS")
@@ -193,47 +199,36 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const svgW = Math.min(gridW + 80, 900);
   const svgH = Math.max(gridH + 60, 200);
 
-  // Color per string (up to 8 strings)
-  const stringColors = ['#1b3f74','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d','#e5a100'];
+  // Color per branch — 16 DISTINCT colors. drawRoofPlan groups trunk runs by
+  // color, so a recycled palette would silently merge branch 1 with branch 9.
+  const stringColors = ['#1b3f74','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d','#e5a100',
+                        '#134e4a','#7f1d1d','#92400e','#312e81','#155e75','#831843','#3f6212','#713f12'];
 
-  // Assign string index to each panel — CONTIGUOUS runs. An AC branch is a
-  // physical daisy-chain of adjacent modules; the old global (row, col) sort
-  // interleaved rows from DIFFERENT roof planes (row/col are per-plane grid
-  // indices), scattering every branch across the roof. Group by plane first,
-  // then row, then col, so each chunk is one continuous run.
-  const panelStringMap: Map<string, number> = new Map();
-  // Plane order: LARGEST planes first, so the big north/south fields get whole
-  // branches and only the tail branch picks up the small hip-cap planes
-  // (arbitrary first-appearance order made branch 1 span three planes).
-  const _planeCounts = new Map<string, number>();
-  panels.forEach((p: any) => {
-    const k = String(p.planeId ?? p.arrayId ?? '');
-    _planeCounts.set(k, (_planeCounts.get(k) ?? 0) + 1);
-  });
-  const _planeRank = new Map<string, number>();
-  [..._planeCounts.entries()].sort((a, b) => b[1] - a[1]).forEach(([k], i) => _planeRank.set(k, i));
-  // Serpentine within each plane (alternate column direction per row) so
-  // consecutive panels are physically adjacent — that IS the wiring order.
-  const sortedPanels = [...panels].sort((a: any, b: any) => {
-    const pr = (_planeRank.get(String(a.planeId ?? a.arrayId ?? '')) ?? 0) - (_planeRank.get(String(b.planeId ?? b.arrayId ?? '')) ?? 0);
-    if (pr !== 0) return pr;
-    const rr = (a.row ?? 0) - (b.row ?? 0);
-    if (rr !== 0) return rr;
-    const rev = ((a.row ?? 0) % 2) === 1;
-    return rev ? (b.col ?? 0) - (a.col ?? 0) : (a.col ?? 0) - (b.col ?? 0);
-  });
-  // BALANCED chunk sizes (first branches take the remainder) — ceil-chunking
-  // gave 14/14/14/11; balanced gives 9/9/9/9/9/8 for 53 @ max-10.
-  const _sizes = balancedBranchSizes(sortedPanels.length, totalStrings);
-  {
+  // Assign branch index to each panel — PLANE-AWARE (Ray, 2026-07-03:
+  // "logic says we are not linking strings across opposite sides of the
+  // roof"). planMicroBranches (computed above) never lets a branch span
+  // planes: each face chunks into its own NEC-sized branches; small hip-cap
+  // planes get their own short branch instead of piggybacking over the ridge.
+  const panelStringMap: Map<string, number> = _plan
+    ? _plan.assign
+    : new Map();
+  if (!_isMicro) {
+    // String-inverter path: keep the serpentine chunking over totalStrings.
+    const sortedForStrings = [...panels].sort((a: any, b: any) => {
+      const rr = (a.row ?? 0) - (b.row ?? 0);
+      if (rr !== 0) return rr;
+      return (a.col ?? 0) - (b.col ?? 0);
+    });
+    const _sizes = balancedBranchSizes(sortedForStrings.length, totalStrings);
     let _bi = 0, _used = 0;
-    sortedPanels.forEach((p) => {
+    sortedForStrings.forEach((p) => {
       if (_used >= (_sizes[_bi] ?? Infinity) && _bi < _sizes.length - 1) { _bi++; _used = 0; }
       panelStringMap.set(p.id, _bi);
       _used++;
     });
   }
-  const panelsPerString = _sizes[0] ?? totalPanels;
+  const panelsPerString = _plan ? (_plan.sizes[0] ?? totalPanels)
+    : Math.ceil(totalPanels / Math.max(totalStrings, 1));
 
   let svgCells = '';
   if (panels.length > 0 && panels.length <= 200) {
@@ -282,7 +277,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     ? Array.from({ length: totalStrings }, (_, bi) => ({
         si: bi,
         label: `Branch ${bi + 1}`,
-        count: sortedPanels.filter(p => panelStringMap.get(p.id) === bi).length,
+        count: panels.filter(p => panelStringMap.get(p.id) === bi).length,
         model: '—',
         watts: _legendWatts,
         voc: 0,
@@ -380,9 +375,12 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // Branch coloring + dropping PV-2's dimension callouts keeps the sheets distinct.
   let agDrawSvg: string;
   try {
-    // Build per-panel branch color map from panelStringMap + stringColors
+    // Build per-panel branch color map — inserted in BRANCH ORDER so the
+    // drawing's first-appearance color order equals B1..Bn (= legend order).
     const panelColorById: Map<string, string> = new Map();
-    sortedPanels.forEach(p => {
+    const _byBranch = [...panels].sort((a: any, b: any) =>
+      (panelStringMap.get(a.id) ?? 0) - (panelStringMap.get(b.id) ?? 0));
+    _byBranch.forEach(p => {
       const si = panelStringMap.get(p.id) ?? 0;
       panelColorById.set(p.id, stringColors[si % stringColors.length]);
     });
@@ -489,7 +487,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
               <th style="padding:1px 2px;font-size:6px;">Wp</th>
             </tr></thead>
             <tbody>
-              ${legendItems.slice(0,10).map((item: {si:number,label:string,count:number,model:string,watts:number,voc:number,isc:number}) => {
+              ${legendItems.slice(0,16).map((item: {si:number,label:string,count:number,model:string,watts:number,voc:number,isc:number}) => {
                 const hex = stringColors[item.si % stringColors.length];
                 return `<tr style="border-bottom:1px solid #eee;">
                   <td style="padding:1px 3px;"><span style="display:inline-block;width:9px;height:9px;background:${hex};vertical-align:middle;border:1px solid ${hex};"></span></td>
