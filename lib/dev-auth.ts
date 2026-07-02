@@ -118,16 +118,18 @@ export function getDevSessionUser(
 ): SessionUser | null {
   if (!isDevAuthAllowed()) return null;
 
-  // When isDevAuthAllowed() returns true, DEV_AUTH_BYPASS=true is confirmed
-  // and VERCEL_ENV is not 'production'. Log and return dev user.
+  // BOTH checks must pass (env var + explicit header).
+  // Without the header, fall through to real auth — this prevents
+  // signed-in users from being silently overridden by the dev user.
   const headerBypass = headers ? requestHasDevAuthHeader(headers) : false;
+  if (!headerBypass) return null;
 
   console.log('[DEV_AUTH_ACTIVE]', JSON.stringify({
     userId:    DEV_SESSION_USER.id,
     email:     DEV_SESSION_USER.email,
     nodeEnv:   process.env.NODE_ENV,
     vercelEnv: process.env.VERCEL_ENV ?? 'not-set (local)',
-    via:       headerBypass ? 'header(X-Dev-Auth)' : 'env(DEV_AUTH_BYPASS)',
+    via:       'header(X-Dev-Auth)',
   }));
   return DEV_SESSION_USER;
 }

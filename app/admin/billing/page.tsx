@@ -65,11 +65,11 @@ export default function BillingPage() {
         <Kpi icon={<Users size={18} className="text-amber-400" />} accent="bg-amber-500/15" label="Total subs" value={stats?.total ?? '—'} />
       </div>
 
-      {error && (
+      {error ? (
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-300">
           {error}{error.includes('STRIPE') && ' — set the Stripe keys on this deployment.'}
         </div>
-      )}
+      ) : null}
 
       {loading ? (
         <div className="text-center text-slate-500 py-16">Loading subscriptions…</div>
@@ -93,7 +93,7 @@ export default function BillingPage() {
                 <tr key={s.id} className="hover:bg-white/5">
                   <td className="px-4 py-3">
                     <div className="text-white">{s.name || s.email || '—'}</div>
-                    {s.name && s.email && <div className="text-xs text-slate-500">{s.email}</div>}
+                    {s.name && s.email ? <div className="text-xs text-slate-500">{s.email}</div> : null}
                   </td>
                   <td className="px-4 py-3 text-slate-300">{s.plan}</td>
                   <td className="px-4 py-3 text-right text-slate-300">{s.seats > 0 ? `+${s.seats}` : '—'}</td>

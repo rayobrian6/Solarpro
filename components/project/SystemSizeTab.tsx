@@ -157,7 +157,7 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
                   className="p-1.5 rounded-lg bg-slate-700/50 text-slate-400 hover:text-white transition-colors">
                   <X size={14} />
                 </button>
-                {saveErr && <span className="text-xs text-red-400">{saveErr}</span>}
+                {saveErr ? <span className="text-xs text-red-400">{saveErr}</span> : null}
               </div>
             ) : (
               <div className="flex items-end gap-2 group/size">
@@ -229,7 +229,7 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
               }
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-white">{item.label}</div>
-                {item.source && <div className="text-xs text-slate-500">{item.source}</div>}
+                {item.source ? <div className="text-xs text-slate-500">{item.source}</div> : null}
               </div>
               <div className={`text-sm font-semibold ${item.value ? 'text-white' : 'text-red-400'}`}>
                 {item.value || (item.required ? 'Missing — required' : 'Not set')}

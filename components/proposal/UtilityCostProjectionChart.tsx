@@ -238,7 +238,7 @@ export function UtilityCostProjectionChart({
         ) : null}
 
         {/* Shaded deficit region (pre-crossover, where solar costs more) */}
-        {crossoverYear !== null && crossoverYear > 1 && (() => {
+        {crossoverYear !== null && crossoverYear > 1 ? ((() => {
           const endIdx = crossoverYear - 1;
           const forwardPoints = Array.from({ length: endIdx + 1 }, (_, j) => {
             return `${j === 0 ? 'M' : 'L'}${xPos(j).toFixed(1)},${yPos(withSolar[j]).toFixed(1)}`;
@@ -255,7 +255,7 @@ export function UtilityCostProjectionChart({
               opacity={0.4}
             />
           );
-        })()}
+        })()) : null}
 
         {/* Without solar line (red) */}
         <path
@@ -344,7 +344,7 @@ export function UtilityCostProjectionChart({
         ) : null}
 
         {/* Cumulative savings annotation at Year 25 midpoint */}
-        {savings25 > 0 && (() => {
+        {savings25 > 0 ? ((() => {
           const midY = (yPos(withoutSolar[YEARS - 1]) + yPos(withSolar[YEARS - 1])) / 2;
           const arrowX = xPos(YEARS - 1) - 10;
           return (
@@ -380,7 +380,7 @@ export function UtilityCostProjectionChart({
               />
             </>
           );
-        })()}
+        })()) : null}
 
         {/* Y-axis label */}
         <text

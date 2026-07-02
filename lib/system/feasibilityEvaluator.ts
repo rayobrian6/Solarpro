@@ -276,6 +276,13 @@ export function evaluateInverterFeasibility(
   const vmpCold =
     panel.vmp *
     (1 + ((panel.tempCoeffVmp ?? panel.tempCoeffVoc) / 100) * deltaT);
+  // Hot Vmp (75°C cell) — worst case for the MPPT LOWER bound. Vmp drops when
+  // hot, so min string length and any mpptVoltageMin check must use hot Vmp, not
+  // cold. 75°C matches layoutCandidateGenerator + string-generator so all three
+  // sizers agree. (Engineering audit 2026-06-19, finding C1.)
+  const vmpHot =
+    panel.vmp *
+    (1 + ((panel.tempCoeffVmp ?? panel.tempCoeffVoc) / 100) * (75 - 25));
 
   // ── String-length window ──────────────────────────────────────────────
   // v47.411 — Optimizer topology: string Voc/Vmp is regulated by the optimizer
@@ -291,7 +298,7 @@ export function evaluateInverterFeasibility(
     : Math.floor(inverter.maxDcVoltage / Math.max(vocCold, 0.001));
   const minPanelsByVmp = isOptimizer
     ? 1
-    : Math.ceil(inverter.mpptVoltageMin / Math.max(vmpCold, 0.001));
+    : Math.ceil(inverter.mpptVoltageMin / Math.max(vmpHot, 0.001)); // hot Vmp — C1
 
   // v47.415 — Nominal DC bus voltage for operating-current math.
   // SolarEdge HD-Wave holds bus at 400V nominal (per datasheet + Application
@@ -453,8 +460,8 @@ export function evaluateInverterFeasibility(
   const maxStringPowerW = Number.POSITIVE_INFINITY; // optimizer clipping is NOT a reject criterion
 
   outer: for (let pps = effectiveMax; pps >= effectiveMin; pps--) {
-    const sVoc = vocCold * pps;
-    const sVmp = vmpCold * pps;
+    const sVoc = vocCold * pps;       // cold — for the max-voltage reject below
+    const sVmp = vmpHot * pps;         // hot — for the MPPT-min reject below (C1)
     // v47.411 — Skip per-string voltage constraints for optimizer topology.
     // See the String-length window block above for rationale: each optimizer
     // regulates its panel output, so string Voc/Vmp is independent of panel
@@ -586,7 +593,7 @@ export function evaluateInverterFeasibility(
     }
     return earlyFailure(input, failures, {
       stringVoltageValid: stringVocColdDiag <= inverter.maxDcVoltage,
-      mpptVoltageValid: vmpCold * diagnosticPps >= inverter.mpptVoltageMin,
+      mpptVoltageValid: vmpHot * diagnosticPps >= inverter.mpptVoltageMin, // hot Vmp — C1
       mpptCurrentValid: true,
       panelsPerString: diagnosticPps,
     });

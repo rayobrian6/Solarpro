@@ -310,7 +310,7 @@ export default function BillingPage() {
                   <div key={p.id} className={`rounded-xl p-4 border ${isCurrent ? `${info.borderColor} ${info.bgColor}` : 'border-slate-700 bg-slate-800/50'}`}>
                     <div className={`font-semibold text-sm mb-1 ${isCurrent ? info.color : 'text-slate-300'}`}>
                       {p.label}
-                      {isCurrent && <span className="ml-2 text-xs opacity-70">(current)</span>}
+                      {isCurrent ? <span className="ml-2 text-xs opacity-70">(current)</span> : null}
                     </div>
                     <div className={`text-xs font-bold mb-2 ${isCurrent ? info.color : 'text-slate-400'}`}>{p.price}</div>
                     <ul className="space-y-1">

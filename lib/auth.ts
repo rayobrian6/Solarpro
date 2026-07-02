@@ -189,6 +189,16 @@ export function signToken(user: SessionUser): string {
 }
 
 export function verifyToken(token: string): SessionUser | null {
+  return verifyTokenWithMeta(token)?.user ?? null;
+}
+
+/**
+ * Like verifyToken but also returns the token's issued-at (iat, seconds since
+ * epoch). The iat is needed to enforce session invalidation on password reset:
+ * a token issued BEFORE users.password_changed_at must be rejected. Returns null
+ * for an invalid/expired token.
+ */
+export function verifyTokenWithMeta(token: string): { user: SessionUser; iat: number | null } | null {
   try {
     // SECURITY: explicitly restrict to HS256 — prevents alg:none and algorithm confusion attacks
     const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as Record<string, any>;
@@ -196,15 +206,41 @@ export function verifyToken(token: string): SessionUser | null {
     // fields that may exist in old JWTs issued before this fix.
     if (!decoded?.id || !decoded?.email) return null;
     return {
-      id:      String(decoded.id),
-      name:    String(decoded.name || decoded.email),
-      email:   String(decoded.email),
-      company: decoded.company ? String(decoded.company) : undefined,
-      // role is intentionally NOT extracted — always read from DB
+      user: {
+        id:      String(decoded.id),
+        name:    String(decoded.name || decoded.email),
+        email:   String(decoded.email),
+        company: decoded.company ? String(decoded.company) : undefined,
+        // role is intentionally NOT extracted — always read from DB
+      },
+      iat: typeof decoded.iat === 'number' ? decoded.iat : null,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Session-invalidation check. Returns true when a token (by its iat) was issued
+ * BEFORE the user's password was last changed — i.e. it predates a password
+ * reset and must be rejected so other devices are logged out.
+ *
+ * Fails OPEN (returns false) when:
+ *  - passwordChangedAt is null/absent (migration 094 pending, or never reset)
+ *  - the token has no iat (can't determine — never lock a valid user out)
+ * A small clock-skew grace prevents invalidating the fresh token minted right
+ * after the reset itself.
+ */
+export function isSessionStale(
+  iatSeconds: number | null | undefined,
+  passwordChangedAt: string | Date | null | undefined,
+): boolean {
+  if (!passwordChangedAt) return false;
+  if (iatSeconds == null) return false;
+  const changedMs = new Date(passwordChangedAt).getTime();
+  if (Number.isNaN(changedMs)) return false;
+  const SKEW_MS = 5000; // tolerate minor clock skew between token signing and DB clock
+  return iatSeconds * 1000 < changedMs - SKEW_MS;
 }
 
 // ── Cookie helpers ────────────────────────────────────────────────────────────

@@ -627,6 +627,11 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const rafterABM   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
   const rafterDefl  = structural?.rafter?.deflection?.toFixed(3) || '—';
   const rafterAD    = structural?.rafter?.allowableDeflection?.toFixed(3) || '—';
+  // Truss framing is analyzed by load capacity (PSF), not rafter bending (ft-lbs).
+  // Rendering its 0-demand / capacity-in-PSF as "0 ft-lbs / 45 ft-lbs" read as broken.
+  const _isTruss      = (structural?.rafter?.framingType === 'truss') || (structural?.rafter?.bendingMoment === 0 && (structural?.rafter?.allowableBendingMoment || 0) > 0);
+  const trussCapPsf   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
+  const trussLoadPsf  = structural?.rafter?.totalLoadPsf?.toFixed(1) || '—';
   const totalUplift = structural?.attachment?.totalUpliftPerAttachment?.toFixed(0) || '—';
 
   const rafterSize  = project.rafterSize || '2×6';
@@ -662,15 +667,22 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           </table>
         </div>
 
-        <!-- Rafter Analysis -->
+        <!-- Roof Framing Analysis -->
         <div class="struct-card">
-          <div class="sct">Rafter Analysis — Existing Framing</div>
+          <div class="sct">${_isTruss ? 'Roof Framing Analysis — Pre-Engineered Truss' : 'Rafter Analysis — Existing Framing'}</div>
           <table class="calc-table">
-            <tr><td>Rafter Size</td><td class="cv">${rafterSize} @ ${rafterSpace}" O.C.</td></tr>
+            <tr><td>${_isTruss ? 'Truss @ Spacing' : 'Rafter Size'}</td><td class="cv">${rafterSize} @ ${rafterSpace}" O.C.</td></tr>
+            ${_isTruss ? `
+            <tr><td>Truss Load Capacity</td><td class="cv">${trussCapPsf} PSF</td></tr>
+            <tr><td>Total Roof Load</td><td class="cv">${trussLoadPsf} PSF</td></tr>
+            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${Number(utilization) > 100 ? '#cc0000' : '#000'};">${utilization}%</td></tr>
+            <tr><td>Basis</td><td class="cv">BCSI pre-eng. truss capacity</td></tr>
+            ` : `
             <tr><td>Bending Moment</td><td class="cv">${rafterBM} ft-lbs</td></tr>
             <tr><td>Allowable Moment</td><td class="cv">${rafterABM} ft-lbs</td></tr>
             <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${Number(utilization) > 100 ? '#cc0000' : '#000'};">${utilization}%</td></tr>
             <tr><td>Deflection / Allowed</td><td class="cv">${rafterDefl}" / ${rafterAD}"</td></tr>
+            `}
           </table>
         </div>
 

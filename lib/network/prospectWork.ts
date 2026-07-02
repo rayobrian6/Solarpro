@@ -54,7 +54,8 @@ async function enrichOne(p: InstallerProspect, apiKey: string): Promise<boolean>
 }
 
 export async function enrichBatch(apiKey: string, limit = 5): Promise<{ processed: number; enriched: number }> {
-  const batch = (await listProspects({ stage: "discovered", limit: 50 })).filter((p) => !p.email || !p.website).slice(0, limit);
+  // SQL-side filter: only discovered leads missing email or website, no JS post-filtering.
+  const batch = (await listProspects({ stage: "discovered", limit })).filter((p) => !p.email || !p.website);
   if (batch.length === 0) return { processed: 0, enriched: 0 };
   const res = await Promise.all(batch.map((p) => enrichOne(p, apiKey).catch(() => false)));
   return { processed: batch.length, enriched: res.filter(Boolean).length };
@@ -62,15 +63,40 @@ export async function enrichBatch(apiKey: string, limit = 5): Promise<{ processe
 
 // ── Vet all enriched leads (deterministic) ──────────────────────────────────
 export async function qualifyAll(): Promise<{ processed: number; qualified: number; rejected: number }> {
-  const batch = await listProspects({ stage: "enriched", limit: 500 });
-  let qualified = 0, rejected = 0;
-  for (const p of batch) {
-    const score = scoreRow(p);
-    const findable = !!(p.phone || p.email || p.website);
-    if (!findable) { await applyWorkUpdate(p.id, { stage: "rejected", qualityScore: score, notes: "Auto-vet: no contact details found" }); rejected++; }
-    else { await applyWorkUpdate(p.id, { stage: "qualified", qualityScore: score }); qualified++; }
-  }
-  return { processed: batch.length, qualified, rejected };
+  // Bulk vetting — two SQL UPDATEs instead of N individual round-trips.
+  // 1) Qualify enriched leads that have at least one contact method.
+  const { getDbReady } = await import("@/lib/db-neon");
+  const sql = await getDbReady();
+  const qRows = await sql`
+    UPDATE installer_prospects
+    SET stage = 'qualified', quality_score = (
+      COALESCE(CASE WHEN email IS NOT NULL THEN 30 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN phone IS NOT NULL THEN 20 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN website IS NOT NULL THEN 12 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN license_number IS NOT NULL THEN 13 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN rating >= 4 THEN 10 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN review_count >= 10 THEN 8 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN contact_name IS NOT NULL THEN 7 ELSE 0 END, 0)
+    ), notes = 'Auto-vet: qualified', updated_at = NOW()
+    WHERE stage = 'enriched' AND (email IS NOT NULL OR phone IS NOT NULL OR website IS NOT NULL)
+    RETURNING id
+  `;
+  // 2) Reject enriched leads with zero contact info.
+  const rRows = await sql`
+    UPDATE installer_prospects
+    SET stage = 'rejected', quality_score = (
+      COALESCE(CASE WHEN email IS NOT NULL THEN 30 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN phone IS NOT NULL THEN 20 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN website IS NOT NULL THEN 12 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN license_number IS NOT NULL THEN 13 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN rating >= 4 THEN 10 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN review_count >= 10 THEN 8 ELSE 0 END, 0) +
+      COALESCE(CASE WHEN contact_name IS NOT NULL THEN 7 ELSE 0 END, 0)
+    ), notes = 'Auto-vet: no contact details found', updated_at = NOW()
+    WHERE stage = 'enriched' AND email IS NULL AND phone IS NULL AND website IS NULL
+    RETURNING id
+  `;
+  return { processed: qRows.length + rRows.length, qualified: qRows.length, rejected: rRows.length };
 }
 
 // ── Draft a dossier for one qualified lead (no web search) ──────────────────

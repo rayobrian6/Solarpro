@@ -2,10 +2,16 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import type {
   Project, Layout, PlacedPanel, SolarPanel, Inverter, Battery,
-  SystemType, DrawingMode, RoofPlane, BillAnalysis, BatteryRecommendation
+  SystemType, DrawingMode, RoofPlane, BillAnalysis, BatteryRecommendation,
+  DesignElectrical
 } from '@/types';
 import { generateFenceLayout, calculateSystemSize, polygonAreaM2 } from '@/lib/panelLayout';
 import { generateRoofLayoutOptimized, generateGroundLayoutOptimized, clearGridCache } from '@/lib/panelLayoutOptimized';
+import { assignStrings, type Topology } from '@/lib/stringAssignment';
+import {
+  RACKING_SYSTEMS, OPTIMIZERS, MICROINVERTERS,
+  getMidClampGapMeters, getMidClampGapInches,
+} from '@/lib/equipment-db';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
 // v50.11: POA calculation + segment labels
@@ -43,7 +49,7 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff, Bug
+  Info, ChevronRight, Eye, EyeOff, Bug, Download
 } from 'lucide-react';
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
@@ -118,11 +124,11 @@ function Section({ title, icon, children, defaultOpen = true, badge }: {
       >
         <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 uppercase tracking-wide">
           {icon}{title}
-          {badge && <span className="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs normal-case font-normal">{badge}</span>}
+          {badge ? <span className="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs normal-case font-normal">{badge}</span> : null}
         </div>
         {open ? <ChevronUp size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
       </button>
-      {open && <div className="px-4 pb-4 space-y-3">{children}</div>}
+      {open ? <div className="px-4 pb-4 space-y-3">{children}</div> : null}
     </div>
   );
 }
@@ -500,6 +506,12 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [addressSuggestions, setAddressSuggestions] = useState<Array<{ short_name: string; display_name: string; lat: number; lng: number }>>([]);
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
   const [addressSuggestionsLoading, setAddressSuggestionsLoading] = useState(false);
+  // The address input lives inside the overflow-x-auto header, which clips the
+  // dropdown AND sits below the 3D canvas. Render the dropdown as position:fixed
+  // (escapes both, like the floating Report-a-Bug button), positioned from the
+  // input's live rect.
+  const addrInputRef = useRef<HTMLInputElement>(null);
+  const [addrDropdownPos, setAddrDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const addressDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Drawing state
@@ -526,6 +538,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [solarDataError, setSolarDataError] = useState<string | null>(null);
   // Solar API roof plane auto-detection status
   const [solarApiStatus, setSolarApiStatus] = useState<'idle' | 'loading' | 'loaded' | 'unavailable'>('idle');
+  // Nearmap aerial roof detection (licensed HD aerial → real planes, on demand)
+  const [aerialDetecting, setAerialDetecting] = useState(false);
   // Pending plane: drawn vertices awaiting azimuth/pitch tagging before panels are placed
   const [pendingPlane, setPendingPlane] = useState<{ vertices: {lat:number;lng:number}[]; area: number } | null>(null);
   const [pendingPlaneAzimuth, setPendingPlaneAzimuth] = useState<number>(180);
@@ -567,7 +581,16 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── AHJ-derived initial values (Phase 1 QW-1a/QW-1b) ──────────────────
   // Look up AHJ jurisdiction from project address to get fire setback defaults
   // instead of dangerous zero values. Falls back to national defaults if no match.
-  const ahjRecord = project.address ? getAhjByAddress(project.address) : null;
+  // v63: pass structured county/city/state hints so downstate addresses resolve to
+  // the correct AHJ (e.g. Wood River → Madison County) instead of the old bug that
+  // defaulted every unmatched Illinois address to Cook County / Chicago.
+  const ahjRecord = (project.address || (project as any).county || (project as any).stateCode)
+    ? getAhjByAddress(project.address || '', {
+        stateCode: (project as any).stateCode,
+        county:    (project as any).county,
+        city:      (project as any).city,
+      })
+    : null;
   const INCHES_TO_METERS = 0.0254;
 
   // QW-1a: Compute initial fire setbacks from AHJ jurisdiction data
@@ -602,6 +625,110 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [panelSpacing, setPanelSpacing] = useState(0.006); // v47.98: 0.006m = ¼" clamp gap (was 0.02m)
   const [setback, setSetback] = useState(initialSetbackM);
   const [bifacialOptimized, setBifacialOptimized] = useState(true);
+
+  // v63: Strings & equipment visualization + mid-clamp-driven spacing
+  const [rackingId, setRackingId] = useState('ironridge-xr100');
+  const [topology, setTopology] = useState<Topology>('string');
+  const [modulesPerString, setModulesPerString] = useState(10);
+  const [colorByString, setColorByString] = useState(false);
+  const [showEquipment, setShowEquipment] = useState(false);
+  const [panelOpacity, setPanelOpacity] = useState(1);
+  // v63: manual string painting — paint mode, active target string, per-panel overrides
+  const [paintMode, setPaintMode] = useState(false);
+  const [paintStringIndex, setPaintStringIndex] = useState(0);
+  const [stringOverrides, setStringOverrides] = useState<Record<string, number>>({});
+  // Mid-clamp module gap (meters) for the selected racking — drives panel spacing.
+  const midClampGapM = useMemo(() => getMidClampGapMeters(rackingId), [rackingId]);
+  // Apply the hardware mid-clamp gap to the panel spacing whenever the racking changes.
+  const applyRacking = useCallback((id: string) => {
+    setRackingId(id);
+    clearGridCache();
+    setPanelSpacing(getMidClampGapMeters(id));
+  }, []);
+
+  // v63: derive per-panel string + equipment assignment from the placed panels.
+  const stringAssignment = useMemo(
+    () => assignStrings(panels as any, {
+      modulesPerString,
+      topology,
+      modulesPerDevice: 1,
+      optimizerModelId: OPTIMIZERS[0]?.id,
+      microModelId: MICROINVERTERS[0]?.id,
+      overrides: stringOverrides,
+    }),
+    [panels, modulesPerString, topology, stringOverrides],
+  );
+  const panelMeta = useMemo(() => {
+    const m: Record<string, { color?: string; deviceType?: 'optimizer' | 'micro' | 'none'; stringLabel?: string }> = {};
+    for (const id in stringAssignment.byPanelId) {
+      const a = stringAssignment.byPanelId[id];
+      m[id] = { color: a.color, deviceType: a.deviceType, stringLabel: a.stringLabel };
+    }
+    return m;
+  }, [stringAssignment]);
+  const stringLegend = useMemo(
+    () => stringAssignment.strings.map(s => ({ label: s.label, color: s.color, panelCount: s.panelCount })),
+    [stringAssignment],
+  );
+  // Turning equipment view on dims the panels so devices are visible underneath.
+  const toggleEquipment = useCallback(() => {
+    setShowEquipment(prev => {
+      const next = !prev;
+      setPanelOpacity(next ? 0.35 : 1);
+      return next;
+    });
+  }, []);
+
+  // v63: paint mode — clicking a panel in 3D assigns it to the active string.
+  const togglePaintMode = useCallback(() => {
+    setPaintMode(prev => {
+      const next = !prev;
+      if (next) { setColorByString(true); setPlacementMode3D('select'); } // colors must be visible + clicks route to select handler
+      return next;
+    });
+  }, []);
+  const handlePanelPaint = useCallback((panelId: string) => {
+    setStringOverrides(prev => ({ ...prev, [panelId]: paintStringIndex }));
+  }, [paintStringIndex]);
+  const resetStringOverrides = useCallback(() => setStringOverrides({}), []);
+
+  // v63: serialize the current electrical design for the Engineering handoff.
+  // Logged into the saved Layout (only happens when a real project is active —
+  // scratch/testing designs never persist), read by the Engineering page to seed
+  // its inverter/string/topology config with no re-entry.
+  const buildDesignElectrical = useCallback((): DesignElectrical => {
+    const byPanelId: Record<string, number> = {};
+    const stringMap = new Map<number, string[]>();
+    for (const pid in stringAssignment.byPanelId) {
+      const idx = stringAssignment.byPanelId[pid].stringIndex;
+      byPanelId[pid] = idx;
+      const arr = stringMap.get(idx);
+      if (arr) arr.push(pid); else stringMap.set(idx, [pid]);
+    }
+    const strings = [...stringMap.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([stringIndex, panelIds]) => ({ stringIndex, panelCount: panelIds.length, panelIds }));
+    return {
+      topology,
+      inverterBrand: topology === 'micro' ? 'Enphase' : 'SolarEdge',
+      modulesPerString,
+      rackingId,
+      panelId: (selectedPanel as any)?.id,
+      optimizerModelId: topology === 'optimizer' ? OPTIMIZERS[0]?.id : undefined,
+      microModelId: topology === 'micro' ? MICROINVERTERS[0]?.id : undefined,
+      byPanelId,
+      overrides: Object.keys(stringOverrides).length > 0 ? stringOverrides : undefined,
+      strings,
+      deviceCount: stringAssignment.deviceCount,
+      generatedAt: new Date().toISOString(),
+    };
+  }, [stringAssignment, topology, modulesPerString, rackingId, selectedPanel, stringOverrides]);
+
+  // Keep the latest electrical design in a ref for the beforeunload save path.
+  const designElectricalRef = useRef<DesignElectrical | null>(null);
+  useEffect(() => {
+    designElectricalRef.current = panels.length > 0 ? buildDesignElectrical() : null;
+  }, [panels.length, buildDesignElectrical]);
 
   // Phase 2D: ComputedField descriptors for tilt and azimuth with provenance
   const tiltComputed: ComputedFieldValue = useMemo(() => ({
@@ -724,6 +851,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
+  const fenceLineRef = useRef<{ lat: number; lng: number }[]>([]); // keeps fence geometry accessible in saveLayoutToDB autosave
+  const fenceHeightRef = useRef<number>(2.0);
   // v50.22: tracks the address from an explicit user pick (address search or Pick House).
   // onTwinLoaded must not overwrite solarDataAddress/solarDataCityOnly when a pick is in flight.
   const explicitPickAddressRef = useRef<string | null>(null);
@@ -791,6 +920,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panelsRef2.current = panels; }, [panels]);
   useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
+  useEffect(() => { fenceLineRef.current = fenceLine; }, [fenceLine]);
+  useEffect(() => { fenceHeightRef.current = fenceHeight; }, [fenceHeight]);
 
   // QW-10: Reactive production calculation — auto-compute with 3s debounce
   // whenever panels change significantly. Replaces the manual button click.
@@ -811,16 +942,27 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   // ── Auto-save layout to DB (3-second debounce after panel changes) ──────────
   const saveLayoutToDB = useCallback(async (panelList: PlacedPanel[]) => {
-    const panelsJson = JSON.stringify(panelList);
-    if (panelsJson === lastSavedPanelsRef.current) return; // nothing changed
-    lastSavedPanelsRef.current = panelsJson;
+    // v63: fold the electrical design into the dedup signature so topology /
+    // modules-per-string / string-paint changes persist even when panels are unchanged.
+    const designElectrical = panelList.length > 0 ? buildDesignElectrical() : undefined;
+    const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
+    if (sig === lastSavedPanelsRef.current) return; // nothing changed
+    lastSavedPanelsRef.current = sig;
     const payload = {
       panels: panelList,
       mapCenter: mapCenterRef.current,
       mapZoom: zoomRef.current,
       systemType: project.systemType,
+      // v63: electrical design handoff for Engineering (string/topology/brand/equipment)
+      designElectrical,
       // Include roofPlanes so permit generator can use exact roof geometry
       roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
+      // Persist fence geometry on autosave too — previously only the manual
+      // buildLayout()→/api/production path saved these, so an auto-saved fence
+      // design lost its line/height on reload (and engineering had no geometry
+      // to recognize it by). Mirrors the roofPlanes treatment.
+      fenceLine:  fenceLineRef.current.length > 1 ? fenceLineRef.current : undefined,
+      fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
     console.log('[LAYOUT SAVE PAYLOAD]', {
@@ -853,7 +995,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
     }
-  }, [project.id, project.systemType]);
+  }, [project.id, project.systemType, buildDesignElectrical]);
 
   // Trigger auto-save 3 seconds after panels change
   useEffect(() => {
@@ -870,12 +1012,15 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => {
     const handleBeforeUnload = () => {
       const panelList = panelsRef2.current;
-      if (JSON.stringify(panelList) === lastSavedPanelsRef.current) return;
+      const designElectrical = designElectricalRef.current ?? undefined;
+      const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
+      if (sig === lastSavedPanelsRef.current) return;
       const payload = JSON.stringify({
         panels: panelList,
         mapCenter: mapCenterRef.current,
         mapZoom: zoomRef.current,
         systemType: project.systemType,
+        designElectrical,
         roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
       });
       navigator.sendBeacon(
@@ -902,10 +1047,20 @@ export default function DesignStudio({ project, onSave }: Props) {
         });
         if (data.success && data.data?.panels && data.data.panels.length > 0) {
           setPanels(data.data.panels);
-          lastSavedPanelsRef.current = JSON.stringify(data.data.panels);
+          lastSavedPanelsRef.current = JSON.stringify(data.data.panels) + '|' + JSON.stringify(data.data?.designElectrical ?? null);
           setRestoredPanelCount(data.data.panels.length);
           setLayoutLoadedFromDB(true);
           console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
+        }
+        // v63: restore the electrical design (topology / brand / modules-per-string /
+        // racking / manual string-paint overrides) so the UI reflects what was saved.
+        const de = data.data?.designElectrical as DesignElectrical | undefined;
+        if (de) {
+          if (de.topology) setTopology(de.topology);
+          if (typeof de.modulesPerString === 'number') setModulesPerString(de.modulesPerString);
+          if (de.rackingId) setRackingId(de.rackingId);
+          if (de.overrides && Object.keys(de.overrides).length > 0) setStringOverrides(de.overrides);
+          console.log('[DesignStudio] Restored design electrical:', { topology: de.topology, overrides: Object.keys(de.overrides ?? {}).length });
         }
         // CRITICAL FIX: Also restore roofPlanes so roofPlanesRef stays populated
         // Without this, auto-save fires with roofPlanesRef.current = [] and roof planes are lost
@@ -1048,6 +1203,25 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   };
 
+  // Keep the fixed-positioned address dropdown anchored to the input's live rect
+  // (recompute on open, and while open on scroll/resize).
+  useEffect(() => {
+    if (!showAddressSuggestions || addressSuggestions.length === 0) return;
+    const update = () => {
+      const el = addrInputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setAddrDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [showAddressSuggestions, addressSuggestions.length]);
+
   // ── Address autocomplete ──────────────────────────────────
   const handleAddressSearchInput = useCallback((value: string) => {
     setAddressSearch(value);
@@ -1133,6 +1307,43 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSolarDataLoading(false);
     }
   }, []);
+
+  // ── Nearmap aerial roof detection (on-demand, licensed HD aerial) ──────
+  // Pulls real roof planes (outline + pitch + material) for the building under
+  // the current map center and drops them into the roofPlanes slot as
+  // confirmed:false, so they render in the 3D scene and route through the
+  // existing operator review/confirm step. Costs Nearmap credits → user-action
+  // only, never auto. Falls back gracefully (toast) when there's no coverage.
+  const detectRoofFromAerial = useCallback(async () => {
+    setAerialDetecting(true);
+    setSolarApiStatus('loading');
+    try {
+      const res = await fetch(
+        `/api/aerial-roof-detect?lat=${mapCenter.lat}&lng=${mapCenter.lng}`
+      );
+      const data = await res.json();
+      if (!data.success) {
+        setSolarApiStatus('unavailable');
+        toast.error('Aerial detect failed', data.error || 'Could not reach Nearmap.');
+        return;
+      }
+      if (!data.covered || !Array.isArray(data.planes) || data.planes.length === 0) {
+        setSolarApiStatus('unavailable');
+        toast.info('No aerial coverage here', data.message || 'Use Solar API or draw the roof manually.');
+        return;
+      }
+      const planes = data.planes as RoofPlane[];
+      setRoofPlanes(planes);
+      setSolarApiStatus('loaded');
+      if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
+      toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap · review pitch & azimuth, then confirm`);
+    } catch (e) {
+      setSolarApiStatus('unavailable');
+      toast.error('Aerial detect failed', (e as Error).message);
+    } finally {
+      setAerialDetecting(false);
+    }
+  }, [mapCenter.lat, mapCenter.lng, toast]);
 
   // ── Handle house pick from 3D view ──────────────────────────────────
   // Called when user clicks a house in Pick House mode.
@@ -2937,7 +3148,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
     setAutoLayoutRunning(true);
     const minSetback = 0;    // v47.95: no minimum -- AHJ fire setbacks handle clearances
-    const tightSpacing = 0.006; // v47.98: ¼" clamp gap
+    const tightSpacing = midClampGapM; // v63: mid-clamp gap from selected racking (was hardcoded ¼")
     let allNew: PlacedPanel[] = [];
 
     roofPlanes.forEach(plane => {
@@ -2979,7 +3190,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       'Fill Roof complete',
       `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW (max density)`
     );
-  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation]);
+  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
 
   // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
   const optimizeLayout = useCallback(() => {
@@ -3002,7 +3213,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
         layoutId, roofPlane: plane, panel: selectedPanel,
-        setback: optSetback, panelSpacing: 0.006, rowSpacing: optRowSpacingRoof, // v47.98: ¼" clamp gap
+        setback: optSetback, panelSpacing: midClampGapM, rowSpacing: optRowSpacingRoof, // v63: mid-clamp gap from racking
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
         orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
@@ -3018,7 +3229,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       const layoutId = uuidv4();
       const newPanels = generateGroundLayoutOptimized({
         layoutId, area: groundArea, panel: selectedPanel,
-        tilt, azimuth, rowSpacing: optRowSpacingGround, panelSpacing: 0.006, // v47.98: ¼" clamp gap
+        tilt, azimuth, rowSpacing: optRowSpacingGround, panelSpacing: midClampGapM, // v63: mid-clamp gap from racking
         panelsPerRow, groundHeight,
         orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
@@ -3032,7 +3243,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       'Optimized Layout complete',
       `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW · min shading`
     );
-  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation]);
+  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
 
   // ── Calculate production ───────────────────────────────────
   const buildSystemDefinition = () => {
@@ -3092,6 +3303,10 @@ export default function DesignStudio({ project, onSave }: Props) {
       const location = buildLocationInput();
       const body: Record<string, unknown> = { systemDefinition, location };
       if (project.id) body.projectId = project.id;
+      // Carry the equipment selection so the production route persists it and the
+      // project hydrates it back (engineering audit C2 — was local-only/dropped).
+      if (selectedInverter) body.selectedInverter = selectedInverter;
+      if (selectedPanel) body.selectedPanel = selectedPanel;
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3160,7 +3375,16 @@ export default function DesignStudio({ project, onSave }: Props) {
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, layout }),
+        // Persist the inverter/panel selection with the layout. upsertProduction
+        // saves them and getProjectById hydrates them back onto the project, so
+        // engineering/permit see the choice. Without this the picks were
+        // local-only and silently discarded (engineering audit C2).
+        body: JSON.stringify({
+          projectId: project.id,
+          layout,
+          selectedInverter: selectedInverter ?? undefined,
+          selectedPanel: selectedPanel ?? undefined,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -3214,6 +3438,55 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
+  // v50.x: BOM CSV export — pure client-side, no backend.
+  // Builds a single-row-per-unique-model CSV with header
+  //   Category,Manufacturer,Model,Quantity,Unit
+  // inspired by OpenSolar Pro's multi-supplier cart, but shipped as the
+  // lighter CSV-export version per JAMES / Quinn 2026-06-29 22:27 CT.
+  const handleBomExport = useCallback(() => {
+    if (panels.length === 0) return;
+
+    // RFC 4180: wrap fields containing comma/quote/newline in double-quotes.
+    const csvField = (val: string | number): string => {
+      const s = String(val);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const panelMfr   = selectedPanel?.manufacturer ?? 'Unknown';
+    const panelModel = selectedPanel?.model ?? 'Unknown';
+
+    // One row per unique panel model (the whole design uses selectedPanel).
+    const rows: Array<[string, string, string, number, string]> = [
+      ['Panel', panelMfr, panelModel, panels.length, 'ea'],
+    ];
+    if (selectedInverter) {
+      rows.push(['Inverter', selectedInverter.manufacturer, selectedInverter.model, 1, 'ea']);
+    }
+    // Racking + BOS stubs — replace with real selector values when
+    // DesignSidebar surfaces a racking picker. rowCount derived from
+    // panelsPerRow so ground/fence systems stay sensible.
+    const rowCount = Math.max(1, Math.ceil(panels.length / Math.max(1, panelsPerRow)));
+    rows.push(['Racking', 'Generic', 'XR-Series', rowCount, 'ea']);
+    rows.push(['BOS', 'Generic', 'Misc', 1, 'ea']);
+
+    const header = ['Category', 'Manufacturer', 'Model', 'Quantity', 'Unit'];
+    const csvLines = [header, ...rows].map(r => r.map(csvField).join(','));
+    const csv = csvLines.join('\n') + '\n';
+
+    // Trigger browser download via Blob + temporary anchor.
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const date = new Date().toISOString().slice(0, 10);
+    const projectName = (project?.name ?? 'design').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName}-BOM-${date}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [panels, selectedPanel, selectedInverter, panelsPerRow, project]);
+
   return (
     <div className="flex flex-col h-full bg-slate-950">
       {/* Report a Bug — floating (Design Studio runs without the app header) */}
@@ -3242,6 +3515,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           <div className="relative flex-1">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 z-10" />
             <input
+              ref={addrInputRef}
               type="text"
               value={addressSearch}
               onChange={e => handleAddressSearchInput(e.target.value)}
@@ -3268,9 +3542,13 @@ export default function DesignStudio({ project, onSave }: Props) {
               ) : null}
             </div>
 
-            {/* Autocomplete dropdown */}
-            {showAddressSuggestions && addressSuggestions.length > 0 ? (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 overflow-hidden">
+            {/* Autocomplete dropdown — position:fixed so it escapes the header's
+                overflow clipping and renders above the 3D canvas (z-[100]). */}
+            {showAddressSuggestions && addressSuggestions.length > 0 && addrDropdownPos ? (
+              <div
+                className="fixed bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-[100] overflow-hidden"
+                style={{ top: addrDropdownPos.top, left: addrDropdownPos.left, width: addrDropdownPos.width }}
+              >
                 {addressSuggestions.map((s, i) => (
                   <button
                     key={i}
@@ -3337,6 +3615,10 @@ export default function DesignStudio({ project, onSave }: Props) {
               <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
             </div>
           ) : null}
+          <span className="ml-2 hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <span aria-hidden>🖱️</span>
+            Left click drag and scroll wheel rotates
+          </span>
           <button
             onClick={() => setShowPanels(!showPanels)}
             className={`btn-sm ${showPanels ? 'btn-secondary' : 'btn-ghost'}`}
@@ -3438,13 +3720,24 @@ export default function DesignStudio({ project, onSave }: Props) {
           ) : null}
           {/* Proceed to Engineering CTA — shown once panels are placed */}
           {panels.length > 0 ? (
-            <button
-              onClick={() => router.push(`/engineering?projectId=${project.id}`)}
-              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
-              title="Open Engineering with this project"
-            >
-              Engineering <ArrowRight size={11} />
-            </button>
+            <>
+              {/* v50.x: BOM CSV export — pure client-side Blob download, no backend.
+                  Sibling to the Engineering CTA, identical styling for visual coherence. */}
+              <button
+                onClick={handleBomExport}
+                className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
+                title="Download Bill of Materials (CSV)"
+              >
+                <Download size={11} /> BOM
+              </button>
+              <button
+                onClick={() => router.push(`/engineering?projectId=${project.id}`)}
+                className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
+                title="Open Engineering with this project"
+              >
+                Engineering <ArrowRight size={11} />
+              </button>
+            </>
           ) : null}
         </div>
       </div>
@@ -3573,6 +3866,15 @@ export default function DesignStudio({ project, onSave }: Props) {
               showShade={showShade3D}
               showIrradiance={showIrradiance}
               fireSetbacks={fireSetbacks}
+              showSetbackZones={showSetbackZones}
+              mountingSystemId={rackingId}
+              colorByString={colorByString}
+              showEquipment={showEquipment}
+              panelOpacity={panelOpacity}
+              panelMeta={panelMeta}
+              stringLegend={stringLegend}
+              paintMode={paintMode}
+              onPanelPaint={handlePanelPaint}
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
@@ -3786,13 +4088,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                     {drawingMode === 'draw_fence' && '🔲 Click to draw fence line'}
                   </span>
                   <span className="text-slate-400">• Double-click to finish</span>
-                  {drawnPoints.length > 0 && <span className="text-amber-400 font-semibold">{drawnPoints.length} pts</span>}
+                  {drawnPoints.length > 0 ? <span className="text-amber-400 font-semibold">{drawnPoints.length} pts</span> : null}
                 </div>
               ) : null}
               {drawingMode === 'measure' ? (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-cyan-300 pointer-events-none">
                   📏 Click to measure distance • Double-click to clear
-                  {measureDistance !== null && <span className="ml-2 font-bold">{measureDistance.toFixed(1)}m</span>}
+                  {measureDistance !== null ? <span className="ml-2 font-bold">{measureDistance.toFixed(1)}m</span> : null}
                 </div>
               ) : null}
 
@@ -3896,7 +4198,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           <div className="flex-1 overflow-y-auto">
 
             {/* ── DESIGN TAB ── */}
-            {activeTab === 'design' && (
+            {activeTab === 'design' ? (
               <>
                 {/* System Summary — always visible so Calculate Production is always accessible */}
                 <Section title="System Summary" icon={<Zap size={12} />}>
@@ -4194,10 +4496,141 @@ export default function DesignStudio({ project, onSave }: Props) {
                   {activeZoneType === 'roof' ? (
                     <SliderRow label="Roof Setback" value={setback} min={0} max={2.0} step={0.05} unit="m" onChange={v => { clearGridCache(); setSetback(v); }} />
                   ) : null}
-                  {(activeZoneType === 'roof' || activeZoneType === 'ground') && (
+                  {(activeZoneType === 'roof' || activeZoneType === 'ground') ? (
                     <SliderRow label="Row Spacing" value={rowSpacing} min={0.01} max={3.0} step={0.01} unit="m" onChange={v => { clearGridCache(); setRowSpacing(v); }} />
-                  )}
+                  ) : null}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
+
+                  {/* v63: Racking → mid-clamp gap drives panel spacing & the firewalk filter */}
+                  {(activeZoneType === 'roof' || activeZoneType === 'fence') ? (
+                    <div className="py-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-slate-400">Racking (mid-clamp)</span>
+                        <span className="text-xs text-cyan-400 font-mono">{getMidClampGapInches(rackingId).toFixed(2)}&quot; gap</span>
+                      </div>
+                      <select
+                        value={rackingId}
+                        onChange={e => applyRacking(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 rounded text-xs text-slate-200 px-2 py-1"
+                      >
+                        {RACKING_SYSTEMS.filter(r => activeZoneType === 'fence'
+                          ? r.systemType === 'fence'
+                          : (r.systemType === 'roof' || r.systemType === 'flat_roof')
+                        ).map(r => (
+                          <option key={r.id} value={r.id}>{r.manufacturer} {r.model}</option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Mid-clamp gaps accumulate across each row — applied to panel spacing and the firewalk filter.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {/* v63: Strings & Equipment visualization */}
+                  <div className="py-1 mt-1 border-t border-slate-700/60 pt-2">
+                    <div className="flex items-center gap-1 mb-1.5">
+                      <Zap size={11} className="text-amber-400" />
+                      <span className="text-xs font-medium text-amber-400">Strings &amp; Equipment</span>
+                    </div>
+                    <label className="text-[10px] text-slate-400">Topology</label>
+                    <select
+                      value={topology}
+                      onChange={e => setTopology(e.target.value as Topology)}
+                      className="w-full bg-slate-800 border border-slate-600 rounded text-xs text-slate-200 px-2 py-1 mb-1.5"
+                    >
+                      <option value="string">String (no module electronics)</option>
+                      <option value="optimizer">String + Optimizers</option>
+                      <option value="micro">Microinverters</option>
+                    </select>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] text-slate-400">Modules / string</span>
+                      <input
+                        type="number" min={1} max={30} value={modulesPerString}
+                        onChange={e => setModulesPerString(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+                        className="w-16 bg-slate-800 border border-slate-600 rounded text-xs text-slate-200 px-2 py-1 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setColorByString(v => !v)}
+                        className={`flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${colorByString ? 'border-blue-500/50 bg-blue-500/10 text-blue-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                      >
+                        🎨 {colorByString ? 'Strings ✓' : 'Color strings'}
+                      </button>
+                      <button
+                        onClick={toggleEquipment}
+                        className={`flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${showEquipment ? 'border-green-500/50 bg-green-500/10 text-green-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                      >
+                        ⚡ {showEquipment ? 'Equip ✓' : 'Show equip'}
+                      </button>
+                    </div>
+                    {showEquipment ? (
+                      <div className="mt-1.5">
+                        <SliderRow label="Panel Opacity" value={panelOpacity} min={0.1} max={1} step={0.05} unit="" onChange={setPanelOpacity} />
+                      </div>
+                    ) : null}
+                    {(colorByString || showEquipment) ? (
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        {stringAssignment.strings.length} string{stringAssignment.strings.length !== 1 ? 's' : ''}
+                        {stringAssignment.deviceType !== 'none'
+                          ? ` · ${stringAssignment.deviceCount} ${stringAssignment.deviceType === 'micro' ? 'micros' : 'optimizers'}`
+                          : ''}
+                      </p>
+                    ) : null}
+
+                    {/* v63: Manual string painting — click panels in 3D to assign them */}
+                    {panels.length > 0 ? (
+                      <div className="mt-2 pt-2 border-t border-slate-700/40">
+                        <button
+                          onClick={togglePaintMode}
+                          className={`w-full flex items-center justify-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${paintMode ? 'border-fuchsia-500/60 bg-fuchsia-500/10 text-fuchsia-300' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                        >
+                          🖌 {paintMode ? 'Painting — click panels' : 'Paint strings'}
+                        </button>
+                        {paintMode ? (
+                          <div className="mt-1.5">
+                            <div className="text-[10px] text-slate-400 mb-1">Active string (click panels in 3D to assign):</div>
+                            <div className="flex flex-wrap gap-1">
+                              {stringAssignment.strings.map(s => (
+                                <button
+                                  key={s.stringIndex}
+                                  onClick={() => setPaintStringIndex(s.stringIndex)}
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${paintStringIndex === s.stringIndex ? 'border-white text-white' : 'border-transparent text-slate-900'}`}
+                                  style={{ background: s.color }}
+                                  title={`${s.label} · ${s.panelCount} panels`}
+                                >
+                                  S{s.stringIndex + 1}
+                                </button>
+                              ))}
+                              {(() => {
+                                const nextIdx = stringAssignment.strings.length > 0
+                                  ? Math.max(...stringAssignment.strings.map(s => s.stringIndex)) + 1
+                                  : 0;
+                                return (
+                                  <button
+                                    onClick={() => setPaintStringIndex(nextIdx)}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${paintStringIndex === nextIdx ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-600 text-slate-400 hover:text-slate-200'}`}
+                                  >
+                                    + New
+                                  </button>
+                                );
+                              })()}
+                            </div>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[10px] text-slate-500">
+                                → String {paintStringIndex + 1} · {Object.keys(stringOverrides).length} override{Object.keys(stringOverrides).length !== 1 ? 's' : ''}
+                              </span>
+                              {Object.keys(stringOverrides).length > 0 ? (
+                                <button onClick={resetStringOverrides} className="text-[10px] text-slate-400 hover:text-red-400 underline">
+                                  Reset to auto
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
 
                   {/* v30.9 / v50.23: Panel Orientation Toggle — portrait | landscape | hybrid */}
                   <div className="py-1">
@@ -4228,7 +4661,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </div>
 
                   {/* v30.9: Fire Setback Controls (roof only) */}
-                  {activeZoneType === 'roof' && (
+                  {activeZoneType === 'roof' ? (
                     <div className="mt-2 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-red-400">🔥 Fire Setbacks</span>
@@ -4257,6 +4690,64 @@ export default function DesignStudio({ project, onSave }: Props) {
                           </button>
                         </div>
                       </div>
+                      {/* v62: AHJ fire-code requirements — what THIS jurisdiction requires
+                          for ridge / valley / hip / eave / edge / pathway, with one-click apply. */}
+                      {(() => {
+                        const r = ahjRecord;
+                        const M = 0.0254;
+                        const cells: Array<[string, number]> = r ? [
+                          ['Ridge',  r.ridgeSetbackInches],
+                          ['Valley', r.valleySetbackInches],
+                          ['Hip',    r.hipRoofSetbackInches],
+                          ['Eave',   r.eaveSetbackInches],
+                          ['Perim',  r.roofSetbackInches],
+                          ['Pathway', r.pathwayWidthInches],
+                        ] : [];
+                        return (
+                          <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-semibold text-red-300">
+                                {r ? `📍 ${r.city || r.county}, ${r.stateCode} requires` : '📋 IRC R324 defaults'}
+                              </span>
+                              {r ? <span className="text-[10px] text-slate-400">NEC {r.necVersion}</span> : null}
+                            </div>
+                            {r ? (
+                              <>
+                                <div className="grid grid-cols-3 gap-1">
+                                  {cells.map(([label, inches]) => (
+                                    <div key={label} className="rounded bg-slate-800/60 px-1.5 py-1 text-center">
+                                      <div className="text-[9px] uppercase tracking-wide text-slate-500">{label}</div>
+                                      <div className="text-xs font-semibold text-slate-200">{inches}″</div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="text-[10px] text-slate-500 leading-tight truncate" title={r.ahjName}>{r.ahjName}</div>
+                                <button
+                                  onClick={() => {
+                                    setFireSetbacks(prev => ({
+                                      ...prev,
+                                      ridgeSetbackM: r.ridgeSetbackInches * M,
+                                      // edge/side covers rake + hip + valley in the layout engine — use the strictest
+                                      edgeSetbackM:  Math.max(r.valleySetbackInches, r.hipRoofSetbackInches, r.ridgeSetbackInches) * M,
+                                      eaveSetbackM:  r.eaveSetbackInches * M,
+                                      pathwayWidthM: r.pathwayWidthInches * M,
+                                      enforcePathway: true,
+                                    }));
+                                    setSetback(r.roofSetbackInches * M);
+                                  }}
+                                  className="w-full text-[11px] py-1 rounded border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
+                                >
+                                  Apply {r.city || r.county} fire setbacks
+                                </button>
+                              </>
+                            ) : (
+                              <div className="text-[10px] text-slate-400 leading-snug">
+                                18″ ridge · 18″ valley · 18″ hip · 36″ pathway (IRC R324). Set a project address to load the local jurisdiction&apos;s exact requirements.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <SliderRow
                         label="Edge Setback"
                         value={Math.round(fireSetbacks.edgeSetbackM * 39.37)}
@@ -4276,11 +4767,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                         min={0} max={24} step={1} unit="in"
                         onChange={v => setFireSetbacks(prev => ({ ...prev, eaveSetbackM: v / 39.37 }))}
                       />
-                      {(fireSetbacks.eaveSetbackM ?? 0) === 0 && (
+                      {(fireSetbacks.eaveSetbackM ?? 0) === 0 ? (
                         <div className="text-xs text-emerald-400/80 bg-emerald-500/10 rounded-lg p-2">
                           0″ eave — panels extend to gutter line (max coverage)
                         </div>
-                      )}
+                      ) : null}
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-slate-400">Pathway (36″)</label>
                         <button
@@ -4296,7 +4787,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                       ) : null}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* v30.9: Multi-Row Placement Tool */}
                   <div className="mt-2 pt-2 border-t border-slate-700/50">
@@ -4370,7 +4861,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   }
                   return null;
                 })()}
-                {roofSegments.length > 0 && (() => {
+                {roofSegments.length > 0 ? ((() => {
                   // Pre-compute summary stats
                   const totalAreaFt2 = roofSegments.reduce((s: number, seg: any) => s + (seg.areaM2 ?? seg.stats?.areaMeters2 ?? 0) * 10.7639, 0);
                   const bestSeg = roofSegments.reduce((best: any, seg: any) => {
@@ -4507,7 +4998,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </div>
                     </Section>
                   );
-                })()}
+                })()) : null}
 
                 {/* ── Roof Planes Section ─────────────────────────────────────────── */}
                 <Section
@@ -4517,6 +5008,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                     defaultOpen={false}
                   >
                     <div className="space-y-2">
+
+                      {/* Nearmap aerial detect — real planes from licensed HD aerial, on demand */}
+                      <button
+                        onClick={detectRoofFromAerial}
+                        disabled={aerialDetecting}
+                        className="w-full py-2 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white"
+                      >
+                        {aerialDetecting ? (
+                          <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Detecting from aerial…</>
+                        ) : (
+                          <>🛰️ Detect roof from aerial</>
+                        )}
+                      </button>
 
                       {/* Idle state */}                      {/* Idle state */}
                       {solarApiStatus === 'idle' && roofPlanes.length === 0 ? (
@@ -4735,7 +5239,7 @@ export default function DesignStudio({ project, onSave }: Props) {
 
 
               </>
-            )}
+            ) : null}
 
             {/* ── BILL ANALYSIS TAB ── */}
             {activeTab === 'bill' ? (
@@ -4882,8 +5386,8 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                         <div className="flex items-center gap-2 mt-1.5">
                           <span className="text-xs text-slate-500">{(p.width * FEET_PER_METER).toFixed(2)}×{(p.height * FEET_PER_METER).toFixed(2)}ft</span>
-                          {p.bifacial && <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Bifacial</span>}
-                          {p.cellType && <span className="text-xs text-slate-600">{p.cellType}</span>}
+                          {p.bifacial ? <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Bifacial</span> : null}
+                          {p.cellType ? <span className="text-xs text-slate-600">{p.cellType}</span> : null}
                         </div>
                       </button>
                     ))}
@@ -4944,7 +5448,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                             inv.type === 'optimizer' ? 'bg-blue-500/20 text-blue-400' :
                             'bg-slate-700 text-slate-400'
                           }`}>{inv.type}</span>
-                          {inv.batteryCompatible && <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Battery Ready</span>}
+                          {inv.batteryCompatible ? <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Battery Ready</span> : null}
                           <span className="text-xs text-slate-600">${inv.pricePerUnit.toLocaleString()}</span>
                         </div>
                       </button>
@@ -4988,7 +5492,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                             bat.chemistry === 'LFP' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
                           }`}>{bat.chemistry}</span>
                           <span className="text-xs text-slate-500">{bat.roundTripEfficiency}% RTE</span>
-                          {bat.cycles && <span className="text-xs text-slate-600">{bat.cycles.toLocaleString()} cycles</span>}
+                          {bat.cycles ? <span className="text-xs text-slate-600">{bat.cycles.toLocaleString()} cycles</span> : null}
                           <span className="text-xs text-slate-500">${bat.pricePerUnit.toLocaleString()}</span>
                         </div>
                       </button>
@@ -5005,8 +5509,8 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div><span className="text-slate-500">Power:</span> <span className="text-white">{selectedBattery.powerKw} kW</span></div>
                         <div><span className="text-slate-500">Chemistry:</span> <span className="text-white">{selectedBattery.chemistry}</span></div>
                         <div><span className="text-slate-500">Warranty:</span> <span className="text-white">{selectedBattery.warranty}yr</span></div>
-                        {selectedBattery.dimensions && <div className="col-span-2"><span className="text-slate-500">Dimensions:</span> <span className="text-white">{selectedBattery.dimensions}</span></div>}
-                        {selectedBattery.weight && <div><span className="text-slate-500">Weight:</span> <span className="text-white">{selectedBattery.weight}kg</span></div>}
+                        {selectedBattery.dimensions ? <div className="col-span-2"><span className="text-slate-500">Dimensions:</span> <span className="text-white">{selectedBattery.dimensions}</span></div> : null}
+                        {selectedBattery.weight ? <div><span className="text-slate-500">Weight:</span> <span className="text-white">{selectedBattery.weight}kg</span></div> : null}
                       </div>
                     </div>
 

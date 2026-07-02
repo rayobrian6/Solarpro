@@ -49,7 +49,33 @@ export type InstallationType =
   | 'commercial_ballasted'
   | 'ground_mount'
   | 'tracker'
-  | 'carport';
+  | 'carport'
+  | 'fence';            // SolFence vertical bifacial solar fence (analyzeFence)
+
+// ── Mount-type mapping (UNIFIED-ENGINE-DESIGN-SPEC.md, Step 2) ────────────────
+// Single source of truth: systemType ('roof' | 'ground' | 'fence' — the UI/config
+// vocabulary) → InstallationType (the structural-engine vocabulary). Before this,
+// the structural payload never carried installationType, so every ground/fence job
+// defaulted to 'roof_residential' in /calculate and silently ran the roof path.
+//
+// PE-GATED scope (do NOT mistake this for the ground/fence structural build):
+//   • 'ground' → 'ground_mount' here only flips OFF the meaningless roof
+//     mount-capacity check in V4 (skipMountCheck). It does NOT activate the
+//     ground-pile branch — that keys on the *mounting system's* type, and no
+//     ground mounting system is passed yet. The real exposed-wind + IBC 1807.3
+//     embedment math is Step 6; output stays "ESTIMATE — not engineered" behind
+//     the structural-tab guardrail banner.
+//   • 'fence' → 'fence' routes to the dedicated analyzeFence path in V4
+//     (freestanding-wall wind + SolFence post embedment). Output stays
+//     "ESTIMATE — not engineered" (engineered:false) until PE sign-off.
+export function systemTypeToInstallationType(systemType?: string): InstallationType {
+  switch (systemType) {
+    case 'ground': return 'ground_mount';
+    case 'fence':  return 'fence';
+    case 'roof':
+    default:       return 'roof_residential';
+  }
+}
 
 // ── Structural Issue (superset of all 4 engine definitions) ─────────────────
 // V1 had:   code, severity, message, value?, limit?, reference?, suggestion?

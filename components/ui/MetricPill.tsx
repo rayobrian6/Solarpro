@@ -84,7 +84,7 @@ export function MetricPill({
         <div className="flex items-center gap-1.5">
           <span className={`text-sm font-black tabular-nums leading-tight ${cfg.valueColor}`}>
             {value}
-            {unit && <span className="text-xs font-normal text-slate-400 ml-0.5">{unit}</span>}
+            {unit ? <span className="text-xs font-normal text-slate-400 ml-0.5">{unit}</span> : null}
           </span>
           {hasConfidence ? (
             <ConfidenceBadge

@@ -2,6 +2,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
+import { systemTypeToInstallationType } from '@/lib/structural/types';
+import { resolveEquipment } from '@/lib/systemEquipmentResolver';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -27,6 +29,7 @@ const MOUNTING_BRANDS: string[] = Array.from(new Set(ALL_MOUNTING_SYSTEMS.map(s 
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
 // Phase 11 — brand-driven sizing recommendation UI
 import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizingEngine';
+import { designElectricalToEngineering } from '@/lib/system/designToEngineering';
 import {
   SizingRecommendation,
   type CurrentConfigSnapshot,
@@ -228,6 +231,7 @@ interface ProjectConfig {
   batteryId: string;        // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
   generatorId: string;      // equipment-db generator ID
   generatorWireLength: number;  // ft — distance from generator to ATS (user-configurable)
+  trenchRunLengthFt?: number;   // ft — ground/fence array → service trench distance (user-input; adds to DC run + underground conduit)
   atsId: string;            // equipment-db ATS ID
   backupInterfaceId: string; // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, etc.)
   mainPanelAmps: number;
@@ -476,7 +480,7 @@ const defaultProject: ProjectConfig = {
   date: new Date().toISOString().split('T')[0], systemType: 'roof',
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
-  batteryId: '', generatorId: '', generatorWireLength: 50, atsId: '', backupInterfaceId: '',
+  batteryId: '', generatorId: '', generatorWireLength: 50, trenchRunLengthFt: 0, atsId: '', backupInterfaceId: '',
   mainPanelAmps: 200, mainPanelBrand: 'Square D', utilityMeter: 'Bidirectional Net Meter',
   acDisconnect: true, dcDisconnect: true, productionMeter: true, rapidShutdown: true,
   roofType: 'shingle', mountingId: 'ironridge-xr100',
@@ -543,10 +547,10 @@ function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: any; ex
         {cfg.icon}
         <div className="flex-1 min-w-0">
           <div className="text-xs text-white">{issue.message}</div>
-          {issue.necReference && <div className="text-xs text-slate-500 mt-0.5">{issue.necReference}</div>}
-          {issue.suggestion && <div className="text-xs text-amber-400/80 mt-0.5">💡 {issue.suggestion}</div>}
+          {issue.necReference ? <div className="text-xs text-slate-500 mt-0.5">{issue.necReference}</div> : null}
+          {issue.suggestion ? <div className="text-xs text-amber-400/80 mt-0.5">💡 {issue.suggestion}</div> : null}
         </div>
-        {issue.code && <div className="text-xs text-slate-600 font-mono flex-shrink-0">{issue.code}</div>}
+        {issue.code ? <div className="text-xs text-slate-600 font-mono flex-shrink-0">{issue.code}</div> : null}
         {explanation ? (
           <div className="text-xs text-slate-600 flex-shrink-0 ml-1">
             {open ? '▲' : '▼'}
@@ -605,7 +609,7 @@ function ProgramRow({
             <span className="text-xs font-semibold text-white leading-tight">{title}</span>
             {status ? <ProgramStatusBadge status={status} /> : null}
           </div>
-          {subtitle && <p className="text-[11px] text-slate-400 leading-snug">{subtitle}</p>}
+          {subtitle ? <p className="text-[11px] text-slate-400 leading-snug">{subtitle}</p> : null}
           {value ? (
             <p className="text-[11px] text-emerald-300 font-medium mt-0.5 leading-snug">{value}</p>
           ) : null}
@@ -1295,7 +1299,7 @@ function EngineeringPageInner() {
               try {
                 const panel = SOLAR_PANELS.find((pp: any) => pp.id === panelId) as any;
                 const sizingResult = sizeSystemFromBrand({
-                  systemType: 'roof',
+                  systemType: (p.systemType ?? seed?.system_type ?? 'roof') as any,  // honor roof/ground/fence
                   panelCount,
                   panelWattage: panel?.watts ?? engCfg?.panelWatts ?? seed.panel_watt ?? 400,
                   panelVoc: panel?.voc ?? engCfg?.panelVoc ?? 49.6,
@@ -1408,7 +1412,7 @@ function EngineeringPageInner() {
             if (invType !== 'micro' && _nsBrand) {
               try {
                 const _nsResult = sizeSystemFromBrand({
-                  systemType: 'roof', panelCount,
+                  systemType: (p.systemType ?? layout?.systemType ?? 'roof') as any, panelCount,  // honor roof/ground/fence
                   panelWattage: _nsPanel?.watts ?? 400,
                   panelVoc: _nsPanel?.voc ?? 49.6,
                   panelTempCoeffVoc: _nsPanel?.tempCoeffVoc ?? -0.27,
@@ -1447,6 +1451,42 @@ function EngineeringPageInner() {
           patches.utilityId = p.utilityId || patches.utilityId;
           if (panelCount > 0) {
             setAutoLoadBanner(`Loaded from project: ${p.name}${panelCount ? ` (${panelCount} panels, ${systemKw.toFixed(1)} kW)` : ''}`);
+          }
+        }
+
+        // ── v63: Design Studio electrical handoff ───────────────────────────
+        // If the saved layout carries an electrical design (string + topology +
+        // brand + equipment logged in Design Studio when this project was worked
+        // on), seed the engineering inverter config from it — string count, sizes,
+        // topology, brand, panel and racking carry over with NO re-entry. Runs
+        // for both the seed and no-seed branches above. The saved engineering_config
+        // restore below still wins once the engineer customizes in the workspace.
+        const designElec = (layout as any)?.designElectrical as import('@/types').DesignElectrical | undefined;
+        if (designElec && Array.isArray(designElec.strings) && designElec.strings.length > 0) {
+          try {
+            const handoff = designElectricalToEngineering(designElec, {
+              selectedInverterId: p.selectedInverter?.id,
+              tilt:    (patches.roofPitch as number) ?? seed?.tilt ?? 20,
+              azimuth: seed?.azimuth ?? 180,
+            });
+            patches.inverters = [_buildInvCfg({
+              existingId: 'inv-design-0',
+              inverterId: handoff.inverterId,
+              type:       handoff.inverterType,
+              strings:    handoff.strings as unknown as StringConfig[],
+              ...(handoff.optimizerPeripheralId ? { optimizerPeripheralId: handoff.optimizerPeripheralId } : {}),
+            })];
+            if (handoff.mountingId) patches.mountingId = handoff.mountingId;
+            console.log('[EngineeringPage] Seeded inverters from Design Studio electrical handoff:', {
+              topology: designElec.topology,
+              strings:  handoff.strings.length,
+              brand:    handoff.inverterBrand,
+              racking:  handoff.mountingId,
+            });
+            setAutoLoadBanner(prev =>
+              prev ? `${prev} · strings from design` : `✅ Strings loaded from design (${handoff.strings.length} string${handoff.strings.length !== 1 ? 's' : ''})`);
+          } catch (deErr) {
+            console.error('[EngineeringPage] design electrical handoff failed (non-fatal):', deErr);
           }
         }
 
@@ -1542,6 +1582,98 @@ function EngineeringPageInner() {
           }
         }
 
+        // v62 — STRING-DISTRIBUTION STALENESS HEAL (single source of truth).
+        // The two gates above catch a wrong panel TOTAL and an inactive inverter,
+        // but NOT a stale per-string DISTRIBUTION: a config can have the right
+        // total and an active inverter yet still carry an OLD layout the current
+        // allocator would never produce (e.g. 11 strings of 7 where the engine
+        // now packs ~7 strings of ~11). In AUTO mode the sizing engine OWNS the
+        // layout, so we rebuild the committed strings from the allocator whenever
+        // the saved distribution diverges from it — preserving the inverter
+        // models, the panel selection, and wire/mount fields. This makes the
+        // committed config ALWAYS equal the single-source-of-truth allocator
+        // output, for any brand and panel count. Guided/manual modes are left
+        // untouched (the user curates those via the recommendation panel / edits).
+        if (
+          p.controlMode === 'auto' &&
+          savedConfig &&
+          Array.isArray((savedConfig as any).inverters) &&
+          (savedConfig as any).inverters.length > 0 &&
+          (((savedConfig as any).inverters[0]?.type ?? 'string') !== 'micro')
+        ) {
+          try {
+            const _hInvs    = (savedConfig as any).inverters as any[];
+            const _hStrings = _hInvs.flatMap((inv: any) => (inv.strings ?? []) as any[]);
+            const _hTotal   = _hStrings.reduce((s: number, str: any) => s + (str.panelCount ?? 0), 0);
+            const _hPanelId = _hStrings[0]?.panelId ?? '';
+            const _hPanel   = (SOLAR_PANELS as any[]).find((pp: any) => pp.id === _hPanelId);
+            const _hInvId   = _hInvs[0]?.inverterId ?? '';
+            const _hBrand   = (savedConfig as any).selectedBrand;
+            const _hCount   = expectedHydrationPanelCount > 0 ? expectedHydrationPanelCount : _hTotal;
+            if (_hPanel && _hCount > 0 && (_hInvId || _hBrand)) {
+              const _hInput: Parameters<typeof sizeSystemFromBrand>[0] = {
+                // Honor the project's real mount type (roof / ground / fence) — never assume roof.
+                systemType:        ((savedConfig as any).systemType ?? 'roof'),
+                panelCount:        _hCount,
+                panelWattage:      _hPanel.watts ?? 400,
+                panelVoc:          _hPanel.voc,
+                panelVmp:          _hPanel.vmp,
+                panelIsc:          _hPanel.isc,
+                panelTempCoeffVoc: _hPanel.tempCoeffVoc,
+                designTempMin:     -10,
+                batteryEnabled:    false,
+              };
+              if (_hInvId) _hInput.selectedInverterId = _hInvId;
+              else         _hInput.selectedBrand      = _hBrand;
+              const _hEng = sizeSystemFromBrand(_hInput);
+              if (_hEng.topology !== 'micro' && _hEng.strings.length > 0) {
+                const _savedSorted = [..._hStrings.map((s: any) => s.panelCount ?? 0)].sort((a, b) => a - b);
+                const _engSorted   = [..._hEng.strings.map((s: any) => s.panelCount)].sort((a, b) => a - b);
+                const _diverges =
+                  _savedSorted.length !== _engSorted.length ||
+                  _savedSorted.some((c, i) => c !== _engSorted[i]);
+                if (_diverges) {
+                  // Rebuild strings from the engine layout, grouped by inverterIndex,
+                  // preserving the panel id + wire/mount fields from the saved strings.
+                  const _byInv = new Map<number, any[]>();
+                  for (const s of _hEng.strings) {
+                    const idx = (s as any).inverterIndex ?? 0;
+                    if (!_byInv.has(idx)) _byInv.set(idx, []);
+                    _byInv.get(idx)!.push(s);
+                  }
+                  const _tmpl = _hStrings[0] ?? {};
+                  const _newInvs = Array.from({ length: _hEng.inverterCount }, (_: any, idx: number) => {
+                    const _shell    = _hInvs[idx] ?? _hInvs[0];
+                    const _assigned = _byInv.get(idx) ?? [];
+                    const _strs = (_assigned.length > 0 ? _assigned : [{ panelCount: 0 }]).map((s: any, si: number) => ({
+                      ..._tmpl,
+                      id:         `str-heal-${idx}-${si}`,
+                      panelCount: s.panelCount,
+                      panelId:    _hPanelId,
+                    }));
+                    return {
+                      ..._shell,
+                      strings:            _strs,
+                      stringsPerInverter: _strs.length,
+                      modulesPerString:   _strs[0]?.panelCount ?? 0,
+                    };
+                  });
+                  console.warn(
+                    '[HYDRATION STRING-DISTRIBUTION HEAL]',
+                    '\n  projectId:', projectId,
+                    '\n  saved layout:', _savedSorted.join('+'),
+                    '\n  engine layout:', _engSorted.join('+'),
+                    '\n  action: AUTO mode — rebuilt committed strings from the allocator (single source of truth)'
+                  );
+                  (savedConfig as any).inverters = _newInvs;
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[HYDRATION STRING-DISTRIBUTION HEAL] skipped (error):', err);
+          }
+        }
+
         if (savedConfig && Object.keys(savedConfig).length > 0) {
           console.log('[EngineeringPage] Restoring from engineering_config (auto-saved workspace)');
           // Merge: project-level fields from patches, all engineering fields from savedConfig
@@ -1556,9 +1688,21 @@ function EngineeringPageInner() {
               city:        patches.city        ?? prev.city,
               county:      patches.county      ?? prev.county,
               zip:         patches.zip         ?? prev.zip,
-              systemType:  patches.systemType  ?? prev.systemType,
               // All engineering config fields from saved workspace (user's last state)
               ...savedConfig,
+              // Re-assert mount type AFTER the savedConfig spread. A stale or
+              // auto-defaulted saved workspace can carry systemType:'roof' and
+              // silently DOWNGRADE a fence/ground project (Ray: "loaded a fence,
+              // engineering didn't recognize it as a fence"). Precedence:
+              //   1. an explicit NON-roof choice in savedConfig (user's intent), then
+              //   2. the project record (patches.systemType, authoritative) when it
+              //      is non-roof — a fence/ground project must never load as roof, then
+              //   3. fall back to savedConfig / patches / prev.
+              systemType: ((savedConfig as any).systemType && (savedConfig as any).systemType !== 'roof')
+                ? (savedConfig as any).systemType
+                : (patches.systemType && patches.systemType !== 'roof')
+                  ? patches.systemType
+                  : ((savedConfig as any).systemType ?? patches.systemType ?? prev.systemType),
             };
             // v61.2/v61.3 reconciliation: if a saved config has stringsPerInverter metadata
             // that disagrees with the actual inv.strings array length, trust
@@ -1652,7 +1796,7 @@ function EngineeringPageInner() {
                   : _allStrings.length;
                 try {
                   const _fixInput: Parameters<typeof sizeSystemFromBrand>[0] = {
-                    systemType: 'roof',
+                    systemType: (merged.systemType ?? 'roof') as any,  // honor roof/ground/fence
                     panelCount: _totalPanels,
                     panelWattage: _panelObj?.watts ?? 400,
                     panelVoc: _panelObj?.voc ?? 49.6,
@@ -1975,7 +2119,7 @@ function EngineeringPageInner() {
             try {
               const _rfPanel = SOLAR_PANELS.find((pp: any) => pp.id === panelId);
               const _rfResult = sizeSystemFromBrand({
-                systemType: 'roof',
+                systemType: (patches.systemType ?? 'roof') as any,  // honor roof/ground/fence
                 panelCount,
                 panelWattage: (_rfPanel as any)?.watts ?? run.panelWattage ?? 400,
                 panelVoc: (_rfPanel as any)?.voc ?? 49.6,
@@ -2362,6 +2506,8 @@ function EngineeringPageInner() {
       inverterManufacturer: invData?.manufacturer ?? (topology === 'micro' ? 'Enphase' : 'SolarEdge'),
       inverterModel: invData?.model ?? (topology === 'micro' ? 'IQ8+' : 'SE7600H'),
       inverterAcKw: invData?.acOutputKw ?? (invData?.acOutputW ? invData.acOutputW / 1000 : topology === 'micro' ? 0.290 : 7.6), // v58.4: fallback 0.295->0.290 (IQ8+ datasheet max continuous = 290VA)
+      // C7 fix: physical inverter count so multi-inverter AC current / OCPD / schedule qty are sized for ALL units, not just the primary.
+      inverterCount: topology === 'micro' ? 1 : Math.max(1, config.inverters.length),
       inverterMaxDcV: invData?.maxDcVoltage ?? (topology === 'micro' ? 60 : 600),
       inverterMpptVmin: invData?.mpptVoltageMin ?? (topology === 'micro' ? 16 : 100),
       inverterMpptVmax: invData?.mpptVoltageMax ?? (topology === 'micro' ? 60 : 480),
@@ -2481,6 +2627,8 @@ function EngineeringPageInner() {
       mainPanelBrand: config.mainPanelBrand ?? 'Square D',
       panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
       interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+      systemType: config.systemType,   // adds the SolFence mounting row to the equipment schedule for fence
+
       branchCount: topology === 'micro' ? Math.ceil(totalPanels / (modulesPerDevice * branchLimit)) : undefined,
       // B1 FIX: Pass the actual string count from config.inverters so computeSystem()
       // uses the user's layout rather than auto-calculating from NEC 690.7 physics.
@@ -2707,6 +2855,11 @@ function EngineeringPageInner() {
         batteryMode: 'auto',
         batteryGoal: 'backup',
         batteryTargetKwh: config.batteryKwh || undefined,
+        // v62 — thread the user's explicit UNITS count so the recommendation
+        // installs exactly what the user picked instead of auto-pinning to 1.
+        // Keeps rec.battery.moduleCount in agreement with config.batteryCount,
+        // so the diff panel shows "matches" and apply never reverts the count.
+        batteryDesiredUnits: config.batteryCount || undefined,
       });
       return result;
     } catch (err) {
@@ -2727,6 +2880,12 @@ function EngineeringPageInner() {
     config.selectedBrand,
     batteryEnabled,
     config.batteryKwh,
+    // NOTE: deliberately NOT depending on config.batteryCount. A battery UNITS
+    // edit must never recompute the recommendation, because that re-fires the
+    // auto-apply / runtime-guard chain and rebuilds the STRING layout — adding
+    // a battery would "touch the strings" (and could oscillate). batteryDesiredUnits
+    // is still read from the current config whenever the rec recomputes for a real
+    // reason; the user's count sticks via applySizingRecommendation's preserve path.
   ]);
 
 
@@ -3294,61 +3453,51 @@ function EngineeringPageInner() {
         userHasEditedInverters: false,
         selectedBrand: rec.brand.id,
       };
-      if (rec.battery && rec.battery.equipmentDbId) {
+      // v62 — USER BATTERY IS AUTHORITATIVE.
+      //
+      // applySizingRecommendation re-syncs the INVERTER / STRING layout. It must
+      // NEVER destroy a battery the user has explicitly configured. The previous
+      // code overwrote batteryCount with rec.battery.moduleCount, which 'auto'
+      // sizing pins to 1 (sizingEngine sizes to one unit's default kWh) — so
+      // selecting N batteries reverted to 1 on every apply/auto-heal. This also
+      // generalizes the old v58.13 ecosystem-battery guard: any user-selected
+      // battery (ecosystem OR manual) is now preserved wholesale.
+      const hasUserBattery =
+        !!prev.batteryId && (prev.batteryCount ?? 0) > 0;
+      if (hasUserBattery) {
+        console.log('[SIZING APPLY v62] preserving user battery (authoritative):', {
+          batteryId: prev.batteryId,
+          batteryCount: prev.batteryCount,
+          batteryKwh: prev.batteryKwh,
+        });
+        // Intentionally leave batteryId/batteryCount/batteryKwh/Brand/Model off
+        // the patch so the user's selection survives the inverter re-sync.
+      } else if (rec.battery && rec.battery.equipmentDbId) {
+        // No user battery yet — adopt the engine's sized battery as the seed.
         patch.batteryId = rec.battery.equipmentDbId;
         patch.batteryCount = rec.battery.moduleCount;
         patch.batteryKwh = rec.battery.installedKwh;
         patch.batteryBrand = rec.brand.manufacturer;
         patch.batteryModel = rec.battery.equipmentDbId;
       } else {
-        // v58.13 — ECOSYSTEM BATTERY GUARD.
-        //
-        // The sizing engine only emits `rec.battery` when `batteryEnabled === true`.
-        // Prior behaviour: when `batteryEnabled` was false at the moment Apply
-        // was clicked, we wiped batteryId/Count/Kwh — which destroyed the
-        // battery the ecosystem picker had just applied.
-        //
-        // New rule: if the user has an ecosystem applied AND that ecosystem
-        // brought in a battery (prev.batteryId is truthy), PRESERVE it. The
-        // ecosystem is the source of truth for battery selection in that case.
-        //
-        // This also covers the refresh-hydration race where `batteryEnabled`
-        // is momentarily false on first render before the v58.12 hydration
-        // effect flips it to true.
-        const hasEcosystemBattery =
-          !!(prev as any).ecosystemBrand &&
-          !!prev.batteryId &&
-          (prev.batteryCount ?? 0) > 0;
-        if (hasEcosystemBattery) {
-          console.log('[SIZING APPLY v58.13] preserving ecosystem battery:', {
-            ecosystem: (prev as any).ecosystemBrand,
-            batteryId: prev.batteryId,
-            batteryCount: prev.batteryCount,
-          });
-          // Intentionally do NOT set batteryId/batteryCount/batteryKwh on patch.
-        } else {
-          // No ecosystem battery to protect — clear battery fields cleanly
-          // (preserves original behaviour for non-ecosystem flows).
-          patch.batteryId = '';
-          patch.batteryCount = 0;
-          patch.batteryKwh = 0;
-        }
+        // No user battery and the engine sized none — leave cleared.
+        patch.batteryId = '';
+        patch.batteryCount = 0;
+        patch.batteryKwh = 0;
       }
 
       return { ...prev, ...patch };
     });
 
-    // v58.13 — Also re-assert batteryEnabled if we just preserved an ecosystem
-    // battery. This is safe: it's a no-op if the toggle is already on, and if
-    // the toggle was momentarily off (e.g. refresh-hydration race), flipping
-    // it true makes the next sizing run emit `rec.battery` properly so the
-    // SLD + BOM + permit all stay consistent.
+    // v62 (was v58.13) — Re-assert batteryEnabled whenever we just preserved a
+    // user battery (ecosystem OR manual). Safe: a no-op if the toggle is already
+    // on, and if it was momentarily off (e.g. refresh-hydration race) flipping
+    // it true keeps the next sizing run + SLD + BOM + permit consistent.
     setConfig(prev => {
-      const hasEcosystemBattery =
-        !!(prev as any).ecosystemBrand &&
+      const hasUserBattery =
         !!prev.batteryId &&
         (prev.batteryCount ?? 0) > 0;
-      if (hasEcosystemBattery) setBatteryEnabled(true);
+      if (hasUserBattery) setBatteryEnabled(true);
       return prev;
     });
 
@@ -3487,20 +3636,8 @@ function EngineeringPageInner() {
   useEffect(() => {
     if (!sizingAutoApply) return;
     if (!sizingRecommendation) return;
-    // Phase 13.1 — USER INTENT LOCK. If the user has edited the inverter
-    // config, auto-apply is a HARD STOP. The recommendation stays visible
-    // (read-only), but we never mutate the user's config silently. The
-    // user can still click "Apply Recommendation" explicitly.
-    if (config.userHasEditedInverters) {
-      console.log('🔒 [AUTO-APPLY] blocked — userHasEditedInverters=true (user config is source of truth)');
-      return;
-    }
-    // v61.7 — CONFIG OVERWRITE KILL SWITCH: isUserControlled is the master lock.
-    if (config.isUserControlled) {
-      console.log('[CONFIG OVERWRITE BLOCKED] AUTO-APPLY blocked — isUserControlled=true. Config is final until explicit user action.');
-      return;
-    }
-    // Quick structural check: any mismatch triggers apply.
+    // Compute the mismatch FIRST so the user-intent locks below can tell a
+    // STALE/broken layout (must re-sync) apart from a pure model preference.
     const rec = sizingRecommendation;
     const snap = sizingCurrentSnapshot;
     const topologyMismatch = snap.topology !== rec.topology;
@@ -3526,6 +3663,33 @@ function EngineeringPageInner() {
     // String-layout mismatch catches cases where inverter/topology match
     // but the per-string panel distribution is wrong (AUTO STRING REBUILD).
     const stringLayoutMismatch = detectStringLayoutMismatch(snap, rec);
+
+    // v61.8 — A config whose inverter COUNT, string LAYOUT, or TOPOLOGY no longer
+    // matches the system (e.g. after a panel-count change) is structurally STALE —
+    // a broken layout for the current panels, NOT a deliberate user preference.
+    // It must re-sync, even under the user-intent locks, otherwise the UI shows
+    // an over-provisioned/stale array forever (e.g. 5 inverters of 7-panel strings
+    // for a system the engine correctly lays out as 2 inverters of 11). A pure
+    // inverter-MODEL drift IS a preference and stays protected. The user's EXPLICIT
+    // equipment lock (controlMode / configLocks.inverter) is still enforced by
+    // shouldAllowOverride below, so a locked model is never silently swapped —
+    // guided/manual users get a suggestion/block instead of a silent change.
+    const structurallyStale = topologyMismatch || countMismatch || stringLayoutMismatch;
+
+    // Phase 13.1 — USER INTENT LOCK: a HARD STOP for a model/preference drift on a
+    // user-edited or user-controlled config, but NOT for a structurally-stale layout.
+    if (!structurallyStale && config.userHasEditedInverters) {
+      console.log('🔒 [AUTO-APPLY] blocked — userHasEditedInverters=true (no structural staleness; model preference protected)');
+      return;
+    }
+    if (!structurallyStale && config.isUserControlled) {
+      console.log('[CONFIG OVERWRITE BLOCKED] AUTO-APPLY blocked — isUserControlled=true (no structural staleness)');
+      return;
+    }
+    if (structurallyStale && (config.userHasEditedInverters || config.isUserControlled)) {
+      console.log('🩹 [AUTO-APPLY] auto-healing STRUCTURALLY-STALE config despite user lock (count/layout/topology mismatch — broken layout for current panels, not a preference)');
+    }
+
     if (topologyMismatch || countMismatch || modelMismatch || stringLayoutMismatch) {
       console.log('🚨 [AUTO-APPLY] firing applySizingRecommendation (no user lock, mismatch detected)');
       // v61: Check control mode + field locks before auto-applying
@@ -4134,6 +4298,9 @@ function EngineeringPageInner() {
         inverters: electricalInverters,
         mainPanelAmps: config.mainPanelAmps,
         systemVoltage: 240,
+        // Rooftop temp adder only for roof arrays (cells run hotter on a hot roof).
+        // Ground/fence panels are in free air → 0 (else over-derates the conductor).
+        rooftopTempAdder: config.systemType === 'roof' ? 30 : 0,
         wireGauge: config.wireGauge,
         wireLength: config.wireLength,
         conduitType: config.conduitType,
@@ -4225,11 +4392,35 @@ function EngineeringPageInner() {
           railSpan: config.railSpacing,
           rowSpacing: 12, arrayTilt: config.roofPitch,
           systemType: config.systemType,
+          // Mount type now reaches V4 (was dropped → defaulted 'roof_residential').
+          // See systemTypeToInstallationType — ground flips off the roof mount-capacity
+          // check only; PE-gated ground/fence structural math is a later step.
+          installationType: systemTypeToInstallationType(config.systemType),
           mountSpecs,
+          // Real fence geometry → analyzeFence (else the engine uses SolFence
+          // defaults). fenceHeight/fenceLine come from the saved layout (meters).
+          ...(config.systemType === 'fence' ? (() => {
+            const M2FT = 3.28084;
+            const fenceHeightFt = (projectLayout?.fenceHeight ?? 1.8288) * M2FT;
+            const fenceLengthFt = (() => {
+              const line = projectLayout?.fenceLine;
+              if (!Array.isArray(line) || line.length < 2) return totalPanels * 3.28;
+              const DEG2RAD = Math.PI / 180, EARTH_R = 6_371_000;
+              let m = 0;
+              for (let i = 0; i < line.length - 1; i++) {
+                const a = line[i], b = line[i + 1];
+                const dx = (b.lng - a.lng) * DEG2RAD * Math.cos(a.lat * DEG2RAD) * EARTH_R;
+                const dy = (b.lat - a.lat) * DEG2RAD * EARTH_R;
+                m += Math.sqrt(dx * dx + dy * dy);
+              }
+              return m * M2FT;
+            })();
+            return { fenceHeightFt, fenceLengthFt, postSpacingFt: 8, groundClearanceFt: 2 / 12 };
+          })() : {}),
         };
       })(),
     };
-  }, [config, totalPanels, sizingRecommendation]);
+  }, [config, totalPanels, sizingRecommendation, projectLayout]);
 
   // ── saveEngineeringOutputs: persist live engine state to project_files ──────
   const saveEngineeringOutputs = useCallback(async (calcData: any) => {
@@ -4360,14 +4551,41 @@ function EngineeringPageInner() {
     setCalcError(null);
     setConfigDirty(false);
     try {
+      // RC-1: fail loud on a DANGLING equipment reference instead of silently
+      // computing on placeholder specs. The equipment DB is complete (verified —
+      // no entry is missing critical specs), so a lookup miss can only mean the
+      // config points at an id that isn't in the DB (a removed/renamed SKU or a
+      // stale saved project). Per "don't fake missing specs — go find them",
+      // surface it so the user re-selects, rather than quietly substituting a
+      // generic 41.6V / 7.6kW number and presenting it as engineered.
+      const _unresolved: string[] = [];
+      config.inverters.forEach((inv, ii) => {
+        if (inv.inverterId && !getInvById(inv.inverterId, inv.type)) {
+          _unresolved.push(`Inverter ${ii + 1} (${inv.inverterId})`);
+        }
+        inv.strings.forEach((str, si) => {
+          if (str.panelId && !getPanelById(str.panelId)) {
+            _unresolved.push(`Inverter ${ii + 1} · String ${si + 1} panel (${str.panelId})`);
+          }
+        });
+      });
+      if (config.batteryId && !getBatteryById(config.batteryId)) {
+        _unresolved.push(`Battery (${config.batteryId})`);
+      }
+      if (_unresolved.length > 0) {
+        setCalcError(
+          `Unresolved equipment — not found in the equipment database, so engineering will not compute on placeholder specs. ` +
+          `Re-select in System Config: ${_unresolved.join('; ')}.`,
+        );
+        return;  // finally{} resets setCalculating
+      }
+
       const payload = buildCalcPayload();
 
-      // Get panel data for V2 structural calc
-      const firstStrV2 = config.inverters[0]?.strings[0];
-      const panelDataV2 = firstStrV2?.panelId ? (SOLAR_PANELS as any[]).find((p: any) => p.id === firstStrV2.panelId) : null;
-
-      // Run legacy calculate + new rules engine + V2 structural in parallel
-      const [calcRes, rulesRes, structV2Res] = await Promise.all([
+      // Run legacy calculate + new rules engine in parallel.
+      // (V3 /structural-v2 retired — the Structural tab now reads the single
+      // structural engine of record, V4, from /calculate. Spec Step 5.)
+      const [calcRes, rulesRes] = await Promise.all([
         fetch('/api/engineering/calculate', {
           method: 'POST',
         cache: 'no-store',
@@ -4379,139 +4597,123 @@ function EngineeringPageInner() {
         cache: 'no-store',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            electrical: { ...payload.electrical, designTempMin: -10, designTempMax: 40, rooftopTempAdder: 30, necVersion: '2023',
+            electrical: { ...payload.electrical, designTempMin: -10, designTempMax: 40, rooftopTempAdder: config.systemType === 'roof' ? 30 : 0, necVersion: '2023',
               topologyType: payload.topologyType },  // v57.5 — topology guard for NEC 690.7 optimizer bypass in rules engine
             structural: payload.structural,
             engineeringMode,
             overrides,
           }),
         }),
-        fetch('/api/engineering/structural-v2', {
-          method: 'POST',
-          cache: 'no-store',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            // Site
-            windSpeed:        config.windSpeed,
-            windExposure:     config.windExposure,
-            groundSnowLoad:   config.groundSnowLoad,
-            roofPitch:        config.roofPitch,
-            meanRoofHeight:   config.meanRoofHeight ?? 15,  // ft — ASCE 7 Kz (1-story≈15, 2-story≈25)
-            // Framing
-            framingType:      config.framingType,
-            rafterSpacing:    config.rafterSpacing,
-            rafterSpan:       config.rafterSpan,
-            rafterSize:       config.rafterSize,
-            rafterSpecies:    config.rafterSpecies,
-            // Array geometry — derived from panel specs
-            panelCount:       totalPanels,
-            panelLength:      panelDataV2?.length ?? 73.0,
-            panelWidth:       panelDataV2?.width  ?? 41.0,
-            panelWeight:      panelDataV2?.weight ?? 45.0,
-            panelOrientation: (config.panelOrientation ?? 'portrait') as 'portrait' | 'landscape',
-            rowCount:         config.rowCount ?? undefined,
-            // Racking
-            mountingSystem:   config.systemType === 'roof' ? (config.mountingId ?? 'ironridge-xr100') : undefined,
-            rackingWeight:    4.0,
-          }),
-        }).catch(() => null),  // V3 structural is best-effort
       ]);
       const calcData = await calcRes.json();
       if (calcData.success) {
-        // Merge V3 structural results into compliance data
+        // Map the single structural engine of record (V4, already returned by
+        // /calculate in calcData.structural) into the V1-compatible display shape
+        // the Structural tab reads. This previously OVERWROTE calcData.structural
+        // with a parallel V3 (/structural-v2) call, so the tab showed V3 while the
+        // permit/BOM/SLD path showed V4 — the live C3 divergence (status could even
+        // disagree: WARNING on the tab vs PASS on the permit for the same project).
+        // V3 and V4 share identical output field names, so the same transform works
+        // sourced from V4. (UNIFIED-ENGINE-DESIGN-SPEC.md Step 5.)
         try {
-          if (structV2Res && structV2Res.ok) {
-            const structV2Data = await structV2Res.json();
-            // V3 API returns status directly (no .success wrapper)
-            if (structV2Data?.status) {
-              const ra = structV2Data.rafterAnalysis;
-              const ml = structV2Data.mountLayout;
-              const wind = structV2Data.wind;
-              const snow = structV2Data.snow;
-              calcData.structural = {
-                // V3 fields
-                status:          structV2Data.status,
-                framing:         structV2Data.framing,
-                arrayGeometry:   structV2Data.arrayGeometry,
-                mountLayout:     ml,
-                railAnalysis:    structV2Data.railAnalysis,
-                rackingBOM:      structV2Data.rackingBOM,
-                rafterAnalysis:  ra,
-                wind:            {
-                  velocityPressure:    wind?.velocityPressurePsf,
-                  netUpliftPressure:   wind?.netUpliftPressurePsf,
-                  upliftPerAttachment: ml?.upliftPerMountLbs,
-                  designWindSpeed:     config.windSpeed,
-                  exposureCategory:    config.windExposure,
-                  Kz:                  wind?.exposureCoeff,
-                  Kzt: 1.0, Kd: 0.85,
-                  GCp:                 wind?.gcpUplift,
-                  GCpi:                0.18,
-                  tributaryArea:       ml?.tributaryAreaPerMountFt2,
-                  totalAttachments:    ml?.mountCount,
-                },
-                snow:            {
-                  groundSnowLoad:        snow?.groundSnowLoadPsf,
-                  roofSnowLoad:          snow?.roofSnowLoadPsf,
-                  snowLoadPerAttachment: ml?.downwardPerMountLbs,
-                },
-                // V1 compatibility shims
-                rafter: {
-                  rafterSize:             ra?.size,
-                  rafterSpacing:          ra?.spacingIn,
-                  rafterSpan:             ra?.spanFt,
-                  bendingMoment:          ra?.bendingMomentDemandFtLbs,
-                  allowableBendingMoment: ra?.bendingMomentCapacityFtLbs,
-                  utilizationRatio:       ra?.overallUtilization,
-                  deflection:             ra?.deflectionIn,
-                  allowableDeflection:    ra?.allowableDeflectionIn,
-                  Fb_base:                1150,
-                  Cd: 1.15, Cr: 1.15,
-                  Fb_prime:               1150 * 1.15 * 1.15,
-                  totalLoadPsf:           ra?.totalLoadPsf,
-                  lineLoad:               ra ? ra.totalLoadPsf * (ra.spacingIn / 12) : 0,
-                },
-                attachment: {
-                  safetyFactor:             ml?.safetyFactor,
-                  lagBoltCapacity:          ml?.mountCapacityLbs,
-                  totalUpliftPerAttachment: ml?.upliftPerMountLbs,
-                  upliftPerAttachment:      ml?.upliftPerMountLbs,
-                  attachmentSpacing:        ml?.mountSpacingIn,
-                  railSpacing:              structV2Data.arrayGeometry?.railSpacingIn,
-                  tributaryArea:            ml?.tributaryAreaPerMountFt2,
-                  maxAllowedSpacing:        ml?.mountSpacingIn,
-                  spacingMarginPct:         100,
-                },
-                deadLoad: {
-                  panelWeightPsf:        structV2Data.addedDeadLoadPsf,
-                  rackingWeightPsf:      1.5,
-                  totalDeadLoadPsf:      structV2Data.addedDeadLoadPsf,
-                  deadLoadPerAttachment: ml?.downwardPerMountLbs,
-                  existingRoofDeadLoad:  15,
-                  totalRoofDeadLoad:     (structV2Data.addedDeadLoadPsf ?? 0) + 15,
-                },
-                errors:          structV2Data.errors,
-                warnings:        structV2Data.warnings,
-                recommendations: structV2Data.recommendations,
-              };
-              // Auto-update framing type if detected
-              if (structV2Data.framing?.type && config.framingType === 'unknown') {
-                updateConfig({ framingType: structV2Data.framing.type });
-              }
+          const v4s = calcData.structural;
+          if (v4s?.status) {
+            const ra = v4s.rafterAnalysis;
+            const ml = v4s.mountLayout;
+            const wind = v4s.wind;
+            const snow = v4s.snow;
+            calcData.structural = {
+              status:          v4s.status,
+              framing:         { type: ra?.framingType, autoDetected: v4s.debugInfo?.autoDetectedFraming },
+              arrayGeometry:   v4s.arrayGeometry,
+              mountLayout:     ml,
+              railAnalysis:    v4s.railAnalysis,
+              rackingBOM:      v4s.rackingBOM,
+              rafterAnalysis:  ra,
+              // Fence (SolFence) structural — carries the real post embedment /
+              // overturning / wind from analyzeFence so the Structural tab can show
+              // it instead of the stubbed roof rafter rows.
+              fenceMountAnalysis: v4s.fenceMountAnalysis,
+              engineered:         v4s.engineered,
+              // Native V4 top-level fields — the "Structural Compliance" card
+              // (page.tsx ~9792) reads native names (totalSystemWeightLbs,
+              // addedDeadLoadPsf, wind.netUpliftPressurePsf, snow.roofSnowLoadPsf).
+              // Carrying them alongside the V1-compat shims lights up rows that were
+              // blank under the old V3 merge (which only produced V1-compat names).
+              totalSystemWeightLbs: v4s.totalSystemWeightLbs,
+              addedDeadLoadPsf:     v4s.addedDeadLoadPsf,
+              wind:            {
+                ...wind,   // native: netUpliftPressurePsf, velocityPressurePsf, roofZone, gcp*, exposureCoeff
+                velocityPressure:    wind?.velocityPressurePsf,
+                netUpliftPressure:   wind?.netUpliftPressurePsf,
+                upliftPerAttachment: ml?.upliftPerMountLbs,
+                designWindSpeed:     config.windSpeed,
+                exposureCategory:    config.windExposure,
+                Kz:                  wind?.exposureCoeff,
+                Kzt: 1.0, Kd: 0.85,
+                GCp:                 wind?.gcpUplift,
+                GCpi:                0.18,
+                tributaryArea:       ml?.tributaryAreaPerMountFt2,
+                totalAttachments:    ml?.mountCount,
+              },
+              snow:            {
+                ...snow,   // native: groundSnowLoadPsf, roofSnowLoadPsf, slopeFactor, thermalFactor, importanceFactor
+                groundSnowLoad:        snow?.groundSnowLoadPsf,
+                roofSnowLoad:          snow?.roofSnowLoadPsf,
+                snowLoadPerAttachment: ml?.downwardPerMountLbs,
+              },
+              // V1 compatibility shims
+              rafter: {
+                rafterSize:             ra?.size,
+                rafterSpacing:          ra?.spacingIn,
+                rafterSpan:             ra?.spanFt,
+                bendingMoment:          ra?.bendingMomentDemandFtLbs,
+                allowableBendingMoment: ra?.bendingMomentCapacityFtLbs,
+                utilizationRatio:       ra?.overallUtilization,
+                deflection:             ra?.deflectionIn,
+                allowableDeflection:    ra?.allowableDeflectionIn,
+                Fb_base:                1150,
+                Cd: 1.15, Cr: 1.15,
+                Fb_prime:               1150 * 1.15 * 1.15,
+                totalLoadPsf:           ra?.totalLoadPsf,
+                lineLoad:               ra ? ra.totalLoadPsf * (ra.spacingIn / 12) : 0,
+              },
+              attachment: {
+                safetyFactor:             ml?.safetyFactor,
+                lagBoltCapacity:          ml?.mountCapacityLbs,
+                totalUpliftPerAttachment: ml?.upliftPerMountLbs,
+                upliftPerAttachment:      ml?.upliftPerMountLbs,
+                attachmentSpacing:        ml?.mountSpacingIn,
+                railSpacing:              v4s.arrayGeometry?.railSpacingIn,
+                tributaryArea:            ml?.tributaryAreaPerMountFt2,
+                maxAllowedSpacing:        ml?.maxAllowedSpacingIn ?? ml?.mountSpacingIn,
+                spacingMarginPct:         100,
+              },
+              deadLoad: {
+                panelWeightPsf:        v4s.addedDeadLoadPsf,
+                rackingWeightPsf:      1.5,
+                totalDeadLoadPsf:      v4s.addedDeadLoadPsf,
+                deadLoadPerAttachment: ml?.downwardPerMountLbs,
+                existingRoofDeadLoad:  15,
+                totalRoofDeadLoad:     (v4s.addedDeadLoadPsf ?? 0) + 15,
+              },
+              errors:          v4s.errors,
+              warnings:        v4s.warnings,
+              recommendations: v4s.recommendations,
+            };
+            // Auto-update framing type if detected
+            if (ra?.framingType && ra.framingType !== 'unknown' && config.framingType === 'unknown') {
+              updateConfig({ framingType: ra.framingType });
             }
           }
-        } catch (_) { /* V3 structural merge is best-effort */ }
+        } catch (_) { /* structural display map is best-effort */ }
 
-        // v47.417 — Recompute overallStatus AFTER V3 structural merge.
-        // Bug: /api/engineering/calculate computes overallStatus from the V1/V4
-        // structural engine BEFORE the client replaces calcData.structural with
-        // V3 results. V4 and V3 can disagree on what counts as an error (e.g.
-        // V4 flags MOUNT_INSUFFICIENT_CAPACITY as error, V3 auto-reduces spacing
-        // and demotes it to a MOUNT_SPACING_REDUCED warning). The result was
-        // Overall=FAIL despite Electrical=PASS and Structural=WARNING, with no
-        // errors visible in the compliance UI. Fix: after the V3 merge lands
-        // on calcData.structural, recompute overallStatus from the final
-        // electrical + structural status the user actually sees.
+        // v47.417 — Recompute overallStatus from the FINAL structural status the
+        // user sees. Historically the client replaced calcData.structural with a
+        // separate V3 result that could disagree with the server's V4-computed
+        // overallStatus; V3 is now retired (Step 5) so the structural source is V4
+        // throughout, but keeping this recompute is harmless and keeps overallStatus
+        // consistent with the structural errors actually rendered in the UI.
         try {
           const elecErrors = (calcData.electrical?.errors ?? []).filter((e: any) => !e.autoFixed && e.severity !== 'info');
           const structErrors = (calcData.structural?.errors ?? []).filter((e: any) => e?.severity === 'error');
@@ -5065,8 +5267,13 @@ function EngineeringPageInner() {
             return acRun?.wireGauge
               || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
           })(),
-          dcWireLength:     firstStr?.wireLength || cs.runs.find(r => r.id === 'DC_STRING_RUN')?.onewayLengthFt || 50,
+          // Ground/fence arrays sit away from the house: add the user-input trench
+          // run length to the DC home run (drives wire footage + NEC 300.5 conduit).
+          dcWireLength:     (firstStr?.wireLength || cs.runs.find(r => r.id === 'DC_STRING_RUN')?.onewayLengthFt || 50)
+                              + ((config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0),
           acWireLength:     config.wireLength || cs.runs.find(r => r.id === 'DISCO_TO_METER_RUN')?.onewayLengthFt || 50,
+          // Trench length for the NEC 300.5 underground conduit line (ground/fence).
+          trenchRunLengthFt: (config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0,
           conduitType:      config.conduitType,
           // Use ComputedSystem conduit size
           conduitSizeInch:  (() => {
@@ -5469,49 +5676,40 @@ function EngineeringPageInner() {
       await runCalc();
     }
 
-    // Call V2 structural API with truss/rafter distinction
+    // Structural framing-detect + spacing log from the engine of record (V4),
+    // via /calculate. Was a separate /structural-v2 (V3) call — retired in Step 5b
+    // so Auto-Fix reads the SAME structural engine as the tab and permit. This
+    // block only detects framing + logs; the actual fixes are below (IronRidge,
+    // wire, RSD, feasibility).
     try {
-      const structRes = await fetch('/api/engineering/structural-v2', {
+      const structRes = await fetch('/api/engineering/calculate', {
         method: 'POST',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          windSpeed:         config.windSpeed,
-          windExposure:      config.windExposure,
-          groundSnowLoad:    config.groundSnowLoad,
-          roofType:          config.roofType,
-          roofPitch:         config.roofPitch,
-          rafterSpacing:     config.rafterSpacing,
-          rafterSpan:        config.rafterSpan,
-          rafterSize:        config.rafterSize,
-          rafterSpecies:     config.rafterSpecies,
-          framingType:       config.framingType,
-          panelCount:        totalPanels,
-          mountingId:        config.mountingId,
-          systemType:        config.systemType,
-        }),
+        body: JSON.stringify(buildCalcPayload()),
       });
       if (structRes.ok) {
         const structData = await structRes.json();
-        if (structData.success) {
+        const s = structData?.structural;   // raw StructuralResultV4 from /calculate
+        if (s?.status) {
+          const framingType = s.rafterAnalysis?.framingType;
           // Update framing type if auto-detected
-          if (structData.framing?.type && config.framingType === 'unknown') {
-            updateConfig({ framingType: structData.framing.type });
+          if (framingType && framingType !== 'unknown' && config.framingType === 'unknown') {
+            updateConfig({ framingType });
           }
           // Log mount spacing recommendation
-          if (structData.mountLayout?.mountSpacing) {
-            logDecision('Structural V2',
-              `${structData.framing?.type ?? config.framingType} — ` +
-              `mount spacing: ${structData.mountLayout.mountSpacing}", ` +
-              `${structData.mountLayout.mountCount} mounts, ` +
-              `SF=${structData.summary?.safetyFactor?.toFixed(2)} ` +
-              `${structData.status === 'PASS' ? '✓' : '⚠'}`,
-              structData.status === 'PASS' ? 'info' : 'auto'
+          if (s.mountLayout?.mountSpacingIn) {
+            logDecision('Structural',
+              `${framingType ?? config.framingType} — ` +
+              `mount spacing: ${s.mountLayout.mountSpacingIn}", ` +
+              `${s.mountLayout.mountCount} mounts, ` +
+              `SF=${s.mountLayout.safetyFactor?.toFixed(2)} ` +
+              `${s.status === 'PASS' ? '✓' : '⚠'}`,
+              s.status === 'PASS' ? 'info' : 'auto'
             );
           }
-          if (structData.status === 'FAIL') {
-            // V2 calculates optimal spacing automatically — no need to reduce
-            logDecision('Auto Fix', `Structural FAIL — check recommendations: ${structData.recommendations?.join('; ')}`, 'auto');
+          if (s.status === 'FAIL') {
+            logDecision('Auto Fix', `Structural FAIL — check recommendations: ${s.recommendations?.join('; ')}`, 'auto');
           }
         }
       }
@@ -5742,14 +5940,19 @@ function EngineeringPageInner() {
   // ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const layoutType = (projectLayout?.type ?? projectLayout?.systemType ?? '').toString().toLowerCase();
-    const layoutIsFence = layoutType === 'solar_fence' || layoutType === 'fence';
+    // Reliable persisted fence signal: a drawn fence line (layouts.fence_line).
+    // NOTE: projectLayout.type === 'solar_fence' is a runtime-only value and is
+    // NEVER written to the DB, so on a fresh load it's undefined — relying on it
+    // alone misses fence projects. The fence-line geometry IS persisted, so use it.
+    const hasFenceGeometry = Array.isArray(projectLayout?.fenceLine) && projectLayout!.fenceLine!.length > 1;
+    const layoutIsFence = layoutType === 'solar_fence' || layoutType === 'fence' || hasFenceGeometry;
     const configIsFence = config.systemType === 'fence';
 
-    // Job 1 (kept): auto-heal systemType when layout says fence but config says roof.
-    // This is a DATA-INTEGRITY fix (stale DB bug), NOT a config mutation — the
+    // Job 1 (kept): auto-heal systemType when the layout says fence (by type OR by
+    // persisted fence geometry) but config says roof. DATA-INTEGRITY fix — the
     // user's intent (system is a fence) is already expressed by the layout.
     if (layoutIsFence && !configIsFence) {
-      console.log(`[FENCE WATCHER] Auto-healing systemType: layout says '${layoutType}' but config.systemType='${config.systemType}' → promoting to 'fence'`);
+      console.log(`[FENCE WATCHER] Auto-healing systemType → 'fence' (layoutType='${layoutType}', fenceGeometry=${hasFenceGeometry}, was '${config.systemType}')`);
       setConfig(prev => ({ ...prev, systemType: 'fence' }));
     }
     // Job 2 REMOVED (Phase 11): auto-promotion of hardcoded defaults to
@@ -5760,6 +5963,7 @@ function EngineeringPageInner() {
     config.systemType,
     projectLayout?.type,
     projectLayout?.systemType,
+    projectLayout?.fenceLine,
   ]);
   const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
   const [planSetError, setPlanSetError] = useState<string | null>(null);
@@ -5956,7 +6160,7 @@ function EngineeringPageInner() {
               let _pcEngStrings: { panelCount: number; inverterIndex?: number }[] | null = null;
               try {
                 const _pcSizingInput: Parameters<typeof sizeSystemFromBrand>[0] = {
-                  systemType: 'roof',
+                  systemType: (config.systemType ?? 'roof') as any,  // honor roof/ground/fence, not hardcoded roof
                   panelCount: _pcPc,
                   panelWattage: _pcPanel?.watts ?? 400,
                   panelVoc: _pcPanel?.voc ?? 49.6,
@@ -6233,10 +6437,25 @@ function EngineeringPageInner() {
           }; })() : undefined,
       };
 
-      const res = await fetch('/api/engineering/permit?format=pdf', {
+      const _permitOpts = {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(permitInput),
-      });
+      };
+      let res = await fetch('/api/engineering/permit?format=pdf', _permitOpts);
+
+      // If submission-ready generation is blocked ONLY by missing cad-safe roof
+      // geometry, fall back to a clearly-labeled DRAFT package so the button still
+      // produces output. Projects that DO have a promoted CanonicalBuildingModel
+      // still get the submission-ready package on the first attempt.
+      let _draftFallback = false;
+      if (res.status === 422) {
+        const _peek = await res.clone().json().catch(() => ({} as any));
+        if (_peek.code === 'CANONICAL_ROOF_GEOMETRY_REQUIRED' || _peek.code === 'CANONICAL_ROOF_PLANES_MISSING') {
+          _draftFallback = true;
+          toast.info('No promoted CAD geometry yet — generating a DRAFT permit package (not submission-ready).');
+          res = await fetch('/api/engineering/permit?format=pdf&draft=true', _permitOpts);
+        }
+      }
 
       if (res.ok) {
         const contentType = res.headers.get('Content-Type') || '';
@@ -6245,11 +6464,12 @@ function EngineeringPageInner() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
+        const _suffix = _draftFallback ? '-DRAFT' : '';
         a.download = isHtmlFallback
-          ? `PermitPackage-${config.projectName || 'project'}.html`
-          : `PermitPackage-${config.projectName || 'project'}.pdf`;
+          ? `PermitPackage-${config.projectName || 'project'}${_suffix}.html`
+          : `PermitPackage-${config.projectName || 'project'}${_suffix}.pdf`;
         a.click(); URL.revokeObjectURL(url);
-        logDecision('Permit Package', `Downloaded as ${isHtmlFallback ? 'HTML' : 'PDF'}`, 'auto');
+        logDecision('Permit Package', `Downloaded ${_draftFallback ? 'DRAFT ' : ''}as ${isHtmlFallback ? 'HTML' : 'PDF'}`, 'auto');
       } else if (res.status === 422) {
         const errData = await res.json().catch(() => ({}));
         if (errData.code === 'ENGINEERING_MODEL_STALE') {
@@ -6770,8 +6990,8 @@ function EngineeringPageInner() {
             <span className="compliance-segment-value">
               {overallStatus ?? <span style={{color:'rgba(148,163,184,0.4)'}}>—</span>}
             </span>
-            {overallStatus === 'FAIL' && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
-            {overallStatus === 'WARNING' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />}
+            {overallStatus === 'FAIL' ? <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" /> : null}
+            {overallStatus === 'WARNING' ? <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" /> : null}
           </div>
 
           {/* Electrical segment */}
@@ -6945,9 +7165,9 @@ function EngineeringPageInner() {
             {/* Rules engine summary */}
             {rulesResult && (rulesResult.errorCount > 0 || rulesResult.warningCount > 0) ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-xs">
-                {rulesResult.errorCount > 0 && <span className="text-red-400 font-bold">{rulesResult.errorCount}E</span>}
-                {rulesResult.warningCount > 0 && <span className="text-amber-400 font-bold">{rulesResult.warningCount}W</span>}
-                {rulesResult.autoFixCount > 0 && <span className="text-emerald-400">{rulesResult.autoFixCount} fixed</span>}
+                {rulesResult.errorCount > 0 ? <span className="text-red-400 font-bold">{rulesResult.errorCount}E</span> : null}
+                {rulesResult.warningCount > 0 ? <span className="text-amber-400 font-bold">{rulesResult.warningCount}W</span> : null}
+                {rulesResult.autoFixCount > 0 ? <span className="text-emerald-400">{rulesResult.autoFixCount} fixed</span> : null}
               </div>
             ) : null}
 
@@ -7030,10 +7250,10 @@ function EngineeringPageInner() {
                   }
                 }}
               >
-                {saveState === 'saving' && <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
-                {saveState === 'saved'  && <CheckCircle size={13} />}
-                {saveState === 'error'  && <AlertCircle size={13} />}
-                {saveState === 'idle'   && <span>💾</span>}
+                {saveState === 'saving' ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> : null}
+                {saveState === 'saved' ? <CheckCircle size={13} /> : null}
+                {saveState === 'error' ? <AlertCircle size={13} /> : null}
+                {saveState === 'idle' ? <span>💾</span> : null}
                 <span className="hidden sm:inline">
                   {saveState === 'saving' ? 'Saving…' :
                    saveState === 'saved'  ? 'Saved ✓' :
@@ -7077,7 +7297,7 @@ function EngineeringPageInner() {
       ) : null}
 
       {/* ─── Change Project chip + Auto-save indicator ─── */}
-      {currentProjectId && (
+      {currentProjectId ? (
         <div className="bg-slate-900/60 border-b border-slate-700/30 px-6 py-2 flex-shrink-0 flex items-center gap-3">
           <span className="text-xs text-slate-500">Project loaded</span>
           <button
@@ -7156,8 +7376,8 @@ function EngineeringPageInner() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
             ) : null}
-            {saveState === 'saved'  && <CheckCircle size={12} />}
-            {saveState === 'error'  && <AlertCircle size={12} />}
+            {saveState === 'saved' ? <CheckCircle size={12} /> : null}
+            {saveState === 'error' ? <AlertCircle size={12} /> : null}
             {saveState === 'idle'   && '💾'}
             {saveState === 'saving' ? 'Saving…' :
              saveState === 'saved'  ? (lastSavedAt && Math.round((Date.now() - lastSavedAt.getTime()) / 1000) < 5 ? 'Saved ✓' : 'Saved ✓') :
@@ -7165,7 +7385,7 @@ function EngineeringPageInner() {
                                       'Save Config'}
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* ── Project Selector: shown when no projectId in URL ── */}
       {!currentProjectId ? (
@@ -7217,8 +7437,8 @@ function EngineeringPageInner() {
                           <div>
                             <div className="text-sm font-medium text-white">{p.name}</div>
                             <div className="text-xs text-slate-400 mt-0.5">
-                              {p.client?.name && <span className="mr-2">👤 {p.client.name}</span>}
-                              {p.address && <span>{p.address}</span>}
+                              {p.client?.name ? <span className="mr-2">👤 {p.client.name}</span> : null}
+                              {p.address ? <span>{p.address}</span> : null}
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">
@@ -7349,7 +7569,7 @@ function EngineeringPageInner() {
               Preview only — apply below to make this your config
             </span>
           ) : null}
-          {displayMode === 'current' && (() => {
+          {displayMode === 'current' ? ((() => {
             const _cStr = currentDisplayConfig.totalStrings;
             const _rStr = recommendedDisplayConfig.totalStrings;
             const _sDiff = _cStr !== _rStr;
@@ -7360,7 +7580,7 @@ function EngineeringPageInner() {
                 Recommendation differs:{_sDiff && <> {_cStr}→{_rStr} strings</>}{_iDiff && <> · inverter upgrade suggested</>}
               </span>
             );
-          })()}
+          })()) : null}
         </div>
       ) : null}
 
@@ -7435,7 +7655,7 @@ function EngineeringPageInner() {
         <div className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6" ref={printRef}>
 
           {/* ── CONFIG TAB ── */}
-          {activeTab === 'config' && (() => {
+          {activeTab === 'config' ? ((() => {
             /* ═══════════════════════════════════════════════════════════
                CONFIG V2 UI  —  v55.0
                Feature flag: ENABLE_CONFIG_V2_UI
@@ -7867,7 +8087,7 @@ function EngineeringPageInner() {
                       </div>
 
                       {/* AHJ Auto-detect banner */}
-                      {ahjInfo && (
+                      {ahjInfo ? (
                         <div className="mt-3 bg-amber-500/5 border border-amber-500/20 rounded-xl p-3">
                           <div className="flex items-center gap-2 mb-2">
                             <MapPin size={12} className="text-amber-400" />
@@ -7881,7 +8101,7 @@ function EngineeringPageInner() {
                             <div><span className="text-slate-500">Roof Setback:</span><span className="text-slate-300 ml-1">{ahjInfo.roofSetbackInches}"</span></div>
                           </div>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Utility + AHJ selectors */}
                       <div className="grid grid-cols-1 gap-3 mt-3">
@@ -7896,7 +8116,7 @@ function EngineeringPageInner() {
                               <option key={u.id} value={u.id}>{u.name}</option>
                             ))}
                           </select>
-                          {config.utilityId && config.state && (() => {
+                          {config.utilityId && config.state ? ((() => {
                             // ✅ v48.24 fix: use per-utility rate from UtilityOption, not state fallback
                             const utils = getUtilitiesByStateNational(config.state);
                             const selectedUtil = utils.find(u => u.id === config.utilityId);
@@ -7908,11 +8128,11 @@ function EngineeringPageInner() {
                                 <span className="text-slate-500">Max: {selectedUtil.interconnectionMaxKw}kW</span>
                               </div>
                             );
-                          })()}
+                          })()) : null}
                         </div>
 
                         {/* v48.29: Utility Programs Panel — full programs with Pro Tips */}
-                        {config.utilityId && (() => {
+                        {config.utilityId ? ((() => {
                           const utils = getUtilitiesByStateNational(config.state || '');
                           const selectedUtil = utils.find(u => u.id === config.utilityId);
                           if (!selectedUtil) return null;
@@ -7943,7 +8163,7 @@ function EngineeringPageInner() {
                               stateCode={stateCode}
                             />
                           );
-                        })()}
+                        })()) : null}
                         <div>
                           <label className="eng-label">Authority Having Jurisdiction (AHJ)</label>
                           <select value={config.ahjId} onChange={e => updateConfig({ ahjId: e.target.value })} className="eng-select">
@@ -8157,6 +8377,14 @@ function EngineeringPageInner() {
                           <input type="number" min={1} value={config.wireLength} onChange={e => updateConfig({ wireLength: +e.target.value })}
                             className="eng-input" />
                         </div>
+                        {(config.systemType === 'ground' || config.systemType === 'fence') ? (
+                          <div className="col-span-2">
+                            <label className="eng-label">Array → Service Trench Run (ft)</label>
+                            <input type="number" min={0} value={config.trenchRunLengthFt ?? 0} onChange={e => updateConfig({ trenchRunLengthFt: Math.max(0, +e.target.value) })}
+                              className="eng-input" />
+                            <p className="text-[10px] text-slate-500 mt-1">Underground distance from the {config.systemType} array to the service — adds to the DC home run + NEC 300.5 buried conduit.</p>
+                          </div>
+                        ) : null}
                       </div>
 
                       {/* Disconnects & toggles */}
@@ -8170,11 +8398,11 @@ function EngineeringPageInner() {
                           <label key={item.key} className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-800/40 transition-colors"
                             onClick={() => updateConfig({ [item.key]: !(config as any)[item.key] } as any)}>
                             <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all flex-shrink-0 ${(config as any)[item.key] ? 'bg-amber-500 border-amber-500' : 'border-slate-600'}`}>
-                              {(config as any)[item.key] && <CheckCircle size={12} className="text-slate-900" />}
+                              {(config as any)[item.key] ? <CheckCircle size={12} className="text-slate-900" /> : null}
                             </div>
                             <div>
                               <span className="text-xs text-slate-300 block">{item.label}</span>
-                              {item.sub && <span className="text-[10px] text-slate-500">{item.sub}</span>}
+                              {item.sub ? <span className="text-[10px] text-slate-500">{item.sub}</span> : null}
                             </div>
                           </label>
                         ))}
@@ -8493,7 +8721,7 @@ function EngineeringPageInner() {
                                       {Array.from({ length: Math.min(count, 20) }, (_, pi) => (
                                         <div key={pi} className="h-3 flex-1 rounded-sm bg-purple-500/50 border border-purple-500/30 min-w-[4px] max-w-[12px]" />
                                       ))}
-                                      {count > 20 && <span className="text-[9px] text-purple-400 ml-1">+{count - 20}</span>}
+                                      {count > 20 ? <span className="text-[9px] text-purple-400 ml-1">+{count - 20}</span> : null}
                                     </div>
                                     <span className="text-[10px] text-slate-400 font-mono w-8 text-right shrink-0">{count}</span>
                                   </div>
@@ -8507,29 +8735,42 @@ function EngineeringPageInner() {
                                 const _maxPanels = 25;
                                 const invColors = ['text-amber-400', 'text-sky-400', 'text-emerald-400', 'text-violet-400'];
                                 const invBg     = ['bg-amber-500/40 border-amber-500/20', 'bg-sky-500/40 border-sky-500/20', 'bg-emerald-500/40 border-emerald-500/20', 'bg-violet-500/40 border-violet-500/20'];
-                                return config.inverters.flatMap((inv, invIdx) => {
+                                const _multiInv = config.inverters.length > 1;
+                                // Group strings UNDER their inverter with a header + count, and
+                                // order each inverter's strings largest-first so the list reads
+                                // cleanly (was a flat, unordered "Inv N · Sm" list that looked jumbled).
+                                return config.inverters.map((inv, invIdx) => {
                                   const colorCls = invColors[invIdx % invColors.length];
                                   const bgCls    = invBg[invIdx % invBg.length];
-                                  const invLabel = config.inverters.length > 1
-                                    ? `Inv ${invIdx + 1}`
-                                    : null;
-                                  return inv.strings.map((str, si) => {
-                                    const panel = getPanelById(str.panelId);
-                                    const kw = (str.panelCount * (panel?.watts || 400) / 1000);
-                                    const label = invLabel ? `${invLabel} · S${si + 1}` : str.label;
-                                    return (
-                                      <div key={str.id} className="flex items-center gap-2">
-                                        <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>{label}</span>
-                                        <div className="flex gap-0.5 flex-1">
-                                          {Array.from({ length: Math.min(str.panelCount, _maxPanels) }, (_, pi) => (
-                                            <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
-                                          ))}
-                                          {str.panelCount > _maxPanels && <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxPanels}</span>}
+                                  const _sorted  = [...inv.strings].sort((a, b) => b.panelCount - a.panelCount);
+                                  const _invPanels = inv.strings.reduce((s, st) => s + st.panelCount, 0);
+                                  return (
+                                    <div key={inv.id} className={_multiInv ? 'pb-1.5 mb-1.5 border-b border-slate-800/60 last:border-0 last:mb-0 last:pb-0' : ''}>
+                                      {_multiInv ? (
+                                        <div className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${colorCls}`}>
+                                          Inverter {invIdx + 1} · {inv.strings.length} string{inv.strings.length === 1 ? '' : 's'} · {_invPanels} panels
                                         </div>
-                                        <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
+                                      ) : null}
+                                      <div className="space-y-1.5">
+                                        {_sorted.map((str, si) => {
+                                          const panel = getPanelById(str.panelId);
+                                          const kw = (str.panelCount * (panel?.watts || 400) / 1000);
+                                          return (
+                                            <div key={str.id} className="flex items-center gap-2">
+                                              <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>{_multiInv ? `S${si + 1}` : (str.label ?? `S${si + 1}`)}</span>
+                                              <div className="flex gap-0.5 flex-1">
+                                                {Array.from({ length: Math.min(str.panelCount, _maxPanels) }, (_, pi) => (
+                                                  <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
+                                                ))}
+                                                {str.panelCount > _maxPanels ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxPanels}</span> : null}
+                                              </div>
+                                              <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
+                                            </div>
+                                          );
+                                        })}
                                       </div>
-                                    );
-                                  });
+                                    </div>
+                                  );
                                 });
                               })()
                             )}
@@ -8564,7 +8805,7 @@ function EngineeringPageInner() {
                                       ? systemPanelCount
                                       : inv.strings.reduce((s, str) => s + str.panelCount, 0)} panels ·
                                     {(inv.strings.reduce((s, str) => s + str.panelCount * (getPanelById(str.panelId)?.watts || 400), 0) / 1000).toFixed(2)} kW DC
-                                    {(inv.type === 'string' || inv.type === 'hybrid' || inv.type === 'ecoflow') && (() => {
+                                    {(inv.type === 'string' || inv.type === 'hybrid' || inv.type === 'ecoflow') ? ((() => {
                                       const perInvStringCount = inv.strings.length;
                                       const perInvPanelCounts = inv.strings.map(s => s.panelCount);
                                       const allEqual = perInvPanelCounts.every(c => c === perInvPanelCounts[0]);
@@ -8576,7 +8817,7 @@ function EngineeringPageInner() {
                                           · {perInvStringCount} string{perInvStringCount === 1 ? '' : 's'} ({pps})
                                         </span>
                                       );
-                                    })()}
+                                    })()) : null}
                                     {inv.type === 'micro' ? (
                                       <span className="ml-1 text-purple-400 font-semibold">
                                         · {cs.microDeviceCount} microinverters · {cs.acBranchCount} AC branch{cs.acBranchCount > 1 ? 'es' : ''}
@@ -8594,7 +8835,7 @@ function EngineeringPageInner() {
                                   {/* Topology selector — segmented control */}
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Topology</span>
-                                    {topologySwitching && <span className="text-xs text-amber-400 animate-pulse">Propagating ecosystem…</span>}
+                                    {topologySwitching ? <span className="text-xs text-amber-400 animate-pulse">Propagating ecosystem…</span> : null}
                                   </div>
                                   <div className="flex rounded-xl overflow-hidden border border-slate-700/60 mb-3">
                                     {([
@@ -8674,7 +8915,7 @@ function EngineeringPageInner() {
                                                   <div className="mt-1.5 pt-1 border-t border-slate-700/30">
                                                     <div className="text-slate-400 mb-1">
                                                       Auto: <span className="text-amber-300 font-bold">{autoStrings}×{autoPerStr}</span>
-                                                      {autoLastStr !== autoPerStr && autoStrings > 1 && <span className="text-slate-500"> (last: {autoLastStr})</span>}
+                                                      {autoLastStr !== autoPerStr && autoStrings > 1 ? <span className="text-slate-500"> (last: {autoLastStr})</span> : null}
                                                     </div>
                                                     <button
                                                       onClick={() => {
@@ -8710,7 +8951,7 @@ function EngineeringPageInner() {
                                   </div>
                                   {/* Device Ratio Override */}
                                   <div className="bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2 mt-1">
-                                    {inv.type === 'micro' && (() => {
+                                    {inv.type === 'micro' ? ((() => {
                                       const regMpd = (getInvById(inv.inverterId, 'micro') as any)?.modulesPerDevice ?? 1;
                                       return (
                                         <div className="flex items-center gap-3">
@@ -8726,7 +8967,7 @@ function EngineeringPageInner() {
                                           <div className="text-xs text-slate-500 italic pt-4">Changing this will recalculate engineering values.</div>
                                         </div>
                                       );
-                                    })()}
+                                    })()) : null}
                                     {inv.type === 'optimizer' ? (
                                       <div className="flex items-center gap-3">
                                         <div className="flex-1">
@@ -8909,7 +9150,7 @@ function EngineeringPageInner() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-bold text-white">{comp.manufacturer} {comp.model}</div>
-                                {comp.partNumber && <div className="text-xs text-emerald-400/70 font-mono">{comp.partNumber}</div>}
+                                {comp.partNumber ? <div className="text-xs text-emerald-400/70 font-mono">{comp.partNumber}</div> : null}
                                 <div className="text-xs text-slate-400 truncate">{comp.reason}</div>
                               </div>
                               <div className="text-xs text-emerald-400 font-bold flex-shrink-0">×{comp.quantity}</div>
@@ -9061,14 +9302,14 @@ function EngineeringPageInner() {
                               <input type="number" min={0} step={0.1} value={config.batteryKwh} onChange={e => updateConfig({ batteryKwh: +e.target.value })} className="eng-input" />
                             </div>
                           </div>
-                          {config.batteryId && (() => {
+                          {config.batteryId ? ((() => {
                             const bat = getBatteryById(config.batteryId);
                             return bat?.backfeedBreakerA ? (
                               <div className="text-xs text-orange-400 text-center">
                                 +{bat.backfeedBreakerA}A bus load (NEC 705.12B)
                               </div>
                             ) : null;
-                          })()}
+                          })()) : null}
                         </div>
                       )}
 
@@ -9077,7 +9318,7 @@ function EngineeringPageInner() {
                         <div className="flex items-center gap-2 mb-3">
                           <Wrench size={12} className="text-orange-400" />
                           <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">Generator & Transfer Switch</span>
-                          {!config.generatorId && <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">+4 Models</span>}
+                          {!config.generatorId ? <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">+4 Models</span> : null}
                           {config.generatorId && _genData ? (
                             <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-orange-500/20 text-orange-300 border border-orange-500/30">
                               {_genData.ratedOutputKw}kW {_genData.manufacturer}
@@ -9138,7 +9379,7 @@ function EngineeringPageInner() {
                                 value={config.generatorWireLength ?? 50}
                                 onChange={e => updateConfig({ generatorWireLength: Math.max(5, +e.target.value) })}
                                 className="eng-input" />
-                              {config.generatorWireLength && (() => {
+                              {config.generatorWireLength ? ((() => {
                                 const genRun = cs.runs?.find((r: any) => r.id === 'GENERATOR_TO_ATS_RUN');
                                 if (!genRun) return null;
                                 return (
@@ -9148,7 +9389,7 @@ function EngineeringPageInner() {
                                     <span className="text-slate-500">{config.generatorWireLength}ft · {genRun.ocpdAmps}A OCPD</span>
                                   </div>
                                 );
-                              })()}
+                              })()) : null}
                             </div>
                           ) : null}
                         </div>
@@ -9232,8 +9473,8 @@ function EngineeringPageInner() {
                                           <span className={`text-[11px] font-bold leading-tight truncate ${isActive ? 'text-amber-200' : isRecommended ? 'text-emerald-200' : ''}`}>
                                             {opt.label}
                                           </span>
-                                          {isRecommended && <span className="ml-auto text-[8px] font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 rounded px-1 shrink-0">FIX</span>}
-                                          {isActive && !isRecommended && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+                                          {isRecommended ? <span className="ml-auto text-[8px] font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 rounded px-1 shrink-0">FIX</span> : null}
+                                          {isActive && !isRecommended ? <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" /> : null}
                                         </span>
                                         <span className={`text-[9px] font-mono mt-0.5 ${isActive ? 'text-amber-400/80' : isRecommended ? 'text-emerald-400/80' : 'text-slate-600'}`}>{opt.nec}</span>
                                       </button>
@@ -9315,10 +9556,10 @@ function EngineeringPageInner() {
 
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── COMPLIANCE TAB ── */}
-          {activeTab === 'compliance' && (() => {
+          {activeTab === 'compliance' ? ((() => {
             const _ov   = compliance.overallStatus;
             const _el   = compliance.electrical?.status;
             const _st   = compliance.structural?.status;
@@ -9441,10 +9682,10 @@ function EngineeringPageInner() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs font-bold text-red-300">{rule.ruleId || `Rule ${i+1}`}</span>
-                                    {rule.necReference && <span className="text-[10px] font-mono text-red-500/70 bg-red-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span>}
+                                    {rule.necReference ? <span className="text-[10px] font-mono text-red-500/70 bg-red-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span> : null}
                                   </div>
                                   <p className="text-xs text-red-200/80 leading-relaxed">{rule.message || rule.description}</p>
-                                  {rule.detail && <p className="text-xs text-red-400/60 mt-1">{rule.detail}</p>}
+                                  {rule.detail ? <p className="text-xs text-red-400/60 mt-1">{rule.detail}</p> : null}
                                 </div>
                                 <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">FAIL</span>
                               </div>
@@ -9470,10 +9711,10 @@ function EngineeringPageInner() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs font-bold text-amber-300">{rule.ruleId || `Rule ${i+1}`}</span>
-                                    {rule.necReference && <span className="text-[10px] font-mono text-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span>}
+                                    {rule.necReference ? <span className="text-[10px] font-mono text-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span> : null}
                                   </div>
                                   <p className="text-xs text-amber-200/80 leading-relaxed">{rule.message || rule.description}</p>
-                                  {rule.detail && <p className="text-xs text-amber-400/60 mt-1">{rule.detail}</p>}
+                                  {rule.detail ? <p className="text-xs text-amber-400/60 mt-1">{rule.detail}</p> : null}
                                 </div>
                                 <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">WARN</span>
                               </div>
@@ -9498,7 +9739,7 @@ function EngineeringPageInner() {
                               <div className="flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-emerald-300/80">{rule.ruleId || `Rule ${i+1}`}</span>
-                                  {rule.necReference && <span className="text-[10px] font-mono text-emerald-600 bg-emerald-500/8 px-1.5 py-0.5 rounded">{rule.necReference}</span>}
+                                  {rule.necReference ? <span className="text-[10px] font-mono text-emerald-600 bg-emerald-500/8 px-1.5 py-0.5 rounded">{rule.necReference}</span> : null}
                                   <span className="text-xs text-slate-500">{rule.message || rule.description}</span>
                                 </div>
                                 <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">PASS</span>
@@ -9671,7 +9912,7 @@ function EngineeringPageInner() {
                     ) : null}
 
                     {/* Structural compliance detail */}
-                    {compliance.structural && (() => {
+                    {compliance.structural ? ((() => {
                       const _str = compliance.structural as any;
                       return (
                         <div className={`rounded-xl border p-4 ${_sGlow(_st)}`}>
@@ -9776,7 +10017,7 @@ function EngineeringPageInner() {
                           </div>
                         </div>
                       );
-                    })()}
+                    })()) : null}
 
                   </div>
                 </div>
@@ -9801,10 +10042,10 @@ function EngineeringPageInner() {
 
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── ELECTRICAL SIZING TAB ── */}
-          {activeTab === 'electrical' && (() => {
+          {activeTab === 'electrical' ? ((() => {
             const elec     = compliance.electrical as any;
             const acSizing = elec?.acSizing;
             const _st      = elec?.status;
@@ -10030,9 +10271,9 @@ function EngineeringPageInner() {
                             <div key={i} className="flex items-start gap-2 text-xs text-red-300/80">
                               <span className="text-red-500 mt-0.5">•</span>
                               <span>
-                                {v.code && <span className="font-mono text-red-400 font-bold mr-1">[{v.code}]</span>}
+                                {v.code ? <span className="font-mono text-red-400 font-bold mr-1">[{v.code}]</span> : null}
                                 {typeof v === 'string' ? v : v.message || v.description || v.reason || String(v)}
-                                {v.suggestion && <span className="text-amber-400/70 ml-1"> → {v.suggestion}</span>}
+                                {v.suggestion ? <span className="text-amber-400/70 ml-1"> → {v.suggestion}</span> : null}
                               </span>
                             </div>
                           ))}
@@ -10132,7 +10373,7 @@ function EngineeringPageInner() {
                     )}
 
                     {/* Wire runs detail */}
-                    {cs.runs?.length > 0 && (
+                    {cs.runs?.length > 0 ? (
                       <div className="rounded-xl border border-slate-700/60 bg-slate-800/30 p-4">
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                           <GitBranch size={12} className="text-blue-400" /> Wire Runs
@@ -10145,26 +10386,101 @@ function EngineeringPageInner() {
                                 <span className="text-slate-300 font-medium">{run.id || run.label}</span>
                               </div>
                               <div className="flex items-center gap-3 text-slate-500">
-                                {run.wireGauge && <span className="text-white font-bold">{run.wireGauge}</span>}
-                                {run.ocpdAmps  && <span>{run.ocpdAmps}A OCPD</span>}
-                                {run.conduitSize && <span>{run.conduitSize}" {run.conduitType}</span>}
+                                {run.wireGauge ? <span className="text-white font-bold">{run.wireGauge}</span> : null}
+                                {run.ocpdAmps ? <span>{run.ocpdAmps}A OCPD</span> : null}
+                                {run.conduitSize ? <span>{run.conduitSize}" {run.conduitType}</span> : null}
                               </div>
                             </div>
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── STRUCTURAL TAB ── */}
-          {activeTab === 'structural' && (
+          {activeTab === 'structural' ? (
             <div className="max-w-none space-y-5">
-              {/* ══════════ STRUCTURAL INTEGRITY HERO ══════════ */}
+              {/* ══════════ MOUNT-TYPE GUARDRAIL ══════════ */}
+              {/* The structural engine currently models ROOF-mounted arrays only (ASCE 7-22 roof
+                  wind zones, rafter/lag attachment). Ground mounts (footing/pier embedment, exposed
+                  wind, frame overturning) and fences (post embedment, full-face wind) need a
+                  different analysis not yet implemented — so for those mount types the numbers below
+                  are roof-based PLACEHOLDERS. Surface that clearly so no one submits them as
+                  engineered for permit. */}
+              {config.systemType && config.systemType !== 'roof' ? (
+                <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 flex items-start gap-3">
+                  <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-red-200 leading-relaxed">
+                    <div className="font-bold text-red-300 mb-1 uppercase tracking-wide">
+                      {config.systemType === 'fence' ? 'Fence' : 'Ground-mount'} structural is an ESTIMATE — not engineered
+                    </div>
+                    {config.systemType === 'fence' ? (
+                      <>The SOL Fence analysis below is computed from SolFence's published spec
+                      (freestanding-wall wind per ASCE 7-22 §29 → post overturning → embedment matched
+                      to the SolFence datasheet). It is still an <span className="font-semibold text-red-100">ESTIMATE</span> —
+                      the section-to-post connection allowable and a stamped SolFence PE letter are not yet
+                      validated. <span className="font-semibold text-red-100">Do not submit as engineered until a
+                      licensed structural PE reviews the design.</span> (The roof rafter/lag rows below do not apply to a fence.)</>
+                    ) : (
+                      <>The structural analysis below models <span className="font-semibold text-red-100">roof-mounted</span> arrays
+                      only (ASCE 7-22 roof wind zones, rafter / lag attachment). A ground mount requires
+                      footing / driven-pier embedment, exposed-terrain wind, frame overturning, and soil/frost-depth
+                      geotech — which is not yet implemented. Any PASS / FAIL, load, or fastener value shown here is a
+                      roof-based placeholder. <span className="font-semibold text-red-100">Do not submit it as engineered for permit
+                      until a licensed structural PE reviews the ground design.</span></>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+              {/* ══════════ SOL FENCE STRUCTURAL (analyzeFence) ══════════ */}
+              {config.systemType === 'fence' && (compliance.structural as any)?.fenceMountAnalysis ? (() => {
+                const fm = (compliance.structural as any).fenceMountAnalysis;
+                const cell = (label: string, value: string, sub: string) => (
+                  <div className="rounded-lg border border-purple-500/30 bg-slate-900/40 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-purple-300/80">{label}</div>
+                    <div className="text-sm font-bold text-white">{value}</div>
+                    <div className="text-[10px] text-slate-400">{sub}</div>
+                  </div>
+                );
+                return (
+                  <div className="rounded-xl border border-purple-500/40 bg-purple-500/5 p-4 mb-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Wind size={14} className="text-purple-300" />
+                      <span className="text-sm font-bold text-purple-100">SOL Fence Structural — freestanding-wall wind → post embedment</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-mono ml-auto">ASCE 7-22 §29 · IBC 1807.3</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                      {cell('Posts', `${fm.postCount}`, `${fm.sectionCount} sections @ ${fm.postSpacingFt} ft`)}
+                      {cell('Driven Embedment', `${fm.requiredEmbedmentFt.toFixed(1)} ft`, fm.embedmentGovernedBy === 'frost' ? 'frost-governed (6" below)' : 'SolFence 4 ft driven min')}
+                      {cell('Wind / Post', `${Math.round(fm.windForcePerPostLbs)} lb`, `qz ${fm.velocityPressurePsf.toFixed(1)} psf · Cf ${fm.forceCoefficientCf}`)}
+                      {cell('Overturning', `${Math.round(fm.overturningMomentFtLbs).toLocaleString()} ft-lb`, `${fm.fenceHeightFt.toFixed(1)} ft tall`)}
+                    </div>
+                    {fm.exceedsRatedWind ? (
+                      <div className="text-xs text-amber-300 mb-2">⚠ Site design wind exceeds SolFence's {fm.ratedWindMph} mph rating — confirm a high-wind configuration with the manufacturer (Sarah @ SolFence).</div>
+                    ) : null}
+                    {(compliance.structural as any)?.recommendations?.length ? (
+                      <div className="space-y-1">
+                        {(compliance.structural as any).recommendations.map((rec: string, i: number) => (
+                          <div key={i} className="text-[11px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+                            <span className="text-purple-300 mt-0.5 shrink-0">→</span><span>{rec}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400 leading-relaxed">
+                        Foundation: 2-3/8" steel pipe driven 4 ft min with a post pounder (no concrete; clears 6" below frost) — concrete-set 3 ft is the alt for max stability. 4x4 posts are 6061-T6. ESTIMATE — not engineered until PE-validated.
+                      </div>
+                    )}
+                  </div>
+                );
+              })() : null}
+              {/* ══════════ STRUCTURAL INTEGRITY HERO (roof/ground only — a fence uses the SOL Fence panel above) ══════════ */}
+              {config.systemType !== 'fence' ? (
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
 <div className="flex items-center gap-2 mb-4">
                   <Wind size={14} className="text-amber-400" />
@@ -10202,6 +10518,7 @@ function EngineeringPageInner() {
                   ) : null}
                 </div>
               </div>
+              ) : null}
               <div className="eng-panel">
                 <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight"><Wind size={14} className="text-amber-400" /> Site & Wind Parameters</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -10224,6 +10541,7 @@ function EngineeringPageInner() {
                     <input type="number" value={config.groundSnowLoad} onChange={e => updateConfig({ groundSnowLoad: +e.target.value })}
                       className="eng-input" />
                   </div>
+                  {config.systemType !== 'fence' ? (<>
                   <div>
                     <label className="eng-label">Roof Pitch (degrees)</label>
                     <input type="number" min={0} max={60} value={config.roofPitch} onChange={e => updateConfig({ roofPitch: +e.target.value })}
@@ -10250,6 +10568,7 @@ function EngineeringPageInner() {
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">ASCE 7-22 Kz &mdash; eave-to-ridge midpoint</div>
                   </div>
+                  </>) : null}
                   <div>
                     <label className="eng-label">Panel Orientation</label>
                     <select value={config.panelOrientation ?? 'portrait'} onChange={e => updateConfig({ panelOrientation: e.target.value as 'portrait' | 'landscape' })}
@@ -10261,6 +10580,8 @@ function EngineeringPageInner() {
                   </div>
                 </div>
               </div>
+              {/* Roof framing / roof racking / roof structural results — not applicable to a fence (SOL Fence panel above covers it) */}
+              {config.systemType !== 'fence' ? (<>
               <div className="eng-panel">
                 <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight"><Ruler size={14} className="text-amber-400" /> Roof Framing</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -10374,18 +10695,18 @@ function EngineeringPageInner() {
                     <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400 bg-slate-800/40 rounded-lg px-3 py-2">
                       <span>System: <span className="text-white font-bold">{sel.productLine} {sel.model}</span></span>
                       <span>Type: <span className="text-amber-300 font-bold">{sel.systemType.replace(/_/g, ' ')}</span></span>
-                      {sel.mount?.fastenersPerMount && <span>Fasteners/mount: <span className="text-amber-300 font-bold">{sel.mount.fastenersPerMount}</span></span>}
-                      {sel.mount?.upliftCapacityLbs && <span>Uplift capacity: <span className="text-amber-300 font-bold">{sel.mount.upliftCapacityLbs} lbf</span></span>}
-                      {sel.mount?.maxSpacingIn && <span>Max spacing: <span className="text-slate-300 font-bold">{sel.mount.maxSpacingIn}&quot;</span></span>}
-                      {sel.maxWindSpeedMph && <span>Max wind: <span className="text-slate-300 font-bold">{sel.maxWindSpeedMph} mph</span></span>}
-                      {sel.maxSnowLoadPsf && <span>Max snow: <span className="text-slate-300 font-bold">{sel.maxSnowLoadPsf} psf</span></span>}
-                      {sel.ul2703Listed && <span className="text-emerald-400 font-bold">✓ UL 2703</span>}
+                      {sel.mount?.fastenersPerMount ? <span>Fasteners/mount: <span className="text-amber-300 font-bold">{sel.mount.fastenersPerMount}</span></span> : null}
+                      {sel.mount?.upliftCapacityLbs ? <span>Uplift capacity: <span className="text-amber-300 font-bold">{sel.mount.upliftCapacityLbs} lbf</span></span> : null}
+                      {sel.mount?.maxSpacingIn ? <span>Max spacing: <span className="text-slate-300 font-bold">{sel.mount.maxSpacingIn}&quot;</span></span> : null}
+                      {sel.maxWindSpeedMph ? <span>Max wind: <span className="text-slate-300 font-bold">{sel.maxWindSpeedMph} mph</span></span> : null}
+                      {sel.maxSnowLoadPsf ? <span>Max snow: <span className="text-slate-300 font-bold">{sel.maxSnowLoadPsf} psf</span></span> : null}
+                      {sel.ul2703Listed ? <span className="text-emerald-400 font-bold">✓ UL 2703</span> : null}
                       <span className="text-slate-500 italic ml-auto">Mount spacing is calculated from wind/snow loads.</span>
                     </div>
                   );
                 })()}
               </div>
-              {compliance.structural && (
+              {compliance.structural ? (
                 <div className="eng-panel">
                   <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight">
                     <BarChart2 size={14} className="text-amber-400" /> Structural Analysis Results
@@ -10475,7 +10796,7 @@ function EngineeringPageInner() {
                       </div>
                     </div>
                     {/* Rail Analysis (if applicable) */}
-                    {compliance.structural.railAnalysis && (
+                    {compliance.structural.railAnalysis ? (
                       <div className="bg-slate-800/40 rounded-xl p-4 md:col-span-2">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Ruler size={11} /> Rail Analysis</div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -10493,7 +10814,7 @@ function EngineeringPageInner() {
                           <div className="flex justify-between"><span className="text-slate-400">Status</span><span className={compliance.structural.railAnalysis.passes ? 'text-emerald-400' : 'text-red-400'}>{compliance.structural.railAnalysis.passes ? 'PASS' : 'FAIL'}</span></div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                   {/* Racking BOM Summary */}
                   {compliance.structural.rackingBOM ? (
@@ -10562,7 +10883,8 @@ function EngineeringPageInner() {
                     </div>
                   ) : null}
                 </div>
-              )}
+              ) : null}
+              </>) : null}
 
               {/* ── STRUCTURAL DEBUG PANEL ── */}
               {compliance.structural ? (
@@ -10651,8 +10973,8 @@ function EngineeringPageInner() {
                       {/* Status */}
                       <div className={`rounded-lg px-3 py-2 text-xs font-bold ${compliance.structural.status === 'PASS' ? 'bg-emerald-500/10 text-emerald-400' : compliance.structural.status === 'WARNING' ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>
                         STRUCTURAL STATUS: {compliance.structural.status}
-                        {compliance.structural.errors?.length > 0 && <span className="ml-3 font-normal text-red-300">{compliance.structural.errors.map((e: any) => (e as Error).message).join(' | ')}</span>}
-                        {compliance.structural.warnings?.length > 0 && <span className="ml-3 font-normal text-amber-300">{compliance.structural.warnings.map((w: any) => w.message).join(' | ')}</span>}
+                        {compliance.structural.errors?.length > 0 ? <span className="ml-3 font-normal text-red-300">{compliance.structural.errors.map((e: any) => (e as Error).message).join(' | ')}</span> : null}
+                        {compliance.structural.warnings?.length > 0 ? <span className="ml-3 font-normal text-amber-300">{compliance.structural.warnings.map((w: any) => w.message).join(' | ')}</span> : null}
                       </div>
                     </div>
                   </details>
@@ -10916,10 +11238,10 @@ function EngineeringPageInner() {
             ) : null}
 
             </div>
-          )}
+          ) : null}
 
           {/* ── SINGLE-LINE DIAGRAM TAB ── */}
-          {activeTab === 'diagram' && (!canSLD ? (
+          {activeTab === 'diagram' ? (!canSLD ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
                   <Lock size={28} className="text-amber-400" />
@@ -11247,7 +11569,7 @@ function EngineeringPageInner() {
                 ) : null}
 
               </div>
-            ))}
+            )) : null}
 
           {/* ── EQUIPMENT SCHEDULE TAB ── */}
           {activeTab === 'schedule' ? (
@@ -11539,7 +11861,7 @@ function EngineeringPageInner() {
                   </table>
                 </div>
                 {/* Electrical Equipment Section — sourced from compliance.electrical.acSizing */}
-                {(compliance.electrical as any)?.acSizing && (() => {
+                {(compliance.electrical as any)?.acSizing ? ((() => {
                   const ac = (compliance.electrical as any).acSizing;
                   const interconnectLabels: Record<string, string> = {
                     LOAD_SIDE: 'Load-Side Breaker (NEC 705.12(B) — 120% Rule)',
@@ -11623,7 +11945,7 @@ function EngineeringPageInner() {
                       </table>
                     </div>
                   );
-                })()}
+                })()) : null}
                 {/* ComputedSystem Conduit Schedule — auto-populated from cs.conduitSchedule */}
                 <div className="mb-6">
                   <div className="text-sm font-black text-slate-700 mb-2 uppercase tracking-wide flex items-center gap-2">
@@ -11697,7 +12019,7 @@ function EngineeringPageInner() {
           ) : null}
 
           {/* ── MOUNTING DETAILS TAB ── */}
-          {activeTab === 'mounting' && (() => {
+          {activeTab === 'mounting' ? ((() => {
             // ── Mounting Details Tab ── Full Redesign ──────────────────────────────
             const allSystems = getAllMountingSystems();
 
@@ -11857,7 +12179,7 @@ function EngineeringPageInner() {
                         <circle cx={m.x} cy={m.y} r={1.5} fill="white"/>
                       </g>);
                     })}
-                    {isRtMini && (()=>{
+                    {isRtMini ? ((()=>{
                       const rA=mountPts.find(m=>m.rail===0&&m.staggered);
                       const rB=mountPts.find(m=>m.rail===1&&m.staggered);
                       if(!rA||!rB)return null;
@@ -11869,7 +12191,7 @@ function EngineeringPageInner() {
                         <rect x={midX-24} y={dy-9} width={48} height={10} fill="#0f172a"/>
                         <text x={midX} y={dy-0.5} textAnchor="middle" fill="#a855f7" fontSize="7" fontFamily="monospace">{Math.round(attachSpIn/2)}" stagger</text>
                       </g>);
-                    })()}
+                    })()) : null}
                     {(()=>{
                       const p0=mountPts.filter(m=>m.rail===0);
                       if(p0.length<2)return null;
@@ -11882,13 +12204,13 @@ function EngineeringPageInner() {
                         <text x={(p0[0].x+p0[1].x)/2} y={dy} textAnchor="middle" fill="#94a3b8" fontSize="7.5" fontFamily="monospace">{attachSpIn}" O.C.</text>
                       </g>);
                     })()}
-                    {rows>=1&&(()=>{
+                    {rows>=1 ? ((()=>{
                       const [y1,y2]=railY(0); const dx=svgW-14;
                       return (<g>
                         <line x1={dx} y1={y1} x2={dx} y2={y2} stroke="#f59e0b" strokeWidth="1" markerStart="url(#da-l)" markerEnd="url(#da-r)"/>
                         <text x={dx+5} y={(y1+y2)/2+3} textAnchor="start" fill="#f59e0b" fontSize="7" fontFamily="monospace">{railSpIn}"</text>
                       </g>);
-                    })()}
+                    })()) : null}
                     <g transform={`translate(${marginL},${svgH-12})`}>
                       <rect x={0} y={0} width={9} height={7} fill="#0f172a" stroke="#334155" rx="1"/>
                       <text x={13} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Panel</text>
@@ -11942,7 +12264,7 @@ function EngineeringPageInner() {
                     {rafters.map((rx,i)=>(
                       <g key={`rf-${i}`}>
                         <rect x={rx} y={rafterTop} width={RW} height={rafterH} fill="url(#rfG)" stroke="#92400e" strokeWidth="1"/>
-                        {i===1&&<text x={rx+RW/2} y={rafterTop+55} textAnchor="middle" fill="#fbbf24" fontSize="6.5" fontFamily="monospace" transform={`rotate(-90,${rx+RW/2},${rafterTop+55})`}>{config.rafterSize??'2x6'} RAFTER</text>}
+                        {i===1 ? <text x={rx+RW/2} y={rafterTop+55} textAnchor="middle" fill="#fbbf24" fontSize="6.5" fontFamily="monospace" transform={`rotate(-90,${rx+RW/2},${rafterTop+55})`}>{config.rafterSize??'2x6'} RAFTER</text> : null}
                       </g>
                     ))}
                     <line x1={rafters[0]+RW/2} y1={groundY+5} x2={rafters[1]+RW/2} y2={groundY+5} stroke="#64748b" strokeWidth="0.8" markerStart="url(#sa-l)" markerEnd="url(#sa-r)"/>
@@ -12061,9 +12383,9 @@ function EngineeringPageInner() {
                     ))}
                   </div>
                   <div className="bg-slate-950 rounded-xl p-2 border border-slate-800">
-                    {diagramView==='layout'  && <TopDownLayout />}
-                    {diagramView==='section' && <CrossSectionView />}
-                    {diagramView==='iso'     && <IsoView />}
+                    {diagramView==='layout' ? <TopDownLayout /> : null}
+                    {diagramView==='section' ? <CrossSectionView /> : null}
+                    {diagramView==='iso' ? <IsoView /> : null}
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-1.5 text-xs">
                     <div className="bg-slate-900/60 rounded-lg px-2 py-1.5">
@@ -12161,6 +12483,7 @@ function EngineeringPageInner() {
                       <h3 className="text-lg font-black text-white">Mounting Details</h3>
                       <p className="text-slate-400 text-xs mt-0.5">Full engineering specifications · ASCE 7-22 · ICC-ES rated hardware</p>
                     </div>
+                    {config.systemType !== 'fence' ? (
                     <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
                       {(['residential', 'commercial', 'ground'] as const).map(t => (
                         <button key={t} onClick={() => { setMountingInstallType(t); setShowAllSystems(false); setMountingSearchQuery(''); }}
@@ -12169,7 +12492,52 @@ function EngineeringPageInner() {
                         </button>
                       ))}
                     </div>
+                    ) : null}
                   </div>
+                  {/* ══════════ SOL FENCE MOUNTING (real SolFence system, not a roof picker) ══════════ */}
+                  {config.systemType === 'fence' ? (() => {
+                    const eq = resolveEquipment('fence');
+                    const rk = eq.racking;
+                    const spec = (label: string, value: string) => (
+                      <div className="rounded-lg border border-emerald-500/25 bg-slate-900/40 p-2.5">
+                        <div className="text-[10px] uppercase tracking-wide text-emerald-300/80">{label}</div>
+                        <div className="text-xs font-semibold text-white leading-snug">{value}</div>
+                      </div>
+                    );
+                    return (
+                      <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-base">🚧</span>
+                          <span className="text-sm font-bold text-emerald-100">{rk.rackingBrand} — {rk.rackingModel}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono ml-auto">{rk.certifications}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mb-3">{eq.sectionTitle} · panels mounted 90° vertical (bifacial). Power electronics (Enphase IQ8 micro or Tigo TS4-A-O optimizer) + wiring are installer-supplied — not in the SolFence kit.</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                          {spec('Material', rk.railMaterial)}
+                          {spec('Sections', "8 ft wide (incl. side channels + rails) — 6' = 2 panels, 4' = 1 panel")}
+                          {spec('Foundation', '2-3/8" steel pipe driven 4 ft min (post pounder); concrete-set 3 ft alt')}
+                          {spec('Attachment', rk.attachmentType)}
+                          {spec('Tilt', rk.tiltRange)}
+                          {spec('Warranty', rk.warranty)}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {eq.attachmentCards.map((c, i) => (
+                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-700/50 bg-slate-900/30 p-2.5">
+                              <span className="text-sm shrink-0">{c.icon}</span>
+                              <div>
+                                <div className="text-xs font-bold text-white">{c.label}</div>
+                                <div className="text-[11px] text-emerald-300/90">{c.hardware}</div>
+                                <div className="text-[10px] text-slate-400 leading-snug">{c.note}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-3">Real SolFence section/post/cap/donut/RCP SKUs + driven-steel foundation appear on the Bill of Materials. The roof/ground mounting picker below does not apply to a fence.</p>
+                      </div>
+                    );
+                  })() : null}
+                  {/* Roof/ground mounting picker — not applicable to a fence (the SOL Fence panel above covers it) */}
+                  {config.systemType !== 'fence' ? (<>
                   {/* Search bar + roof type indicator */}
                   <div className="flex items-center gap-3 mb-3">
                     <div className="flex-1 relative">
@@ -12196,9 +12564,9 @@ function EngineeringPageInner() {
                     <div className="mb-3 flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
                       <span className="text-amber-400 font-bold">⚡ Active in project:</span>
                       <span className="text-white font-bold">{ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.manufacturer} {ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.model}</span>
-                      {config.mountingId !== selectedMountingId && (
+                      {config.mountingId !== selectedMountingId ? (
                         <button onClick={() => setSelectedMountingId(config.mountingId)} className="ml-auto text-amber-400 hover:text-amber-300 font-bold">View →</button>
-                      )}
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -12222,8 +12590,8 @@ function EngineeringPageInner() {
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="text-xs font-bold text-white leading-tight">{sys.manufacturer}</div>
                           <div className="flex gap-1 flex-shrink-0">
-                            {sys.iccEsReport && <span className="text-xs text-emerald-400 font-bold">ICC-ES</span>}
-                            {config.mountingId === sys.id && <span className="text-xs text-blue-400 font-bold">⚡</span>}
+                            {sys.iccEsReport ? <span className="text-xs text-emerald-400 font-bold">ICC-ES</span> : null}
+                            {config.mountingId === sys.id ? <span className="text-xs text-blue-400 font-bold">⚡</span> : null}
                           </div>
                         </div>
                         <div className="text-xs text-amber-300 font-bold mb-0.5">{sys.model}</div>
@@ -12237,7 +12605,7 @@ function EngineeringPageInner() {
                                 className="text-xs bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-2 py-0.5 rounded-full transition-colors"
                               >Use This</button>
                             ) : null}
-                            {config.mountingId === sys.id && <span className="text-xs text-blue-400 font-bold">⚡ Active</span>}
+                            {config.mountingId === sys.id ? <span className="text-xs text-blue-400 font-bold">⚡ Active</span> : null}
                           </div>
                         ) : null}
                       </button>
@@ -12256,17 +12624,18 @@ function EngineeringPageInner() {
                       </button>
                     ) : null}
                   </div>
+                  </>) : null}
                 </div>
 
                 {/* ── Selected System Spec Panel ── */}
-                {selectedSystem ? (
+                {selectedSystem && config.systemType !== 'fence' ? (
                   <div className="eng-panel">
                     <div className="flex items-start justify-between mb-4">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-bold bg-amber-500 text-slate-900 px-2 py-0.5 rounded-full">SELECTED SYSTEM</span>
-                          {selectedSystem.iccEsReport && <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">{selectedSystem.iccEsReport}</span>}
-                          {selectedSystem.ul2703Listed && <span className="text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full">UL 2703</span>}
+                          {selectedSystem.iccEsReport ? <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">{selectedSystem.iccEsReport}</span> : null}
+                          {selectedSystem.ul2703Listed ? <span className="text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full">UL 2703</span> : null}
                         </div>
                         <h4 className="text-xl font-black text-white">{selectedSystem.manufacturer} {selectedSystem.model}</h4>
                         <p className="text-slate-400 text-xs mt-0.5">{selectedSystem.description}</p>
@@ -12413,14 +12782,14 @@ function EngineeringPageInner() {
                         </div>
                         <div className="bg-slate-900/60 rounded-xl p-4">
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
-                            {selectedSystem.hardware.midClamp && <div><div className="text-slate-500 mb-0.5">Mid Clamp</div><div className="text-white">{selectedSystem.hardware.midClamp}</div></div>}
-                            {selectedSystem.hardware.endClamp && <div><div className="text-slate-500 mb-0.5">End Clamp</div><div className="text-white">{selectedSystem.hardware.endClamp}</div></div>}
-                            {selectedSystem.hardware.railSplice && <div><div className="text-slate-500 mb-0.5">Rail Splice</div><div className="text-white">{selectedSystem.hardware.railSplice}</div></div>}
-                            {selectedSystem.hardware.groundLug && <div><div className="text-slate-500 mb-0.5">Ground Lug</div><div className="text-white">{selectedSystem.hardware.groundLug}</div></div>}
-                            {selectedSystem.hardware.lagBolt && <div><div className="text-slate-500 mb-0.5">Lag Bolt</div><div className="text-white">{selectedSystem.hardware.lagBolt}</div></div>}
-                            {selectedSystem.hardware.bondingHardware && <div><div className="text-slate-500 mb-0.5">Bonding</div><div className="text-white">{selectedSystem.hardware.bondingHardware}</div></div>}
-                            {selectedSystem.hardware.flashingKit && <div><div className="text-slate-500 mb-0.5">Flashing Kit</div><div className="text-white">{selectedSystem.hardware.flashingKit}</div></div>}
-                            {selectedSystem.hardware.tileHook && <div><div className="text-slate-500 mb-0.5">Tile Hook</div><div className="text-white">{selectedSystem.hardware.tileHook}</div></div>}
+                            {selectedSystem.hardware.midClamp ? <div><div className="text-slate-500 mb-0.5">Mid Clamp</div><div className="text-white">{selectedSystem.hardware.midClamp}</div></div> : null}
+                            {selectedSystem.hardware.endClamp ? <div><div className="text-slate-500 mb-0.5">End Clamp</div><div className="text-white">{selectedSystem.hardware.endClamp}</div></div> : null}
+                            {selectedSystem.hardware.railSplice ? <div><div className="text-slate-500 mb-0.5">Rail Splice</div><div className="text-white">{selectedSystem.hardware.railSplice}</div></div> : null}
+                            {selectedSystem.hardware.groundLug ? <div><div className="text-slate-500 mb-0.5">Ground Lug</div><div className="text-white">{selectedSystem.hardware.groundLug}</div></div> : null}
+                            {selectedSystem.hardware.lagBolt ? <div><div className="text-slate-500 mb-0.5">Lag Bolt</div><div className="text-white">{selectedSystem.hardware.lagBolt}</div></div> : null}
+                            {selectedSystem.hardware.bondingHardware ? <div><div className="text-slate-500 mb-0.5">Bonding</div><div className="text-white">{selectedSystem.hardware.bondingHardware}</div></div> : null}
+                            {selectedSystem.hardware.flashingKit ? <div><div className="text-slate-500 mb-0.5">Flashing Kit</div><div className="text-white">{selectedSystem.hardware.flashingKit}</div></div> : null}
+                            {selectedSystem.hardware.tileHook ? <div><div className="text-slate-500 mb-0.5">Tile Hook</div><div className="text-white">{selectedSystem.hardware.tileHook}</div></div> : null}
                           </div>
                         </div>
                       </div>
@@ -12428,6 +12797,8 @@ function EngineeringPageInner() {
                   </div>
                 ) : null}
 
+                {/* Layout diagrams + load analysis + BOM preview + code refs — roof/ground/commercial only, not a fence */}
+                {config.systemType !== 'fence' ? (<>
                 {/* ── Real-Time Layout Visualization ── */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* Mount Spacing Diagram */}
@@ -12437,9 +12808,9 @@ function EngineeringPageInner() {
                       {mountingInstallType === 'ground' ? 'Ground Mount Layout' : mountingInstallType === 'commercial' ? 'Ballast Layout' : 'Mount Spacing Diagram'}
                     </h4>
                     <div className="bg-slate-900/60 rounded-xl p-3 mb-3">
-                      {mountingInstallType === 'residential' && <MountSpacingDiagram />}
-                      {mountingInstallType === 'commercial' && <BallastLayoutDiagram />}
-                      {mountingInstallType === 'ground' && <GroundMountDiagram />}
+                      {mountingInstallType === 'residential' ? <MountSpacingDiagram /> : null}
+                      {mountingInstallType === 'commercial' ? <BallastLayoutDiagram /> : null}
+                      {mountingInstallType === 'ground' ? <GroundMountDiagram /> : null}
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {mountingInstallType === 'residential' && <>
@@ -12629,12 +13000,12 @@ function EngineeringPageInner() {
                     <div className="mt-3 border-t border-slate-700/50 pt-3">
                       <div className="text-xs text-slate-500 mb-2">Estimated quantities (from system specs, {totalPanels} panels):</div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                        {selectedSystem.mount && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mounts (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 2.5)}</div></div>}
-                        {selectedSystem.rail && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Rail (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.8 * 2)} ft</div></div>}
-                        {selectedSystem.hardware?.midClamp && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mid Clamps</div><div className="text-white font-bold">{totalPanels * 2} est.</div></div>}
-                        {selectedSystem.hardware?.endClamp && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">End Clamps</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.5)} est.</div></div>}
-                        {selectedSystem.ballast && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Ballast Blocks</div><div className="text-purple-300 font-bold">{totalPanels * selectedSystem.ballast.minBlocksPerModule}–{totalPanels * selectedSystem.ballast.maxBlocksPerModule}</div></div>}
-                        {selectedSystem.groundMount && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Piles (est.)</div><div className="text-green-300 font-bold">{Math.ceil(totalPanels / 4)}</div></div>}
+                        {selectedSystem.mount ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mounts (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 2.5)}</div></div> : null}
+                        {selectedSystem.rail ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Rail (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.8 * 2)} ft</div></div> : null}
+                        {selectedSystem.hardware?.midClamp ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mid Clamps</div><div className="text-white font-bold">{totalPanels * 2} est.</div></div> : null}
+                        {selectedSystem.hardware?.endClamp ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">End Clamps</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.5)} est.</div></div> : null}
+                        {selectedSystem.ballast ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Ballast Blocks</div><div className="text-purple-300 font-bold">{totalPanels * selectedSystem.ballast.minBlocksPerModule}–{totalPanels * selectedSystem.ballast.maxBlocksPerModule}</div></div> : null}
+                        {selectedSystem.groundMount ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Piles (est.)</div><div className="text-green-300 font-bold">{Math.ceil(totalPanels / 4)}</div></div> : null}
                       </div>
                     </div>
                   ) : null}
@@ -12661,12 +13032,13 @@ function EngineeringPageInner() {
                     ))}
                   </div>
                 </div>
+                </>) : null}
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── PERMIT PACKAGE TAB ── */}
-          {activeTab === 'permit' && (!canPermit ? (
+          {activeTab === 'permit' ? (!canPermit ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-4">
                   <Lock size={28} className="text-blue-400" />
@@ -12958,7 +13330,10 @@ function EngineeringPageInner() {
                                   })),
                                 }; })() : undefined,
                             };
-                            const res = await fetch('/api/engineering/permit?format=html', {
+                            // Preview is a NON-SUBMISSION preview by definition, so request
+                            // draft mode — otherwise a roof project without a promoted cad-safe
+                            // CanonicalBuildingModel 422s ("submission-ready ... requires ...").
+                            const res = await fetch('/api/engineering/permit?format=html&draft=true', {
                               method: 'POST', headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify(permitInput),
                             });
@@ -13103,7 +13478,7 @@ function EngineeringPageInner() {
                                   {_icaProfile.common_rejections.map((r, i) => (
                                     <div key={i} className="text-xs">
                                       <span className="font-bold text-red-300">{r.reason}</span>
-                                      {r.how_to_avoid && <span className="text-slate-400"> — {r.how_to_avoid}</span>}
+                                      {r.how_to_avoid ? <span className="text-slate-400"> — {r.how_to_avoid}</span> : null}
                                     </div>
                                   ))}
                                 </div>
@@ -13166,10 +13541,10 @@ function EngineeringPageInner() {
 
                 </div>
               );
-            })())}
+            })()) : null}
 
           {/* ── BOM TAB ── */}
-          {activeTab === 'bom' && (!canBOM ? (
+          {activeTab === 'bom' ? (!canBOM ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
                   <Lock size={28} className="text-violet-400" />
@@ -13257,7 +13632,7 @@ function EngineeringPageInner() {
                   </div>
                 ) : null}
 
-                {bom.length > 0 && !bomLoading && (() => {
+                {bom.length > 0 && !bomLoading ? ((() => {
                   // ── cost helpers ──
                   const fmt$ = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   const fmtK = (n: number) => n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : fmt$(n);
@@ -13323,7 +13698,7 @@ function EngineeringPageInner() {
                             <div className="text-3xl font-black text-white tabular-nums tracking-tight">{fmtK(totalCost)}</div>
                             <div className="text-xs text-slate-500 mt-0.5">
                               {bomPricing?.pricingApplied ? 'CED · Soligent · KWh Q1 2025' : 'Category estimates'}
-                              {unpricedCount > 0 && <span className="text-amber-400 ml-2">· {unpricedCount} unpriced</span>}
+                              {unpricedCount > 0 ? <span className="text-amber-400 ml-2">· {unpricedCount} unpriced</span> : null}
                             </div>
                           </div>
 
@@ -13505,9 +13880,9 @@ function EngineeringPageInner() {
                         return (
                           <div className="px-3 py-2.5 rounded-lg bg-amber-500/8 border border-amber-500/25 space-y-1">
                             <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold"><AlertCircle size={13} /> BOM self-check warnings</div>
-                            {!panelCheck && <div className="text-xs text-amber-300/80 pl-5">Panels: BOM={bomPanelQty} · Config={totalPanelsBom}</div>}
-                            {!microCheck && isMicroBom && <div className="text-xs text-amber-300/80 pl-5">Microinverters: BOM={bomMicroQty} · Expected={expectedMicro}</div>}
-                            {!stringInvCheck && !isMicroBom && <div className="text-xs text-amber-300/80 pl-5">String inverters: BOM={bomStringInvQty} · Config={expectedStringInv}</div>}
+                            {!panelCheck ? <div className="text-xs text-amber-300/80 pl-5">Panels: BOM={bomPanelQty} · Config={totalPanelsBom}</div> : null}
+                            {!microCheck && isMicroBom ? <div className="text-xs text-amber-300/80 pl-5">Microinverters: BOM={bomMicroQty} · Expected={expectedMicro}</div> : null}
+                            {!stringInvCheck && !isMicroBom ? <div className="text-xs text-amber-300/80 pl-5">String inverters: BOM={bomStringInvQty} · Config={expectedStringInv}</div> : null}
                           </div>
                         );
                       })()}
@@ -13611,10 +13986,10 @@ function EngineeringPageInner() {
 
                     </>
                   );
-                })()}
+                })()) : null}
 
               </div>
-            ))}
+            )) : null}
 
         {/* ── CLIENT FILES TAB ── */}
           {activeTab === 'files' ? (
@@ -14505,7 +14880,7 @@ function EngineeringPageInner() {
                 >
                   <Grid size={12} className={bomLoading ? 'animate-spin' : ''} />
                   <span className="flex-1 text-left">{bomLoading ? 'Generating BOM…' : 'Generate BOM'}</span>
-                  {bom.length > 0 && !bomLoading && <span className="text-teal-600 text-xs">{bom.length} items</span>}
+                  {bom.length > 0 && !bomLoading ? <span className="text-teal-600 text-xs">{bom.length} items</span> : null}
                 </button>
 
                 {/* Row 6: Generate SLD */}
@@ -14646,7 +15021,11 @@ function EngineeringPageInner() {
       {confirmDialog ? (
         <ConfirmDialog
           message={confirmDialog.message}
-          onConfirm={confirmDialog.onConfirm}
+          // Always dismiss the modal on confirm, THEN run the action. ConfirmDialog
+          // doesn't self-close, and several onConfirm handlers (e.g. Change
+          // ecosystem) didn't call setConfirmDialog(null) — so clicking Confirm ran
+          // the action but the modal stayed up, reading as a dead button.
+          onConfirm={() => { const fn = confirmDialog.onConfirm; setConfirmDialog(null); fn(); }}
           onCancel={() => setConfirmDialog(null)}
           variant="warning"
         />

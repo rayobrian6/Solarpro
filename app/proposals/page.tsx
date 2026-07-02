@@ -916,8 +916,8 @@ function ProposalContent() {
                           ) : null}
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          {address && <span className="text-xs text-slate-500 truncate max-w-[200px]">{address}</span>}
-                          {address && <span className="text-slate-700">·</span>}
+                          {address ? <span className="text-xs text-slate-500 truncate max-w-[200px]">{address}</span> : null}
+                          {address ? <span className="text-slate-700">·</span> : null}
                           <span className="text-xs text-slate-600 flex items-center gap-1 flex-shrink-0">
                             <Calendar size={9} />
                             {new Date(proposal.preparedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -1712,7 +1712,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 {client ? (
                   <p className="text-slate-400 text-sm">
                     Prepared for <span className="text-white font-medium">{client.name}</span>
-                    {client.address && <span> &middot; {client.address}, {client.city}, {client.state}</span>}
+                    {client.address ? <span> &middot; {client.address}, {client.city}, {client.state}</span> : null}
                   </p>
                 ) : null}
                 <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
@@ -1724,7 +1724,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <div className="text-right flex-shrink-0">
                   <div className="text-5xl font-black leading-none" style={{ color: primaryColor }}>{systemSizeKw.toFixed(1)}</div>
                   <div className="text-slate-300 text-sm font-bold tracking-wide mt-1">kW System</div>
-                  {totalPanels > 0 && <div className="text-slate-500 text-xs mt-1">{totalPanels} panels</div>}
+                  {totalPanels > 0 ? <div className="text-slate-500 text-xs mt-1">{totalPanels} panels</div> : null}
                 </div>
               ) : null}
             </div>
@@ -2077,7 +2077,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-sm font-semibold text-white">{inc.name}</div>
-                      {inc.description && <div className="text-xs text-slate-400 mt-1">{inc.description}</div>}
+                      {inc.description ? <div className="text-xs text-slate-400 mt-1">{inc.description}</div> : null}
                     </div>
                     <div className="text-sm font-black flex-shrink-0 text-emerald-400">
                       {inc.calculatedValue > 0 ? `$${Math.round(inc.calculatedValue).toLocaleString()}` : 'Eligible'}
@@ -2108,7 +2108,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-sm font-semibold text-white">{inc.name}</div>
-                      {inc.description && <div className="text-xs text-slate-400 mt-1">{inc.description}</div>}
+                      {inc.description ? <div className="text-xs text-slate-400 mt-1">{inc.description}</div> : null}
                     </div>
                     <div className="text-xs font-bold flex-shrink-0 text-blue-400 text-right">
                       {inc.type === 'property_tax_exemption' || inc.type === 'sales_tax_exemption'
@@ -2693,7 +2693,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <div key={a.label} className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/20">
                   <div className="text-slate-400 mb-0.5">{a.label}</div>
                   <div className="text-white font-semibold">{a.value}</div>
-                  {a.note && <div className="text-slate-500 text-xs mt-0.5">{a.note}</div>}
+                  {a.note ? <div className="text-slate-500 text-xs mt-0.5">{a.note}</div> : null}
                 </div>
               ))}
             </div>

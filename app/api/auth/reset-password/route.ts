@@ -119,13 +119,29 @@ export async function POST(req: NextRequest) {
     // free-pass orphan, the login route's Safety Net B would otherwise keep
     // forcing a reset on every failed login attempt even after a valid
     // bcrypt hash has been stored — creating an infinite reset loop.
-    await sql`
-      UPDATE users
-      SET password_hash = ${passwordHash},
-          is_free_pass  = false,
-          updated_at    = NOW()
-      WHERE id = ${tokenRecord.user_id}
-    `;
+    // password_changed_at stamps the reset moment so JWT sessions issued on
+    // other devices BEFORE now are rejected by the auth guards (migration 094).
+    // Best-effort: retry without the column if migration 094 isn't applied yet,
+    // so a password reset never hard-fails on older DBs.
+    try {
+      await sql`
+        UPDATE users
+        SET password_hash       = ${passwordHash},
+            is_free_pass        = false,
+            password_changed_at = NOW(),
+            updated_at          = NOW()
+        WHERE id = ${tokenRecord.user_id}
+      `;
+    } catch (colErr) {
+      console.warn('[password-reset] password_changed_at column missing, updating without it:', (colErr as Error).message);
+      await sql`
+        UPDATE users
+        SET password_hash = ${passwordHash},
+            is_free_pass  = false,
+            updated_at    = NOW()
+        WHERE id = ${tokenRecord.user_id}
+      `;
+    }
     console.log(`[password-reset] POST — password updated for userId=${tokenRecord.user_id}`);
 
     // 6. Delete the used token (single-use enforcement)

@@ -434,7 +434,7 @@ export default function GuidedTour({ onComplete }: GuidedTourProps) {
             className="btn-primary px-3 py-1.5 text-xs flex items-center gap-1.5"
           >
             {step.cta}
-            {stepIdx < TOUR_STEPS.length - 1 && <ArrowRight size={13} />}
+            {stepIdx < TOUR_STEPS.length - 1 ? <ArrowRight size={13} /> : null}
           </button>
         </div>
       </div>

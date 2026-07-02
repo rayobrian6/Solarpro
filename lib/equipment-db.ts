@@ -179,6 +179,12 @@ export interface RackingSystem {
   maxSnowLoad: number; // psf
   railSpanMax: number; // inches
   attachmentSpacingMax: number; // inches
+  /** Module-to-module gap created by this system's mid-clamps (inches).
+   *  Drives panel spacing in the roof layout, which the firewalk/pathway math
+   *  reads through the post-generation edge filter — so the accumulated gap
+   *  correctly narrows the usable field. TYPICAL values; verify vs the clamp
+   *  datasheet. Falls back to 0.25" (mid-clamp physical minimum) when absent. */
+  midClampGapIn?: number;
   weight: number; // lbs per linear foot
   material: string;
   warranty: string;
@@ -228,6 +234,50 @@ export interface Conduit {
 // ============================================================
 
 export const SOLAR_PANELS: SolarPanel[] = [
+  // Tesla — Tesla Solar Panel (TSP-415 / TSP-420)
+  // Source: Tesla Solar Panel Datasheet (energylibrary.tesla.com). All-black
+  // Tesla-frame module, pairs natively with Tesla Panel Mount + Tesla Solar
+  // Inverter / Powerwall 3. 1000V max, 25A max series fuse, 18 power zones.
+  // NOCT not published on the datasheet — 45°C assumed (industry-typical).
+  // Cell chemistry not stated on the datasheet — mono-PERC assumed pending the
+  // detailed cutsheet. parallelStringLimit 2: (2-1)×1.25×Isc = 16.3A < 25A fuse;
+  // a 3rd parallel string would exceed the 25A series-fuse cap (needs OCPD).
+  {
+    id: 'tesla-tsp-420',
+    manufacturer: 'Tesla',
+    model: 'Solar Panel TSP-420',
+    category: 'solar_panel',
+    watts: 420, efficiency: 20.5,
+    voc: 40.95, vmp: 34.29, isc: 13.03, imp: 12.25,
+    tempCoeffVoc: -0.27, tempCoeffIsc: 0.04, tempCoeffPmax: -0.34,
+    maxSystemVoltage: 1000, maxSeriesFuseRating: 25,
+    nominalOperatingTemp: 45, parallelStringLimit: 2,
+    weight: 49, length: 71.1, width: 44.7, thickness: 1.57,
+    warranty: '25yr product / 25yr power', ulListing: 'UL 61730',
+    bifacial: false, cellType: 'mono-PERC',
+    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/Solar/Retrofit/Datasheet/TeslaSolarPanel/DatasheetTeslaSolarPanel.pdf',
+    ecosystemBrand: 'tesla', ecosystemFamily: 'Tesla Solar Panel',
+    compatibleWith: ['tesla-solar-inverter-3p8k', 'tesla-solar-inverter-5k', 'tesla-solar-inverter-5p7k', 'tesla-solar-inverter-7p6k'],
+    isNew: true,
+  },
+  {
+    id: 'tesla-tsp-415',
+    manufacturer: 'Tesla',
+    model: 'Solar Panel TSP-415',
+    category: 'solar_panel',
+    watts: 415, efficiency: 20.3,
+    voc: 40.92, vmp: 34.24, isc: 12.93, imp: 12.12,
+    tempCoeffVoc: -0.27, tempCoeffIsc: 0.04, tempCoeffPmax: -0.34,
+    maxSystemVoltage: 1000, maxSeriesFuseRating: 25,
+    nominalOperatingTemp: 45, parallelStringLimit: 2,
+    weight: 49, length: 71.1, width: 44.7, thickness: 1.57,
+    warranty: '25yr product / 25yr power', ulListing: 'UL 61730',
+    bifacial: false, cellType: 'mono-PERC',
+    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/Solar/Retrofit/Datasheet/TeslaSolarPanel/DatasheetTeslaSolarPanel.pdf',
+    ecosystemBrand: 'tesla', ecosystemFamily: 'Tesla Solar Panel',
+    compatibleWith: ['tesla-solar-inverter-3p8k', 'tesla-solar-inverter-5k', 'tesla-solar-inverter-5p7k', 'tesla-solar-inverter-7p6k'],
+    isNew: true,
+  },
   // SunPower
   {
     id: 'sp-maxeon7-440',
@@ -276,10 +326,10 @@ export const SOLAR_PANELS: SolarPanel[] = [
     // Electrical specs from SunPower Maxeon 3 datasheet (SPR-MAX3-400).
     // Low-Isc / high-Voc monocrystalline IBC design (Maxeon Gen III cells).
     voc: 75.6, vmp: 65.8, isc: 6.58, imp: 6.08,
-    tempCoeffVoc: -0.26, tempCoeffIsc: 0.048, tempCoeffPmax: -0.29,
+    tempCoeffVoc: -0.236, tempCoeffIsc: 0.048, tempCoeffPmax: -0.29,  // datasheet Voc coeff −0.236%/°C
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
     nominalOperatingTemp: 44.5, parallelStringLimit: 3,
-    weight: 42.0, length: 61.3, width: 41.2, thickness: 1.57,
+    weight: 42.0, length: 66.5, width: 41.2, thickness: 1.57,  // datasheet 1690×1046mm = 66.5×41.2in (was 61.3)
     warranty: '25yr product / 25yr power',
     ulListing: 'UL 61730',
     bifacial: false,
@@ -310,7 +360,7 @@ export const SOLAR_PANELS: SolarPanel[] = [
     model: 'EverVolt HK Black 410W',
     category: 'solar_panel',
     watts: 410, efficiency: 22.2,
-    voc: 51.9, vmp: 43.7, isc: 10.06, imp: 9.39,
+    voc: 49.0, vmp: 42.7, isc: 10.35, imp: 9.61,  // datasheet EVPV410H (132 half-cell HJT): Voc 49.0 (was 51.9), Vmp 42.7, Isc 10.35, Imp 9.61
     tempCoeffVoc: -0.25, tempCoeffIsc: 0.04, tempCoeffPmax: -0.26,
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
     nominalOperatingTemp: 44, parallelStringLimit: 3,
@@ -375,12 +425,12 @@ export const SOLAR_PANELS: SolarPanel[] = [
     manufacturer: 'Trina Solar',
     model: 'Vertex S+ 435W',
     category: 'solar_panel',
-    watts: 435, efficiency: 22.6,
+    watts: 435, efficiency: 21.77,  // datasheet (was copy-paste 22.6)
     voc: 37.80, vmp: 31.60, isc: 14.72, imp: 13.77,
     tempCoeffVoc: -0.24, tempCoeffIsc: 0.05, tempCoeffPmax: -0.29,
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
     nominalOperatingTemp: 43, parallelStringLimit: 3,
-    weight: 44.1, length: 70.9, width: 41.7, thickness: 1.38,
+    weight: 46.5, length: 69.4, width: 44.6, thickness: 1.18,  // datasheet 1762×1134×30mm, 21.1kg (was copy-paste 44.1lb/70.9×41.7)
     warranty: '25yr product / 25yr power', ulListing: 'UL 61730',
     bifacial: false, cellType: 'N-type TOPCon',
     datasheetUrl: 'https://www.trinasolar.com/en-glb/product/vertex-s-plus',
@@ -391,7 +441,7 @@ export const SOLAR_PANELS: SolarPanel[] = [
     manufacturer: 'Q CELLS',
     model: 'Q.PEAK DUO BLK ML-G10+ 400W',
     category: 'solar_panel',
-    watts: 400, efficiency: 22.4,
+    watts: 400, efficiency: 20.6,  // datasheet: 20.4% (G10+ up to 21.1%); was a fabricated 22.4%
     voc: 41.60, vmp: 34.50, isc: 12.26, imp: 11.59,
     tempCoeffVoc: -0.26, tempCoeffIsc: 0.05, tempCoeffPmax: -0.35,
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
@@ -434,10 +484,10 @@ export const SOLAR_PANELS: SolarPanel[] = [
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
     nominalOperatingTemp: 45, parallelStringLimit: 3,
     weight: 46.0, length: 67.8, width: 44.6, thickness: 1.38,
-    warranty: '30yr product / 30yr power', ulListing: 'UL 61730, IEC 61215',
+    warranty: '12yr product / 30yr linear power', ulListing: 'UL 61730, IEC 61215',
     bifacial: true, cellType: 'N-type TOPCon',
-    datasheetUrl: '',
-    active: false, // v47.406: Philadelphia Solar website (philadelphiasolar.com) is unreachable as of v47.406; no distributor mirror found. Following Sungrow/EcoFlow/HM-800 deactivation policy.
+    datasheetUrl: 'https://ussolarsupplier.com/products/philadelphia-solar-440w-solar-panels-108-cell-bifacial-mnb108hcbf-440w',
+    active: true, // REACTIVATED 2026-06-21: the v47.406 "out of business / unreachable" premise was WRONG — Philadelphia Solar (Jordan, est. 2007) is actively manufacturing and the exact Nexus MNB108(HCBF)-440W is in stock at US distributors (US Solar Supplier, A1 SolarStore, RockSolar). This is the SolFence default fence panel (SolFence distributor price $262.50).
   },
 ];
 
@@ -1549,11 +1599,19 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-3p8k',
     manufacturer: 'Tesla', model: 'Solar Inverter 3.8kW', category: 'string_inverter',
-    acOutputKw: 3.8, dcInputKwMax: 5.7,
+    acOutputKw: 3.8, dcInputKwMax: 6.46,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 1,
+    // Datasheet 1538000: 4 MPPT (input connectors 1-2-1-2), 600 VDC max,
+    // allowable DC/AC 1.7. Per MPPT: 13A IMP (operating) / 17A ISC.
+    // maxInputCurrentPerMppt is set to the 17A ISC rating, NOT the 13A IMP: the
+    // sizing engine compares the NEC 690.8 design current (Isc×1.25) per MPPT
+    // against this field, and the MPPT input tolerates Isc up to 17A — so a
+    // TSP-420 string (Isc×1.25 = 16.3A) correctly fits. maxParallelStringsPerMppt
+    // kept at 1 (safe residential default = 4 string inputs; the two 2-connector
+    // MPPTs / jumpers allow more but the schema can't express the per-MPPT split).
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 4, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 15.8,
+    acOutputVoltage: 240, acOutputCurrentMax: 16,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
@@ -1568,11 +1626,11 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-5k',
     manufacturer: 'Tesla', model: 'Solar Inverter 5kW', category: 'string_inverter',
-    acOutputKw: 5.0, dcInputKwMax: 7.5,
+    acOutputKw: 5.0, dcInputKwMax: 8.5,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 2,
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 4, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 20.8,
+    acOutputVoltage: 240, acOutputCurrentMax: 21,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
@@ -1587,11 +1645,11 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-5p7k',
     manufacturer: 'Tesla', model: 'Solar Inverter 5.7kW', category: 'string_inverter',
-    acOutputKw: 5.7, dcInputKwMax: 8.55,
+    acOutputKw: 5.7, dcInputKwMax: 9.69,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 1,
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 4, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 23.8,
+    acOutputVoltage: 240, acOutputCurrentMax: 24,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
@@ -1606,11 +1664,11 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-7p6k',
     manufacturer: 'Tesla', model: 'Solar Inverter 7.6kW', category: 'string_inverter',
-    acOutputKw: 7.6, dcInputKwMax: 11.4,
+    acOutputKw: 7.6, dcInputKwMax: 12.92,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 2,
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 5, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 31.7,
+    acOutputVoltage: 240, acOutputCurrentMax: 32,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
@@ -1858,7 +1916,7 @@ export const MICROINVERTERS: Microinverter[] = [
     model: 'IQ8A',
     category: 'microinverter',
     // IQ8A: 349W AC output, 1.46A nominal — designed for high-power modules up to 460W DC
-    acOutputW: 349, dcInputWMax: 460,
+    acOutputW: 349, dcInputWMax: 500,  // IQ8A pairs to ~500W modules (was 460, copy-pasted from IQ8M)
     maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
     maxInputCurrent: 15.0,
     acOutputVoltage: 240, acOutputCurrentMax: 1.46,
@@ -2093,6 +2151,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile', 'metal_corrugated'],
     maxWindSpeed: 160, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // UFO/bonded mid-clamp — typical, verify vs datasheet
     weight: 1.2, material: '6005-T5 Aluminum',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'L-foot with lag bolt into rafter',
@@ -2109,6 +2168,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile', 'metal_corrugated', 'metal_standing_seam'],
     maxWindSpeed: 150, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 1.1, material: '6005-T5 Aluminum',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'L-foot or standoff with lag bolt',
@@ -2126,6 +2186,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile'],
     maxWindSpeed: 150, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 1.0, material: '6005-T5 Aluminum',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'Snap-in L-foot with lag bolt',
@@ -2143,6 +2204,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile'],
     maxWindSpeed: 150, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 0.9, material: 'Aluminum / Stainless',
     warranty: '10yr', ulListing: 'UL 2703',
     attachmentMethod: 'Flashed mount with lag bolt',
@@ -2160,6 +2222,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['flat_tpo', 'flat_epdm', 'flat_gravel'],
     maxWindSpeed: 130, maxSnowLoad: 30,
     railSpanMax: 84, attachmentSpacingMax: 84,
+    midClampGapIn: 0.79,  // flat-roof tray (~20mm) — typical, verify vs datasheet
     weight: 2.5, material: 'Aluminum / HDPE',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'Ballasted tray (no penetrations)',
@@ -2176,6 +2239,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['metal_standing_seam'],
     maxWindSpeed: 160, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 0.5, material: 'Stainless Steel / Aluminum',
     warranty: '25yr', ulListing: 'UL 2703',
     attachmentMethod: 'S-5! clamp on standing seam (no penetrations)',
@@ -2194,6 +2258,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile'],
     maxWindSpeed: 150, maxSnowLoad: 45,
     railSpanMax: 72, attachmentSpacingMax: 48,
+    midClampGapIn: 0.4,   // compatible-rail mid-clamp — typical, verify vs datasheet
     weight: 0.6, material: 'Aluminum / EPDM',
     warranty: '20yr', ulListing: 'ICC-ES ESR-3575 / UL 2703',
     attachmentMethod: 'Flashed pad with 2 lag bolts into rafter → L-foot bolt → compatible rail (IronRidge XR100/XR1000, Pegasus, or equivalent)',
@@ -2206,6 +2271,29 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     fastenersPerAttachment: 2,   // 2 lag bolts per RT-MINI pad
     upliftCapacity: 450,         // lbf per lag bolt (ICC-ES ESR-3575)
     tributaryArea: 8.5,          // ft² per attachment point
+  },
+  // SolFence (Sol Fence LLC) — vertical 90° bifacial solar-fence system.
+  // Real specs from Ray's distributor/datasheet PDFs (2026-06-21): pre-built
+  // 8'-wide sections (2 panels per 6' section), 4x4 6061-T6 aircraft-grade
+  // aluminum posts on 8' spacing, 115 mph / 113 psf rated, driven 2-3/8" steel
+  // pipe foundation (post pounder) standard. Power electronics (Enphase IQ8
+  // micro or Tigo TS4-A-O optimizer) + wiring are installer-supplied.
+  {
+    id: 'solfence-8ft',
+    manufacturer: 'SolFence',
+    model: "8' Wide Bifacial Fence Section",
+    category: 'racking',
+    systemType: 'fence',
+    roofTypes: [],
+    maxWindSpeed: 115, maxSnowLoad: 113,
+    railSpanMax: 96, attachmentSpacingMax: 96,   // 8' section / 8' post spacing
+    midClampGapIn: 0.4,   // gap between the 2 panels in a section (channel) — typical
+    weight: 3.0, material: '6061-T6 Aircraft-Grade Aluminum',
+    warranty: 'Lifetime (frame) / 30yr (panels)', ulListing: 'Patent-pending (Sol Fence LLC)',
+    attachmentMethod: 'Driven 2-3/8" steel pipe (4\' min, post pounder) or concrete-set 4x4 posts',
+    hardware: "8'-wide pre-built section (incl. side channels & rails), 4x4 aluminum posts (6.5'/9'/4.5'), apex caps, donuts, RCP",
+    installNotes: 'Vertical 90° bifacial fence. Post spacing 8 ft. Driven-pile foundation standard; concrete-set optional. Power electronics (Enphase IQ8 micro or Tigo TS4-A-O optimizer) + all wiring installer-supplied (not in kit).',
+    datasheetUrl: 'https://solfence.solar',
   },
 ];
 
@@ -2252,6 +2340,18 @@ export function getMicroinverterById(id: string): Microinverter | undefined {
 
 export function getRackingById(id: string): RackingSystem | undefined {
   return RACKING_SYSTEMS.find(r => r.id === id);
+}
+
+/** Mid-clamp module gap (inches) for a racking system. Falls back to the
+ *  0.25" mid-clamp physical minimum when the system is unknown or unspecified. */
+export function getMidClampGapInches(rackingId?: string): number {
+  const r = rackingId ? getRackingById(rackingId) : undefined;
+  return r?.midClampGapIn ?? 0.25;
+}
+
+/** Mid-clamp module gap in meters (for layout spacing). */
+export function getMidClampGapMeters(rackingId?: string): number {
+  return getMidClampGapInches(rackingId) * 0.0254;
 }
 
 export function getConductorByGauge(gauge: string): Conductor | undefined {
@@ -2363,11 +2463,11 @@ export const BATTERIES: BatterySystem[] = [
     id: 'enphase-iq-battery-10t',
     manufacturer: 'Enphase', model: 'IQ Battery 10T',
     category: 'battery', subcategory: 'ac_coupled',
-    usableCapacityKwh: 10.08, peakPowerKw: 7.68, continuousPowerKw: 7.68,
+    usableCapacityKwh: 10.08, peakPowerKw: 5.76, continuousPowerKw: 3.84,  // datasheet: 3.84 kVA continuous (16A), ~5.7 kVA peak; was a fabricated 7.68
     roundTripEfficiencyPct: 96.0, chemistry: 'LFP', voltageNominalV: 48,
-    acOutputVoltageV: 240, maxContinuousOutputA: 32,
-    backfeedBreakerA: 40,        // NEC 705.12(B): 40A breaker adds to bus loading
-    minDedicatedBreakerA: 40,
+    acOutputVoltageV: 240, maxContinuousOutputA: 16,  // datasheet 16A continuous (was 32)
+    backfeedBreakerA: 20,        // NEC 705.12(B): 16A×1.25 → 20A OCPD (was 40, based on the wrong 32A)
+    minDedicatedBreakerA: 20,
     weightLbs: 225, outdoorRated: true, ipRating: 'IP55',
     gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
     requiresGateway: true, gatewayModel: 'Enphase IQ System Controller 3',
@@ -3356,6 +3456,39 @@ export const BACKUP_INTERFACES: BackupInterface[] = [
 
 export function getBatteryById(id: string): BatterySystem | undefined {
   return BATTERIES.find(b => b.id === id);
+}
+
+/**
+ * Resolve the representative battery SKU for a battery-brand token (e.g. 'tesla',
+ * 'enphase', 'solaredge', 'eg4', 'byd', 'pylontech', 'tigo', 'homegrid',
+ * 'ecoflow'). Matches active batteries by ecosystemBrand, manufacturer slug, or
+ * id prefix. For `single_pack` strategies returns the largest-capacity match
+ * (the whole pack, e.g. Powerwall 3); otherwise the smallest-capacity match (the
+ * granular stacking module). Used by the sizing engine so EVERY brand's battery
+ * resolves to a real SKU + capacity (previously only EcoFlow did).
+ */
+export function resolveBatteryForBrand(
+  brandToken: string | undefined,
+  strategy: 'modular_stack' | 'single_pack' | 'per_module' | 'custom' = 'modular_stack',
+): BatterySystem | undefined {
+  const t = (brandToken ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!t) return undefined;
+  const matches = BATTERIES.filter(b => {
+    if (b.active === false) return false;
+    const eco = (b.ecosystemBrand ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const mfr = b.manufacturer.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return eco === t || mfr === t || b.id.toLowerCase().startsWith(t + '-');
+  });
+  if (matches.length === 0) return undefined;
+  // single_pack → whole pack (largest); modular → granular module (smallest).
+  // Tiebreak: prefer isNew, then higher continuous power, then id (deterministic).
+  matches.sort((a, b) => {
+    if (a.usableCapacityKwh !== b.usableCapacityKwh) return a.usableCapacityKwh - b.usableCapacityKwh;
+    if ((a.isNew ? 1 : 0) !== (b.isNew ? 1 : 0)) return (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0);
+    if (a.continuousPowerKw !== b.continuousPowerKw) return b.continuousPowerKw - a.continuousPowerKw;
+    return a.id.localeCompare(b.id);
+  });
+  return strategy === 'single_pack' ? matches[matches.length - 1] : matches[0];
 }
 
 export function getGeneratorById(id: string): GeneratorSystem | undefined {

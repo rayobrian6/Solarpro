@@ -350,7 +350,7 @@ export default function ProspectsPage() {
                   {p.rating != null ? (
                     <span className="flex items-center gap-1">
                       <Star size={11} className="text-amber-400 fill-amber-400" />
-                      {p.rating}{p.review_count != null && <span className="text-slate-600">({p.review_count})</span>}
+                      {p.rating}{p.review_count != null ? <span className="text-slate-600">({p.review_count})</span> : null}
                     </span>
                   ) : null}
                   {p.license_number ? (
@@ -390,12 +390,12 @@ export default function ProspectsPage() {
                   ) : null}
                 </div>
 
-                {p.notes && <p className="text-xs text-slate-500 line-clamp-2">{p.notes}</p>}
+                {p.notes ? <p className="text-xs text-slate-500 line-clamp-2">{p.notes}</p> : null}
 
                 {p.metadata?.dossier ? (
                   <div className="rounded-md bg-violet-500/10 border border-violet-500/20 p-2 text-[11px] space-y-1">
-                    {p.metadata.dossier.whyCall && <div className="text-violet-300 font-semibold">📖 {p.metadata.dossier.whyCall}</div>}
-                    {p.metadata.dossier.opener && <div className="text-slate-400 italic">&ldquo;{p.metadata.dossier.opener}&rdquo;</div>}
+                    {p.metadata.dossier.whyCall ? <div className="text-violet-300 font-semibold">📖 {p.metadata.dossier.whyCall}</div> : null}
+                    {p.metadata.dossier.opener ? <div className="text-slate-400 italic">&ldquo;{p.metadata.dossier.opener}&rdquo;</div> : null}
                   </div>
                 ) : null}
 

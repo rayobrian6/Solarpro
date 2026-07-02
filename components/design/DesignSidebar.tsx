@@ -62,7 +62,7 @@ function Section({ title, icon, children, defaultOpen = true }: {
         </div>
         {open ? <ChevronUp size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
       </button>
-      {open && <div className="px-4 pb-4 space-y-3">{children}</div>}
+      {open ? <div className="px-4 pb-4 space-y-3">{children}</div> : null}
     </div>
   );
 }

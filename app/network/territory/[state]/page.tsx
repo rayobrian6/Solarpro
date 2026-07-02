@@ -107,7 +107,7 @@ function Kpi({
       <div className="mt-0.5 text-[11px] uppercase tracking-wider text-slate-500">
         {label}
       </div>
-      {sub && <div className="mt-1 text-[11px] text-slate-600">{sub}</div>}
+      {sub ? <div className="mt-1 text-[11px] text-slate-600">{sub}</div> : null}
     </div>
   );
 }
@@ -132,7 +132,7 @@ function Breakdown({
       <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">
         {title}
       </p>
-      {subtitle && <p className="mt-0.5 text-[11px] text-slate-600">{subtitle}</p>}
+      {subtitle ? <p className="mt-0.5 text-[11px] text-slate-600">{subtitle}</p> : null}
       <div className="mt-3 space-y-2">
         {rows.slice(0, 8).map((r) => (
           <div key={r.label} className="flex items-center gap-3">

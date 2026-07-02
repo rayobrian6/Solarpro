@@ -40,6 +40,7 @@ const navItems: NavItem[] = [
   { label: 'Projects',      href: '/projects',   icon: <FolderOpen size={17} />, color: 'text-amber-400' },
   { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
   { label: 'Engineering',   href: '/engineering',icon: <Wrench size={17} />, color: 'text-blue-400' },
+  { label: 'Generator Estimator', href: '/generator-estimator', icon: <Zap size={17} />, color: 'text-amber-300' },
   { label: 'Proposals',     href: '/proposals',  icon: <FileText size={17} /> },
   { label: 'Marketplace',    href: '/network',    icon: <Network size={17} />, color: 'text-emerald-400' },
   { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
@@ -378,12 +379,12 @@ function NotificationDropdown({ projects }: { projects: Project[] }) {
         onClick={() => { logClick('NOTIFICATIONS_CLICK'); setOpen(!open); }}
       >
         <Bell size={16} />
-        {count > 0 && (
+        {count > 0 ? (
           <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full text-[9px] font-black flex items-center justify-center"
             style={{ background: '#EF4444', color: '#fff' }}>
             {count > 9 ? '9+' : count}
           </span>
-        )}
+        ) : null}
       </button>
 
       {open ? (
@@ -720,7 +721,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               title={collapsed ? 'Admin Portal' : undefined}
             >
               <span className="flex-shrink-0"><Shield size={17} /></span>
-              {!collapsed && <span>Admin Portal</span>}
+              {!collapsed ? <span>Admin Portal</span> : null}
             </Link>
           </>
         ) : null}

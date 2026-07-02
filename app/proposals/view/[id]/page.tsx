@@ -21,7 +21,7 @@ import { calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { buildArraysFromLayout, buildSystemConfig, getArrayProposalText } from '@/lib/multiArrayEngine';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { UtilityRateGraph } from '@/components/proposal/UtilityRateGraph';
-import { UtilityCostProjectionChart } from '@/components/proposal/UtilityCostProjectionChart';
+import { CashFlowStoryCard } from '@/components/proposal/CashFlowStoryCard';
 import {
   buildUtilityProfile,
   validateProposalTruth,
@@ -770,7 +770,7 @@ function PublicProposalView({
                 {client ? (
                   <p className="text-slate-400 text-sm">
                     Prepared for <span className="text-white font-medium">{client.name}</span>
-                    {client.address && <span> &middot; {client.address}, {client.city}, {client.state}</span>}
+                    {client.address ? <span> &middot; {client.address}, {client.city}, {client.state}</span> : null}
                   </p>
                 ) : null}
                 <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
@@ -782,7 +782,7 @@ function PublicProposalView({
                 <div className="text-right flex-shrink-0">
                   <div className="text-5xl font-black leading-none" style={{ color: primaryColor }}>{systemSizeKw.toFixed(1)}</div>
                   <div className="text-slate-300 text-sm font-bold tracking-wide mt-1">kW System</div>
-                  {totalPanels > 0 && <div className="text-slate-500 text-xs mt-1">{totalPanels} panels</div>}
+                  {totalPanels > 0 ? <div className="text-slate-500 text-xs mt-1">{totalPanels} panels</div> : null}
                 </div>
               ) : null}
             </div>
@@ -1115,14 +1115,8 @@ function PublicProposalView({
               </p>
               <UtilityRateGraph utility={cp.utility} financial={cp.financial} />
             </div>
-            <div className="proposal-sec card p-4" data-block-id="cost-projection-chart">
-              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
-                <Zap size={15} style={{ color: primaryColor }} /> 25-Year Cost Comparison
-              </h3>
-              <p className="text-xs text-slate-400 mb-3">
-                The green line shows your total cost with solar. The red line shows what you&apos;d pay staying on grid power.
-              </p>
-              <UtilityCostProjectionChart
+            <div data-block-id="cost-projection-chart">
+              <CashFlowStoryCard
                 utility={cp.utility}
                 financial={cp.financial}
                 truth25yr={cp.truth25yr}
@@ -1160,7 +1154,7 @@ function PublicProposalView({
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-sm font-semibold text-white">{inc.name}</div>
-                      {inc.description && <div className="text-xs text-slate-400 mt-1">{inc.description}</div>}
+                      {inc.description ? <div className="text-xs text-slate-400 mt-1">{inc.description}</div> : null}
                     </div>
                     <div className="text-sm font-black flex-shrink-0 text-emerald-400">
                       {inc.calculatedValue > 0 ? `$${Math.round(inc.calculatedValue).toLocaleString()}` : 'Eligible'}
@@ -1191,7 +1185,7 @@ function PublicProposalView({
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-sm font-semibold text-white">{inc.name}</div>
-                      {inc.notes && <div className="text-xs text-slate-400 mt-1">{inc.notes}</div>}
+                      {inc.notes ? <div className="text-xs text-slate-400 mt-1">{inc.notes}</div> : null}
                     </div>
                     <div className="text-xs font-bold flex-shrink-0 text-blue-400 text-right">
                       {inc.type === 'property_tax_exemption' || inc.type === 'sales_tax_exemption'
@@ -1784,7 +1778,7 @@ function PublicProposalView({
                 <div key={a.label} className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/20">
                   <div className="text-slate-400 mb-0.5">{a.label}</div>
                   <div className="text-white font-semibold">{a.value}</div>
-                  {a.note && <div className="text-slate-500 text-xs mt-0.5">{a.note}</div>}
+                  {a.note ? <div className="text-slate-500 text-xs mt-0.5">{a.note}</div> : null}
                 </div>
               ))}
             </div>
@@ -1896,7 +1890,7 @@ function PublicProposalView({
         </div>
 
         {/* ── Environmental Impact ─────────────────────────────────────────── */}
-        {annualProduction > 0 && (() => {
+        {annualProduction > 0 ? ((() => {
           // EPA eGRID national average: 0.386 kg CO₂ per kWh (2023)
           const CO2_PER_KWH_KG   = 0.386;
           const TREE_KG_CO2_YR   = 21.77;  // avg tree absorbs ~21.77 kg CO₂/yr
@@ -1967,7 +1961,7 @@ function PublicProposalView({
               </div>
             </div>
           );
-        })()}
+        })()) : null}
 
         {/* ── What Happens Next — post-sign timeline ────────────────────────── */}
         <div className="proposal-sec card p-4" data-block-id="next-steps-timeline">

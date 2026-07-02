@@ -533,7 +533,7 @@ function MemberCerts({ memberId, showToast }: { memberId: string; showToast: (m:
           return (
             <div key={c.id} className="flex items-center gap-2 text-xs">
               <span className="text-slate-300">{c.name}</span>
-              {c.issuer && <span className="text-slate-600 text-[11px]">· {c.issuer}</span>}
+              {c.issuer ? <span className="text-slate-600 text-[11px]">· {c.issuer}</span> : null}
               <span className={`px-1.5 py-0.5 rounded-full border text-[9px] font-semibold ${s.cls}`}>
                 {s.label(c.expires_on)}
               </span>

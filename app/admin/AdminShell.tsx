@@ -7,7 +7,7 @@ import {
   Cpu, Zap, Database, HardDrive, Activity,
   Shield, ChevronRight, LogOut, Sun, Wrench,
   ScrollText, Terminal, MessageSquare, Rocket, Layers, DollarSign, PenTool,
-  UserPlus, LayoutTemplate, Network, GitBranch, History, Share2, Factory,
+  UserPlus, LayoutTemplate, Network, GitBranch, History, Share2, Factory, Satellite,
 } from 'lucide-react';
 
 const NAV_SECTIONS = [
@@ -40,6 +40,7 @@ const NAV_SECTIONS = [
     label: 'Configuration',
     items: [
       { href: '/admin/engineering', label: 'Engineering Monitor', icon: Cpu },
+      { href: '/admin/aerial-roof-lookup', label: 'Aerial Roof Lookup', icon: Satellite },
       { href: '/admin/engineering-intelligence', label: 'Engineering Intelligence', icon: Network },
       { href: '/admin/engineering-intelligence', label: 'Project Intelligence Picker', icon: GitBranch },
       { href: '/admin/engineering-intelligence/snapshots', label: 'Snapshot Timeline', icon: History },
@@ -154,8 +155,8 @@ export default function AdminShell({
                           {newFeedbackCount > 99 ? '99+' : newFeedbackCount}
                         </span>
                       ) : null}
-                      {active && !isFeedback && <ChevronRight size={12} className="ml-auto opacity-60" />}
-                      {active && isFeedback && newFeedbackCount === 0 && <ChevronRight size={12} className="ml-auto opacity-60" />}
+                      {active && !isFeedback ? <ChevronRight size={12} className="ml-auto opacity-60" /> : null}
+                      {active && isFeedback && newFeedbackCount === 0 ? <ChevronRight size={12} className="ml-auto opacity-60" /> : null}
                     </Link>
                   );
                 })}

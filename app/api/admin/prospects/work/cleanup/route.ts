@@ -11,7 +11,6 @@ export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
-import { listProspects, applyWorkUpdate } from "@/lib/network/installerProspects";
 
 function normPhone(raw: string | null): string | null {
   if (!raw) return null;
@@ -32,19 +31,37 @@ export async function POST(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
   try {
-    const all = await listProspects({ limit: 1000 });
-    let fixed = 0;
-    for (const p of all) {
-      const phone = normPhone(p.phone);
-      const website = normSite(p.website);
-      const phoneChanged = phone && phone !== p.phone;
-      const siteChanged = website && website !== p.website;
-      if (phoneChanged || siteChanged) {
-        await applyWorkUpdate(p.id, { phone: phoneChanged ? phone : null, website: siteChanged ? website : null });
-        fixed++;
-      }
-    }
-    return NextResponse.json({ success: true, scanned: all.length, fixed });
+    // Bulk cleanup via SQL — normalizes phone format and website scheme in two UPDATEs
+    // instead of N+1 individual round-trips. Far more efficient at scale.
+    const { getDbReady } = await import("@/lib/db-neon");
+    const sql = await getDbReady();
+
+    // Fix phones: raw digits of length 10 or 11 (leading 1) → (XXX) XXX-XXXX
+    const phoneRows = await sql`
+      UPDATE installer_prospects
+      SET phone = '(' || SUBSTRING(REGEXP_REPLACE(phone, '\D', '', 'g'), 1, 3) || ') '
+                   || SUBSTRING(REGEXP_REPLACE(phone, '\D', '', 'g'), 4, 3) || '-'
+                   || SUBSTRING(REGEXP_REPLACE(phone, '\D', '', 'g'), 7, 4),
+          updated_at = NOW()
+      WHERE phone IS NOT NULL
+        AND LENGTH(REGEXP_REPLACE(phone, '\D', '', 'g')) IN (10, 11)
+        AND phone !~ '\(\d{3}\) \d{3}-\d{4}'
+      RETURNING id
+    `;
+
+    // Fix websites: missing https:// prefix
+    const siteRows = await sql`
+      UPDATE installer_prospects
+      SET website = 'https://' || website, updated_at = NOW()
+      WHERE website IS NOT NULL
+        AND website !~ '^https?://'
+        AND LENGTH(TRIM(website)) > 0
+      RETURNING id
+    `;
+
+    const scanned = await sql`SELECT COUNT(*)::int AS n FROM installer_prospects`;
+    const fixed = phoneRows.length + siteRows.length;
+    return NextResponse.json({ success: true, scanned: (scanned[0] as { n: number }).n, fixed });
   } catch (e) {
     return NextResponse.json({ success: false, error: "Cleanup failed", message: (e as Error).message }, { status: 500 });
   }

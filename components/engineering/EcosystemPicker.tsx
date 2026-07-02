@@ -193,7 +193,7 @@ export default function EcosystemPicker({
       </div>
 
       {/* Expanded kit preview — simplified or expert mode */}
-      {expandedBrand && kit && (
+      {expandedBrand && kit ? (
         expertMode ? (
           <EcosystemKitPanel
             brandId={expandedBrand}
@@ -221,7 +221,7 @@ export default function EcosystemPicker({
             canApply={Boolean(onApply)}
           />
         )
-      )}
+      ) : null}
     </div>
   );
 }
@@ -380,7 +380,7 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
       </div>
 
       {/* Battery-only ecosystem hint (same as expert mode) */}
-      {isBatteryOnlyEcosystem && (
+      {isBatteryOnlyEcosystem ? (
         <div className="flex items-start gap-2 text-xs text-cyan-200/90 bg-cyan-500/5 border border-cyan-500/20 rounded-lg p-3">
           <Info size={14} className="text-cyan-300 flex-shrink-0 mt-0.5" />
           <div className="space-y-0.5">
@@ -391,7 +391,7 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Apply + Expert mode toggle */}
       <div className="flex flex-col gap-2 pt-1">
@@ -655,7 +655,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
         ) : null}
 
       {/* v47.401 — Battery-only ecosystem hint (e.g. Tesla) */}
-      {isBatteryOnlyEcosystem && (
+      {isBatteryOnlyEcosystem ? (
         <div className="flex items-start gap-2 text-xs text-cyan-200/90 bg-cyan-500/5 border border-cyan-500/20 rounded-lg p-3">
           <Info size={14} className="text-cyan-300 flex-shrink-0 mt-0.5" />
           <div className="space-y-0.5">
@@ -668,7 +668,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Apply button */}
       <div className="flex items-center gap-3 pt-1">

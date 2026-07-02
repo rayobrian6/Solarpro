@@ -104,7 +104,7 @@ describe("admin intake funnels infrastructure", () => {
   it("surfaces an operational Intake Funnels tab with required copy/open actions", () => {
     expect(adminPageSource).toContain('{ id: "funnels"');
     expect(adminPageSource).toContain(
-      '{activeTab === "funnels" && <IntakeFunnelsSection />}',
+      '{activeTab === "funnels" ? <IntakeFunnelsSection /> : null}',
     );
     expect(adminPageSource).toContain(
       '"/api/admin/network/funnels?include_inactive=true"',

@@ -406,7 +406,7 @@ export interface RoofPlane {
   adjacentPlaneIds?: string[];
 
   // v47.81 -- Solar API provenance
-  source?: 'solar_api' | 'manual' | 'imported';
+  source?: 'solar_api' | 'manual' | 'imported' | 'aerial_nearmap';
   solarSegmentIndex?: number;
   planeHeightAtCenterMeters?: number;
   confirmed?: boolean;
@@ -506,6 +506,33 @@ export interface Layout {
   // When present, each entry describes one discrete mounting zone.
   // totalPanels and systemSizeKw are still the single-system totals for backward compat.
   arrays?: SolarArray[];
+
+  // v63: Electrical design (string + brand/topology + equipment) produced in
+  // Design Studio, carried over to Engineering automatically. NULL for scratch
+  // designs / older layouts. See DesignElectrical.
+  designElectrical?: DesignElectrical;
+}
+
+// ─── Design → Engineering electrical handoff ─────────────────────────────────
+// Logged by Design Studio when a client project is active, consumed by the
+// Engineering page to seed its inverter/string/topology config without re-entry.
+export interface DesignElectrical {
+  topology: 'string' | 'optimizer' | 'micro';
+  inverterBrand?: string;           // inferred from topology/device (SolarEdge/Enphase/…)
+  modulesPerString: number;
+  rackingId?: string;               // mounting/racking selected in Design Studio
+  panelId?: string;                 // panel model selected in Design Studio
+  optimizerModelId?: string;        // when topology === 'optimizer'
+  microModelId?: string;            // when topology === 'micro'
+  /** Final per-panel string assignment (auto serpentine + manual paint). panelId → stringIndex */
+  byPanelId: Record<string, number>;
+  /** Manual paint overrides ONLY (panelId → stringIndex) — restored into the Design
+   *  Studio UI so re-chunking still works; distinct from the merged byPanelId. */
+  overrides?: Record<string, number>;
+  /** Per-string summary, ordered by stringIndex — drives engineering StringConfig[]. */
+  strings: Array<{ stringIndex: number; panelCount: number; panelIds: string[] }>;
+  deviceCount: number;              // total optimizers / micros (0 for plain string)
+  generatedAt: string;
 }
 
 // ─── Production ───────────────────────────────────────────────

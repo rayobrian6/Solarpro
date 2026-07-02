@@ -958,8 +958,8 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
           id="sd-dog-img"
           draggable={false}
         />
-        {isSpeaking && <span id="sd-speaking-ring" aria-hidden="true" />}
-        {isLoading  && <span id="sd-loading-dot"   aria-hidden="true" />}
+        {isSpeaking ? <span id="sd-speaking-ring" aria-hidden="true" /> : null}
+        {isLoading ? <span id="sd-loading-dot"   aria-hidden="true" /> : null}
       </div>
 
       {/* Chat panel */}
@@ -1015,7 +1015,7 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
                 >
                   {isMuted ? '🔇 Unmute' : '🔊 Mute'}
                 </button>
-                {voiceHint && <span className="sd-vp-hint">{voiceHint}</span>}
+                {voiceHint ? <span className="sd-vp-hint">{voiceHint}</span> : null}
               </div>
               {serverVoiceEnabled === false ? (
                 <div className="sd-vp-hint" style={{ color: '#f87171' }}>

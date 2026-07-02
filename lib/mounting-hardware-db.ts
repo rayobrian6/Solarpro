@@ -87,6 +87,10 @@ export interface MountSpec {
   iccEsReport?: string;
   ul2703Listed: boolean;
   compatibleRoofTypes: RoofType[];
+  // Self-flashing pad standoffs (e.g. Roof Tech RT-MINI) carry integrated EPDM/butyl
+  // on the base that seals the fastener penetration — they do NOT take a separate
+  // flashing kit. When true, the racking BOM must NOT add a flashing line.
+  selfFlashing?: boolean;
 }
 
 export interface BallastSpec {
@@ -184,6 +188,99 @@ export interface MountingSystemSpec {
 const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
 
   // ══════════════════════════════════════════════════════════════════════════
+  // TESLA — Panel Mount (RAIL-LESS: Comp Rafter Base / Tile Hook + Leveling
+  // Feet + Interlocks + Front Skirt). UL 2703 listed, System Fire Class A.
+  // Component allowable loads (Comp Rafter): Uplift 569 lb (SF 2.0), Downforce
+  // 965 lb (SF 1.67), Shear 242 lb. Lag 5/16" → 2½" threaded embedment. Max
+  // attachment span 72", max cantilever 24". Min pitch 2:12 (9.46°). Allowable
+  // system PSF is span/zone-dependent — see Appendix C tables in the structural
+  // engine. Source: Tesla Panel Mount install manuals + Appendix C.
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    id: 'tesla-panel-mount-comp-rafter',
+    manufacturer: 'Tesla',
+    productLine: 'Tesla Panel Mount',
+    model: 'Comp Rafter',
+    category: 'roof_residential',
+    systemType: 'rail_less',
+    compatibleRoofTypes: ['asphalt_shingle'],
+    description: 'Tesla Panel Mount rail-less system for composition shingle roofs. Comp Rafter Base (2023000) lags into the rafter; Leveling Feet (2032169) + Interlocks (1576999) bond and secure modules; Front Skirt for a flush, rail-less aesthetic. UL 2703, Fire Class A. Pairs with Tesla Solar Panel + Tesla Solar Inverter / Powerwall 3.',
+    mount: {
+      model: 'Tesla Comp Rafter Base (2023000)',
+      attachmentMethod: 'l_foot_lag',
+      upliftCapacityLbs: 569,        // UL 2703 component allowable, SF 2.0
+      downwardCapacityLbs: 965,      // SF 1.67
+      shearCapacityLbs: 242,
+      fastenersPerMount: 1,
+      fastenerDiameterIn: 0.3125,    // 5/16" lag (2044245 4¾" / 2044244 5½")
+      fastenerEmbedmentIn: 2.5,      // 2½" threaded embedment into rafter
+      fastenerPulloutLbs: 569,       // governed by component allowable uplift (UL 2703)
+      maxSpacingIn: 72,              // max allowable span between attachments
+      minRafterDepthIn: 3.5,
+      ul2703Listed: true,
+      compatibleRoofTypes: ['asphalt_shingle'],
+    },
+    hardware: {
+      midClamp: 'Tesla Interlock (1576999)',
+      endClamp: 'Tesla Comp Rafter Leveling Foot (2032169)',
+      railSplice: 'N/A — rail-less',
+      groundLug: 'Tesla Ground Lockit (1578119) — grounds up to 72 modules',
+      lagBolt: 'Tesla Lag Screw 5/16 × 4.75" Hex T40 (2044245) / 5.5" (2044244)',
+      flashingKit: 'Comp Rafter Base injected sealant (Tonsan MS-1937, 1679265) + card flashing',
+      bondingHardware: 'Tesla Interlock + Ground Lockit (integrated UL 2703 bonding)',
+    },
+    maxWindSpeedMph: 160,            // screening cap; true rating is span/zone-dependent per Appendix C
+    maxSnowLoadPsf: 60,              // Tesla Solar Panel design load 60 psf (Appendix C governs by span)
+    maxRoofPitchDeg: 45,
+    minRoofPitchDeg: 9,              // 2:12 = 9.46°
+    ul2703Listed: true,
+    engineeringDataSource: 'Tesla Panel Mount - Comp Rafter Installation Manual + Appendix C (Allowable Mounting System Loading), energylibrary.tesla.com',
+    lastUpdated: '2026-04',
+  },
+  {
+    id: 'tesla-panel-mount-tile',
+    manufacturer: 'Tesla',
+    productLine: 'Tesla Panel Mount',
+    model: 'Tile',
+    category: 'roof_residential',
+    systemType: 'rail_less',
+    compatibleRoofTypes: ['tile_concrete', 'tile_clay'],
+    description: 'Tesla Panel Mount rail-less system for tile roofs. Tile Hooks (2262305) replace/relieve tiles and lag into the rafter; Spanner Bars (2129978) span above the tile surface; Flat/Round Leveling Feet (2177129/2133094) + Interlocks bond and secure modules. UL 2703, Fire Class A. Includes replacement flashing for waterproofing.',
+    mount: {
+      model: 'Tesla Tile Hook Assembly (2262305)',
+      attachmentMethod: 'tile_hook',
+      upliftCapacityLbs: 569,        // shared UL 2703 component allowables (Tile Appendix C not yet captured)
+      downwardCapacityLbs: 965,
+      shearCapacityLbs: 242,
+      fastenersPerMount: 1,
+      fastenerDiameterIn: 0.3125,    // 5/16" lag to rafter (2131805) + #15 deck screw (2049471) in offsets
+      fastenerEmbedmentIn: 2.5,
+      fastenerPulloutLbs: 569,
+      maxSpacingIn: 72,
+      minRafterDepthIn: 3.5,
+      ul2703Listed: true,
+      compatibleRoofTypes: ['tile_concrete', 'tile_clay'],
+    },
+    hardware: {
+      midClamp: 'Tesla Interlock (1576999) / Hybrid Interlock (1578969)',
+      endClamp: 'Tesla Round/Flat Leveling Foot (2133094 / 2177129)',
+      railSplice: 'Tesla Spanner Bar Splice Plate (2129977)',
+      groundLug: 'Tesla Ground Lockit (1578119)',
+      lagBolt: 'Tesla Lag Screw 5/16 × 4" Hex T40 (2131805)',
+      flashingKit: 'Tesla Replacement Flashing + Securing Bolt (2127987)',
+      tileHook: 'Tesla Tile Hook Assembly (2262305) + Spanner Bar (2129978)',
+      bondingHardware: 'Tesla Interlock + Ground Lockit (integrated UL 2703 bonding)',
+    },
+    maxWindSpeedMph: 160,
+    maxSnowLoadPsf: 60,
+    maxRoofPitchDeg: 45,
+    minRoofPitchDeg: 9,
+    ul2703Listed: true,
+    engineeringDataSource: 'Tesla Panel Mount - Tile Installation Manual, energylibrary.tesla.com (Tile Appendix C pending)',
+    lastUpdated: '2026-04',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
   // IRONRIDGE — Rail-Based Residential
   // ══════════════════════════════════════════════════════════════════════════
   {
@@ -203,7 +300,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       wallThicknessIn: 0.125,
       momentCapacityInLbs: 21600,   // 1800 ft-lbs × 12
       shearCapacityLbs: 2200,
-      maxSpanIn: 72,
+      maxSpanIn: 96,        // IronRidge XR100 datasheet: 8 ft (96") spanning capability (was 72)
       maxCantileverIn: 24,
       spliceIntervalIn: 168,        // 14 ft standard section
       weightLbsPerFt: 0.95,
@@ -217,7 +314,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 800,
       shearCapacityLbs: 400,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -276,7 +373,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1000,
       shearCapacityLbs: 600,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 84,
@@ -338,7 +435,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 850,
       shearCapacityLbs: 450,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -397,7 +494,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 900,
       shearCapacityLbs: 500,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 78,
@@ -436,34 +533,42 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     category: 'roof_residential',
     systemType: 'rail_based',
     compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
-    description: 'Roof Tech RT-MINI — flashed pad standoff, rail-based system. 2 lag bolts per pad, L-foot, compatible rail. ICC-ES ESR-3575',
+    description: 'Roof Tech RT-MINI — SELF-FLASHING pad standoff (AlphaSeal / RT Butyl seals the screw penetration; no separate flashing kit). Fastened with 2 structural wood screws into the rafter (no pilot hole). L-foot + conventional rail are separate add-ons. ICC-ES ESR-3575.',
     mount: {
       model: 'RT-MINI',
       attachmentMethod: 'l_foot_lag',
-      upliftCapacityLbs: 900,       // 2 × 450 lbs/lag (ICC-ES ESR-3575)
+      // ULTIMATE basis (the engine checks capacity/demand >= 1.5 SF). Web-verified
+      // 2026-06-21 vs ESR-3575: the published ALLOWABLE for the weakest standard
+      // assembly (15/32" sheathing, 2x4 DF-L #2, 2 screws) is 613.2 lb. 900 ultimate
+      // ÷ 1.5 SF = 600 lb effective allowable ≈ the 613 ESR allowable (slightly
+      // conservative). So 900 reconciles and is safe — NOT an overstatement.
+      // Stronger framing (2x6+) has higher capacity per the ESR table; a per-assembly
+      // capacity lookup would be more precise than one number (future structural/PE).
+      upliftCapacityLbs: 900,       // ultimate, per pad — reconciles to ~600 allowable via SF (≈ ESR 613)
       downwardCapacityLbs: 1200,
-      shearCapacityLbs: 600,
+      shearCapacityLbs: 600,         // ≈ ESR 613 lb shear allowable basis
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,   // 5/16" (8mm/M8) structural wood screw — was wrongly 0.5" (1/2"); registry-v4 agrees on 5/16"
       fastenerEmbedmentIn: 2.5,
-      fastenerPulloutLbs: 450,      // per lag bolt (ICC-ES ESR-3575)
+      fastenerPulloutLbs: 450,      // ultimate per screw → ~300 allowable via SF ≈ ESR 306/screw
       maxSpacingIn: 48,
       minRafterDepthIn: 3.5,
       iccEsReport: 'ICC-ES ESR-3575',
       ul2703Listed: true,
       compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
+      selfFlashing: true,           // AlphaSeal/RT Butyl integrated — NO separate flashing kit
     },
     hardware: {
       midClamp: 'RT-MINI Mid Clamp',
       endClamp: 'RT-MINI End Clamp',
       railSplice: 'Compatible with IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent rail',
       groundLug: 'RT-MINI Ground Lug',
-      lagBolt: '1/2" × 3" Lag Bolt SS (2 per mount)',
-      flashingKit: 'RT-MINI Flashing Kit',
+      lagBolt: '5/16" (8mm/M8) structural wood screw, ~3.5" (90mm) — 2 per pad, no pilot hole',
+      // No flashingKit — RT-MINI is self-flashing (integrated AlphaSeal/RT Butyl).
       bondingHardware: 'RT-MINI Bond Clip',
     },
-    maxWindSpeedMph: 150,
-    maxSnowLoadPsf: 40,
+    maxWindSpeedMph: 180,           // manufacturer-rated max (was understated 150)
+    maxSnowLoadPsf: 90,             // manufacturer-rated max (was understated 40)
     maxRoofPitchDeg: 40,
     minRoofPitchDeg: 5,
     ul2703Listed: true,
@@ -493,7 +598,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 600,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 450,
       maxSpacingIn: 48,
@@ -537,7 +642,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1300,
       shearCapacityLbs: 650,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 475,
       maxSpacingIn: 48,
@@ -624,7 +729,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1150,
       shearCapacityLbs: 580,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 440,
       maxSpacingIn: 48,
@@ -684,7 +789,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 800,
       shearCapacityLbs: 400,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -729,7 +834,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 900,
       shearCapacityLbs: 500,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -788,7 +893,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1000,
       shearCapacityLbs: 550,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 60,
@@ -924,7 +1029,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1100,
       shearCapacityLbs: 600,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 84,
@@ -969,7 +1074,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1100,
       shearCapacityLbs: 550,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 450,
       maxSpacingIn: 48,
@@ -1030,7 +1135,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 650,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 90,
@@ -1075,7 +1180,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 850,
       shearCapacityLbs: 450,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -1148,7 +1253,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1300,
       shearCapacityLbs: 700,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 96,

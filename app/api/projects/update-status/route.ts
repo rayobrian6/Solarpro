@@ -82,13 +82,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
     }
 
-    // Update project status — try operations column first, fall back to legacy status
+    // Map the pipeline stage back to a legacy status value so the legacy
+    // `status` column stays in sync with `project_status` (rowToProject and
+    // older list/detail views still read `status`).
+    const STAGE_TO_LEGACY: Record<string, string> = {
+      lead: 'lead',
+      site_assessment: 'design',
+      design_complete: 'design',
+      proposal_sent: 'proposal',
+      contract_signed: 'approved',
+      engineering: 'approved',
+      permit_submitted: 'approved',
+      permit_approved: 'approved',
+      install_scheduled: 'approved',
+      installation: 'approved',
+      inspection: 'approved',
+      pto: 'approved',
+      complete: 'installed',
+    };
+    const legacyStatus = STAGE_TO_LEGACY[status] || 'lead';
+
+    // Update project status — try operations column first, fall back to legacy status.
+    // BUGFIX: also write the legacy `status` column so it never goes stale.
     let usedOpsColumn = false;
     try {
       if (status === 'contract_signed') {
         await sql`
           UPDATE projects
           SET project_status = ${status},
+              status = ${legacyStatus},
               contract_signed_at = NOW(),
               updated_at = NOW()
           WHERE id = ${projectId}
@@ -97,6 +119,7 @@ export async function POST(req: NextRequest) {
         await sql`
           UPDATE projects
           SET project_status = ${status},
+              status = ${legacyStatus},
               actual_completion = NOW(),
               updated_at = NOW()
           WHERE id = ${projectId}
@@ -105,6 +128,7 @@ export async function POST(req: NextRequest) {
         await sql`
           UPDATE projects
           SET project_status = ${status},
+              status = ${legacyStatus},
               updated_at = NOW()
           WHERE id = ${projectId}
         `;
@@ -113,23 +137,6 @@ export async function POST(req: NextRequest) {
     } catch (opsErr) {
       // project_status column doesn't exist — update legacy status field instead
       console.warn('[update-status] project_status column missing, using legacy status:', opsErr);
-      // Map pipeline stages back to legacy status values
-      const STAGE_TO_LEGACY: Record<string, string> = {
-        lead: 'lead',
-        site_assessment: 'design',
-        design_complete: 'design',
-        proposal_sent: 'proposal',
-        contract_signed: 'approved',
-        engineering: 'approved',
-        permit_submitted: 'approved',
-        permit_approved: 'approved',
-        install_scheduled: 'approved',
-        installation: 'approved',
-        inspection: 'approved',
-        pto: 'approved',
-        complete: 'installed',
-      };
-      const legacyStatus = STAGE_TO_LEGACY[status] || 'lead';
       await sql`
         UPDATE projects
         SET status = ${legacyStatus},

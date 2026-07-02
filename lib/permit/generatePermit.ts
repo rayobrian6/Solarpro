@@ -304,7 +304,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         rafterSize,
         rafterSpacingIn: rafterSpIn,
         rafterSpanFt: rafterSpFt,
-        woodSpecies: input.project.rafterSpecies || 'douglas_fir_larch',
+        // Normalize to the WoodSpecies enum ('Douglas Fir-Larch' | 'Southern Pine'
+        // | 'Hem-Fir' | 'Spruce-Pine-Fir'). The old default 'douglas_fir_larch'
+        // (and any lowercase/underscored UI value) matched no NDS_FB/FV/E key, so
+        // the engine silently used generic Fb 1000 psi for EVERY project. (Audit
+        // structural finding 3.)
+        woodSpecies: ((): 'Douglas Fir-Larch' | 'Southern Pine' | 'Hem-Fir' | 'Spruce-Pine-Fir' => {
+          const k = (input.project.rafterSpecies ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+          if (k.startsWith('southern')) return 'Southern Pine';
+          if (k.startsWith('hem')) return 'Hem-Fir';
+          if (k.startsWith('spruce') || k === 'spf') return 'Spruce-Pine-Fir';
+          return 'Douglas Fir-Larch';
+        })(),
         panelCount: totalPanels,
         panelLengthIn: input.project.panelLengthIn || 65,
         panelWidthIn: input.project.panelWidthIn || 40,
@@ -336,6 +347,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         rafterSize:             ra.size,
         rafterSpacing:          ra.spacingIn,
         rafterSpan:             ra.spanFt,
+        framingType:            ra.framingType,
         bendingMoment:          ra.bendingMomentDemandFtLbs,
         allowableBendingMoment: ra.bendingMomentCapacityFtLbs,
         utilizationRatio:       ra.overallUtilization,
@@ -833,14 +845,14 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     --border-hvy: 2px solid #000;
     --border-med: 1.5px solid #000;
 
-    --f-xs:  6.2px;
-    --f-sm:  6.6px;
-    --f-md:  7px;
-    --f-lg:  8px;
-    --f-xl:  9px;
-    --f-2xl:10px;
-    --f-3xl:12px;
-    --f-4xl:16px;
+    --f-xs:  7px;
+    --f-sm:  7.4px;
+    --f-md:  7.9px;
+    --f-lg:  9px;
+    --f-xl:  10px;
+    --f-2xl:11.5px;
+    --f-3xl:13.5px;
+    --f-4xl:18px;
 
     --mono: 'Courier New', Courier, monospace;
     --sans: Arial, 'Helvetica Neue', sans-serif;

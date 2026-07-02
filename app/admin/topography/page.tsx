@@ -126,7 +126,7 @@ function StatusRow({
     <div className="flex items-center justify-between py-1.5 border-b border-slate-800/50 last:border-0">
       <span className="text-xs text-slate-400">{label}</span>
       <div className="flex items-center gap-1.5">
-        {note && <span className="text-[10px] text-slate-500 italic">{note}</span>}
+        {note ? <span className="text-[10px] text-slate-500 italic">{note}</span> : null}
         <Icon size={13} className={iconColor} />
       </div>
     </div>
@@ -586,7 +586,7 @@ function IntegrationPanel({
           onToggle={() => setFieldTableExpanded((v) => !v)}
         />
 
-        {state.errors.length > 0 && (
+        {state.errors.length > 0 ? (
           <div className="border border-amber-500/20 rounded-lg p-3 bg-amber-500/5">
             <p className="text-[10px] font-semibold text-amber-400 mb-1.5 uppercase tracking-wide">
               State Fetch Warnings
@@ -595,7 +595,7 @@ function IntegrationPanel({
               <p key={i} className="text-[10px] text-amber-400/80 font-mono leading-relaxed">{e}</p>
             ))}
           </div>
-        )}
+        ) : null}
 
         <div className="border border-slate-800/60 rounded-lg p-3 bg-slate-900/40">
           <p className="text-[10px] text-slate-500 font-mono">
@@ -746,7 +746,7 @@ function ArchitectureNodeCard({ node }: { node: ArchitectureNode }) {
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Evidence</p>
             <div className="flex flex-wrap gap-1.5">{node.evidence.map(x => <span key={x} className="text-[9px] font-mono bg-[#070d1e] border border-white/5 text-slate-300 px-2 py-0.5 rounded-full">{x}</span>)}</div>
           </div>
-          {node.tables && <div><p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">DB Tables / Fields</p><p className="text-[10px] font-mono text-[#fbbf24]/90 leading-relaxed">{node.tables.join(' · ')}</p></div>}
+          {node.tables ? <div><p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">DB Tables / Fields</p><p className="text-[10px] font-mono text-[#fbbf24]/90 leading-relaxed">{node.tables.join(' · ')}</p></div> : null}
         </div>
       ) : null}
     </div>

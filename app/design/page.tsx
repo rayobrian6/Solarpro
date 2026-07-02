@@ -109,7 +109,7 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
           {geocoding ? 'Loading…' : 'Open 3D Design'}
         </button>
       </div>
-      {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+      {error ? <p className="text-red-400 text-xs mt-2">{error}</p> : null}
       <p className="text-slate-500 text-xs mt-2">
         💡 Pick a suggestion to fly straight to the correct rooftop — no extra searching needed.
       </p>

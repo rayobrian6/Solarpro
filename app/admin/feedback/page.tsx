@@ -330,7 +330,7 @@ export default function AdminFeedbackPage() {
                           <Image size={10} /> Screenshot
                         </span>
                       ) : null}
-                      {item.app_version && <span className="font-mono">{item.app_version}</span>}
+                      {item.app_version ? <span className="font-mono">{item.app_version}</span> : null}
                     </div>
                   </div>
 

@@ -783,11 +783,11 @@ function ProjectDetailInner() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-white text-sm">{label}</span>
-                          {isCurrent && <span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300">Current</span>}
+                          {isCurrent ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300">Current</span> : null}
                         </div>
                         <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
                       </div>
-                      {changingType && !isCurrent && <span className="spinner w-4 h-4 flex-shrink-0 mt-0.5" />}
+                      {changingType && !isCurrent ? <span className="spinner w-4 h-4 flex-shrink-0 mt-0.5" /> : null}
                     </button>
                   );
                 })}

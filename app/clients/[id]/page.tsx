@@ -232,7 +232,7 @@ function NotesSection({ clientId }: { clientId: string }) {
             Add
           </button>
         </div>
-        {error && <p className="text-xs text-red-400 mt-1.5">{error}</p>}
+        {error ? <p className="text-xs text-red-400 mt-1.5">{error}</p> : null}
       </div>
 
       {/* Notes list */}
@@ -540,8 +540,8 @@ function ClientDetailContent() {
               </div>
               <div className="flex items-center gap-4 mt-1 text-xs text-slate-400 flex-wrap">
                 <span className="flex items-center gap-1"><MapPin size={12} />{client.city}, {client.state}</span>
-                {client.email && <span className="flex items-center gap-1"><Mail size={12} />{client.email}</span>}
-                {client.phone && <span className="flex items-center gap-1"><Phone size={12} />{client.phone}</span>}
+                {client.email ? <span className="flex items-center gap-1"><Mail size={12} />{client.email}</span> : null}
+                {client.phone ? <span className="flex items-center gap-1"><Phone size={12} />{client.phone}</span> : null}
               </div>
               {/* Metric pills — muted, no colored borders */}
               <div className="flex items-center gap-2 mt-3 flex-wrap">

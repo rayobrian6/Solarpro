@@ -177,7 +177,7 @@ export function PanelCompatibilityBanner({
                         >
                           <div className="font-semibold">
                             {s.manufacturer} {s.model}
-                            {isActive && <span className="ml-1.5 text-emerald-400">✓ applied</span>}
+                            {isActive ? <span className="ml-1.5 text-emerald-400">✓ applied</span> : null}
                           </div>
                           <div className="opacity-75">
                             {s.watts}W · {s.headroomPct.toFixed(1)}% headroom ·{' '}

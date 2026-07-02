@@ -206,59 +206,125 @@ export async function runIntakePipeline(
   let opportunityId: string | null = null
   try {
     const isDupFlagged = dupResult.is_flagged
+    const idemKey = options.idempotency_key ?? null
 
-    const rows = await sql`
-      INSERT INTO network_opportunities (
-        first_name, last_name, email, phone,
-        address_line1, address_line2, city, state, zip, county,
-        latitude, longitude,
-        monthly_bill_amount, current_electricity_rate,
-        property_type, home_ownership, roof_type, roof_shade,
-        roof_age_years, square_feet_living,
-        source_system, source_channel,
-        utm_source, utm_medium, utm_campaign, utm_content, utm_term,
-        gclid, fbclid,
-        is_duplicate_flagged, duplicate_score, duplicate_of_id,
-        consent_given,
-        notes,
-        status
-      )
-      VALUES (
-        ${payload.first_name}, ${payload.last_name},
-        ${payload.email}, ${payload.phone},
-        ${payload.address_line1}, ${payload.address_line2},
-        ${payload.city}, ${payload.state}, ${payload.zip}, ${payload.county},
-        ${payload.latitude}, ${payload.longitude},
-        ${payload.monthly_bill_amount}, ${payload.current_electricity_rate},
-        ${payload.property_type}, ${payload.home_ownership},
-        ${payload.roof_type}, ${payload.roof_shade},
-        ${payload.roof_age_years}, ${payload.square_feet},
-        ${payload.source_system}, ${payload.source_channel},
-        ${payload.utm_source}, ${payload.utm_medium},
-        ${payload.utm_campaign}, ${payload.utm_content}, ${payload.utm_term},
-        ${payload.gclid}, ${payload.fbclid},
-        ${isDupFlagged}, ${dupResult.score},
-        ${dupResult.best_match?.opportunity_id || null},
-        ${payload.consent_given},
-        ${payload.notes},
-        'new'
-      )
-      RETURNING id
-    `
+    // RACE-SAFE INSERT: write the idempotency key INSIDE the insert with
+    // ON CONFLICT DO NOTHING, so the unique index (migration 089) is what
+    // serializes concurrent re-deliveries — not a non-transactional pre-check
+    // plus a post-insert UPDATE (which left a duplicate row already inserted).
+    // A NULL key never conflicts (Postgres treats NULLs as distinct), so plain
+    // keyless submissions are unaffected. Falls back to a keyless insert if the
+    // column isn't present yet (migration 089 pending) so intake never breaks.
+    let rows: Array<{ id?: string }>
+    try {
+      rows = await sql`
+        INSERT INTO network_opportunities (
+          first_name, last_name, email, phone,
+          address_line1, address_line2, city, state, zip, county,
+          latitude, longitude,
+          monthly_bill_amount, current_electricity_rate,
+          property_type, home_ownership, roof_type, roof_shade,
+          roof_age_years, square_feet_living,
+          source_system, source_channel,
+          utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+          gclid, fbclid,
+          is_duplicate_flagged, duplicate_score, duplicate_of_id,
+          consent_given,
+          notes,
+          intake_idempotency_key,
+          status
+        )
+        VALUES (
+          ${payload.first_name}, ${payload.last_name},
+          ${payload.email}, ${payload.phone},
+          ${payload.address_line1}, ${payload.address_line2},
+          ${payload.city}, ${payload.state}, ${payload.zip}, ${payload.county},
+          ${payload.latitude}, ${payload.longitude},
+          ${payload.monthly_bill_amount}, ${payload.current_electricity_rate},
+          ${payload.property_type}, ${payload.home_ownership},
+          ${payload.roof_type}, ${payload.roof_shade},
+          ${payload.roof_age_years}, ${payload.square_feet},
+          ${payload.source_system}, ${payload.source_channel},
+          ${payload.utm_source}, ${payload.utm_medium},
+          ${payload.utm_campaign}, ${payload.utm_content}, ${payload.utm_term},
+          ${payload.gclid}, ${payload.fbclid},
+          ${isDupFlagged}, ${dupResult.score},
+          ${dupResult.best_match?.opportunity_id || null},
+          ${payload.consent_given},
+          ${payload.notes},
+          ${idemKey},
+          'new'
+        )
+        ON CONFLICT (intake_idempotency_key) DO NOTHING
+        RETURNING id
+      `
+    } catch (colErr) {
+      // intake_idempotency_key column/index not present yet (migration 089
+      // pending) — fall back to a plain keyless insert so intake never breaks.
+      console.warn('[intakePipeline] idempotency column missing, plain insert:', (colErr as Error).message)
+      rows = await sql`
+        INSERT INTO network_opportunities (
+          first_name, last_name, email, phone,
+          address_line1, address_line2, city, state, zip, county,
+          latitude, longitude,
+          monthly_bill_amount, current_electricity_rate,
+          property_type, home_ownership, roof_type, roof_shade,
+          roof_age_years, square_feet_living,
+          source_system, source_channel,
+          utm_source, utm_medium, utm_campaign, utm_content, utm_term,
+          gclid, fbclid,
+          is_duplicate_flagged, duplicate_score, duplicate_of_id,
+          consent_given,
+          notes,
+          status
+        )
+        VALUES (
+          ${payload.first_name}, ${payload.last_name},
+          ${payload.email}, ${payload.phone},
+          ${payload.address_line1}, ${payload.address_line2},
+          ${payload.city}, ${payload.state}, ${payload.zip}, ${payload.county},
+          ${payload.latitude}, ${payload.longitude},
+          ${payload.monthly_bill_amount}, ${payload.current_electricity_rate},
+          ${payload.property_type}, ${payload.home_ownership},
+          ${payload.roof_type}, ${payload.roof_shade},
+          ${payload.roof_age_years}, ${payload.square_feet},
+          ${payload.source_system}, ${payload.source_channel},
+          ${payload.utm_source}, ${payload.utm_medium},
+          ${payload.utm_campaign}, ${payload.utm_content}, ${payload.utm_term},
+          ${payload.gclid}, ${payload.fbclid},
+          ${isDupFlagged}, ${dupResult.score},
+          ${dupResult.best_match?.opportunity_id || null},
+          ${payload.consent_given},
+          ${payload.notes},
+          'new'
+        )
+        RETURNING id
+      `
+    }
     opportunityId = rows[0]?.id as string || null
 
-    // Persist the idempotency key so retries / concurrent re-deliveries are
-    // caught by the pre-check (and the unique index). Best-effort — degrades
-    // silently if the column isn't present yet (migration 089 pending).
-    if (opportunityId && options.idempotency_key) {
-      try {
-        await sql`
-          UPDATE network_opportunities
-          SET intake_idempotency_key = ${options.idempotency_key}
-          WHERE id = ${opportunityId}
-        `
-      } catch (e) {
-        console.warn('[intakePipeline] idempotency persist skipped:', (e as Error).message)
+    // ON CONFLICT DO NOTHING returned no row → a concurrent/duplicate delivery
+    // with the same key already created the opportunity. Return that one as a
+    // duplicate instead of falling through and erroring on a null id.
+    if (!opportunityId && idemKey) {
+      const existing = await sql`
+        SELECT id FROM network_opportunities
+        WHERE intake_idempotency_key = ${idemKey}
+        LIMIT 1
+      `
+      const existingId = (existing[0]?.id as string) || null
+      if (existingId) {
+        return {
+          action: 'duplicate_blocked',
+          opportunity_id: existingId,
+          idempotency_key: idemKey,
+          duplicate_score: 100,
+          duplicate_match_id: existingId,
+          validation_errors: [],
+          validation_warnings: validationResult.warnings,
+          event_id: makeEventId(),
+          duration_ms: Date.now() - startedAt,
+        }
       }
     }
   } catch (err) {

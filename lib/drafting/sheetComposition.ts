@@ -370,10 +370,18 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     ? Math.round(Math.tan(rawPitch * Math.PI / 180) * 12 * 10) / 10
     : rawPitch;
 
+  // Fire setback: prefer the AHJ ridge/edge setback (IFC 605.11 — matches the
+  // notes block) over the old hardcoded 3'. Default 1.5' (18") not 3'.
+  const ahjSetbackIn = (p?.ahjRidgeSetbackIn as number) ?? (p?.ahjRoofSetbackIn as number);
+  const setbackFt = (ahjSetbackIn && ahjSetbackIn > 0)
+    ? Math.round((ahjSetbackIn / 12) * 10) / 10
+    : (pl?.setbacks?.eaveM ? mToFt(pl.setbacks.eaveM) : ((p?.fireSetbackFt as number) ?? 1.5));
+
   return {
     pitchStr:      `${pitchRatio}:12`,
-    azimuthDeg:    pl?.azimuth   ?? (p?.roofAzimuth as number)    ?? 180,
-    setbackFt:     pl?.setbacks?.eaveM ? mToFt(pl.setbacks.eaveM) : ((p?.fireSetbackFt as number) ?? 3),
+    // Round azimuth — was leaking the raw geometry float (e.g. 180.00081202849463°).
+    azimuthDeg:    Math.round(pl?.azimuth ?? (p?.roofAzimuth as number) ?? 180),
+    setbackFt,
     roofType:      ((p?.roofType as string) || 'SHINGLE').toUpperCase(),
     mountSys:      ((p?.mountingSystem as string) || 'IRONRIDGE XR100').toUpperCase(),
     rafterSize:    ((p?.rafterSize as string) || '2x6'),

@@ -40,6 +40,35 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export const SURFACE_OFFSET_M = 0.12; // v47.143: increased to prevent Z-fighting with mesh
 
+/**
+ * v62: Single source of truth for "was this click on the real 3D mesh?".
+ *
+ * On a bare 2D map (no Google Photorealistic 3D Tiles loaded — fallback to
+ * satellite imagery + WGS84 ellipsoid), every pick in plane3d/mark_plane mode
+ * falls through getWorldPosition's chain (3D tiles → terrain globe → ellipsoid)
+ * and lands on the WGS84 ellipsoid at h=0. The trace looks like 3+ points on a
+ * flat horizontal plane: computePlaneFromPoints3D's Newell normal points straight
+ * up, the eave axis falls through to the most-horizontal-edge heuristic, and the
+ * resulting frame is essentially (n=up, u=arbitrary horizontal, v=arbitrary
+ * horizontal). buildSurfaceGrid then places panels on this horizontal frame,
+ * aligned to whatever arbitrary direction — not to the user's traced polygon.
+ * That's the "wonky panels on bare maps" bug.
+ *
+ * The fix is to refuse plane3d/mark_plane input that didn't actually hit the 3D
+ * mesh. Two layers (A + C):
+ *   A. Mode-entry guard in SolarEngine3D.tsx (block the tools when renderMode
+ *      !== 'TILES' — surfaces "use Auto Fill instead").
+ *   C. Click-time defense here: this helper gates each pick. Centralizing the
+ *      check in roofPlane3D.ts keeps the contract testable and prevents drift
+ *      between the two layers if a future change ever drops one.
+ *
+ * Only '3dtiles' is the real-roof pick. 'terrain' and 'ellipsoid' are the
+ * fallback chain that this guard rejects.
+ */
+export function is3DTilesPickMethod(pickMethod: string | undefined | null): boolean {
+  return pickMethod === '3dtiles';
+}
+
 // v47.153: PANEL_STEP_U/V removed.
 // computeGridAlignedOrigin was using these stale step sizes (width+0.02, height+0.05)
 // but buildSurfaceGridECEF is always called with panelSpacingM=0, rowSpacingM=0
@@ -374,10 +403,19 @@ export function computePlaneFromPoints3D(pts: Cart3[]): Plane3DFrame {
   // from peak to corner was longer than the eave edge, giving a wrong u-axis.
   // mostHorizontalEdgeAxis scores edges by len*(1-|dot(dir,upslope)|) so the
   // ridge/eave edge always wins regardless of click order or roof aspect ratio.
-  const mostHorizEdge = mostHorizontalEdgeAxis(projectedPts, normal);
-  // Remove any residual normal component from the edge direction.
-  // u0 = normalize(mostHorizEdge - dot(mostHorizEdge, n)*n)
-  const u0 = projectAxisOntoPlane(mostHorizEdge, normal);
+  // v62: Default the grid u-axis to the EAVE — the horizontal in-plane direction,
+  // = cross(normal, up). The eave is geometric (derived from the slope), so it can
+  // never be a rake/diagonal the way the most-horizontal-EDGE heuristic could be on
+  // an irregular polygon (the cause of "panels sideways"). Baking it into the frame
+  // means EVERY fill path (placement AND any re-layout) is eave-aligned with no
+  // per-call override to lose. Flat roofs (no slope → degenerate eave) fall back to
+  // the original most-horizontal-edge heuristic.
+  const eaveAxis = cross3(normal, radialUp); // ⊥ up (horizontal) AND ⊥ normal (in-plane)
+  const uAxisSource = mag3(eaveAxis) > 0.05
+    ? eaveAxis
+    : mostHorizontalEdgeAxis(projectedPts, normal); // flat roof fallback
+  // Remove any residual normal component from the axis (project into the plane).
+  const u0 = projectAxisOntoPlane(uAxisSource, normal);
 
   // ── Step 6: Strict orthonormal frame — two-pass enforcement ──────────────
   // Pass 1: v = cross(n, u0)  — guaranteed ⊥ to both n and u0
@@ -602,10 +640,31 @@ export function renderPlane3DEntity(
   planeId: string,
   frame?: Plane3DFrame,
   selected = false,
+  outlineOnly = false, // marked faces (no panels) → clean outline, no fill/grid/label/arrows
 ): string[] {
   const entityIds: string[] = [];
 
   try {
+    // ── OUTLINE-ONLY (Mark Plane) ────────────────────────────────────────────
+    // A face marked for the roof model but not paneled: just a crisp edge, so the
+    // roof reads clean and the Roof Model edge colours stand out (no dark fill,
+    // no grid, no label, no slope arrows).
+    if (outlineOnly) {
+      const ring = [...pts3D, pts3D[0]];
+      const outline = viewer.entities.add({
+        name: `[PLANE3D-OUTLINE] ${planeId}`,
+        polyline: {
+          positions:     ring,
+          width:         selected ? 3 : 2,
+          material:      selected ? C.Color.fromCssColorString('#00e5ff').withAlpha(0.95) : C.Color.WHITE.withAlpha(0.55),
+          clampToGround: false,
+          arcType:       C.ArcType.NONE,
+        },
+      });
+      entityIds.push(outline.id);
+      return entityIds;
+    }
+
     // ── 1. FLAT ROOF OVERLAY ─────────────────────────────────────────────
     // v47.140: Section 1 — Flat roof overlay rendered from PROJECTED polygon pts.
     // pts3D are MATHEMATICALLY PLANAR (computed by computePlaneFromPoints3D),

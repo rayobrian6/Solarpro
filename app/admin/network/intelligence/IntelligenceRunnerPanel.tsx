@@ -404,7 +404,7 @@ export default function IntelligenceRunnerPanel({
               <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400">Write mode is hidden for non-super_admin users.</div>
             )}
 
-            {validationError && <div className="mt-4 text-xs text-amber-300">{validationError}</div>}
+            {validationError ? <div className="mt-4 text-xs text-amber-300">{validationError}</div> : null}
 
             <button
               type="submit"
@@ -427,7 +427,7 @@ export default function IntelligenceRunnerPanel({
           <div className="mb-4 grid grid-cols-1 gap-3 text-xs text-slate-400 md:grid-cols-2">
             <div><span className="text-slate-500">run_id:</span> <span className="font-mono text-slate-200">{summary.run_id}</span></div>
             <div><span className="text-slate-500">dry_run:</span> <span className="font-mono text-slate-200">{String(summary.dry_run)}</span></div>
-            {summary.replay_boundary && <div className="md:col-span-2"><span className="text-slate-500">replay_boundary:</span> <span className="font-mono text-slate-200 break-all">{summary.replay_boundary}</span></div>}
+            {summary.replay_boundary ? <div className="md:col-span-2"><span className="text-slate-500">replay_boundary:</span> <span className="font-mono text-slate-200 break-all">{summary.replay_boundary}</span></div> : null}
             <div><span className="text-slate-500">producers executed:</span> <span className="font-mono text-slate-200">{summary.producers_executed.join(', ') || 'none'}</span></div>
             <div><span className="text-slate-500">duration:</span> <span className="font-mono text-slate-200">{summary.duration_ms}ms</span></div>
           </div>
@@ -479,8 +479,8 @@ export default function IntelligenceRunnerPanel({
             <XCircle className="h-5 w-5 text-red-300" />
             <h2 className="text-sm font-bold text-white">Validation / Failure Output</h2>
           </div>
-          {clientError && <p className="mb-3 text-sm text-red-200">{clientError}</p>}
-          {result?.error && <p className="mb-3 text-sm text-red-200">{result.error}</p>}
+          {clientError ? <p className="mb-3 text-sm text-red-200">{clientError}</p> : null}
+          {result?.error ? <p className="mb-3 text-sm text-red-200">{result.error}</p> : null}
           {summary?.validation_failures.map((failure, index) => (
             <div key={`validation-${index}`} className="mb-2 rounded-lg border border-red-500/20 bg-slate-950/40 p-3 text-xs text-red-100">
               <div className="font-semibold">Validation failure: {safeText(failure.producer_name) || 'unknown producer'}</div>
