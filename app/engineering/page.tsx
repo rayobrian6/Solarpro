@@ -5314,9 +5314,10 @@ function EngineeringPageInner() {
           // Pass ComputedSystem.bomQuantities for EXACT match with summary card quantities
           bomQuantities:    cs.bomQuantities,
           // Generator / ATS / BUI — for BOM line items
-          generatorId:      config.generatorId || undefined,
-          atsId:            config.atsId || undefined,
-          backupInterfaceId: config.backupInterfaceId || undefined,
+          generatorId:          config.generatorId || undefined,
+          atsId:                config.atsId || undefined,
+          backupInterfaceId:    config.backupInterfaceId || undefined,
+          generatorWireLength:  config.generatorWireLength || undefined,
           generatorKw:      config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })() : undefined,
           atsAmpRating:     config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })() : undefined,
           backupInterfaceMaxA: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.maxContinuousOutputA ?? undefined; })() : undefined,
