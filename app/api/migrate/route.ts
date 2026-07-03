@@ -4106,7 +4106,7 @@ export async function POST(req: NextRequest) {
       `;
       if (auditLogExists.length === 0) {
         await sql`
-          CREATE TABLE audit_log (
+          CREATE TABLE IF NOT EXISTS audit_log (
             id            BIGSERIAL PRIMARY KEY,
             timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             category      TEXT NOT NULL,
@@ -4125,12 +4125,12 @@ export async function POST(req: NextRequest) {
             entry_hash    TEXT NOT NULL
           )
         `;
-        await sql`CREATE INDEX idx_audit_log_timestamp ON audit_log (timestamp DESC)`;
-        await sql`CREATE INDEX idx_audit_log_category ON audit_log (category)`;
-        await sql`CREATE INDEX idx_audit_log_actor_id ON audit_log (actor_id)`;
-        await sql`CREATE INDEX idx_audit_log_action ON audit_log (action)`;
-        await sql`CREATE INDEX idx_audit_log_target ON audit_log (target_type, target_id)`;
-        await sql`CREATE INDEX idx_audit_log_entry_hash ON audit_log (entry_hash)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log (timestamp DESC)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_category ON audit_log (category)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_actor_id ON audit_log (actor_id)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_target ON audit_log (target_type, target_id)`;
+        await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_entry_hash ON audit_log (entry_hash)`;
         results.push('✅ Migration 100: audit_log table + 6 indexes created');
       } else {
         results.push('⏭ Migration 100: audit_log table already exists');
@@ -4155,27 +4155,46 @@ export async function POST(req: NextRequest) {
       results.push(`✅ Migration 100: MFA columns on users — ${mfaAdded} added (5 total)`);
 
       // Section C: mfa_recovery_codes table
+      // FK constraint added via guarded DO block (not inline) for idempotency
       const recoveryTableExists = await sql`
         SELECT 1 FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = 'mfa_recovery_codes'
       `;
       if (recoveryTableExists.length === 0) {
         await sql`
-          CREATE TABLE mfa_recovery_codes (
+          CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
             id          BIGSERIAL PRIMARY KEY,
-            user_id     TEXT NOT NULL REFERENCES users(id),
+            user_id     UUID NOT NULL,
             code_hash   TEXT NOT NULL,
             used        BOOLEAN DEFAULT FALSE,
             created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             used_at     TIMESTAMPTZ
           )
         `;
-        await sql`CREATE INDEX idx_mfa_recovery_codes_user ON mfa_recovery_codes (user_id)`;
-        await sql`CREATE INDEX idx_mfa_recovery_codes_unused ON mfa_recovery_codes (user_id, used) WHERE used = false`;
-        results.push('✅ Migration 100: mfa_recovery_codes table + 2 indexes created');
+        results.push('✅ Migration 100: mfa_recovery_codes table created');
       } else {
         results.push('⏭ Migration 100: mfa_recovery_codes table already exists');
       }
+
+      // FK: mfa_recovery_codes.user_id → users(id) — guarded for idempotency
+      const fkExists = await sql`
+        SELECT 1 FROM pg_constraint WHERE conname = 'mfa_recovery_codes_user_id_fkey'
+      `;
+      if (fkExists.length === 0) {
+        await sql`
+          ALTER TABLE mfa_recovery_codes
+            ADD CONSTRAINT mfa_recovery_codes_user_id_fkey
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        `;
+        results.push('✅ Migration 100: mfa_recovery_codes FK constraint added');
+      } else {
+        results.push('⏭ Migration 100: mfa_recovery_codes FK constraint already exists');
+      }
+
+      // Indexes (idempotent)
+      await sql`CREATE INDEX IF NOT EXISTS idx_mfa_recovery_codes_user ON mfa_recovery_codes (user_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_mfa_recovery_codes_unused ON mfa_recovery_codes (user_id, used) WHERE used = false`;
+      results.push('✅ Migration 100: mfa_recovery_codes indexes ensured');
 
       // Section D: Consent tracking columns on users
       const consentCols: Array<{ col: string; ddl: () => Promise<unknown> }> = [

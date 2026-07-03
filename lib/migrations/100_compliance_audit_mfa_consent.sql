@@ -57,15 +57,28 @@ COMMENT ON COLUMN users.mfa_enrolled_at IS 'Timestamp of MFA enrollment. Used fo
 
 -- ── Section C: MFA recovery codes table ──────────────────────────────────────
 -- Recovery codes are single-use, one-way hashed for security.
+-- FK constraint added via guarded DO block below (not inline) for idempotency.
 
 CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
   id          BIGSERIAL PRIMARY KEY,
-  user_id     TEXT NOT NULL REFERENCES users(id),
+  user_id     UUID NOT NULL,
   code_hash   TEXT NOT NULL,       -- SHA-256 hash of the recovery code (never stored plaintext)
   used        BOOLEAN DEFAULT FALSE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   used_at     TIMESTAMPTZ          -- When the code was used (for audit trail)
 );
+
+-- FK: mfa_recovery_codes.user_id references users(id) - guarded for idempotency
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'mfa_recovery_codes_user_id_fkey'
+  ) THEN
+    ALTER TABLE mfa_recovery_codes
+      ADD CONSTRAINT mfa_recovery_codes_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_mfa_recovery_codes_user ON mfa_recovery_codes (user_id);
 CREATE INDEX IF NOT EXISTS idx_mfa_recovery_codes_unused ON mfa_recovery_codes (user_id, used) WHERE used = false;
