@@ -213,8 +213,8 @@ export function drawUtilityAnalysis(
   // ── Utility name ────────────────────────────────────────────────────────────
   if (hasUtility) {
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#94a3b8">Utility</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#e2e8f0">${eng!.utilityName}</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Utility</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#111">${eng!.utilityName}</text>`,
     );
     curY += 12;
   }
@@ -228,13 +228,13 @@ export function drawUtilityAnalysis(
       eng!.rateSource === 'utility-db'        ? '(utility avg)'     :
       eng!.rateSource === 'manual'            ? '(manual entry)'    : '';
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#94a3b8">Electric Rate</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Electric Rate</text>`,
       `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#34d399">${rateStr}</text>`,
     );
     curY += 11;
     if (sourceLabel) {
       lines.push(
-        `<text x="${x + w}" y="${curY + 6}" text-anchor="end" font-family="Arial,sans-serif" font-size="5.5" fill="#64748b" font-style="italic">${sourceLabel}</text>`,
+        `<text x="${x + w}" y="${curY + 6}" text-anchor="end" font-family="Arial,sans-serif" font-size="5.5" fill="#777" font-style="italic">${sourceLabel}</text>`,
       );
       curY += 9;
     }
@@ -243,8 +243,8 @@ export function drawUtilityAnalysis(
   // ── Monthly usage ────────────────────────────────────────────────────────────
   if (eng?.monthlyKwh != null && eng.monthlyKwh > 0) {
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#94a3b8">Monthly Usage</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#e2e8f0">${eng.monthlyKwh.toLocaleString()} kWh</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Monthly Usage</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#111">${eng.monthlyKwh.toLocaleString()} kWh</text>`,
     );
     curY += 11;
   }
@@ -257,7 +257,7 @@ export function drawUtilityAnalysis(
     const combinedColor = bi!.combinedUtilityDetected ? '#fbbf24' : '#34d399';
     const combinedLabel = bi!.combinedUtilityDetected ? 'YES' : 'NO';
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#94a3b8">Combined Utility</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Combined Utility</text>`,
       `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="${combinedColor}">${combinedLabel}</text>`,
     );
     curY += 11;
@@ -266,7 +266,7 @@ export function drawUtilityAnalysis(
     if (bi!.detectedServices.length > 0) {
       const serviceStr = bi!.detectedServices.slice(0, 3).join(', ');
       lines.push(
-        `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#94a3b8">Services</text>`,
+        `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Services</text>`,
         `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6" fill="#fbbf24" font-style="italic">${serviceStr}</text>`,
       );
       curY += 11;
@@ -275,7 +275,7 @@ export function drawUtilityAnalysis(
     // Confidence
     const confColor = bi!.confidence === 'high' ? '#34d399' : bi!.confidence === 'medium' ? '#fbbf24' : '#94a3b8';
     lines.push(
-      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#94a3b8">Rate Confidence</text>`,
+      `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Rate Confidence</text>`,
       `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="${confColor}">${bi!.confidence.toUpperCase()}</text>`,
     );
     curY += 11;

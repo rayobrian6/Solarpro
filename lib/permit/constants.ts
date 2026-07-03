@@ -327,7 +327,37 @@ const PDF_PAGE_CONFIG = {
 // auto-resolutions table compacted/capped at 5 rows (real-data overflow).
 // (5) RT-Mini/rail-less attachment callout says 'direct-attach mounts', not
 // 'L-foot'.
-const PLANSET_ENGINE_VERSION = 47381;
+// 47382 (2026-07-03): AUDIT ROUND — 9-agent verification of Ray's v47381 regen
+// against all 61 teardown findings (34 fixed / 34 partial / 26 still-present;
+// audit JSON in session scratchpad). Root theme: sheet TEXT still contradicted
+// the fixed DRAWINGS, plus a stale stored artifact resurrected old defects.
+// (1) E-1 uses the LIVE SLD first — a stored "Generate SLD" SVG is frozen at
+// its old engine version and re-shipped every fixed defect (build badge,
+// '3#32' corruption, ceil/16 branches); stored is now fallback-only.
+// (2) ONE fire-setback rule (lib/permit/utils/fireSetback.ts) feeds the
+// drawing, PV-2 data zone, and PV-2B notes — no more "1.5' EDGES" text beside
+// 3'-0" hatched bands; PV-2B note states the coverage basis.
+// (3) PV-3 detail SINGLE-SOURCED with its own specs table: adapter passes
+// mountingSystemId/_canonical/resolvedAttachSpacingIn through to templates
+// (they were stripped — the root cause of drawing-vs-table contradictions);
+// callouts/notes/layers use DB lag+embed; rail-less wording; dimensions
+// de-duplicated + de-collided; detail circle enlarged w/ fixed-pitch leader
+// labels; UTILITY ANALYSIS block was near-white text on white (now dark).
+// (4) titleBlock construction note prescribes 705.11 tap language on
+// supply-side jobs (was load-side backfeed boilerplate set-wide).
+// (5) Scale statements unified: title block prints AS NOTED only on drawing
+// sheets (PV-1/2/2B/3), NTS elsewhere; cover sheet-ID row matches.
+// (6) PV-0 vicinity: PROJECT SITE pin label (was empty), NTS to corner (sat
+// on the house), north arrow, address caption in normal flow; module-wattage
+// no longer printed twice; AC/DC kW precision unified at 2 decimals.
+// (7) PV-2 flags designed-module/obstruction CONFLICTS in red (module drawn
+// over a vent shipped unmarked); attach-spacing text single-sourced on the
+// plan sheet too.
+// (8) PV-1: legend keys = the same UM/MSP/AC/CB tag codes as the wall chips
+// (numbered rows never matched the plan), leaders stop short of their text
+// (self-strikethrough), emoji footer gone, honest legend swatches, disconnect
+// name consistent between legend and plan.
+const PLANSET_ENGINE_VERSION = 47382;
 
 
 

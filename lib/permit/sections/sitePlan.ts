@@ -43,22 +43,25 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const hasBatt   = (project.batteryCount ?? 0) > 0;
   const hasAcDisc = project.acDisconnect !== false;
 
-  interface EItem { label: string; desc: string; }
+  interface EItem { label: string; desc: string; tag: string; }
   // Battery-only equipment (System Controller, Backup Load Panel) is gated on
   // hasBatt — the legend listed phantom ESS gear on battery-less jobs, with the
   // "controller" model set to the MICROINVERTER model. The AC disconnect on a
   // supply-side tap is the FUSED tap OCPD (see E-1), not non-fused.
   const _pv1SupplySide = project.interconnectionMethod === 'SUPPLY_SIDE_TAP';
+  // Legend keys use the SAME tag codes as the wall chips on the drawing —
+  // numbered legend rows (1-6) that never appeared on the plan were a
+  // coordination P1 an AHJ red-lines.
   const equipItems: EItem[] = [
-    { label: '(E) UTILITY METER',                               desc: utility },
-    { label: '(E) MAIN SERVICE PANEL',                          desc: `${project.mainPanelAmps || 200}A — ${(project.mainPanelBrand || 'EXISTING').toUpperCase()}` },
-    { label: `(N) ${hasAcDisc ? '100A' : '60A'} ${_pv1SupplySide ? 'FUSED' : 'NON-FUSED'} AC DISCONNECT`, desc: _pv1SupplySide ? 'TAP OCPD — NEC 705.11(C), 690.15' : 'WITHIN SIGHT — NEC 690.15' },
-    { label: `(N) ${invMfr} COMBINER BOX`,                      desc: 'EXTERIOR WALL' },
+    { tag: 'UM',  label: '(E) UTILITY METER',                   desc: utility },
+    { tag: 'MSP', label: '(E) MAIN SERVICE PANEL',              desc: `${project.mainPanelAmps || 200}A — ${(project.mainPanelBrand || 'EXISTING').toUpperCase()}` },
+    { tag: 'AC',  label: `(N) ${hasAcDisc ? '100A' : '60A'} ${_pv1SupplySide ? 'FUSED' : 'NON-FUSED'} AC DISCONNECT`, desc: _pv1SupplySide ? 'TAP OCPD — NEC 705.11(C), 690.15' : 'WITHIN SIGHT — NEC 690.15' },
+    { tag: 'CB',  label: `(N) ${invMfr} COMBINER BOX`,          desc: 'EXTERIOR WALL — ADJACENT TO MSP (FIELD VERIFY)' },
     ...(hasBatt ? [
-      { label: `(N) ${invMfr} SYSTEM CONTROLLER`,               desc: 'ESS / MICROGRID INTERCONNECT DEVICE' },
-      { label: '(N) BACKUP LOAD PANEL',                         desc: 'CRITICAL LOADS SUB-PANEL' },
-      { label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 5.0) > 0 ? ' — ' + (project.batteryKwh ?? 5.0).toFixed(1) + ' kWh' : ''}` },
-      { label: '(N) 60A NON-FUSED AC DISCONNECT',               desc: 'ADJACENT TO UTILITY METER' },
+      { tag: 'SC',  label: `(N) ${invMfr} SYSTEM CONTROLLER`,   desc: 'ESS / MICROGRID INTERCONNECT DEVICE' },
+      { tag: 'BLP', label: '(N) BACKUP LOAD PANEL',             desc: 'CRITICAL LOADS SUB-PANEL' },
+      { tag: 'BAT', label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 5.0) > 0 ? ' — ' + (project.batteryKwh ?? 5.0).toFixed(1) + ' kWh' : ''}` },
+      { tag: 'AC2', label: '(N) 60A NON-FUSED AC DISCONNECT',   desc: 'ADJACENT TO UTILITY METER' },
     ] : []),
   ];
 
@@ -373,7 +376,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const TAGS: Record<string, { tag: string; name: string }> = {
           utility_meter: { tag: 'UM',  name: '(E) UTILITY METER' },
           msp:           { tag: 'MSP', name: '(E) MAIN SERVICE PANEL' },
-          ac_disconnect: { tag: 'AC',  name: '(N) AC DISCONNECT' },
+          ac_disconnect: { tag: 'AC',  name: `(N) ${hasAcDisc ? '100A' : '60A'} ${_pv1SupplySide ? 'FUSED' : 'NON-FUSED'} AC DISCONNECT` },
         };
         // Reference-style: small white SQUARE tags on the wall, straight
         // fanned leaders to a margin column, halo text (no white boxes piled
@@ -390,10 +393,13 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           const meta = TAGS[eq.kind];
           const prov = eq.provenance === 'survey_photo_gps' ? 'PER SURVEY PHOTO GPS' : 'APPROX. — FIELD VERIFY';
           ly = Math.max(ly, cropY + 22); ly = Math.min(ly, cropY + cropH - 26);
-          // leader: straight, white casing + dark line
-          const lexEnd = colRight ? colX - 4 : colX + 4;
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.9"/>`);
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#111" stroke-width="1.1"/>`);
+          // leader: straight, white casing + dark line — ends BEFORE the text
+          // block (it used to terminate under the label and read as a
+          // strikethrough across its own 'FIELD VERIFY' subtext).
+          const _nameW = meta.name.length * 6.2 + 6;
+          const lexEnd = colRight ? colX - _nameW - 6 : colX + _nameW + 6;
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3).toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.9"/>`);
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3).toFixed(1)}" stroke="#111" stroke-width="1.1"/>`);
           // wall tag: white square + code
           parts.push(`<rect x="${(p.x - 6).toFixed(1)}" y="${(p.y - 6).toFixed(1)}" width="12" height="12" fill="#fff" stroke="#111" stroke-width="1.3"/>`);
           parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${meta.tag.length > 2 ? 5.6 : 7}" font-weight="900" fill="#111">${meta.tag}</text>`);
@@ -444,7 +450,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           ${furniture}
         </svg>
       </div>
-      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2)||'—'} kW DC &nbsp;|&nbsp; ${aerial.imageSource === 'nearmap' ? '🛰️ Nearmap HD aerial · 7.5 cm/px orthophoto' : '🛰️ Satellite aerial'}</div>`;
+      <div class="f-xs muted right" style="font-style:italic;margin-top:2px;">${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2)||'—'} kW DC &nbsp;|&nbsp; ${aerial.imageSource === 'nearmap' ? 'Nearmap HD aerial · 7.5 cm/px orthophoto' : 'Satellite aerial imagery'}</div>`;
 
     // HONEST legend — list exactly what this aerial actually draws, nothing
     // else (the old hardcoded list promised PROPERTY LINE / FIRE SETBACK that
@@ -454,7 +460,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
       ...(parcelSvg ? [{ fill:'none', stroke:'#111111', dash:true, label:'PROPERTY LINE (COUNTY GIS)' }] : []),
       ...(dimSvg ? [{ fill:'none', stroke:'#6b7280', dash:true,  label:'SUBJECT BUILDING' }] : []),
       ...(canopySvg ? [{ fill:'rgba(22,101,52,0.25)', stroke:'#1a7a2e', dash:true, label:'TREE CANOPY — VERIFY' }] : []),
-      ...(eqSvg ? [{ fill:'#1e40af', stroke:'#ffffff', dash:false, label:'SERVICE EQUIPMENT (TAGGED)' }] : []),
+      ...(eqSvg ? [{ fill:'#ffffff', stroke:'#111111', dash:false, label:'SERVICE EQUIPMENT (TAGGED)' }] : []),
     ];
   } else {
     // ── SCHEMATIC MODE: proper GPS-projected roof planes + panels ──────────
@@ -474,7 +480,7 @@ export function buildPv1Page(
   input: PermitInput,
   pageNum: number,
   totalPages: number,
-  equipItems: Array<{label:string;desc:string}>,
+  equipItems: Array<{label:string;desc:string;tag:string}>,
   drawingHtml: string,
   apn: string,
   ahj: string,
@@ -495,11 +501,11 @@ export function buildPv1Page(
     'VISIBLE, LOCKABLE, LABELED, KNIFE-BLADE AC DISCONNECT LOCATED WITHIN 10\' OF UTILITY METER.',
   ];
 
-  const equipCallouts = equipItems.map((eq,i)=>`
+  const equipCallouts = equipItems.map((eq)=>`
     <div style="margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #000;">
       <div style="display:flex;align-items:flex-start;gap:3px;width:100%;">
         <div style="flex-shrink:0;width:16px;">
-          <div class="mono fw9 f-xs center" style="width:14px;height:14px;border:var(--border-med);background:#000;color:#fff;line-height:14px;">${i+1}</div>
+          <div class="mono fw9 center" style="width:16px;height:14px;border:var(--border-med);background:#fff;color:#111;line-height:14px;font-size:${eq.tag.length > 2 ? '5.6px' : '7px'};">${eq.tag}</div>
         </div>
         <div style="flex:1;padding-left:3px;">
           <div class="f-xs fw9 caps" style="line-height:1.35;">${eq.label}</div>

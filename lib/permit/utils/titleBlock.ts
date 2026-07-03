@@ -69,7 +69,7 @@ export function titleBlock(
       <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
       <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
       <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
-      <tr><td class="tbl">SCALE</td><td class="tbv">AS NOTED</td></tr>
+      <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-2|PV-2B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
     </table>
     <div class="tbs-rev-hdr">REVISIONS</div>
     <table class="tb-table">
@@ -102,7 +102,12 @@ export function buildConstructionNotes(input: PermitInput): string[] {
   const notes: string[] = [
     `All work shall conform to NEC ${necVer}, ${ibcVer} IBC, ${ibcVer} IRC, ${ifcVer} IFC, ASCE 7-22, applicable state amendments, and AHJ requirements. All equipment shall be listed and labeled per NEC 110.3(B).`,
     `Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).`,
-    `System shall comply with NEC 705.12 for interconnected power production equipment. Backfeed breaker shall be sized per NEC 705.12(B)(2)(3)(b). Sum of all supply breakers shall not exceed 120% of bus rating.`,
+    // Interconnection note follows the ACTUAL method — the load-side backfeed
+    // boilerplate on a supply-side-tap job re-introduced the exact set-wide
+    // contradiction the teardown flagged.
+    project.interconnectionMethod === 'SUPPLY_SIDE_TAP'
+      ? `System shall interconnect via supply-side tap per NEC 705.11. Tap conductors shall be sized ≥ 125% of PV output current and terminate in a fused disconnect within 10 ft of the tap per NEC 705.11(C). The 120% busbar rule (NEC 705.12(B)) does not apply to supply-side connections.`
+      : `System shall comply with NEC 705.12 for interconnected power production equipment. Backfeed breaker shall be sized per NEC 705.12(B)(2)(3)(b). Sum of all supply breakers shall not exceed 120% of bus rating.`,
     project.rapidShutdown
       ? `Rapid shutdown system required per NEC 690.12. Module-level rapid shutdown (MLRS) shall reduce array conductors to \u2264 30V within 30 seconds. Initiator shall be located at utility meter per NEC 690.56(B).`
       : `Rapid shutdown initiator shall be installed per NEC 690.12. Array boundary conductors shall be de-energized to \u2264 30V within 30 seconds of initiation.`,

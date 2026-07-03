@@ -19,6 +19,7 @@
 
 import type { CADModel } from '../cad/types';
 import { getMountingSystemById } from '../mounting-hardware-db';
+import { resolveFireSetbackIn, arrayCoverageFrac } from '../permit/utils/fireSetback';
 
 export type SysType = 'roof' | 'ground_mount' | 'solar_fence';
 export type ViewType = 'plan' | 'structural';
@@ -381,8 +382,16 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   // uniform edge setback — treating it as one buried the drawing in hatch).
   const _fireIn    = (p?.ahjRidgeSetbackIn as number);
   const _pathwayIn = (p?.ahjRoofSetbackIn as number);
-  const _fallbackFt = pl?.setbacks?.eaveM ? mToFt(pl.setbacks.eaveM) : ((p?.fireSetbackFt as number) ?? 1.5);
-  const fireSetbackFt = (_fireIn && _fireIn > 0) ? Math.round((_fireIn / 12) * 10) / 10 : _fallbackFt;
+  // Same coverage-aware rule as the DRAWING (resolveFireSetbackIn) — the data
+  // zone printed "1.5' EDGES" while the plan hatched 3'-0" bands.
+  const _covRoofFt2 = (r?.planes ?? []).reduce((s: number, x: any) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _covFrac = arrayCoverageFrac(
+    cad?.totalPanels ?? 0,
+    (p?.panelLengthIn as number) || 66,
+    (p?.panelWidthIn as number) || 40,
+    _covRoofFt2,
+  );
+  const fireSetbackFt = Math.round((resolveFireSetbackIn(_fireIn, _covFrac) / 12) * 10) / 10;
   const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;
 
   // Fastener spec from the SELECTED mounting system so PV-3 can never
@@ -635,8 +644,8 @@ function roofComposition(
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
-        { n: 2, label: 'MOUNTING RAIL', sub: d.mountSys },
-        { n: 3, label: 'STANDOFF / L-FOOT', sub: '3/8" SS LAG @ 2.5" embed' },
+        { n: 2, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'DIRECT-ATTACH MOUNT' : 'MOUNTING RAIL', sub: d.mountSys },
+        { n: 3, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
         { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
         { n: 5, label: `RAFTER ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
         { n: 6, label: d.conduitType + ' CONDUIT', sub: 'see conductor schedule' },

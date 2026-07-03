@@ -11,6 +11,7 @@ import {
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
+import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
@@ -434,11 +435,15 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     `</div>`
   ).join('');
 
-  // System-specific supplemental data
+  // System-specific supplemental data \u2014 setback text from the SAME rule the
+  // drawing uses (it claimed 18" per-AHJ while PV-2 hatched 3'-0" bands).
+  const _fsRoofFt2 = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2);
+  const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 18" ridge/hip setback per AHJ amendment \u2014 IFC 2021 \xa71204.2.1.1 (36" default; confirm exception w/ AHJ)</div>
+      <div>\u2022 ${_fsIn}" ridge/hip fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
       <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>

@@ -298,6 +298,15 @@ function originalProject(original: PermitInputShape): DraftingProject {
     roofType:          original.project?.roofType,
     roofPitch:         original.project?.roofPitch,
     mountingSystem:    original.project?.mountingSystem,
+    // SINGLE-SOURCE PASS-THROUGH: stripping these here made the DRAWING half
+    // of PV-3 contradict its own SPECS table (IronRidge title vs RT-Mini
+    // callouts; 4'-0" drawn vs 12" O.C. MAX specified). The templates resolve
+    // racking + attachment spacing with the SAME chain sheetComposition uses.
+    mountingSystemId:  (original.project as Record<string, unknown> | undefined)?.['mountingSystemId'],
+    _canonical:        (original.project as Record<string, unknown> | undefined)?.['_canonical'],
+    resolvedAttachSpacingIn:
+      (original as unknown as { compliance?: { structural?: { attachment?: { maxAllowedSpacing?: number } } } })
+        .compliance?.structural?.attachment?.maxAllowedSpacing,
     rafterSize:        original.project?.rafterSize,
     rafterSpacing:     original.project?.rafterSpacing,
     attachmentSpacing: original.project?.attachmentSpacing,

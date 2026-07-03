@@ -89,20 +89,28 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const aerial = input.aerialData;
   let vicinityMapHtml = '';
   if (aerial?.imageBase64) {
+    // Pin gets a LABEL ('PROJECT SITE' printed nothing before — empty div),
+    // NTS moves to the corner (it sat ON the subject house), a north arrow
+    // prints, and the address caption is normal document flow below the image
+    // so it can never silently fail to render.
     vicinityMapHtml = `
         <div class=\"aerial-wrap\" style=\"height:150px;\">
         <img src="${aerial.imageBase64}" style="width:100%;height:150px;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
-          <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;\">
-          <svg viewBox="0 0 36 46" width="32" height="42" style="display:block;margin:0 auto;">
+          <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-58%);text-align:center;\">
+          <svg viewBox="0 0 36 46" width="26" height="34" style="display:block;margin:0 auto;">
             <circle cx="18" cy="18" r="16" fill="#000" stroke="#fff" stroke-width="2"/>
             <circle cx="18" cy="18" r="7" fill="#fff"/>
             <polygon points="18,34 12,27 24,27" fill="#000"/>
           </svg>
-          <div class=\"f-xs fw9 aerial-pin-label\">
+          <div style="font-size:7px;font-weight:900;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;letter-spacing:0.8px;">PROJECT SITE</div>
         </div>
-          <div class=\"f-xs fw7 aerial-nts\">NTS</div>
+          <div style="position:absolute;bottom:3px;right:5px;font-size:7px;font-weight:900;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;">NTS</div>
+          <div style="position:absolute;top:3px;right:5px;text-align:center;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;">
+            <div style="font-size:9px;font-weight:900;line-height:1;">▲</div>
+            <div style="font-size:7px;font-weight:900;line-height:1;">N</div>
+          </div>
       </div>
-        </div>`;
+        <div style="border:var(--border);border-top:none;padding:2px 5px;font-size:7px;font-weight:700;letter-spacing:0.4px;text-align:center;">${escapeH(project.address || '')}${project.city ? ' — ' + escapeH(String(project.city).toUpperCase()) : ''}</div>`;
   } else {
     vicinityMapHtml = `
       <div style="background:#e8e8e8;width:100%;height:120px;display:flex;align-items:center;justify-content:center;text-align:center;">
@@ -206,7 +214,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // ── System Summary ────────────────────────────────────────────────────────
   const summaryRows = [
     totalPanels > 0 && moduleDisplay
-      ? tagRow('N', `${totalPanels} × ${moduleDisplay}${eq.panelWatts > 0 ? ` (${eq.panelWatts}W)` : ''}`)
+      ? tagRow('N', `${totalPanels} × ${moduleDisplay}${eq.panelWatts > 0 && !/\b\d{3,4}\s?W\b/i.test(moduleDisplay) ? ` (${eq.panelWatts}W)` : ''}`)
       : '',
     // FIX v47.341: Use resolveInverterCount() — totalPanels for micro, inverters.length for string
     inverterDisplay
@@ -327,8 +335,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   ].join('');
 
   const sysInfoRows = [
-    infoRow('DC SYSTEM SIZE',  dcKw  !== null ? `${dcKw.toFixed(3)} kW DC`  : ''),
-    infoRow('AC SYSTEM SIZE',  acKw  !== null ? `${acKw.toFixed(3)} kW AC`  : ''),
+    infoRow('DC SYSTEM SIZE',  dcKw  !== null ? `${dcKw.toFixed(2)} kW DC`  : ''),
+    infoRow('AC SYSTEM SIZE',  acKw  !== null ? `${acKw.toFixed(2)} kW AC`  : ''),
     infoRow('MODULE',          totalPanels > 0 && moduleDisplay ? `${totalPanels} × ${moduleDisplay}` : ''),
     infoRow('INVERTER',        inverterDisplay ? `${inverterDisplay} — ${topologyLabel}` : ''),
     infoRow('MOUNTING',        mountLabel),
@@ -548,7 +556,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
               ${infoRow('SHEET SIZE',   'ANSI B — 11″ × 17″')}
               ${infoRow('TOTAL SHEETS', `${totalPages}`)}
               ${infoRow('PAGE',         `${pageNum} OF ${totalPages}`)}
-              ${infoRow('SCALE',        'NOT TO SCALE')}
+              ${infoRow('SCALE',        'NTS')}
             </table>
           </div>
         </div>

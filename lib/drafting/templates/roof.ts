@@ -42,6 +42,8 @@ import {
   drawCallout, drawCalloutWithLeader, drawLeaderLine, drawWindArrow,
 } from '../callouts';
 import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
+import { getMountingSystemById } from '../../mounting-hardware-db';
+import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -118,7 +120,9 @@ export function drawRoofPlan(
   const dcKw        = cad?.totalDcKw   ?? engineering.totalDcKw   ?? (totalPanels * (engineering.panelWatts || 400) / 1000);
   const panelLenIn  = project.panelLengthIn   || 66;
   const panelWidIn  = project.panelWidthIn    || 40;
-  const mountSys    = (project.mountingSystem || 'IRONRIDGE XR100').toUpperCase();
+  const mountSys    = ((((project as any)._canonical?.mountSystem as string)
+    || project.mountingSystem
+    || 'IRONRIDGE XR100')).toUpperCase();
   // rail-less systems (RT-Mini etc.) draw per-module mounts; railed systems
   // draw the two row rails + feet at framing crossings
   const isRailless  = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(mountSys);
@@ -130,7 +134,9 @@ export function drawRoofPlan(
   const pitchNum    = project.roofPitch       || 5;
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
-  const attachSp    = project.attachmentSpacing || 48;
+  const attachSp    = (project as any).resolvedAttachSpacingIn
+    || project.attachmentSpacing
+    || 48;
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
   // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
   // (drawn as a band on every edge) and ahjRoofSetbackIn is the ACCESS PATHWAY
@@ -188,13 +194,7 @@ export function drawRoofPlan(
   const _roofAreaFt2  = validPlanes.reduce((s: number, rp: any) => s + _shoelaceFt2(rp.vertices), 0);
   const _arrayAreaFt2 = validPanels.length * (panelLenIn * panelWidIn) / 144;
   const _coverage     = _roofAreaFt2 > 0 ? _arrayAreaFt2 / _roofAreaFt2 : 0;
-  // An AHJ value of exactly 18" is the bare IFC exception value (usually a
-  // DB default, not a real amendment) — it still requires the ≤33% coverage
-  // condition. Only AHJ values ABOVE 18" bypass the test as true amendments.
-  const _ahjSetIn = project.ahjRidgeSetbackIn as number | undefined;
-  const fireSetIn = _ahjSetIn && _ahjSetIn > 18
-    ? _ahjSetIn
-    : (_coverage > 0.33 ? 36 : (_ahjSetIn || 18));
+  const fireSetIn   = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _coverage);
   const setbackFt   = fireSetIn / 12;
 
   // ── Regularize the hand-traced geometry for DRAWING (display copy only) ──
@@ -634,6 +634,20 @@ export function drawRoofPlan(
       return;
     }
     els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${kPx.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.6" stroke-dasharray="3 2"/>`);
+    // DESIGNED module inside this keep-out: designed positions are never
+    // silently deleted (they're the customer's layout), but drawing a module
+    // straight over a vent with no flag was a plan-check P0 — mark the
+    // conflict explicitly for field resolution.
+    for (const p of regPanels) {
+      const px2 = toX(p.lng), py2 = toY(p.lat);
+      if (Math.hypot(px2 - ox, py2 - oy) < kPx) {
+        const cr = Math.hypot(panLenPx, panWidPx) / 2 * 0.62;
+        els.push(`<circle cx="${px2.toFixed(1)}" cy="${py2.toFixed(1)}" r="${cr.toFixed(1)}" fill="none" stroke="#cc0000" stroke-width="1.4" stroke-dasharray="4 2.5"/>`);
+        els.push(drawText(px2, py2 - cr - 2.5, 'MODULE/OBSTRUCTION CONFLICT — FIELD VERIFY', {
+          anchor: 'middle', fontSize: 4.6, fontWeight: 'bold', fill: '#cc0000',
+        }));
+      }
+    }
     els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${rPx.toFixed(1)}" fill="#fff" stroke="#000" stroke-width="0.9"/>`);
     els.push(`<line x1="${(ox - rPx * 0.6).toFixed(1)}" y1="${(oy - rPx * 0.6).toFixed(1)}" x2="${(ox + rPx * 0.6).toFixed(1)}" y2="${(oy + rPx * 0.6).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
     els.push(`<line x1="${(ox - rPx * 0.6).toFixed(1)}" y1="${(oy + rPx * 0.6).toFixed(1)}" x2="${(ox + rPx * 0.6).toFixed(1)}" y2="${(oy - rPx * 0.6).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
@@ -1043,8 +1057,26 @@ export function drawRoofStructural(
   const pitchStr   = pitchNum + ':12';
   const rafterSz   = project.rafterSize         || '2x6';
   const rafterSp   = project.rafterSpacing      || 24;
-  const attachSp   = project.attachmentSpacing  || 48;
-  const mountSys   = (project.mountingSystem    || 'IRONRIDGE XR100').toUpperCase();
+  // SINGLE-SOURCE with the specs table (sheetComposition getRoofData): the
+  // drawing/notes/callouts printed hardcoded 3/8" lag + 4'-0" spacing while
+  // the specs table said 5/16" @ 24" O.C. — contradictions ON ONE SHEET.
+  const _mSelD = (project as any).mountingSystemId
+    ? getMountingSystemById((project as any).mountingSystemId as string)
+    : undefined;
+  const attachSp   = (project as any).resolvedAttachSpacingIn
+    || project.attachmentSpacing
+    || _mSelD?.mount?.maxSpacingIn
+    || 48;
+  const mountSys   = (((project as any)._canonical?.mountSystem as string)
+    || project.mountingSystem
+    || (_mSelD ? `${_mSelD.manufacturer} ${_mSelD.model}` : 'IRONRIDGE XR100')).toUpperCase();
+  const isRaillessD = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(mountSys);
+  const _fracD = (v: number) =>
+    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
+  const _lagDiaD  = _mSelD?.mount?.fastenerDiameterIn ?? 0.375;
+  const _embedD   = _mSelD?.mount?.fastenerEmbedmentIn ?? 2.5;
+  const _lagLenD  = Math.ceil((_embedD + 1.5) * 2) / 2;
+  const lagLabelD = `${_fracD(_lagDiaD)}" DIA × ${_lagLenD}" SS LAG`;
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
   const panelLenIn = project.panelLengthIn      || 66;
   const panelWidIn = project.panelWidthIn       || 40;
@@ -1067,15 +1099,17 @@ export function drawRoofStructural(
   els.push(drawTitleBar(W, 'ROOF ATTACHMENT DETAIL — CROSS-SECTION + MOUNTING', 'SCALE: 1"=1\'-0"'));
 
   // ── Cross-section geometry ──
-  // 3-bay rafter section. Scale: 1 inch = 3px (1 foot = 36px)
-  const IN_PX    = 3;
+  // 4-bay rafter section, scaled UP (1" = 4.5px) — at the old 3px scale the
+  // section + detail circle used barely half the drawing zone and the bottom
+  // 40% of the sheet shipped blank.
+  const IN_PX    = 4.5;
   const bayW     = rafterSp * IN_PX;
-  const nBays    = 3;
+  const nBays    = 4;
   const roofRun  = bayW * nBays;
   const roofRise = roofRun * (pitchNum / 12);
 
   const secX     = dz.x + dz.width * 0.02;
-  const roofBaseY = zones.dims.top + (dz.height * 0.78);
+  const roofBaseY = zones.dims.top + (dz.height * 0.80);
 
   // ── Bottom chord ──
   els.push(drawLine(secX, roofBaseY, secX + roofRun, roofBaseY, 'line-struct'));
@@ -1127,8 +1161,8 @@ export function drawRoofStructural(
   };
   const layers: LayerDef[] = [
     { label: 'PV MODULE',              fill: '#1a3f8a', stroke: '#0a1e4a', h: 12 },
-    { label: 'RAIL / CLAMP',           fill: '#a0a0a0', stroke: '#444',    h: 5  },
-    { label: 'STANDOFF / L-FOOT',      fill: '#b8b8b8', stroke: '#444',    h: 8,  hatch: 'url(#hatch-steel)', hatchOpacity: 0.6 },
+    { label: isRaillessD ? 'MOUNT / CLAMP' : 'RAIL / CLAMP', fill: '#a0a0a0', stroke: '#444', h: 5 },
+    { label: isRaillessD ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', fill: '#b8b8b8', stroke: '#444', h: 8,  hatch: 'url(#hatch-steel)', hatchOpacity: 0.6 },
     { label: 'FLASHING',               fill: '#c8dce8', stroke: '#4488aa', h: 3  },
     { label: roofType + ' ROOF',       fill: '#b89060', stroke: '#665030', h: 8  },
     { label: 'SHEATHING (5/8" OSB)',   fill: 'url(#rafter-wood)', stroke: '#886030', h: 7,  hatch: 'url(#hatch-wood)', hatchOpacity: 0.35 },
@@ -1144,10 +1178,11 @@ export function drawRoofStructural(
     curY += layer.h;
   });
 
-  // ── Detail circle (zoomed L-foot attachment) ──
-  const dcx = dz.x + dz.width * 0.76;
-  const dcy = zones.dims.top + dz.height * 0.42;
-  const dcr = 112;
+  // ── Detail circle (zoomed attachment) — enlarged; at r=112 it left the
+  // bottom of the drawing zone blank.
+  const dcx = dz.x + dz.width * 0.74;
+  const dcy = zones.dims.top + dz.height * 0.46;
+  const dcr = 148;
   els.push(`<circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="${dcr}"
     fill="#fffff8" stroke="#000" stroke-width="1.8"/>`);
   els.push(drawText(dcx, dcy - dcr - 6, 'DETAIL 1/PV-3', {
@@ -1157,26 +1192,31 @@ export function drawRoofStructural(
     anchor: 'middle', fontSize: 7, fill: '#555',
   }));
 
-  // Zoomed layers inside circle
-  const dzX = dcx - 82, dzY = dcy - 55;
-  const dzW = 164;
+  // Zoomed layers inside circle — scaled to the r=148 circle. Labels sit at
+  // a FIXED 13px pitch with leader lines: the old label-per-layer-center put
+  // 7px type on 4px rows (FLASHING/ROOF/SHEATHING text overlapped itself).
+  const dzX = dcx - 105, dzY = dcy - 72;
+  const dzW = 190;
   type ZLayerDef = { label: string; fill: string; stroke?: string; h: number; hatch?: string; hatchOp?: number };
   const zLayers: ZLayerDef[] = [
-    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 16 },
-    { label: 'RAIL — ' + mountSys,                        fill: '#a0a0a0', stroke: '#444',    h: 7  },
-    { label: 'L-FOOT / STANDOFF',                         fill: '#b8b8b8', stroke: '#444',    h: 10, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
-    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 4  },
-    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 8  },
-    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 7,  hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
-    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 18, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
+    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 21 },
+    { label: (isRaillessD ? 'MOUNT — ' : 'RAIL — ') + mountSys, fill: '#a0a0a0', stroke: '#444', h: 9 },
+    { label: isRaillessD ? `MOUNT BASE — ${lagLabelD}` : `L-FOOT — ${lagLabelD}`, fill: '#b8b8b8', stroke: '#444', h: 13, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
+    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 5  },
+    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 10 },
+    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 9,  hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
+    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 23, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
   ];
   let zy = dzY;
+  const _lblX = dzX + dzW + 26;
   zLayers.forEach((zl, i) => {
     els.push(drawRectFilled(dzX, zy, dzW, zl.h, zl.fill, zl.stroke || '#333', 0.9));
     if (zl.hatch) {
       els.push(`<rect x="${dzX.toFixed(1)}" y="${zy.toFixed(1)}" width="${dzW}" height="${zl.h}" fill="${zl.hatch}" opacity="${zl.hatchOp ?? 0.5}"/>`);
     }
-    els.push(drawText(dzX + dzW + 5, zy + zl.h / 2 + 3, zl.label, {
+    const _lblY = dzY + i * 13 + 4;
+    els.push(`<line x1="${(dzX + dzW).toFixed(1)}" y1="${(zy + zl.h / 2).toFixed(1)}" x2="${(_lblX - 3).toFixed(1)}" y2="${(_lblY - 2.5).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
+    els.push(drawText(_lblX, _lblY, zl.label, {
       anchor: 'start', fontSize: 7, fill: '#222',
     }));
     els.push(drawCalloutWithLeader(dzX - 28, zy + zl.h / 2, dzX, zy + zl.h / 2, i + 1, 9));
@@ -1201,31 +1241,27 @@ export function drawRoofStructural(
   }
 
   // ── DIMENSION HIERARCHY ──
-  // L1 — Rafter span (bottom)
-  els.push(drawOverallDimension(
-    secX, secX + roofRun,
-    roofBaseY + 28,
-    20,
-    rafterSp + '" RAFTER SPACING (TYP.)'
-  ));
-
-  // L2 — Single bay (rafter O.C.)
+  // Two distinct rows, no duplication: the old layout drew rafter spacing
+  // TWICE ('24" RAFTER SPACING (TYP.)' + '2'-0" O.C.') on overlapping rows,
+  // striking through each other and the section linework.
+  // Row 1 — single-bay rafter O.C., measured on the SECOND bay so the text
+  // clears the eave layer stack at the left edge (it struck through it).
   els.push(drawLinearDimension(
-    secX, secX + bayW,
-    roofBaseY + 14, 12,
-    ftToFtIn(rafterSp / 12) + ' O.C.'
+    secX + bayW, secX + bayW * 2,
+    roofBaseY + 20, 12,
+    `${rafterSp}" RAFTER O.C. (TYP.)`
   ));
 
-  // L2 — Attachment spacing (2-bay span)
+  // Row 2 — attachment spacing at its true scaled length, on the next row
   els.push(drawOverallDimension(
-    secX, secX + bayW * 2,
-    roofBaseY + 42, 16,
-    ftToFtIn(attachSp / 12) + ' ATTACH. O.C.'
+    secX + bayW, secX + bayW + Math.min(attachSp * IN_PX, roofRun - bayW),
+    roofBaseY + 44, 16,
+    ftToFtIn(attachSp / 12) + ' ATTACH. O.C. MAX'
   ));
 
   // L3 — Lag embedment (vertical, left)
   els.push(drawVerticalDimension(
-    secX + 5, roofBaseY, roofBaseY - 30, 10, '2.5" MIN. EMBED'
+    secX + 5, roofBaseY, roofBaseY - 30, 10, `${_embedD}" MIN. EMBED`
   ));
 
   // ── Callout schedule (right panel) ──
@@ -1241,8 +1277,8 @@ export function drawRoofStructural(
   // ROOF-SPECIFIC callouts (STEP 8/9: roof terms only — NO posts/piles/fence)
   const structCallouts = [
     { n: 1, label: `PV MODULE — ${panelLenIn}" × ${panelWidIn}" @ ${panelWt} LBS` },
-    { n: 2, label: `MOUNTING RAIL — ${mountSys}` },
-    { n: 3, label: `STANDOFF / L-FOOT — 3/8" STAINLESS LAG` },
+    { n: 2, label: isRaillessD ? `DIRECT-ATTACH MOUNT — ${mountSys}` : `MOUNTING RAIL — ${mountSys}` },
+    { n: 3, label: `${isRaillessD ? 'MOUNT BASE' : 'STANDOFF / L-FOOT'} — ${lagLabelD}` },
     { n: 4, label: `FLASHING — UNDER ALL PENETRATIONS` },
     { n: 5, label: `RAFTER — ${rafterSz} @ ${rafterSp}" O.C.` },
     { n: 6, label: `${condType} CONDUIT — SEE CONDUCTOR SCHEDULE` },
@@ -1269,7 +1305,8 @@ export function drawRoofStructural(
   const notes = [
     'VERIFY RAFTER SIZE + SPACING IN FIELD.',
     'ALL HARDWARE: 316 SS OR HOT-DIP GALVANIZED.',
-    'MIN. LAG BOLT EMBEDMENT INTO RAFTER: 2-1/2".',
+    `MIN. LAG THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
+    `LAG BOLT: ${lagLabelD}.`,
     `ATTACH. SPACING: ${ftToFtIn(attachSp / 12)} O.C. MAX.`,
     `WIND LOAD: ${windSpeedMph} MPH — REF: ASCE 7-22`,
     `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`,

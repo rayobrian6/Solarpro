@@ -19,6 +19,12 @@ export interface DraftingProject {
   roofType?: string;
   roofPitch?: number;
   mountingSystem?: string;
+  /** Selected mounting-system DB id — lets templates resolve real fastener specs. */
+  mountingSystemId?: unknown;
+  /** Canonical resolution (mountSystem etc.) — same source the sheet zones use. */
+  _canonical?: unknown;
+  /** Engineering-resolved attachment spacing (V4 mount layout), inches O.C. */
+  resolvedAttachSpacingIn?: number;
   rafterSize?: string;
   rafterSpacing?: number;
   attachmentSpacing?: number;

@@ -1263,36 +1263,15 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
   }
 
   // ── SLD content: 3-tier priority ──────────────────────────────────────
-  //   1. storedSldSvg  — pre-generated via "Generate SLD" button (DB artifact)
-  //   2. Live professional SLD — renderSLDProfessional() from live permit data
+  //   1. LIVE professional SLD — renderSLDProfessional() from CURRENT permit data
+  //   2. storedSldSvg — pre-generated "Generate SLD" DB artifact (fallback only:
+  //      a stored SVG is frozen at whatever engine version rendered it, and a
+  //      stale one resurrected every fixed E-1 defect — build badge, corrupted
+  //      '3#32' callouts, ceil/16 branch math — on top of the repaired engine)
   //   3. Inline buildSLD() — built-in fallback (always works)
   let sldBodyHtml: string;
 
-  if (storedSldSvg && storedSldSvg.trim().startsWith('<svg')) {
-  // FIX v47.296: Sanitize stored SLD — replace roof-specific labels for non-roof systems
-  if (_sldSysType !== 'roof') {
-    storedSldSvg = storedSldSvg
-      .replace(/ROOF J-BOX/g, 'ARRAY J-BOX')
-      .replace(/Roof J-Box/g, 'Array J-Box')
-      .replace(/roof j-box/g, 'array j-box');
-  }
-  // FIX v47.341: Sanitize stored SLD — fix floating point leaks in kW/coordinate values
-  storedSldSvg = storedSldSvg.replace(
-    /\d+\.\d{2}\d{10,}/g,
-    (m: string) => parseFloat(m).toFixed(2)
-  );
-    // Stored SLD from Engineering tab "Generate SLD" — render full-bleed
-    sldBodyHtml = `
-    <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
-      <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
-        ${storedSldSvg}
-      </div>
-    </div>`;
-  } else {
-    // ── LIVE SLD: auto-generate professional SLD from permit data ──────
-    // Pipeline: PermitInput → buildSLDInputFromPermit() → renderSLDProfessional()
-    // Same renderer used by the Engineering tab "Generate SLD" button.
-    // Falls back to inline buildSLD() if the professional renderer fails.
+  {
     let liveSvg: string | null = null;
     try {
       liveSvg = generateLiveSLD(input, cad);
@@ -1300,11 +1279,30 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
         liveSvg = null;
       }
     } catch (sldErr: unknown) {
-      console.warn('[E-1] Live SLD generation failed, falling back to inline buildSLD():', sldErr instanceof Error ? (sldErr as Error).message : sldErr);
+      console.warn('[E-1] Live SLD generation failed, falling back to stored/inline SLD:', sldErr instanceof Error ? (sldErr as Error).message : sldErr);
       liveSvg = null;
     }
 
-    if (liveSvg) {
+    if (!liveSvg && storedSldSvg && storedSldSvg.trim().startsWith('<svg')) {
+      // FIX v47.296: Sanitize stored SLD — replace roof-specific labels for non-roof systems
+      if (_sldSysType !== 'roof') {
+        storedSldSvg = storedSldSvg
+          .replace(/ROOF J-BOX/g, 'ARRAY J-BOX')
+          .replace(/Roof J-Box/g, 'Array J-Box')
+          .replace(/roof j-box/g, 'array j-box');
+      }
+      // FIX v47.341: Sanitize stored SLD — fix floating point leaks in kW/coordinate values
+      storedSldSvg = storedSldSvg.replace(
+        /\d+\.\d{2}\d{10,}/g,
+        (m: string) => parseFloat(m).toFixed(2)
+      );
+      sldBodyHtml = `
+      <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
+        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
+          ${storedSldSvg}
+        </div>
+      </div>`;
+    } else if (liveSvg) {
       // Live professional SLD — render full-bleed (same layout as stored SLD)
       sldBodyHtml = `
       <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
