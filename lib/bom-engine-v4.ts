@@ -112,6 +112,7 @@ export interface BOMGenerationInputV4 {
   generatorKw?: number;
   atsAmpRating?: number;
   backupInterfaceMaxA?: number;
+  generatorWireLength?: number;  // ft — distance from generator to ATS, drives the whip cable line item
   batteryCount?: number;        // qty of battery units
 
   // System type — enables fence/ground structural BOM via bom-system-profiles
@@ -519,6 +520,35 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       'BUI-TBD',
       `Backup Interface Unit — ${input.backupInterfaceMaxA}A / 240V — NEC 706`,
       1, 'ea', 'NEC 706', 'perSystem', '1', true));
+  }
+
+  // Generator whip wire — driven by generatorWireLength (distance gen → ATS).
+  // Gauge pulled from the canonical generator's outputWireGaugeMin in equipment-db;
+  // quantity uses the same 15% fitting allowance as conduit runs elsewhere.
+  if (input.generatorId && input.generatorWireLength && input.generatorWireLength > 0) {
+    const gen = getGeneratorById(input.generatorId);
+    const gauge = gen?.outputWireGaugeMin ?? '#6 AWG';
+    const ft = Math.ceil(input.generatorWireLength * 1.15);
+    const unitCost = 1.85; // ballpark THWN-2 copper per-ft; align with distributor at next price refresh
+    items.push(addItem(
+      'inverter',
+      'wire',
+      'Generic',
+      gauge,
+      `WHIP-${gauge.replace(/\s|#/g, '')}`,
+      `Generator-to-ATS whip cable, ${gauge} THWN-2`,
+      ft,
+      'ft',
+      'NEC 702.4, NEC 215',
+      `config.generatorWireLength = ${input.generatorWireLength} ft × 1.15 fitting allowance`,
+      `${input.generatorWireLength} ft × 1.15 = ${ft} ft`,
+      true,
+      undefined,
+      unitCost,
+      ft * unitCost,
+    ));
+    log.push({ stageId: 'inverter', category: 'wire', item: `Generator whip ${gauge}`,
+      quantity: ft, derivedFrom: 'generatorWireLength', formula: `${input.generatorWireLength} × 1.15`, necReference: 'NEC 702.4, NEC 215' });
   }
 
   // Gateway (optimizer or microinverter topology)
@@ -1196,7 +1226,9 @@ function addItem(
   derivedFrom: string,
   formula: string,
   required: boolean,
-  notes?: string
+  notes?: string,
+  unitCost?: number,
+  totalCost?: number
 ): BOMLineItemV4 {
   return {
     id: nextId(),
@@ -1214,6 +1246,8 @@ function addItem(
     formula,
     required,
     notes,
+    unitCost,
+    totalCost,
   };
 }
 
