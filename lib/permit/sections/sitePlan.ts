@@ -235,29 +235,44 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
       const pv = (_parcel?.polygon ?? []).filter(v => isFinite(v?.lat) && isFinite(v?.lng));
       if (pv.length >= 4) {
         const pts = pv.map(v => toPx(v.lat, v.lng));
-        // Gate on the CROP WINDOW (what the sheet actually shows), not the full
-        // embedded image — and require a full visible SEGMENT. The old any-point
-        // full-image test drew one clipped parcel edge slicing through the
-        // street scene with no closed boundary anywhere.
-        const inFrame = (p: {x:number;y:number}) =>
-          p.x > cropX - 4 && p.x < cropX + cropW + 4 && p.y > cropY - 4 && p.y < cropY + cropH + 4;
-        const _visibleSegs = pts.filter((p, i) => inFrame(p) && inFrame(pts[(i + 1) % pts.length])).length;
-        if (_visibleSegs >= 1) {
+        // Gate on the CROP WINDOW and require real visible LENGTH — but accept
+        // partially visible edges (clip each segment to the crop). Requiring a
+        // fully-in-frame segment suppressed the property line entirely on
+        // parcels larger than the frame (e.g. an apartment lot), while the
+        // old any-point full-image test drew an unlabeled edge through the
+        // street scene. Every visible run long enough now gets its own label.
+        const _clipSeg = (a: {x:number;y:number}, b: {x:number;y:number}) => {
+          // Liang–Barsky clip of segment a→b against the crop rect.
+          let t0 = 0, t1 = 1;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const p = [-dx, dx, -dy, dy];
+          const q = [a.x - cropX, cropX + cropW - a.x, a.y - cropY, cropY + cropH - a.y];
+          for (let k = 0; k < 4; k++) {
+            if (p[k] === 0) { if (q[k] < 0) return null; continue; }
+            const r = q[k] / p[k];
+            if (p[k] < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+            else { if (r < t0) return null; if (r < t1) t1 = r; }
+          }
+          return {
+            ax: a.x + t0 * dx, ay: a.y + t0 * dy,
+            bx: a.x + t1 * dx, by: a.y + t1 * dy,
+          };
+        };
+        const _vis = pts
+          .map((p, i) => _clipSeg(p, pts[(i + 1) % pts.length]))
+          .filter((s): s is NonNullable<typeof s> => !!s)
+          .map(s => ({ ...s, len: Math.hypot(s.bx - s.ax, s.by - s.ay) }))
+          .filter(s => s.len > 8);
+        const _totalVis = _vis.reduce((sum, s) => sum + s.len, 0);
+        if (_totalVis > 80) {
           const d = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
           parcelSvg = `<polygon points="${d}" fill="none" stroke="#fff" stroke-width="3" opacity="0.7" stroke-dasharray="14 7"/>` +
                       `<polygon points="${d}" fill="none" stroke="#111" stroke-width="1.4" stroke-dasharray="14 7"/>`;
-          // Label the longest fully-visible segment
-          let li = -1, lLen = 0;
-          for (let i = 0; i < pts.length; i++) {
-            const a = pts[i], b = pts[(i + 1) % pts.length];
-            if (!inFrame(a) || !inFrame(b)) continue;
-            const L = Math.hypot(b.x - a.x, b.y - a.y);
-            if (L > lLen) { lLen = L; li = i; }
-          }
-          if (li >= 0 && lLen > 70) {
-            const a = pts[li], b = pts[(li + 1) % pts.length];
-            const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-            let ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+          // Label every visible run long enough to carry text (so a clipped
+          // edge can never read as a stray unexplained line).
+          for (const s of _vis.filter(v => v.len > 110).slice(0, 3)) {
+            const mx = (s.ax + s.bx) / 2, my = (s.ay + s.by) / 2;
+            let ang = Math.atan2(s.by - s.ay, s.bx - s.ax) * 180 / Math.PI;
             if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
             parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="8.5" font-weight="900" letter-spacing="1.5" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="2.4" paint-order="stroke">PROPERTY LINE</text>`;
           }

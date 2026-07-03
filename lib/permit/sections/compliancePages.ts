@@ -486,6 +486,20 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               <tr><td class="il">Rapid Shutdown</td><td class="iv">NEC 690.12 Compliant</td></tr>
               <tr><td class="il">MPPT Channels</td><td class="iv">${topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO' ? 'Per-module MPPT (microinverter)' : (inv.strings?.length || 1)}</td></tr>
             </table>
+            ${(() => {
+              // NEC 690.7 sanity at the DATA level — this sheet used to print
+              // a module Voc ABOVE the inverter's max DC input on the same
+              // page with no flag (electrically impossible pairing shipping
+              // silently). Micro topologies skipped every upstream Voc check.
+              const _mVoc = Number(voc);
+              const _mMax = Number(inv.maxDcVoltage);
+              return isFinite(_mVoc) && isFinite(_mMax) && _mMax > 0 && _mVoc > _mMax ? `
+            <div style="border:2px solid #cc0000;background:#fff5f5;padding:4px 6px;margin-top:3px;font-size:8px;line-height:1.4;color:#cc0000;font-weight:700;">
+              ⚠ EQUIPMENT COMPATIBILITY — VERIFY BEFORE CONSTRUCTION: module Voc (${_mVoc} V) exceeds this inverter's
+              maximum DC input voltage (${_mMax} V). Confirm the module/inverter pairing per NEC 690.7 and both
+              manufacturers' compatibility lists; correct the equipment selection if this reflects the actual design.
+            </div>` : '';
+            })()}
           </div>
           `).join('') || '<p style="font-size:9px;color:#999">No inverter data</p>'}
 

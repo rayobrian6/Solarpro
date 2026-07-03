@@ -90,8 +90,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   let vicinityMapHtml = '';
   if (aerial?.imageBase64) {
     vicinityMapHtml = `
-        <div class=\"aerial-wrap\" style=\"height:220px;\">
-        <img src="${aerial.imageBase64}" style="width:100%;height:220px;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
+        <div class=\"aerial-wrap\" style=\"height:150px;\">
+        <img src="${aerial.imageBase64}" style="width:100%;height:150px;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
           <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;\">
           <svg viewBox="0 0 36 46" width="32" height="42" style="display:block;margin:0 auto;">
             <circle cx="18" cy="18" r="16" fill="#000" stroke="#fff" stroke-width="2"/>

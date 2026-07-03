@@ -858,17 +858,19 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       </table>` : ''}
       ${rulesResult?.structuralAutoResolutions && rulesResult.structuralAutoResolutions.length > 0 ? `
       <div class="section-title">Auto-Resolutions Applied</div>
-      <table class="equip-table">
+      <table class="equip-table" style="font-size:7px;">
         <thead><tr><th>Field</th><th>Original</th><th>Resolved</th><th>Reason</th><th>Reference</th></tr></thead>
         <tbody>
-          ${rulesResult.structuralAutoResolutions.map(r => `
+          ${rulesResult.structuralAutoResolutions.slice(0, 5).map(r => `
           <tr style="background:#fff">
-            <td class="mono f-lg">${r.field}</td>
-            <td>${r.originalValue}</td>
-            <td style="color:#000;font-weight:bold">${r.resolvedValue}</td>
-            <td>${r.reason}</td>
-            <td class="mono f-lg">${r.necReference}</td>
+            <td class="mono" style="font-size:7px;">${r.field}</td>
+            <td style="font-size:7px;">${r.originalValue}</td>
+            <td style="color:#000;font-weight:bold;font-size:7px;">${r.resolvedValue}</td>
+            <td style="font-size:7px;">${r.reason}</td>
+            <td class="mono" style="font-size:7px;">${r.necReference}</td>
           </tr>`).join('')}
+          ${rulesResult.structuralAutoResolutions.length > 5 ? `
+          <tr style="background:#f5f5f5"><td colspan="5" style="font-size:7px;font-weight:bold;text-align:center;">+ ${rulesResult.structuralAutoResolutions.length - 5} additional auto-resolution(s) — full record retained in the engineering file</td></tr>` : ''}
         </tbody>
       </table>` : ''}
     </div>

@@ -631,7 +631,7 @@ function roofComposition(
         { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge/hip/rake · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
-        { n: 5, label: 'ATTACHMENT ZONE', sub: `L-foot @ ${d.attachSpacing}" O.C. into rafters` },
+        { n: 5, label: 'ATTACHMENT ZONE', sub: `${/RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'direct-attach mounts' : 'L-foot'} @ ${d.attachSpacing}" O.C. into rafters` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },

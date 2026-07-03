@@ -188,7 +188,13 @@ export function drawRoofPlan(
   const _roofAreaFt2  = validPlanes.reduce((s: number, rp: any) => s + _shoelaceFt2(rp.vertices), 0);
   const _arrayAreaFt2 = validPanels.length * (panelLenIn * panelWidIn) / 144;
   const _coverage     = _roofAreaFt2 > 0 ? _arrayAreaFt2 / _roofAreaFt2 : 0;
-  const fireSetIn   = project.ahjRidgeSetbackIn || (_coverage > 0.33 ? 36 : 18);
+  // An AHJ value of exactly 18" is the bare IFC exception value (usually a
+  // DB default, not a real amendment) — it still requires the ≤33% coverage
+  // condition. Only AHJ values ABOVE 18" bypass the test as true amendments.
+  const _ahjSetIn = project.ahjRidgeSetbackIn as number | undefined;
+  const fireSetIn = _ahjSetIn && _ahjSetIn > 18
+    ? _ahjSetIn
+    : (_coverage > 0.33 ? 36 : (_ahjSetIn || 18));
   const setbackFt   = fireSetIn / 12;
 
   // ── Regularize the hand-traced geometry for DRAWING (display copy only) ──

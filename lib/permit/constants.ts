@@ -313,7 +313,21 @@ const PDF_PAGE_CONFIG = {
 // PV-1 parcel gates on the crop window and full segments, multi-plane
 // azimuth display, APP-A specs reproduce nameplate + match layout dims,
 // pitch printed self-consistently (1-decimal ratio) set-wide.
-const PLANSET_ENGINE_VERSION = 47380;
+// 47381 (2026-07-03): real-data fixes from Ray's v47380 regen (BRAIDON (10).html):
+// (1) An AHJ ridge-setback of exactly 18" no longer bypasses the IFC 1204.2.1.1
+// coverage test (18 is the bare exception value / DB default, not an
+// amendment) — his 47%-coverage roof drew 18" bands again; only AHJ values
+// >18" pass through untested. (2) PV-1 property line restored for parcels
+// larger than the frame: Liang–Barsky segment clipping against the crop
+// window (≥80px total visible), EVERY long visible run labeled — the
+// full-segment gate had suppressed the line entirely on his apartment-lot
+// parcel. (3) APP-A prints a red EQUIPMENT COMPATIBILITY warning when module
+// Voc exceeds the inverter's max DC input (Maxeon-3-on-IQ8A shipped silently;
+// upstream gate fix spun off). (4) PV-0 vicinity aerial 220→150px and PV-4C
+// auto-resolutions table compacted/capped at 5 rows (real-data overflow).
+// (5) RT-Mini/rail-less attachment callout says 'direct-attach mounts', not
+// 'L-foot'.
+const PLANSET_ENGINE_VERSION = 47381;
 
 
 
