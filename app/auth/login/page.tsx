@@ -56,7 +56,7 @@ function LoginForm() {
    * Core submit — separated from handleSubmit so it can be called by the
    * auto-retry path with the same credentials after a DB_STARTING 503.
    */
-  async function attemptLogin(email: string, password: string): Promise<'success' | 'auth_error' | 'db_starting' | 'db_config' | 'network_error'> {
+  async function attemptLogin(email: string, password: string): Promise<{ type: 'success' | 'auth_error' | 'db_starting' | 'db_config' | 'network_error' | 'mfa_required' | 'mfa_enrollment_required'; mfaMethod?: string }> {
     try {
       const res = await fetch('/api/auth/login', {
         method:  'POST',
@@ -79,32 +79,42 @@ function LoginForm() {
             if (!debugData.hasAuthCookie) {
               console.error('[LOGIN_COOKIE_MISSING] Login succeeded but auth cookie was not set in browser. Set-Cookie header may have been stripped by a proxy or edge rule.');
               setError('Authentication cookie was not issued. This is a server configuration issue — please contact support or try a different browser. (Debug: cookie missing after 200 OK)');
-              return 'auth_error';
+              return { type: 'auth_error' };
             }
           }
         } catch (debugErr) {
           // Debug check failed — don't block login, but log it
           console.warn('[LOGIN_COOKIE_VERIFY_FAILED] Could not verify cookie presence:', debugErr);
         }
-        return 'success';
+        return { type: 'success' };
       }
 
       // 503 with DB_STARTING code = Neon cold start, auto-retry
       if (res.status === 503 && data.code === 'DB_STARTING') {
-        return 'db_starting';
+        return { type: 'db_starting' };
       }
 
       // 503 with DB_CONFIG_ERROR = genuine misconfiguration, don't retry
       if (res.status === 503 && data.code === 'DB_CONFIG_ERROR') {
-        return 'db_config';
+        return { type: 'db_config' };
+      }
+
+      // MFA required — password verified, but user must complete MFA challenge
+      if (res.status === 200 && data.code === 'MFA_REQUIRED') {
+        return { type: 'mfa_required', mfaMethod: data.mfa_method || 'totp' };
+      }
+
+      // MFA enrollment required — admin/staff account must enroll MFA before access
+      if (res.status === 403 && data.code === 'MFA_ENROLLMENT_REQUIRED') {
+        return { type: 'mfa_enrollment_required' };
       }
 
       // 400/401/500 = real auth or server error
       setError(data.error || 'Login failed. Please try again.');
-      return 'auth_error';
+      return { type: 'auth_error' };
 
     } catch {
-      return 'network_error';
+      return { type: 'network_error' };
     }
   }
 
@@ -142,11 +152,11 @@ function LoginForm() {
    * retry sequence or resolves to success/failure.
    */
   function handleAttemptResult(
-    result: 'success' | 'auth_error' | 'db_starting' | 'db_config' | 'network_error',
+    result: { type: 'success' | 'auth_error' | 'db_starting' | 'db_config' | 'network_error' | 'mfa_required' | 'mfa_enrollment_required'; mfaMethod?: string },
     email: string,
     password: string
   ) {
-    if (result === 'success') {
+    if (result.type === 'success') {
       setStarting(false);
       setLoading(false);
       // Use window.location.href (full browser navigation) instead of router.push().
@@ -164,7 +174,7 @@ function LoginForm() {
       return;
     }
 
-    if (result === 'db_starting') {
+    if (result.type === 'db_starting') {
       retryCountRef.current += 1;
 
       if (retryCountRef.current <= MAX_AUTO_RETRIES) {
@@ -183,17 +193,39 @@ function LoginForm() {
       return;
     }
 
-    if (result === 'db_config') {
+    if (result.type === 'db_config') {
       setStarting(false);
       setLoading(false);
       setError('Server configuration error — the database is not connected. Please contact your administrator. (Error code: DB_CONFIG_ERROR)');
       return;
     }
 
-    if (result === 'network_error') {
+    if (result.type === 'network_error') {
       setStarting(false);
       setLoading(false);
       setError('Network error. Please check your connection and try again.');
+      return;
+    }
+
+    // MFA required — redirect to MFA challenge page
+    if (result.type === 'mfa_required') {
+      setStarting(false);
+      setLoading(false);
+      const method = result.mfaMethod || 'totp';
+      // Redirect to MFA challenge page with method and original redirect params
+      window.location.href = `/auth/mfa?method=${method}&redirect=${encodeURIComponent(redirect)}`;
+      return;
+    }
+
+    // MFA enrollment required — admin/staff must enroll before access
+    if (result.type === 'mfa_enrollment_required') {
+      setStarting(false);
+      setLoading(false);
+      setError('MFA enrollment is required for your account. Please enable MFA to continue. You will be redirected to Security settings.');
+      // Redirect to settings security tab after a brief delay so user sees the message
+      setTimeout(() => {
+        window.location.href = '/settings?tab=security';
+      }, 2000);
       return;
     }
 

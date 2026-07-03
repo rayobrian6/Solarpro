@@ -113,7 +113,8 @@ export async function GET(req: NextRequest) {
         brand_primary_color, brand_secondary_color,
         proposal_footer_text,
         has_seen_tour, tour_completed_at,
-        password_changed_at
+        password_changed_at,
+        mfa_enabled, mfa_method, mfa_enrolled_at
       FROM users WHERE id = ${userId} LIMIT 1
     `;
   } catch (fullErr: unknown) {
@@ -225,6 +226,11 @@ export async function GET(req: NextRequest) {
       // Tutorial
       hasSeenTour:         db.has_seen_tour       === true,
       tourCompletedAt:     db.tour_completed_at   || null,
+
+      // MFA
+      mfaEnabled:          db.mfa_enabled          === true,
+      mfaMethod:           db.mfa_method           || null,
+      mfaEnrolledAt:       db.mfa_enrolled_at      || null,
     }
   }, {
     headers: {
