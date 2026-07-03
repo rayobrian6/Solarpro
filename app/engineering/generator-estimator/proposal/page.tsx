@@ -1,7 +1,9 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useAppStore } from "@/store/appStore";
+import type { Client } from "@/types";
 import {
   buildProposal,
   DEFAULT_MARGINS,
@@ -76,6 +78,35 @@ function ProposalInner() {
     email: sp.get("email") ?? "",
     phone: sp.get("phone") ?? "",
   });
+
+  // v50.x: clients + URL-param deep-link for auto-fill (Quinn dispatch 2026-07-03).
+  // Source: appStore.clients — already loaded globally by AppShell auth context.
+  // We don't call loadClients() here (AppShell handles mount-time fetching).
+  const clients = useAppStore((s) => s.clients);
+  const urlClientId = sp.get("clientId");
+  const [pickedClientId, setPickedClientId] = useState<string | null>(urlClientId ?? null);
+
+  // URL-param deep-link: when ?clientId=<uuid> is present and the client
+  // exists in the store, autofill the customer fields on mount.
+  useEffect(() => {
+    if (!urlClientId) return;
+    const c = clients.find((x) => x.id === urlClientId);
+    if (!c) return;
+    setCustomer({
+      name: c.name,
+      address: c.address,
+      email: c.email,
+      phone: c.phone,
+    });
+  }, [urlClientId, clients]);
+
+  // Wrapper for user edits so editing any field after a successful pick
+  // resets the picker dropdown back to "— choose from your clients —".
+  // Picker onChange uses direct setCustomer to avoid double-clear.
+  function updateCustomer(patch: Partial<typeof customer>) {
+    setCustomer((prev) => ({ ...prev, ...patch }));
+    setPickedClientId(null);
+  }
   const [serviceSize, setServiceSize] = useState<"100A" | "200A" | "400A">(initialService);
   const [genBrand, setGenBrand] = useState(initialGenerator.brand);
   const [genModel, setGenModel] = useState(initialGenerator.model);
@@ -199,11 +230,42 @@ function ProposalInner() {
           {/* FORM COLUMN (hidden on print) */}
           <section className="space-y-6 no-print">
             <Card title="Customer">
+              {/* v50.x: Pick existing client — Quinn dispatch 2026-07-03.
+                  Sits ABOVE the Name field per brief. Selects use eng-select
+                  (Bug 2 fix). Direct setCustomer on pick (no pickedClientId
+                  clear needed — the picker sets it explicitly). */}
+              <Field label="Pick existing client">
+                <select
+                  className="eng-select"
+                  value={pickedClientId ?? ""}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setPickedClientId(id || null);
+                    if (!id) return;
+                    const c = clients.find((x) => x.id === id);
+                    if (c) {
+                      setCustomer({
+                        name: c.name,
+                        address: c.address,
+                        email: c.email,
+                        phone: c.phone,
+                      });
+                    }
+                  }}
+                >
+                  <option value="">— choose from your clients —</option>
+                  {clients.map((c: Client) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} — {c.address || "(no address)"}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               <Field label="Name">
                 <input
                   type="text"
                   value={customer.name}
-                  onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
+                  onChange={(e) => updateCustomer({ name: e.target.value })}
                   className={inputCls}
                   placeholder="Jane Doe"
                 />
@@ -212,7 +274,7 @@ function ProposalInner() {
                 <input
                   type="text"
                   value={customer.address}
-                  onChange={(e) => setCustomer({ ...customer, address: e.target.value })}
+                  onChange={(e) => updateCustomer({ address: e.target.value })}
                   className={inputCls}
                   placeholder="123 Main St, Springfield IL"
                 />
@@ -221,7 +283,7 @@ function ProposalInner() {
                 <input
                   type="email"
                   value={customer.email}
-                  onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
+                  onChange={(e) => updateCustomer({ email: e.target.value })}
                   className={inputCls}
                 />
               </Field>
@@ -229,7 +291,7 @@ function ProposalInner() {
                 <input
                   type="tel"
                   value={customer.phone}
-                  onChange={(e) => setCustomer({ ...customer, phone: e.target.value })}
+                  onChange={(e) => updateCustomer({ phone: e.target.value })}
                   className={inputCls}
                 />
               </Field>
