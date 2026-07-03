@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { parseBill, type BillParseResult } from "@/lib/engineering/generatorParseBill";
+import { useAppStore } from "@/store/appStore";
+import type { Client } from "@/types";
 import {
   calculateEstimateFromBill,
   formatUSD,
@@ -32,7 +35,18 @@ Issued: 10/15/2024
 Due: 11/05/2024
 `;
 
+// v50.x: Suspense boundary required by Next.js 14 because the inner
+// component uses useSearchParams(). Wrapping here keeps the boundary
+// adjacent to the hook usage; the page doesn't need to know.
 export default function BillParser() {
+  return (
+    <Suspense fallback={null}>
+      <BillParserInner />
+    </Suspense>
+  );
+}
+
+function BillParserInner() {
   const [text, setText] = useState("");
   const [parse, setParse] = useState<BillParseResult | null>(null);
   const [estimate, setEstimate] = useState<EstimateResult | null>(null);
@@ -43,6 +57,53 @@ export default function BillParser() {
   >("idle");
   const [pdfError, setPdfError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // v50.x: clientId URL-param support — Quinn dispatch 2026-07-03.
+  // Source: appStore.clients (same as the proposal picker in 2cc2be16).
+  // No loadClients() call here — AppShell handles mount-time fetching.
+  const sp = useSearchParams();
+  const clientId = sp?.get("clientId") ?? null;
+  const clients = useAppStore((s) => s.clients);
+  const client = useMemo(
+    () => (clientId ? clients.find((c) => c.id === clientId) ?? null : null),
+    [clientId, clients]
+  );
+  // Tracks whether the current `parse` came from applyClientAggregates
+  // (so we can show the "From stored client data" badge vs a real bill parse).
+  const [fromStoredClient, setFromStoredClient] = useState(false);
+
+  // v50.x: synthesize a BillParseResult from client aggregates.
+  // peakKw is left null (can't derive reliably from monthly aggregates).
+  // Populates all 8 BillParseResult fields with sensible null defaults for
+  // the ones the client record doesn't carry (billingPeriod*, cleaned).
+  function applyClientAggregates(c: Client) {
+    const kWh = c.annualKwh > 0 ? Math.round(c.annualKwh / 12) : null;
+    const totalCostUsd = c.averageMonthlyBill > 0 ? c.averageMonthlyBill : null;
+    const ratePerKWh = c.utilityRate > 0 ? c.utilityRate : null;
+    setParse({
+      peakKw: null,
+      kWh,
+      totalCostUsd,
+      ratePerKWh,
+      billingPeriodStart: null,
+      billingPeriodEnd: null,
+      found: {
+        kWh: kWh !== null,
+        peakKw: false,
+        ratePerKWh: ratePerKWh !== null,
+        billingPeriod: false,
+        totalCost: totalCostUsd !== null,
+      },
+      cleaned: "",
+    });
+    setEstimate(null);
+    setEstimateError(null);
+    setText("");
+    setPdfName(null);
+    setPdfStatus("idle");
+    setPdfError(null);
+    setFromStoredClient(true);
+  }
 
   const canSize = parse?.peakKw !== null && parse?.peakKw !== undefined;
   // Show "Add to estimator" whenever ANY bill data was extracted — kWh alone
@@ -69,12 +130,14 @@ export default function BillParser() {
     if (!text.trim()) {
       setParse(null);
       setEstimate(null);
+      setFromStoredClient(false);
       return;
     }
     const result = parseBill(text);
     setParse(result);
     setEstimate(null);
     setEstimateError(null);
+    setFromStoredClient(false);
   };
 
   const handleClear = () => {
@@ -82,6 +145,7 @@ export default function BillParser() {
     setParse(null);
     setEstimate(null);
     setEstimateError(null);
+    setFromStoredClient(false);
   };
 
   const handleSize = () => {
@@ -184,6 +248,41 @@ export default function BillParser() {
         </p>
       </header>
 
+      {/* v50.x: "Use stored data" panel — Quinn dispatch 2026-07-03.
+          Only renders when ?clientId=<uuid> is set AND the resolved
+          client has at least one populated aggregate. Sits ABOVE the
+          Bill text section per brief. Calls applyClientAggregates on
+          click to synthesize a BillParseResult from the client record. */}
+      {client && (client.annualKwh > 0 || client.averageMonthlyBill > 0) && (
+        <section className="rounded-xl border border-amber-300/40 bg-amber-300/5 p-5 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">
+                Use stored data from {client.name}
+              </div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                From {client.utilityProvider || "utility"} · saved on client record
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => applyClientAggregates(client)}
+              className="text-xs rounded-md border border-amber-300/40 px-3 py-1.5 text-amber-300 hover:bg-amber-300/10"
+            >
+              Use stored data
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <Stat label="Annual kWh" value={client.annualKwh.toLocaleString()} />
+            <Stat label="Avg monthly bill" value={formatUSD(client.averageMonthlyBill)} />
+            <Stat label="Utility rate" value={`$${client.utilityRate.toFixed(3)}/kWh`} />
+          </div>
+          <p className="text-[10px] text-slate-500">
+            Peak demand isn&apos;t stored on the client record — upload a bill to set peak kW.
+          </p>
+        </section>
+      )}
+
       <section className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-5 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <label htmlFor="bill-text" className="text-sm font-medium text-slate-300">
@@ -270,6 +369,11 @@ export default function BillParser() {
       {parse && (
         <section className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-5 space-y-4">
           <h2 className="text-lg font-bold">Extracted</h2>
+          {fromStoredClient && (
+            <div className="text-[10px] text-amber-300">
+              From stored client data — refresh by uploading a new bill
+            </div>
+          )}
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <Field label="Monthly usage" value={formatKWh(parse.kWh)} found={parse.found.kWh} />
             <Field
@@ -466,4 +570,14 @@ function formatKWh(v: number | null): string {
 function formatKw(v: number | null): string {
   if (v === null) return "—";
   return `${v.toFixed(1)} kW`;
+}
+
+// v50.x: Stat helper for the "Use stored data" panel — Quinn dispatch 2026-07-03.
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/[0.07] bg-[#07070e]/40 p-2.5">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="text-sm font-mono text-white mt-0.5">{value}</div>
+    </div>
+  );
 }
