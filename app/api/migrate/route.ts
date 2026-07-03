@@ -4137,12 +4137,12 @@ export async function POST(req: NextRequest) {
       }
 
       // Section B: MFA columns on users
-      const mfaCols = [
-        { col: 'mfa_enabled', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN DEFAULT FALSE` },
-        { col: 'mfa_method', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_method TEXT` },
-        { col: 'mfa_secret_encrypted', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret_encrypted TEXT` },
-        { col: 'mfa_verified_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_verified_at TIMESTAMPTZ` },
-        { col: 'mfa_enrolled_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enrolled_at TIMESTAMPTZ` },
+      const mfaCols: Array<{ col: string; ddl: () => Promise<unknown> }> = [
+        { col: 'mfa_enabled', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN DEFAULT FALSE` },
+        { col: 'mfa_method', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_method TEXT` },
+        { col: 'mfa_secret_encrypted', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret_encrypted TEXT` },
+        { col: 'mfa_verified_at', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_verified_at TIMESTAMPTZ` },
+        { col: 'mfa_enrolled_at', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enrolled_at TIMESTAMPTZ` },
       ];
       let mfaAdded = 0;
       for (const { col, ddl } of mfaCols) {
@@ -4150,7 +4150,7 @@ export async function POST(req: NextRequest) {
           SELECT 1 FROM information_schema.columns
           WHERE table_name = 'users' AND column_name = ${col}
         `;
-        if (exists.length === 0) { await ddl; mfaAdded++; }
+        if (exists.length === 0) { await ddl(); mfaAdded++; }
       }
       results.push(`✅ Migration 100: MFA columns on users — ${mfaAdded} added (5 total)`);
 
@@ -4178,12 +4178,12 @@ export async function POST(req: NextRequest) {
       }
 
       // Section D: Consent tracking columns on users
-      const consentCols = [
-        { col: 'consent_privacy_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_privacy_at TIMESTAMPTZ` },
-        { col: 'consent_terms_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_terms_at TIMESTAMPTZ` },
-        { col: 'consent_cookie_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_cookie_at TIMESTAMPTZ` },
-        { col: 'consent_marketing_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_marketing_at TIMESTAMPTZ` },
-        { col: 'data_deletion_requested_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS data_deletion_requested_at TIMESTAMPTZ` },
+      const consentCols: Array<{ col: string; ddl: () => Promise<unknown> }> = [
+        { col: 'consent_privacy_at', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_privacy_at TIMESTAMPTZ` },
+        { col: 'consent_terms_at', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_terms_at TIMESTAMPTZ` },
+        { col: 'consent_cookie_at', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_cookie_at TIMESTAMPTZ` },
+        { col: 'consent_marketing_at', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_marketing_at TIMESTAMPTZ` },
+        { col: 'data_deletion_requested_at', ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS data_deletion_requested_at TIMESTAMPTZ` },
       ];
       let consentAdded = 0;
       for (const { col, ddl } of consentCols) {
@@ -4191,7 +4191,7 @@ export async function POST(req: NextRequest) {
           SELECT 1 FROM information_schema.columns
           WHERE table_name = 'users' AND column_name = ${col}
         `;
-        if (exists.length === 0) { await ddl; consentAdded++; }
+        if (exists.length === 0) { await ddl(); consentAdded++; }
       }
       results.push(`✅ Migration 100: Consent columns on users — ${consentAdded} added (5 total)`);
     } catch (e: unknown) {
