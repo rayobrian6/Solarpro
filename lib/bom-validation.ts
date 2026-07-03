@@ -26,6 +26,10 @@ export interface BOMValidationInput {
   fenceData?: any;
   groundData?: any;
   roofType?: string;
+  // Standby power — schema-only, no new validation logic per brief
+  generatorId?: string;
+  atsId?: string;
+  backupInterfaceId?: string;
 }
 
 export interface BOMValidationResult {

@@ -297,6 +297,17 @@ export async function POST(req: NextRequest) {
       // fenceData/groundData still accepted for structural derivation (passed to merge layer)
       fenceData:                body.fenceData,
       groundData:               body.groundData,
+
+      // Standby power — pass-through to BOMGenerationInputV4 (consumed by the
+      // gen/ATS/BUI/whip emission blocks in bom-engine-v4.ts). All optional; the
+      // engine emits no items when these are absent.
+      generatorId:              body.generatorId,
+      atsId:                    body.atsId,
+      backupInterfaceId:        body.backupInterfaceId,
+      generatorKw:              body.generatorKw !== undefined ? Number(body.generatorKw) : undefined,
+      atsAmpRating:             body.atsAmpRating !== undefined ? Number(body.atsAmpRating) : undefined,
+      backupInterfaceMaxA:      body.backupInterfaceMaxA !== undefined ? Number(body.backupInterfaceMaxA) : undefined,
+      generatorWireLength:      body.generatorWireLength !== undefined ? Number(body.generatorWireLength) : undefined,
     };
 
     // MASTER TASK: Payload fields map 1:1 to SystemDefinition:
@@ -323,6 +334,9 @@ export async function POST(req: NextRequest) {
       fenceData: input.fenceData,
       groundData: input.groundData,
       roofType: input.roofType,
+      generatorId: input.generatorId,
+      atsId: input.atsId,
+      backupInterfaceId: input.backupInterfaceId,
     });
     if (validation.warnings.length > 0) {
       console.log('[BOM VALIDATION]', validation.warnings);
