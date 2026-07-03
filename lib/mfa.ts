@@ -13,6 +13,15 @@
  *
  * WebAuthn/FIDO2 support can be added in a future iteration.
  * SMS-based OTP is explicitly NOT supported (per POL-SEC-009).
+ *
+ * FAIL-CLOSED DESIGN:
+ *   If MFA_ENCRYPTION_KEY is missing or invalid, all MFA operations throw.
+ *   This is intentional — MFA must NEVER silently degrade to disabled.
+ *   Missing key → encryptTOTPSecret/decryptTOTPSecret throw Error →
+ *   API routes return 500 → user sees clear error, not a bypassed MFA.
+ *
+ *   MFA_ENCRYPTION_KEY must be a 32-byte (256-bit) base64-encoded key
+ *   set in environment variables. See .env.example for setup instructions.
  */
 
 import crypto from 'crypto';

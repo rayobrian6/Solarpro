@@ -67,49 +67,79 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ─── Recovery code verification ──────────────────────────────────
+    // ─── Recovery code verification (atomic consume) ──────────────
+    // Race-condition fix: SELECT candidate hashes, match in JS (timing-safe),
+    // then atomically UPDATE WHERE id=X AND used=false RETURNING id.
+    // If RETURNING returns nothing, another concurrent request already consumed it.
     if (recovery_code) {
       try {
         const recoveryRows = await sql`
-          SELECT code_hash, used FROM mfa_recovery_codes
+          SELECT id, code_hash FROM mfa_recovery_codes
           WHERE user_id = ${mfaPending.id} AND used = false
         `;
 
+        let matchedRowId: number | null = null;
+
         for (const row of recoveryRows as any[]) {
           if (verifyRecoveryCode(recovery_code, row.code_hash)) {
-            // Mark recovery code as used
-            await sql`
-              UPDATE mfa_recovery_codes SET used = true, used_at = NOW()
-              WHERE user_id = ${mfaPending.id} AND code_hash = ${row.code_hash}
-            `;
-
-            await auditAuth(
-              'mfa_challenge_success',
-              `MFA recovery code used for user ${dbUser.email}`,
-              { actor_id: mfaPending.id, actor_email: dbUser.email, actor_role: dbUser.role, ip_address: ip, request_path: '/api/auth/mfa/verify' },
-              { method: 'recovery_code' },
-            );
-
-            // Issue full session on recovery code success
-            const sessionUser: SessionUser = {
-              id: dbUser.id, name: dbUser.name, email: dbUser.email,
-              company: dbUser.company || undefined,
-            };
-            const token = signToken(sessionUser);
-            const response = NextResponse.json({
-              success: true,
-              message: 'Recovery code accepted. Please enroll a new authenticator device.',
-              should_reenroll: true,
-              data: { user: { ...sessionUser, role: dbUser.role } },
-            });
-            response.cookies.set(COOKIE_NAME, token, {
-              httpOnly: true, secure: process.env.NODE_ENV === 'production',
-              sameSite: 'lax' as const, path: '/', maxAge: COOKIE_MAX_AGE,
-            });
-            // Clear MFA pending cookie
-            response.cookies.set(MFA_PENDING_COOKIE, '', { path: '/api/auth/mfa', maxAge: 0 });
-            return response;
+            matchedRowId = row.id;
+            break; // Stop after first match — codes are unique
           }
+        }
+
+        if (matchedRowId !== null) {
+          // Atomically mark recovery code as used.
+          // WHERE used = false prevents double-use if another request
+          // consumed this code between our SELECT and UPDATE.
+          const consumeResult = await sql`
+            UPDATE mfa_recovery_codes
+            SET used = true, used_at = NOW()
+            WHERE id = ${matchedRowId}
+              AND user_id = ${mfaPending.id}
+              AND used = false
+            RETURNING id
+          `;
+
+          if ((consumeResult as any[]).length === 0) {
+            // Code was consumed by a concurrent request between SELECT and UPDATE
+            await auditAuth(
+              'mfa_recovery_code_failed',
+              `MFA recovery code race condition — code already consumed for user ${dbUser.email}`,
+              { actor_id: mfaPending.id, actor_email: dbUser.email, actor_role: dbUser.role, ip_address: ip, request_path: '/api/auth/mfa/verify' },
+              { method: 'recovery_code', reason: 'already_consumed' },
+            );
+            return NextResponse.json(
+              { error: 'Recovery code already used. Please try another or log in again.' },
+              { status: 400 },
+            );
+          }
+
+          await auditAuth(
+            'mfa_recovery_code_used',
+            `MFA recovery code used for user ${dbUser.email}`,
+            { actor_id: mfaPending.id, actor_email: dbUser.email, actor_role: dbUser.role, ip_address: ip, request_path: '/api/auth/mfa/verify' },
+            { method: 'recovery_code' },
+          );
+
+          // Issue full session on recovery code success
+          const sessionUser: SessionUser = {
+            id: dbUser.id, name: dbUser.name, email: dbUser.email,
+            company: dbUser.company || undefined,
+          };
+          const token = signToken(sessionUser);
+          const response = NextResponse.json({
+            success: true,
+            message: 'Recovery code accepted. Please enroll a new authenticator device.',
+            should_reenroll: true,
+            data: { user: { ...sessionUser, role: dbUser.role } },
+          });
+          response.cookies.set(COOKIE_NAME, token, {
+            httpOnly: true, secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax' as const, path: '/', maxAge: COOKIE_MAX_AGE,
+          });
+          // Clear MFA pending cookie
+          response.cookies.set(MFA_PENDING_COOKIE, '', { path: '/api/auth/mfa', maxAge: 0 });
+          return response;
         }
       } catch {
         // mfa_recovery_codes table might not exist yet
@@ -117,7 +147,7 @@ export async function POST(req: NextRequest) {
       }
 
       await auditAuth(
-        'mfa_challenge_failure',
+        'mfa_recovery_code_failed',
         `Invalid recovery code for user ${dbUser.email}`,
         { actor_id: mfaPending.id, actor_email: dbUser.email, actor_role: dbUser.role, ip_address: ip, request_path: '/api/auth/mfa/verify' },
         { method: 'recovery_code' },

@@ -48,6 +48,8 @@ export type AuditAction =
   | 'mfa_challenge_success'
   | 'mfa_challenge_failure'
   | 'mfa_failure'
+  | 'mfa_recovery_code_used'
+  | 'mfa_recovery_code_failed'
   | 'mfa_enrollment_required'
   | 'account_locked'
   | 'account_unlocked'
