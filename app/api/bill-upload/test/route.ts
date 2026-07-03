@@ -5,6 +5,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { productionGuard } from '@/lib/security';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 let PDFParse: any = null;
 let pdfParseError = '';
@@ -38,6 +39,9 @@ export async function GET(req: NextRequest) {
 
 // POST — upload a PDF and get back raw debug info for each extraction method
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'bill-upload');
+  if (rlGuard.blocked) return rlGuard.response;
+
   // SECURITY: Block debug routes in production
   const _blocked = productionGuard(); if (_blocked) return _blocked;
 

@@ -188,6 +188,58 @@ export function signToken(user: SessionUser): string {
   return jwt.sign(payload, getJwtSecret(), { expiresIn: '30d' });
 }
 
+/**
+ * Signs a short-lived "MFA pending" token.
+ * Issued after successful password verification when MFA is enabled.
+ * This token ONLY authorizes the holder to complete MFA verification —
+ * it does NOT grant application access (mfa_pending = true flag).
+ *
+ * Lifetime: 5 minutes (generous for TOTP entry + clock skew).
+ */
+export const MFA_PENDING_COOKIE = 'solarpro_mfa_pending';
+export const MFA_PENDING_MAX_AGE = 60 * 5; // 5 minutes
+
+export function signMFAPendingToken(user: SessionUser & { role: string; mfa_method: string }): string {
+  const payload = {
+    id:         user.id,
+    name:       user.name,
+    email:      user.email,
+    company:    user.company,
+    mfa_pending: true,
+    role:        user.role,
+    mfa_method:  user.mfa_method,
+  };
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: '5m' });
+}
+
+/**
+ * Verifies an MFA pending token. Returns the payload if valid and
+ * the mfa_pending flag is set; returns null otherwise.
+ */
+export interface MFAPendingPayload extends SessionUser {
+  mfa_pending: boolean;
+  role: string;
+  mfa_method: string;
+}
+
+export function verifyMFAPendingToken(token: string): MFAPendingPayload | null {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as Record<string, any>;
+    if (!decoded?.id || !decoded?.email || !decoded?.mfa_pending) return null;
+    return {
+      id:          String(decoded.id),
+      name:        String(decoded.name || decoded.email),
+      email:       String(decoded.email),
+      company:     decoded.company ? String(decoded.company) : undefined,
+      mfa_pending: true,
+      role:        String(decoded.role || ''),
+      mfa_method:  String(decoded.mfa_method || 'totp'),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function verifyToken(token: string): SessionUser | null {
   return verifyTokenWithMeta(token)?.user ?? null;
 }

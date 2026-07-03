@@ -27,6 +27,7 @@ import {
   summarizeOpenSourcePhotoVisionRun,
 } from '@/lib/db-neon';
 import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 const MAX_BATCHES_PER_TICK = 2; // Process 2 batches per invocation (~25-35s total, safely under 60s)
 

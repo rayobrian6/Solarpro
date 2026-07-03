@@ -16,6 +16,7 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
 import { upsertProspects, type InstallerProspectInput } from "@/lib/network/installerProspects";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // In-memory rate limit: one blitz per 60s per server instance.
 // Prevents accidental credit-burning from rapid repeated requests.
@@ -48,6 +49,9 @@ Return ONLY a JSON array (no prose, no markdown fences) of objects with EXACTLY 
 Aim for 10-15 real companies, each with a website and ideally a phone. Quality over quantity. Your entire final message must be the JSON array.`;
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 

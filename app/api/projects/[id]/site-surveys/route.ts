@@ -7,6 +7,7 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 import {
   getSiteSurveysByProject,
   createSiteSurvey,

@@ -37,6 +37,7 @@ import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/
 import { writeCanonicalModel } from '@/lib/siteSurveys/unifiedGeometry/canonicalModelStore';
 import { getContradictionReportsBySurvey } from '@/lib/db/geometryReconstruction';
 import type { DepthContradictionReport } from '@/lib/siteSurveys/geometryReconstruction/types';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(
   req: NextRequest,

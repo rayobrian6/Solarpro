@@ -38,6 +38,7 @@ import {
 } from '@/lib/db/geometryReconstruction';
 import { generateMockArtifacts } from '@/lib/siteSurveys/geometryReconstruction/mockAdapter';
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(
   req: NextRequest,

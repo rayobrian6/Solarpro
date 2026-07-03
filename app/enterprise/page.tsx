@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Sun, Building2, Users, ArrowRight, CheckCircle,
-  Mail, Phone, MessageSquare, Briefcase, AlertCircle, X
+  Mail, Phone, MessageSquare, Briefcase, AlertCircle, X,
+  Shield, Lock, FileCheck, Eye
 } from 'lucide-react';
 
 export default function EnterprisePage() {
@@ -100,6 +101,86 @@ export default function EnterprisePage() {
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* SOC 2 Readiness Section */}
+            <div className="mt-10 mb-6">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-4">
+                <Shield size={12} /> Security & Compliance
+              </div>
+              <h2 className="text-2xl font-black text-white mb-3">SOC 2 Readiness</h2>
+              <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                SolarPro is actively preparing for SOC 2 Type I certification. Our security foundation
+                is built on the Trust Services Criteria — so your data is protected by enterprise-grade
+                controls today, with formal audit planned as we scale.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                {[
+                  {
+                    icon: <Lock size={16} />,
+                    title: 'Encryption at Rest & Transit',
+                    desc: 'AES-256-GCM for secrets, TLS 1.3 for all connections, bcrypt password hashing',
+                  },
+                  {
+                    icon: <Shield size={16} />,
+                    title: 'MFA & RBAC',
+                    desc: 'TOTP-based MFA for all admin/staff, 5-role access control with least-privilege defaults',
+                  },
+                  {
+                    icon: <Eye size={16} />,
+                    title: 'Tamper-Evident Audit Logs',
+                    desc: 'SHA-256 hash-chained audit trail for all security events — SOC 2 CC7.2 evidence-ready',
+                  },
+                  {
+                    icon: <FileCheck size={16} />,
+                    title: '11 Security Policies',
+                    desc: 'Documented policies covering access control, incident response, encryption, vendor risk, and more',
+                  },
+                ].map((item, i) => (
+                  <div key={i} className="p-3 bg-slate-800/40 border border-slate-700/50 rounded-xl">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 flex-shrink-0">
+                        {item.icon}
+                      </div>
+                      <div className="text-white font-semibold text-xs">{item.title}</div>
+                    </div>
+                    <div className="text-slate-500 text-xs leading-relaxed">{item.desc}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-3 bg-slate-800/30 border border-dashed border-slate-700/50 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-slate-300 text-xs font-semibold">Compliance Roadmap</span>
+                  <span className="text-emerald-400 text-xs font-medium">In Progress</span>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { label: 'Security Policies & Risk Register', done: true },
+                    { label: 'MFA, Audit Logging, RBAC Controls', done: true },
+                    { label: 'Quarterly Access Reviews & Onboarding/Offboarding', done: true },
+                    { label: 'SOC 2 Type I Readiness Assessment', done: false },
+                    { label: 'Formal SOC 2 Type I Audit', done: false },
+                  ].map((step, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 ${step.done ? 'bg-emerald-500/20 border border-emerald-500/40' : 'bg-slate-700/50 border border-slate-600/50'}`}>
+                        {step.done && <CheckCircle size={10} className="text-emerald-400" />}
+                      </div>
+                      <span className={`text-xs ${step.done ? 'text-slate-300' : 'text-slate-500'}`}>{step.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <Link
+                  href="/compliance"
+                  className="inline-flex items-center gap-1.5 text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors"
+                >
+                  View full trust center <ArrowRight size={12} />
+                </Link>
+              </div>
             </div>
 
             <div className="p-4 bg-slate-800/40 border border-slate-700/50 rounded-xl">

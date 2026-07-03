@@ -14,6 +14,7 @@ import { getSiteSurveyById, getSiteSurveyFiles, isValidUUID } from '@/lib/db-neo
 import { inferSurveyEvidenceCategoryFromText, getSurveyEvidenceLabel, type SurveyEvidenceCategory } from '@/lib/survey/evidence/manifest';
 import type { SiteSurveyFile } from '@/lib/db/surveys';
 import { analyzeSurveyPhotosOpenSource, type SurveyPhotoOpenSourceAnalysis } from '@/lib/siteSurvey/photoIntelligence';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 type PreviewCategory = Exclude<SurveyEvidenceCategory, 'duplicate' | 'blurry' | 'unusable'>;
 

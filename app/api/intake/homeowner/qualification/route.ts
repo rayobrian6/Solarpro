@@ -14,6 +14,7 @@ export const maxDuration = 20;
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDbReady } from "@/lib/db-neon";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 import {
   HOMEOWNER_QUALIFICATION_EVENT_TYPE,
   HOMEOWNER_QUALIFICATION_SCHEMA_VERSION,

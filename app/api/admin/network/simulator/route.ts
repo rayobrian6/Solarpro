@@ -10,6 +10,7 @@ import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunity
 import { enrichAndPersistOpportunity } from '@/lib/network/opportunityEnrichment'
 import { matchContractors } from '@/lib/network/contractorMatcher'
 import { logNetworkEvent } from '@/lib/network/attributionTracker'
+import { rateLimitGuard } from '@/lib/rateLimitGuard'
 
 type OpportunityType = 'solar' | 'roofing' | 'battery' | 'service_call'
 type LeadQuality = 'high' | 'medium' | 'low' | 'bad'
@@ -132,6 +133,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   let stage: SimulatorStage = 'auth'
   try {
     logStage(stage)

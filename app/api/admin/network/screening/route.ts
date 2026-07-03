@@ -22,6 +22,7 @@ import {
   scoreToListingPrice,
 } from "@/lib/network/opportunityScorer";
 import { enrichAndPersistOpportunity } from "@/lib/network/opportunityEnrichment";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 function toPostgresTextArray(values: string[]) {
   return `{${values.map((value) => `\"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}\"`).join(",")}}`;
@@ -115,6 +116,9 @@ export async function GET(req: NextRequest) {
 
 // ── POST: Trigger screening ─────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   try {
     const admin = await requireAdminApi(req);
     if (!admin)
@@ -254,6 +258,9 @@ async function scoreAndPersistOpportunity(
 
 // ── PATCH: Override screening decision ─────────────────────────────────────
 export async function PATCH(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   try {
     const admin = await requireAdminApi(req);
     if (!admin)

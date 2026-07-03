@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady } from '@/lib/db-neon';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export const dynamic    = 'force-dynamic';
 export const runtime    = 'nodejs';
@@ -15,6 +16,9 @@ export const maxDuration = 30;
  * Called by SolarDogWithTour when the tour finishes or is skipped.
  */
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'standard');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const session = getUserFromRequest(req);
   if (!session?.id) {
     return NextResponse.json(

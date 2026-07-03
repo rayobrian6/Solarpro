@@ -6,6 +6,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 type Params = { params: { id: string } };
 
@@ -52,6 +53,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 // PATCH /api/admin/leads/[id] — update status and/or notes
 // ---------------------------------------------------------------------------
 export async function PATCH(req: NextRequest, { params }: Params) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 

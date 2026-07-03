@@ -6,6 +6,7 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ── Default notification preferences ─────────────────────────────────────────
 const DEFAULT_NOTIFICATION_PREFS = {
@@ -52,6 +53,9 @@ export async function GET(req: NextRequest) {
 
 // ── PATCH /api/settings/notifications ────────────────────────────────────────
 export async function PATCH(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'settings');
+  if (rlGuard.blocked) return rlGuard.response;
+
   try {
     const user = getUserFromRequest(req);
     if (!user?.id) {

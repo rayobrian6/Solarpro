@@ -52,6 +52,7 @@ import { warmupSAM2Service, isSAM2Enabled } from '@/lib/siteSurveys/geometryReco
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput } from '@/lib/siteSurveys/geometryReconstruction/types';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // Internal auth token -- must match the token used by /start route
 // SECURITY: No hardcoded fallback — env var is REQUIRED. If not set, endpoint is disabled.

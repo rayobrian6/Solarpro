@@ -14,6 +14,7 @@ export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 import {
   upsertProspects,
   listProspects,
@@ -55,6 +56,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const admin = await requireAdminApi(req);
   if (!admin && !ingestKeyOk(req)) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
