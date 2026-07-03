@@ -45,6 +45,7 @@ import {
   fetchHealth,
 } from '@/lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient';
 import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 const MAX_ACTIVE_JOBS_PER_USER = 3;
 

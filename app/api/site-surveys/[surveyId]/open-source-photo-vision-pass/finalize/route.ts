@@ -81,6 +81,7 @@ import { updateSiteSurveyFileLabels } from '@/lib/db/surveys';
 import { getDbReady } from '@/lib/db/core';
 import { adaptPhotoVisionBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ---------------------------------------------------------------------------
 // Timeout constants

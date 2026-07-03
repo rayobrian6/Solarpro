@@ -9,6 +9,7 @@ import { requireAdminApi } from "@/lib/adminAuth";
 import { matchContractors } from "@/lib/network/contractorMatcher";
 import { logNetworkEvent } from "@/lib/network/attributionTracker";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 import {
   releaseMarketplaceInventoryFromIntake,
   transitionMarketplaceInventory,
@@ -182,6 +183,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   let stage: MarketplaceStage = "auth";
   try {
     const admin = await requireAdminApi(req);

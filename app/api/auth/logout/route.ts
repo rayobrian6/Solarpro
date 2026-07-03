@@ -2,8 +2,12 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { COOKIE_NAME } from '@/lib/auth';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'standard');
+  if (rlGuard.blocked) return rlGuard.response;
+
   try {
     const response = NextResponse.json({ success: true });
 

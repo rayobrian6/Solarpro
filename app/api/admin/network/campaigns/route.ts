@@ -29,6 +29,7 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady }     from '@/lib/db-neon';
 import { requireAdminApi } from '@/lib/adminAuth';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ── GET ───────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest): Promise<NextResponse> {

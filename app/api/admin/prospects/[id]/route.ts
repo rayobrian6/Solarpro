@@ -8,6 +8,7 @@ export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 import {
   updateProspect,
   PROSPECT_STAGES,

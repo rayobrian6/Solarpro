@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { requireDeskApi } from "@/lib/leadDeskAuth";
 import { recordDisposition, type ProspectStage } from "@/lib/network/installerProspects";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 const ACTION_STAGE: Record<string, ProspectStage> = {
   called: "contacted",
@@ -21,6 +22,9 @@ const ACTION_STAGE: Record<string, ProspectStage> = {
 };
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const rlGuard = await rateLimitGuard(req, 'standard');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const user = await requireDeskApi(req);
   if (!user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 

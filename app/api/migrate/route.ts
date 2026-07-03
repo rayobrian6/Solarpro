@@ -4094,6 +4094,110 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 086 (depth contradiction reports): ${(e as Error).message}`);
     }
 
+    // ── Migration 100: Compliance schema — audit log, MFA, consent tracking ──
+    // SOC 2 CC7.2 / ISO 27001 A.12.4 tamper-evident audit logging,
+    // MFA columns on users, recovery codes table, consent tracking.
+    // Idempotent: all CREATE/ALTER use IF NOT EXISTS.
+    try {
+      // Section A: audit_log table
+      const auditLogExists = await sql`
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'audit_log'
+      `;
+      if (auditLogExists.length === 0) {
+        await sql`
+          CREATE TABLE audit_log (
+            id            BIGSERIAL PRIMARY KEY,
+            timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            category      TEXT NOT NULL,
+            action        TEXT NOT NULL,
+            actor_id      TEXT,
+            actor_email   TEXT,
+            actor_role    TEXT,
+            target_type   TEXT,
+            target_id     TEXT,
+            description   TEXT NOT NULL,
+            metadata      JSONB DEFAULT '{}',
+            ip_address    TEXT,
+            user_agent    TEXT,
+            request_path  TEXT,
+            prev_hash     TEXT,
+            entry_hash    TEXT NOT NULL
+          )
+        `;
+        await sql`CREATE INDEX idx_audit_log_timestamp ON audit_log (timestamp DESC)`;
+        await sql`CREATE INDEX idx_audit_log_category ON audit_log (category)`;
+        await sql`CREATE INDEX idx_audit_log_actor_id ON audit_log (actor_id)`;
+        await sql`CREATE INDEX idx_audit_log_action ON audit_log (action)`;
+        await sql`CREATE INDEX idx_audit_log_target ON audit_log (target_type, target_id)`;
+        await sql`CREATE INDEX idx_audit_log_entry_hash ON audit_log (entry_hash)`;
+        results.push('✅ Migration 100: audit_log table + 6 indexes created');
+      } else {
+        results.push('⏭ Migration 100: audit_log table already exists');
+      }
+
+      // Section B: MFA columns on users
+      const mfaCols = [
+        { col: 'mfa_enabled', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN DEFAULT FALSE` },
+        { col: 'mfa_method', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_method TEXT` },
+        { col: 'mfa_secret_encrypted', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret_encrypted TEXT` },
+        { col: 'mfa_verified_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_verified_at TIMESTAMPTZ` },
+        { col: 'mfa_enrolled_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enrolled_at TIMESTAMPTZ` },
+      ];
+      let mfaAdded = 0;
+      for (const { col, ddl } of mfaCols) {
+        const exists = await sql`
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = ${col}
+        `;
+        if (exists.length === 0) { await ddl; mfaAdded++; }
+      }
+      results.push(`✅ Migration 100: MFA columns on users — ${mfaAdded} added (5 total)`);
+
+      // Section C: mfa_recovery_codes table
+      const recoveryTableExists = await sql`
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'mfa_recovery_codes'
+      `;
+      if (recoveryTableExists.length === 0) {
+        await sql`
+          CREATE TABLE mfa_recovery_codes (
+            id          BIGSERIAL PRIMARY KEY,
+            user_id     TEXT NOT NULL REFERENCES users(id),
+            code_hash   TEXT NOT NULL,
+            used        BOOLEAN DEFAULT FALSE,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            used_at     TIMESTAMPTZ
+          )
+        `;
+        await sql`CREATE INDEX idx_mfa_recovery_codes_user ON mfa_recovery_codes (user_id)`;
+        await sql`CREATE INDEX idx_mfa_recovery_codes_unused ON mfa_recovery_codes (user_id, used) WHERE used = false`;
+        results.push('✅ Migration 100: mfa_recovery_codes table + 2 indexes created');
+      } else {
+        results.push('⏭ Migration 100: mfa_recovery_codes table already exists');
+      }
+
+      // Section D: Consent tracking columns on users
+      const consentCols = [
+        { col: 'consent_privacy_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_privacy_at TIMESTAMPTZ` },
+        { col: 'consent_terms_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_terms_at TIMESTAMPTZ` },
+        { col: 'consent_cookie_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_cookie_at TIMESTAMPTZ` },
+        { col: 'consent_marketing_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_marketing_at TIMESTAMPTZ` },
+        { col: 'data_deletion_requested_at', ddl: sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS data_deletion_requested_at TIMESTAMPTZ` },
+      ];
+      let consentAdded = 0;
+      for (const { col, ddl } of consentCols) {
+        const exists = await sql`
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = ${col}
+        `;
+        if (exists.length === 0) { await ddl; consentAdded++; }
+      }
+      results.push(`✅ Migration 100: Consent columns on users — ${consentAdded} added (5 total)`);
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 100 (compliance schema): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

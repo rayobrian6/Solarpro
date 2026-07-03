@@ -7,10 +7,13 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getDbReady, verifyPassword, signToken, COOKIE_NAME, COOKIE_MAX_AGE, SessionUser
+  getDbReady, verifyPassword, signToken, COOKIE_NAME, COOKIE_MAX_AGE, SessionUser,
+  signMFAPendingToken, MFA_PENDING_COOKIE, MFA_PENDING_MAX_AGE,
 } from '@/lib/auth';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { auditAuth, auditSecurity } from '@/lib/auditLog';
+import { isMFARequiredButNotEnabled } from '@/lib/mfa';
 
 // PHASE 5: Log auth secret fingerprint on first invocation (not the secret itself)
 // This confirms the secret is stable and consistent across deployments.
@@ -60,7 +63,8 @@ export async function POST(req: NextRequest) {
 
     // ── Fetch user ────────────────────────────────────────────────────────
     const rows = await sql`
-      SELECT id, name, email, password_hash, company, phone, role, is_free_pass
+      SELECT id, name, email, password_hash, company, phone, role, is_free_pass,
+             mfa_enabled, mfa_method
       FROM users
       WHERE email = ${email.toLowerCase().trim()}
       LIMIT 1
@@ -77,6 +81,12 @@ export async function POST(req: NextRequest) {
         compareResult: false,
         requiresReset: false,
       }));
+      // Compliance audit log: failed login attempt
+      await auditAuth('login_failure', `Failed login attempt for ${email.toLowerCase().trim()}`, {
+        actor_email: email.toLowerCase().trim(),
+        ip_address: getClientIp(req),
+        request_path: '/api/auth/login',
+      }, { reason: 'user_not_found' });
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }
@@ -134,6 +144,15 @@ export async function POST(req: NextRequest) {
           hashFormat:  verifyResult.hashFormat,
           hashPrefix:  user.password_hash?.slice(0, 10),
         });
+
+        // Compliance audit log: free-pass account needs password reset
+        await auditAuth('login_failure', `Free-pass account password reset required for ${user.email}`, {
+          actor_id: user.id,
+          actor_email: user.email,
+          ip_address: getClientIp(req),
+          request_path: '/api/auth/login',
+        }, { reason: 'legacy_hash_reset_required', is_free_pass: true });
+
         return NextResponse.json(
           {
             success: false,
@@ -144,10 +163,75 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // Compliance audit log: failed login — invalid password
+      await auditAuth('login_failure', `Failed login attempt for ${user.email}`, {
+        actor_id: user.id,
+        actor_email: user.email,
+        ip_address: getClientIp(req),
+        request_path: '/api/auth/login',
+      }, { reason: 'invalid_password' });
+
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }
       );
+    }
+
+    // ── MFA enforcement check ──────────────────────────────────────────
+    // Per POL-SEC-009, admin/staff accounts MUST have MFA enabled.
+    // If MFA is required but not enabled, require enrollment before login.
+    if (isMFARequiredButNotEnabled(user.role, user.mfa_enabled)) {
+      // Compliance audit log: MFA enrollment required but not enabled
+      await auditSecurity('mfa_enrollment_required', `MFA enrollment required for ${user.email} (role: ${user.role})`, {
+        actor_id: user.id,
+        actor_email: user.email,
+        ip_address: getClientIp(req),
+        request_path: '/api/auth/login',
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'MFA enrollment is required for your account. Please enable MFA to continue.',
+          code: 'MFA_ENROLLMENT_REQUIRED',
+        },
+        { status: 403 }
+      );
+    }
+
+    // If user has MFA enabled, require MFA verification after password success
+    if (user.mfa_enabled) {
+      // Compliance audit log: MFA challenge issued
+      await auditAuth('mfa_challenge_issued', `MFA challenge issued for ${user.email}`, {
+        actor_id: user.id,
+        actor_email: user.email,
+        ip_address: getClientIp(req),
+        request_path: '/api/auth/login',
+      }, { mfa_method: user.mfa_method || 'totp' });
+
+      // Issue a short-lived MFA pending token so the verify route can identify the user.
+      // This token does NOT grant application access (mfa_pending flag).
+      const mfaToken = signMFAPendingToken({
+        id: user.id, name: user.name, email: user.email,
+        company: user.company || undefined, role: user.role, mfa_method: user.mfa_method || 'totp',
+      });
+      const mfaResponse = NextResponse.json(
+        {
+          success: false,
+          error: 'MFA verification required.',
+          code: 'MFA_REQUIRED',
+          mfa_method: user.mfa_method || 'totp',
+        },
+        { status: 200 }
+      );
+      mfaResponse.cookies.set(MFA_PENDING_COOKIE, mfaToken, {
+        httpOnly: true,
+        secure:   process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        path:     '/api/auth/mfa',
+        maxAge:   MFA_PENDING_MAX_AGE,
+      });
+      return mfaResponse;
     }
 
     // JWT contains ONLY identity — role is NOT included
@@ -159,6 +243,14 @@ export async function POST(req: NextRequest) {
     };
 
     const token = signToken(sessionUser);
+
+    // Compliance audit log: successful login
+    await auditAuth('login_success', `Successful login for ${sessionUser.email}`, {
+      actor_id: sessionUser.id,
+      actor_email: sessionUser.email,
+      ip_address: getClientIp(req),
+      request_path: '/api/auth/login',
+    });
 
     // ── FIX: Use response.cookies.set() — the Next.js 14 App Router
     // canonical API. Using headers: { 'Set-Cookie': string } is unreliable

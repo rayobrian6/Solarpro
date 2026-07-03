@@ -16,6 +16,7 @@ import { requireAdminApi } from "@/lib/adminAuth";
 import { matchContractors } from "@/lib/network/contractorMatcher";
 import { logNetworkEvent } from "@/lib/network/attributionTracker";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 type Params = { params: { id: string } };
 
@@ -93,6 +94,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 
 // ── POST: Run matching ───────────────────────────────────────────────────────
 export async function POST(req: NextRequest, { params }: Params) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   try {
     const admin = await requireAdminApi(req);
     if (!admin)

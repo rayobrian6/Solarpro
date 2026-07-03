@@ -9,8 +9,12 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
 import { enrichBatch } from "@/lib/network/prospectWork";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   const apiKey = process.env.ANTHROPIC_API_KEY;

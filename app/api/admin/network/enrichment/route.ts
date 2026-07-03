@@ -28,6 +28,7 @@ import {
   getPendingEnrichmentOpportunities,
 } from '@/lib/enrichment/enrichmentOrchestrator';
 import type { EnrichmentProvider } from '@/lib/intake/enrichmentQueue';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ── GET: Dashboard
 export async function GET(req: NextRequest): Promise<NextResponse> {

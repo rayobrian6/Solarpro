@@ -28,6 +28,7 @@ import { writeCanonicalModel } from '@/lib/siteSurveys/unifiedGeometry/canonical
 import { canonicalToPermitRoofPlanes } from '@/lib/siteSurveys/unifiedGeometry/canonicalToPermit';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
 import type { GeometryPromotionRecord } from '@/lib/siteSurveys/unifiedGeometry/types';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 const CANONICAL_STATES = new Set(['promoted_canonical', 'cad_safe']);
 const isAerialRoofPlane = (a: UnifiedGeometryArtifact) =>

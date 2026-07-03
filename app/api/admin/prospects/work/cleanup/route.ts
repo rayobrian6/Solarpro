@@ -11,6 +11,7 @@ export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 function normPhone(raw: string | null): string | null {
   if (!raw) return null;
@@ -27,6 +28,9 @@ function normSite(raw: string | null): string | null {
 }
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 

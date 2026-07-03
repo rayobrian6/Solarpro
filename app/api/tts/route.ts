@@ -19,6 +19,7 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 const VOICE_ID_DEFAULT = 'CwhRBWXzGAHq8TQ4Fs17';
 const MODEL_ID         = 'eleven_multilingual_v2';
@@ -30,6 +31,9 @@ const VOICE_SETTINGS   = {
 };
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'standard');
+  if (rlGuard.blocked) return rlGuard.response;
+
   // Auth required — voice is per-user
   const user = getUserFromRequest(req);
   if (!user) {

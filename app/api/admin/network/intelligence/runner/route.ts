@@ -21,6 +21,7 @@ import { PRODUCER_REGISTRY, type ProducerInput, type ProducerName } from '@/lib/
 import { runIntelligenceProducers, type ProducerRunJob } from '@/lib/intelligence/runner';
 import type { ObservationEntityType } from '@/lib/intelligence/observations';
 import type { ProducerWindow } from '@/lib/intelligence/producers';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 const MAX_WINDOW_DAYS = 31;
 const MAX_PREVIEW_LIMIT = 50;

@@ -23,8 +23,12 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady } from '@/lib/db-neon';
 import { productionGuard } from '@/lib/security';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   // SECURITY: Block in production — this returns sensitive account metadata
   const _blocked = productionGuard(); if (_blocked) return _blocked;
 

@@ -19,6 +19,7 @@ import { buildSurveyEvidenceTraceability } from '@/lib/survey/evidence/provenanc
 import { buildSurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
 import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 import { analyzeSurveyPhotosOpenSource } from '@/lib/siteSurvey/photoIntelligence';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ---------------------------------------------------------------------------
 // GET — survey detail + all files

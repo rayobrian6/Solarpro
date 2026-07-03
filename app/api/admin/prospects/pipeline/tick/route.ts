@@ -16,8 +16,12 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
 import { qualifyAll } from "@/lib/network/prospectWork";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const admin = await requireAdminApi(req);
   const cronOk = !!process.env.CRON_SECRET && req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
   const keyOk = !!process.env.PROSPECT_INGEST_KEY && req.headers.get("x-pipeline-key") === process.env.PROSPECT_INGEST_KEY;

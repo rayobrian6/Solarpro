@@ -25,6 +25,7 @@ import {
 import { logNetworkEvent } from "@/lib/network/attributionTracker";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
 import { enrichAndPersistOpportunity } from "@/lib/network/opportunityEnrichment";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ── GET: List opportunities ───────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -139,6 +140,9 @@ export async function GET(req: NextRequest) {
 
 // ── POST: Manually create opportunity ────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   try {
     const admin = await requireAdminApi(req);
     if (!admin)
@@ -213,6 +217,9 @@ export async function POST(req: NextRequest) {
 
 // ── PATCH: Bulk actions ───────────────────────────────────────────────────────
 export async function PATCH(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   try {
     const admin = await requireAdminApi(req);
     if (!admin)
