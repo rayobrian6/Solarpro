@@ -157,6 +157,10 @@ export interface RafterAnalysis {
   deflectionUtilization: number;
   overallUtilization: number;
   passes: boolean;
+  /** Reference bending design value Fb (NDS, psi) — for sheet display. */
+  fbRefPsi?: number;
+  /** Adjusted allowable bending F'b (psi) incl. CD·CM·Ct·CF·Cr — for sheet display. */
+  fbPrimePsi?: number;
   notes: string[];
 }
 
@@ -504,12 +508,21 @@ function analyzeRafter(
   const fv_actual = 1.5 * V_demand / (b * d);
   const shearUtil = fv_actual / Fv_prime;
 
-  // Deflection (L/240 for total load)
+  // Deflection — IBC Table 1604.3 / IRC R301.7: rafters supporting a ceiling
+  // are checked at L/240 for LIVE (snow) load and L/180 for TOTAL load.
+  // The old code applied the L/240 live-load limit to TOTAL load, overstating
+  // deflection utilization ~45% and failing structurally sound roofs.
   const w_inPerIn = w / 12;
   const L_in = L * 12;
-  const delta = 5 * w_inPerIn * Math.pow(L_in, 4) / (384 * E_prime * I);
-  const delta_allow = L_in / 240;
-  const deflUtil = delta / delta_allow;
+  const w_live_inPerIn = (snowLoadPsf * tributaryWidthFt) / 12;
+  const delta_total = 5 * w_inPerIn * Math.pow(L_in, 4) / (384 * E_prime * I);
+  const delta_live  = 5 * w_live_inPerIn * Math.pow(L_in, 4) / (384 * E_prime * I);
+  const deflUtilLive  = delta_live / (L_in / 240);
+  const deflUtilTotal = delta_total / (L_in / 180);
+  const _liveGoverns = deflUtilLive >= deflUtilTotal;
+  const delta = _liveGoverns ? delta_live : delta_total;
+  const delta_allow = _liveGoverns ? L_in / 240 : L_in / 180;
+  const deflUtil = Math.max(deflUtilLive, deflUtilTotal);
 
   const overallUtil = Math.max(bendingUtil, shearUtil, deflUtil);
 
@@ -534,9 +547,12 @@ function analyzeRafter(
     deflectionUtilization: deflUtil,
     overallUtilization: overallUtil,
     passes: overallUtil <= 1.0,
+    fbRefPsi: Fb_ref,
+    fbPrimePsi: Fb_prime,
     notes: [
       ...notes,
       `Fb' = ${Fb_prime.toFixed(0)} psi (Fb=${Fb_ref} × CD=${CD} × CF=${CF_b} × Cr=${Cr})`,
+      `Deflection: live Δ vs L/240, total Δ vs L/180 (IBC Table 1604.3) — ${_liveGoverns ? 'live' : 'total'} load governs`,
       `Bending: ${(bendingUtil * 100).toFixed(0)}%, Shear: ${(shearUtil * 100).toFixed(0)}%, Deflection: ${(deflUtil * 100).toFixed(0)}%`,
     ],
   };

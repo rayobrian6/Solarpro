@@ -149,6 +149,11 @@ describe('Defect 5 — Structural prose guards against — values', () => {
     delete input.compliance.structural.rackingLoadPsf;
     delete input.compliance.structural.wind;
     delete input.compliance.structural.snow;
+    // The server-side V4 engine now genuinely runs in the vitest env (the old
+    // lazy require('@/…') silently failed here) and would backfill everything
+    // deleted above. Pin a rafter stub so needsCalc stays false and the
+    // absent-data prose guard is actually exercised.
+    input.compliance.structural.rafter = { bendingMoment: 1 } as any;
 
     const html = generatePermitHTML(input);
     const pv4c = sheetPage(html, 'PV-4C');

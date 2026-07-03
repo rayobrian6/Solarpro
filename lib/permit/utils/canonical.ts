@@ -155,8 +155,19 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
     isc:          eq.panelIsc,
   };
 
-  // ── Step 5: Mount system — locked to systemType, no input drift ──────────
-  const mountSystem = MOUNT_SYSTEM_MAP[rawType];
+  // ── Step 5: Mount system — the SELECTED racking is authoritative ─────────
+  // Hardcoding roof→'IronRidge XR100' here shipped packages whose PV-3
+  // detailed the actually-selected Roof Tech RT-MINI while APP-A and the
+  // cover claimed IronRidge — two racking systems in one permit. The map is
+  // only the last-resort default when nothing was selected.
+  const _mountSel = input.project.mountingSystemId
+    ? getMountingSystemById(input.project.mountingSystemId)
+    : undefined;
+  const mountSystem = (_mountSel
+      ? `${_mountSel.manufacturer} ${_mountSel.model}`.trim()
+      : '')
+    || input.project.mountingSystem
+    || MOUNT_SYSTEM_MAP[rawType];
 
   // ── Step 7: Hard validation gates ────────────────────────────────────────
   if (!rawType)              throw new Error('[CANONICAL] HARD FAIL: systemType is missing');

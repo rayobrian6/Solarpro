@@ -124,10 +124,12 @@
   },
   "sld-input-roof": {
     "topLevelKeys": [
+      "acConduitFillPct",
       "acConduitType",
       "acOCPD",
       "acOutputAmps",
       "acOutputKw",
+      "acVoltageDropPct",
       "acWireGauge",
       "acWireLength",
       "address",
@@ -150,6 +152,7 @@
       "deviceCount",
       "drawingDate",
       "drawingNumber",
+      "egcGauge",
       "generatorBrand",
       "generatorKw",
       "hasBattery",
@@ -159,6 +162,7 @@
       "inverterModel",
       "lastStringPanels",
       "mainPanelAmps",
+      "microBranches",
       "mpptAllocation",
       "mpptChannels",
       "ocpdPerString",

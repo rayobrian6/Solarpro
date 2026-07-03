@@ -1016,9 +1016,12 @@ export async function POST(req: NextRequest) {
     // is empty after all enrichment, default to 'SolarPro Engineering'.
     // Error 5p fix: designer is on PermitInput.project type — no `as any` needed
     {
+      // NEVER default the Designer/Engineer-of-Record to the software vendor —
+      // "SolarPro Engineering" printed as the EOR on CERT was a teardown P1
+      // (the platform is not a licensed design firm). Leave blank; CERT renders
+      // a fill-in line, which is what a wet-stamping PE expects.
       if (!enrichedBody.project.designer || enrichedBody.project.designer.trim() === '') {
-        enrichedBody.project.designer = 'SolarPro Engineering';
-        console.log('[permit/DESIGNER] Empty designer — defaulted to "SolarPro Engineering"');
+        console.log('[permit/DESIGNER] Designer empty — leaving blank for EOR fill-in');
       }
     }
 

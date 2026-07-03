@@ -281,6 +281,7 @@ export function roofCAD(input: PermitInputShape): CADModel {
         pointInPolygonLocal({ x: p.x, y: p.y }, polyXY)
       );
 
+      const _designedPlane = planeGpsPanels.length > 0;
       if (planeGpsPanels.length > 0) {
         // Use GPS panel positions directly
         for (const gp of planeGpsPanels) {
@@ -371,11 +372,27 @@ export function roofCAD(input: PermitInputShape): CADModel {
         ...buildCADObstructions(sysDefObstructions, rp.id),
         ...canonicalCADObstructions.filter(o => o.roofPlaneId === rp.id),
       ];
-      const filteredPanels = filterPanelsByObstructions(planePanels, planeObstructions, warnings);
-      const removedCount = planePanels.length - filteredPanels.length;
-      if (removedCount > 0) {
-        warnings.push(`[OBSTRUCTION] plane ${rp.id}: removed ${removedCount} panel(s) blocked by obstructions`);
-        console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} removed=${removedCount} remaining=${filteredPanels.length}`);
+      // DESIGNED (GPS) positions are authoritative — never silently delete a
+      // customer-placed module: the roof table summed 52 while every other
+      // sheet declared 53 because one designed panel fell in a keep-out. For
+      // designed planes we KEEP the module and flag the conflict; the filter
+      // only prunes AUTO-GENERATED grid placements.
+      let filteredPanels: typeof planePanels;
+      if (_designedPlane) {
+        const kept = filterPanelsByObstructions(planePanels, planeObstructions, []);
+        const conflicts = planePanels.length - kept.length;
+        if (conflicts > 0) {
+          warnings.push(`[OBSTRUCTION CONFLICT] plane ${rp.id}: ${conflicts} designed module(s) overlap obstruction keep-outs — modules retained, FIELD VERIFY clearance`);
+          console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} designed-plane conflicts=${conflicts} (retained)`);
+        }
+        filteredPanels = planePanels;
+      } else {
+        filteredPanels = filterPanelsByObstructions(planePanels, planeObstructions, warnings);
+        const removedCount = planePanels.length - filteredPanels.length;
+        if (removedCount > 0) {
+          warnings.push(`[OBSTRUCTION] plane ${rp.id}: removed ${removedCount} panel(s) blocked by obstructions`);
+          console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} removed=${removedCount} remaining=${filteredPanels.length}`);
+        }
       }
 
       // Recompute dimensions after filtering

@@ -609,7 +609,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const { compliance, rulesResult, project } = input;
   const structural = compliance.structural;
   const ibcVer = '2021';
-  const structuralRules = (rulesResult?.rules || []).filter(r => r.category === 'structural');
+  // Structural engine V4 (compliance.structural) is the engine of record on
+  // this sheet — drop rules-engine rows that carry their OWN rafter/uplift
+  // numbers, which contradicted the V4 tables printed right beside them
+  // (73% PASS vs 89%/145%, 370/984 lbs vs 210/500 lbs on one package).
+  const structuralRules = (rulesResult?.rules || []).filter(r =>
+    r.category === 'structural' && !/rafter|uplift|attach/i.test(String(r.ruleId || '')));
 
   const windSpeed   = structural?.wind?.windSpeed || '—';
   const exposure    = structural?.wind?.exposureCategory || '—';
@@ -816,7 +821,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           per ASCE 7-22 §2.3 and manufacturer installation requirements.
         </div>
       </div>
-      ${structural ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+      ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — ROOF MOUNT:</strong>
         Wind analysis per ASCE 7-22 §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
@@ -824,7 +829,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         ${_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.'}
         ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= 2.0 ? 'exceeds' : 'DOES NOT MEET'} the required minimum of 2.0.` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
-      <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
+      <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ASCE 7-22 §26/27 and ${ibcVer} IBC/IRC.
@@ -1029,13 +1034,26 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
 
 // ── BOM Table Renderer (v48.x) ───────────────────────────────────────────────
 // Standalone helper — lives outside the template literal to avoid escaping hell.
-function renderBOMTable(bom: PermitInput['bom']): string {
+// Supports row slicing so long BOMs paginate onto a continuation sheet instead
+// of silently clipping mid-row at the fixed page height (teardown P0).
+
+const BOM_SKIP_CATEGORIES = new Set(['solar_panel', 'panels', 'inverters']);
+
+/** Rows the SCHED BOM table will render (after panel/inverter dedup). */
+export function schedBomRowCount(bom: PermitInput['bom']): number {
+  return (bom ?? []).filter(i => !BOM_SKIP_CATEGORIES.has(i.category)).length;
+}
+
+/** Max BOM rows on the primary SCHED sheet (it also carries the module/
+ *  inverter tables); the continuation sheet is all-table and fits more. */
+export const SCHED_BOM_ROWS_FIRST = 15;
+
+function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY): string {
   if (!bom || bom.length === 0) {
     return '<!-- No BOM data — permit generated without BOM integration -->';
   }
 
-  const bomSkipCategories = new Set(['solar_panel', 'panels', 'inverters']);
-  const bomItems = bom.filter(i => !bomSkipCategories.has(i.category));
+  const bomItems = bom.filter(i => !BOM_SKIP_CATEGORIES.has(i.category));
   if (bomItems.length === 0) {
     return '<!-- BOM present but all items are panels/inverters (already rendered above) -->';
   }
@@ -1059,7 +1077,7 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   }
   const stages = [...stageOrder, ...Object.keys(grouped).filter(s => !stageOrder.includes(s))];
 
-  let html = '<div class="section-title">Bill of Materials — Full Equipment Schedule</div>';
+  let html = `<div class="section-title">Bill of Materials — Full Equipment Schedule${startRow > 0 ? ' (CONTINUED)' : ''}</div>`;
   html += '<table class="bom-table" style="width:100%;font-size:var(--f-sm);">';
   html += '<thead><tr style="background:#000;color:#fff;">';
   html += '<th style="width:4%">#</th>';
@@ -1074,13 +1092,19 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   html += '<th style="width:11%">Derived From</th>';
   html += '</tr></thead><tbody>';
 
-  let rowNum = 0;
+  // Flatten in stage order so the table can be sliced across sheets.
+  const flat: Array<{ item: (typeof bomItems)[number]; stageLabel: string }> = [];
   for (const stageKey of stages) {
     const items = grouped[stageKey];
     if (!items || items.length === 0) continue;
     const stageLabel = items[0].stageLabel || stageLabels[stageKey] || stageKey;
+    for (const item of items) flat.push({ item, stageLabel });
+  }
+  const endRow = Math.min(flat.length, startRow + maxRows);
 
-    for (const item of items) {
+  let rowNum = startRow;
+  {
+    for (const { item, stageLabel } of flat.slice(startRow, endRow)) {
       rowNum++;
       const bg = rowNum % 2 === 0 ? 'background:#f8f8f8;' : '';
       const reqBadge = item.required !== false
@@ -1104,9 +1128,18 @@ function renderBOMTable(bom: PermitInput['bom']): string {
     }
   }
 
+  if (endRow < flat.length) {
+    // More rows follow on the continuation sheet — say so instead of clipping.
+    html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
+    html += '<td colspan="10" style="text-align:center;letter-spacing:1px;">CONTINUED ON SCHED-2 — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
+    html += '</tr>';
+    html += '</tbody></table>';
+    return html;
+  }
+
   html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
   html += '<td colspan="6" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS</td>';
-  html += '<td class="tr">' + rowNum + '</td>';
+  html += '<td class="tr">' + flat.length + '</td>';
   html += '<td colspan="3"></td>';
   html += '</tr>';
   html += '</tbody></table>';
@@ -1115,7 +1148,7 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   const stageCount = Object.keys(grouped).length;
   html += '<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">';
   html += '<strong>BILL OF MATERIALS SUMMARY:</strong> ';
-  html += 'This system BOM contains ' + rowNum + ' line items across ' + stageCount + ' stages. ';
+  html += 'This system BOM contains ' + flat.length + ' line items across ' + stageCount + ' stages. ';
   html += requiredCount + ' items are required per NEC / manufacturer specification. ';
   html += 'All quantities are derived from CAD geometry and equipment registry — no manual estimates. ';
   html += 'Structural items are computed from array layout per ASCE 7-22 / IBC 2021. ';
@@ -1123,6 +1156,18 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   html += '</div>';
 
   return html;
+}
+
+/** Continuation sheet for long BOMs — rendered only when the BOM exceeds
+ *  SCHED_BOM_ROWS_FIRST rows (generatePermit decides). */
+export function pageEquipmentScheduleCont(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+  return `
+  <div class="page">
+    ${titleBlock(input, 'SCHED-2', 'EQUIPMENT SCHEDULE (CONTINUED)', pageNum, totalPages)}
+    <div class="page-content">
+      ${renderBOMTable(input.bom, SCHED_BOM_ROWS_FIRST)}
+    </div>
+  </div>`;
 }
 
 export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
@@ -1217,7 +1262,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>
       </div>
 
-      ${renderBOMTable(bom)}
+      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST)}
 
 
       <!-- System-Specific Hardware Schedule -->

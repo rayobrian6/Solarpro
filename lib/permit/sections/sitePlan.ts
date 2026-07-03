@@ -44,14 +44,19 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const hasAcDisc = project.acDisconnect !== false;
 
   interface EItem { label: string; desc: string; }
+  // Battery-only equipment (System Controller, Backup Load Panel) is gated on
+  // hasBatt — the legend listed phantom ESS gear on battery-less jobs, with the
+  // "controller" model set to the MICROINVERTER model. The AC disconnect on a
+  // supply-side tap is the FUSED tap OCPD (see E-1), not non-fused.
+  const _pv1SupplySide = project.interconnectionMethod === 'SUPPLY_SIDE_TAP';
   const equipItems: EItem[] = [
     { label: '(E) UTILITY METER',                               desc: utility },
     { label: '(E) MAIN SERVICE PANEL',                          desc: `${project.mainPanelAmps || 200}A — ${(project.mainPanelBrand || 'EXISTING').toUpperCase()}` },
-    { label: `(N) ${invMfr} SYSTEM CONTROLLER`,                 desc: `${invMfr} ${invModel}` },
-    { label: '(N) BACKUP LOAD PANEL',                           desc: 'CRITICAL LOADS SUB-PANEL' },
-    { label: `(N) ${hasAcDisc ? '100A' : '60A'} NON-FUSED AC DISCONNECT`, desc: 'WITHIN SIGHT — NEC 690.15' },
-    { label: '(N) ENPHASE COMBINER BOX',                        desc: 'EXTERIOR WALL' },
+    { label: `(N) ${hasAcDisc ? '100A' : '60A'} ${_pv1SupplySide ? 'FUSED' : 'NON-FUSED'} AC DISCONNECT`, desc: _pv1SupplySide ? 'TAP OCPD — NEC 705.11(C), 690.15' : 'WITHIN SIGHT — NEC 690.15' },
+    { label: `(N) ${invMfr} COMBINER BOX`,                      desc: 'EXTERIOR WALL' },
     ...(hasBatt ? [
+      { label: `(N) ${invMfr} SYSTEM CONTROLLER`,               desc: 'ESS / MICROGRID INTERCONNECT DEVICE' },
+      { label: '(N) BACKUP LOAD PANEL',                         desc: 'CRITICAL LOADS SUB-PANEL' },
       { label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 5.0) > 0 ? ' — ' + (project.batteryKwh ?? 5.0).toFixed(1) + ' kWh' : ''}` },
       { label: '(N) 60A NON-FUSED AC DISCONNECT',               desc: 'ADJACENT TO UTILITY METER' },
     ] : []),
@@ -230,8 +235,14 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
       const pv = (_parcel?.polygon ?? []).filter(v => isFinite(v?.lat) && isFinite(v?.lng));
       if (pv.length >= 4) {
         const pts = pv.map(v => toPx(v.lat, v.lng));
-        const inFrame = (p: {x:number;y:number}) => p.x > -4 && p.x < imgW + 4 && p.y > -4 && p.y < imgH + 4;
-        if (pts.some(inFrame)) {
+        // Gate on the CROP WINDOW (what the sheet actually shows), not the full
+        // embedded image — and require a full visible SEGMENT. The old any-point
+        // full-image test drew one clipped parcel edge slicing through the
+        // street scene with no closed boundary anywhere.
+        const inFrame = (p: {x:number;y:number}) =>
+          p.x > cropX - 4 && p.x < cropX + cropW + 4 && p.y > cropY - 4 && p.y < cropY + cropH + 4;
+        const _visibleSegs = pts.filter((p, i) => inFrame(p) && inFrame(pts[(i + 1) % pts.length])).length;
+        if (_visibleSegs >= 1) {
           const d = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
           parcelSvg = `<polygon points="${d}" fill="none" stroke="#fff" stroke-width="3" opacity="0.7" stroke-dasharray="14 7"/>` +
                       `<polygon points="${d}" fill="none" stroke="#111" stroke-width="1.4" stroke-dasharray="14 7"/>`;
@@ -535,8 +546,8 @@ export function buildPv1Page(
           ${equipCallouts}
           <div style="border:var(--border);padding:var(--xs);margin-top:var(--xs);" class="f-xs">
             <div class=\"fw9 caps f-xs sub-hdr\">LOCATION OF AC DISCONNECT:</div>
-            EXTERIOR WALL (ESS)<br/>
-            UTILITY NUMBER: ${project.utilityMeter || '—'}
+            EXTERIOR WALL — ADJACENT TO UTILITY METER<br/>
+            METER: ${project.utilityMeter || 'FIELD VERIFY'}
           </div>
           <div class="mt-sm">
             <div class=\"sec-hdr\">LEGEND</div>
@@ -551,7 +562,7 @@ export function buildPv1Page(
             <div style="flex:1;text-align:center;">
               <span class="f-lg fw9 caps mono">PV-1 — ${_pv1SubTitle}</span>
               &nbsp;&nbsp;
-              <span class="f-md">SCALE: NTS &nbsp;|&nbsp; ANSI B 11&Prime; &times; 17&Prime;</span>
+              <span class="f-md">SCALE: AS NOTED — SEE SCALE BAR &nbsp;|&nbsp; ANSI B 11&Prime; &times; 17&Prime;</span>
               &nbsp;&nbsp;
               <span class="f-xs mono">APN: ${apn} &nbsp;|&nbsp; AHJ: ${ahj} &nbsp;|&nbsp; UTILITY: ${utility}</span>
             </div>

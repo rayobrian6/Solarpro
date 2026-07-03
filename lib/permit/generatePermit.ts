@@ -23,13 +23,14 @@ import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
 import { pageSiteInformation } from './sections/sitePlan';
 import { pageArrayPrimary, pageArrayGeometry } from './sections/arrayPages';
-import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule } from './sections/structuralPages';
+import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
 import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter } from './sections/certPages';
@@ -285,7 +286,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     const needsCalc = !existingRafter
       || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0);
     if (needsCalc && sysType === 'roof') {
-      const { runStructuralCalcV4 } = require('@/lib/structural-engine-v4');
+      // (static import — the old lazy require('@/…') silently failed outside
+      // webpack, so test/render harnesses got '—' structural values)
       const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? input.project.roofPitch ?? 20;
       const windSpeed    = canonical.site.windSpeed || 115;
       const groundSnow   = canonical.site.groundSnowLoad || 0;
@@ -295,13 +297,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const framingType  = input.project.framingType || 'rafter';
       const totalPanels  = input.system?.totalPanels || cad.totalPanels || 1;
       const structInput = {
-        installationType: 'residential_pitched',
+        // 'residential_pitched' was never a valid InstallationType — the old
+        // untyped require() hid it; the engine fell through to its default.
+        installationType: 'roof_residential' as const,
         windSpeed,
-        windExposure: canonical.site.exposureCategory || 'C',
+        windExposure: ((): 'B' | 'C' | 'D' => {
+          const e = String(canonical.site.exposureCategory || 'C').toUpperCase();
+          return e === 'B' || e === 'D' ? e : 'C';
+        })(),
         groundSnowLoad: groundSnow,
         meanRoofHeight: 15,
         roofPitch: roofPitchDeg,
-        framingType: framingType === 'truss' ? 'truss' : 'rafter',
+        framingType: (framingType === 'truss' ? 'truss' : 'rafter') as 'truss' | 'rafter',
         rafterSize,
         rafterSpacingIn: rafterSpIn,
         rafterSpanFt: rafterSpFt,
@@ -334,16 +341,26 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
       const s = input.compliance.structural || {};
       s.wind = s.wind || {};
-      if (!s.wind.windSpeed)            s.wind.windSpeed = wa.designWindSpeedMph;
-      if (!s.wind.exposureCategory)     s.wind.exposureCategory = structInput.windExposure;
+      // V4 is the ENGINE OF RECORD for structural — overwrite any values a
+      // different engine (rules-engine) left behind. The old keep-if-set
+      // guards let PV-4A print one engine's uplift (370/984 lbs) while PV-4C
+      // and PE-1 printed V4's (210/500 lbs) on the same package.
+      s.wind.windSpeed           = wa.designWindSpeedMph;
+      s.wind.exposureCategory    = structInput.windExposure;
       // Error 5t fix: propagate exposure category to project level for coverSheet.ts
       if (!input.project.windExposure)   input.project.windExposure = structInput.windExposure;
-      if (!s.wind.velocityPressure)     s.wind.velocityPressure = wa.velocityPressurePsf;
-      if (!s.wind.netUpliftPressure)    s.wind.netUpliftPressure = wa.netUpliftPressurePsf;
-      if (!s.wind.upliftPerAttachment)  s.wind.upliftPerAttachment = ml?.upliftPerMountLbs;
+      s.wind.velocityPressure    = wa.velocityPressurePsf;
+      s.wind.netUpliftPressure   = wa.netUpliftPressurePsf;
+      if (ml?.upliftPerMountLbs) s.wind.upliftPerAttachment = ml.upliftPerMountLbs;
       s.snow = s.snow || {};
-      if (!s.snow.groundSnowLoad)       s.snow.groundSnowLoad = sa.groundSnowLoadPsf;
-      if (!s.snow.roofSnowLoad)         s.snow.roofSnowLoad = sa.roofSnowLoadPsf;
+      s.snow.groundSnowLoad      = sa.groundSnowLoadPsf;
+      s.snow.roofSnowLoad        = sa.roofSnowLoadPsf;
+      // Snow per attachment: roof snow psf × tributary area per mount (derived
+      // from uplift/pressure, both per-mount) — was never set → printed 0 lbs.
+      if (ml?.upliftPerMountLbs && wa.netUpliftPressurePsf > 0 && sa.roofSnowLoadPsf > 0) {
+        const _tribArea = ml.upliftPerMountLbs / wa.netUpliftPressurePsf;
+        s.snow.snowLoadPerAttachment = sa.roofSnowLoadPsf * _tribArea;
+      }
       s.rafter = {
         rafterSize:             ra.size,
         rafterSpacing:          ra.spacingIn,
@@ -354,17 +371,21 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         utilizationRatio:       ra.overallUtilization,
         deflection:             ra.deflectionIn,
         allowableDeflection:    ra.allowableDeflectionIn,
-        Fb_base:                1150,
+        // From the engine — the old hardcoded 1150×1.15×1.15=1521 omitted the
+        // size factor CF the capacity calc includes, so the printed F'b could
+        // never reproduce the printed allowable moment.
+        Fb_base:                ra.fbRefPsi ?? 1150,
         Cd: 1.15, Cr: 1.15,
-        Fb_prime:               1150 * 1.15 * 1.15,
+        Fb_prime:               ra.fbPrimePsi ?? (1150 * 1.15 * 1.15),
         totalLoadPsf:           ra.totalLoadPsf,
         lineLoad:               ra.totalLoadPsf * (ra.spacingIn / 12),
       };
       s.attachment = s.attachment || {};
-      if (!s.attachment.safetyFactor)         s.attachment.safetyFactor = ml?.safetyFactor;
-      if (!s.attachment.lagBoltCapacity)       s.attachment.lagBoltCapacity = ml?.upliftPerMountLbs ? ml.upliftPerMountLbs * (ml.safetyFactor || 2) : undefined;
-      if (!s.attachment.maxAllowedSpacing)     s.attachment.maxAllowedSpacing = ml?.mountSpacingIn;
-      if (!s.attachment.totalUpliftPerAttachment) s.attachment.totalUpliftPerAttachment = ml?.upliftPerMountLbs;
+      // Same single-engine rule as wind: V4 overwrites when it produced values.
+      if (ml?.safetyFactor)      s.attachment.safetyFactor = ml.safetyFactor;
+      if (ml?.upliftPerMountLbs) s.attachment.lagBoltCapacity = ml.upliftPerMountLbs * (ml.safetyFactor || 2);
+      if (ml?.mountSpacingIn)    s.attachment.maxAllowedSpacing = ml.mountSpacingIn;
+      if (ml?.upliftPerMountLbs) s.attachment.totalUpliftPerAttachment = ml.upliftPerMountLbs;
       if (!s.totalDeadLoadPsf)   s.totalDeadLoadPsf = ra.pvDeadLoadPsf + ra.roofDeadLoadPsf;
       if (!s.moduleLoadPsf)      s.moduleLoadPsf = ra.pvDeadLoadPsf;
       if (!s.rackingLoadPsf)     s.rackingLoadPsf = ra.pvDeadLoadPsf > 0 ? ra.pvDeadLoadPsf * 0.15 : 0.5;
@@ -388,10 +409,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     const needsElecCalc = !existingElec
       || (existingElec.busbar == null && existingElec.acConductorCallout == null);
     if (needsElecCalc && input.system?.inverters?.length) {
-      const { runElectricalCalc: _runElec } = require('@/lib/electrical-calc');
-      const { getPanelById: _getPanelById } = require('@/lib/equipment-db');
-      const { getInverterById: _getInvById } = require('@/lib/equipment-db');
-      const { getMicroinverterById: _getMicroById } = require('@/lib/equipment-db');
+      // Static imports (top of file) — the old lazy require('@/…') silently
+      // failed outside webpack, leaving the electrical section blank.
+      const _runElec = runElectricalCalc;
+      const _getPanelById = getPanelById;
+      const _getInvById = getInverterById;
+      const _getMicroById = getMicroinverterById;
 
       // ── Build InverterInput[] from system.inverters + equipment-db backfill ──
       const invInputs: InverterInput[] = input.system.inverters.map((inv, invIdx) => {
@@ -768,30 +791,39 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
     || input.planSetOptions?.cadAppendixPreviewV1 === true
     || input.permitOptions?.cadAppendixPreviewV1 === true;
-  const TOTAL = includeCADAppendixPreview ? 16 : 15;
+  // VAL-1 is internal QA telemetry (hashes, decision provenance, rule IDs) —
+  // NOT part of the AHJ deliverable. Opt back in for internal review runs.
+  const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
+    || input.planSetOptions?.includeInternalValidation === true;
+  // Long BOMs paginate onto SCHED-2 instead of clipping at the page edge.
+  const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
 
-  // Dynamic page assembly — CADModel + RenderContext passed to ALL page functions
-  const pages = [
-    pageCoverSheet(input, cad, 1, TOTAL),                              // PV-0: Cover (all systems)
-    pageSiteInformation(input, cad, 2, TOTAL),                         // PV-1: Site Plan (all systems)
-    pageArrayPrimary(input, cad, 3, TOTAL, renderCtx),                 // PV-2: Roof / Ground / Fence (cad.systemType)
-    pageArrayGeometry(input, cad, 4, TOTAL),                           // PV-2B: Array geometry (system-aware)
-    pageStructuralPrimary(input, cad, 5, TOTAL, renderCtx),            // PV-3: Structural (cad.systemType)
-    pageNECCompliance(input, cad, 6, TOTAL),                      // PV-4A: NEC (all)
-    pageConductorSchedule(input, cad, 7, TOTAL),                  // PV-4B: Conductor (system-aware)
-    pageStructural(input, cad, 8, TOTAL),                         // PV-4C: Structural calcs (system-aware)
-    pageWarningLabels(input, cad, 9, TOTAL),                      // PV-5: Labels (system-aware)
-    pageEquipmentSchedule(input, cad, 10, TOTAL),                 // SCHED (all)
-    pageSpecSheetReference(input, cad, 11, TOTAL),                // APP-A (all)
-    pageEngineerCert(input, cad, 12, TOTAL),                      // CERT (all)
-    pagePELetter(input, cad, 13, TOTAL),                          // PE-1 (all)
-    pageSingleLineDiagram(input, cad, 14, TOTAL, storedSldSvg),   // E-1: SLD (all, system-labeled)
-    pageValidationSummary(input, canonical, cad, 15, TOTAL),      // VAL-1: Validation summary (engineering authority)
+  // Dynamic page assembly — numbering derives from the list, so conditional
+  // sheets can never desync pageNum/TOTAL or the cover index again.
+  const pageFns: Array<(n: number, t: number) => string> = [
+    (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
+    (n, t) => pageSiteInformation(input, cad, n, t),                   // PV-1: Site Plan (all systems)
+    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-2: Roof / Ground / Fence (cad.systemType)
+    (n, t) => pageArrayGeometry(input, cad, n, t),                     // PV-2B: Array geometry (system-aware)
+    (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Structural (cad.systemType)
+    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (all)
+    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (system-aware)
+    (n, t) => pageStructural(input, cad, n, t),                        // PV-4C: Structural calcs (system-aware)
+    (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
+    (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (all)
+    ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
+    (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
+    (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
+    (n, t) => pagePELetter(input, cad, n, t),                          // PE-1 (all)
+    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (all, system-labeled)
+    ...(includeInternalValidation ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
   ];
+  const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);
+  const pages = pageFns.map((f, i) => f(i + 1, TOTAL));
 
   if (includeCADAppendixPreview) {
     try {
-      pages.push(pageCADAppendixPreview(input, cad, 16, TOTAL));       // APP-CAD: non-authoritative CAD preview appendix
+      pages.push(pageCADAppendixPreview(input, cad, TOTAL, TOTAL));    // APP-CAD: non-authoritative CAD preview appendix
     } catch (appendixErr: unknown) {
       console.warn('[generatePermitHTML] CAD appendix preview omitted (non-critical):', appendixErr instanceof Error ? appendixErr.message : appendixErr);
     }

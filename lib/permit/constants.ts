@@ -276,7 +276,44 @@ const PDF_PAGE_CONFIG = {
 // logging at every gate (the "did it even run?" question answers itself in
 // the function logs — #1 suspect for the still-missing vent is
 // ANTHROPIC_API_KEY absent on Vercel).
-const PLANSET_ENGINE_VERSION = 47379;
+// 47380 (2026-07-03): TEARDOWN FIX CAMPAIGN — 61 confirmed defects from the
+// 116-agent teardown of the v47379 package (docs/TEARDOWN-v47379.md), themes:
+// (1) INTERCONNECTION SINGLE-SOURCED: isSupplySideInterconnection() helper —
+// PV-0 summary/info rows, Scope of Work, PV-4A methodology, PV-4B load calc
+// (supply-side jobs get a real NEC 705.11 analysis, never "FAIL — UPGRADE
+// PANEL"), BOM label, and the E-1 tap now lands LINE side of the main breaker
+// through a FUSED disconnect (tap OCPD). "NEC 705.12(B): REQUIRES REVIEW"
+// can no longer print. 705.12(A) citations → 705.11 (2020+ numbering).
+// (2) ELECTRICAL TRUTH: sldAdapter passes the real branch plan (microBranches)
+// + engine fill/vdrop/EGC; renderer ceil(md/16) + 100A-branch-OCPD fallbacks
+// dead; PV-4B branch rows = real AC amps (plan sizes × per-micro output);
+// PV-5 POI label prints rated AC output (77A not 8.2A), code-text 690.56(C)
+// placard, added 690.13(B)/690.56(C)(3) labels, 705.10 directory all cycles;
+// "3#32 THWN-2" corruption fixed (plain-gauge extraction).
+// (3) STRUCTURAL SINGLE ENGINE: V4 overwrites rules-engine wind/attachment
+// values; deflection = live vs L/240 + total vs L/180 (IBC 1604.3 — the old
+// L/240-on-total manufactured the 145% "failure"); F'b printed from the
+// engine (CF included); snow-per-attachment computed; VAL-1 roof check reads
+// real utilization; CERT letter conditional (never certifies over a failing
+// check); rafter-rule rows deduped off PV-4A/PV-4C; span marked ASSUMED.
+// (4) RACKING SINGLE-SOURCED: canonical.mountSystem = selected system (DB),
+// PV-3 lag/embedment physically coherent (length ≥ embed + stack), APP-A
+// racking table from the same DB record.
+// (5) OVERFLOW: dynamic page assembly (numbering derived), SCHED-2 BOM
+// continuation sheet, VAL-1 out of the AHJ deliverable (internal opt-in),
+// cover index mirrors assembly, compact cover notes.
+// (6) FIRE: setback width per IFC 1204.2.1.1 coverage test (>33% → 36");
+// pathways DRAWN as green corridors + legend/note; §605 citations → §1204.
+// (7) PV-2B: per-plane serpentine chains + Manhattan transitions, homeruns
+// land at a JB clamped ON the roof, honest conduit note.
+// (8) 52-vs-53: designed (GPS) modules are never silently obstruction-
+// filtered — conflicts become FIELD VERIFY warnings.
+// (9) DELIVERABLE HYGIENE: no vendor-as-EOR fallback, no version badges on
+// customer sheets, CERT dates single-sourced, phantom ESS legend gone,
+// PV-1 parcel gates on the crop window and full segments, multi-plane
+// azimuth display, APP-A specs reproduce nameplate + match layout dims,
+// pitch printed self-consistently (1-decimal ratio) set-wide.
+const PLANSET_ENGINE_VERSION = 47380;
 
 
 

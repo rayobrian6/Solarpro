@@ -91,7 +91,7 @@ export function pageValidationSummary(
       label:  'Mount System Verified',
       value:  canonical.mountSystem,
       status: canonical.mountSystem ? 'PASS' : 'FAIL',
-      note:   'Locked to canonical.systemType via MOUNT_SYSTEM_MAP — no manual override',
+      note:   'From selected mounting system (mounting-hardware DB) — MOUNT_SYSTEM_MAP default only when nothing selected',
     },
     {
       label:  'Wind Speed Verified',
@@ -114,12 +114,19 @@ export function pageValidationSummary(
                : _isGround
                ? `Pile depth: ${canonical.structure.pileDepthFt.toFixed(1)} ft | Spacing: ${canonical.structure.pileSpacingFt.toFixed(1)} ft O.C. | Tilt: ${canonical.structure.tiltDeg}°`
                : `Rafter: ${canonical.structure.rafterSize} @ ${canonical.structure.rafterSpacingIn}" O.C. | Attachment: ${canonical.structure.attachSpacingIn}" O.C.`,
-      status: _isFence ? (embedStatus as CheckStatus) : 'PASS',
+      // Roof status reads the REAL structural result — this was hardcoded
+      // 'PASS' and printed "ALL CHECKS PASSED" over a failing rafter check.
+      status: _isFence ? (embedStatus as CheckStatus) : (() => {
+        if (_isGround) return 'PASS' as CheckStatus;
+        const _u = input.compliance?.structural?.rafter?.utilizationRatio;
+        if (_u == null) return 'WARN' as CheckStatus;
+        return (_u <= 1.0 ? 'PASS' : 'FAIL') as CheckStatus;
+      })(),
       note:   _isFence
                ? 'Broms method embedment check — computed from canonical wind speed + fence geometry'
                : _isGround
                ? 'Pile capacity from compliance engine — verify with geotechnical engineer'
-               : 'Rafter utilization + lag bolt capacity from compliance engine',
+               : `Rafter governing utilization ${input.compliance?.structural?.rafter?.utilizationRatio != null ? (input.compliance.structural.rafter.utilizationRatio * 100).toFixed(0) + '%' : 'not computed'} — single source: structural engine V4 (see PV-4C)`,
     },
     {
       label:  'Electrical Data Verified',

@@ -1138,10 +1138,18 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         1, 'ea', 'NEC 690.56', 'perSystem', '1', true));
     }
 
-    // NEC 705.12 — Backfeed breaker label
-    items.push(addItem('labels', 'label', 'HellermannTyton', 'Backfeed Breaker Label',
-      'LABEL-BF', 'Backfeed breaker label per NEC 705.12',
-      1, 'ea', 'NEC 705.12', 'perSystem', '1', true));
+    // Point-of-interconnection label — method-specific. A supply-side tap job
+    // has no backfeed breaker; ordering a "backfeed breaker label" for it
+    // contradicted E-1/PV-4A ("Backfed Breaker: N/A — Tap Connection").
+    if (String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase() === 'SUPPLY_SIDE_TAP') {
+      items.push(addItem('labels', 'label', 'HellermannTyton', 'Supply-Side Tap POI Label',
+        'LABEL-SST', 'Point-of-interconnection label per NEC 705.10 (supply-side tap, NEC 705.11)',
+        1, 'ea', 'NEC 705.10', 'perSystem', '1', true));
+    } else {
+      items.push(addItem('labels', 'label', 'HellermannTyton', 'Backfeed Breaker Label',
+        'LABEL-BF', 'Backfeed breaker label per NEC 705.12',
+        1, 'ea', 'NEC 705.12', 'perSystem', '1', true));
+    }
 
     // Disconnecting means label
     items.push(addItem('labels', 'label', 'HellermannTyton', 'Disconnecting Means Label',

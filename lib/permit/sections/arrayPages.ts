@@ -181,15 +181,28 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         ? Math.max(..._pitches).toFixed(1)
         : `${Math.min(..._pitches).toFixed(0)}–${Math.max(..._pitches).toFixed(0)}`)
     : (count > 0 ? (sumTilt / count).toFixed(1) : (project.roofPitch || 20).toString());
+  // Multi-plane roofs face MULTIPLE directions — claiming plane[0]'s azimuth
+  // for the whole system printed "Azimuth 3° (N)" on a 4-plane N/S/E/W array.
+  const _azList = (cad.roof?.planes ?? [])
+    .map((p: any) => p.azimuth)
+    .filter((v: any) => isFinite(v))
+    .map((v: number) => ((v % 360) + 360) % 360);
+  const _azDir = (az: number) => az >= 337.5 || az < 22.5 ? 'N' :
+    az < 67.5 ? 'NE' : az < 112.5 ? 'E' : az < 157.5 ? 'SE' :
+    az < 202.5 ? 'S' : az < 247.5 ? 'SW' : az < 292.5 ? 'W' : 'NW';
+  const _multiAz = _azList.length > 1
+    && new Set(_azList.map(_azDir)).size > 1;
   const avgAz = isRoof(cadSystemType) && roofPlane0?.azimuth != null
     ? roofPlane0.azimuth.toFixed(0)
     : (count > 0 ? (sumAz / count).toFixed(0) : '180');
 
   // Determine compass direction from azimuth
   const azNum = parseFloat(avgAz);
-  const compassDir = azNum >= 337.5 || azNum < 22.5 ? 'N' :
-    azNum < 67.5 ? 'NE' : azNum < 112.5 ? 'E' : azNum < 157.5 ? 'SE' :
-    azNum < 202.5 ? 'S' : azNum < 247.5 ? 'SW' : azNum < 292.5 ? 'W' : 'NW';
+  const compassDir = _azDir(((azNum % 360) + 360) % 360);
+  // Display string — multi-plane arrays list the facet directions.
+  const azDisplay = _multiAz
+    ? `MULTI — ${[...new Set(_azList.map(_azDir))].join('/')} (SEE PLANE LABELS)`
+    : `${avgAz}° (${compassDir})`;
 
   // Build SVG grid
   const cellW = 28, cellH = 38, gapX = 4, gapY = 6;
@@ -410,7 +423,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     { n: 1, label: 'NEC 690.8', sub: _isMicro
         ? `AC branch \xd7 1.25 continuous = conductor sizing basis`
         : `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
-    { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${avgAz}\xb0 (${compassDir})` },
+    { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${azDisplay}` },
     { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa71204.2 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
        sub: isRoof(cadSystemType) ? 'Min 18" ridge/hip setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
     { n: 4, label: 'DC Capacity', sub: `${system.totalDcKw?.toFixed(2) || '\u2014'} kW DC` },
@@ -477,7 +490,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
             <tr><td>Total Modules</td><td>${totalPanels}</td></tr>
             <tr><td>${_isMicro ? 'AC Branches' : 'Strings'}</td><td>${totalStrings}</td></tr>
             <tr><td>Tilt</td><td>${avgTilt}\xb0</td></tr>
-            <tr><td>Azimuth</td><td>${avgAz}\xb0 (${compassDir})</td></tr>
+            <tr><td>Azimuth</td><td>${azDisplay}</td></tr>
             <tr><td>Rows</td><td>${rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels))}</td></tr>
             <tr><td>System</td><td>${isFence(cadSystemType) ? 'FENCE' : isGround(cadSystemType) ? 'GROUND' : 'ROOF'}</td></tr>
             <tr><td>Orient.</td><td>${panels[0]?.orientation?.toUpperCase() || 'PORTRAIT'}</td></tr>

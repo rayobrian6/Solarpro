@@ -137,9 +137,9 @@ export function drawRoofPlan(
   // WIDTH — a designated 36" route requirement, NOT a uniform edge moat.
   // Hatching every eave/rake at the pathway width buried half the roof in red
   // and made code-compliant modules read as violations.
-  const fireSetIn   = project.ahjRidgeSetbackIn || 18;
+  // Defaults resolved AFTER geometry validation — the 18"-vs-36" ridge
+  // setback depends on array coverage (IFC 2021 §1204.2.1.1); see below.
   const pathwayIn   = project.ahjRoofSetbackIn  || 36;
-  const setbackFt   = fireSetIn / 12;
   const pathwayFt   = pathwayIn / 12;
 
   // ── STEP 4: Geometry from CAD (via adapter fake-degree encoding) ──
@@ -171,6 +171,25 @@ export function drawRoofPlan(
       '— roof system requires cad.roof model with planes and panels.'
     );
   }
+
+  // ── Fire setback width — IFC 2021 §1204.2.1.1 coverage test ──
+  // The 18" ridge setback is the EXCEPTION, allowed only where the array
+  // covers ≤ 33% of the roof plan area; above that the 36" default governs.
+  // An AHJ-supplied value always wins. (Shipping 18" bands on a 48%-coverage
+  // roof was a plan-check red flag.)
+  const _shoelaceFt2 = (verts: any[]): number => {
+    let s = 0;
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      s += a.lng * b.lat - b.lng * a.lat;
+    }
+    return Math.abs(s) / 2;   // fake-degree verts: 1 unit = 1 ft
+  };
+  const _roofAreaFt2  = validPlanes.reduce((s: number, rp: any) => s + _shoelaceFt2(rp.vertices), 0);
+  const _arrayAreaFt2 = validPanels.length * (panelLenIn * panelWidIn) / 144;
+  const _coverage     = _roofAreaFt2 > 0 ? _arrayAreaFt2 / _roofAreaFt2 : 0;
+  const fireSetIn   = project.ahjRidgeSetbackIn || (_coverage > 0.33 ? 36 : 18);
+  const setbackFt   = fireSetIn / 12;
 
   // ── Regularize the hand-traced geometry for DRAWING (display copy only) ──
   // Welds shared facet corners, straightens near-axis eaves/ridge, squares the
@@ -337,6 +356,63 @@ export function drawRoofPlan(
     planeLabels.push({ cx, cy, ri, pitch: rp.pitch, azimuth: rp.azimuth });
   });
 
+  // ── Fire-access pathways (IFC 2021 §1204.2.1) — DRAWN, not just noted ──
+  // For each panel-bearing plane, find the widest module-free strip running
+  // eave→ridge; when it fits the required pathway width, hatch and label it.
+  // The pathway existed only as note TEXT before — a plan checker looking for
+  // the code-required 36" route found nothing in the geometry.
+  let _pathwaysDrawn = 0;
+  regPlanes.forEach((rp: any, ri: number) => {
+    if (!rp.vertices || rp.vertices.length < 3) return;
+    const planePanels = regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices));
+    if (!planePanels.length) return;
+    const ptsXY = rp.vertices.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
+    // Screen-space downslope basis (v = eave→ridge axis, u = along-eave axis)
+    const az = (typeof rp.azimuth === 'number' && isFinite(rp.azimuth)) ? rp.azimuth : 180;
+    const c0lng = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
+    const c0lat = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
+    let vdx = toX(c0lng + Math.sin(az * Math.PI / 180)) - toX(c0lng);
+    let vdy = toY(c0lat + Math.cos(az * Math.PI / 180)) - toY(c0lat);
+    const vl = Math.hypot(vdx, vdy) || 1; vdx /= vl; vdy /= vl;
+    const udx = -vdy, udy = vdx;
+    const uOf = (x: number, y: number) => x * udx + y * udy;
+    const vOf = (x: number, y: number) => x * vdx + y * vdy;
+    const us = ptsXY.map((p: any) => uOf(p.x, p.y));
+    const vs = ptsXY.map((p: any) => vOf(p.x, p.y));
+    const uMin = Math.min(...us), uMax = Math.max(...us);
+    const vMin = Math.min(...vs), vMax = Math.max(...vs);
+    // Occupied intervals along the eave axis (panels padded to footprint)
+    const _padPx = (Math.max(panelLenIn, panelWidIn) / 12) * scale / 2 + 2;
+    const occ = planePanels
+      .map((p: any) => { const u = uOf(toX(p.lng), toY(p.lat)); return [u - _padPx, u + _padPx] as [number, number]; })
+      .sort((a: [number, number], b: [number, number]) => a[0] - b[0]);
+    const merged: Array<[number, number]> = [];
+    for (const iv of occ) {
+      const last = merged[merged.length - 1];
+      if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+      else merged.push([iv[0], iv[1]]);
+    }
+    const gaps: Array<[number, number]> = [];
+    let cur = uMin;
+    for (const [s, e] of merged) { if (s > cur) gaps.push([cur, s]); cur = Math.max(cur, e); }
+    if (cur < uMax) gaps.push([cur, uMax]);
+    const needPx = pathwayFt * scale;
+    const best = gaps.filter(g => g[1] - g[0] >= needPx)
+      .sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]))[0];
+    if (!best) return;
+    const gc = (best[0] + best[1]) / 2;
+    const g0 = gc - needPx / 2, g1 = gc + needPx / 2;
+    const corner = (u: number, v: number) => `${(u * udx + v * vdx).toFixed(1)},${(u * udy + v * vdy).toFixed(1)}`;
+    const poly = [corner(g0, vMin), corner(g1, vMin), corner(g1, vMax), corner(g0, vMax)].join(' ');
+    els.push(`<g clip-path="url(#sbclip${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
+    const lmx = gc * udx + ((vMin + vMax) / 2) * vdx;
+    const lmy = gc * udy + ((vMin + vMax) / 2) * vdy;
+    let angDeg = Math.atan2(vdy, vdx) * 180 / Math.PI;
+    if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;
+    els.push(`<text x="${lmx.toFixed(1)}" y="${lmy.toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${lmx.toFixed(1)} ${lmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#1a7a2e">${ftToFtIn(pathwayFt)} ACCESS PATHWAY</text>`);
+    _pathwaysDrawn++;
+  });
+
   // ── Draw panels (from CAD fake-degree positions) ──
   // Render modules at near-true footprint (was 0.8 → a sparse, scattered array).
   // 0.97 leaves only a hairline gap so adjacent panels read as a tight, real array.
@@ -425,34 +501,70 @@ export function drawRoofPlan(
       if (!seen.has(color)) { seen.set(color, branchGroups.length); branchGroups.push({ color, ps: [] }); }
       branchGroups[seen.get(color)!].ps.push(p);
     }
+    // JB position FIRST — homeruns need a target. Keep it ON the roof near
+    // the SE eave, inside the outline: the old panel-bbox+26 offset dropped
+    // it into the hip setback / off the roof edge.
+    const _allVx = regPlanes.flatMap((rp: any) => (rp.vertices ?? []).map((v: any) => toX(v.lng)));
+    const _allVy = regPlanes.flatMap((rp: any) => (rp.vertices ?? []).map((v: any) => toY(v.lat)));
+    const _pbx = regPanels.map((p: any) => toX(p.lng)), _pby = regPanels.map((p: any) => toY(p.lat));
+    const jbX = Math.min(Math.max(..._pbx) + 14, (_allVx.length ? Math.max(..._allVx) : Math.max(..._pbx)) - 10);
+    const jbY = Math.min(Math.max(..._pby) + 12, (_allVy.length ? Math.max(..._allVy) : Math.max(..._pby)) - 8);
+
     branchGroups.forEach((g, bi) => {
       if (g.ps.length < 2) return;
-      const pts = g.ps.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
-      // Greedy nearest-neighbor chain from the NW-most module of the branch.
-      const n = pts.length;
-      const used = new Array(n).fill(false);
-      let cur = 0;
-      for (let i = 1; i < n; i++) if (pts[i].x + pts[i].y < pts[cur].x + pts[cur].y) cur = i;
-      const order = [cur]; used[cur] = true;
-      for (let step = 1; step < n; step++) {
-        let best = -1, bestD = Infinity;
-        for (let i = 0; i < n; i++) {
-          if (used[i]) continue;
-          const d = (pts[i].x - pts[cur].x) ** 2 + (pts[i].y - pts[cur].y) ** 2;
-          if (d < bestD) { bestD = d; best = i; }
-        }
-        order.push(best); used[best] = true; cur = best;
+      // Per-plane serpentine segments joined by explicit Manhattan transitions.
+      // The old GLOBAL nearest-neighbor chain wandered across hips and setback
+      // zones mid-branch — cable draped over the ridge, unbuildable as drawn.
+      const byPlaneKey = new Map<string, any[]>();
+      for (const p of g.ps) {
+        const k = String(p.planeId ?? p.arrayId ?? '');
+        if (!byPlaneKey.has(k)) byPlaneKey.set(k, []);
+        byPlaneKey.get(k)!.push(p);
       }
-      // Segment lengths → any hop ≫ median is a plane-to-plane continuation,
-      // drawn dashed so it reads as "run continues", not as a cable over the ridge.
-      const segs = order.slice(1).map((oi, k) => {
-        const a = pts[order[k]], b = pts[oi];
-        return Math.hypot(b.x - a.x, b.y - a.y);
-      });
+      const chainGroup = (ps: any[]): any[] => {
+        // ALWAYS geometric nearest-neighbor in SCREEN space. Global row/col
+        // indices don't reflect a rotated end-plane's local layout — sorting
+        // by them re-created the starburst INSIDE the plane group.
+        const P = ps.map((p: any) => ({ p, x: toX(p.lng), y: toY(p.lat) }));
+        const used = new Array(P.length).fill(false);
+        let cur = 0;
+        for (let i = 1; i < P.length; i++) if (P[i].x + P[i].y < P[cur].x + P[cur].y) cur = i;
+        const out = [P[cur].p]; used[cur] = true;
+        for (let s = 1; s < P.length; s++) {
+          let best = -1, bestD = Infinity;
+          for (let i = 0; i < P.length; i++) {
+            if (used[i]) continue;
+            const d = (P[i].x - P[cur].x) ** 2 + (P[i].y - P[cur].y) ** 2;
+            if (d < bestD) { bestD = d; best = i; }
+          }
+          out.push(P[best].p); used[best] = true; cur = best;
+        }
+        return out;
+      };
+      // Plane-group sequence: largest first, then nearest centroid next.
+      const grps = [...byPlaneKey.values()].map(ps => {
+        const xs = ps.map((p: any) => toX(p.lng)), ys = ps.map((p: any) => toY(p.lat));
+        return { ps, cx: xs.reduce((a, b) => a + b, 0) / xs.length, cy: ys.reduce((a, b) => a + b, 0) / ys.length };
+      }).sort((a, b) => b.ps.length - a.ps.length);
+      const seq = [grps.shift()!];
+      while (grps.length) {
+        const last = seq[seq.length - 1];
+        let ni = 0, nd = Infinity;
+        grps.forEach((gr, i) => { const d = (gr.cx - last.cx) ** 2 + (gr.cy - last.cy) ** 2; if (d < nd) { nd = d; ni = i; } });
+        seq.push(grps.splice(ni, 1)[0]);
+      }
+      const orderedPs: any[] = [];
+      const transitionAt = new Set<number>();
+      for (const gr of seq) {
+        if (orderedPs.length) transitionAt.add(orderedPs.length);
+        orderedPs.push(...chainGroup(gr.ps));
+      }
+      const pts = orderedPs.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
+      const segs = pts.slice(1).map((b, k) => Math.hypot(b.x - pts[k].x, b.y - pts[k].y));
       const medSeg = [...segs].sort((a, b) => a - b)[Math.floor(segs.length / 2)] || 1;
-      for (let k = 1; k < order.length; k++) {
-        const a = pts[order[k - 1]], b = pts[order[k]];
-        const long = segs[k - 1] > Math.max(3 * medSeg, 40);
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1], b = pts[k];
+        const long = transitionAt.has(k) || segs[k - 1] > Math.max(3 * medSeg, 40);
         if (long) {
           // Plane-to-plane transition: MANHATTAN route (along the row, then
           // across), dashed — a freehand diagonal slicing the setback hatch
@@ -465,23 +577,25 @@ export function drawRoofPlan(
           els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="1.2"/>`);
         }
       }
-      const h = pts[order[0]];
+      const h = pts[0];
       els.push(`<rect x="${(h.x - 8).toFixed(1)}" y="${(h.y - 6).toFixed(1)}" width="16" height="12" rx="2" fill="#fff" stroke="${g.color}" stroke-width="1"/>`);
       els.push(drawText(h.x, h.y + 3, `B${bi + 1}`, { anchor: 'middle', fontSize: 6.5, fontWeight: '900', fill: '#111' }));
+      // HOMERUN — every branch lands at the JB (the circuits previously ended
+      // in mid-roof with no terminus anywhere on the sheet).
+      const tail = pts[pts.length - 1];
+      const hr = `${tail.x.toFixed(1)},${tail.y.toFixed(1)} ${tail.x.toFixed(1)},${jbY.toFixed(1)} ${jbX.toFixed(1)},${jbY.toFixed(1)}`;
+      els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="2.2" opacity="0.7" stroke-dasharray="3 3"/>`);
+      els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="0.9" stroke-dasharray="3 3"/>`);
     });
 
-    // Branch TERMINUS — the circuits need somewhere to land. JB symbol at
-    // the SE eave (same spot PV-2 calls out the junction box + EMT drop),
-    // dashed collector run off the roof edge, count note beside it.
-    // (Local bounds — roofMaxX/_panelPts are declared later in this fn.)
+    // Branch TERMINUS — JB symbol where the homeruns land, honest conduit note
+    // (a single hardcoded ¾" EMT for 6 branch circuits failed NEC fill/derate).
     if (branchGroups.length > 0 && regPanels.length > 0) {
-      const _bx = regPanels.map((p: any) => toX(p.lng)), _by = regPanels.map((p: any) => toY(p.lat));
-      const jbX = Math.max(..._bx) + 26, jbY = Math.max(..._by) + 6;
       els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${(jbX + 16).toFixed(1)},${(jbY + 10).toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
       els.push(`<rect x="${(jbX - 4).toFixed(1)}" y="${(jbY - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#000" stroke-width="1"/>`);
       els.push(`<line x1="${(jbX - 4).toFixed(1)}" y1="${(jbY - 4).toFixed(1)}" x2="${(jbX + 4).toFixed(1)}" y2="${(jbY + 4).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
       els.push(drawText(jbX + 20, jbY + 16, `(N) JB — ${branchGroups.length} AC BRANCH CIRCUITS`, { anchor: 'end', fontSize: 5.8, fontWeight: 'bold', fill: '#000' }));
-      els.push(drawText(jbX + 20, jbY + 23, `¾" EMT — ROUTE FIELD-VERIFIED`, { anchor: 'end', fontSize: 5.2, fill: '#333' }));
+      els.push(drawText(jbX + 20, jbY + 23, `CONDUIT SIZED PER NEC CH.9 — SEE PV-4B / E-1`, { anchor: 'end', fontSize: 5.2, fill: '#333' }));
     }
   }
 
@@ -659,9 +773,16 @@ export function drawRoofPlan(
     const gn: string[] = [
       '1. FIELD VERIFY ALL DIMENSIONS PRIOR',
       '   TO INSTALLATION.',
-      `2. MAINTAIN ${ftToFtIn(pathwayFt)} ACCESS PATHWAY PER`,
-      '   AHJ — IFC §1204.2. HIP CLEARANCES',
-      '   PROVIDE EAVE-TO-RIDGE ROUTES.',
+      ..._pathwaysDrawn > 0
+        ? [
+            `2. ${ftToFtIn(pathwayFt)} FIRE ACCESS PATHWAYS SHOWN`,
+            '   HATCHED GREEN — IFC §1204.2.1.',
+          ]
+        : [
+            `2. MAINTAIN ${ftToFtIn(pathwayFt)} ACCESS PATHWAY PER`,
+            '   IFC §1204.2.1 — HIP CLEARANCES',
+            '   PROVIDE EAVE-TO-RIDGE ROUTES.',
+          ],
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
       ...(_hardObs.length > 0
@@ -760,6 +881,10 @@ export function drawRoofPlan(
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="7" cy="-0.5" r="1.2" fill="#2a5db0"/>`, label: 'PV MODULE' },
       { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
+      ...(_pathwaysDrawn > 0 ? [{
+        swatch: `<rect x="0" y="-5" width="14" height="9" fill="#1a7a2e" opacity="0.12" stroke="#1a7a2e" stroke-width="0.7" stroke-dasharray="3 1.5"/>`,
+        label: `${ftToFtIn(pathwayFt)} ACCESS PATHWAY`,
+      }] : []),
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="2.4"/>`, label: 'RIDGE / HIP' },
       { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.1"/>`, label: 'EAVE / RAKE' },
       { swatch: `<line x1="0" y1="-3" x2="14" y2="-3" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="0" x2="14" y2="0" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="3" x2="14" y2="3" stroke="#c8cdd5" stroke-width="0.7"/>`, label: `FRAMING @ ${rafterSp}" O.C.` },

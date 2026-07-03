@@ -31,16 +31,34 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
       <div class="cert-subject">
         <strong>PROJECT:</strong> ${project.projectName || '—'} | <strong>ADDRESS:</strong> ${address} | <strong>SYSTEM:</strong> ${panelCount} modules, ${sysSize} kW DC / ${sysAc} kW AC | <strong>INVERTER:</strong> ${invModel}
       </div>
+      ${(() => {
+        // The compliance statement must not contradict the package's own
+        // structural analysis (PE-1/PV-4C) — certifying "complies" over a
+        // failing rafter check was an automatic-rejection contradiction.
+        const _u = input.compliance?.structural?.rafter?.utilizationRatio;
+        return _u != null && _u > 1.0 ? `
+      <div style="border:3px solid #cc0000;background:#fff5f5;padding:var(--xs);margin-bottom:var(--xs);font-size:var(--f-md);line-height:1.5;">
+        <strong style="color:#cc0000;">STRUCTURAL REVIEW REQUIRED:</strong>
+        The roof framing analysis (PV-4C / PE-1) computes a governing utilization of ${(_u * 100).toFixed(0)}% under the modeled assumptions.
+        This certification is limited to the electrical design until the structural condition is resolved by field verification of framing
+        (size, spacing, span, species) or engineered reinforcement. Do not issue for construction on the structural scope.
+      </div>` : '';
+      })()}
       <div class="cert-statement">
         I hereby certify that the solar photovoltaic system design at <strong>${address}</strong> has been prepared under my direct supervision
-        and complies with the following applicable codes and standards:
+        and ${(() => {
+          const _u = input.compliance?.structural?.rafter?.utilizationRatio;
+          return _u != null && _u > 1.0
+            ? 'that the ELECTRICAL design complies with the following applicable codes and standards (structural scope pending — see notice above):'
+            : 'complies with the following applicable codes and standards:';
+        })()}
         <ul style="margin-top:var(--xs);line-height:1.6;padding-left:var(--md);">
           <li>National Electrical Code (NEC) ${necVer}, Article 690 — Solar Photovoltaic Systems</li>
           <li>National Electrical Code (NEC) ${necVer}, Article 705 — Interconnected Electric Power Production Sources</li>
           ${(project.batteryCount || 0) > 0 ? `<li>National Electrical Code (NEC) ${necVer}, Article 706 — Energy Storage Systems; NFPA 855</li>` : ''}
           <li>ASCE 7-22 — Minimum Design Loads and Associated Criteria for Buildings and Other Structures</li>
           <li>International Building Code (IBC) / International Residential Code (IRC) — Structural requirements</li>
-          <li>International Fire Code (IFC) ${necVer === '2023' ? '2024' : '2021'} — Chapter 6 §605 Solar Photovoltaic Systems</li>
+          <li>International Fire Code (IFC) ${necVer === '2023' ? '2024' : '2021'} — §1204 Solar Photovoltaic Systems (rooftop access & pathways)</li>
           <li>All applicable local amendments adopted by ${state} and the Authority Having Jurisdiction (${ahj})</li>
         </ul>
       </div>
@@ -78,7 +96,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
           </table>
           <div class="section-title">SLD Reference</div>
           <table class="info-table">
-            <tr><td class="il">Sheet E-1</td><td class="iv">Single-Line Electrical Diagram — generated separately via Engineering → Diagram tab → Download SLD PDF</td></tr>
+            <tr><td class="il">Sheet E-1</td><td class="iv">Single-Line Electrical Diagram — included in this plan set</td></tr>
           </table>
         </div>
       </div>
@@ -103,7 +121,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
       </div>
 
       <div class="cert-footer">
-        SolarPro Engineering Platform ${BUILD_VERSION} · Generated ${new Date().toLocaleDateString()} ·
+        Document date ${escapeH(String(project.date ?? '—'))} ·
         This document requires engineer review and wet stamp before AHJ submission.
         All equipment must be UL-listed and installed per manufacturer specifications and NEC ${necVer}.
       </div>
@@ -417,7 +435,9 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const rafterSize  = project.rafterSize  || '2×6';
   const rafterSpace = project.rafterSpacing || 24;
   const attachSpace = project.attachmentSpacing || 48;
-  const roofPitch   = project.roofPitch ? `${Math.round(Math.tan(project.roofPitch * Math.PI / 180) * 12)}/12 (${project.roofPitch.toFixed(1)}°)` : '—';
+  // 1-decimal ratio so the printed pair is self-consistent — Math.round gave
+  // "4/12 (20.0°)" where 4:12 is actually 18.4° (a checkable contradiction).
+  const roofPitch   = project.roofPitch ? `${(Math.tan(project.roofPitch * Math.PI / 180) * 12).toFixed(1)}:12 (${project.roofPitch.toFixed(1)}°)` : '—';
   const roofType    = roofTypeLabel(project.roofType);
   const exposure    = structural?.wind?.exposureCategory || '—';
   const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'IronRidge XR100';
@@ -467,7 +487,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             ${_peSiteLoading(input)}
                                     <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Rafter Bending & Deflection Analysis</td></tr>
             <tr><td class="il">F’b (Adjusted)</td><td class="iv">${fbPrime} psi</td><td class="il">Framing</td><td class="iv">${_isTruss ? 'Truss' : 'Stick'} (${framingType})</td></tr>
-            <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Rafter Span</td><td class="iv">${rafterSpanFt} ft</td></tr>
+            <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Rafter Span</td><td class="iv">${rafterSpanFt} ft${!project.rafterSpan ? ' (ASSUMED — FIELD VERIFY)' : ''}</td></tr>
             <tr><td class="il">Line Load</td><td class="iv">${lineLoad} lb/ft</td><td class="il">Bending Moment</td><td class="iv">${bendingMoment} / ${allowableBM} lb-ft</td></tr>
             <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflPass ? '#000' : '#cc0000'};">${deflection} in (Δ_allow = ${allowableDefl} in — ${deflUtil}%)</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
