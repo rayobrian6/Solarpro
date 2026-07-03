@@ -96,6 +96,25 @@ const nextConfig = {
   // (and any other dev page that hits a same-origin /api route) appears dead.
   // See https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  // Legacy Generator Estimator routes — pre-nest (commit 5d047a7a) shipped at
+  // /generator-estimator/* (top-level). Step 1 of the nest deleted those
+  // routes and moved them under /engineering/generator-estimator/*. Any
+  // external link / bookmark / share to the old paths now 404s. Redirect them
+  // permanently so legacy URLs auto-route to the new paths (preserves
+  // ?brand=&model=&kw= etc. via `permanent: true` 308 status — query string
+  // is forwarded by Next.js automatically).
+  async redirects() {
+    return [
+      { source: '/generator-estimator',          destination: '/engineering/generator-estimator',          permanent: true },
+      { source: '/generator-estimator/bill',     destination: '/engineering/generator-estimator/bill',     permanent: true },
+      { source: '/generator-estimator/proposal', destination: '/engineering/generator-estimator/proposal', permanent: true },
+      // Also catch the bare /proposal and /bill URLs that some pre-nest
+      // Estimator links generated — they were never real routes but the
+      // browser still hit them via stale bookmarks.
+      { source: '/proposal',                     destination: '/engineering/generator-estimator/proposal', permanent: true },
+      { source: '/bill',                         destination: '/engineering/generator-estimator/bill',     permanent: true },
+    ];
+  },
   // NOTE: removeConsole was removed — the SWC transform was eating multi-line
   // console.log calls (e.g. the PARSED_DATA_OBJECT log in handleBillComplete)
   // and corrupting the surrounding bill-save logic in production builds.
