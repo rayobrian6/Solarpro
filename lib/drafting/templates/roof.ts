@@ -223,6 +223,13 @@ export function drawRoofPlan(
   els.push(drawBackground(W, H, '#ffffff'));
   // Red diagonal hatch for the fire-setback band (the reference's signature mark).
   els.push(`<defs><pattern id="hatch-setback" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#cc2222" stroke-width="0.7"/></pattern></defs>`);
+  // Setback hatch is DEFERRED and painted OVER the modules: painting modules
+  // on top hid every encroachment (modules sitting in the 36" band read as
+  // clean roof). Quads + label positions collected for encroachment counting
+  // and label de-collision.
+  const deferredBandEls: string[] = [];
+  const bandQuads: Array<Array<{ x: number; y: number }>> = [];
+  const bandLabelPts: Array<{ x: number; y: number }> = [];
   // Viewport title (reference style) renders BELOW the drawing — the old
   // full-width solid-black banner read as a web dashboard, not a CAD sheet.
   const svgTitle = isBranchColorMode
@@ -337,23 +344,27 @@ export function drawRoofPlan(
       if (interior || !isEave) {
         const a2x = a.x + nx * dPx, a2y = a.y + ny * dPx;
         const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
-        bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.6" stroke="none"/>`);
+        bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.45" stroke="none"/>`);
         bands.push(`<line x1="${a2x.toFixed(1)}" y1="${a2y.toFixed(1)}" x2="${b2x.toFixed(1)}" y2="${b2y.toFixed(1)}" class="line-setbk"/>`);
+        bandQuads.push([{ x: a.x, y: a.y }, { x: b.x, y: b.y }, { x: b2x, y: b2y }, { x: a2x, y: a2y }]);
         // Reference-style IN-BAND label on long bands (rotated to the band
-        // axis) — replaces the margin callout whose leader crossed the array
-        // and whose text collided with the GENERAL NOTES column.
-        if (!isBranchColorMode && el > 95) {
+        // axis). Labels de-collide globally — every short hip band carrying
+        // its own rotated label produced the NW/SE-corner crisscross.
+        if (!isBranchColorMode && el > 150) {
           const bmx = (a.x + b.x) / 2 + nx * dPx * 0.5;
           const bmy = (a.y + b.y) / 2 + ny * dPx * 0.5;
-          let angDeg = Math.atan2(ey, ex) * 180 / Math.PI;
-          if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;   // never upside-down
-          bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(setbackFt)} FIRE SETBACK</text>`);
+          if (!bandLabelPts.some(q => Math.hypot(q.x - bmx, q.y - bmy) < 60)) {
+            bandLabelPts.push({ x: bmx, y: bmy });
+            let angDeg = Math.atan2(ey, ex) * 180 / Math.PI;
+            if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;   // never upside-down
+            bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(setbackFt)} FIRE SETBACK</text>`);
+          }
         }
       }
       if (interior) interiorEdgesXY.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
       edgeLines.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#000" stroke-width="${interior ? 2.4 : 1.3}"/>`);
     }
-    els.push(`<g clip-path="url(#${clipId})">${bands.join('')}</g>`);
+    deferredBandEls.push(`<g clip-path="url(#${clipId})">${bands.join('')}</g>`);
     els.push(...edgeLines);
 
     // Plane label — collected, rendered after panels (see planeLabels render below)
@@ -487,6 +498,22 @@ export function drawRoofPlan(
         `</g>`);
     }
   });
+
+  // ── Setback hatch OVER the modules + encroachment accounting ──
+  // Painting modules on top of the hatch hid every violation; the AHJ (and
+  // Ray) must SEE a module sitting in the band. Encroaching modules get a red
+  // corner flag; the count lands in the general notes.
+  els.push(...deferredBandEls);
+  let _encroachCount = 0;
+  if (!isBranchColorMode && bandQuads.length) {
+    regPanels.forEach((p: any) => {
+      const px = toX(p.lng), py = toY(p.lat);
+      if (bandQuads.some(q => ptInRingXY(px, py, q))) {
+        _encroachCount++;
+        els.push(`<rect x="${(px - 4).toFixed(1)}" y="${(py - 4).toFixed(1)}" width="8" height="8" fill="none" stroke="#cc0000" stroke-width="1.2" transform="rotate(45 ${px.toFixed(1)} ${py.toFixed(1)})"/>`);
+      }
+    });
+  }
 
   // ── AC branch trunk routing (PV-2B): the daisy-chain per branch ──
   // Branch MEMBERSHIP comes from panelColorById (arrayPages assignment; first-
@@ -805,6 +832,13 @@ export function drawRoofPlan(
           ],
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
+      ...(_encroachCount > 0
+        ? [
+            `3A. ${_encroachCount} MODULE(S) ENCROACH THE`,
+            `   ${ftToFtIn(setbackFt)} SETBACK (RED ◇) — RELOCATE`,
+            '   OR OBTAIN AHJ EXCEPTION.',
+          ]
+        : []),
       ...(_hardObs.length > 0
         ? [
             `4. ${_hardObs.length} ROOF OBSTRUCTION(S) PLOTTED W/`,
@@ -899,7 +933,11 @@ export function drawRoofPlan(
     // Legend — documents the symbols/line-styles actually on this sheet.
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
-      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="7" cy="-0.5" r="1.2" fill="#2a5db0"/>`, label: 'PV MODULE' },
+      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
+      ...(_encroachCount > 0 ? [{
+        swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
+        label: 'SETBACK ENCROACHMENT',
+      }] : []),
       { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
       ...(_pathwaysDrawn > 0 ? [{
         swatch: `<rect x="0" y="-5" width="14" height="9" fill="#1a7a2e" opacity="0.12" stroke="#1a7a2e" stroke-width="0.7" stroke-dasharray="3 1.5"/>`,

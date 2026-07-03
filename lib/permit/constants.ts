@@ -357,7 +357,22 @@ const PDF_PAGE_CONFIG = {
 // (numbered rows never matched the plan), leaders stop short of their text
 // (self-strikethrough), emoji footer gone, honest legend swatches, disconnect
 // name consistent between legend and plan.
-const PLANSET_ENGINE_VERSION = 47382;
+// 47383 (2026-07-03): audit-round 2 (layout craft).
+// (1) PV-2 setback hatch paints OVER the modules (painting modules on top hid
+// every violation); modules inside a band get a red ◇ flag, counted in the
+// general notes with "RELOCATE OR OBTAIN AHJ EXCEPTION". In-band setback
+// labels de-collide globally (min 60px apart, min 150px band) — kills the
+// NW/SE-corner label crisscross. Legend module swatch shows the real 4
+// attachment points + an encroachment key.
+// (2) PV-0 leads with a real headline ("PHOTOVOLTAIC ROOF MOUNT SYSTEM",
+// 23px) instead of branding the racking vendor at 8px.
+// (3) PE-1/CERT structural tables: load combos restated as ASD (ASCE 7-22
+// §2.4, 0.6D+0.6W) to match the ASD capacities they sit beside — the LRFD
+// §2.3 pairing was an engineering-review red flag.
+// (4) PV-3 sidebar callout de-hardcoded (3/8" @ 2.5" → DB lag/embed via
+// d.lagSpec) + rail-less wording; cross-section dims moved off the eave
+// stack (self-strikethrough).
+const PLANSET_ENGINE_VERSION = 47383;
 
 
 

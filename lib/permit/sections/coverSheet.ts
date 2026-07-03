@@ -367,14 +367,16 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
       <!-- ═══ LEFT COLUMN (2fr): system + design data ═══ -->
       <div class="col-stack">
 
-        <!-- PROJECT OVERVIEW — single headline strip. The old 6-row table
-             triplicated the right column's SYSTEM INFORMATION and the SYSTEM
-             SUMMARY below it, and pushed the construction notes off the page. -->
+        <!-- PROJECT HEADLINE — reference covers lead with a LARGE system
+             title (the set's biggest text was a 13px strip, and it branded
+             the racking vendor instead of the system type). -->
         ${(dcKw !== null || totalPanels > 0) ? `
         <div class="sec">
-          <div class="sec-hdr">PHOTOVOLTAIC ${mountLabel} SYSTEM — PROJECT OVERVIEW</div>
-          <div class="sec-body" style="padding:var(--xs);font-size:11px;font-weight:900;letter-spacing:0.4px;">
-            ${[dcKw !== null ? `${dcKw.toFixed(2)} kW DC` : '', acKw !== null ? `${acKw.toFixed(2)} kW AC` : '', totalPanels > 0 ? `${totalPanels} MODULES` : '', topologyLabel || '', mountLabel ? `${mountLabel} MOUNT` : ''].filter(Boolean).join(' &nbsp;·&nbsp; ')}
+          <div class="sec-body" style="padding:7px 10px 6px;">
+            <div style="font-size:23px;font-weight:900;letter-spacing:1.4px;line-height:1.05;">PHOTOVOLTAIC ${isFence(_coverSysType) ? 'SOLAR FENCE' : isGround(_coverSysType) ? 'GROUND MOUNT' : 'ROOF MOUNT'} SYSTEM</div>
+            <div style="font-size:10.5px;font-weight:900;letter-spacing:0.4px;margin-top:4px;">
+            ${[dcKw !== null ? `${dcKw.toFixed(2)} kW DC` : '', acKw !== null ? `${acKw.toFixed(2)} kW AC` : '', totalPanels > 0 ? `${totalPanels} MODULES` : '', topologyLabel || '', mountLabel ? `${mountLabel}` : ''].filter(Boolean).join(' &nbsp;·&nbsp; ')}
+            </div>
           </div>
         </div>` : ''}
 

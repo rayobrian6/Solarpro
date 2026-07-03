@@ -261,8 +261,8 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Post Foundation Capacity Analysis</td></tr>
             <tr><td class="il">Net Lateral Wind Load / Post</td><td class="iv">${uplift} lbs</td><td class="il">Post Embedment Capacity</td><td class="iv">Per ASCE 7-22 §29.4</td></tr>
             <tr><td class="il">Safety Factor (Overturning)</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 1.5 ? '#000' : '#cc0000'};">${safetyFact} (min. 1.5 req.)</td><td class="il">Post Embedment Depth</td><td class="iv">${postEmbed} ft min.</td></tr>
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
-            <tr><td class="il">Governing Combo</td><td class="iv">0.9D + 1.0W (Overturning)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §29.4</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.4 — ASD)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Overturning)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §29.4</td></tr>
           </table>
 
           <div class="sec" style="margin-bottom:var(--xs);">
@@ -355,8 +355,8 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Pile/Pier Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift / Pile</td><td class="iv">${uplift} lbs</td><td class="il">Pile Lateral Capacity</td><td class="iv">Per geotechnical report</td></tr>
             <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Pile Embedment Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
-            <tr><td class="il">Governing Combo</td><td class="iv">0.9D + 1.0W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §27</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.4 — ASD)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §27</td></tr>
           </table>
 
           <div class="sec" style="margin-bottom:var(--xs);">
@@ -493,8 +493,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
             <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} — ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : '—'}</td></tr>
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.3)</td></tr>
-            <tr><td class="il">Governing Combo</td><td class="iv">0.9D + 1.0W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §26/27</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.4 — ASD)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §26/27</td></tr>
           </table>
 
           <div class="sec" style="margin-bottom:var(--xs);">
