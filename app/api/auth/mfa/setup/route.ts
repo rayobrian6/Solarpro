@@ -87,8 +87,8 @@ export async function POST(req: NextRequest) {
       }
     } catch {
       // If mfa_recovery_codes table doesn't exist yet, log warning
-      // The migration 024 should create this table
-      console.warn('[MFA_SETUP] Recovery codes table not found — run migration 024');
+      // The migration 100 should create this table
+      console.warn('[MFA_SETUP] Recovery codes table not found — run migration 100');
     }
 
     await auditAuth(

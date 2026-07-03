@@ -43,8 +43,12 @@ export type AuditAction =
   | 'password_reset_complete'
   | 'mfa_enabled'
   | 'mfa_disabled'
+  | 'mfa_setup_initiated'
+  | 'mfa_challenge_issued'
   | 'mfa_challenge_success'
   | 'mfa_challenge_failure'
+  | 'mfa_failure'
+  | 'mfa_enrollment_required'
   | 'account_locked'
   | 'account_unlocked'
   // Access
