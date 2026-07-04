@@ -461,10 +461,14 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
                 for (const b of filled) b.notes.forEach((n, i) => flat.push({ t: i === 0 ? b.title : undefined, n }));
                 const per = Math.ceil(flat.length / 3);
                 const cols = [flat.slice(0, per), flat.slice(per, per * 2), flat.slice(per * 2)];
+                // Battery/ESS packages carry 22+ notes — at 6.2px they ran
+                // 31px past the page bottom (clipped rows). Scale with count.
+                const _fs = totalNotes > 20 ? 5.6 : 6.2;
+                const _lh = totalNotes > 20 ? 1.14 : 1.18;
                 let num = 0;
                 const renderCol = (c: typeof flat) => `<div>${c.map(x => {
                   num++;
-                  return `<div style="display:flex;gap:3px;font-size:6.2px;line-height:1.18;margin-bottom:0.5px;">`
+                  return `<div style="display:flex;gap:3px;font-size:${_fs}px;line-height:${_lh};margin-bottom:0.5px;">`
                     + `<div style="font-weight:900;min-width:11px;">${num}.</div>`
                     + `<div>${x.t ? `<span style="font-weight:900;">${x.t}: </span>` : ''}${x.n}</div></div>`;
                 }).join('')}</div>`;

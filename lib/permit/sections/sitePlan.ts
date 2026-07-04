@@ -176,6 +176,27 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           Math.hypot((d.dLat - mLat) * 111320, (d.dLng - mLng) * 111320 * _cos) < 1.2).length;
         if (magM < 2.5 && agree * 2 >= _deltas.length) { _dLat = mLat; _dLng = mLng; }
       }
+      // FALLBACK: whole-roof bbox-center registration. Nearmap often returns
+      // ONE outline for a multi-plane hip roof — every design plane then
+      // matches the same subject centroid, the per-plane deltas can never
+      // agree, the shift was rejected, and the module layer rendered at raw
+      // design GPS (~1 m off the pixels — south row read as past the eave).
+      if (_dLat === 0 && _dLng === 0 && _subjPolys.length < ((project.roofPlanes?.length ?? 0))) {
+        const _bboxC = (vs: Array<{lat:number;lng:number}>) => ({
+          lat: (Math.min(...vs.map(v => v.lat)) + Math.max(...vs.map(v => v.lat))) / 2,
+          lng: (Math.min(...vs.map(v => v.lng)) + Math.max(...vs.map(v => v.lng))) / 2,
+        });
+        const allSubj = _subjPolys.flat().filter(v => isFinite(v?.lat) && isFinite(v?.lng));
+        const allDesign = ((project.roofPlanes ?? []) as any[])
+          .flatMap(rp => rp.vertices ?? [])
+          .filter((v: any) => isFinite(v?.lat) && isFinite(v?.lng) && Math.abs(v.lat) > 0.001);
+        if (allSubj.length >= 3 && allDesign.length >= 3) {
+          const sc = _bboxC(allSubj), dcAll = _bboxC(allDesign);
+          const dLat = sc.lat - dcAll.lat, dLng = sc.lng - dcAll.lng;
+          const magM = Math.hypot(dLat * 111320, dLng * 111320 * _cos);
+          if (magM < 2.5) { _dLat = dLat; _dLng = dLng; }
+        }
+      }
     }
     const toPxD = (lat: number, lng: number) => toPx(lat + _dLat, lng + _dLng);
 

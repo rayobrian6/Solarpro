@@ -6373,8 +6373,11 @@ function EngineeringPageInner() {
           // batteryEnabled). The permit's equipment legend keys off batteryCount>0, so a
           // stale config.batteryCount (e.g. an old ecosystem auto-add) must be zeroed here
           // when the toggle is off — otherwise a phantom battery renders across the planset.
-          batteryBrand: batteryEnabled ? config.batteryBrand : undefined,
-          batteryModel: batteryEnabled ? config.batteryModel : undefined,
+          // Brand/model resolved from batteryId when the string fields are empty —
+          // config.batteryBrand/Model stay '' on the pick-by-id flow, which shipped
+          // PV-5's L-8 BESS placard as "Manufacturer: — / Model: —".
+          batteryBrand: batteryEnabled ? (config.batteryBrand || (config.batteryId ? (getBatteryById(config.batteryId)?.manufacturer ?? '') : '')) : undefined,
+          batteryModel: batteryEnabled ? (config.batteryModel || (config.batteryId ? (getBatteryById(config.batteryId)?.model ?? '') : '')) : undefined,
           batteryCount: batteryEnabled ? config.batteryCount : 0,
           batteryKwh:   batteryEnabled ? config.batteryKwh : 0,
           batteryBackfeedA: batteryEnabled ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,

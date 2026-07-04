@@ -354,26 +354,28 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       <div class=\"sec-hdr-dark\" style=\"margin-bottom:4px;\">
         LABEL SCHEDULE &mdash; ALL LABELS
       </div>
-      <table class=\"equip-table\">
-        <thead>
-          <tr>
-            <th style="width:7%;">LABEL</th>
-            <th style="width:22%;">CODE REFERENCE</th>
-            <th style="width:8%;text-align:center;">REQ'D</th>
-            <th>PLACEMENT LOCATION</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${labels.map((lbl, idx) =>
-            `<tr style="${!lbl.required ? 'opacity:0.45;' : ''}background:${idx % 2 === 0 ? '#fff' : '#f5f5f5'};">` +
-            `<td class="fw9 mono">${lbl.id}</td>` +
-            `<td style="font-family:monospace;font-size:8px;">${lbl.necRef}</td>` +
-            `<td style="text-align:center;font-weight:900;font-family:monospace;">${lbl.required ? 'YES' : 'N/A'}</td>` +
-            `<td style="font-size:9px;">${lbl.placement}</td>` +
-            `</tr>`
-          ).join('')}
-        </tbody>
-      </table>
+      ${(() => {
+        // Two side-by-side half tables — the single full-width table ran 81px
+        // past the page bottom once a battery made all 13 labels applicable.
+        const _row = (lbl: typeof labels[number], idx: number) =>
+          `<tr style="${!lbl.required ? 'opacity:0.45;' : ''}background:${idx % 2 === 0 ? '#fff' : '#f5f5f5'};">` +
+          `<td class="fw9 mono">${lbl.id}</td>` +
+          `<td style="font-family:monospace;font-size:7px;">${lbl.necRef}</td>` +
+          `<td style="text-align:center;font-weight:900;font-family:monospace;">${lbl.required ? 'YES' : 'N/A'}</td>` +
+          `<td style="font-size:8px;">${lbl.placement}</td>` +
+          `</tr>`;
+        const _head = `<thead><tr>` +
+          `<th style="width:10%;">LABEL</th>` +
+          `<th style="width:24%;">CODE REF</th>` +
+          `<th style="width:9%;text-align:center;">REQ'D</th>` +
+          `<th>PLACEMENT LOCATION</th>` +
+          `</tr></thead>`;
+        const _half = Math.ceil(labels.length / 2);
+        const _tbl = (ls: typeof labels) =>
+          `<table class="equip-table" style="margin:0;">${_head}<tbody>${ls.map(_row).join('')}</tbody></table>`;
+        return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);align-items:start;">` +
+          `${_tbl(labels.slice(0, _half))}${_tbl(labels.slice(_half))}</div>`;
+      })()}
 
     </div>
   </div>`;
@@ -498,10 +500,20 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               // silently). Micro topologies skipped every upstream Voc check.
               const _mVoc = Number(vocMax); // cold-corrected per NEC 690.7 — raw Voc can pass while the corrected value exceeds the limit
               const _mMax = Number(inv.maxDcVoltage);
-              return isFinite(_mVoc) && isFinite(_mMax) && _mMax > 0 && _mVoc > _mMax ? `
+              const _warns: string[] = [];
+              if (isFinite(_mVoc) && isFinite(_mMax) && _mMax > 0 && _mVoc > _mMax) {
+                _warns.push(`cold-corrected module Voc (${_mVoc} V per NEC 690.7 @ ${designTempMinC}°C) exceeds this inverter's maximum DC input voltage (${_mMax} V)`);
+              }
+              // Per-module overpower on micros — a 600 W module on a ~350 W-AC
+              // micro (DC/AC 1.7) is beyond every manufacturer pairing range
+              // and shipped silently as "31 kW DC / 18 kW AC".
+              const _mAcW = Number(inv.acOutputKw) * 1000;
+              if (inv.type === 'micro' && isFinite(_mAcW) && _mAcW > 0 && pmax / _mAcW > 1.55) {
+                _warns.push(`module STC power (${pmax} W) is ${(pmax / _mAcW).toFixed(2)}× this microinverter's AC rating (${Math.round(_mAcW)} W) — beyond the manufacturer's pairing range (≤1.55×); expect sustained clipping`);
+              }
+              return _warns.length ? `
             <div style="border:2px solid #cc0000;background:#fff5f5;padding:4px 6px;margin-top:3px;font-size:8px;line-height:1.4;color:#cc0000;font-weight:700;">
-              ⚠ EQUIPMENT COMPATIBILITY — VERIFY BEFORE CONSTRUCTION: cold-corrected module Voc (${_mVoc} V per
-              NEC 690.7 @ ${designTempMinC}°C) exceeds this inverter's maximum DC input voltage (${_mMax} V).
+              ⚠ EQUIPMENT COMPATIBILITY — VERIFY BEFORE CONSTRUCTION: ${_warns.join('; ')}.
               Confirm the module/inverter pairing per NEC 690.7 and both manufacturers' compatibility lists;
               correct the equipment selection if this reflects the actual design.
             </div>` : '';

@@ -419,6 +419,12 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     agDrawSvg = schematicGridSvg;
   }
 
+  // Fire-setback numbers from the SAME rule the drawing uses \u2014 needed by the
+  // callouts below and the supplemental block further down.
+  const _fsRoofFt2Early = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _fsCovEarly = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2Early);
+  const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
+
   // Callout notes for data zone
   const agCalloutRows = [
     { n: 1, label: 'NEC 690.8', sub: _isMicro
@@ -426,7 +432,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         : `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
     { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${azDisplay}` },
     { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa71204.2 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
-       sub: isRoof(cadSystemType) ? 'Min 18" ridge/hip setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
+       sub: isRoof(cadSystemType) ? `${_fsInEarly}" ridge \xb7 18" hip/valley setback` : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
     { n: 4, label: 'DC Capacity', sub: `${system.totalDcKw?.toFixed(2) || '\u2014'} kW DC` },
   ].map(c =>
     `<div class="callout-row">` +
@@ -443,7 +449,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 ${_fsIn}" ridge/hip fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
+      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
+      <div>\u2022 18" clear at hips/valleys \u2014 IFC 2021 \xa71204.2.1.2</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
       <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>

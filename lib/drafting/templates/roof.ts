@@ -72,20 +72,28 @@ function sameVert(a: { lat: number; lng: number }, b: { lat: number; lng: number
 
 // Edge classification: an edge shared with ANOTHER facet (same endpoints, either
 // order) is interior = ridge/hip; a perimeter edge is eave/rake. Drives both the
-// per-edge fire-setback distance and the per-edge line weight.
-function isInteriorEdge(
+// per-edge fire-setback distance and the per-edge line weight. Returns the
+// ADJACENT plane index (-1 = perimeter) so callers can tell ridge from hip:
+// opposite-facing neighbor (azimuths ~180° apart) = ridge; else hip/valley.
+function interiorEdgeAdj(
   a: { lat: number; lng: number }, b: { lat: number; lng: number },
   planes: any[], skipIdx: number,
-): boolean {
+): number {
   for (let pi = 0; pi < planes.length; pi++) {
     if (pi === skipIdx) continue;
     const vs = planes[pi].vertices as Array<{ lat: number; lng: number }>;
     for (let i = 0; i < vs.length; i++) {
       const u = vs[i], v = vs[(i + 1) % vs.length];
-      if ((sameVert(u, a) && sameVert(v, b)) || (sameVert(u, b) && sameVert(v, a))) return true;
+      if ((sameVert(u, a) && sameVert(v, b)) || (sameVert(u, b) && sameVert(v, a))) return pi;
     }
   }
-  return false;
+  return -1;
+}
+function isInteriorEdge(
+  a: { lat: number; lng: number }, b: { lat: number; lng: number },
+  planes: any[], skipIdx: number,
+): boolean {
+  return interiorEdgeAdj(a, b, planes, skipIdx) >= 0;
 }
 
 // Plan-view (horizontal footprint) area of a facet ring, in ft². drawRoofPlan
@@ -324,24 +332,30 @@ export function drawRoofPlan(
       const a = ptsXY[ei], b = ptsXY[(ei + 1) % nV];
       if (Math.hypot(b.x - a.x, b.y - a.y) < 2) continue;   // degenerate/closing dup
       const va = rp.vertices![ei], vb = rp.vertices![(ei + 1) % nV];
-      const interior = isInteriorEdge(va, vb, regPlanes, ri);
-      // Eave test (perimeter only): CAD-space OUTWARD normal vs the downslope dir.
-      let isEave = false;
-      if (!interior && az != null) {
-        const eLng = vb.lng - va.lng, eLat = vb.lat - va.lat;
-        const eLen = Math.hypot(eLng, eLat) || 1;
-        let onX = -eLat / eLen, onY = eLng / eLen;
-        const mLng = (va.lng + vb.lng) / 2, mLat = (va.lat + vb.lat) / 2;
-        if (ptInLatLngRing(mLat + onY * 1.5, mLng + onX * 1.5, rp.vertices!)) { onX = -onX; onY = -onY; }
-        isEave = (onX * dsX + onY * dsY) > 0.64;   // within ~50° of downslope
+      const adjIdx = interiorEdgeAdj(va, vb, regPlanes, ri);
+      const interior = adjIdx >= 0;
+      // IFC 2021 §1204.2 is PER EDGE TYPE, not one blanket width: the ridge
+      // gets the coverage-resolved setback (18"/36"), hips and valleys need
+      // only an 18" clear path, and eaves/rakes have NO fire setback at all
+      // (access is handled by the drawn pathways). The old blanket band
+      // hatched hips at 3'-0" and rakes too — half the roof read as keep-out.
+      let edgeKind: 'ridge' | 'hip' | 'perimeter' = 'perimeter';
+      if (interior) {
+        const azA = rp.azimuth, azB = (regPlanes[adjIdx] as any)?.azimuth;
+        if (isFinite(azA) && isFinite(azB)) {
+          const d = Math.abs(((azA - azB) % 360 + 360) % 360);
+          edgeKind = Math.min(d, 360 - d) > 135 ? 'ridge' : 'hip';
+        } else edgeKind = 'ridge';   // no azimuths → conservative
       }
-      const dPx = setbackFt * scale;
+      const HIP_SETBACK_FT = 1.5;   // IFC 2021 §1204.2.1.2 — 18" clear at hips/valleys
+      const edgeSetbackFt = edgeKind === 'ridge' ? setbackFt : HIP_SETBACK_FT;
+      const dPx = edgeSetbackFt * scale;
       // Inward unit normal (screen space) — probe a point just off the midpoint.
       const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey);
       let nx = -ey / el, ny = ex / el;
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       if (!ptInRingXY(mx + nx * 3, my + ny * 3, ptsXY)) { nx = -nx; ny = -ny; }
-      if (interior || !isEave) {
+      if (interior) {
         const a2x = a.x + nx * dPx, a2y = a.y + ny * dPx;
         const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
         bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.45" stroke="none"/>`);
@@ -357,7 +371,7 @@ export function drawRoofPlan(
             bandLabelPts.push({ x: bmx, y: bmy });
             let angDeg = Math.atan2(ey, ex) * 180 / Math.PI;
             if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;   // never upside-down
-            bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(setbackFt)} FIRE SETBACK</text>`);
+            bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(edgeSetbackFt)} ${edgeKind === 'ridge' ? 'RIDGE' : 'HIP/VALLEY'} SETBACK</text>`);
           }
         }
       }
@@ -859,6 +873,9 @@ export function drawRoofPlan(
           ]
         : []),
     ];
+    // Opaque backing like the tables above — the notes printed straight over
+    // the roof's NW hip hatch when the drawing extended into the left column.
+    t.push(`<rect x="${tx - 3}" y="${gnY - 9}" width="${tblW + 6}" height="${12 + gn.length * 9.5 + 12}" fill="rgba(255,255,255,0.95)" stroke="none"/>`);
     t.push(drawText(tx, gnY, 'GENERAL NOTES', { anchor: 'start', fontSize: 7.2, fontWeight: 'bold', fill: '#000' }));
     t.push(`<line x1="${tx}" y1="${gnY + 2.5}" x2="${tx + tblW}" y2="${gnY + 2.5}" stroke="#000" stroke-width="0.8"/>`);
     gn.forEach((line, i) => {
@@ -938,7 +955,7 @@ export function drawRoofPlan(
         swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
         label: 'SETBACK ENCROACHMENT',
       }] : []),
-      { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
+      { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} RIDGE · 1'-6" HIP/VALLEY SETBACK` },
       ...(_pathwaysDrawn > 0 ? [{
         swatch: `<rect x="0" y="-5" width="14" height="9" fill="#1a7a2e" opacity="0.12" stroke="#1a7a2e" stroke-width="0.7" stroke-dasharray="3 1.5"/>`,
         label: `${ftToFtIn(pathwayFt)} ACCESS PATHWAY`,

@@ -404,7 +404,26 @@ const PDF_PAGE_CONFIG = {
 // min 90px) instead of a fixed 150px that pushed the section 27px past the
 // page bottom; CERT "Date of Certification" left blank for the PE (the
 // prefilled issue date read as the license-expiration value above it).
-const PLANSET_ENGINE_VERSION = 47384;
+// 47385 (2026-07-04): Ray's battery regen ((13)-era) — visual-fidelity round.
+// (1) PV-1 module layer REGISTERS to the imagery: whole-roof bbox-center
+// fallback when Nearmap returns fewer subject polygons than design planes
+// (per-plane matching degenerated → shift always rejected → modules rendered
+// ~1 m off, south row read as past the eave).
+// (2) Fire setbacks are PER EDGE TYPE per IFC 2021 §1204.2: ridge gets the
+// coverage-resolved 18"/36", hips/valleys 18" (§1204.2.1.2), eaves/rakes
+// NONE — the blanket 3'-0" band on every hip buried the W/E planes in
+// keep-out hatch. Labels/legend/data zones/callouts say which edge.
+// (3) PV-2/PV-2B general notes get an opaque backing (printed over the NW
+// hip hatch when the roof extended into the left column).
+// (4) PV-0 construction notes scale with count (battery packages carry 22+
+// notes — ran 31px past the page); PV-5 label schedule splits into two
+// side-by-side half tables (all-13-labels battery case ran 81px past).
+// (5) Micro overpower pairing surfaced: computed-system warns when module
+// STC W > 1.55× the micro's AC rating (600W-on-IQ8A = 1.72 shipped silently
+// as "31 kW DC / 18 kW AC"); APP-A prints the red compatibility warning for
+// the same condition. Battery brand/model resolved from batteryId at permit
+// build (L-8 BESS placard printed "Manufacturer: —").
+const PLANSET_ENGINE_VERSION = 47385;
 
 
 

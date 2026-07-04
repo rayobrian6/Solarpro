@@ -616,7 +616,7 @@ function roofComposition(
         { label: 'ROOF TYPE',      value: d.roofType },
         { label: 'PITCH',          value: d.pitchStr,                        bold: true },
         { label: 'AZIMUTH',        value: d.azimuthLabel },
-        { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' EDGES · ${d.pathwayFt}' PATHWAY`, bold: true },
+        { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' RIDGE · 18" HIP · ${d.pathwayFt}' PATHWAY`, bold: true },
         { label: 'FRAMING',        value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
         { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX` },
         { label: 'MODULES',        value: `${d.totalPanels} @ ${d.dcKw} kWdc`, bold: true },
@@ -637,7 +637,7 @@ function roofComposition(
   const callouts: CalloutItem[] = isPlan
     ? [
         { n: 1, label: 'PV MODULE ARRAY', sub: `${d.totalPanels} mod @ ${d.dcKw} kW DC` },
-        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge/hip/rake · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
+        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
         { n: 5, label: 'ATTACHMENT ZONE', sub: `${/RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'direct-attach mounts' : 'L-foot'} @ ${d.attachSpacing}" O.C. into rafters` },

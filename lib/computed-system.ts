@@ -962,6 +962,30 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     });
   }
 
+  // Per-module overpower pairing. A 600 W module on a 366 W-AC micro is a
+  // per-module DC/AC of 1.64 — beyond every IQ8-series pairing range (≤1.55).
+  // It ships silently as "31 kW DC / 18 kW AC" with sustained clipping. Legal
+  // per NEC (no code section caps the ratio), so a WARNING, not an error —
+  // but it is almost always an equipment-selection mistake.
+  const MICRO_MAX_PAIRING_RATIO = 1.55;
+  if (isMicro && input.inverterAcKw > 0 && input.panelWatts > 0) {
+    const perModuleRatio = input.panelWatts / (input.inverterAcKw * 1000);
+    if (perModuleRatio > MICRO_MAX_PAIRING_RATIO) {
+      issues.push({
+        severity: 'warning',
+        code: 'MICRO_DC_AC_PAIRING',
+        message:
+          `${input.panelWatts}W module on a ${Math.round(input.inverterAcKw * 1000)}W-AC microinverter — ` +
+          `per-module DC/AC ratio ${perModuleRatio.toFixed(2)} exceeds the manufacturer pairing range ` +
+          `(≤${MICRO_MAX_PAIRING_RATIO}). Expect sustained output clipping.`,
+        necReference: 'Manufacturer pairing guide',
+        autoFixed: false,
+        suggestion:
+          'Select a higher-output microinverter (480W-class for 550–670W modules) or a lower-wattage module',
+      });
+    }
+  }
+
   // ── String Count Calculation ───────────────────────────────────────────────
   let stringCount = 1;
   let panelsPerString = input.totalPanels;
