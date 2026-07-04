@@ -397,6 +397,7 @@ export function generateBOMForPermit(
         stringCount,
         inverterCount,
         systemKw:            totalDcKw,
+        acOutputKw:          totalAcKw > 0 ? totalAcKw : undefined,
         dcWireGauge,
         acWireGauge,
         dcWireLength,

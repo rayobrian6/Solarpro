@@ -94,8 +94,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     // prints, and the address caption is normal document flow below the image
     // so it can never silently fail to render.
     vicinityMapHtml = `
-        <div class=\"aerial-wrap\" style=\"height:150px;\">
-        <img src="${aerial.imageBase64}" style="width:100%;height:150px;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
+        <div class=\"aerial-wrap\" style=\"position:relative;flex:1 1 auto;min-height:90px;overflow:hidden;\">
+        <img src="${aerial.imageBase64}" style="position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
           <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-58%);text-align:center;\">
           <svg viewBox="0 0 36 46" width="26" height="34" style="display:block;margin:0 auto;">
             <circle cx="18" cy="18" r="16" fill="#000" stroke="#fff" stroke-width="2"/>
@@ -578,7 +578,10 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
         <!-- VICINITY MAP -->
         <div class="sec f1">
           <div class="sec-hdr">VICINITY MAP &mdash; NTS &mdash; FIELD VERIFY ALL CONDITIONS</div>
-          <div class="sec-body sec-body-table" style="overflow:hidden;position:relative;">
+          <!-- Flex column so the aerial FILLS the space the column actually has
+               left — the fixed 150px image pushed this section 27px past the
+               page bottom (clipped caption) whenever the column ran long. -->
+          <div class="sec-body sec-body-table" style="overflow:hidden;position:relative;display:flex;flex-direction:column;">
             ${vicinityMapHtml}
         <div class=\"df aic bt-1\" style=\"padding:2px var(--xs);gap:var(--xs);\">
               <span class="f-sm fw7 f1">

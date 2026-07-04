@@ -372,7 +372,39 @@ const PDF_PAGE_CONFIG = {
 // (4) PV-3 sidebar callout de-hardcoded (3/8" @ 2.5" → DB lag/embed via
 // d.lagSpec) + rail-less wording; cross-section dims moved off the eave
 // stack (self-strikethrough).
-const PLANSET_ENGINE_VERSION = 47383;
+// 47384 (2026-07-04): audit of Ray's v47383 regen ((12).html) — cross-sheet
+// single-sourcing round.
+// (1) SCHED BOM sized the AC disconnect/fuses from DC kW (31.2 → 175A RK5
+// fuses in an Eaton 200A disco) while PV-0/PV-4B/E-1 specify the 100A fused
+// disco (75.6A × 1.25). bom-engine-v4 takes acOutputKw and sizes all AC-side
+// gear (disco/fuse/backfeed/EGC/GEC fallbacks) from the AC nameplate.
+// (2) APP-A 690.8 table printed Voc ×1.25 = 62.3 V "max" directly across from
+// the inverter's 60 V DC limit with no flag. Now prints the exact NEC 690.7(A)
+// cold-corrected Voc (project designTempMin, same input the engines use) and
+// the red EQUIPMENT COMPATIBILITY warning fires on the CORRECTED value.
+// (3) Attach spacing + lag spec single-sourced set-wide: PE-1 and the PV-4C
+// requirements block now use the same engineering-resolved chain as PV-3
+// (structural.attachment.maxAllowedSpacing → user input → racking max) and
+// the mounting system's lag dia/embed — they printed 48" max / 3/8" beside
+// PV-3/PV-4C-analysis' resolved 24" / 5/16" for the same job. APP-A's "Max
+// Attach Spacing" prefers the resolved value over the racking's rated max.
+// (4) PE-1 prints the pitch the structural engine analyzed (CAD plane[0] →
+// project) — the letter claimed project.roofPitch 4.4:12 (20.0°) while the
+// analysis above it ran on the 17° CAD plane (PV-0/PV-2 print 3.6:12).
+// (5) Seismic Design Category single-sourced: PE-1/CERT '|| D' fallback
+// printed SDC D beside PV-0's AHJ-derived CAT. B; now falls back to
+// project.seismicCategory, then '—' (never invents a category).
+// (6) PV-4C load-combo block restated as ASD §2.4 (0.6D+0.6W / D+S) — 47383
+// fixed PE-1/CERT but this sheet still quoted LRFD §2.3 (0.9D+1.0W,
+// 1.2D+1.6S) beside ASD capacities.
+// (7) PV-4C auto-resolutions render as a compact footnote line (the 5-column
+// table sat after the page conclusion and fell entirely past the page bottom
+// on real data — invisible in print); typical-detail SVG slimmed 220→168px.
+// (8) PV-0 vicinity aerial fills the space the column has left (flex,
+// min 90px) instead of a fixed 150px that pushed the section 27px past the
+// page bottom; CERT "Date of Certification" left blank for the PE (the
+// prefilled issue date read as the license-expiration value above it).
+const PLANSET_ENGINE_VERSION = 47384;
 
 
 

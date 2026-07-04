@@ -9,6 +9,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { roofTypeLabel } from '../utils/helpers';
 import { getEquipmentContext, isFence, isGround } from '@/lib/system';
+import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { BUILD_VERSION } from '@/lib/version';
 
 export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
@@ -70,7 +71,9 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">PE License Number</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">State of Licensure</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">License Expiration Date</div></div>
-          <div class="cert-field"><div class="cf-val">${project.date}</div><div class="cf-lbl">Date of Certification</div></div>
+          <!-- Blank — the PE dates this when signing. Prefilling the package
+               issue date read as the expiration value of the field above. -->
+          <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Date of Certification</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Phone / Email</div></div>
           <div class="cert-field" style="margin-top:var(--sm)"><div class="cf-val" style="border-bottom:var(--border-hvy);padding-bottom:18px;">________________________________</div><div class="cf-lbl">Signature</div></div>
         </div>
@@ -194,7 +197,9 @@ function _peSiteLoading(input: PermitInput): string {
   const windSpeed  = structural?.wind?.windSpeed || '—';
   const snowLoad   = structural?.snow?.groundSnowLoad || '—';
   const exposure   = structural?.wind?.exposureCategory || '—';
-  const sdc        = compliance.structural?.seismic?.sdc || 'D';
+  // AHJ-derived category before any default — the '|| D' fallback printed
+  // SDC D on PE-1 while PV-0 printed the AHJ's CAT. B for the same site.
+  const sdc        = compliance.structural?.seismic?.sdc || input.project.seismicCategory || '—';
   return `
   <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Site Loading Parameters</td></tr>
   <tr><td class="il">Design Wind Speed (Vult)</td><td class="iv">${windSpeed} mph</td><td class="il">Exposure Category</td><td class="iv">Cat. ${exposure}</td></tr>
@@ -434,10 +439,25 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const allowableDefl = structural?.rafter?.allowableDeflection ? structural.rafter.allowableDeflection.toFixed(3) : '—';
   const rafterSize  = project.rafterSize  || '2×6';
   const rafterSpace = project.rafterSpacing || 24;
-  const attachSpace = project.attachmentSpacing || 48;
+  // Same resolution chain as PV-3 (engineering-resolved → user input → racking
+  // rated max) — the raw ||48 default printed "48" max O.C." on the letter
+  // while PV-3 and the PV-4C lag analysis resolved 24" for the same job.
+  const _mountSel   = project.mountingSystemId ? getMountingSystemById(project.mountingSystemId) : undefined;
+  const attachSpace = structural?.attachment?.maxAllowedSpacing
+    || project.attachmentSpacing
+    || _mountSel?.mount?.maxSpacingIn
+    || 48;
+  const _fracIn = (v: number) =>
+    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
+  const lagDia    = _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
+  const lagEmbed  = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
   // 1-decimal ratio so the printed pair is self-consistent — Math.round gave
   // "4/12 (20.0°)" where 4:12 is actually 18.4° (a checkable contradiction).
-  const roofPitch   = project.roofPitch ? `${(Math.tan(project.roofPitch * Math.PI / 180) * 12).toFixed(1)}:12 (${project.roofPitch.toFixed(1)}°)` : '—';
+  // Pitch = what the structural engine analyzed (CAD plane[0] → project) —
+  // the letter used to claim project.roofPitch (20°) while the analysis ran
+  // on the CAD plane pitch (17°).
+  const _pitchDeg   = cad.roof?.planes?.[0]?.pitch ?? project.roofPitch;
+  const roofPitch   = _pitchDeg ? `${(Math.tan(_pitchDeg * Math.PI / 180) * 12).toFixed(1)}:12 (${_pitchDeg.toFixed(1)}°)` : '—';
   const roofType    = roofTypeLabel(project.roofType);
   const exposure    = structural?.wind?.exposureCategory || '—';
   const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'IronRidge XR100';
@@ -475,8 +495,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <table class="info-table" class="mb-xs">
             <tr><td class="il">Roof Type</td><td class="iv">${roofType}</td><td class="il">Roof Pitch</td><td class="iv">${roofPitch}</td></tr>
             <tr><td class="il">Rafter / Framing</td><td class="iv">${rafterSize} Lumber</td><td class="il">Spacing</td><td class="iv">${rafterSpace}" O.C.</td></tr>
-            <tr><td class="il">Attachment Spacing</td><td class="iv">${attachSpace}" max O.C.</td><td class="il">Lag Diameter</td><td class="iv">3/8" min.</td></tr>
-            <tr><td class="il">Min. Embedment</td><td class="iv">2.5" into rafter</td><td class="il">Hardware</td><td class="iv">Stainless Steel</td></tr>
+            <tr><td class="il">Attachment Spacing</td><td class="iv">${attachSpace}" max O.C.</td><td class="il">Lag Diameter</td><td class="iv">${lagDia}" min.</td></tr>
+            <tr><td class="il">Min. Embedment</td><td class="iv">${lagEmbed}" into rafter</td><td class="il">Hardware</td><td class="iv">Stainless Steel</td></tr>
             <tr><td class="il">Roof Sheathing</td><td class="iv">No attachment to sheathing only</td><td class="il">Underlayment</td><td class="iv">Maintained per mfr. req.</td></tr>
           </table>
         </div>

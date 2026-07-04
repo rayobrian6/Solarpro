@@ -60,7 +60,9 @@ export function _peSiteLoading(input: PermitInput): string {
   const windSpeed  = structural?.wind?.windSpeed || '—';
   const snowLoad   = structural?.snow?.groundSnowLoad || '—';
   const exposure   = structural?.wind?.exposureCategory || '—';
-  const sdc        = compliance.structural?.seismic?.sdc || 'D';
+  // AHJ-derived category before any default — the '|| D' fallback printed
+  // SDC D on PE-1 while PV-0 printed the AHJ's CAT. B for the same site.
+  const sdc        = compliance.structural?.seismic?.sdc || input.project.seismicCategory || '—';
   return `
   <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Site Loading Parameters</td></tr>
   <tr><td class="il">Design Wind Speed (Vult)</td><td class="iv">${windSpeed} mph</td><td class="il">Exposure Category</td><td class="iv">Cat. ${exposure}</td></tr>

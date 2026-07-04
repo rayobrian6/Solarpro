@@ -14,6 +14,7 @@ import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../u
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension } from '../utils/drawing';
 import {  isFence, isGround, isRoof } from '@/lib/system';
+import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import {
   extractStructuralInputFromCAD,
   deriveStructuralBOM,
@@ -662,7 +663,19 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
 
   const rafterSize  = project.rafterSize || '2×6';
   const rafterSpace = project.rafterSpacing || 24;
-  const attachSpace = project.attachmentSpacing || 48;
+  // Same resolution chain as PV-3/PE-1 (engineering-resolved → user input →
+  // racking rated max) and lag spec from the SELECTED mounting system — the
+  // requirements block used to print "3/8" / 48" max" beside a lag analysis
+  // that resolved 5/16" @ 24" for the same job.
+  const _mountSel   = project.mountingSystemId ? getMountingSystemById(project.mountingSystemId) : undefined;
+  const attachSpace = structural?.attachment?.maxAllowedSpacing
+    || project.attachmentSpacing
+    || _mountSel?.mount?.maxSpacingIn
+    || 48;
+  const _fracIn = (v: number) =>
+    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
+  const lagDia    = _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
+  const lagEmbed  = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
 
   return `
   <div class="page">
@@ -751,7 +764,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <div class="section-title">Standard Detail — Roof Attachment (Lag Bolt w/ Flashing, Typical)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
         <div style="text-align:center;">
-          <svg viewBox="0 0 300 240" width="280" height="220" style="display:block;margin:0 auto;">
+          <svg viewBox="0 0 300 240" width="210" height="168" style="display:block;margin:0 auto;">
             <!-- Rafter -->
             <rect x="20" y="130" width="260" height="55" fill="#d4a76a" stroke="#000" stroke-width="1.5"/>
             <text x="150" y="162" text-anchor="middle" font-size="10" font-weight="bold" fill="#000">RAFTER (${rafterSize})</text>
@@ -777,14 +790,14 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <line x1="150" y1="86" x2="150" y2="175" stroke="#000" stroke-width="3"/>
             <polygon points="145,175 155,175 150,185" fill="#000"/>
             <text x="158" y="132" font-size="6.5" fill="#000">LAG BOLT</text>
-            <text x="158" y="140" font-size="6.5" fill="#000">3/8" DIA.</text>
+            <text x="158" y="140" font-size="6.5" fill="#000">${lagDia}" DIA.</text>
             <!-- Embedment dimension -->
             <line x1="163" y1="130" x2="205" y2="130" stroke="#c00" stroke-width="0.6" stroke-dasharray="2,1"/>
             <line x1="163" y1="175" x2="205" y2="175" stroke="#c00" stroke-width="0.6" stroke-dasharray="2,1"/>
             <line x1="200" y1="130" x2="200" y2="175" stroke="#c00" stroke-width="1"/>
             <polygon points="196,130 204,130 200,124" fill="#c00"/>
             <polygon points="196,175 204,175 200,181" fill="#c00"/>
-            <text x="208" y="155" font-size="7" fill="#c00" font-weight="bold">2.5"</text>
+            <text x="208" y="155" font-size="7" fill="#c00" font-weight="bold">${lagEmbed}"</text>
             <text x="208" y="163" font-size="6.5" fill="#c00">MIN</text>
             <!-- Uplift arrow -->
             <line x1="150" y1="20" x2="150" y2="5" stroke="#c00" stroke-width="2"/>
@@ -794,7 +807,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         </div>
         <div style="font-size:var(--f-sm);line-height:1.7;">
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">ROOF ATTACHMENT REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. Lag bolt: 3/8" diameter minimum stainless steel, <strong>2.5" minimum embedment into rafter.</strong></div>
+          <div style="margin-bottom:3px;">1. Lag bolt: ${lagDia}" diameter minimum stainless steel, <strong>${lagEmbed}" minimum embedment into rafter.</strong></div>
           <div style="margin-bottom:3px;">2. Flashing: Aluminum or stainless steel base flashing installed under existing roofing material per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">3. Sealant: Polyurethane or silicone roofing sealant at all roof penetrations per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">4. Attachment to structural framing members only — <strong>no attachment to sheathing or decking alone.</strong></div>
@@ -805,8 +818,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         </div>
       </div>
 
-      <!-- Governing Load Combination — Roof -->
-      <div class="section-title">Governing Load Combination — ASCE 7-22 §2.3</div>
+      <!-- Governing Load Combination — Roof. ASD (§2.4) combos — the rafter/lag
+           capacities on this sheet are allowable-stress values; quoting the
+           LRFD §2.3 factored combos beside them contradicted PE-1/CERT. -->
+      <div class="section-title">Governing Load Combination — ASCE 7-22 §2.4 (ASD)</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
           <tr><td class="il" style="width:100px;">ASCE 7-22</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
@@ -814,11 +829,11 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
-          <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.3) — ROOF-MOUNTED PV:</strong>
-          The controlling load case for roof-mounted PV is <strong>0.9D + 1.0W</strong> (net uplift) for lag bolt
-          withdrawal capacity, and <strong>1.2D + 1.6S + 0.5W</strong> for gravity/snow loading on existing framing.
+          <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.4 — ASD) — ROOF-MOUNTED PV:</strong>
+          The controlling load case for roof-mounted PV is <strong>0.6D + 0.6W</strong> (net uplift) for lag bolt
+          withdrawal capacity, and <strong>D + S</strong> for gravity/snow loading on existing framing.
           All lag bolt attachments shall develop the required withdrawal capacity with a minimum safety factor of 2.0
-          per ASCE 7-22 §2.3 and manufacturer installation requirements.
+          per ASCE 7-22 §2.4 and manufacturer installation requirements.
         </div>
       </div>
       ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
@@ -857,22 +872,15 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         </tbody>
       </table>` : ''}
       ${rulesResult?.structuralAutoResolutions && rulesResult.structuralAutoResolutions.length > 0 ? `
-      <div class="section-title">Auto-Resolutions Applied</div>
-      <table class="equip-table" style="font-size:7px;">
-        <thead><tr><th>Field</th><th>Original</th><th>Resolved</th><th>Reason</th><th>Reference</th></tr></thead>
-        <tbody>
-          ${rulesResult.structuralAutoResolutions.slice(0, 5).map(r => `
-          <tr style="background:#fff">
-            <td class="mono" style="font-size:7px;">${r.field}</td>
-            <td style="font-size:7px;">${r.originalValue}</td>
-            <td style="color:#000;font-weight:bold;font-size:7px;">${r.resolvedValue}</td>
-            <td style="font-size:7px;">${r.reason}</td>
-            <td class="mono" style="font-size:7px;">${r.necReference}</td>
-          </tr>`).join('')}
-          ${rulesResult.structuralAutoResolutions.length > 5 ? `
-          <tr style="background:#f5f5f5"><td colspan="5" style="font-size:7px;font-weight:bold;text-align:center;">+ ${rulesResult.structuralAutoResolutions.length - 5} additional auto-resolution(s) — full record retained in the engineering file</td></tr>` : ''}
-        </tbody>
-      </table>` : ''}
+      <!-- Compact footnote form — the 5-column table version rendered AFTER
+           the page conclusion and fell entirely past the fixed 11" page
+           bottom (invisible in print) on real data. -->
+      <div style="padding:3px 6px;margin-top:2px;font-size:7px;line-height:1.4;border:var(--border);background:#fafafa;color:#333;">
+        <strong>ENGINE-PROPOSED RESOLUTIONS (provenance only — NOT applied to this design; the analysis above evaluates the as-modeled framing and governs):</strong>
+        ${rulesResult.structuralAutoResolutions.slice(0, 4).map(r =>
+          `${r.field}: ${r.originalValue} → <strong>${r.resolvedValue}</strong> (${r.reason}${r.necReference ? ` — ${r.necReference}` : ''})`,
+        ).join(' &nbsp;·&nbsp; ')}${rulesResult.structuralAutoResolutions.length > 4 ? ` &nbsp;·&nbsp; + ${rulesResult.structuralAutoResolutions.length - 4} more — full record retained in the engineering file` : ''}
+      </div>` : ''}
     </div>
   </div>`;
 }

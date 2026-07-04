@@ -412,10 +412,15 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const panelWid = project.panelWidthIn || 40;
   const panelWt = project.panelWeightLbs || 44;
 
-  // NEC 690.8 calculations
-  const TEMP_CORR_FACTOR = 1.25; // for -13°F (worst case cold)
+  // NEC 690.7/690.8 calculations — cold Voc uses the exact NEC 690.7(A)
+  // formula with the project design-low temp (same input the SLD/engines
+  // use), matching the compatibility gate. The old blanket ×1.25 printed a
+  // 62.3 V "max" beside a 60 V inverter DC limit on the same sheet.
+  const VOC_TEMP_COEFF = -0.27;                    // %/°C — matches the printed spec row
+  const designTempMinC = project.designTempMin ?? -10;
+  const vocColdFactor = 1 + (VOC_TEMP_COEFF / 100) * (designTempMinC - 25);
   const NEC_SAFETY = 1.25;
-  const vocMax = parseFloat((voc * TEMP_CORR_FACTOR).toFixed(1));
+  const vocMax = parseFloat((voc * vocColdFactor).toFixed(1));
   const iscMax = parseFloat((isc * NEC_SAFETY).toFixed(2));
 
   return `
@@ -457,9 +462,9 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
           <!-- NEC 690.8 Calculations from module specs -->
           <div class="section-title">NEC 690.8 — Module Electrical Calculations</div>
           <table class="equip-table">
-            <thead><tr><th>Parameter</th><th>Nameplate</th><th>×1.25 NEC Factor</th><th>Result</th></tr></thead>
+            <thead><tr><th>Parameter</th><th>Nameplate</th><th>NEC Factor</th><th>Result</th></tr></thead>
             <tbody>
-              <tr><td>Voc (Open Circuit)</td><td>${voc} V</td><td>×1.25 (temp. correction)</td><td><strong>${vocMax} V max</strong></td></tr>
+              <tr><td>Voc (Open Circuit)</td><td>${voc} V</td><td>×${vocColdFactor.toFixed(3)} (NEC 690.7 @ ${designTempMinC}°C)</td><td><strong>${vocMax} V max</strong></td></tr>
               <tr><td>Isc (Short Circuit)</td><td>${isc} A</td><td>×1.25 (NEC 690.8(A))</td><td><strong>${iscMax} A max</strong></td></tr>
               <tr><td>Vmp (Operating)</td><td>${vmp} V</td><td>×1.0</td><td>${vmp} V</td></tr>
               <tr><td>Imp (Operating)</td><td>${imp} A</td><td>×1.0</td><td>${imp} A</td></tr>
@@ -491,13 +496,14 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               // a module Voc ABOVE the inverter's max DC input on the same
               // page with no flag (electrically impossible pairing shipping
               // silently). Micro topologies skipped every upstream Voc check.
-              const _mVoc = Number(voc);
+              const _mVoc = Number(vocMax); // cold-corrected per NEC 690.7 — raw Voc can pass while the corrected value exceeds the limit
               const _mMax = Number(inv.maxDcVoltage);
               return isFinite(_mVoc) && isFinite(_mMax) && _mMax > 0 && _mVoc > _mMax ? `
             <div style="border:2px solid #cc0000;background:#fff5f5;padding:4px 6px;margin-top:3px;font-size:8px;line-height:1.4;color:#cc0000;font-weight:700;">
-              ⚠ EQUIPMENT COMPATIBILITY — VERIFY BEFORE CONSTRUCTION: module Voc (${_mVoc} V) exceeds this inverter's
-              maximum DC input voltage (${_mMax} V). Confirm the module/inverter pairing per NEC 690.7 and both
-              manufacturers' compatibility lists; correct the equipment selection if this reflects the actual design.
+              ⚠ EQUIPMENT COMPATIBILITY — VERIFY BEFORE CONSTRUCTION: cold-corrected module Voc (${_mVoc} V per
+              NEC 690.7 @ ${designTempMinC}°C) exceeds this inverter's maximum DC input voltage (${_mMax} V).
+              Confirm the module/inverter pairing per NEC 690.7 and both manufacturers' compatibility lists;
+              correct the equipment selection if this reflects the actual design.
             </div>` : '';
             })()}
           </div>
@@ -523,7 +529,14 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">System</td><td class="iv">${_sysName}</td></tr>
             <tr><td class="il">Material</td><td class="iv">${_mSel?.rail?.materialAlloy || 'Aluminum — per manufacturer listing'}</td></tr>
             <tr><td class="il">Rail Profile</td><td class="iv">${_mSel?.rail ? `${_mSel.rail.model} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")` : (_mSel ? 'Rail-less / direct-attach' : 'Per manufacturer')}</td></tr>
-            <tr><td class="il">Max Attach Spacing</td><td class="iv">${_mSel?.mount?.maxSpacingIn ? `${_mSel.mount.maxSpacingIn}" O.C.` : 'Per PV-3 / structural calc'}</td></tr>
+            <tr><td class="il">Max Attach Spacing</td><td class="iv">${(() => {
+              // Engineering-resolved spacing first (same chain as PV-3/PE-1) —
+              // the racking's rated 48" printed here beside PV-3's resolved 24".
+              const _spc = input.compliance?.structural?.attachment?.maxAllowedSpacing
+                || (project.attachmentSpacing as number | undefined)
+                || _mSel?.mount?.maxSpacingIn;
+              return _spc ? `${_spc}" O.C.` : 'Per PV-3 / structural calc';
+            })()}</td></tr>
             ${_isRoof ? `<tr><td class="il">Attachment</td><td class="iv">${_mSel?.mount?.model || 'Per PV-3 attachment detail'}</td></tr>` : ''}
             ${_isRoof ? `<tr><td class="il">Lag Bolt</td><td class="iv">${_fr(_lagDia)}" DIA × ${_lagLen}" Min. Stainless Steel</td></tr>` : ''}
             ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">Min. ${_embed}" thread embedment into rafter</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}

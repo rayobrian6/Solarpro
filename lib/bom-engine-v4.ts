@@ -46,6 +46,7 @@ export interface BOMGenerationInputV4 {
   stringCount: number;
   inverterCount: number;
   systemKw: number;
+  acOutputKw?: number;        // AC nameplate kW — sizes AC-side gear (disconnect/fuse/backfeed); systemKw is DC and oversizes them
 
   // Wiring
   dcWireGauge: string;
@@ -820,8 +821,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   if (input.requiresACDisconnect !== false) {
     const acVoltage = input.acVoltage ?? 240;
 
-    // Step 1-2: Continuous current × 125%
-    const acContCurrent = (input.systemKw * 1000) / acVoltage;
+    // Step 1-2: Continuous current × 125% — from AC nameplate (DC kW would oversize the disco/fuse)
+    const acContCurrent = ((input.acOutputKw ?? input.systemKw) * 1000) / acVoltage;
     const acRequiredAmps = acContCurrent * 1.25;
 
     // Step 3: Determine fused or non-fused from interconnection method
@@ -921,7 +922,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // NEC 705.12(B): continuous AC output current × 1.25 → next standard breaker
     const derivedBackfeedAmps = (input.backfeedAmps ?? 0) > 0
       ? input.backfeedAmps
-      : (input.systemKw * 1000 / (input.acVoltage ?? 240)) * 1.25;
+      : ((input.acOutputKw ?? input.systemKw) * 1000 / (input.acVoltage ?? 240)) * 1.25;
     const requestedBreaker = nextStandardBreaker(derivedBackfeedAmps);
     const backfeedAmps = Math.min(requestedBreaker, maxPVBreaker);
     if (requestedBreaker > maxPVBreaker) {
@@ -1032,7 +1033,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const egcLength = conduitLength(input.acWireLength);
     // EGC gauge: NEC 250.122 — based on OCPD size
     const ocpdForEgc = input.acOCPD > 0 ? input.acOCPD : nextStandardBreaker(
-      (input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25
+      ((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25
     );
     const egcGauge = ocpdForEgc <= 60 ? '#10 AWG' : ocpdForEgc <= 100 ? '#8 AWG' : '#6 AWG';
     items.push(addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
@@ -1062,7 +1063,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // GEC: Grounding Electrode Conductor — NEC 250.66
     // Sized by largest service conductor or 6 AWG minimum for PV systems ≤ 200A
     const gecOcpd = input.acOCPD > 0 ? input.acOCPD
-      : nextStandardBreaker((input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25);
+      : nextStandardBreaker(((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25);
     const gecGauge = gecOcpd <= 60 ? '#6 AWG' : gecOcpd <= 100 ? '#4 AWG' : '#2 AWG';
     const gecLength = 50; // standard 50-ft run from inverter to grounding electrode
     items.push(addItem('structural', 'wire', 'Southwire', `${gecGauge} Bare Copper GEC`,
