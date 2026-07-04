@@ -178,6 +178,16 @@ export interface CapabilityProfile {
    */
   branchCircuit: BranchCircuitSpec | null;
 
+  /**
+   * v47.431 — For 'micro' topology: the device's maximum DC input voltage (V)
+   * from the datasheet (e.g. every Enphase IQ8 variant = 60 V). The module's
+   * cold-corrected Voc (NEC 690.7) must not exceed this — a 75.6 V-Voc
+   * SunPower Maxeon 3 can never pair with an IQ8. Mirrors
+   * equipment-db Microinverter.maxDcVoltage. Omitted/null for
+   * string/optimizer/hybrid (their ceiling lives in MpptChannelSpec).
+   */
+  maxDcInputV?: number | null;
+
   // ── String design rules (string/optimizer/hybrid) ─────────────────────────
   /**
    * For optimizer topology: the maximum regulated output current (A) from

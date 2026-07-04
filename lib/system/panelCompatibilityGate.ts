@@ -31,12 +31,14 @@
 //   STRING_INVERTERS registry, and takes the minimum maxInputCurrentPerMppt
 //   as the brand's "effective" cap. Zero per-brand special-casing.
 //
-//   MICRO TOPOLOGY SHORT-CIRCUIT
-//   When brand.topology === 'micro', the per-MPPT current gate does not apply:
-//   microinverters serve individual panels (1–2 modules per device) and have
-//   no shared MPPT bus. The gate returns 'compatible' with a reason explaining
-//   the gate is not applicable. This prevents a false "unknown" banner for
-//   Enphase IQ8, APsystems, Hoymiles, and any future micro brand.
+//   MICRO TOPOLOGY — MODULE VOC GATE (v47.431, TEARDOWN-v47379 P0)
+//   When brand.topology === 'micro', the per-MPPT current gate does not apply
+//   (microinverters serve individual panels, no shared MPPT bus) — but the
+//   module's cold-corrected Voc (NEC 690.7) is gated against the brand's
+//   strictest microinverter max-DC-input voltage (e.g. Enphase IQ8 = 60 V).
+//   High-Voc modules like SunPower Maxeon 3 (75.6 V) return 'incompatible'
+//   with Voc-fitting replacement suggestions; unresolvable caps fail open to
+//   'compatible' so no false "unknown" banner appears for micro brands.
 //
 // USAGE (sizingEngine.ts):
 //   const gate = evaluatePanelBrandCompatibility(panel, brand);
@@ -48,8 +50,8 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import type { BrandProfile } from './brandProfiles';
-import type { SolarPanel, StringInverter } from '../equipment-db';
-import { STRING_INVERTERS, SOLAR_PANELS } from '../equipment-db';
+import type { SolarPanel, StringInverter, Microinverter } from '../equipment-db';
+import { STRING_INVERTERS, MICROINVERTERS, SOLAR_PANELS } from '../equipment-db';
 import { findCompatiblePanels } from '../panel-compatibility';
 
 // ─── Public types ──────────────────────────────────────────────────────────
@@ -84,6 +86,10 @@ export interface PanelCompatibilityGateResult {
     isc: number;
     /** NEC design current = Isc × 1.25 (A). */
     designCurrent: number;
+    /** Panel STC open-circuit voltage (V). Populated for micro topology. */
+    voc?: number;
+    /** Cold-corrected Voc per NEC 690.7 (V). Populated for micro topology. */
+    vocColdCorrected?: number;
   };
   brand: {
     id: string;
@@ -91,6 +97,10 @@ export interface PanelCompatibilityGateResult {
     /** The minimum per-MPPT current cap across the brand's supported models (A).
      *  null when the cap cannot be determined. */
     effectiveMaxInputCurrentPerMppt: number | null;
+    /** Micro topology only: the minimum max-DC-input voltage across the
+     *  brand's supported microinverter models (V). null / undefined when
+     *  not applicable or not resolvable. */
+    effectiveMaxDcInputVoltage?: number | null;
   };
   /** Percent headroom of the current panel vs brand cap.
    *  Negative when designCurrent > cap. Zero-floored for display. */
@@ -109,6 +119,19 @@ export interface EvaluatePanelBrandOptions {
   marginalThreshold?: number;
   /** Max number of replacement suggestions to return. Default 3. */
   maxSuggestions?: number;
+  /** Site design low temperature (°C) for the NEC 690.7(A)(1) Voc cold
+   *  correction. When provided (and the panel has a tempCoeffVoc), the
+   *  exact formula is used; otherwise the conservative table multiplier
+   *  below applies. */
+  designTempMinC?: number;
+  /** Fallback NEC 690.7 Table cold-correction multiplier applied to Voc
+   *  when no designTempMinC is available. Default 1.12 (≈ −1 to −5 °C
+   *  ambient band of NEC Table 690.7(A)). */
+  vocColdMultiplier?: number;
+  /** Micro topology: cold-Voc headroom (fraction) below which a pairing is
+   *  'marginal'. Kept separate from marginalThreshold because the ×1.12
+   *  cold correction already embeds worst-case margin. Default 0.05 (5%). */
+  microVocMarginalThreshold?: number;
 }
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -116,6 +139,8 @@ export interface EvaluatePanelBrandOptions {
 const DEFAULT_NEC_MULTIPLIER    = 1.25;
 const DEFAULT_MARGINAL_THRESHOLD = 0.15; // 15%
 const DEFAULT_MAX_SUGGESTIONS    = 3;
+const DEFAULT_VOC_COLD_MULTIPLIER = 1.12; // NEC Table 690.7(A), −1…−5 °C band
+const DEFAULT_MICRO_VOC_MARGINAL_THRESHOLD = 0.05; // 5%
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -131,10 +156,10 @@ const DEFAULT_MAX_SUGGESTIONS    = 3;
  *
  * BRAND-AGNOSTIC: no per-brand logic. Works for every current/future brand.
  *
- * NOTE: For micro topology brands, this function is NOT called —
- * evaluatePanelBrandCompatibility() short-circuits to 'compatible' before
- * reaching the MPPT current gate, since per-MPPT input current is a
- * string-inverter concept that doesn't apply to per-panel microinverters.
+ * NOTE: For micro topology brands, this function is NOT called — per-MPPT
+ * input current is a string-inverter concept that doesn't apply to per-panel
+ * microinverters. Micro brands are gated on module Voc vs max DC input
+ * voltage instead (see getBrandMinMicroMaxDcVoltage).
  */
 export function getBrandMinMpptCurrent(brand: BrandProfile | null | undefined): number | null {
   if (!brand) return null;
@@ -150,6 +175,53 @@ export function getBrandMinMpptCurrent(brand: BrandProfile | null | undefined): 
     if (min === null || cap < min) min = cap;
   }
   return min;
+}
+
+/**
+ * Micro-topology counterpart of getBrandMinMpptCurrent(): the strictest
+ * max-DC-input voltage among a brand's supported microinverter models.
+ * Scans brand.supportedInverterModels, resolves each equipmentDbId against
+ * the MICROINVERTERS registry, and returns the minimum maxDcVoltage.
+ *
+ * Returns null when the brand has no supported models or none resolve.
+ * BRAND-AGNOSTIC: no per-brand logic (Enphase IQ8 = 60 V, APsystems DS3 =
+ * 60 V, Hoymiles HM = 60 V — all from datasheet-backed equipment-db records).
+ */
+export function getBrandMinMicroMaxDcVoltage(brand: BrandProfile | null | undefined): number | null {
+  if (!brand) return null;
+  const models = brand.supportedInverterModels ?? [];
+  if (models.length === 0) return null;
+
+  let min: number | null = null;
+  for (const ref of models) {
+    const micro = MICROINVERTERS.find(x => x.id === ref.equipmentDbId) as Microinverter | undefined;
+    if (!micro) continue;
+    const cap = micro.maxDcVoltage;
+    if (typeof cap !== 'number' || cap <= 0) continue;
+    if (min === null || cap < min) min = cap;
+  }
+  return min;
+}
+
+/**
+ * NEC 690.7(A) cold-temperature Voc correction factor.
+ * Exact formula when a design-low temperature and panel coefficient are
+ * available; conservative table multiplier (default ×1.12) otherwise.
+ */
+function vocColdFactor(
+  panel: SolarPanel,
+  designTempMinC: number | undefined,
+  fallbackMultiplier: number,
+): number {
+  if (
+    typeof designTempMinC === 'number' &&
+    typeof panel.tempCoeffVoc === 'number' &&
+    panel.tempCoeffVoc !== 0
+  ) {
+    // tempCoeffVoc is %/°C (negative) → factor > 1 for sub-25°C design temps
+    return 1 + (panel.tempCoeffVoc / 100) * (designTempMinC - 25);
+  }
+  return fallbackMultiplier;
 }
 
 function roundA(a: number): number {
@@ -206,6 +278,47 @@ function buildSuggestions(
   }
 
   return ranked;
+}
+
+/**
+ * Micro topology: rank replacement panels whose COLD-CORRECTED Voc fits under
+ * the brand's max-DC-input voltage cap. Voltage analogue of buildSuggestions().
+ * tier/headroomPct here express VOLTAGE headroom, not current headroom.
+ */
+function buildMicroVocSuggestions(
+  vocCap: number,
+  designTempMinC: number | undefined,
+  coldMultiplier: number,
+  necMultiplier: number,
+  marginalFrac: number,
+  maxSuggestions: number,
+  excludePanelId?: string,
+): PanelBrandSuggestion[] {
+  const candidates = SOLAR_PANELS
+    .filter(p => p.id !== excludePanelId && p.active !== false && p.voc > 0)
+    .map(p => {
+      const vocCold = p.voc * vocColdFactor(p, designTempMinC, coldMultiplier);
+      return { p, vocCold, headroomFrac: (vocCap - vocCold) / vocCap };
+    })
+    .filter(c => c.vocCold <= vocCap)
+    // Comfortable-voltage-headroom panels first, then highest watts.
+    .sort((a, b) => {
+      const aComf = a.headroomFrac >= marginalFrac ? 1 : 0;
+      const bComf = b.headroomFrac >= marginalFrac ? 1 : 0;
+      if (aComf !== bComf) return bComf - aComf;
+      return b.p.watts - a.p.watts;
+    });
+
+  return candidates.slice(0, maxSuggestions).map(c => ({
+    id:            c.p.id,
+    manufacturer:  c.p.manufacturer,
+    model:         c.p.model,
+    watts:         c.p.watts,
+    isc:           c.p.isc,
+    designCurrent: roundA(c.p.isc * necMultiplier),
+    headroomPct:   roundPct(c.headroomFrac * 100),
+    tier:          c.headroomFrac >= marginalFrac ? 'comfortable' : 'marginal',
+  }));
 }
 
 function buildReason(
@@ -308,31 +421,107 @@ export function evaluatePanelBrandCompatibility(
     };
   }
 
-  // ── Micro topology short-circuit ──────────────────────────────────────
-  // Per-MPPT input current is a string-inverter concept. Microinverters
-  // serve individual panels (1–2 modules per device) with no shared MPPT
-  // bus, so the current-gate concept doesn't apply. Return 'compatible'
-  // with a reason explaining the gate is not applicable. This prevents a
-  // false "unknown" / "no resolvable inverter models" banner for Enphase
-  // IQ8, APsystems, Hoymiles, and any future micro brand.
+  // ── Micro topology — module Voc vs max DC input voltage ──────────────
+  // Per-MPPT input current is a string-inverter concept and doesn't apply
+  // to per-panel microinverters — but the module's COLD-CORRECTED Voc must
+  // stay under the micro's max DC input voltage (NEC 690.7). Before
+  // v47.431 this branch returned 'compatible' unconditionally, which let
+  // e.g. SunPower Maxeon 3 (Voc 75.6 V → ~84.7 V cold) ship as compatible
+  // with Enphase IQ8 (60 V max DC input). TEARDOWN-v47379 P0.
   if (brand.topology === 'micro') {
+    const vocCap        = getBrandMinMicroMaxDcVoltage(brand);
+    const designCurrent = roundA(panel.isc * necMultiplier);
+    const coldMult      = options.vocColdMultiplier ?? DEFAULT_VOC_COLD_MULTIPLIER;
+    const vocMarginal   = options.microVocMarginalThreshold ?? DEFAULT_MICRO_VOC_MARGINAL_THRESHOLD;
+    const coldFactor    = vocColdFactor(panel, options.designTempMinC, coldMult);
+    const vocCold       = roundA(panel.voc * coldFactor);
+    const panelName     = `${panel.manufacturer} ${panel.model}`;
+
+    const panelBlock = {
+      id:                panel.id,
+      manufacturer:      panel.manufacturer,
+      model:             panel.model,
+      isc:               panel.isc,
+      designCurrent,
+      voc:               panel.voc,
+      vocColdCorrected:  vocCold,
+    };
+    const brandBlock = {
+      id:                              brand.id,
+      displayName:                     brand.displayName,
+      effectiveMaxInputCurrentPerMppt: null,
+      effectiveMaxDcInputVoltage:      vocCap,
+    };
+
+    // Fail-open when the voltage cap can't be resolved or the panel record
+    // has no usable Voc — same philosophy as 'unknown' for string brands,
+    // but keep 'compatible' to avoid the false-banner regression the
+    // original short-circuit was added for.
+    if (vocCap === null || !(panel.voc > 0)) {
+      return {
+        status:      'compatible',
+        panel:       panelBlock,
+        brand:       brandBlock,
+        headroomPct: 100,   // not determinable — report full headroom
+        suggestions: [],
+        reason:      buildReason('compatible', panel, brand, null, designCurrent, 100, []),
+      };
+    }
+
+    const headroomFrac = (vocCap - vocCold) / vocCap;
+    const headroomPct  = roundPct(headroomFrac * 100);
+
+    if (vocCold > vocCap) {
+      const suggestions = buildMicroVocSuggestions(
+        vocCap, options.designTempMinC, coldMult, necMultiplier,
+        vocMarginal, maxSuggestions, panel.id,
+      );
+      const top = suggestions[0];
+      const reason =
+        `${panelName} (Voc ${panel.voc.toFixed(1)} V, ${vocCold.toFixed(1)} V cold-corrected per ` +
+        `NEC 690.7) exceeds ${brand.displayName}'s ${vocCap.toFixed(0)} V max DC input per ` +
+        `microinverter. ` +
+        (top
+          ? `Auto-switched to ${top.manufacturer} ${top.model} (${top.watts}W, ` +
+            `${top.headroomPct.toFixed(1)}% voltage headroom) for a compliant design.`
+          : `No compatible replacement was found in the catalog — please pick a ` +
+            `different brand or contact support.`);
+      return {
+        status: 'incompatible',
+        panel:  panelBlock,
+        brand:  brandBlock,
+        headroomPct,
+        suggestions,
+        reason,
+      };
+    }
+
+    if (headroomFrac < vocMarginal) {
+      return {
+        status: 'marginal',
+        panel:  panelBlock,
+        brand:  brandBlock,
+        headroomPct,
+        suggestions: [],
+        reason:
+          `${panelName} fits under ${brand.displayName}'s ${vocCap.toFixed(0)} V max DC input, ` +
+          `but with only ${headroomPct.toFixed(1)}% cold-temperature voltage headroom ` +
+          `(Voc ${vocCold.toFixed(1)} V cold-corrected per NEC 690.7). Verify the site's ` +
+          `design low temperature before permitting.`,
+      };
+    }
+
     return {
       status: 'compatible',
-      panel: {
-        id:            panel.id,
-        manufacturer:  panel.manufacturer,
-        model:         panel.model,
-        isc:           panel.isc,
-        designCurrent: roundA(panel.isc * necMultiplier),
-      },
-      brand: {
-        id:                              brand.id,
-        displayName:                     brand.displayName,
-        effectiveMaxInputCurrentPerMppt: null,
-      },
-      headroomPct: 100,   // not applicable — report full headroom
+      panel:  panelBlock,
+      brand:  brandBlock,
+      headroomPct,
       suggestions: [],
-      reason:      buildReason('compatible', panel, brand, null, roundA(panel.isc * necMultiplier), 100, []),
+      reason:
+        `${panelName} is compatible with ${brand.displayName} — per-MPPT current gating ` +
+        `does not apply to microinverters (each panel is served by its own device). ` +
+        `Cold-corrected Voc ${vocCold.toFixed(1)} V is within the ${vocCap.toFixed(0)} V ` +
+        `max DC input (${headroomPct.toFixed(1)}% headroom, NEC 690.7).`,
     };
   }
 

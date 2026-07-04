@@ -942,6 +942,26 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // Max panels per string: floor(inverterMaxDcV / vocCorrected)
   const maxPanelsPerString = Math.floor(input.inverterMaxDcV / vocCorrected);
 
+  // v47.431 — NEC 690.7 for MICRO topology (TEARDOWN-v47379 P0). Micros skip
+  // the per-string loop below, so before this check a high-Voc module (e.g.
+  // SunPower Maxeon 3, 75.6 V) paired with a 60 V-max micro (Enphase IQ8)
+  // produced no voltage error anywhere in computed-system. Each module feeds
+  // its own DC input, so the gate is single-module cold-corrected Voc vs the
+  // micro's max DC input voltage.
+  if (isMicro && input.inverterMaxDcV > 0 && vocCorrected > input.inverterMaxDcV) {
+    issues.push({
+      severity: 'error',
+      code: 'NEC_690_7_VOLTAGE',
+      message:
+        `Module Voc ${vocCorrected.toFixed(1)}V (cold-corrected at ${input.designTempMin}°C) ` +
+        `exceeds microinverter max DC input ${input.inverterMaxDcV}V`,
+      necReference: 'NEC 690.7',
+      autoFixed: false,
+      suggestion:
+        'Select a microinverter with a higher max DC input voltage or a lower-Voc module',
+    });
+  }
+
   // ── String Count Calculation ───────────────────────────────────────────────
   let stringCount = 1;
   let panelsPerString = input.totalPanels;

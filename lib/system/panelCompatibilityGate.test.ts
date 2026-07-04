@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   evaluatePanelBrandCompatibility,
   getBrandMinMpptCurrent,
+  getBrandMinMicroMaxDcVoltage,
 } from './panelCompatibilityGate';
 import { SOLAR_PANELS } from '../equipment-db';
 import { BRAND_PROFILES, getBrandProfile } from './brandProfiles';
@@ -208,27 +209,34 @@ describe('v47.423 — unknown status (fail-open)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Micro topology short-circuit — Enphase, APsystems, Hoymiles
+// Micro topology — Enphase, APsystems, Hoymiles
+// v47.431: no longer an unconditional 'compatible' short-circuit — module
+// cold-corrected Voc is gated against the brand's max DC input voltage.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('v47.423 — micro topology short-circuit', () => {
-  function enphase() {
-    const b = getBrandProfile('enphase');
-    if (!b) throw new Error('fixture missing: enphase brand profile');
-    return b;
-  }
-  function apsystems() {
-    const b = getBrandProfile('apsystems');
-    if (!b) throw new Error('fixture missing: apsystems brand profile');
-    return b;
-  }
-  function hoymiles() {
-    const b = getBrandProfile('hoymiles');
-    if (!b) throw new Error('fixture missing: hoymiles brand profile');
-    return b;
-  }
+function enphase() {
+  const b = getBrandProfile('enphase');
+  if (!b) throw new Error('fixture missing: enphase brand profile');
+  return b;
+}
+function apsystems() {
+  const b = getBrandProfile('apsystems');
+  if (!b) throw new Error('fixture missing: apsystems brand profile');
+  return b;
+}
+function hoymiles() {
+  const b = getBrandProfile('hoymiles');
+  if (!b) throw new Error('fixture missing: hoymiles brand profile');
+  return b;
+}
+function maxeon3() {
+  const p = SOLAR_PANELS.find(x => x.id === 'sp-maxeon3-400');
+  if (!p) throw new Error('fixture missing: sp-maxeon3-400');
+  return p;
+}
 
-  it('Enphase IQ8 with any panel returns compatible — never unknown', () => {
+describe('v47.423 — micro topology (Voc-fitting panels)', () => {
+  it('Enphase IQ8 with a standard-Voc panel returns compatible — never unknown', () => {
     const r = evaluatePanelBrandCompatibility(qcells400(), enphase());
     expect(r.status).toBe('compatible');
     expect(r.status).not.toBe('unknown');
@@ -246,7 +254,7 @@ describe('v47.423 — micro topology short-circuit', () => {
     expect(r.brand.effectiveMaxInputCurrentPerMppt).toBeNull();
   });
 
-  it('Enphase result has no auto-swap suggestions', () => {
+  it('Enphase result has no auto-swap suggestions for a Voc-fitting panel', () => {
     const r = evaluatePanelBrandCompatibility(qcells400(), enphase());
     expect(r.suggestions).toEqual([]);
   });
@@ -263,12 +271,98 @@ describe('v47.423 — micro topology short-circuit', () => {
     expect(r.status).not.toBe('unknown');
   });
 
-  it('all three micro brands with Silfab SIL-430 (high Isc) return compatible', () => {
+  it('all three micro brands with Silfab SIL-430 (high Isc, standard Voc) return compatible', () => {
     for (const brand of [enphase(), apsystems(), hoymiles()]) {
       const r = evaluatePanelBrandCompatibility(silfab430(), brand);
       expect(r.status).toBe('compatible');
       expect(r.status).not.toBe('unknown');
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v47.431 — Micro Voc gate (TEARDOWN-v47379 P0)
+// Module cold-corrected Voc vs microinverter max DC input voltage (NEC 690.7)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('v47.431 — getBrandMinMicroMaxDcVoltage()', () => {
+  it('resolves Enphase IQ8 to 60 V (all IQ8 variants)', () => {
+    expect(getBrandMinMicroMaxDcVoltage(enphase())).toBe(60);
+  });
+
+  it('resolves APsystems to 60 V', () => {
+    expect(getBrandMinMicroMaxDcVoltage(apsystems())).toBe(60);
+  });
+
+  it('returns null for null/undefined and for empty model lists', () => {
+    expect(getBrandMinMicroMaxDcVoltage(null)).toBeNull();
+    expect(getBrandMinMicroMaxDcVoltage(undefined)).toBeNull();
+    const fake: BrandProfile = { ...enphase(), supportedInverterModels: [] };
+    expect(getBrandMinMicroMaxDcVoltage(fake)).toBeNull();
+  });
+
+  it('returns null when no equipmentDbId resolves against MICROINVERTERS', () => {
+    const fake: BrandProfile = {
+      ...enphase(),
+      supportedInverterModels: [
+        { equipmentDbId: 'nonexistent-micro-xyz', acKw: 0.3, dcKwMax: 0.5, mpptCount: 1 },
+      ],
+    };
+    expect(getBrandMinMicroMaxDcVoltage(fake)).toBeNull();
+  });
+});
+
+describe('v47.431 — micro Voc gate classification', () => {
+  it('SunPower Maxeon 3 (Voc 75.6 V) on Enphase IQ8 is INCOMPATIBLE (75.6 × 1.12 = 84.7 V > 60 V)', () => {
+    const r = evaluatePanelBrandCompatibility(maxeon3(), enphase());
+    expect(r.status).toBe('incompatible');
+    expect(r.brand.effectiveMaxDcInputVoltage).toBe(60);
+    expect(r.panel.voc).toBeCloseTo(75.6, 1);
+    expect(r.panel.vocColdCorrected!).toBeGreaterThan(60);
+    expect(r.headroomPct).toBeLessThan(0);
+    expect(r.reason).toContain('max DC input');
+  });
+
+  it('Maxeon 3 on every micro brand is incompatible with Voc-fitting suggestions', () => {
+    for (const brand of [enphase(), apsystems(), hoymiles()]) {
+      const r = evaluatePanelBrandCompatibility(maxeon3(), brand);
+      expect(r.status).toBe('incompatible');
+      expect(r.suggestions.length).toBeGreaterThan(0);
+      for (const s of r.suggestions) {
+        expect(s.id).not.toBe('sp-maxeon3-400');
+        const p = SOLAR_PANELS.find(x => x.id === s.id)!;
+        expect(p.voc * 1.12).toBeLessThanOrEqual(60);
+      }
+    }
+  });
+
+  it('classifies a near-cap panel as MARGINAL (forged Voc 52 V → 58.2 V cold, 3% headroom)', () => {
+    const forged = { ...qcells400(), id: 'forged-high-voc', voc: 52.0 };
+    const r = evaluatePanelBrandCompatibility(forged, enphase());
+    expect(r.status).toBe('marginal');
+    expect(r.headroomPct).toBeGreaterThan(0);
+    expect(r.headroomPct).toBeLessThan(5);
+    expect(r.suggestions).toEqual([]);
+  });
+
+  it('uses the exact NEC 690.7(A)(1) formula when designTempMinC is provided', () => {
+    // Maxeon 3 tempCoeffVoc −0.236 %/°C at a mild 10 °C design low:
+    // factor = 1 + (−0.236/100)(10−25) = 1.0354 → 78.3 V, still > 60 V.
+    const r = evaluatePanelBrandCompatibility(maxeon3(), enphase(), { designTempMinC: 10 });
+    expect(r.status).toBe('incompatible');
+    expect(r.panel.vocColdCorrected!).toBeCloseTo(75.6 * 1.0354, 0);
+  });
+
+  it('fails open to compatible when no micro model resolves (cap unknown)', () => {
+    const fake: BrandProfile = {
+      ...enphase(),
+      supportedInverterModels: [
+        { equipmentDbId: 'nonexistent-micro-xyz', acKw: 0.3, dcKwMax: 0.5, mpptCount: 1 },
+      ],
+    };
+    const r = evaluatePanelBrandCompatibility(maxeon3(), fake);
+    expect(r.status).toBe('compatible'); // fail-open, matches gate philosophy
+    expect(r.brand.effectiveMaxDcInputVoltage).toBeNull();
   });
 });
 // ═══════════════════════════════════════════════════════════════════════════
@@ -342,8 +436,11 @@ describe('v47.423 — brand-agnostic sweep', () => {
         expect([
           'compatible', 'marginal', 'incompatible', 'unknown',
         ]).toContain(r.status);
-        // Micro topology brands MUST resolve to 'compatible', never 'unknown'.
-        // Per-MPPT current gating does not apply to per-panel microinverters.
+        // Micro topology brands must never be 'unknown'. All three
+        // representative panels have standard Voc (≤ 49 V → cold ≤ 54.9 V),
+        // safely under every micro brand's 60 V max DC input, so they must
+        // classify 'compatible' (v47.431: high-Voc panels like Maxeon 3
+        // would instead be 'incompatible' — covered in the micro Voc suite).
         if (brand.topology === 'micro') {
           expect(r.status).toBe('compatible');
         }

@@ -65,6 +65,10 @@ export const ENPHASE_IQ8PLUS: CapabilityProfile = {
   // IQ8+: 1.21A AC per unit @ 240V → floor(16 / 1.21) = 13 (with 16A max)
   // NEC 80%: floor(20 × 0.8 / 1.21) = floor(13.22) = 13 units per 20A branch.
 
+  // IQ8 Series datasheet: max DC input voltage 60 V (all variants).
+  // Module cold-corrected Voc (NEC 690.7) must stay under this.
+  maxDcInputV: 60,
+
   optimizerMaxOutputCurrent: null,
   optimizerBusVoltage: null,
 
@@ -90,6 +94,10 @@ export const ENPHASE_IQ8M: CapabilityProfile = {
   mpptChannels: [],
   branchCircuit: microBranchSpec(1.39, 1),
   // NEC 80%: floor(20 × 0.8 / 1.39) = floor(11.51) = 11 units per 20A branch.
+
+  // IQ8 Series datasheet: max DC input voltage 60 V (all variants).
+  // Module cold-corrected Voc (NEC 690.7) must stay under this.
+  maxDcInputV: 60,
 
   optimizerMaxOutputCurrent: null,
   optimizerBusVoltage: null,
@@ -117,6 +125,10 @@ export const ENPHASE_IQ8H: CapabilityProfile = {
   branchCircuit: microBranchSpec(1.59, 1),
   // NEC 80%: floor(20 × 0.8 / 1.59) = floor(10.06) = 10 units per 20A branch.
 
+  // IQ8 Series datasheet: max DC input voltage 60 V (all variants).
+  // Module cold-corrected Voc (NEC 690.7) must stay under this.
+  maxDcInputV: 60,
+
   optimizerMaxOutputCurrent: null,
   optimizerBusVoltage: null,
 
@@ -143,6 +155,10 @@ export const ENPHASE_IQ8A: CapabilityProfile = {
   branchCircuit: microBranchSpec(1.53, 1),
   // NEC 80%: floor(20 × 0.8 / 1.53) = floor(10.46) = 10 units per 20A branch.
 
+  // IQ8 Series datasheet: max DC input voltage 60 V (all variants).
+  // Module cold-corrected Voc (NEC 690.7) must stay under this.
+  maxDcInputV: 60,
+
   optimizerMaxOutputCurrent: null,
   optimizerBusVoltage: null,
 
@@ -168,6 +184,10 @@ export const ENPHASE_IQ8AC: CapabilityProfile = {
   mpptChannels: [],
   branchCircuit: microBranchSpec(1.60, 1),
   // NEC 80%: floor(20 × 0.8 / 1.60) = floor(10.0) = 10 units per 20A branch.
+
+  // IQ8 Series datasheet: max DC input voltage 60 V (all variants).
+  // Module cold-corrected Voc (NEC 690.7) must stay under this.
+  maxDcInputV: 60,
 
   optimizerMaxOutputCurrent: null,
   optimizerBusVoltage: null,
