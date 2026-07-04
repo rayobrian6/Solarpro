@@ -240,6 +240,66 @@ export function verifyMFAPendingToken(token: string): MFAPendingPayload | null {
   }
 }
 
+/**
+ * MFA Enrollment Pending Token — restricted credential for MFA enrollment flow.
+ *
+ * PURPOSE:
+ *   When an admin/staff user without MFA logs in, the server returns
+ *   MFA_ENROLLMENT_REQUIRED and issues this token instead of a full session.
+ *   This token ONLY authorizes MFA enrollment endpoints — it does NOT grant
+ *   application access to projects, settings, billing, admin APIs, or account data.
+ *
+ * SECURITY:
+ *   - httpOnly, Secure (production), sameSite=lax
+ *   - 10-minute TTL (generous for QR scan + authenticator setup)
+ *   - mfa_enrollment_pending flag distinguishes from full session
+ *   - Invalidated after successful enrollment (cookie cleared by server)
+ *   - Cannot be used to access any endpoint except /api/auth/mfa/setup
+ *   - Cannot be used to authenticate to /api/auth/me or any other route
+ *
+ *   This is NOT a session — it is a restricted enrollment credential.
+ */
+export const MFA_ENROLLMENT_PENDING_COOKIE = 'solarpro_mfa_enroll_pending';
+export const MFA_ENROLLMENT_PENDING_MAX_AGE = 60 * 10; // 10 minutes
+
+export function signMFAEnrollmentPendingToken(user: SessionUser & { role: string }): string {
+  const payload = {
+    id:         user.id,
+    name:       user.name,
+    email:      user.email,
+    company:    user.company,
+    mfa_enrollment_pending: true,
+    role:       user.role,
+  };
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: '10m' });
+}
+
+/**
+ * Verifies an MFA enrollment pending token. Returns the payload if valid and
+ * the mfa_enrollment_pending flag is set; returns null otherwise.
+ */
+export interface MFAEnrollmentPendingPayload extends SessionUser {
+  mfa_enrollment_pending: boolean;
+  role: string;
+}
+
+export function verifyMFAEnrollmentPendingToken(token: string): MFAEnrollmentPendingPayload | null {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as Record<string, any>;
+    if (!decoded?.id || !decoded?.email || !decoded?.mfa_enrollment_pending) return null;
+    return {
+      id:          String(decoded.id),
+      name:        String(decoded.name || decoded.email),
+      email:       String(decoded.email),
+      company:     decoded.company ? String(decoded.company) : undefined,
+      mfa_enrollment_pending: true,
+      role:        String(decoded.role || ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function verifyToken(token: string): SessionUser | null {
   return verifyTokenWithMeta(token)?.user ?? null;
 }

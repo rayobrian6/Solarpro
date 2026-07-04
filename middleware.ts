@@ -30,6 +30,7 @@ const PUBLIC_PATHS = [
   '/auth/subscribe',
   '/auth/forgot-password',
   '/auth/reset-password',
+  '/auth/mfa/enroll',  // MFA enrollment page (uses enrollment pending cookie, not session)
   '/subscribe',
   '/enterprise',
   '/terms',

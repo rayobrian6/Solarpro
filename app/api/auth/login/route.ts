@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getDbReady, verifyPassword, signToken, COOKIE_NAME, COOKIE_MAX_AGE, SessionUser,
   signMFAPendingToken, MFA_PENDING_COOKIE, MFA_PENDING_MAX_AGE,
+  signMFAEnrollmentPendingToken, MFA_ENROLLMENT_PENDING_COOKIE, MFA_ENROLLMENT_PENDING_MAX_AGE,
 } from '@/lib/auth';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
@@ -189,7 +190,14 @@ export async function POST(req: NextRequest) {
         request_path: '/api/auth/login',
       });
 
-      return NextResponse.json(
+      // Issue a restricted enrollment pending credential.
+      // This is NOT a full session — it only authorizes MFA enrollment.
+      // The user cannot access projects, settings, billing, or any other API.
+      const enrollToken = signMFAEnrollmentPendingToken({
+        id: user.id, name: user.name, email: user.email,
+        company: user.company || undefined, role: user.role,
+      });
+      const enrollResponse = NextResponse.json(
         {
           success: false,
           error: 'MFA enrollment is required for your account. Please enable MFA to continue.',
@@ -197,6 +205,14 @@ export async function POST(req: NextRequest) {
         },
         { status: 403 }
       );
+      enrollResponse.cookies.set(MFA_ENROLLMENT_PENDING_COOKIE, enrollToken, {
+        httpOnly: true,
+        secure:   process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        path:     '/api/auth/mfa',
+        maxAge:   MFA_ENROLLMENT_PENDING_MAX_AGE,
+      });
+      return enrollResponse;
     }
 
     // If user has MFA enabled, require MFA verification after password success

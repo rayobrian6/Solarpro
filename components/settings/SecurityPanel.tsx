@@ -30,8 +30,10 @@ type EnrollmentStep = 'idle' | 'loading' | 'qr_ready' | 'verifying' | 'success' 
 interface MFASetupResponse {
   uri: string;
   secret: string;
-  recovery_codes: string[];
   message: string;
+  // Recovery codes: returned from PUT after TOTP verification (timing fix).
+  // Previously they came from POST; now POST only returns uri + secret.
+  recovery_codes?: string[];
 }
 
 interface SecurityPanelProps {
@@ -145,6 +147,12 @@ export default function SecurityPanel({ user, onUserUpdate }: SecurityPanelProps
       }
 
       // MFA enabled successfully
+      // Recovery codes now come from the PUT response (timing fix: codes are
+      // generated AFTER TOTP proof-of-possession, not before)
+      if (data.recovery_codes && data.recovery_codes.length > 0) {
+        // Store recovery codes in setupData so the success card can display them
+        setSetupData(prev => prev ? { ...prev, recovery_codes: data.recovery_codes } : { uri: '', secret: '', message: '', recovery_codes: data.recovery_codes });
+      }
       setStep('success');
       setShowRecoveryCodes(true);
 

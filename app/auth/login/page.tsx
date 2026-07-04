@@ -218,14 +218,15 @@ function LoginForm() {
     }
 
     // MFA enrollment required — admin/staff must enroll before access
+    // The login API issued a restricted enrollment pending cookie.
+    // Redirect to dedicated enrollment page (NOT /settings which requires full session).
     if (result.type === 'mfa_enrollment_required') {
       setStarting(false);
       setLoading(false);
-      setError('MFA enrollment is required for your account. Please enable MFA to continue. You will be redirected to Security settings.');
-      // Redirect to settings security tab after a brief delay so user sees the message
-      setTimeout(() => {
-        window.location.href = '/settings?tab=security';
-      }, 2000);
+      // Direct redirect to the dedicated MFA enrollment page.
+      // The enrollment pending cookie (solarpro_mfa_enroll_pending) was already
+      // set by the 403 MFA_ENROLLMENT_REQUIRED response — it authorizes MFA setup.
+      window.location.href = '/auth/mfa/enroll';
       return;
     }
 
