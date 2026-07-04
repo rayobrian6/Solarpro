@@ -86,7 +86,23 @@ export async function GET() {
     !resendKey.includes('YOUR_')
   );
 
-  // 6. Monitoring (Sentry) check
+  // 6. MFA encryption key check — validates presence and key length
+  // SECURITY: NEVER expose the key, decoded bytes, hash, or any derivative.
+  // Only reports: name, configured (present), valid_length (base64-decoded === 32 bytes).
+  const mfaKey = process.env.MFA_ENCRYPTION_KEY;
+  let mfaConfigured = false;
+  let mfaValidLength = false;
+  if (mfaKey) {
+    mfaConfigured = true;
+    try {
+      const decoded = Buffer.from(mfaKey, 'base64');
+      mfaValidLength = decoded.length === 32;
+    } catch {
+      mfaValidLength = false;
+    }
+  }
+
+  // 7. Monitoring (Sentry) check
   const sentryDsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN || '';
   const monitoringOk = !!(sentryDsn && sentryDsn.startsWith('https://') && sentryDsn.includes('@'));
   const monitoringProvider = monitoringOk ? 'sentry' : 'console-only';
@@ -123,6 +139,11 @@ export async function GET() {
       email: {
         ok:         emailConfigured,
         configured: emailConfigured,
+      },
+      mfa_encryption: {
+        name:          'MFA_ENCRYPTION_KEY',
+        configured:    mfaConfigured,
+        valid_length:  mfaValidLength,
       },
       monitoring: {
         ok:       monitoringOk,
