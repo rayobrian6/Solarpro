@@ -129,6 +129,34 @@ function ProposalInner() {
   const [taxRate, setTaxRate] = useState(DEFAULT_MARGINS.taxRatePct);
   const [notes, setNotes] = useState("");
 
+  // v50.x: generator cable — integer ft input + kW-class lookup. Default to
+  // 17-26 kW copper (CM-HSBCC-2361PLUS2, $12.18/ft) when no generator picked.
+  // Add-on only — does NOT flow into proposal.total. Rendered as a separate
+  // add-on row in the financial summary; per-tier price comes from CABLE_BY_KW
+  // which mirrors lib/bom-engine-v4.ts (research brief 2026-07-03).
+  const [cableFt, setCableFt] = useState<number>(0);
+
+  const cableLookup = useMemo(() => {
+    // kW-class lookup — mirrors research brief 2026-07-03.
+    const CABLE_BY_KW: Array<{
+      kwMax: number;
+      part: string;
+      material: "Cu" | "Al";
+      perFt: number;
+      desc: string;
+    }> = [
+      { kwMax: 11, part: "Ziller 7-11kW aluminum",  material: "Al", perFt: 3.50,  desc: "Generac aluminum wire, 7-11 kW class" },
+      { kwMax: 16, part: "CM-HSBCC-MEDPLUS2",       material: "Cu", perFt: 8.71,  desc: "CableMaster 9-wire composite, 12-16 kW copper" },
+      { kwMax: 26, part: "CM-HSBCC-2361PLUS2",      material: "Cu", perFt: 12.18, desc: "CableMaster 9-wire composite, 17-26 kW copper" },
+      { kwMax: 28, part: "CM-HSBCC-ALUM20341PLUS2", material: "Al", perFt: 8.22,  desc: "CableMaster 9-wire composite, 18-28 kW aluminum" },
+    ];
+    const kw = genKw || 0;
+    return CABLE_BY_KW.find((c) => kw <= c.kwMax) ?? CABLE_BY_KW[2]; // index 2 = 17-26 kW copper default
+  }, [genKw]);
+
+  const cableAdjustedFt = Math.ceil((cableFt || 0) * 1.15); // 15% fitting allowance, matches BOM engine
+  const cableTotal = cableAdjustedFt > 0 ? cableAdjustedFt * cableLookup.perFt : 0;
+
   const inputs: ProposalInputs = useMemo(
     () => ({
       customer,
@@ -527,6 +555,55 @@ function ProposalInner() {
               </div>
             </Card>
 
+            <Card title="Generator Cable">
+              <Field label="Cable run (feet, integer)">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  min={0}
+                  step={1}
+                  value={cableFt || ""}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/[^0-9]/g, ""); // force integer
+                    setCableFt(v === "" ? 0 : parseInt(v, 10));
+                  }}
+                  className={inputCls}
+                  placeholder="e.g. 30"
+                />
+              </Field>
+
+              {cableFt > 0 && (
+                <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Cable</span>
+                    <span className="font-mono text-white">{cableLookup.part}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Spec</span>
+                    <span className="text-slate-300 text-right">{cableLookup.desc}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Quantity (15% fitting allowance)</span>
+                    <span className="font-mono text-white">{cableAdjustedFt} ft</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Unit cost</span>
+                    <span className="font-mono text-white">${cableLookup.perFt.toFixed(2)}/ft</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-white/[0.07]">
+                    <span className="text-amber-300 font-bold">Cable total (add-on)</span>
+                    <span className="font-mono text-amber-300 font-black">${cableTotal.toFixed(2)}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 pt-1">
+                    Class selected from generator kW ({genKw || 22} kW). Update generator
+                    selection to change cable class. CableMaster is Generac&apos;s preferred
+                    composite-cable supplier; TC-ER-JP rated (joist pull); UL Listed; NEC 2023 compliant.
+                  </p>
+                </div>
+              )}
+            </Card>
+
             <Card title="Notes (optional)">
               <textarea
                 value={notes}
@@ -633,6 +710,28 @@ function ProposalInner() {
                     </tr>
                   );
                 })}
+                {cableFt > 0 && (
+                  <tr className="border-b border-white/[0.05] bg-amber-300/[0.04]">
+                    <td className="py-3 pr-4">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-amber-300/15 px-2 py-[1px] text-[9px] font-black uppercase tracking-wider text-amber-300/90">add-on</span>
+                        <span>
+                          Generator composite cable ({cableAdjustedFt} ft × ${cableLookup.perFt.toFixed(2)}/ft)
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-slate-500">
+                        {cableLookup.part} — {cableLookup.material === "Cu" ? "copper" : "aluminum"}
+                      </div>
+                    </td>
+                    {isInterior && (
+                      <td className="py-3 text-right text-slate-500">{fmtCents(cableTotal * 100)}</td>
+                    )}
+                    <td className="py-3 text-right font-bold text-amber-300">{fmtCents(cableTotal * 100)}</td>
+                    {isInterior && (
+                      <td className="py-3 text-right text-slate-500">pass-through</td>
+                    )}
+                  </tr>
+                )}
               </tbody>
               <tfoot>
                 <tr className="border-t border-white/[0.1]">
