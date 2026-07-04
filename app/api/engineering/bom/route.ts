@@ -131,6 +131,13 @@ function injectStructuralIntoV4(
   };
 }
 
+// Coerce an untrusted payload value to a finite number, or undefined.
+const _finiteOrUndef = (v: unknown): number | undefined => {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
@@ -300,14 +307,15 @@ export async function POST(req: NextRequest) {
 
       // Standby power — pass-through to BOMGenerationInputV4 (consumed by the
       // gen/ATS/BUI/whip emission blocks in bom-engine-v4.ts). All optional; the
-      // engine emits no items when these are absent.
+      // engine emits no items when these are absent. Non-numeric payload values
+      // drop to undefined (raw Number() let NaN flow into BOM item labels).
       generatorId:              body.generatorId,
       atsId:                    body.atsId,
       backupInterfaceId:        body.backupInterfaceId,
-      generatorKw:              body.generatorKw !== undefined ? Number(body.generatorKw) : undefined,
-      atsAmpRating:             body.atsAmpRating !== undefined ? Number(body.atsAmpRating) : undefined,
-      backupInterfaceMaxA:      body.backupInterfaceMaxA !== undefined ? Number(body.backupInterfaceMaxA) : undefined,
-      generatorWireLength:      body.generatorWireLength !== undefined ? Number(body.generatorWireLength) : undefined,
+      generatorKw:              _finiteOrUndef(body.generatorKw),
+      atsAmpRating:             _finiteOrUndef(body.atsAmpRating),
+      backupInterfaceMaxA:      _finiteOrUndef(body.backupInterfaceMaxA),
+      generatorWireLength:      _finiteOrUndef(body.generatorWireLength),
     };
 
     // MASTER TASK: Payload fields map 1:1 to SystemDefinition:

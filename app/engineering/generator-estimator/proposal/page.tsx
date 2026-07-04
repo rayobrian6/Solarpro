@@ -150,8 +150,12 @@ function ProposalInner() {
       { kwMax: 26, part: "CM-HSBCC-2361PLUS2",      material: "Cu", perFt: 12.18, desc: "CableMaster 9-wire composite, 17-26 kW copper" },
       { kwMax: 28, part: "CM-HSBCC-ALUM20341PLUS2", material: "Al", perFt: 8.22,  desc: "CableMaster 9-wire composite, 18-28 kW aluminum" },
     ];
-    const kw = genKw || 0;
-    return CABLE_BY_KW.find((c) => kw <= c.kwMax) ?? CABLE_BY_KW[2]; // index 2 = 17-26 kW copper default
+    // No generator picked → assume 22 kW (matches the on-screen "(genKw || 22)"
+    // text). `kw = 0` fell through to the FIRST tier (7-11 kW aluminum,
+    // $3.50/ft) while the UI claimed the 22 kW copper class — quotes built
+    // before picking a generator underpriced cable ~3.5×.
+    const kw = genKw || 22;
+    return CABLE_BY_KW.find((c) => kw <= c.kwMax) ?? CABLE_BY_KW[2]; // index 2 = 17-26 kW copper default (also >28 kW fallback)
   }, [genKw]);
 
   const cableAdjustedFt = Math.ceil((cableFt || 0) * 1.15); // 15% fitting allowance, matches BOM engine

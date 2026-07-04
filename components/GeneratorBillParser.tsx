@@ -207,10 +207,16 @@ function BillParserInner() {
         setPdfStatus("done");
         return;
       }
-      // PDF — extract text via pdfjs-dist.
+      // PDF — extract text via pdfjs-dist. Worker is served SAME-ORIGIN from
+      // /public (the previous unpkg.com CDN workerSrc executed third-party-
+      // hosted code at runtime and dies under any CSP or offline use; a
+      // `new URL('pdfjs-dist/…', import.meta.url)` bundle breaks Next dev's
+      // ESM-externals resolution). public/pdf.worker.min.mjs is copied from
+      // node_modules/pdfjs-dist/build — RE-COPY IT when bumping the pdfjs-dist
+      // version in package.json (pdfjs hard-fails on API/worker version skew).
       const buf = await file.arrayBuffer();
       const pdfjs = await import("pdfjs-dist");
-      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       const doc = await pdfjs.getDocument({ data: buf }).promise;
       const pages: string[] = [];
       for (let i = 1; i <= doc.numPages; i++) {

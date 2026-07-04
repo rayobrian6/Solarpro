@@ -108,11 +108,11 @@ const nextConfig = {
       { source: '/generator-estimator',          destination: '/engineering/generator-estimator',          permanent: true },
       { source: '/generator-estimator/bill',     destination: '/engineering/generator-estimator/bill',     permanent: true },
       { source: '/generator-estimator/proposal', destination: '/engineering/generator-estimator/proposal', permanent: true },
-      // Also catch the bare /proposal and /bill URLs that some pre-nest
-      // Estimator links generated — they were never real routes but the
-      // browser still hit them via stale bookmarks.
-      { source: '/proposal',                     destination: '/engineering/generator-estimator/proposal', permanent: true },
-      { source: '/bill',                         destination: '/engineering/generator-estimator/bill',     permanent: true },
+      // NOTE: bare /proposal and /bill redirects removed (review 2026-07-04) —
+      // permanent 308s on generic top-level paths get cached by browsers and
+      // would permanently hijack those URLs from any future app route (we
+      // already ship /proposals). The pre-nest Estimator never had real
+      // routes there; stale bookmarks 404 like any other dead link.
     ];
   },
   // NOTE: removeConsole was removed — the SWC transform was eating multi-line
