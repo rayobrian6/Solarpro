@@ -19,6 +19,12 @@ export interface DraftingProject {
   roofType?: string;
   roofPitch?: number;
   mountingSystem?: string;
+  /** Selected mounting-system DB id — lets templates resolve real fastener specs. */
+  mountingSystemId?: unknown;
+  /** Canonical resolution (mountSystem etc.) — same source the sheet zones use. */
+  _canonical?: unknown;
+  /** Engineering-resolved attachment spacing (V4 mount layout), inches O.C. */
+  resolvedAttachSpacingIn?: number;
   rafterSize?: string;
   rafterSpacing?: number;
   attachmentSpacing?: number;
@@ -32,6 +38,21 @@ export interface DraftingProject {
   ahjRidgeSetbackIn?: number;
   // Electrical
   inverterType?: string;
+  // Equipment identity — the reference sets annotate the PLAN with real
+  // make/model strings ("(N) 30 — JINKO JKM420N-54HL4-B (420W)"), not bubbles.
+  moduleMfr?: string;
+  moduleModel?: string;
+  inverterMfr?: string;
+  inverterModel?: string;
+  // Roof obstructions (Nearmap AI / vision / manual) in fake-degree coords —
+  // PV-2 draws the footprint + dashed keep-out ring + type label.
+  roofObstructions?: Array<{
+    lat: number;
+    lng: number;
+    radiusFt: number;
+    clearanceFt: number;
+    type: string;
+  }>;
   // Panel GPS positions from 3D engine
   panelPositions?: Array<{
     id: string;

@@ -42,6 +42,7 @@ import type { UnifiedGeometryAuthorityState } from '@/lib/siteSurveys/unifiedGeo
 import { insertPromotionRecords } from '@/lib/siteSurveys/unifiedGeometry/promotionStore';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
 import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(
   req: NextRequest,

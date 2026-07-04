@@ -288,8 +288,8 @@ export interface PermitInput {
   planSetId?: string;
   // ── Plan set generation options (set by caller, read by sheet renderers) ──
   cadAppendixPreviewV1?: boolean;
-  planSetOptions?: { cadAppendixPreviewV1?: boolean };
-  permitOptions?: { cadAppendixPreviewV1?: boolean };
+  planSetOptions?: { cadAppendixPreviewV1?: boolean; includeInternalValidation?: boolean };
+  permitOptions?: { cadAppendixPreviewV1?: boolean; includeInternalValidation?: boolean };
   // ── Engineering data (read by canonical.ts for structural calc) ──
   engineering?: unknown | null;
   // Error 5q fix: canonical model + bridge — set by permit route, read by roofCAD.ts
@@ -457,6 +457,8 @@ export interface PermitInput {
     lat?: number;
     lng?: number;
     zoom?: number;
+    centerSource?: 'array' | 'segment' | 'pin' | 'nearmap_roof';
+    imageSource?: 'nearmap' | 'google';
     roofSegments?: Array<{
       pitchDegrees: number;
       azimuthDegrees: number;

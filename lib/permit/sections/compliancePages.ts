@@ -10,6 +10,7 @@ import { interconnectionLabel } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
+import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
@@ -27,7 +28,12 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   const _labelTopo = topologyToLegacy(getInverterTopology(input, cad));
   const isMicro = _labelTopo === 'MICRO';
 
-  const maxCircuitCurrent = (panelIsc * 1.25).toFixed(1);
+  // Label current must describe the CIRCUIT the label is on. For a micro/AC
+  // system the point-of-interconnection current is the aggregate rated AC
+  // output — printing one module's DC Isc×1.25 (8.2A) on a ~77A system was a
+  // plan-check red flag. String systems keep the DC source-circuit value.
+  const _acOutA = ((system.totalAcKw || 0) * 1000) / 240;
+  const maxCircuitCurrent = (isMicro && _acOutA > 0 ? _acOutA : panelIsc * 1.25).toFixed(1);
   const maxSystemVoltage = isMicro ? '240V AC' : `${(panelVoc * 1.25).toFixed(0)}V DC`;
 
   interface LabelSpec {
@@ -44,8 +50,15 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     {
       id: 'L-1',
       necRef: `NEC 690.54 / NEC ${necVer}`,
-      placement: 'On combiner box and at DC disconnect',
-      lines: [
+      placement: isMicro
+        ? 'At the point of interconnection / AC disconnect'
+        : 'On combiner box and at DC disconnect',
+      lines: isMicro ? [
+        // NEC 690.54 point-of-interconnection label — rated AC values
+        'SOLAR ELECTRIC SYSTEM CONNECTED',
+        `RATED AC OUTPUT CURRENT: ${maxCircuitCurrent}A`,
+        'NOMINAL OPERATING AC VOLTAGE: 240V',
+      ] : [
         'WARNING',
         'SOLAR ELECTRIC SYSTEM CONNECTED',
         `MAXIMUM SYSTEM VOLTAGE: ${maxSystemVoltage}`,
@@ -58,13 +71,16 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     {
       id: 'L-2',
       // NEC 2023 renumbered 690.56(B) → 690.12(D)(2)
-      necRef: necVer === '2023' ? 'NEC 690.12(D)(2)' : 'NEC 690.56(B)',
-      placement: 'At rapid shutdown initiator (service entrance)',
+      // Code-mandated placard text per NEC 690.56(C) \u2014 the previous
+      // checkbox-style wording was invented and matched no code language.
+      necRef: necVer === '2023' ? 'NEC 690.12(D) / 690.56(C)' : 'NEC 690.56(C)',
+      placement: 'At rapid shutdown initiation device (service entrance)',
       lines: [
-        'SOLAR RAPID SHUTDOWN',
-        'STATUS:',
-        '\u25a1 NORMAL OPERATION',
-        '\u25a1 RAPID SHUTDOWN ACTIVATED',
+        'SOLAR PV SYSTEM IS EQUIPPED WITH',
+        'RAPID SHUTDOWN',
+        'TURN RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION',
+        'TO SHUT DOWN PV SYSTEM AND REDUCE',
+        'SHOCK HAZARD IN THE ARRAY',
       ],
       bg: '#cc0000',
       fg: '#ffffff',
@@ -89,7 +105,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     },
     {
       id: 'L-4',
-      necRef: 'NEC 705.12 / 690.64',
+      necRef: 'NEC 705.12 / 705.10',
       placement: 'On the main service panel — inside door',
       lines: [
         'WARNING',
@@ -103,7 +119,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     },
     {
       id: 'L-5',
-      necRef: 'IFC \u00a7605.11 / NEC 690.56(A)',
+      necRef: 'IFC \u00a71204 / NEC 690.56(A)',
       placement: 'Adjacent to or on the utility meter',
       lines: [
         'SOLAR PV SYSTEM CONNECTED',
@@ -205,7 +221,34 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       ],
       bg: '#000',
       fg: '#ffffff',
-      required: necVer === '2023',
+      // NEC 705.10 has required a power-source directory plaque since well
+      // before the 2023 cycle — gating it to 2023 left it off most sets.
+      required: true,
+    },
+    {
+      id: 'L-12',
+      necRef: 'NEC 690.13(B)',
+      placement: 'On each PV system disconnecting means',
+      lines: [
+        'PHOTOVOLTAIC SYSTEM DISCONNECT',
+        'LINE AND LOAD TERMINALS',
+        'MAY BE ENERGIZED IN THE OPEN POSITION',
+      ],
+      bg: '#cc0000',
+      fg: '#ffffff',
+      required: true,
+    },
+    {
+      id: 'L-13',
+      necRef: necVer === '2023' ? 'NEC 690.12(D)' : 'NEC 690.56(C)(3)',
+      placement: 'At the rapid shutdown switch',
+      lines: [
+        'RAPID SHUTDOWN SWITCH',
+        'FOR SOLAR PV SYSTEM',
+      ],
+      bg: '#cc0000',
+      fg: '#ffffff',
+      required: project.rapidShutdown,
     },
   ];
 
@@ -269,7 +312,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       </table>
 
       <!-- General Notes -->
-      <div class=\\\"sec-hdr-dark\\\" style=\\\"margin-bottom:4px;\\">
+      <div class="sec-hdr-dark" style="margin-bottom:4px;\\">
         GENERAL NOTES &mdash; INSTALLATION REQUIREMENTS
       </div>
       <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.55;border:var(--border);margin-bottom:8px;">
@@ -288,21 +331,21 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
             <div style="margin-bottom:2px;">2. Any deviation from the approved design shall be reported to the engineer of record.</div>
             <div style=\"margin-bottom:2px;\">3. ${_isRoof ? 'All roof penetrations shall be waterproofed per roofing manufacturer requirements.' : 'All below-grade conduit and conductors shall be rated for wet/direct burial locations per NEC 300.5.'}</div>\n
             <div style="margin-bottom:2px;">4. Module and racking installation per manufacturer instructions and UL 2703 listing.</div>
-            <div style="margin-bottom:2px;">5. Maintain IFC \u00a7605.11 fire code setbacks: 3 ft from ridge, 18" from edges and valleys.</div>
+            <div style="margin-bottom:2px;">5. Maintain fire access per IFC \u00a71204.2.1: 36" access pathways and the ridge setback shown on PV-2 (18" permitted only where array \u2264 33% of roof area).</div>
           </div>
         </div>
       </div>
 
       <!-- Inspection Hold Points -->
-      <div class=\\\"sec-hdr-dark\\\" style=\\\"margin-bottom:4px;\\">
+      <div class="sec-hdr-dark" style="margin-bottom:4px;\\">
         INSPECTION HOLD POINTS
       </div>
-      <table class=\\\"equip-table\\\">
+      <table class="equip-table">
         <thead><tr><th style="width:6%;">#</th><th style="width:22%;">Inspection Point</th><th style="width:42%;">Verification Requirements</th><th style="width:15%;">Code Reference</th><th style="width:15%;text-align:center;">Inspector</th></tr></thead>
         <tbody>
           <tr><td class="fw9 mono">1</td><td class="fw7">Rough Electrical</td><td>Verify conductor sizing, conduit routing, grounding connections, junction box accessibility</td><td class="mono" style="font-size:8px;">NEC 690, 250</td><td class="center">\u25a1</td></tr>
           <tr class=\"bg-lt\"><td class=\"fw9 mono\">2</td><td class=\"fw7\">${_isRoof ? 'Structural / Roof' : _isFence ? 'Structural / Fence' : 'Structural / Ground Mount'}</td><td>${_isRoof ? 'Verify attachment to structural members, lag bolt embedment, flashing installation, rail alignment' : _isFence ? 'Verify fence post embedment depth, concrete footing pour, post plumb/alignment, and module mounting' : 'Verify pile embedment, ground clearance, tilt angle, and module mounting'}</td><td class=\"mono\" style=\"font-size:8px;\">IBC Ch. 16, IRC R301</td><td class=\"center\">\u25a1</td></tr>\n
-          <tr><td class="fw9 mono">3</td><td class="fw7">Module Installation</td><td>Verify module mounting, clamp torque, bonding connections, setback compliance</td><td class="mono" style="font-size:8px;">UL 2703, IFC 605.11</td><td class="center">\u25a1</td></tr>
+          <tr><td class="fw9 mono">3</td><td class="fw7">Module Installation</td><td>Verify module mounting, clamp torque, bonding connections, setback compliance</td><td class="mono" style="font-size:8px;">UL 2703, IFC §1204</td><td class="center">\u25a1</td></tr>
           <tr class="bg-lt"><td class="fw9 mono">4</td><td class="fw7">Final Electrical</td><td>Verify labeling, rapid shutdown, disconnect operation, grounding continuity, Voc/Isc verification</td><td class="mono" style="font-size:8px;">NEC 690.12, 690.54</td><td class="center">\u25a1</td></tr>
           <tr><td class="fw9 mono">5</td><td class="fw7">Utility Interconnection</td><td>Verify meter configuration, net metering enrollment, anti-islanding test (if required by AHJ)</td><td class="mono" style="font-size:8px;">IEEE 1547, NEC 705</td><td class="center">\u25a1</td></tr>
         </tbody>
@@ -357,11 +400,16 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const voc = panels?.panelVoc || project.panelVoc || 41.6;
   const isc = panels?.panelIsc || project.panelIsc || 12.26;
   const pmax = modWatts;
+  // Vmp estimated from Voc; Imp DERIVED from Pmax/Vmp so the printed pair
+  // reproduces the nameplate (the old isc×0.94 guess printed 62.7V × 6.19A =
+  // 388W beside "400 Wp" — a checkable arithmetic error).
   const vmp = parseFloat((voc * 0.83).toFixed(1));
-  const imp = parseFloat((isc * 0.94).toFixed(2));
+  const imp = parseFloat((pmax / vmp).toFixed(2));
   const tempCoeff = -0.35;
-  const panelLen = project.panelLengthIn || 79.9;
-  const panelWid = project.panelWidthIn || 40.9;
+  // Defaults must match the layout engine's module footprint (66" × 40") —
+  // APP-A used to claim a 79.9" module while PV-2/PV-3 drew 66".
+  const panelLen = project.panelLengthIn || 66;
+  const panelWid = project.panelWidthIn || 40;
   const panelWt = project.panelWeightLbs || 44;
 
   // NEC 690.8 calculations
@@ -391,6 +439,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">NOCT</td><td class="iv">45°C ±2°C</td></tr>
             <tr><td class="il">Module Efficiency</td><td class="iv">${((pmax / (panelLen/39.37 * panelWid/39.37)) / 10).toFixed(1)}%</td></tr>
           </table>
+          <div style="font-size:7px;color:#555;margin:-2px 0 4px 0;">Vmp/Imp and temperature coefficients are typical values — verify against the manufacturer's certified datasheet before construction.</div>
 
           <div class="section-title">PV Module — Physical Specifications</div>
           <table class="info-table" style="margin-bottom:6px;">
@@ -435,24 +484,53 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               <tr><td class="il">Grid Standards</td><td class="iv">IEEE 1547-2018, UL 1741 SA</td></tr>
               <tr><td class="il">Anti-Islanding</td><td class="iv">Yes — Per IEEE 1547</td></tr>
               <tr><td class="il">Rapid Shutdown</td><td class="iv">NEC 690.12 Compliant</td></tr>
-              <tr><td class="il">MPPT Channels</td><td class="iv">${inv.strings?.length || 1}</td></tr>
+              <tr><td class="il">MPPT Channels</td><td class="iv">${topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO' ? 'Per-module MPPT (microinverter)' : (inv.strings?.length || 1)}</td></tr>
             </table>
+            ${(() => {
+              // NEC 690.7 sanity at the DATA level — this sheet used to print
+              // a module Voc ABOVE the inverter's max DC input on the same
+              // page with no flag (electrically impossible pairing shipping
+              // silently). Micro topologies skipped every upstream Voc check.
+              const _mVoc = Number(voc);
+              const _mMax = Number(inv.maxDcVoltage);
+              return isFinite(_mVoc) && isFinite(_mMax) && _mMax > 0 && _mVoc > _mMax ? `
+            <div style="border:2px solid #cc0000;background:#fff5f5;padding:4px 6px;margin-top:3px;font-size:8px;line-height:1.4;color:#cc0000;font-weight:700;">
+              ⚠ EQUIPMENT COMPATIBILITY — VERIFY BEFORE CONSTRUCTION: module Voc (${_mVoc} V) exceeds this inverter's
+              maximum DC input voltage (${_mMax} V). Confirm the module/inverter pairing per NEC 690.7 and both
+              manufacturers' compatibility lists; correct the equipment selection if this reflects the actual design.
+            </div>` : '';
+            })()}
           </div>
           `).join('') || '<p style="font-size:9px;color:#999">No inverter data</p>'}
 
-          <!-- Racking System Summary -->
-          <div class=\"section-title\">Racking System</div>
+          <!-- Racking System Summary — from the SELECTED mounting system.
+               The old static table printed IronRidge FlashFoot2 / 5/16" lag
+               specs on every package regardless of the racking actually
+               specified on PV-3 (two racking systems in one permit). -->
+          ${(() => {
+            const _mSel = project.mountingSystemId ? getMountingSystemById(project.mountingSystemId) : undefined;
+            const _sysName = project._canonical?.mountSystem || project.mountingSystem
+              || (_mSel ? `${_mSel.manufacturer} ${_mSel.model}` : '')
+              || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100';
+            const _fr = (v: number) =>
+              v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
+            const _lagDia = _mSel?.mount?.fastenerDiameterIn ?? 0.375;
+            const _embed  = _mSel?.mount?.fastenerEmbedmentIn ?? 2.5;
+            const _lagLen = Math.ceil((_embed + 1.5) * 2) / 2;
+            return `
+          <div class="section-title">Racking System</div>
           <table class="info-table">
-            <tr><td class="il">System</td><td class="iv">${project._canonical?.mountSystem || project.mountingSystem || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100'}</td></tr>
-            <tr><td class="il">Material</td><td class="iv">6105-T5 Anodized Aluminum</td></tr>
-            <tr><td class="il">Rail Profile</td><td class="iv">2.25" × 1.50" Heavy Duty</td></tr>
-            <tr><td class="il">Max Span</td><td class="iv">72" (1829mm)</td></tr>
-            ${_isRoof ? '<tr><td class=\\\"il\\\">Attachment</td><td class=\\\"iv\\\">FlashFoot2 with L-Foot</td></tr>' : ''}
-            ${_isRoof ? '<tr><td class=\\\"il\\\">Lag Bolt</td><td class=\\\"iv\\\">5/16\\\" × 3\\\" Stainless Steel</td></tr>' : ''}
-            ${_isRoof ? '<tr><td class=\\\"il\\\">Embedment</td><td class=\\\"iv\\\">Min. 2.5\\\" into rafter</td></tr>' : _isFence ? '<tr><td class=\\\"il\\\">Post Type</td><td class=\\\"iv\\\">Steel Pipe / HSS</td></tr>' : '<tr><td class=\\\"il\\\">Pile Type</td><td class=\\\"iv\\\">Driven Pile / Helical Pier</td></tr>'}
-            <tr><td class="il">UL Listing</td><td class="iv">UL 2703 / ICC-ES AC428</td></tr>
+            <tr><td class="il">System</td><td class="iv">${_sysName}</td></tr>
+            <tr><td class="il">Material</td><td class="iv">${_mSel?.rail?.materialAlloy || 'Aluminum — per manufacturer listing'}</td></tr>
+            <tr><td class="il">Rail Profile</td><td class="iv">${_mSel?.rail ? `${_mSel.rail.model} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")` : (_mSel ? 'Rail-less / direct-attach' : 'Per manufacturer')}</td></tr>
+            <tr><td class="il">Max Attach Spacing</td><td class="iv">${_mSel?.mount?.maxSpacingIn ? `${_mSel.mount.maxSpacingIn}" O.C.` : 'Per PV-3 / structural calc'}</td></tr>
+            ${_isRoof ? `<tr><td class="il">Attachment</td><td class="iv">${_mSel?.mount?.model || 'Per PV-3 attachment detail'}</td></tr>` : ''}
+            ${_isRoof ? `<tr><td class="il">Lag Bolt</td><td class="iv">${_fr(_lagDia)}" DIA × ${_lagLen}" Min. Stainless Steel</td></tr>` : ''}
+            ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">Min. ${_embed}" thread embedment into rafter</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
+            <tr><td class="il">UL Listing</td><td class="iv">${_mSel?.mount?.ul2703Listed === false ? 'See manufacturer listing' : 'UL 2703'}${_mSel?.mount?.iccEsReport ? ` / ${_mSel.mount.iccEsReport}` : ''}</td></tr>
             <tr><td class="il">Wind Rating</td><td class="iv">Per ASCE 7-22 (see PV-4C)</td></tr>
-          </table>
+          </table>`;
+          })()}
 
           <!-- Spec Sheet Links Note -->
           <div style="background:#fff;border:1px solid #000;padding:6px;margin-top:6px;font-size:8.5px;color:#000;line-height:1.5;">

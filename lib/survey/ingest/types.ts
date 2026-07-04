@@ -303,6 +303,12 @@ export interface TransformFile {
    * NULL for v1.0 / partner payload photos (no category in that schema).
    */
   category: string | null;
+  /**
+   * Device geolocation sampled at capture time (SurveyV2 only). Persisted to
+   * site_survey_files.gps_lat/gps_lng — drives PV-1 equipment-marker tier 1
+   * ('PER SURVEY PHOTO GPS'). NULL when unavailable.
+   */
+  gps?: { lat: number; lng: number; accuracyM?: number } | null;
 }
 
 // ---------------------------------------------------------------------------

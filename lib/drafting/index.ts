@@ -187,6 +187,11 @@ export function adaptPermitInput(input: PermitInputShape): DraftingInput {
       ahjRidgeSetbackIn: input.project?.ahjRidgeSetbackIn,
       panelPositions:    input.project?.panelPositions,
       roofPlanes:        input.project?.roofPlanes,
+      // Equipment identity for on-plan callouts (reference-set style)
+      moduleMfr:     firstStr?.panelManufacturer || (input.project as any)?.moduleMfr,
+      moduleModel:   firstStr?.panelModel || (input.project as any)?.moduleModel || (input.project as any)?.panelModel,
+      inverterMfr:   input.system?.inverters?.[0]?.manufacturer || (input.project as any)?.inverterMfr,
+      inverterModel: input.system?.inverters?.[0]?.model || (input.project as any)?.inverterModel,
     },
     layout: {
       fenceSegments:        input.layout?.fenceSegments,

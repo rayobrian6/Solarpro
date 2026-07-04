@@ -150,9 +150,9 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   const reqEmbedDisp = reqEmbedFt.toFixed(2);
   const safetyFactor = safetyRatio.toFixed(2);
 
-  const totalDL  = structural?.totalDeadLoadPsf?.toFixed(1) || '3.2';
-  const moduleDL = structural?.moduleLoadPsf?.toFixed(1) || '2.5';
-  const rackDL   = structural?.rackingLoadPsf?.toFixed(1) || '0.5';
+  const totalDL  = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
+  const moduleDL = structural?.moduleLoadPsf?.toFixed(1) || '—';
+  const rackDL   = structural?.rackingLoadPsf?.toFixed(1) || '—';
   const upliftPsf = structural?.wind?.netUpliftPressure?.toFixed(2) || windPresDisp;
   const upliftPost = windLoadPost;
 
@@ -359,11 +359,13 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         <strong>PAGE CONCLUSION — FENCE STRUCTURAL ANALYSIS:</strong>
         The proposed solar fence photovoltaic array and post foundation system have been analyzed for wind
         overturning, dead load, and post embedment capacity per ASCE 7-22 §29.4 and ${ibcVer} IBC.
-        ${structural && (structural.attachment?.safetyFactor || 0) >= 1.5
+        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 1.5
           ? `All structural parameters are within acceptable limits. The fence post foundation system is adequate
              to support the proposed solar fence PV array without modification. Post embedment and footing
              dimensions confirmed per ASCE 7-22 §29.4 wind overturning analysis.`
-          : 'Review flagged structural items before proceeding with installation. Foundation sizing may require revision.'}
+          : structural && structural.attachment?.safetyFactor == null
+            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+            : 'Review flagged structural items before proceeding with installation. Foundation sizing may require revision.'}
       </div>
 
       ${structuralRules.length > 0 ? `
@@ -401,9 +403,9 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   const upliftPile  = structural?.wind?.upliftPerAttachment?.toFixed(0) || '—';
   const groundSnow  = structural?.snow?.groundSnowLoad || '—';
   const snowPile    = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
-  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '3.2';
-  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '2.5';
-  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '0.5';
+  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
+  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
+  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
 
   // CAD ground data
@@ -453,7 +455,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
             <tr><td>Foundation Type</td><td class="cv">${structType}</td></tr>
             <tr><td>Pile Embedment Depth</td><td class="cv">${pileDepth} ft min. (below frost)</td></tr>
             <tr><td>Pile Spacing</td><td class="cv">${pileSp} ft O.C.</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact} (min. 2.0)</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
             <tr><td>Wind Code Reference</td><td class="cv">ASCE 7-22 §27</td></tr>
           </table>
         </div>
@@ -567,16 +569,18 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ASCE 7-22 §7.` : 'Snow loading is not a controlling factor at this location.'}
         Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ASCE 7-22 §7.
         Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ASCE 7-22 §27.
-        Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= 2.0 ? 'above' : 'BELOW'} the required minimum of 2.0.
+        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= 2.0 ? 'above' : 'BELOW'} the required minimum of 2.0.` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
         wind uplift, snow, dead load, and pile capacity per ASCE 7-22 §27 and ${ibcVer} IBC.
-        ${structural && (structural.attachment?.safetyFactor || 0) >= 2.0
+        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
-          : 'Review flagged structural items before proceeding with installation. Pile sizing may require revision.'}
+          : structural && structural.attachment?.safetyFactor == null
+            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+            : 'Review flagged structural items before proceeding with installation. Pile sizing may require revision.'}
       </div>
 
       ${structuralRules.length > 0 ? `
@@ -605,7 +609,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const { compliance, rulesResult, project } = input;
   const structural = compliance.structural;
   const ibcVer = '2021';
-  const structuralRules = (rulesResult?.rules || []).filter(r => r.category === 'structural');
+  // Structural engine V4 (compliance.structural) is the engine of record on
+  // this sheet — drop rules-engine rows that carry their OWN rafter/uplift
+  // numbers, which contradicted the V4 tables printed right beside them
+  // (73% PASS vs 89%/145%, 370/984 lbs vs 210/500 lbs on one package).
+  const structuralRules = (rulesResult?.rules || []).filter(r =>
+    r.category === 'structural' && !/rafter|uplift|attach/i.test(String(r.ruleId || '')));
 
   const windSpeed   = structural?.wind?.windSpeed || '—';
   const exposure    = structural?.wind?.exposureCategory || '—';
@@ -615,18 +624,35 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const groundSnow  = structural?.snow?.groundSnowLoad || '—';
   const roofSnow    = structural?.snow?.roofSnowLoad?.toFixed(1) || '—';
   const snowAtt     = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
-  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '3.2';
-  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '2.5';
-  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '0.5';
+  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
+  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
+  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '—';
 
   const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
   const maxSpacing  = structural?.attachment?.maxAllowedSpacing || '—';
-  const utilization = ((structural?.rafter?.utilizationRatio || 0) * 100).toFixed(0);
+  const _utilRatio = structural?.rafter?.utilizationRatio; // GOVERNING ratio (max of bending/deflection)
+  const utilization = _utilRatio != null ? (_utilRatio * 100).toFixed(0) : '—';
   const rafterBM    = structural?.rafter?.bendingMoment?.toFixed(0) || '—';
   const rafterABM   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
   const rafterDefl  = structural?.rafter?.deflection?.toFixed(3) || '—';
   const rafterAD    = structural?.rafter?.allowableDeflection?.toFixed(3) || '—';
+  // Per-check ratios — printing the governing ratio beside the bending numbers
+  // read as "1116 of 1246 allowable = 145%", an impossible line an AHJ rejects.
+  const _bmRaw   = structural?.rafter?.bendingMoment;
+  const _abmRaw  = structural?.rafter?.allowableBendingMoment;
+  const _bendRatio = (_bmRaw != null && _abmRaw) ? _bmRaw / _abmRaw : null;
+  const _deflRaw = structural?.rafter?.deflection;
+  const _adRaw   = structural?.rafter?.allowableDeflection;
+  const _deflRatio = (_deflRaw != null && _adRaw) ? _deflRaw / _adRaw : null;
+  const bendUtil = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : '—';
+  const _governs = (_deflRatio ?? 0) > (_bendRatio ?? 0) ? 'deflection' : 'bending';
+  // "TOTAL ADDED DEAD LOAD" must equal the sum of the component rows above it —
+  // totalDeadLoadPsf is EXISTING roof + PV, a different (also useful) number.
+  const _addedRaw = (structural?.moduleLoadPsf != null || structural?.rackingLoadPsf != null)
+    ? (structural?.moduleLoadPsf ?? 0) + (structural?.rackingLoadPsf ?? 0) + 0.2
+    : null;
+  const addedDL = _addedRaw != null ? _addedRaw.toFixed(1) : '—';
   // Truss framing is analyzed by load capacity (PSF), not rafter bending (ft-lbs).
   // Rendering its 0-demand / capacity-in-PSF as "0 ft-lbs / 45 ft-lbs" read as broken.
   const _isTruss      = (structural?.rafter?.framingType === 'truss') || (structural?.rafter?.bendingMoment === 0 && (structural?.rafter?.allowableBendingMoment || 0) > 0);
@@ -675,13 +701,14 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             ${_isTruss ? `
             <tr><td>Truss Load Capacity</td><td class="cv">${trussCapPsf} PSF</td></tr>
             <tr><td>Total Roof Load</td><td class="cv">${trussLoadPsf} PSF</td></tr>
-            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${Number(utilization) > 100 ? '#cc0000' : '#000'};">${utilization}%</td></tr>
+            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${utilization}${_utilRatio != null ? '%' : ''}</td></tr>
             <tr><td>Basis</td><td class="cv">BCSI pre-eng. truss capacity</td></tr>
             ` : `
             <tr><td>Bending Moment</td><td class="cv">${rafterBM} ft-lbs</td></tr>
             <tr><td>Allowable Moment</td><td class="cv">${rafterABM} ft-lbs</td></tr>
-            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${Number(utilization) > 100 ? '#cc0000' : '#000'};">${utilization}%</td></tr>
-            <tr><td>Deflection / Allowed</td><td class="cv">${rafterDefl}" / ${rafterAD}"</td></tr>
+            <tr><td>Bending Utilization</td><td class="cv" style="font-weight:bold;color:${_bendRatio != null && _bendRatio > 1.0 ? '#cc0000' : '#000'};">${bendUtil}${_bendRatio != null ? '%' : ''}</td></tr>
+            <tr><td>Deflection / Allowed</td><td class="cv" style="color:${_deflRatio != null && _deflRatio > 1.0 ? '#cc0000' : '#000'};">${rafterDefl}" / ${rafterAD}"</td></tr>
+            <tr><td>Governing Check</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${_utilRatio != null ? `${_governs} — ${utilization}%` : '—'}</td></tr>
             `}
           </table>
         </div>
@@ -692,7 +719,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <table class="calc-table">
             <tr><td>Lag Bolt Capacity</td><td class="cv">${lagCap} lbs</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact} (min. 2.0)</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
             <tr><td>Max Allowed Spacing</td><td class="cv">${maxSpacing}"</td></tr>
           </table>
         </div>
@@ -706,16 +733,18 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <tr><td class="fw7">PV Modules</td><td class="tr mono">${moduleDL} PSF</td><td>Per manufacturer spec sheet, distributed over array area</td></tr>
           <tr class="bg-lt"><td class="fw7">Racking / Rails</td><td class="tr mono">${rackDL} PSF</td><td>Aluminum rail + L-foot + clamp assembly</td></tr>
           <tr><td class="fw7">Electrical (Wiring, Conduit)</td><td class="tr mono">0.2 PSF</td><td>Estimate for home-run conduit + module leads</td></tr>
-          <tr class="bg-lt" style="font-weight:bold;border-top:2px solid #000"><td class="fw7">TOTAL ADDED DEAD LOAD</td><td class="tr mono fw7">${totalDL} PSF</td><td>Added to existing roof dead load (typically 8–12 PSF)</td></tr>
+          <tr class="bg-lt" style="font-weight:bold;border-top:2px solid #000"><td class="fw7">TOTAL ADDED DEAD LOAD</td><td class="tr mono fw7">${addedDL} PSF</td><td>Sum of PV components above — added to the existing roof</td></tr>
+          <tr style="font-weight:bold;"><td class="fw7">COMBINED ROOF DEAD LOAD</td><td class="tr mono fw7">${totalDL} PSF</td><td>Existing roof construction (typically 8–12 PSF) + PV system</td></tr>
         </tbody>
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>DEAD LOAD INTERPRETATION:</strong>
-        The total added dead load of ${totalDL} PSF is distributed uniformly over the array footprint on the existing roof.
-        This represents a minimal addition relative to the existing roof dead load (typically 8–12 PSF for asphalt shingle
-        on plywood sheathing). The existing roof structure is evaluated to confirm adequate capacity for the combined
-        loading condition per IBC Section 1607. Rafter utilization ratio of ${utilization}% confirms the existing framing
-        ${Number(utilization) <= 100 ? 'has adequate capacity' : 'requires reinforcement'} for the additional PV loading.
+        The added PV dead load of ${addedDL} PSF is distributed uniformly over the array footprint, for a combined roof
+        dead load of ${totalDL} PSF. This represents a minimal addition relative to the existing roof dead load (typically
+        8–12 PSF for asphalt shingle on plywood sheathing). The existing roof structure is evaluated to confirm adequate
+        capacity for the combined loading condition per IBC Section 1607. The governing ${_governs} check at ${utilization}%
+        ${_utilRatio != null && _utilRatio <= 1.0 ? 'confirms the existing framing has adequate capacity' : 'indicates the modeled framing requires field verification of actual framing type/span or reinforcement'}
+        for the additional PV loading${_utilRatio != null && _utilRatio > 1.0 ? ' (bending utilization ' + bendUtil + '%; deflection ' + rafterDefl + '" vs ' + rafterAD + '" allowable)' : ''}.
       </div>
 
       <!-- Standard Detail: Roof Attachment -->
@@ -792,22 +821,24 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           per ASCE 7-22 §2.3 and manufacturer installation requirements.
         </div>
       </div>
-      ${structural ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+      ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — ROOF MOUNT:</strong>
         Wind analysis per ASCE 7-22 §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ASCE 7-22 §7).` : 'Snow loading is not a controlling factor at this location.'}
-        The rafter utilization ratio of ${utilization}% confirms the existing framing ${Number(utilization) <= 100 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.
-        Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= 2.0 ? 'exceeds' : 'DOES NOT MEET'} the required minimum of 2.0.
+        ${_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= 2.0 ? 'exceeds' : 'DOES NOT MEET'} the required minimum of 2.0.` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
-      <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
+      <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ASCE 7-22 §26/27 and ${ibcVer} IBC/IRC.
-        ${structural && (structural.rafter?.utilizationRatio || 0) <= 1.0 && (structural.attachment?.safetyFactor || 0) >= 2.0
+        ${structural && structural.rafter?.utilizationRatio != null && structural.rafter.utilizationRatio <= 1.0 && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
           ? `All structural parameters are within acceptable limits. The existing roof structure and lag bolt attachment
              system are adequate to support the proposed PV array without modification.`
-          : 'Review flagged structural items before proceeding with installation. Reinforcement or attachment revision may be required.'}
+          : structural && structural.rafter?.utilizationRatio == null && structural.attachment?.safetyFactor == null
+            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+            : 'Review flagged structural items before proceeding with installation. Reinforcement or attachment revision may be required.'}
       </div>
 
       ${structuralRules.length > 0 ? `
@@ -827,17 +858,19 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       </table>` : ''}
       ${rulesResult?.structuralAutoResolutions && rulesResult.structuralAutoResolutions.length > 0 ? `
       <div class="section-title">Auto-Resolutions Applied</div>
-      <table class="equip-table">
+      <table class="equip-table" style="font-size:7px;">
         <thead><tr><th>Field</th><th>Original</th><th>Resolved</th><th>Reason</th><th>Reference</th></tr></thead>
         <tbody>
-          ${rulesResult.structuralAutoResolutions.map(r => `
+          ${rulesResult.structuralAutoResolutions.slice(0, 5).map(r => `
           <tr style="background:#fff">
-            <td class="mono f-lg">${r.field}</td>
-            <td>${r.originalValue}</td>
-            <td style="color:#000;font-weight:bold">${r.resolvedValue}</td>
-            <td>${r.reason}</td>
-            <td class="mono f-lg">${r.necReference}</td>
+            <td class="mono" style="font-size:7px;">${r.field}</td>
+            <td style="font-size:7px;">${r.originalValue}</td>
+            <td style="color:#000;font-weight:bold;font-size:7px;">${r.resolvedValue}</td>
+            <td style="font-size:7px;">${r.reason}</td>
+            <td class="mono" style="font-size:7px;">${r.necReference}</td>
           </tr>`).join('')}
+          ${rulesResult.structuralAutoResolutions.length > 5 ? `
+          <tr style="background:#f5f5f5"><td colspan="5" style="font-size:7px;font-weight:bold;text-align:center;">+ ${rulesResult.structuralAutoResolutions.length - 5} additional auto-resolution(s) — full record retained in the engineering file</td></tr>` : ''}
         </tbody>
       </table>` : ''}
     </div>
@@ -1003,13 +1036,26 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
 
 // ── BOM Table Renderer (v48.x) ───────────────────────────────────────────────
 // Standalone helper — lives outside the template literal to avoid escaping hell.
-function renderBOMTable(bom: PermitInput['bom']): string {
+// Supports row slicing so long BOMs paginate onto a continuation sheet instead
+// of silently clipping mid-row at the fixed page height (teardown P0).
+
+const BOM_SKIP_CATEGORIES = new Set(['solar_panel', 'panels', 'inverters']);
+
+/** Rows the SCHED BOM table will render (after panel/inverter dedup). */
+export function schedBomRowCount(bom: PermitInput['bom']): number {
+  return (bom ?? []).filter(i => !BOM_SKIP_CATEGORIES.has(i.category)).length;
+}
+
+/** Max BOM rows on the primary SCHED sheet (it also carries the module/
+ *  inverter tables); the continuation sheet is all-table and fits more. */
+export const SCHED_BOM_ROWS_FIRST = 15;
+
+function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY): string {
   if (!bom || bom.length === 0) {
     return '<!-- No BOM data — permit generated without BOM integration -->';
   }
 
-  const bomSkipCategories = new Set(['solar_panel', 'panels', 'inverters']);
-  const bomItems = bom.filter(i => !bomSkipCategories.has(i.category));
+  const bomItems = bom.filter(i => !BOM_SKIP_CATEGORIES.has(i.category));
   if (bomItems.length === 0) {
     return '<!-- BOM present but all items are panels/inverters (already rendered above) -->';
   }
@@ -1033,7 +1079,7 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   }
   const stages = [...stageOrder, ...Object.keys(grouped).filter(s => !stageOrder.includes(s))];
 
-  let html = '<div class="section-title">Bill of Materials — Full Equipment Schedule</div>';
+  let html = `<div class="section-title">Bill of Materials — Full Equipment Schedule${startRow > 0 ? ' (CONTINUED)' : ''}</div>`;
   html += '<table class="bom-table" style="width:100%;font-size:var(--f-sm);">';
   html += '<thead><tr style="background:#000;color:#fff;">';
   html += '<th style="width:4%">#</th>';
@@ -1048,13 +1094,19 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   html += '<th style="width:11%">Derived From</th>';
   html += '</tr></thead><tbody>';
 
-  let rowNum = 0;
+  // Flatten in stage order so the table can be sliced across sheets.
+  const flat: Array<{ item: (typeof bomItems)[number]; stageLabel: string }> = [];
   for (const stageKey of stages) {
     const items = grouped[stageKey];
     if (!items || items.length === 0) continue;
     const stageLabel = items[0].stageLabel || stageLabels[stageKey] || stageKey;
+    for (const item of items) flat.push({ item, stageLabel });
+  }
+  const endRow = Math.min(flat.length, startRow + maxRows);
 
-    for (const item of items) {
+  let rowNum = startRow;
+  {
+    for (const { item, stageLabel } of flat.slice(startRow, endRow)) {
       rowNum++;
       const bg = rowNum % 2 === 0 ? 'background:#f8f8f8;' : '';
       const reqBadge = item.required !== false
@@ -1078,9 +1130,18 @@ function renderBOMTable(bom: PermitInput['bom']): string {
     }
   }
 
+  if (endRow < flat.length) {
+    // More rows follow on the continuation sheet — say so instead of clipping.
+    html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
+    html += '<td colspan="10" style="text-align:center;letter-spacing:1px;">CONTINUED ON SCHED-2 — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
+    html += '</tr>';
+    html += '</tbody></table>';
+    return html;
+  }
+
   html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
   html += '<td colspan="6" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS</td>';
-  html += '<td class="tr">' + rowNum + '</td>';
+  html += '<td class="tr">' + flat.length + '</td>';
   html += '<td colspan="3"></td>';
   html += '</tr>';
   html += '</tbody></table>';
@@ -1089,7 +1150,7 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   const stageCount = Object.keys(grouped).length;
   html += '<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">';
   html += '<strong>BILL OF MATERIALS SUMMARY:</strong> ';
-  html += 'This system BOM contains ' + rowNum + ' line items across ' + stageCount + ' stages. ';
+  html += 'This system BOM contains ' + flat.length + ' line items across ' + stageCount + ' stages. ';
   html += requiredCount + ' items are required per NEC / manufacturer specification. ';
   html += 'All quantities are derived from CAD geometry and equipment registry — no manual estimates. ';
   html += 'Structural items are computed from array layout per ASCE 7-22 / IBC 2021. ';
@@ -1097,6 +1158,18 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   html += '</div>';
 
   return html;
+}
+
+/** Continuation sheet for long BOMs — rendered only when the BOM exceeds
+ *  SCHED_BOM_ROWS_FIRST rows (generatePermit decides). */
+export function pageEquipmentScheduleCont(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+  return `
+  <div class="page">
+    ${titleBlock(input, 'SCHED-2', 'EQUIPMENT SCHEDULE (CONTINUED)', pageNum, totalPages)}
+    <div class="page-content">
+      ${renderBOMTable(input.bom, SCHED_BOM_ROWS_FIRST)}
+    </div>
+  </div>`;
 }
 
 export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
@@ -1152,7 +1225,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       <!-- Wire Sizing Justification -->
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>
       <table class="equip-table">
-        <thead><tr><th>Circuit</th><th>Isc (A)</th><th>×1.25 (A)</th><th>×1.25 OCPD (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
+        <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Isc×1.25 (A)</th><th>OCPD ≥ Isc×1.56 (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
         <tbody>
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => {
@@ -1175,13 +1248,13 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>WIRE SIZING INTERPRETATION:</strong>
-        All DC source circuit conductors are sized per NEC 690.8(A)(1) using Isc × 1.25 for continuous duty, with OCPD rated at Isc × 1.25 × 1.25 per NEC 690.8(B)(1).
+        All DC source circuit conductors are sized per NEC 690.8(A)(1) using Isc × 1.25 for continuous duty, with OCPD rated at Isc × 1.56 (1.25 × 1.25 per NEC 690.8(A)(1)×(B)(1)).
         USE-2 rated conductors (90\u00b0C) are specified for all PV source circuits to maximize ampacity margin under ${isRoof(cad.systemType) ? 'rooftop temperature' : isFence(cad.systemType) ? 'outdoor fence-mounted' : 'outdoor ground-mounted'} conditions.
         Conductor ampacity after derating exceeds the maximum circuit current for all circuits. No conductor upsizing is required.
       </div>
       <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.6;border:var(--border);border-top:none;background:#f0f4f8;">
         <strong>FORMULA REFERENCE — WIRE SIZING (NEC 690.8):</strong><br/>
-        <span style="font-family:var(--mono);font-size:10px;">Max Circuit Current = Isc × 1.25 &nbsp; | &nbsp; OCPD ≥ Isc × 1.25 × 1.25 &nbsp; | &nbsp; Conductor Ampacity ≥ Max Circuit Current (after derating)</span><br/>
+        <span style="font-family:var(--mono);font-size:10px;">Max Circuit Current = Isc × 1.25 [690.8(A)(1)] &nbsp; | &nbsp; OCPD ≥ Isc × 1.56 [690.8(A)(1)×(B)(1)] &nbsp; | &nbsp; Conductor Ampacity ≥ Max Circuit Current (after derating)</span><br/>
         <span style="font-size:9px;color:#333;">
           The wire sizing chain ensures: (1) continuous duty factor accounts for sustained PV output under peak insolation,
           (2) OCPD rating provides 125% margin above continuous current for fuse/breaker coordination,
@@ -1191,7 +1264,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>
       </div>
 
-      ${renderBOMTable(bom)}
+      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST)}
 
 
       <!-- System-Specific Hardware Schedule -->

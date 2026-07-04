@@ -65,8 +65,10 @@ export function roofCAD(input: PermitInputShape): CADModel {
   // filter panels that fall within (radiusM + setbackM) of each obstruction.
   // This is NON-BREAKING: if obstructions is undefined/empty, nothing changes.
   // Error 5w fix: _systemDefinition now declared on PermitInputShape — no `as any` needed
+  // (copied — Nearmap AI obstructions are appended below; never mutate the
+  // caller's SystemDefinition array)
   const sysDefObstructions: SysDefObstruction[] =
-    input._systemDefinition?.obstructions ?? [];
+    [...(input._systemDefinition?.obstructions ?? [])];
   const sysDefElecNodes: SysDefElectricalNode[] =
     input._systemDefinition?.electricalNodes ?? [];
   const canonicalCADObstructions: CADObstruction[] = canonicalBridge?.obstructions ?? [];
@@ -120,6 +122,97 @@ export function roofCAD(input: PermitInputShape): CADModel {
     : allLatLngs.length > 0
       ? allLatLngs.reduce((s, v) => s + v.lng, 0) / allLatLngs.length
       : (rawPanels[0]?.lng ?? -122.0);
+
+  // ── Nearmap AI obstructions (raw lat/lng polygons from the permit route) ──
+  // Projected HERE because only roofCAD knows the local origin. Each becomes a
+  // SysDefObstruction so the existing per-plane panel filtering + CADModel
+  // plumbing applies unchanged; roofPlaneId is assigned by point-in-polygon
+  // against the raw (real-GPS) plane rings.
+  const _ptInRing = (lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+      if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+  let _droppedOffRoof = 0;
+  const nearmapObstructions: SysDefObstruction[] = ((input.project as any)?.roofObstructions ?? [])
+    .filter((o: any) => Array.isArray(o?.polygon) && o.polygon.length >= 3)
+    .map((o: any, i: number) => {
+      const pts = o.polygon.filter((p: any) => isFinite(p?.lat) && isFinite(p?.lng));
+      if (pts.length < 3) return null;
+      let cLat = pts.reduce((s: number, p: any) => s + p.lat, 0) / pts.length;
+      let cLng = pts.reduce((s: number, p: any) => s + p.lng, 0) / pts.length;
+      // The Nearmap AI query AOI (~45 m) covers NEIGHBORING buildings too —
+      // an obstruction only belongs on this planset if its centroid sits on
+      // one of THIS project's roof planes. (Neighbor vents scattered across
+      // the sheet were the "all fucky" bug.)
+      // CANOPY is the exception: a tree overhanging the eave has its centroid
+      // over the YARD — membership is vertex overlap either way, and the drawn
+      // marker re-centers on the part of the canopy actually over the roof
+      // (that's the area the aerial couldn't verify — possible hidden vents).
+      const isCanopy = o.type === 'canopy';
+      let hostPlane: any;
+      let radPts = pts;   // vertices that drive the drawn radius
+      if (isCanopy) {
+        hostPlane = rawPlanes.find((rp: any) =>
+          pts.some((p: any) => _ptInRing(p.lat, p.lng, rp.vertices ?? [])) ||
+          (rp.vertices ?? []).some((v: any) => _ptInRing(v.lat, v.lng, pts)));
+        if (!hostPlane) { _droppedOffRoof++; return null; }
+        const onRoof = pts.filter((p: any) =>
+          rawPlanes.some((rp: any) => _ptInRing(p.lat, p.lng, rp.vertices ?? [])));
+        if (onRoof.length >= 1) {
+          cLat = onRoof.reduce((s: number, p: any) => s + p.lat, 0) / onRoof.length;
+          cLng = onRoof.reduce((s: number, p: any) => s + p.lng, 0) / onRoof.length;
+          radPts = onRoof;   // size the marker by the OVER-ROOF part, not the whole tree
+        }
+      } else {
+        hostPlane = rawPlanes.find((rp: any) => _ptInRing(cLat, cLng, rp.vertices ?? []));
+        if (!hostPlane) { _droppedOffRoof++; return null; }
+      }
+      const cosLat = Math.cos(cLat * Math.PI / 180);
+      // LINEAR features (ridge vents, flashing runs) are not point obstructions —
+      // a circle abstraction turns them into a giant blob mid-ridge. Drop them;
+      // the ridge/hip setback bands already communicate that keep-out.
+      // Linear-feature drop does not apply to canopy — a tree edge tracing the
+      // eave is exactly the shape we're flagging, not a ridge-vent artifact.
+      if (!isCanopy) {
+        const _xs = pts.map((p: any) => (p.lng - cLng) * 111320 * cosLat);
+        const _ys = pts.map((p: any) => (p.lat - cLat) * 111320);
+        const _extX = Math.max(...(_xs as number[])) - Math.min(...(_xs as number[]));
+        const _extY = Math.max(...(_ys as number[])) - Math.min(...(_ys as number[]));
+        const _long = Math.max(_extX, _extY), _short = Math.max(Math.min(_extX, _extY), 0.05);
+        if (_long / _short > 3 && _long > 2) { _droppedOffRoof++; return null; }
+      }
+      const cXY = latLngToXY(cLat, cLng, originLat, originLng);
+      // footprint radius = max vertex distance from the centroid, capped PER
+      // TYPE — a vent is never 1.2 m across; coarse AI polygons at the ridge
+      // junctions were rendering as dominant circles mid-sheet. Canopy gets a
+      // wide cap + floor: the blind spot is genuinely large.
+      const _radCap: Record<string, number> = {
+        vent: 0.3, chimney: 0.8, ac_unit: 0.6, satellite: 0.5, skylight: 1.2, canopy: 3.5, other: 0.5,
+      };
+      const radiusM = Math.min(_radCap[o.type] ?? 0.5, Math.max(isCanopy ? 1.0 : 0.15, ...radPts.map((p: any) =>
+        Math.hypot((p.lat - cLat) * 111320, (p.lng - cLng) * 111320 * cosLat))));
+      return {
+        id:          `nm-obs-${i}`,
+        type:        o.type || 'other',
+        worldX:      cXY.x,
+        worldY:      cXY.y,
+        radiusM,
+        heightFt:    1,
+        setbackIn:   Math.round(((o.clearanceM ?? 0.15) / 0.0254)),
+        confidence:  typeof o.confidence === 'number' ? o.confidence : 0.8,
+        roofPlaneId: hostPlane.id ?? null,
+        source:      'merged' as const,
+      };
+    })
+    .filter(Boolean) as SysDefObstruction[];
+  if (nearmapObstructions.length > 0 || _droppedOffRoof > 0) {
+    sysDefObstructions.push(...nearmapObstructions);
+    warnings.push(`roofCAD: ${nearmapObstructions.length} Nearmap AI obstruction(s) on-roof (${_droppedOffRoof} neighbor/off-roof dropped)`);
+  }
 
   // ── GPS panel lookup map ──────────────────────────────────────
   // Map each GPS panel to local XY
@@ -188,6 +281,7 @@ export function roofCAD(input: PermitInputShape): CADModel {
         pointInPolygonLocal({ x: p.x, y: p.y }, polyXY)
       );
 
+      const _designedPlane = planeGpsPanels.length > 0;
       if (planeGpsPanels.length > 0) {
         // Use GPS panel positions directly
         for (const gp of planeGpsPanels) {
@@ -278,11 +372,27 @@ export function roofCAD(input: PermitInputShape): CADModel {
         ...buildCADObstructions(sysDefObstructions, rp.id),
         ...canonicalCADObstructions.filter(o => o.roofPlaneId === rp.id),
       ];
-      const filteredPanels = filterPanelsByObstructions(planePanels, planeObstructions, warnings);
-      const removedCount = planePanels.length - filteredPanels.length;
-      if (removedCount > 0) {
-        warnings.push(`[OBSTRUCTION] plane ${rp.id}: removed ${removedCount} panel(s) blocked by obstructions`);
-        console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} removed=${removedCount} remaining=${filteredPanels.length}`);
+      // DESIGNED (GPS) positions are authoritative — never silently delete a
+      // customer-placed module: the roof table summed 52 while every other
+      // sheet declared 53 because one designed panel fell in a keep-out. For
+      // designed planes we KEEP the module and flag the conflict; the filter
+      // only prunes AUTO-GENERATED grid placements.
+      let filteredPanels: typeof planePanels;
+      if (_designedPlane) {
+        const kept = filterPanelsByObstructions(planePanels, planeObstructions, []);
+        const conflicts = planePanels.length - kept.length;
+        if (conflicts > 0) {
+          warnings.push(`[OBSTRUCTION CONFLICT] plane ${rp.id}: ${conflicts} designed module(s) overlap obstruction keep-outs — modules retained, FIELD VERIFY clearance`);
+          console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} designed-plane conflicts=${conflicts} (retained)`);
+        }
+        filteredPanels = planePanels;
+      } else {
+        filteredPanels = filterPanelsByObstructions(planePanels, planeObstructions, warnings);
+        const removedCount = planePanels.length - filteredPanels.length;
+        if (removedCount > 0) {
+          warnings.push(`[OBSTRUCTION] plane ${rp.id}: removed ${removedCount} panel(s) blocked by obstructions`);
+          console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} removed=${removedCount} remaining=${filteredPanels.length}`);
+        }
       }
 
       // Recompute dimensions after filtering
@@ -774,9 +884,14 @@ function buildCADElectricalNodes(nodes: SysDefElectricalNode[]): CADElectricalNo
  */
 function filterPanelsByObstructions(
   panels: CADPanel[],
-  obstructions: CADObstruction[],
+  allObstructions: CADObstruction[],
   warnings: string[],
 ): CADPanel[] {
+  // CANOPY never deletes designed modules: it flags an area the aerial could
+  // not verify (hatched zone + note on the sheet). Hard-filtering by it made
+  // the DRAWING silently drop modules the design carries (header said 53,
+  // roof showed 41) — the sheet must draw the design and flag the conflict.
+  const obstructions = allObstructions.filter(o => o.type !== 'canopy');
   if (obstructions.length === 0) return panels;
 
   return panels.filter(panel => {

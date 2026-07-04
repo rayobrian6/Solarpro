@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -41,6 +42,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'standard');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const user = getUserFromRequest(req);
   if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
@@ -76,6 +80,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'standard');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const user = getUserFromRequest(req);
   if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 

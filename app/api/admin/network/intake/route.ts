@@ -26,6 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDbReady } from "@/lib/db-neon";
 import { requireAdminApi } from "@/lib/adminAuth";
 import { randomUUID } from "crypto";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 import {
   applyOperatorReviewAction,
   deriveLeadOpsSummary,

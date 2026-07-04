@@ -19,6 +19,7 @@
 
 import type { RunSegment, MicroBranch } from './computed-system';
 import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
+import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
@@ -175,6 +176,10 @@ export interface SLDProfessionalInput {
   hasEnphaseIQSC3?:        boolean;
   scale:                   string;
   acWireLength:            number;
+  /** Real engine-computed AC feeder conduit fill % (NEC Ch.9 Tbl.1). */
+  acConduitFillPct?:       number;
+  /** Real engine-computed AC feeder voltage drop %. */
+  acVoltageDropPct?:       number;
   panelsPerString?:        number;
   lastStringPanels?:       number;
   designTempMin?:          number;
@@ -1249,7 +1254,8 @@ function renderCombiner(
 // ── AC Disconnect (internal structure) ───────────────────────────────────────
 function renderDisco(
   cx: number, cy: number,
-  ocpd: number, calloutN: number
+  ocpd: number, calloutN: number,
+  fusedTapOcpd = false
 ): {svg:string; lx:number; rx:number;
     loadInX:number; loadInY:number; lineOutX:number; lineOutY:number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['ac-disconnect'] = 120×100
@@ -1306,9 +1312,10 @@ function renderDisco(
   p.push(ln(bx+W2, poleY1, bx+W2+10, cy, {sw:SW_MED}));
   p.push(ln(bx+W2, poleY2, bx+W2+10, cy, {sw:SW_MED}));
 
-  // Labels below
-  p.push(txt(cx, by2+H2+10, `${ocpd}A NON-FUSED`, {sz:F.tiny, anc:'middle'}));
-  p.push(txt(cx, by2+H2+19, 'NEC 690.14 — UTILITY ACCESSIBLE', {sz:F.tiny, anc:'middle', italic:true}));
+  // Labels below — a supply-side tap's disconnect IS the tap OCPD and must be
+  // fused (NEC 705.11); load-side jobs keep the conventional non-fused disco.
+  p.push(txt(cx, by2+H2+10, fusedTapOcpd ? `${ocpd}A FUSED — TAP OCPD` : `${ocpd}A NON-FUSED`, {sz:F.tiny, anc:'middle'}));
+  p.push(txt(cx, by2+H2+19, fusedTapOcpd ? 'NEC 705.11(C), 690.14 — UTILITY ACCESSIBLE' : 'NEC 690.14 — UTILITY ACCESSIBLE', {sz:F.tiny, anc:'middle', italic:true}));
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
@@ -1431,15 +1438,25 @@ function renderMSPSupply(
   p.push(busbar(bx+8, bx+W2-8, busY, 'MAIN BUS'));
 
   if (isSupply) {
-    // Supply-side tap connector
+    // Supply-side tap: lands on the SERVICE (line-side) conductors between the
+    // meter and the MAIN breaker — never on the load-side bus. The old drawing
+    // dropped the tap straight onto MAIN BUS (a load-side connection), which
+    // contradicted every 'NEC 705.11' label on the sheet.
     const tapX = bx+28;
-    const tapY = busY-16;
-    p.push(txt(tapX, tapY-8, 'TAP', {sz:5.5, anc:'middle', bold:true, fill:SUPPLY_CLR}));
-    p.push(ln(tapX-10, tapY, tapX+10, tapY, {stroke:SUPPLY_CLR, sw:SW_MED}));
-    p.push(ln(tapX, tapY, tapX, busY, {stroke:SUPPLY_CLR, sw:SW_MED}));
-    p.push(circ(tapX, tapY, 3, {fill:SUPPLY_CLR, stroke:SUPPLY_CLR, sw:0}));
+    const svcY = busY-18;              // service conductor run, above the bus
+    const pvInY = by2+55;              // 'utility_in' anchor row — PV enters here
+    const mainBkrX = bx+W2-20;         // main breaker position (drawn below)
+    // Service conductors: main breaker LINE side up and across to the tap
+    p.push(ln(mainBkrX, svcY, mainBkrX, busY-6, {stroke:SUPPLY_CLR, sw:SW_MED}));
+    p.push(ln(tapX, svcY, mainBkrX, svcY, {stroke:SUPPLY_CLR, sw:SW_MED}));
+    p.push(txt((tapX+mainBkrX)/2, svcY-4, 'SERVICE (LINE) SIDE', {sz:4.5, anc:'middle', fill:SUPPLY_CLR}));
+    // PV conductors (from the fused AC disconnect) enter left wall → tap point
+    p.push(ln(bx, pvInY, tapX, pvInY, {stroke:SUPPLY_CLR, sw:SW_MED}));
+    p.push(ln(tapX, pvInY, tapX, svcY, {stroke:SUPPLY_CLR, sw:SW_MED}));
+    p.push(circ(tapX, svcY, 3, {fill:SUPPLY_CLR, stroke:SUPPLY_CLR, sw:0}));
+    p.push(txt(tapX, svcY-8, 'TAP', {sz:5.5, anc:'middle', bold:true, fill:SUPPLY_CLR}));
     p.push(txt(cx, by2+H2+10, `${mainAmps}A RATED`, {sz:F.tiny, anc:'middle'}));
-    p.push(txt(cx, by2+H2+19, 'SUPPLY SIDE TAP — NEC 705.11', {sz:F.tiny, anc:'middle', bold:true, fill:SUPPLY_CLR}));
+    p.push(txt(cx, by2+H2+19, 'SUPPLY SIDE TAP — LINE SIDE OF MAIN — NEC 705.11', {sz:F.tiny, anc:'middle', bold:true, fill:SUPPLY_CLR}));
   } else {
     // Backfed breaker on bus
     const brkX = cx;
@@ -1592,7 +1609,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const tcx = (DX + TB_X) / 2;
   parts.push(txt(tcx, DY+16, 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM', {sz:F.title, bold:true, anc:'middle'}));
   parts.push(txt(tcx, DY+26,
-    `${esc(input.address)}  |  ${esc(input.topologyType.replace(/_/g,' '))}  |  ${input.totalModules} MODULES  |  ${input.acOutputKw} kW AC`,
+    `${esc(input.address)}  |  ${esc(input.topologyType.replace(/_/g,' '))}  |  ${input.totalModules} MODULES  |  ${Number(input.acOutputKw).toFixed(2)} kW AC`,
     {sz:F.sub, anc:'middle', fill:'#444'}));
 
   // ── Schematic border ──────────────────────────────────────────────────────
@@ -1730,7 +1747,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(txt(jbCX, jbCY-jbH/2-7, isMicro?'AC JUNCTION':'DC JUNCTION', {sz:F.tiny, anc:'middle'}));
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
-    const nb = input.microBranches?.length ?? Math.ceil(md/16);
+    const nb = input.microBranches?.length ?? microBranchCount(md, input.inverterModel);
     const bocpd = input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20;
     parts.push(txt(jbCX, jbCY+jbH/2+9, `${nb} branches`, {sz:F.tiny, anc:'middle'}));
     parts.push(txt(jbCX, jbCY+jbH/2+18, `${bocpd}A OCPD ea.`, {sz:F.tiny, anc:'middle'}));
@@ -1745,7 +1762,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   {
     const run = isMicro ? roofRun : dcStringRun;
     const fb = isMicro
-      ? [`${input.branchWireGauge??'#10 AWG'} THWN-2`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31']
+      ? [`ENPHASE Q CABLE (TC-ER)`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31(C)']
       : [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
     const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);
@@ -1760,7 +1777,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
-    const nb = input.microBranches?.length ?? Math.ceil(md/16);
+    const nb = input.microBranches?.length ?? microBranchCount(md, input.inverterModel);
     const bocpd = input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20;
     const clabel = input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
     const cr = renderCombiner(xComb, BUS_Y, nb, bocpd, clabel, 3);
@@ -1888,7 +1905,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   }
 
   // ── NODE 5: AC DISCONNECT ─────────────────────────────────────────────────
-  const discoResult = renderDisco(xDisco, BUS_Y, resolvedAcOCPD, isMicro?4:5);
+  const discoResult = renderDisco(xDisco, BUS_Y, resolvedAcOCPD, isMicro?4:5, isSupplySide);
   parts.push(discoResult.svg);
   parts.push(txt(xDisco, BUS_Y-40, '(N) AC DISCONNECT', {sz:F.hdr, bold:true, anc:'middle'}));
 
@@ -2329,8 +2346,18 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
-    const ab = Math.ceil(md/16);
-    const ba = branchRun?.ocpdAmps ?? necNextStandardOcpd((input.acOutputKw*1000/240)*1.25);
+    // Real branch plan when provided; per-model NEC count otherwise. NEVER
+    // ceil(md/16) (wrong for IQ8A) and NEVER the system-output OCPD (100A)
+    // as a per-branch breaker — both were plan-check red flags.
+    const ab = input.microBranches?.length ?? microBranchCount(md, input.inverterModel);
+    const _perMicroBrA = md > 0 ? (input.acOutputKw*1000/md)/240 : 0;
+    const _maxBrDev = input.microBranches?.length
+      ? Math.max(...input.microBranches.map(b => b.deviceCount))
+      : microMaxPerBranch(input.inverterModel);
+    const ba = branchRun?.ocpdAmps
+      ?? (input.microBranches?.length ? Math.max(...input.microBranches.map(b => b.ocpdAmps)) : 0)
+      ?? 0;
+    const baShow = ba || necNextStandardOcpd(_maxBrDev * _perMicroBrA * 1.25) || 20;
     parts.push(txt(p1x+cW/2, CALC_Y+10, 'AC BRANCH CIRCUIT INFO', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
       ['Topology','MICROINVERTER'],
@@ -2338,8 +2365,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['Total DC Power',`${dcKw.toFixed(2)} kW`],
       ['AC per Micro',`${((input.acOutputKw*1000)/md).toFixed(0)} W`],
       ['Branch Circuits',`${ab}`],
-      ['Max Micros/Branch','16 (NEC 690.8)'],
-      ['Branch OCPD',`${ba} A`],
+      ['Max Micros/Branch',`${microMaxPerBranch(input.inverterModel)} (NEC 690.8)`],
+      ['Branch OCPD',`${baShow} A`],
       ['Branch Wire',`${branchRun?.wireGauge ?? input.branchWireGauge ?? '#10 AWG'}`],
       ['Feeder Wire',`${resolvedAcWire}`],
       ['Feeder Conduit',`${resolvedAcConduit} ${resolvedAcCondType}`],
@@ -2393,7 +2420,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(rect(p2x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
   parts.push(txt(p2x+cW/2, CALC_Y+10, 'AC SYSTEM CALCULATIONS', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const acRows: [string,string][] = [
-    ['AC Output (kW)',`${input.acOutputKw} kW`],
+    ['AC Output (kW)',`${Number(input.acOutputKw).toFixed(2)} kW`],
     ['AC Output Amps',`${input.acOutputAmps} A`],
     ['AC OCPD (125%)',`${resolvedAcOCPD} A`],
     ['AC Wire Gauge',`${resolvedAcWire}`],
@@ -2426,7 +2453,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     })() : isSupplySide ? [
       ['Interconnection','Supply Side Tap'] as [string,string],
       ['NEC Reference','NEC 705.11'] as [string,string],
-      ['Backfed Breaker','N/A — Tap Connection'] as [string,string],
+      ['Tap OCPD',`${pvBreakerAmps} A FUSED DISCO`] as [string,string],
+      ['Backfed Breaker','N/A — LINE-SIDE TAP'] as [string,string],
       ['120% Rule','N/A — Supply Side'] as [string,string],
     ] : [
       ['Interconnection','Backfed Breaker'] as [string,string],
@@ -2457,12 +2485,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Module Wattage',`${input.panelWatts} W`],
     ['Total Modules',`${input.totalModules}`],
     ['Microinverters',`${md2} units`],
-    ['Branch Circuits',`${Math.ceil(md2/16)}`],
+    ['Branch Circuits',`${input.microBranches?.length ?? microBranchCount(md2, input.inverterModel)}`],
     ['Inverter Mfr.',esc(input.inverterManufacturer)],
     ['Inverter Model',esc(input.inverterModel)],
-    ['Inverter Output',`${input.acOutputKw} kW AC`],
+    ['Inverter Output',`${Number(input.acOutputKw).toFixed(2)} kW AC`],
     ['AC Combiner',esc(input.combinerLabel??'IQ Combiner')],
-    ['AC Disconnect',`${resolvedAcOCPD}A Non-Fused`],
+    ['AC Disconnect',`${resolvedAcOCPD}A ${isSupplySide ? 'Fused (Tap OCPD)' : 'Non-Fused'}`],
     ['Main Panel',`${input.mainPanelAmps} A`],
     ['Utility',esc(input.utilityName)],
     ['Interconnection',esc(input.interconnection)],
@@ -2481,9 +2509,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Combiner',esc(input.combinerLabel??(input.combinerType??'Direct'))],
     ['Inverter Mfr.',esc(input.inverterManufacturer)],
     ['Inverter Model',esc(input.inverterModel)],
-    ['Inverter Output',`${input.acOutputKw} kW AC`],
+    ['Inverter Output',`${Number(input.acOutputKw).toFixed(2)} kW AC`],
     ['DC Disconnect',`${input.dcOCPD}A Fused`],
-    ['AC Disconnect',`${resolvedAcOCPD}A Non-Fused`],
+    ['AC Disconnect',`${resolvedAcOCPD}A ${isSupplySide ? 'Fused (Tap OCPD)' : 'Non-Fused'}`],
     ['Main Panel',`${input.mainPanelAmps} A`],
     ['Utility',esc(input.utilityName)],
     ['Interconnection',esc(input.interconnection)],
@@ -2554,15 +2582,23 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       };
     });
   } else {
+    // No per-run engine data — use REAL engine values where the adapter
+    // provided them (feeder fill/vdrop/length) and '—' (0) where it didn't.
+    // The old canned 32%/28% fill, 1.2-1.8% vdrop, and 50/20/15 ft lengths
+    // were fabricated numbers an AHJ could (and did) try to reproduce.
+    const _fFill = input.acConduitFillPct ?? 0;
+    const _fVd   = input.acVoltageDropPct ?? 0;
+    const _fLen  = input.acWireLength ?? 0;
+    const _fPass = _fFill <= 40 && _fVd <= 3;
     sRows = isMicro ? [
-      {id:'BR-1',from:'ROOF J-BOX',to:'AC COMBINER',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.2,len:50,pass:true},
-      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.4,len:20,pass:true},
-      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.4,len:15,pass:true},
+      {id:'BR-1',from:'ROOF J-BOX',to:'AC COMBINER',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
+      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
+      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ] : [
-      {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:30,ocpd:input.dcOCPD,vdrop:1.2,len:50,pass:true},
-      {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:28,amp:30,ocpd:input.dcOCPD,vdrop:1.2,len:20,pass:true},
-      {id:'A-1',from:'INVERTER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.8,len:20,pass:true},
-      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.8,len:15,pass:true},
+      {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
+      {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
+      {id:'A-1',from:'INVERTER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
+      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ];
   }
 
@@ -2602,9 +2638,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(rect(tbX, tbY+38, TB_W, 30, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(tbX+TB_W/2, tbY+51, 'SINGLE LINE DIAGRAM', {sz:F.tbTitle, bold:true, anc:'middle'}));
   parts.push(txt(tbX+TB_W/2, tbY+63, 'PHOTOVOLTAIC SYSTEM', {sz:F.tb, anc:'middle'}));
-  // BUILD version badge — visible on every render for deployment verification
-  parts.push(rect(tbX, tbY+68, TB_W, 10, {fill: '#1B5E20', stroke: 'none', sw: 0}));
-  parts.push(txt(tbX+TB_W/2, tbY+76, getBuildBadge() + ' | SLD SYMBOLS V2', {sz: 4.5, bold: true, anc: 'middle', fill: '#FFFFFF'}));
+  // Engine build badge removed from the customer sheet (internal QA telemetry
+  // on an AHJ deliverable). Deployment verification: the HTML meta
+  // planset-version tag + an SVG comment carry the same information invisibly.
+  parts.push(`<!-- ${getBuildBadge()} | SLD SYMBOLS V2 -->`);
 
   // Project info rows
   const tbRows: [string,string][] = [
@@ -2629,7 +2666,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const sysRows: [string,string][] = [
     ['TOPOLOGY',input.topologyType.replace(/_/g,' ')],
     ['DC SIZE',`${dcKw.toFixed(2)} kW`],
-    ['AC OUTPUT',`${input.acOutputKw} kW`],
+    ['AC OUTPUT',`${Number(input.acOutputKw).toFixed(2)} kW`],
     ['MODULES',`${input.totalModules} × ${input.panelWatts}W`],
     ['INVERTER',esc(input.inverterManufacturer)],
     ['MODEL',esc(input.inverterModel)],

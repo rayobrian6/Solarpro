@@ -16,6 +16,7 @@ import { neon } from "@neondatabase/serverless";
 import fs from "fs";
 import path from "path";
 import { requireAdminApi } from "@/lib/adminAuth";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 function stripSqlComments(sql: string): string {
   return sql
@@ -28,6 +29,9 @@ function stripSqlComments(sql: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'admin');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const admin = await requireAdminApi(req);
   if (!admin) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });

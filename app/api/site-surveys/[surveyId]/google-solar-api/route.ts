@@ -52,6 +52,7 @@ import {
   isValidBuildingInsightsData,
 } from '@/lib/siteSurveys/googleSolarApi/cache';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(
   req: NextRequest,

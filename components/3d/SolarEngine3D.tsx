@@ -18,6 +18,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
+import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { getSunPosition } from '@/lib/solarMath';
 import type { PlacedPanel, RoofPlane } from '@/types';
 import {
@@ -253,6 +254,12 @@ interface Props {
     setbackInsets: number;
     /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
     roofPlaneEntityCount: number;
+    /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
+     *  bands hug edges (not roof middle). cf0dd96b regression guard. */
+    setbackBandCentroids: Array<{ lat: number; lng: number }>;
+    /** Count of full rebuilds triggered during panel drag/move — should stay 0
+     *  for smooth moves. 2176e4d3 regression guard. */
+    panelMoveRebuildCount: number;
   }) => void;
   /** v47.122: ID of the currently selected roof plane (highlights it, dims others) */
   selectedRoofPlaneId?: string;
@@ -507,11 +514,15 @@ function SolarEngine3D({
   // Performance: snapshot of last rendered panel list for incremental diff
   const lastRenderedPanelsRef = useRef<PlacedPanel[]>([]);
   const fullRebuildCountRef = useRef(0);
+  const panelMoveRebuildCountRef = useRef(0);
+  const setbackBandCentroidsRef = useRef<Array<{ lat: number; lng: number }>>([]);
   const publishE2EDiagnostics = useCallback(() => {
     onE2EDiagnostics?.({
       fullRebuildCount: fullRebuildCountRef.current,
       setbackInsets: setbackZoneEntitiesRef.current.length,
       roofPlaneEntityCount: plane3DEntityMap.current.size,
+      setbackBandCentroids: setbackBandCentroidsRef.current,
+      panelMoveRebuildCount: panelMoveRebuildCountRef.current,
     });
   }, [onE2EDiagnostics]);
   // Row tool context: tracks which systemType to use for row-placed panels
@@ -2890,6 +2901,7 @@ function SolarEngine3D({
 
   function renderFireSetbackZones(viewer: any, C: any) {
     clearFireSetbackZones(viewer);
+    setbackBandCentroidsRef.current = []; // reset centroids for fresh render
     const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
     const eaveSB  = fireSetbacks?.eaveSetbackM  ?? 0;
     const edgeSB  = fireSetbacks?.edgeSetbackM  ?? 0.457;
@@ -2995,6 +3007,20 @@ function SolarEngine3D({
           },
         });
         setbackZoneEntitiesRef.current.push(ent);
+        // E2E: compute centroid of this setback band (lat/lng) so tests can verify
+        // bands hug edges, not the roof interior. cf0dd96b regression guard.
+        try {
+          const cx = positions.reduce((s: number, p: any) => s + p.x, 0) / positions.length;
+          const cy = positions.reduce((s: number, p: any) => s + p.y, 0) / positions.length;
+          const cz = positions.reduce((s: number, p: any) => s + p.z, 0) / positions.length;
+          const carto = C.Cartographic.fromCartesian(new C.Cartesian3(cx, cy, cz));
+          if (carto) {
+            setbackBandCentroidsRef.current.push({
+              lat: C.Math.toDegrees(carto.latitude),
+              lng: C.Math.toDegrees(carto.longitude),
+            });
+          }
+        } catch {}
       }
     });
     publishE2EDiagnostics();
@@ -3248,6 +3274,12 @@ function SolarEngine3D({
     // Full rebuild path: shade mode changed, or first render, or forced
     if (forceFullRebuild || (prev.length === 0 && panelList.length > 0)) {
       fullRebuildCountRef.current += 1;
+      // E2E: track if this full rebuild happened while panel count was stable
+      // (position-only move). Incrementing panelMoveRebuildCount during a drag
+      // means the 2176e4d3 regression is back — jerky rebuilds on panel move.
+      if (prev.length > 0 && prev.length === panelList.length && forceFullRebuild) {
+        panelMoveRebuildCountRef.current += 1;
+      }
       panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
       panelMapRef.current.clear();
       // v48.7: pre-compute skipGrid for entire batch — consistent rendering across all panels
@@ -7697,6 +7729,51 @@ function SolarEngine3D({
     const planes = roofPlanesRef.current ?? [];
     const confirmedPlanes = planes.filter(rp => rp.vertices && rp.vertices.length >= 3 && rp.confirmed !== false);
     let eligiblePlanes = confirmedPlanes.length > 0 ? confirmedPlanes : planes.filter(rp => rp.vertices && rp.vertices.length >= 3);
+
+    // ── "Only my building" (Ray, 2026-06-30) ────────────────────────────────
+    // Auto-fill must panel ONLY the subject building, never the neighbours whose
+    // planes are also in roofPlanes (from a block-wide detect / saved data) — that
+    // was the "50 on my roof + 84 elsewhere = 134" bug. Applied HERE, the single
+    // 3D-fill chokepoint, so it covers EVERY trigger (Design Studio buttons AND the
+    // in-scene "Auto Fill" tool). Keep the facet cluster under the house (lat,lng)
+    // + a 60 m hard cap so a bridged/spurious far plane can't survive.
+    if (eligiblePlanes.length > 1) {
+      const before = eligiblePlanes.length;
+      // Subject reference: prefer the user's MARKED planes (source 'manual' /
+      // createdFrom3D). The geocode (lat,lng) can land on the NEIGHBOUR (3 Melvin
+      // Dr geocodes ~17m onto the next house), seeding the filter on the wrong
+      // building and skipping the roof the user drew. The marked plane is truth.
+      const marked = eligiblePlanes.filter(p => ((p as any).source === 'manual' || (p as any).createdFrom3D) && p.vertices && p.vertices.length >= 3);
+      const sv = marked.flatMap(p => p.vertices ?? []);
+      const subjectPt = sv.length > 0
+        ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
+        : { lat, lng };
+      const { kept } = filterToSubjectBuilding(
+        eligiblePlanes,
+        (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+        subjectPt,
+        { maxDistM: 60 },
+      );
+      if (kept.length > 0 && kept.length < before) {
+        eligiblePlanes = kept;
+        addLog('AUTO', `handleAutoRoof: subject filter kept ${kept.length}/${before} planes (seed=${marked.length > 0 ? 'marked-plane' : 'geocode'})`);
+      }
+    }
+
+    // De-dup: drop a detected (aerial_*) plane that overlaps a hand-traced plane —
+    // the same roof captured twice was double-filling (Melvin: 54 traced + 80 on the
+    // overlapping aerial plane = 134). The manual trace wins.
+    if (eligiblePlanes.length > 1) {
+      const { kept: deduped, dropped } = dropDetectedPlanesOverlappingManual(
+        eligiblePlanes,
+        (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+        (p) => (p as any).source === 'manual' || (p as any).createdFrom3D === true,
+      );
+      if (dropped > 0 && deduped.length > 0) {
+        eligiblePlanes = deduped;
+        addLog('AUTO', `handleAutoRoof: dropped ${dropped} detected plane(s) overlapping your traced roof`);
+      }
+    }
 
     // ── v62: AUTO-DETECT — no hand-drawn planes → build CLEAN planes from Google
     // Solar's detected roof segments and run them through the SAME flush grid engine

@@ -3,6 +3,21 @@ import { getDevSessionUserFromRequest } from '@/lib/dev-auth';
 
 const COOKIE_NAME = 'solarpro_session';
 
+// ── Session timeout enforcement per POL-SEC-009 ──────────────────────────
+// Admin sessions expire after 8 hours of inactivity.
+// Regular user sessions expire after 24 hours of inactivity.
+// The JWT itself has a 30-day max lifetime, but the middleware enforces
+// shorter inactivity windows for compliance (SOC 2 CC6.1, ISO 27001 A.9.4.2).
+const SESSION_TIMEOUT_MS: Record<string, number> = {
+  super_admin:  8 * 60 * 60 * 1000,   // 8 hours
+  admin:        8 * 60 * 60 * 1000,   // 8 hours
+  staff:        8 * 60 * 60 * 1000,   // 8 hours
+  crew_member: 24 * 60 * 60 * 1000,  // 24 hours
+  homeowner:   24 * 60 * 60 * 1000,  // 24 hours
+  user:        24 * 60 * 60 * 1000,  // 24 hours (default/fallback)
+};
+const DEFAULT_SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 // Public paths that never require auth
 // ── Public Paths ────────────────────────────────────────────────────
 // SECURITY AUDIT: Only truly public endpoints belong here.
@@ -15,6 +30,7 @@ const PUBLIC_PATHS = [
   '/auth/subscribe',
   '/auth/forgot-password',
   '/auth/reset-password',
+  '/auth/mfa/enroll',  // MFA enrollment page (uses enrollment pending cookie, not session)
   '/subscribe',
   '/enterprise',
   '/terms',
@@ -26,6 +42,8 @@ const PUBLIC_PATHS = [
   '/api/auth/me',
   '/api/auth/request-password-reset',
   '/api/auth/reset-password',
+  '/api/auth/mfa/verify',  // MFA verify uses MFA pending cookie, not session cookie
+  '/api/auth/mfa/setup',   // MFA setup uses session cookie (requires auth)
 
   // ── SSO authorize (OAuth-style entry point for mobile/external apps) ──
   // This endpoint is intentionally public: unauthenticated users get
@@ -92,7 +110,7 @@ const PUBLIC_PATHS = [
  * Role is NOT checked here -- that is handled by requireAdmin() in server components
  * and requireAdminApi() in API routes, both of which query the DB.
  */
-function decodeJwtPayload(token: string): { id: string; email: string; exp?: number } | null {
+function decodeJwtPayload(token: string): { id: string; email: string; exp?: number; iat?: number } | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -102,7 +120,12 @@ function decodeJwtPayload(token: string): { id: string; email: string; exp?: num
     if (data.exp && data.exp < Math.floor(Date.now() / 1000)) return null;
     // Must have id and email (identity fields)
     if (!data.id || !data.email) return null;
-    return data;
+    return {
+      id: String(data.id),
+      email: String(data.email),
+      exp: data.exp,
+      iat: data.iat,
+    };
   } catch {
     return null;
   }
@@ -309,7 +332,44 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Authenticated -- pass through.
+  // ── Session timeout enforcement per POL-SEC-009 ────────────────────────
+  // Check if the session has exceeded the maximum inactivity window.
+  // Admin paths (/admin, /api/admin) use the 8-hour timeout.
+  // All other paths use the 24-hour timeout.
+  // The JWT's iat (issued-at) is the proxy for "last authentication time".
+  if (user.iat) {
+    const nowMs = Date.now();
+    const iatMs = user.iat * 1000; // Convert seconds to ms
+    const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
+    const maxSessionMs = isAdminPath
+      ? SESSION_TIMEOUT_MS['admin']
+      : DEFAULT_SESSION_TIMEOUT_MS;
+
+    if (nowMs - iatMs > maxSessionMs) {
+      // Session has exceeded the maximum duration — require re-authentication
+      console.log(`[SESSION_TIMEOUT] path=${pathname} iat=${user.iat} maxHours=${maxSessionMs / 3600000}`);
+
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json(
+          { success: false, error: 'Session expired. Please log in again.', code: 'SESSION_EXPIRED' },
+          { status: 401 }
+        );
+      }
+
+      // Page routes -> redirect to login with session expired message
+      const loginUrl = new URL('/auth/login', req.url);
+      loginUrl.searchParams.set('reason', 'session_expired');
+      if (pathname !== '/' && !pathname.startsWith('/auth')) {
+        loginUrl.searchParams.set('redirect', pathname);
+      }
+      const redirectResponse = NextResponse.redirect(loginUrl);
+      // Clear the expired session cookie
+      redirectResponse.cookies.set(COOKIE_NAME, '', { path: '/', maxAge: 0 });
+      return redirectResponse;
+    }
+  }
+
+  // Authenticated — pass through.
   // /admin role authorization is handled by:
   //   - app/admin/layout.tsx -> requireAdmin() -> queries DB for role
   //   - /api/admin/* routes  -> requireAdminApi() -> queries DB for role

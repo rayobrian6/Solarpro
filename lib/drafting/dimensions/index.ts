@@ -13,7 +13,9 @@ import type { DimensionOptions } from '../types';
 import { drawArrowhead, drawText } from '../primitives';
 
 // ── Constants ─────────────────────────────────────────────────
-const DIM_COLOR      = '#0055aa';
+// Black dimension linework — the PE-sealed reference sets draw dims monochrome;
+// the old blue read as a UI mockup rather than a CAD sheet (Ray, 2026-07-01).
+const DIM_COLOR      = '#000000';
 const EXT_OVERSHOOT  = 4;   // px extension lines extend past dim line
 const EXT_GAP        = 3;   // px gap between geometry and extension line start
 const TICK_HALF      = 5;   // half-length of tick mark

@@ -27,6 +27,7 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { runIntakePipeline } from '@/lib/intake/intakePipeline';
 import { generatePayloadIdempotencyKey } from '@/lib/intake/webhookVerifier';
 import { neon } from '@neondatabase/serverless';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ── GET: Webhook log
 export async function GET(req: NextRequest): Promise<NextResponse> {

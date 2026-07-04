@@ -12,8 +12,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { geocodeAddress } from '@/lib/geocode';
-import { nearmapConfigured, checkNearmapCoverage, fetchNearmapRoofPlanes } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, checkNearmapCoverage, fetchNearmapAIResult, type NearmapObstruction } from '@/lib/aerial/nearmap';
 import { nearmapPlanesToRoofPlanes } from '@/lib/aerial/nearmapToRoofPlane';
+import { cropToSubjectBuilding, cropObstructionsToPlanes } from '@/lib/aerial/subjectBuildingCrop';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -60,11 +61,29 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const raw = await fetchNearmapRoofPlanes(lat, lng, { radiusM: 45, skipCoverageCheck: true });
-    const planes = nearmapPlanesToRoofPlanes(raw, () => crypto.randomUUID());
+    const { roofPlanes: raw, obstructions: rawObs } = await fetchNearmapAIResult(lat, lng, { radiusM: 45, skipCoverageCheck: true });
+
+    // Crop the whole-block AI result down to just the subject building under the
+    // detect point (map centre / geocode). Nearmap returns every roof in the
+    // ~45m AOI; we keep only the facet cluster the user is designing on so
+    // "Detect from aerial" doesn't grab the entire neighbourhood. `?crop=false`
+    // disables it for debugging (returns the raw block).
+    const doCrop = searchParams.get('crop') !== 'false';
+    const crop = doCrop ? cropToSubjectBuilding(raw, { lat, lng }) : null;
+    const croppedPlanes = crop ? crop.planes : raw;
+    const obstructions = crop
+      ? cropObstructionsToPlanes(rawObs, croppedPlanes, { lat, lng })
+      : rawObs;
+
+    const planes = nearmapPlanesToRoofPlanes(croppedPlanes, () => crypto.randomUUID());
     return NextResponse.json({
       success: true, covered: true, coverage,
-      resolved: { lat, lng, address: resolvedAddress }, planes,
+      resolved: { lat, lng, address: resolvedAddress }, planes, obstructions,
+      crop: crop
+        ? { applied: crop.cropped, planesBefore: raw.length, planesKept: crop.planes.length,
+            obstructionsBefore: rawObs.length, obstructionsKept: obstructions.length }
+        : { applied: false, planesBefore: raw.length, planesKept: raw.length,
+            obstructionsBefore: rawObs.length, obstructionsKept: rawObs.length },
     });
   } catch (err) {
     return NextResponse.json({ success: false, covered: false, planes: [],

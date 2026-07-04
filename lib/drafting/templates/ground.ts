@@ -400,7 +400,7 @@ export function drawGroundArray(
   }
 
   // Bottom note
-  els.push(drawText(zones.dims.left, H - 8,
+  els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
     'ARRAY SITE PLAN — FIELD VERIFY PILE LOCATIONS AND ROW SPACING — SEE PV-3 FOR STRUCTURAL', {
       anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
     }));
@@ -739,7 +739,7 @@ export function drawGroundStructural(
   }
 
   // Scale note
-  els.push(drawText(zones.dims.left, H - 8,
+  els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
     'PILE ELEVATION SCHEMATIC — VERIFY PILE DIAMETER, DEPTH + SPACING WITH GEOTECH REPORT — NTS', {
       anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
     }));

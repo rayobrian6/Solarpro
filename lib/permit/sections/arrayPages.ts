@@ -11,8 +11,11 @@ import {
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
+import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
+import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
+import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -129,13 +132,21 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   }> || [];
 
   const totalPanels = cadTotalPanels || system.totalPanels || panels.length || 0;
-  // Topology-aware circuit count: microinverters are AC BRANCH CIRCUITS (NEC 690.8
-  // ~16 micros/branch), NOT one DC string. A 52-micro system is ~4 branches, not
-  // "1 string of 52" (which is the default-fallback signature of an empty config).
+  // Topology-aware circuit count: microinverters are AC BRANCH CIRCUITS, NOT one
+  // DC string. Branch max is PER MODEL from the Enphase capability profiles
+  // (NEC 80% on a 20A branch: IQ8+ 13, IQ8A 10, ...) — the old hardcoded 16
+  // put 14 IQ8As on one branch, an NEC 690.8 plan-check violation.
   const _isMicro = (system.inverters?.[0]?.type === 'micro')
     || String((system as any).topology || '').toLowerCase().includes('micro');
+  const _invModel = system.inverters?.[0]?.model;
+  // PLANE-AWARE branch plan (never spans roof faces — installer truth). When
+  // panel positions are absent (degraded payload), fall back to the flat
+  // per-model NEC count.
+  const _plan = _isMicro && panels.length > 0
+    ? planMicroBranches(panels as any[], _invModel)
+    : null;
   const totalStrings = _isMicro
-    ? (Math.ceil(totalPanels / 16) || 1)
+    ? (_plan?.count ?? microBranchCount(totalPanels, _invModel))
     : (system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
   const circuitWord   = _isMicro ? 'BRANCH' : 'STRING';
   const circuitWordPl = _isMicro ? 'BRANCHES' : 'STRINGS';  // proper plural (not "BRANCHS")
@@ -163,18 +174,36 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     if (p.tilt != null) { sumTilt += p.tilt; count++; }
     if (p.azimuth != null) sumAz += p.azimuth;
   });
-  const avgTilt = isRoof(cadSystemType) && roofPlane0?.pitch != null
-    ? roofPlane0.pitch.toFixed(1)  // pitch is already in degrees from canonical model
+  // Multi-plane roofs: show the RANGE across facets, not plane[0] only —
+  // PV-2's per-facet table shows 17-19° while this sheet claimed "16.5°".
+  const _pitches = (cad.roof?.planes ?? []).map((p: any) => p.pitch).filter((v: any) => isFinite(v));
+  const avgTilt = isRoof(cadSystemType) && _pitches.length > 0
+    ? (Math.min(..._pitches).toFixed(0) === Math.max(..._pitches).toFixed(0)
+        ? Math.max(..._pitches).toFixed(1)
+        : `${Math.min(..._pitches).toFixed(0)}–${Math.max(..._pitches).toFixed(0)}`)
     : (count > 0 ? (sumTilt / count).toFixed(1) : (project.roofPitch || 20).toString());
+  // Multi-plane roofs face MULTIPLE directions — claiming plane[0]'s azimuth
+  // for the whole system printed "Azimuth 3° (N)" on a 4-plane N/S/E/W array.
+  const _azList = (cad.roof?.planes ?? [])
+    .map((p: any) => p.azimuth)
+    .filter((v: any) => isFinite(v))
+    .map((v: number) => ((v % 360) + 360) % 360);
+  const _azDir = (az: number) => az >= 337.5 || az < 22.5 ? 'N' :
+    az < 67.5 ? 'NE' : az < 112.5 ? 'E' : az < 157.5 ? 'SE' :
+    az < 202.5 ? 'S' : az < 247.5 ? 'SW' : az < 292.5 ? 'W' : 'NW';
+  const _multiAz = _azList.length > 1
+    && new Set(_azList.map(_azDir)).size > 1;
   const avgAz = isRoof(cadSystemType) && roofPlane0?.azimuth != null
     ? roofPlane0.azimuth.toFixed(0)
     : (count > 0 ? (sumAz / count).toFixed(0) : '180');
 
   // Determine compass direction from azimuth
   const azNum = parseFloat(avgAz);
-  const compassDir = azNum >= 337.5 || azNum < 22.5 ? 'N' :
-    azNum < 67.5 ? 'NE' : azNum < 112.5 ? 'E' : azNum < 157.5 ? 'SE' :
-    azNum < 202.5 ? 'S' : azNum < 247.5 ? 'SW' : azNum < 292.5 ? 'W' : 'NW';
+  const compassDir = _azDir(((azNum % 360) + 360) % 360);
+  // Display string — multi-plane arrays list the facet directions.
+  const azDisplay = _multiAz
+    ? `MULTI — ${[...new Set(_azList.map(_azDir))].join('/')} (SEE PLANE LABELS)`
+    : `${avgAz}° (${compassDir})`;
 
   // Build SVG grid
   const cellW = 28, cellH = 38, gapX = 4, gapY = 6;
@@ -184,14 +213,36 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const svgW = Math.min(gridW + 80, 900);
   const svgH = Math.max(gridH + 60, 200);
 
-  // Color per string (up to 8 strings)
-  const stringColors = ['#000','#000','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d'];
+  // Color per branch — 16 DISTINCT colors. drawRoofPlan groups trunk runs by
+  // color, so a recycled palette would silently merge branch 1 with branch 9.
+  const stringColors = ['#1b3f74','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d','#e5a100',
+                        '#134e4a','#7f1d1d','#92400e','#312e81','#155e75','#831843','#3f6212','#713f12'];
 
-  // Assign string index to each panel (distribute evenly)
-  const panelStringMap: Map<string, number> = new Map();
-  const sortedPanels = [...panels].sort((a, b) => (a.row ?? 0) - (b.row ?? 0) || (a.col ?? 0) - (b.col ?? 0));
-  const panelsPerString = totalStrings > 0 ? Math.ceil(totalPanels / totalStrings) : totalPanels;
-  sortedPanels.forEach((p, i) => { panelStringMap.set(p.id, Math.floor(i / panelsPerString)); });
+  // Assign branch index to each panel — PLANE-AWARE (Ray, 2026-07-03:
+  // "logic says we are not linking strings across opposite sides of the
+  // roof"). planMicroBranches (computed above) never lets a branch span
+  // planes: each face chunks into its own NEC-sized branches; small hip-cap
+  // planes get their own short branch instead of piggybacking over the ridge.
+  const panelStringMap: Map<string, number> = _plan
+    ? _plan.assign
+    : new Map();
+  if (!_isMicro) {
+    // String-inverter path: keep the serpentine chunking over totalStrings.
+    const sortedForStrings = [...panels].sort((a: any, b: any) => {
+      const rr = (a.row ?? 0) - (b.row ?? 0);
+      if (rr !== 0) return rr;
+      return (a.col ?? 0) - (b.col ?? 0);
+    });
+    const _sizes = balancedBranchSizes(sortedForStrings.length, totalStrings);
+    let _bi = 0, _used = 0;
+    sortedForStrings.forEach((p) => {
+      if (_used >= (_sizes[_bi] ?? Infinity) && _bi < _sizes.length - 1) { _bi++; _used = 0; }
+      panelStringMap.set(p.id, _bi);
+      _used++;
+    });
+  }
+  const panelsPerString = _plan ? (_plan.sizes[0] ?? totalPanels)
+    : Math.ceil(totalPanels / Math.max(totalStrings, 1));
 
   let svgCells = '';
   if (panels.length > 0 && panels.length <= 200) {
@@ -234,13 +285,19 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // strings); inverters[].strings is the phantom "1 string of N" fallback, so derive
   // the legend from the same per-panel branch grouping the grid uses (panelStringMap)
   // — otherwise the legend ("String 1, Qty 52") contradicts the B1..Bn grid cells.
-  const _legendWatts = panels[0]?.wattage
-    || system.inverters?.[0]?.strings?.[0]?.panelWatts || 400;
+  // Wp from the SYSTEM record (kW ÷ modules), never the stale per-panel
+  // wattage field — layout panels carried 440W while the set said 400W,
+  // and a checker multiplies qty × Wp on page one.
+  const _sysWatts = (system.totalDcKw && totalPanels)
+    ? Math.round((system.totalDcKw * 1000) / totalPanels) : null;
+  const _legendWatts = _sysWatts
+    || system.inverters?.[0]?.strings?.[0]?.panelWatts
+    || panels[0]?.wattage || 400;
   const legendItems = _isMicro
     ? Array.from({ length: totalStrings }, (_, bi) => ({
         si: bi,
         label: `Branch ${bi + 1}`,
-        count: sortedPanels.filter(p => panelStringMap.get(p.id) === bi).length,
+        count: panels.filter(p => panelStringMap.get(p.id) === bi).length,
         model: '—',
         watts: _legendWatts,
         voc: 0,
@@ -333,19 +390,43 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <text x="80" y="${AG_VB_H - 5}" font-size="8" fill="#777" font-family="Arial,sans-serif">SCHEMATIC (NOT TO SCALE — NTS)</text>
   </svg>`;
 
-  // PV-2B renders the string-layout schematic (string-colored grouping grid).
-  // It must NOT reuse PV-2's roof-plan renderer (getArrayPlanFromCAD) or the two
-  // sheets become identical — see the PV-2B note above pageArrayGeometry.
-  const agDrawSvg = schematicGridSvg;
+  // ── v65: PV-2B now renders the REAL ROOF with modules colored by AC branch ──
+  // Falls back to the schematic grid when no roof geometry is available.
+  // Branch coloring + dropping PV-2's dimension callouts keeps the sheets distinct.
+  let agDrawSvg: string;
+  try {
+    // Build per-panel branch color map — inserted in BRANCH ORDER so the
+    // drawing's first-appearance color order equals B1..Bn (= legend order).
+    const panelColorById: Map<string, string> = new Map();
+    const _byBranch = [...panels].sort((a: any, b: any) =>
+      (panelStringMap.get(a.id) ?? 0) - (panelStringMap.get(b.id) ?? 0));
+    _byBranch.forEach(p => {
+      const si = panelStringMap.get(p.id) ?? 0;
+      panelColorById.set(p.id, stringColors[si % stringColors.length]);
+    });
+
+    // Use the same roof renderer as PV-2, but WITH branch colors
+    // (drawRoofPlan switches to "circuit layout" mode when panelColorById is present)
+    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById);
+    if (roofSvg && roofSvg.length > 500) {
+      agDrawSvg = roofSvg;
+    } else {
+      agDrawSvg = schematicGridSvg;
+    }
+  } catch (_e) {
+    // No usable roof model — fall back to the schematic grid
+    console.warn('[PV-2B] Roof renderer failed, using schematic grid:', (_e as Error).message);
+    agDrawSvg = schematicGridSvg;
+  }
 
   // Callout notes for data zone
   const agCalloutRows = [
     { n: 1, label: 'NEC 690.8', sub: _isMicro
         ? `AC branch \xd7 1.25 continuous = conductor sizing basis`
         : `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
-    { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${avgAz}\xb0 (${compassDir})` },
-    { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa7605.11 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
-       sub: isRoof(cadSystemType) ? 'Min 18" eave/ridge setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
+    { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${azDisplay}` },
+    { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa71204.2 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
+       sub: isRoof(cadSystemType) ? 'Min 18" ridge/hip setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
     { n: 4, label: 'DC Capacity', sub: `${system.totalDcKw?.toFixed(2) || '\u2014'} kW DC` },
   ].map(c =>
     `<div class="callout-row">` +
@@ -354,14 +435,19 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     `</div>`
   ).join('');
 
-  // System-specific supplemental data
+  // System-specific supplemental data \u2014 setback text from the SAME rule the
+  // drawing uses (it claimed 18" per-AHJ while PV-2 hatched 3'-0" bands).
+  const _fsRoofFt2 = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2);
+  const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
   const agSupplemental = isRoof(cadSystemType) ? `
-    <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa7605.11)</div>
+    <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 Min 18" edge setback from eaves</div>
-      <div>\u2022 Min 18" setback from ridge</div>
-      <div>\u2022 36" access at hip/valley per AHJ</div>
+      <div>\u2022 ${_fsIn}" ridge/hip fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
+      <div>\u2022 Modules may extend to eave (no eave req.)</div>
+      <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
+      ${_isMicro && totalStrings > 4 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner accepts 4; remaining branches land on AC subpanel, see E-1</div>` : ''}
     </div>` :
     isFence(cadSystemType) ? `
     <div class="draw-zone-hdr">FENCE SEGMENTS</div>
@@ -396,7 +482,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->
       <div class="draw-zone" style="flex:0 0 78%;max-width:78%;min-height:0;">
-        <div class="draw-zone-hdr">PROFESSIONAL CAD ARRAY DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} ${circuitLabel}</div>
+        <div class="draw-zone-hdr">CIRCUIT LAYOUT \u2014 ${totalPanels} MODULES / ${totalStrings} ${circuitLabel} \u2014 ${displaySystemType(cadSystemType)}</div>
         <div class="draw-zone-body" style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:10px;background:#fff;min-height:0;">
           ${agDrawSvg}
         </div>
@@ -409,7 +495,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
             <tr><td>Total Modules</td><td>${totalPanels}</td></tr>
             <tr><td>${_isMicro ? 'AC Branches' : 'Strings'}</td><td>${totalStrings}</td></tr>
             <tr><td>Tilt</td><td>${avgTilt}\xb0</td></tr>
-            <tr><td>Azimuth</td><td>${avgAz}\xb0 (${compassDir})</td></tr>
+            <tr><td>Azimuth</td><td>${azDisplay}</td></tr>
             <tr><td>Rows</td><td>${rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels))}</td></tr>
             <tr><td>System</td><td>${isFence(cadSystemType) ? 'FENCE' : isGround(cadSystemType) ? 'GROUND' : 'ROOF'}</td></tr>
             <tr><td>Orient.</td><td>${panels[0]?.orientation?.toUpperCase() || 'PORTRAIT'}</td></tr>
@@ -417,7 +503,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           </table>
         </div>
         <div style="flex-shrink:0;border-bottom:var(--border);">
-          <div class="draw-zone-hdr">${circuitWord} LEGEND</div>
+          <div class="draw-zone-hdr">${_isMicro ? 'BRANCH LEGEND' : 'STRING LEGEND'}</div>
           <table style="width:100%;border-collapse:collapse;">
             <thead><tr style="background:#000;color:#fff;">
               <th style="padding:1px 2px;width:12px;font-size:6px;"></th>
@@ -426,7 +512,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
               <th style="padding:1px 2px;font-size:6px;">Wp</th>
             </tr></thead>
             <tbody>
-              ${legendItems.slice(0,10).map((item: {si:number,label:string,count:number,model:string,watts:number,voc:number,isc:number}) => {
+              ${legendItems.slice(0,16).map((item: {si:number,label:string,count:number,model:string,watts:number,voc:number,isc:number}) => {
                 const hex = stringColors[item.si % stringColors.length];
                 return `<tr style="border-bottom:1px solid #eee;">
                   <td style="padding:1px 3px;"><span style="display:inline-block;width:9px;height:9px;background:${hex};vertical-align:middle;border:1px solid ${hex};"></span></td>

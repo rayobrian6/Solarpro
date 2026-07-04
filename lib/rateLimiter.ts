@@ -98,6 +98,8 @@ export type LimiterKey =
   | 'password-reset'
   | 'delete-account'
   | 'mobile-session'
+  | 'mfa_verify'
+  | 'mfa_setup'
   // AI / compute
   | 'bill-upload'
   | 'engineering'
@@ -146,6 +148,8 @@ const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   'password-reset':         _passwordResetLimiter,
   'delete-account':         _deleteAccountLimiter,
   'mobile-session':         _mobileSessionLimiter,
+  'mfa_verify':             makeLimiter(10, '5 m'),   // 10 TOTP attempts per 5 min — prevents brute force
+  'mfa_setup':              makeLimiter(3, '15 m'),   // 3 setup attempts per 15 min — prevents abuse
   // AI / compute
   'bill-upload':            _billUploadLimiter,
   'engineering':            _engineeringLimiter,

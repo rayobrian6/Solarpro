@@ -14,9 +14,10 @@ import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import OrganizationPanel from '@/components/settings/OrganizationPanel';
 import CrewMembersPanel from '@/components/settings/CrewMembersPanel';
+import SecurityPanel from '@/components/settings/SecurityPanel';
 import { useTheme, THEME_CONFIG, type Theme } from '@/contexts/ThemeContext';
 
-type Tab = 'profile' | 'branding' | 'subscription' | 'organization' | 'teams' | 'notifications';
+type Tab = 'profile' | 'branding' | 'subscription' | 'organization' | 'teams' | 'notifications' | 'security';
 
 interface BrandingSettings {
   companyName: string;
@@ -68,7 +69,7 @@ export default function SettingsPage() {
   });
 
   // ✅ v40.8: Read from global UserContext — no independent /api/auth/me fetch
-  const { user, loading: userLoading } = useUser();
+  const { user, loading: userLoading, refreshUser } = useUser();
   const { theme, setTheme } = useTheme();
 
   // Derived values from UserContext — always in sync with DB
@@ -246,6 +247,7 @@ export default function SettingsPage() {
     { id: 'organization',  label: 'Organization',   icon: <Building2 size={16} /> },
     { id: 'teams',         label: 'Teams',          icon: <Users size={16} /> },
     { id: 'notifications', label: 'Notifications',  icon: <Bell size={16} /> },
+    { id: 'security',      label: 'Security',        icon: <Lock size={16} /> },
   ];
 
   return (
@@ -739,6 +741,11 @@ export default function SettingsPage() {
         {/* ── NOTIFICATIONS TAB ── */}
         {activeTab === 'notifications' ? (
           <NotificationsPanel />
+        ) : null}
+
+        {/* ─── SECURITY / MFA TAB ─── */}
+        {activeTab === 'security' && user ? (
+          <SecurityPanel user={user} onUserUpdate={refreshUser} />
         ) : null}
 
     </AppShell>

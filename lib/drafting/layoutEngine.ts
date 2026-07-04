@@ -155,7 +155,12 @@ function groundLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZone
 
 function roofLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones {
   const isPlan = viewType === 'plan';
-  const H = isPlan ? CANVAS_PLAN_H : CANVAS_ELEV_H;
+  // ROOF PLAN canvas matches the PV-2 page draw zone's aspect (~1.15) instead
+  // of the generic 2.30 plan strip — the old 1060×460 canvas letterboxed into
+  // the tall zone with ~50% blank sheet above/below, which also shrank the
+  // roof (and its 5.4px table text) to ~48% of achievable size. Ground/fence
+  // plans keep CANVAS_PLAN_H.
+  const H = isPlan ? 920 : CANVAS_ELEV_H;
   const W = CANVAS_W;
 
   const dimLeft   = 70;

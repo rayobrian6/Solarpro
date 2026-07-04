@@ -18,6 +18,8 @@
 // ============================================================
 
 import type { CADModel } from '../cad/types';
+import { getMountingSystemById } from '../mounting-hardware-db';
+import { resolveFireSetbackIn, arrayCoverageFrac } from '../permit/utils/fireSetback';
 
 export type SysType = 'roof' | 'ground_mount' | 'solar_fence';
 export type ViewType = 'plan' | 'structural';
@@ -337,12 +339,16 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
 export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   pitchStr: string;
   azimuthDeg: number;
-  setbackFt: number;
+  fireSetbackFt: number;
+  pathwayFt: number;
   roofType: string;
   mountSys: string;
   rafterSize: string;
   rafterSpacing: number;
   attachSpacing: number;
+  lagSpec: string;
+  embedSpec: string;
+  azimuthLabel: string;
   conduitType: string;
   windSpeedMph: number;
   totalPanels: number;
@@ -370,23 +376,75 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     ? Math.round(Math.tan(rawPitch * Math.PI / 180) * 12 * 10) / 10
     : rawPitch;
 
-  // Fire setback: prefer the AHJ ridge/edge setback (IFC 605.11 — matches the
-  // notes block) over the old hardcoded 3'. Default 1.5' (18") not 3'.
-  const ahjSetbackIn = (p?.ahjRidgeSetbackIn as number) ?? (p?.ahjRoofSetbackIn as number);
-  const setbackFt = (ahjSetbackIn && ahjSetbackIn > 0)
-    ? Math.round((ahjSetbackIn / 12) * 10) / 10
-    : (pl?.setbacks?.eaveM ? mToFt(pl.setbacks.eaveM) : ((p?.fireSetbackFt as number) ?? 1.5));
+  // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (per the IFC table behind
+  // applyCodeBasis): ahjRidgeSetbackIn = the FIRE SETBACK on roof edges;
+  // ahjRoofSetbackIn = the ACCESS PATHWAY width (a designated 36" route, not a
+  // uniform edge setback — treating it as one buried the drawing in hatch).
+  const _fireIn    = (p?.ahjRidgeSetbackIn as number);
+  const _pathwayIn = (p?.ahjRoofSetbackIn as number);
+  // Same coverage-aware rule as the DRAWING (resolveFireSetbackIn) — the data
+  // zone printed "1.5' EDGES" while the plan hatched 3'-0" bands.
+  const _covRoofFt2 = (r?.planes ?? []).reduce((s: number, x: any) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _covFrac = arrayCoverageFrac(
+    cad?.totalPanels ?? 0,
+    (p?.panelLengthIn as number) || 66,
+    (p?.panelWidthIn as number) || 40,
+    _covRoofFt2,
+  );
+  const fireSetbackFt = Math.round((resolveFireSetbackIn(_fireIn, _covFrac) / 12) * 10) / 10;
+  const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;
+
+  // Fastener spec from the SELECTED mounting system so PV-3 can never
+  // contradict APP-A/PE-1. Lag LENGTH must physically deliver the embedment:
+  // length ≥ embedment + ~1.5" of deck/flashing/foot stack-up — the old
+  // static '3" lag / 2-1/2" embedment' pair was impossible to build.
+  const _mountSel = (p?.mountingSystemId as string)
+    ? getMountingSystemById(p.mountingSystemId as string)
+    : undefined;
+  const _fracIn = (v: number) =>
+    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
+  const _lagDiaIn  = _mountSel?.mount?.fastenerDiameterIn ?? 0.375;
+  const _embedIn   = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
+  const _lagLenIn  = Math.ceil((_embedIn + 1.5) * 2) / 2;
+  const _ca = ((c?.structural ?? {}) as Record<string, any>)?.attachment;
+  const _mountName = ((input?.project as any)?._canonical?.mountSystem as string)
+    || (p?.mountingSystem as string)
+    || (_mountSel ? `${_mountSel.manufacturer} ${_mountSel.model}` : 'IRONRIDGE XR100');
+
+  // Multi-plane azimuth display — a 4-plane N/S/E/W roof must not claim
+  // plane[0]'s heading ("Azimuth 3° (N)") as the system azimuth.
+  const _azsAll = (r?.planes ?? [])
+    .map((x: any) => x?.azimuth)
+    .filter((v: any) => isFinite(v))
+    .map((v: number) => ((v % 360) + 360) % 360);
+  const _azDir = (az: number) => az >= 337.5 || az < 22.5 ? 'N' :
+    az < 67.5 ? 'NE' : az < 112.5 ? 'E' : az < 157.5 ? 'SE' :
+    az < 202.5 ? 'S' : az < 247.5 ? 'SW' : az < 292.5 ? 'W' : 'NW';
+  const _azPrimary = Math.round(pl?.azimuth ?? (p?.roofAzimuth as number) ?? 180);
+  const _azDirs = [...new Set(_azsAll.map(_azDir))];
+  const azimuthLabel = _azDirs.length > 1
+    ? `MULTI — ${_azDirs.join('/')}`
+    : `${_azPrimary}° (${_azDir(((_azPrimary % 360) + 360) % 360)})`;
 
   return {
     pitchStr:      `${pitchRatio}:12`,
     // Round azimuth — was leaking the raw geometry float (e.g. 180.00081202849463°).
-    azimuthDeg:    Math.round(pl?.azimuth ?? (p?.roofAzimuth as number) ?? 180),
-    setbackFt,
+    azimuthDeg:    _azPrimary,
+    azimuthLabel,
+    fireSetbackFt,
+    pathwayFt,
     roofType:      ((p?.roofType as string) || 'SHINGLE').toUpperCase(),
-    mountSys:      ((p?.mountingSystem as string) || 'IRONRIDGE XR100').toUpperCase(),
+    mountSys:      _mountName.toUpperCase(),
     rafterSize:    ((p?.rafterSize as string) || '2x6'),
     rafterSpacing: (p?.rafterSpacing as number) || 24,
-    attachSpacing: (p?.attachmentSpacing as number) || 48,
+    // Engineering-resolved spacing first (V4 mount layout — e.g. auto-resolved
+    // 36"), then the user's input, then the racking system's rated max.
+    attachSpacing: (_ca?.maxAllowedSpacing as number)
+      || (p?.attachmentSpacing as number)
+      || _mountSel?.mount?.maxSpacingIn
+      || 48,
+    lagSpec:       `${_fracIn(_lagDiaIn)}" DIA × ${_lagLenIn}" MIN SS`,
+    embedSpec:     `${_embedIn}" MIN THREAD EMBEDMENT`,
     conduitType:   ((p?.conduitType as string) || 'EMT').toUpperCase(),
     windSpeedMph:  (cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115,
     totalPanels:   cad.totalPanels ?? 0,
@@ -557,9 +615,9 @@ function roofComposition(
         { label: 'MOUNTING',       value: d.mountSys },
         { label: 'ROOF TYPE',      value: d.roofType },
         { label: 'PITCH',          value: d.pitchStr,                        bold: true },
-        { label: 'AZIMUTH',        value: `${d.azimuthDeg}° (${azLabel(d.azimuthDeg)})` },
-        { label: 'FIRE SETBACK',   value: `${d.setbackFt}' — ALL EDGES`,    bold: true },
-        { label: 'RAFTER',         value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
+        { label: 'AZIMUTH',        value: d.azimuthLabel },
+        { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' EDGES · ${d.pathwayFt}' PATHWAY`, bold: true },
+        { label: 'FRAMING',        value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
         { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX` },
         { label: 'MODULES',        value: `${d.totalPanels} @ ${d.dcKw} kWdc`, bold: true },
       ]
@@ -568,8 +626,8 @@ function roofComposition(
         { label: 'RAFTER SIZE',    value: d.rafterSize },
         { label: 'RAFTER SPACING', value: `${d.rafterSpacing}" O.C.` },
         { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX`,   bold: true },
-        { label: 'LAG BOLT',       value: '3/8" DIA × 3" MIN SS' },
-        { label: 'EMBEDMENT',      value: '2-1/2" MIN INTO RAFTER',         bold: true, highlight: true },
+        { label: 'LAG BOLT',       value: d.lagSpec },
+        { label: 'EMBEDMENT',      value: d.embedSpec,                      bold: true, highlight: true },
         { label: 'ROOF TYPE',      value: d.roofType },
         { label: 'HARDWARE',       value: '316 S.S. THROUGHOUT' },
         { label: 'WIND SPEED',     value: `${d.windSpeedMph} MPH Vult` },
@@ -579,15 +637,15 @@ function roofComposition(
   const callouts: CalloutItem[] = isPlan
     ? [
         { n: 1, label: 'PV MODULE ARRAY', sub: `${d.totalPanels} mod @ ${d.dcKw} kW DC` },
-        { n: 2, label: `${d.setbackFt}' FIRE SETBACK`, sub: 'all roof edges & ridge — IFC §605.11.6' },
+        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge/hip/rake · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
-        { n: 5, label: 'ATTACHMENT ZONE', sub: `L-foot @ ${d.attachSpacing}" O.C. into rafters` },
+        { n: 5, label: 'ATTACHMENT ZONE', sub: `${/RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'direct-attach mounts' : 'L-foot'} @ ${d.attachSpacing}" O.C. into rafters` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
-        { n: 2, label: 'MOUNTING RAIL', sub: d.mountSys },
-        { n: 3, label: 'STANDOFF / L-FOOT', sub: '3/8" SS LAG @ 2.5" embed' },
+        { n: 2, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'DIRECT-ATTACH MOUNT' : 'MOUNTING RAIL', sub: d.mountSys },
+        { n: 3, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
         { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
         { n: 5, label: `RAFTER ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
         { n: 6, label: d.conduitType + ' CONDUIT', sub: 'see conductor schedule' },
@@ -607,7 +665,7 @@ function roofComposition(
     drawPct:        82,
     dataPct:        18,
     drawHeader:     isPlan
-      ? `ROOF PLAN — ${d.totalPanels} MOD @ ${d.dcKw} kWdc | ${d.roofType} ROOF @ ${d.pitchStr} | AZ: ${d.azimuthDeg}° | ${d.mountSys}`
+      ? `ROOF PLAN — ${d.totalPanels} MOD @ ${d.dcKw} kWdc | ${d.roofType} ROOF @ ${d.pitchStr} | AZ: ${d.azimuthLabel} | ${d.mountSys}`
       : `ATTACHMENT DETAIL — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${d.attachSpacing}" O.C. MAX`,
     secondaryHeader: isPlan ? 'SETBACK & OBSTRUCTION OVERLAY' : 'ATTACHMENT DETAIL — NTS',
     dataTitle:      isPlan ? 'SYSTEM DATA' : 'ATTACHMENT SPECS',

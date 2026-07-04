@@ -92,7 +92,10 @@ export const roofProject: PermitInput = {
       manufacturer: 'Enphase',
       model: 'IQ8M',
       type: 'micro',
-      acOutputKw: 5.0,
+      // PER-UNIT AC output — generatePermit computes totalAcKw = panels × this
+      // for micro topology (real IQ8M = 330 VA). A system-level 5.0 here made
+      // every rendered sheet claim 60 kW AC on a 5.16 kW DC system.
+      acOutputKw: 0.33,
       maxDcVoltage: 60,
       efficiency: 0.97,
       ulListing: 'UL 1741 SA',

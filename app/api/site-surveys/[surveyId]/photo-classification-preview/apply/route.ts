@@ -26,6 +26,7 @@ import {
 import { analyzeSurveyPhotosOpenSource } from "@/lib/siteSurvey/photoIntelligence";
 import { buildSurveyEvidenceTraceability } from "@/lib/survey/evidence/provenance";
 import { buildSurveyEvidenceEngineeringBridge } from "@/lib/survey/evidence/engineeringBridge";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 type ApplyItem = {
   fileId: string;

@@ -5,6 +5,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
 import { ingestUtilityBillIntelligence } from "@/lib/intake/utilityBillIntelligence";
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const admin = await requireAdminApi(req);

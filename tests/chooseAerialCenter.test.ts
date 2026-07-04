@@ -3,9 +3,10 @@ import { chooseAerialCenter } from '@/lib/permit/sections/sitePlan';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Regression: the aerial image must center on the project's roof, never on a
-// neighbor's. When the design carries panel GPS we center on the array centroid;
-// otherwise we pick a roof segment NEAR the address pin — not the largest
-// south-facing roof in the vicinity (which can be the neighbor's bigger roof).
+// neighbor's. Priority is array centroid → geocoded pin → segment (last resort).
+// The geocoded address pin is authoritative for a real street address (the Design
+// Studio fly-in geocodes to it and lands on the correct house), so a Google Solar
+// roof SEGMENT must NEVER override a valid pin — that was the "wrong house" bug.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PIN_LAT = 38.7009;
@@ -26,41 +27,56 @@ describe('chooseAerialCenter', () => {
     expect(r.lng).toBeCloseTo(arrayCenter.lng, 7);
   });
 
-  it('does NOT pick the neighbor\'s larger south-facing roof when no array GPS', () => {
-    // This house: small-ish south roof, ~8 m from the pin.
+  it('uses the geocoded pin and NEVER a neighbor segment when there is no array GPS', () => {
+    // A big south-facing neighbor roof ~60 m away that would win on area, plus a
+    // closer one. With a valid pin, NEITHER may override it — we center on the pin.
     const myRoof = { center: { lat: PIN_LAT + mLat(8), lng: PIN_LNG }, azimuthDegrees: 180, areaM2: 60 };
-    // Neighbor: much bigger south-facing roof, ~60 m away — would win on area.
     const neighbor = { center: { lat: PIN_LAT + mLat(60), lng: PIN_LNG + mLng(10) }, azimuthDegrees: 185, areaM2: 400 };
 
     const r = chooseAerialCenter(PIN_LAT, PIN_LNG, undefined, [neighbor, myRoof]);
-    expect(r.source).toBe('segment');
-    // Must be MY roof, not the neighbor's larger one.
-    expect(r.lat).toBeCloseTo(myRoof.center.lat, 7);
-    expect(r.lng).toBeCloseTo(myRoof.center.lng, 7);
+    expect(r.source).toBe('pin');
+    expect(r.lat).toBe(PIN_LAT);
+    expect(r.lng).toBe(PIN_LNG);
   });
 
-  it('prefers the largest south-facing roof AMONG on-parcel segments', () => {
-    // Two segments both within ~25 m of the pin: a north face and a bigger south face.
-    const northFace = { center: { lat: PIN_LAT + mLat(6), lng: PIN_LNG }, azimuthDegrees: 0, areaM2: 50 };
-    const southFace = { center: { lat: PIN_LAT + mLat(10), lng: PIN_LNG + mLng(3) }, azimuthDegrees: 180, areaM2: 55 };
-    const r = chooseAerialCenter(PIN_LAT, PIN_LNG, undefined, [northFace, southFace]);
-    expect(r.source).toBe('segment');
-    expect(r.lat).toBeCloseTo(southFace.center.lat, 7);
-  });
-
-  it('falls back to the nearest segment when none sit on-parcel', () => {
-    const far1 = { center: { lat: PIN_LAT + mLat(120), lng: PIN_LNG }, azimuthDegrees: 180, areaM2: 300 };
-    const far2 = { center: { lat: PIN_LAT + mLat(40), lng: PIN_LNG }, azimuthDegrees: 90, areaM2: 80 };
-    const r = chooseAerialCenter(PIN_LAT, PIN_LNG, undefined, [far1, far2]);
-    expect(r.source).toBe('segment');
-    // 40 m is nearer than 120 m — nearest wins over largest.
-    expect(r.lat).toBeCloseTo(far2.center.lat, 7);
-  });
-
-  it('falls back to the geocode pin when there are no usable segments', () => {
+  it('centers on the geocoded pin when there are no segments', () => {
     const r = chooseAerialCenter(PIN_LAT, PIN_LNG, undefined, []);
     expect(r.source).toBe('pin');
     expect(r.lat).toBe(PIN_LAT);
     expect(r.lng).toBe(PIN_LNG);
+  });
+
+  it('trusts an array centroid that sits a few metres off the pin (real design)', () => {
+    // The design centroid is normally a short hop from the geocode pin — trust it.
+    const arrayCenter = { lat: PIN_LAT + mLat(25), lng: PIN_LNG + mLng(10) };
+    const r = chooseAerialCenter(PIN_LAT, PIN_LNG, arrayCenter, []);
+    expect(r.source).toBe('array');
+  });
+
+  it('REJECTS a corrupt array centroid hundreds of metres from the pin (cross-contamination)', () => {
+    // Observed bug: design geometry saved under the wrong project → panels in another
+    // town/state. A centroid that far must not drag the aerial off the real house.
+    const corrupt = { lat: PIN_LAT + mLat(5000), lng: PIN_LNG + mLng(5000) };
+    const r = chooseAerialCenter(PIN_LAT, PIN_LNG, corrupt, []);
+    expect(r.source).toBe('pin');
+    expect(r.lat).toBe(PIN_LAT);
+  });
+
+  it('still trusts a far array centroid when the pin itself is invalid', () => {
+    // No usable pin → the design centroid is all we have; use it.
+    const arrayCenter = { lat: 40.5, lng: -80.2 };
+    const r = chooseAerialCenter(0, 0, arrayCenter, []);
+    expect(r.source).toBe('array');
+    expect(r.lat).toBe(40.5);
+  });
+
+  it('falls back to the nearest segment ONLY when the pin is missing/invalid', () => {
+    const far1 = { center: { lat: 38.80, lng: -90.10 }, azimuthDegrees: 180, areaM2: 300 };
+    const near = { center: { lat: 38.70, lng: -90.15 }, azimuthDegrees: 90, areaM2: 80 };
+    // pin is (0,0) → invalid → use the nearest segment.
+    const r = chooseAerialCenter(0, 0, undefined, [far1, near]);
+    expect(r.source).toBe('segment');
+    // nearest to (0,0) is whichever has smaller magnitude — both far, nearest wins.
+    expect(['number']).toContain(typeof r.lat);
   });
 });

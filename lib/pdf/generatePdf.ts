@@ -61,9 +61,15 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
     // Set content directly (avoids file:// URL issues in serverless)
     await page.setContent(html, { waitUntil: 'load', timeout: opts.timeout ?? 40000 });
 
+    // Explicit page dimensions win over 'format' — the permit planset is
+    // ANSI B (17in × 11in); ignoring widthIn/heightIn printed engineering
+    // sheets onto Letter paper. With explicit dims the orientation is already
+    // encoded (17 wide × 11 high IS landscape), so landscape must be false or
+    // Chrome transposes the paper a second time.
     const pdfBuffer = await page.pdf({
-      format:          opts.format ?? 'Letter',
-      landscape:       opts.landscape ?? false,
+      ...(opts.widthIn && opts.heightIn
+        ? { width: opts.widthIn, height: opts.heightIn, landscape: false }
+        : { format: opts.format ?? 'Letter', landscape: opts.landscape ?? false }),
       printBackground: opts.printBackground ?? true,
       margin: {
         top:    opts.margin?.top    ?? '0',
@@ -72,6 +78,7 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
         left:   opts.margin?.left   ?? '0',
       },
       scale: opts.scale ?? 1,
+      timeout: opts.timeout ?? 40000,
     });
 
     await browser.close();

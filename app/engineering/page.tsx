@@ -4924,14 +4924,19 @@ function EngineeringPageInner() {
           rapidShutdown:  config.rapidShutdown,
           // v58.20: explicit hasBattery + batteryBrand so renderer always gets
           // correct flags regardless of whether batteryKwh/Count are zero.
-          hasBattery:     !!(config.batteryId && (config.batteryCount ?? 0) > 0),
-          batteryBrand:   config.batteryBrand || undefined,
-          batteryModel:   config.batteryBrand ? `${config.batteryBrand} ${config.batteryModel}` : undefined,
-          batteryKwh:     config.batteryKwh && config.batteryCount
-                            ? config.batteryKwh * config.batteryCount
-                            : (config.batteryKwh || undefined),
+          // BATTERY GATE (Ray, 2026-06-30): only render battery on the SLD when explicitly
+          // enabled (batteryEnabled = added in engineering or selected in 3D design). A stale
+          // config.batteryCount must not leak a phantom battery into the diagram.
+          hasBattery:     batteryEnabled && !!(config.batteryId && (config.batteryCount ?? 0) > 0),
+          batteryBrand:   batteryEnabled ? (config.batteryBrand || undefined) : undefined,
+          batteryModel:   batteryEnabled && config.batteryBrand ? `${config.batteryBrand} ${config.batteryModel}` : undefined,
+          batteryKwh:     batteryEnabled
+                            ? (config.batteryKwh && config.batteryCount
+                                ? config.batteryKwh * config.batteryCount
+                                : (config.batteryKwh || undefined))
+                            : undefined,
           // Battery backfeed breaker (NEC 705.12(B)) — from equipment-db
-          batteryBackfeedA: config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
+          batteryBackfeedA: batteryEnabled && config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
           // Generator fields
           generatorBrand: config.generatorId
             ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })()
@@ -5240,7 +5245,11 @@ function EngineeringPageInner() {
               ? ((firstInv as any).optimizerPeripheralId || firstInv.inverterId)
               : undefined,
           rackingId,
-          batteryId:        config.batteryId || undefined,
+          // BATTERY GATE (Ray, 2026-06-30): the planset gets a battery ONLY when one is
+          // explicitly enabled (battery added in engineering, or selected in 3D design →
+          // hydrates batteryEnabled). batteryEnabled is the single source of truth; a stale
+          // config.batteryCount (e.g. an ecosystem auto-add) must NOT leak into the planset.
+          batteryId:        batteryEnabled ? (config.batteryId || undefined) : undefined,
           // NON-DESTRUCTIVE DEFAULT + FENCE SAFETY NET:
           //   1. If user set a real panel, use it (non-destructive).
           //   2. If panel is a known hardcoded default (qcells-peak-duo-400) AND system is fence,
@@ -5324,7 +5333,7 @@ function EngineeringPageInner() {
           dcDisconnect:     firstInv?.type === 'micro' ? false : config.dcDisconnect,
           productionMeter:  config.productionMeter,
           rapidShutdown:    config.rapidShutdown,
-          batteryCount:     config.batteryCount,
+          batteryCount:     batteryEnabled ? config.batteryCount : 0,  // gated — see batteryId note above
           topologyType:     topoType,
           jurisdiction:     compliance.jurisdiction?.state || '',
           // Phase 3 - Layout fields
@@ -6359,9 +6368,16 @@ function EngineeringPageInner() {
           attachmentSpacing: config.attachmentSpacing,
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
-          batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
-          batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
-          batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
+          // BATTERY GATE (Ray, 2026-06-30): the planset shows a battery ONLY when one is
+          // explicitly enabled (added in engineering, or selected in 3D design → hydrates
+          // batteryEnabled). The permit's equipment legend keys off batteryCount>0, so a
+          // stale config.batteryCount (e.g. an old ecosystem auto-add) must be zeroed here
+          // when the toggle is off — otherwise a phantom battery renders across the planset.
+          batteryBrand: batteryEnabled ? config.batteryBrand : undefined,
+          batteryModel: batteryEnabled ? config.batteryModel : undefined,
+          batteryCount: batteryEnabled ? config.batteryCount : 0,
+          batteryKwh:   batteryEnabled ? config.batteryKwh : 0,
+          batteryBackfeedA: batteryEnabled ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
           generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
           generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
           atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
@@ -6384,6 +6400,7 @@ function EngineeringPageInner() {
               tilt: p.tilt, azimuth: p.azimuth, wattage: p.wattage,
               row: p.row, col: p.col, systemType: p.systemType, orientation: p.orientation,
               arrayId: (p as any).arrayId,
+              planeId: (p as any).planeId,  // branch wiring groups per plane (PV-2B)
             })),
             roofPlanes: (projectLayout?.roofPlanes || []).map((rp: any) => ({
               id: rp.id, vertices: rp.vertices || [],
@@ -8560,25 +8577,25 @@ function EngineeringPageInner() {
                             updates.inverters = updatedInverters;
                           }
                         }
-                        if (payload.selections.batteryId) {
+                        // v63 (Ray, 2026-06-30): an inverter ecosystem must NOT auto-add or
+                        // auto-enable a battery. Battery is user-driven only — added in
+                        // engineering (toggle on) or selected in 3D design. We therefore apply
+                        // the ecosystem's battery details ONLY when the user already has a
+                        // battery enabled; otherwise the selection is ignored (no phantom
+                        // battery, no auto-flip of the toggle). Removed the prior
+                        // setBatteryEnabled(true) auto-enable.
+                        if (payload.selections.batteryId && batteryEnabled) {
                           updates.batteryId = payload.selections.batteryId;
                           if (!config.batteryCount || config.batteryCount < 1) updates.batteryCount = 1;
-                          // v58.8: Populate full battery metadata (same shape as when the
-                          // user picks from the Battery Model dropdown), so BOM, proposal,
-                          // datasheets, and the kWh summary strip all have correct values.
+                          // Populate full battery metadata (same shape as when the user picks
+                          // from the Battery Model dropdown) so BOM, proposal, datasheets, and
+                          // the kWh summary strip all have correct values.
                           const bat = getBatteryById(payload.selections.batteryId);
                           if (bat) {
                             updates.batteryBrand = bat.manufacturer ?? '';
                             updates.batteryModel = bat.model ?? '';
                             updates.batteryKwh = bat.usableCapacityKwh ?? 0;
                           }
-                          // v58.8: Auto-enable the battery toggle so the sizing engine
-                          // recognizes the ecosystem-picked battery. Without this, the
-                          // Battery column in "System Matches Recommendation" shows "—"
-                          // and the Battery Storage panel stays collapsed ("No battery —
-                          // toggle above to add"), leaving users unable to see what
-                          // battery the ecosystem actually selected.
-                          setBatteryEnabled(true);
                         }
                         const wouldClobber: string[] = [];
                         if (payload.selections.inverterId && config.inverters?.[0]?.inverterId &&
@@ -13324,6 +13341,7 @@ function EngineeringPageInner() {
                                     tilt: p.tilt, azimuth: p.azimuth, wattage: p.wattage,
                                     row: p.row, col: p.col, systemType: p.systemType, orientation: p.orientation,
                                     arrayId: (p as any).arrayId,
+                                    planeId: (p as any).planeId,  // branch wiring groups per plane (PV-2B)
                                   })),
                                   roofPlanes: (projectLayout?.roofPlanes || []).map((rp: any) => ({
                                     id: rp.id, vertices: rp.vertices || [],

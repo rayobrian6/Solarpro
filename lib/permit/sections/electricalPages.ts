@@ -6,9 +6,10 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, utilityDisplayName, necNextStandardOcpd, type SysType } from '../utils/helpers';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, isSupplySideInterconnection, utilityDisplayName, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
+import { balancedBranchSizes, microBranchCount, planMicroBranches } from '../utils/branching';
 
 // ─── (Existing pages reused with minor upgrades) ─────────────────────────────
 
@@ -49,7 +50,13 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
       <table class="equip-table">
         <thead><tr><th style="width:18%">Code Reference</th><th style="width:25%">Description</th><th style="width:30%">Result</th><th style="width:15%">Value / Limit</th><th style="width:12%">Status</th></tr></thead>
         <tbody>
-          ${(rulesResult.rules || []).filter(rule => _isRoof || rule.category !== 'structural' || !String(rule.ruleId || '').includes('rafter')).map(rule => `
+          ${(rulesResult.rules || []).filter(rule =>
+            // PV-4A is the NEC sheet — structural results live on PV-4C
+            // (engine V4, single source). Rules-engine structural rows here
+            // contradicted PV-4C's numbers on the same package.
+            _isRoof ? rule.category !== 'structural'
+                    : (rule.category !== 'structural' || !String(rule.ruleId || '').includes('rafter'))
+          ).map(rule => `
           <tr style="background:${statusBg(rule.severity)}">
             <td class="mono f-lg">${rule.necReference || rule.asceReference || rule.ruleId}</td>
             <td>${rule.title}${rule.autoFixed ? ' <span style="background:#f5f5f5;color:#000;padding:1px 5px;;font-size:8px;font-weight:700">Auto-Fixed</span>' : ''}</td>
@@ -74,7 +81,9 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           <tr class="bg-lt"><td class="fw7">Max Circuit Current</td><td>Isc × 1.25</td><td class="mono">NEC 690.8(A)(1)</td><td>Continuous duty factor</td></tr>
           <tr><td class="fw7">OCPD Rating</td><td>Max Circuit Current × 1.25</td><td class="mono">NEC 690.8(B)(1)</td><td>Or next standard fuse/breaker size</td></tr>
           <tr class="bg-lt"><td class="fw7">Conductor Ampacity</td><td>≥ Max Circuit Current (after derating)</td><td class="mono">NEC 690.8(B), 310.15</td><td>Corrected for temp. and conduit fill</td></tr>
-          <tr><td class="fw7">Backfeed Breaker</td><td>120% Rule: Main + PV ≤ Busbar × 1.2</td><td class="mono">NEC 705.12(B)(2)(3)</td><td>Load-side connection method</td></tr>
+          ${isSupplySideInterconnection(input)
+            ? `<tr><td class="fw7">Interconnection</td><td>Supply-side tap: conductors ≥ 1.25 × PV output current; fused disconnect at tap</td><td class="mono">NEC 705.11</td><td>Line side of service disconnect — 120% rule N/A</td></tr>`
+            : `<tr><td class="fw7">Backfeed Breaker</td><td>120% Rule: Main + PV ≤ Busbar × 1.2</td><td class="mono">NEC 705.12(B)(2)(3)</td><td>Load-side connection method</td></tr>`}
           <tr class="bg-lt"><td class="fw7">EGC Sizing</td><td>Per NEC Table 250.122 based on OCPD</td><td class="mono">NEC 690.45, 250.122</td><td>Min. #12 AWG Cu for ≤ 20A circuits</td></tr>
           <tr><td class="fw7">Voltage Drop</td><td>Vd = (2 × L × I × R) / 1000</td><td class="mono">NEC 210.19(A) FPN</td><td>Target ≤ 2% branch, ≤ 3% feeder</td></tr>
           <tr class="bg-lt"><td class="fw7">Conduit Fill</td><td>Per NEC Chapter 9, Table 1</td><td class="mono">NEC Ch. 9 Table 1</td><td>Max 40% fill for 3+ conductors</td></tr>
@@ -138,25 +147,38 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             // FIX v47.341: Topology-aware DC/AC branch rows
             const _csTopo = topologyToLegacy(getInverterTopology(input, cad));
             if (_csTopo === 'MICRO') {
-              // Microinverter: No traditional DC strings — show AC branch circuit rows instead
+              // Microinverter: No traditional DC strings — show AC branch circuit rows.
+              // Branch current is AC: (micros on branch) × per-micro AC output amps.
+              // The old code used the MODULE DC Isc×1.25 (8.22A) with a 15A OCPD —
+              // fabricated numbers on an AC circuit schedule.
               const eq_cs = getEquipmentContext(input, cad);
-              const _csIsc = eq_cs.panelIsc || 0;
-              const _csBranchAmps = (_csIsc * 1.25);
-              const _csBranchOcpd = necNextStandardOcpd(_csBranchAmps * 1.25);
               const _csModules = system.totalPanels || 0;
-              const _csBranches = Math.ceil(_csModules / 16) || 1;  // NEC 690.8 max 16 micros per branch
-              return Array.from({length: _csBranches}, (_, i) => `
+              // PLANE-AWARE branch plan — same planner as PV-2B/SLD (economical,
+              // never desyncs); flat NEC fallback without positions.
+              const _csPanels = (project as any).panelPositions as Array<{id:string;planeId?:string;arrayId?:string;row?:number;col?:number}> | undefined;
+              const _csPlan = _csPanels?.length ? planMicroBranches(_csPanels, eq_cs.inverterModel) : null;
+              const _csSizes = _csPlan?.sizes?.length
+                ? _csPlan.sizes
+                : balancedBranchSizes(_csModules, microBranchCount(_csModules, eq_cs.inverterModel));
+              const _csPerMicroA = (_csModules > 0 && (system.totalAcKw || 0) > 0)
+                ? ((system.totalAcKw as number) * 1000 / _csModules) / 240
+                : 0;
+              return _csSizes.map((sz, i) => {
+                const amps = sz * _csPerMicroA;
+                const ocpd = necNextStandardOcpd(amps * 1.25) || 20;
+                return `
               <tr>
                 <td class="fw7">AC Branch ${i + 1}</td>
-                <td>Microinverters (Group ${i + 1})</td>
+                <td>${sz} × Microinverter</td>
                 <td>AC Combiner / Panel</td>
                 <td>#10 AWG THWN-2</td>
-                <td>${_csBranchAmps.toFixed(2)}A</td>
-                <td>${_csBranchOcpd}A</td>
+                <td>${amps.toFixed(1)}A</td>
+                <td>${ocpd}A</td>
                 <td>—</td>
                 <td>${project.conduitType || 'EMT'}</td>
                 <td>${project.wireLength || '—'} ft</td>
-              </tr>`).join('');
+              </tr>`;
+              }).join('');
             } else {
               // String / Optimizer: Show traditional DC string rows
               return (system.inverters?.flatMap((inv, invIdx) =>
@@ -180,7 +202,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <td class="fw7">AC Output</td>
             <td>Inverter(s)</td><td>Main Panel</td>
             <td>${elec.acConductorCallout || project.wireGauge} THWN-2</td>
-            <td>${elec.acWireAmpacity || '—'}A</td>
+            <td>${typeof elec.acWireAmpacity === 'number' ? elec.acWireAmpacity.toFixed(1) : (elec.acWireAmpacity || '—')}A</td>
             <td>${elec.busbar?.backfeedBreakerRequired || '—'}A</td>
             <td style="color:${(elec.acVoltageDrop || 0) > 3 ? '#cc0000' : '#000'}">${elec.acVoltageDrop?.toFixed(2) || '—'}%</td>
             <td>${project.conduitType}</td>
@@ -226,11 +248,11 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         <tr><td class="il">Fill Percentage</td><td class="iv" style="color:${elec.conduitFill.fillPercent > 40 ? '#cc0000' : '#000'};font-weight:bold">${elec.conduitFill.fillPercent?.toFixed(1)}% (Max: 40%)</td>
         <td class="il">Status</td><td class="iv" style="color:${elec.conduitFill.passes ? '#000' : '#cc0000'};font-weight:bold">${elec.conduitFill.passes ? '✓ PASS' : '✗ FAIL'}</td></tr>
       </table>` : ''}
+      ${elec ? `
       <div class="section-title">Voltage Drop Calculation — NEC 210.19(A) Informational Note</div>
       <table class="equip-table">
         <thead><tr><th>Circuit</th><th>Length (ft)</th><th>Conductor</th><th>Amps</th><th>Voltage</th><th>V-Drop (V)</th><th>V-Drop %</th><th>Limit</th><th>Status</th></tr></thead>
         <tbody>
-          ${elec ? `
           <tr>
             <td class="fw7">AC Output</td>
             <td class="tr">${project.wireLength} ft</td>
@@ -242,52 +264,24 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <td class="tr">≤ 3.0%</td>
             <td class="center fw7" style="color:${(elec.acVoltageDrop || 0) > 3 ? '#cc0000' : '#000'}">${(elec.acVoltageDrop || 0) <= 3 ? '✓ PASS' : '✗ REVIEW'}</td>
           </tr>
-          ` : '<tr><td colspan="9" class="center" style="color:#555;font-style:italic">Run compliance check to calculate voltage drop</td></tr>'}
         </tbody>
       </table>
-      ${elec ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>VOLTAGE DROP INTERPRETATION:</strong>
         Calculated AC feeder voltage drop is ${elec.acVoltageDrop?.toFixed(2) || '—'}% over a ${project.wireLength} ft conductor run using ${elec.acConductorCallout || project.wireGauge} copper.
         NEC 210.19(A) Informational Note recommends ≤ 3% for feeders and ≤ 5% total (branch + feeder combined).
         ${(elec.acVoltageDrop || 0) <= 3 ? 'The calculated drop is within recommended limits. No conductor upsizing is required.' : 'The calculated drop exceeds 3%. Consider upsizing conductors or reducing run length.'}
       </div>
-      <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.6;border:var(--border);border-top:none;background:#f0f4f8;">
-        <strong>FORMULA REFERENCE — VOLTAGE DROP:</strong><br/>
-        <span style="font-family:var(--mono);font-size:10px;">Vd = (2 × L × I × R) / 1000</span><br/>
-        <span style="font-size:9px;color:#333;">
-          Where: L = ${project.wireLength} ft (one-way conductor length),
-          I = ${elec.busbar?.backfeedBreakerRequired || '—'}A (operating current),
-          R = resistance per 1000 ft (NEC Chapter 9, Table 8 for ${elec.acConductorCallout || project.wireGauge} Cu @ 75°C).
-          Result: ${elec.acVoltageDrop ? (elec.acVoltageDrop * 240 / 100).toFixed(2) : '—'}V drop = ${elec.acVoltageDrop?.toFixed(2) || '—'}% of 240V.
-        </span>
-        <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:${(elec.acVoltageDrop || 0) <= 3 ? '#000' : '#cc0000'};color:#fff;">${(elec.acVoltageDrop || 0) <= 3 ? 'PASS' : 'FAIL'}</span>
-      </div>` : ''}
+      ${''/* Formula-tutorial box removed — code-book pedagogy that displaced
+           project content on the fixed sheet; the calc row + interpretation
+           above carry the engineering result. */}` : ''}
 
-      <div class="section-title">Temperature Correction — NEC Table 310.15(B)(1)</div>
-      <table class="equip-table">
-        <thead><tr><th>Ambient Temp °C</th><th>60°C Insulation</th><th>75°C (THWN)</th><th>90°C (THWN-2/USE-2)</th><th>Application</th></tr></thead>
-        <tbody>
-          <tr><td class="fw7">26–30</td><td class="tr">1.00</td><td class="tr">1.00</td><td class="tr fw7">1.00</td><td>Standard conditions</td></tr>
-          <tr class="bg-lt"><td class="fw7">31–35</td><td class="tr">0.91</td><td class="tr">0.94</td><td class="tr fw7">0.96</td><td>Warm climate, ground level</td></tr>
-          <tr><td class="fw7">36–40</td><td class="tr">0.82</td><td class="tr">0.88</td><td class="tr fw7">0.91</td><td>Attic, above roof</td></tr>
-          <tr class="bg-lt"><td class="fw7">41–45</td><td class="tr">0.71</td><td class="tr">0.82</td><td class="tr fw7">0.87</td><td>Enclosed conduit on roof</td></tr>
-          <tr><td class="fw7">46–50</td><td class="tr">0.58</td><td class="tr">0.75</td><td class="tr fw7">0.82</td><td>Close to roof surface</td></tr>
-          <tr class="bg-lt"><td class="fw7">51–55</td><td class="tr">0.41</td><td class="tr">0.67</td><td class="tr fw7">0.76</td><td>Direct sun, hot climate</td></tr>
-        </tbody>
-      </table>
-
+      ${/* Generic NEC reference tables (temp-correction factors, rooftop adder
+           matrix) removed — they duplicated code-book content, pushed the
+           project-specific LOAD CALC off the fixed sheet (silent clipping),
+           and PV-4A's methodology table already cites the sections. */''}
       ${_isRoof ? `
-      <div class="section-title">Rooftop Temperature Adder — NEC Table 310.15(B)(3)(c)</div>
-      <table class="equip-table">
-        <thead><tr><th>Conduit Location</th><th>Temp. Adder °C</th><th>Temp. Adder °F</th><th>Application</th></tr></thead>
-        <tbody>
-          <tr><td class="fw7">Above roof — 0" to 0.5" (flush)</td><td class="tr mono">+33°C</td><td class="tr mono">+60°F</td><td>Flush-mounted conduit (worst case)</td></tr>
-          <tr class="bg-lt"><td class="fw7">Above roof — 0.5" to 3.5"</td><td class="tr mono">+22°C</td><td class="tr mono">+40°F</td><td>Typical EMT on standoffs</td></tr>
-          <tr><td class="fw7">Above roof — 3.5" to 12"</td><td class="tr mono">+17°C</td><td class="tr mono">+30°F</td><td>Raised conduit run</td></tr>
-          <tr class="bg-lt"><td class="fw7">Above roof — 12" to 36"</td><td class="tr mono">+14°C</td><td class="tr mono">+25°F</td><td>High standoff or attic penetration</td></tr>
-        </tbody>
-      </table>
-      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);background:#fafafa;">
         <strong>TEMPERATURE DERATING NOTE:</strong>
         Conductors routed in conduit on the roof surface are subject to the rooftop temperature adder per NEC 310.15(B)(3)(c).
         All conductor selections account for the worst-case temperature condition.
@@ -312,26 +306,8 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         • Grounding: Per NEC 690.47 and 250.166
       </div>`}
 
-      <div class="section-title">NEC Code References — Conductor & Conduit</div>
-      <table class="equip-table">
-        <thead><tr><th style="width:18%">Code Section</th><th style="width:25%">Title</th><th>Application</th></tr></thead>
-        <tbody>
-          <tr><td class="mono f-lg">NEC 690.8(A)</td><td>Maximum Circuit Current</td><td>PV source circuit current = Isc × 1.25; output circuit = sum of parallel Isc × 1.25</td></tr>
-          <tr><td class="mono f-lg">NEC 690.8(B)</td><td>Circuit Sizing</td><td>Conductor ampacity ≥ 1.25 × Isc; OCPD rating ≥ 1.25 × max circuit current</td></tr>
-          <tr><td class="mono f-lg">NEC 690.7(A)</td><td>Maximum Voltage</td><td>String Voc corrected for minimum design temperature per Table 690.7(A)</td></tr>
-          <tr><td class="mono f-lg">NEC 310.15(B)(1)</td><td>Ampacity Correction</td><td>Temperature correction factors applied per conductor insulation rating</td></tr>
-          <tr><td class="mono f-lg">NEC 310.15(B)(3)(c)</td><td>Rooftop Temp. Adder</td><td>Additional temperature adder for conduit/cable on or above rooftops</td></tr>
-          <tr><td class="mono f-lg">NEC Ch. 9 Table 1</td><td>Conduit Fill</td><td>Max fill: 1 wire = 53%; 2 wires = 31%; 3+ wires = 40% of conduit area</td></tr>
-          <tr><td class="mono f-lg">NEC 705.12(B)(2)</td><td>120% Busbar Rule</td><td>Backfeed breaker ≤ 20% of main panel busbar rating</td></tr>
-          <tr><td class="mono f-lg">NEC 690.12</td><td>Rapid Shutdown</td><td>Module-level shutdown within 30 seconds</td></tr>
-          <tr><td class="mono f-lg">NEC 310.15</td><td>Conductor Ampacity</td><td>Temperature and conduit fill derating</td></tr>
-          <tr><td class="mono f-lg">NEC Ch. 9, Table 1</td><td>Conduit Fill</td><td>Maximum 40% fill for 3+ conductors</td></tr>
-          <tr><td class="mono f-lg">ASCE 7-22 §26</td><td>Wind Loads</td><td>${_isRoof ? 'Components and cladding on roof-mounted arrays' : _isFence ? 'Wind loads on fence-mounted PV panels (Cf=1.3, ASCE §29.4)' : 'Wind loads on ground-mounted arrays (ASCE §29.4)'}</td></tr>
-          <tr><td class=\"mono f-lg\">ASCE 7-22 §7</td><td>Snow Loads</td><td>${_isRoof ? 'Roof snow load with slope reduction factor' : 'Ground snow load — roof slope reduction not applicable for ' + (_isFence ? 'fence-mounted' : 'ground-mounted') + ' arrays'}</td></tr>
-          <tr><td class="mono f-lg">NEC 220.82</td><td>Dwelling Load Calcs</td><td>Optional method — existing dwelling unit load calculation</td></tr>
-        </tbody>
-      </table>
-
+      ${/* Full NEC code-reference table removed — duplicated PV-4A's
+           methodology table row-for-row and displaced project content. */''}
       <div class="section-title">Load Calculations — NEC 220.82 Optional Method</div>
       ${(() => {
         const busA = project.panelBusRating || project.mainPanelAmps || 200;
@@ -344,6 +320,11 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const busLimit = busA * 1.2;
         const maxBfAllowed = busLimit - mainA;
         const passes120 = bfAmps <= maxBfAllowed;
+        // Single-sourced interconnection: a supply-side tap connects LINE side
+        // of the service disconnect — NEC 705.12(B)'s 120% busbar rule does not
+        // govern, so running (and failing) it here contradicted the rest of the
+        // set. Steps 8-9 + interpretation are method-specific below.
+        const _lcSupply = isSupplySideInterconnection(input);
         const sqft = mainA >= 200 ? 3000 : 2000;
         const lightingVA = sqft * 3;
         const smallApplVA = 4500;
@@ -370,33 +351,38 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <tr style="background:#fff;border-top:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:700;">Total Calculated Load</td><td>Steps 1–4 ÷ 240V service</td><td class="tr fw9">${Math.round(totalLoad).toLocaleString()} VA = ${loadAmps}A</td></tr>
             <tr class="bg-lt"><td class="fw9 mono">6</td><td>Service Ampacity</td><td>${mainA}A panel × 240V</td><td class="tr fw9">${mainA}A available</td></tr>
             <tr ><td class="fw9 mono">7</td><td>PV AC Output</td><td>${acKw.toFixed(2)} kW AC ÷ 240V</td><td class="tr fw9">${acAmps.toFixed(1)}A PV</td></tr>
+            ${_lcSupply ? `
+            <tr class="bg-lt"><td class="fw9 mono">8</td><td>Tap OCPD — NEC 705.11 / 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A fused disconnect</td></tr>
+            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">9</td><td style="font-weight:900;">Supply-Side Connection — NEC 705.11</td><td>Tap made LINE side of the ${mainA}A service disconnect; 120% busbar rule (NEC 705.12(B)) not applicable</td><td style="font-weight:900;text-align:right;font-size:11px;">COMPLIES</td></tr>
+            ` : `
             <tr class="bg-lt"><td class="fw9 mono">8</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A breaker required</td></tr>
-            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">9</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${passes120 ? 'PASS' : 'FAIL — UPGRADE PANEL'}</td></tr>
+            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">9</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${passes120 ? 'PASS' : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQ’D'}</td></tr>
+            `}
           </tbody>
         </table>
+        ${_lcSupply ? `
+        <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+          <strong>SUPPLY-SIDE INTERCONNECTION — NEC 705.11:</strong>
+          The PV system output connection is made to the supply (line) side of the service disconnecting means.
+          Tap conductors are sized ≥ 125% of PV output current (${acAmps.toFixed(1)}A × 1.25 = ${continuousA.toFixed(1)}A) and terminate in a ${bfAmps}A fused AC disconnect located within 10 ft of the tap per NEC 705.11(C).
+          The 120% busbar limitation of NEC 705.12(B) applies only to load-side connections and does not govern this design.
+          Service conductor and metering equipment adequacy to be field-verified with the serving utility.
+        </div>
+        ${''/* formula-tutorial box removed — displaced project content */}` : `
         <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
           <strong>120% RULE INTERPRETATION:</strong>
           The PV system requires a ${bfAmps}A backfeed breaker installed at the load end of the existing ${busA}A busbar.
           Per NEC 705.12(B)(2)(3), the sum of the main breaker (${mainA}A) and the PV backfeed breaker (${bfAmps}A) = ${mainA + bfAmps}A,
           which ${passes120 ? 'does not exceed' : 'exceeds'} the 120% limit of ${busLimit.toFixed(0)}A.
-          ${passes120 ? 'No panel upgrade is required.' : 'A panel upgrade or supply-side connection per NEC 705.12(A) is required.'}
+          ${passes120 ? 'No panel upgrade is required.' : 'A supply-side connection per NEC 705.11 or a panel upgrade is required.'}
         </div>
-        <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.6;border:var(--border);border-top:none;background:#f0f4f8;">
-          <strong>FORMULA REFERENCE — 120% BUSBAR RULE (NEC 705.12(B)(2)(3)):</strong><br/>
-          <span style="font-family:var(--mono);font-size:10px;">Main Breaker + PV Backfeed ≤ Busbar Rating × 120%</span><br/>
-          <span style="font-size:9px;color:#333;">
-            Calculation: ${mainA}A (main) + ${bfAmps}A (PV backfeed) = ${mainA + bfAmps}A ≤ ${busA}A × 1.2 = ${busLimit.toFixed(0)}A.
-            Maximum allowable PV backfeed = ${busLimit.toFixed(0)}A − ${mainA}A = ${maxBfAllowed.toFixed(0)}A.
-            Required PV backfeed breaker = ${bfAmps}A.
-          </span>
-          <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:${passes120 ? '#000' : '#cc0000'};color:#fff;">${passes120 ? 'PASS' : 'FAIL'}</span>
-        </div>`;
+        ${''/* formula-tutorial box removed — displaced project content */}`}`;
       })()}
       <!-- Grounding & Bonding Standard Detail -->
       <div class="section-title">Grounding & Bonding Detail — NEC 690.43, 250.166</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
         <div style="text-align:center;">
-          <svg viewBox="0 0 280 180" width="260" height="170" style="display:block;margin:0 auto;">
+          <svg viewBox="0 0 280 180" width="200" height="130" style="display:block;margin:0 auto;">
             <!-- Ground bus bar -->
             <rect x="20" y="140" width="240" height="16" fill="#0a0" stroke="#000" stroke-width="1.5" rx="2"/>
             <text x="140" y="152" text-anchor="middle" font-size="8" fill="#fff" font-weight="bold">EQUIPMENT GROUNDING BUS</text>
@@ -800,7 +786,11 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const batteryBackfeedA = project.batteryBackfeedA ?? (hasBattery ? project.batteryCount * 20 : 0);
     const egcNum = '10';
     const branchOcpd = 20;
-    const nBranches = Math.ceil(totalPanels / 16);
+    // PLANE-AWARE branch count — same planner as PV-2B/SLD
+    const _sldEPanels = (project as any).panelPositions as Array<{id:string;planeId?:string;arrayId?:string;row?:number;col?:number}> | undefined;
+    const nBranches = _sldEPanels?.length
+      ? planMicroBranches(_sldEPanels, inverterModel).count
+      : microBranchCount(totalPanels, inverterModel);
     const deviceCount = totalPanels;
 
     // X positions
@@ -940,18 +930,18 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(callout(utilCX+mR+14,utilCY-mR-5,6));
 
     // Callout legend box (top-left of schematic)
-    const lgdX=SCH_X+8, lgdY=SCH_Y+8, lgdW=130, lgdH=hasBattery?115:90;
+    const lgdX=SCH_X+8, lgdY=SCH_Y+8, lgdW=230, lgdH=hasBattery?140:115;
     parts.push(rect(lgdX,lgdY,lgdW,lgdH,{fill:WHT,stroke:BLK,sw:SW_HAIR}));
     parts.push(rect(lgdX,lgdY,lgdW,13,{fill:BLK,sw:0}));
     parts.push(txt(lgdX+lgdW/2,lgdY+10,'CALLOUT LEGEND',{sz:6,bold:true,anc:'middle',fill:WHT}));
     const lgdItems: [number,string][] = [
-      [1,'PV Array / Microinverters'],
+      [1,`PV Array — ${totalPanels}×${panelWatts}W — ${panelVoc.toFixed(0)}Voc/${panelIsc.toFixed(1)}Isc`],
       [2,isRoof(_sldSysType) ? 'Roof J-Box (AC)' : 'Array J-Box (AC)'],
-      [3,'AC Combiner (IQ Combiner 5C)'],
-      [4,'AC Disconnect'],
-      [5,'Main Service Panel (MSP)'],
-      [6,'Utility Meter'],
-      ...(hasBattery ? ([[7,'IQ System Controller 3'],[8,'IQ Battery Storage']] as [number,string][]) : []),
+      [3,'AC Combiner — IQ Combiner 5C'],
+      [4,`AC Disconnect — ${acOCPD}A Non-Fused`],
+      [5,`MSP — ${mainAmps}A Main / ${pvBreakerAmps}A PV`],
+      [6,'Utility Meter — 120/240V 1Ø'],
+      ...(hasBattery ? ([[7,'IQ System Controller 3 — 200A'],[8,`IQ Battery — ${batteryKwh.toFixed(0)}kWh`]] as [number,string][]) : []),
     ];
     lgdItems.forEach(([n,lbl],i)=>{
       const ly=lgdY+22+i*13;
@@ -1052,9 +1042,24 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(rect(p2x,CALC_Y,cW,CALC_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
     parts.push(rect(p2x,CALC_Y,cW,14,{fill:BLK,sw:0}));
     parts.push(txt(p2x+cW/2,CALC_Y+10,'AC SYSTEM CALCULATIONS',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    // NEC 690.8(A) Source Circuit Current (per microinv./string)
+    const _srcIsc = panelIsc > 0 ? panelIsc : 0;
+    const _srcImax = _srcIsc * 1.25;                         // NEC 690.8(A)(1)(a)
+    const _srcOcpd = _srcImax > 0 ? Math.ceil(_srcImax / 5) * 5 : branchOcpd; // next standard size
+    // NEC 690.8(B) PV Output Circuit Current
+    const _outImax = acOutputAmps * 1.25;                    // NEC 690.8(B)(1)(a)
+    const _outOcpd = _outImax > 0 ? Math.ceil(_outImax / 5) * 5 : acOCPD;     // next standard size
     const rows2: [string,string][]=[
       ['AC Output (kW)',`${totalAcKw.toFixed(2)} kW`],
       ['AC Output Amps',`${acOutputAmps.toFixed(1)} A`],
+      ['─ NEC 690.8(A) Source ─',''],
+      ['Isc (per module)',`${_srcIsc.toFixed(2)} A`],
+      ['Imax = Isc×1.25',`${_srcImax.toFixed(2)} A`],
+      ['Src OCPD',`${_srcOcpd} A`],
+      ['─ NEC 690.8(B) Output ─',''],
+      ['Iout = P÷V',`${acOutputAmps.toFixed(2)} A`],
+      ['Imax = Iout×1.25',`${_outImax.toFixed(2)} A`],
+      ['Out OCPD',`${_outOcpd} A`],
       ['AC OCPD (125%)',`${acOCPD} A`],
       ['AC Wire Gauge',acWireGauge],
       ['AC Conduit Type',acCondType],
@@ -1084,21 +1089,28 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(rect(p3x,CALC_Y,cW,CALC_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
     parts.push(rect(p3x,CALC_Y,cW,14,{fill:BLK,sw:0}));
     parts.push(txt(p3x+cW/2,CALC_Y+10,'EQUIPMENT SCHEDULE',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    const _invAcKw = eq_sld.inverterAcOutputKw || 0;
+    const _invAcA = _invAcKw > 0 ? (_invAcKw * 1000 / 240) : 0;
     const rows3: [string,string][]=[
       ['PV Module',esc(panelModel)],
       ['Module Wattage',`${panelWatts} W`],
+      ['Module Voc',`${panelVoc.toFixed(1)} V`],
+      ['Module Isc',`${panelIsc.toFixed(2)} A`],
       ['Total Modules',`${totalPanels}`],
+      ['─ Inverter ─',''],
       ['Microinverters',`${md} units`],
-      ['Branch Circuits',`${ab}`],
       ['Inverter Mfr.',esc(inverterMfr)],
       ['Inverter Model',esc(inverterModel)],
+      ['Inverter Max I',_invAcA > 0 ? `${_invAcA.toFixed(1)} A` : '—'],
       ['Inverter Output',`${totalAcKw.toFixed(2)} kW AC`],
+      ['Branch Circuits',`${ab}`],
+      ['─ System ─',''],
       ['AC Combiner','Enphase IQ Combiner 5C'],
       ['AC Disconnect',`${acOCPD}A Non-Fused`],
       ['Main Panel',`${mainAmps} A`],
       ['Utility',esc(utilityName)],
-      ['Interconnection','LOAD_SIDE'],
-      ['Rapid Shutdown','INTEGRATED'],
+      ['Interconnection',interconnectionLabel(project.interconnectionMethod)],
+      ['Rapid Shutdown','INTEGRATED — NEC 690.12'],
       ['Battery Storage',hasBattery?esc(batteryModel):'NONE'],
       ...(hasBattery&&batteryKwh?[['Battery Capacity',`${batteryKwh.toFixed(1)} kWh`] as [string,string]]:[]),
       ...(hasBattery?[['Batt. Backfeed',`${batteryBackfeedA}A — NEC 705.12(B)`] as [string,string]]:[]),
@@ -1192,7 +1204,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
       ['MODEL',esc(inverterModel)],
       ['SERVICE',`${mainAmps}A`],
       ['UTILITY',esc(utilityName)],
-      ['INTERCONN.','LOAD_SIDE'],
+      ['INTERCONN.',interconnectionLabel(project.interconnectionMethod).split(' — ')[0]],
     ];
     let sysY2=sysY+12;
     const sysRH=16;
@@ -1251,36 +1263,15 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
   }
 
   // ── SLD content: 3-tier priority ──────────────────────────────────────
-  //   1. storedSldSvg  — pre-generated via "Generate SLD" button (DB artifact)
-  //   2. Live professional SLD — renderSLDProfessional() from live permit data
+  //   1. LIVE professional SLD — renderSLDProfessional() from CURRENT permit data
+  //   2. storedSldSvg — pre-generated "Generate SLD" DB artifact (fallback only:
+  //      a stored SVG is frozen at whatever engine version rendered it, and a
+  //      stale one resurrected every fixed E-1 defect — build badge, corrupted
+  //      '3#32' callouts, ceil/16 branch math — on top of the repaired engine)
   //   3. Inline buildSLD() — built-in fallback (always works)
   let sldBodyHtml: string;
 
-  if (storedSldSvg && storedSldSvg.trim().startsWith('<svg')) {
-  // FIX v47.296: Sanitize stored SLD — replace roof-specific labels for non-roof systems
-  if (_sldSysType !== 'roof') {
-    storedSldSvg = storedSldSvg
-      .replace(/ROOF J-BOX/g, 'ARRAY J-BOX')
-      .replace(/Roof J-Box/g, 'Array J-Box')
-      .replace(/roof j-box/g, 'array j-box');
-  }
-  // FIX v47.341: Sanitize stored SLD — fix floating point leaks in kW/coordinate values
-  storedSldSvg = storedSldSvg.replace(
-    /\d+\.\d{2}\d{10,}/g,
-    (m: string) => parseFloat(m).toFixed(2)
-  );
-    // Stored SLD from Engineering tab "Generate SLD" — render full-bleed
-    sldBodyHtml = `
-    <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
-      <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
-        ${storedSldSvg}
-      </div>
-    </div>`;
-  } else {
-    // ── LIVE SLD: auto-generate professional SLD from permit data ──────
-    // Pipeline: PermitInput → buildSLDInputFromPermit() → renderSLDProfessional()
-    // Same renderer used by the Engineering tab "Generate SLD" button.
-    // Falls back to inline buildSLD() if the professional renderer fails.
+  {
     let liveSvg: string | null = null;
     try {
       liveSvg = generateLiveSLD(input, cad);
@@ -1288,11 +1279,30 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
         liveSvg = null;
       }
     } catch (sldErr: unknown) {
-      console.warn('[E-1] Live SLD generation failed, falling back to inline buildSLD():', sldErr instanceof Error ? (sldErr as Error).message : sldErr);
+      console.warn('[E-1] Live SLD generation failed, falling back to stored/inline SLD:', sldErr instanceof Error ? (sldErr as Error).message : sldErr);
       liveSvg = null;
     }
 
-    if (liveSvg) {
+    if (!liveSvg && storedSldSvg && storedSldSvg.trim().startsWith('<svg')) {
+      // FIX v47.296: Sanitize stored SLD — replace roof-specific labels for non-roof systems
+      if (_sldSysType !== 'roof') {
+        storedSldSvg = storedSldSvg
+          .replace(/ROOF J-BOX/g, 'ARRAY J-BOX')
+          .replace(/Roof J-Box/g, 'Array J-Box')
+          .replace(/roof j-box/g, 'array j-box');
+      }
+      // FIX v47.341: Sanitize stored SLD — fix floating point leaks in kW/coordinate values
+      storedSldSvg = storedSldSvg.replace(
+        /\d+\.\d{2}\d{10,}/g,
+        (m: string) => parseFloat(m).toFixed(2)
+      );
+      sldBodyHtml = `
+      <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
+        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
+          ${storedSldSvg}
+        </div>
+      </div>`;
+    } else if (liveSvg) {
       // Live professional SLD — render full-bleed (same layout as stored SLD)
       sldBodyHtml = `
       <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">

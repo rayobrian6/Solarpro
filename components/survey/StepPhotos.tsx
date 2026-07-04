@@ -30,6 +30,31 @@ function blankSlotState(): SlotState {
 }
 
 // ---------------------------------------------------------------------------
+// captureGeolocation - sample device GPS at photo-capture time.
+// Browser file-input photos carry no EXIF GPS, so this is the only reliable
+// position source. The surveyor stands within a few meters of the subject,
+// which pins meter/panel photos to the correct wall for the PV-1 plan sheet.
+// Fail-soft: resolves null on denial/timeout/unsupported - never blocks upload.
+// ---------------------------------------------------------------------------
+function captureGeolocation(): Promise<{ lat: number; lng: number; accuracyM?: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracyM: isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : undefined,
+      }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
 // StepPhotos
 // ---------------------------------------------------------------------------
 interface StepPhotosProps {
@@ -73,6 +98,10 @@ export function StepPhotos({
     async (category: PhotoCategory, file: File) => {
       setSlotState(category, { uploading: true, progress: 10, error: null });
 
+      // Sample GPS in parallel with the upload - adds no wait in the common
+      // case (upload takes longer than the fix) and fails soft to null.
+      const gpsPromise = captureGeolocation();
+
       try {
         const formData = new FormData();
         formData.append('file', file);
@@ -98,6 +127,7 @@ export function StepPhotos({
         }
 
         const result = await res.json() as { url: string; uploadKey: string };
+        const gps = await gpsPromise;
 
         const photo: SurveyPhoto = {
           id: `photo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -106,6 +136,7 @@ export function StepPhotos({
           url: result.url,
           uploadKey: result.uploadKey,
           capturedAt: new Date().toISOString(),
+          gps,
         };
 
         onPhotoUploaded(photo);

@@ -41,6 +41,65 @@ import {
 import {
   drawCallout, drawCalloutWithLeader, drawLeaderLine, drawWindArrow,
 } from '../callouts';
+import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
+import { getMountingSystemById } from '../../mounting-hardware-db';
+import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
+
+// Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
+function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+    if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// Screen-space point-in-ring (ray cast) — used to pick each edge's inward normal.
+function ptInRingXY(x: number, y: number, ring: { x: number; y: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
+    if (((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// CAD-space vertex coincidence (fake-degrees, 1 unit ≈ 1 ft).
+function sameVert(a: { lat: number; lng: number }, b: { lat: number; lng: number }): boolean {
+  return Math.abs(a.lat - b.lat) < 0.75 && Math.abs(a.lng - b.lng) < 0.75;
+}
+
+// Edge classification: an edge shared with ANOTHER facet (same endpoints, either
+// order) is interior = ridge/hip; a perimeter edge is eave/rake. Drives both the
+// per-edge fire-setback distance and the per-edge line weight.
+function isInteriorEdge(
+  a: { lat: number; lng: number }, b: { lat: number; lng: number },
+  planes: any[], skipIdx: number,
+): boolean {
+  for (let pi = 0; pi < planes.length; pi++) {
+    if (pi === skipIdx) continue;
+    const vs = planes[pi].vertices as Array<{ lat: number; lng: number }>;
+    for (let i = 0; i < vs.length; i++) {
+      const u = vs[i], v = vs[(i + 1) % vs.length];
+      if ((sameVert(u, a) && sameVert(v, b)) || (sameVert(u, b) && sameVert(v, a))) return true;
+    }
+  }
+  return false;
+}
+
+// Plan-view (horizontal footprint) area of a facet ring, in ft². drawRoofPlan
+// receives fake-degree CAD units where 1 unit ≈ 1 ft (see header), so the raw
+// shoelace is already ft² — no lat/lng metre conversion. This is the "PLAN VIEW"
+// roof area the pro sets report, not the sloped surface area.
+function planViewAreaFt2(ring: Array<{ lat: number; lng: number }>): number {
+  if (ring.length < 3) return 0;
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    a += ring[j].lng * ring[i].lat - ring[i].lng * ring[j].lat;
+  }
+  return Math.abs(a / 2);   // ft² (1 CAD unit = 1 ft)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // drawRoofPlan — PV-2 Top-Down GPS Array Layout (PRIMARY)
@@ -53,6 +112,7 @@ export function drawRoofPlan(
   intent?: DesignIntent | null,
   cad?: CADModel | null,
   ctx?: RenderContext | null,
+  panelColorById?: Map<string, string> | null,
 ): string {
   const { project, layout, engineering } = input;
 
@@ -60,16 +120,33 @@ export function drawRoofPlan(
   const dcKw        = cad?.totalDcKw   ?? engineering.totalDcKw   ?? (totalPanels * (engineering.panelWatts || 400) / 1000);
   const panelLenIn  = project.panelLengthIn   || 66;
   const panelWidIn  = project.panelWidthIn    || 40;
-  const mountSys    = (project.mountingSystem || 'IRONRIDGE XR100').toUpperCase();
+  const mountSys    = ((((project as any)._canonical?.mountSystem as string)
+    || project.mountingSystem
+    || 'IRONRIDGE XR100')).toUpperCase();
+  // rail-less systems (RT-Mini etc.) draw per-module mounts; railed systems
+  // draw the two row rails + feet at framing crossings
+  const isRailless  = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(mountSys);
   const roofType    = (project.roofType       || 'SHINGLE').toUpperCase();
+  const condType    = (project.conduitType    || 'EMT').toUpperCase();
+  const panelWatts  = engineering.panelWatts || 0;
+  const _modNamed   = [project.moduleMfr, project.moduleModel].filter(Boolean).join(' ').toUpperCase();
+  const _invNamed   = [project.inverterMfr, project.inverterModel].filter(Boolean).join(' ').toUpperCase();
   const pitchNum    = project.roofPitch       || 5;
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
-  const attachSp    = project.attachmentSpacing || 48;
-  const setbackIn   = project.ahjRoofSetbackIn  || 18;  // IFC 605.11 access pathway (was hardcoded 36")
-  const ridgeSetIn  = project.ahjRidgeSetbackIn || 18;
-  const setbackFt   = setbackIn / 12;
-  const ridgeSetFt  = ridgeSetIn / 12;
+  const attachSp    = (project as any).resolvedAttachSpacingIn
+    || project.attachmentSpacing
+    || 48;
+  // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
+  // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
+  // (drawn as a band on every edge) and ahjRoofSetbackIn is the ACCESS PATHWAY
+  // WIDTH — a designated 36" route requirement, NOT a uniform edge moat.
+  // Hatching every eave/rake at the pathway width buried half the roof in red
+  // and made code-compliant modules read as violations.
+  // Defaults resolved AFTER geometry validation — the 18"-vs-36" ridge
+  // setback depends on array coverage (IFC 2021 §1204.2.1.1); see below.
+  const pathwayIn   = project.ahjRoofSetbackIn  || 36;
+  const pathwayFt   = pathwayIn / 12;
 
   // ── STEP 4: Geometry from CAD (via adapter fake-degree encoding) ──
   const rpData = project.roofPlanes    || [];
@@ -101,6 +178,34 @@ export function drawRoofPlan(
     );
   }
 
+  // ── Fire setback width — IFC 2021 §1204.2.1.1 coverage test ──
+  // The 18" ridge setback is the EXCEPTION, allowed only where the array
+  // covers ≤ 33% of the roof plan area; above that the 36" default governs.
+  // An AHJ-supplied value always wins. (Shipping 18" bands on a 48%-coverage
+  // roof was a plan-check red flag.)
+  const _shoelaceFt2 = (verts: any[]): number => {
+    let s = 0;
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      s += a.lng * b.lat - b.lng * a.lat;
+    }
+    return Math.abs(s) / 2;   // fake-degree verts: 1 unit = 1 ft
+  };
+  const _roofAreaFt2  = validPlanes.reduce((s: number, rp: any) => s + _shoelaceFt2(rp.vertices), 0);
+  const _arrayAreaFt2 = validPanels.length * (panelLenIn * panelWidIn) / 144;
+  const _coverage     = _roofAreaFt2 > 0 ? _arrayAreaFt2 / _roofAreaFt2 : 0;
+  const fireSetIn   = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _coverage);
+  const setbackFt   = fireSetIn / 12;
+
+  // ── Regularize the hand-traced geometry for DRAWING (display copy only) ──
+  // Welds shared facet corners, straightens near-axis eaves/ridge, squares the
+  // outline — ±1-2 ft trace noise rendered as amateur linework (wavy eaves,
+  // dogleg ridge, asymmetric hips). Panels ride along via each facet's fitted
+  // affine so rows stay flush to the straightened edges (they overhung the new
+  // eave when only the planes moved). Stored geometry is untouched.
+  const regPlanes = regularizeRoofPlanes(validPlanes as any[]);
+  const regPanels = coTransformPanels(validPlanes as any[], regPlanes as any[], validPanels as any[]);
+
   // ── Layout zones (STEP 3) ──
   const zones = getLayoutForSystem('roof', 'plan');
   const W = zones.canvas.width;
@@ -108,13 +213,32 @@ export function drawRoofPlan(
   const dz = zones.draw;
 
   const els: string[] = [];
+  // v65: pre-compute branch-color mode flag (needed for title bar)
+  const isBranchColorMode = !!(panelColorById && panelColorById.size > 0);
+
   els.push(drawSVGOpen(W, H));
-  els.push(drawBackground(W, H, '#f5f7f0'));
-  els.push(drawTitleBar(W, 'ROOF PLAN — PHOTOVOLTAIC ARRAY LAYOUT', 'SCALE: 3/32"=1\'-0"'));
+  // Pro-reference restyle (Ray, 2026-07-01: match the PE-sealed set): white sheet,
+  // white roof linework, red-HATCHED setback bands, white modules w/ attachment
+  // dots — monochrome CAD language instead of tinted fills ("cartoony").
+  els.push(drawBackground(W, H, '#ffffff'));
+  // Red diagonal hatch for the fire-setback band (the reference's signature mark).
+  els.push(`<defs><pattern id="hatch-setback" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#cc2222" stroke-width="0.7"/></pattern></defs>`);
+  // Setback hatch is DEFERRED and painted OVER the modules: painting modules
+  // on top hid every encroachment (modules sitting in the 36" band read as
+  // clean roof). Quads + label positions collected for encroachment counting
+  // and label de-collision.
+  const deferredBandEls: string[] = [];
+  const bandQuads: Array<Array<{ x: number; y: number }>> = [];
+  const bandLabelPts: Array<{ x: number; y: number }> = [];
+  // Viewport title (reference style) renders BELOW the drawing — the old
+  // full-width solid-black banner read as a web dashboard, not a CAD sheet.
+  const svgTitle = isBranchColorMode
+    ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP'
+    : 'ROOF PLAN WITH MODULES';
 
   // ── GPS coordinate → SVG mapping ──
-  const allLats = validPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
-  const allLngs = validPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
+  const allLats = regPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
+  const allLngs = regPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
   const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
   const minLng = Math.min(...allLngs), maxLng = Math.max(...allLngs);
   const latSpan = maxLat - minLat || 0.001;
@@ -141,30 +265,169 @@ export function drawRoofPlan(
   // Plane labels are collected here and rendered AFTER the panels so the modules
   // never paint over them (the old "ANE 2 / E FAC" clipping).
   const planeLabels: Array<{ cx: number; cy: number; ri: number; pitch: any; azimuth: any }> = [];
-  validPlanes.forEach((rp: any, ri: number) => {
-    const pts = rp.vertices!.map(
-      (v: any) => toX(v.lng).toFixed(1) + ',' + toY(v.lat).toFixed(1)
-    ).join(' ');
+  const interiorEdgesXY: Array<{ ax: number; ay: number; bx: number; by: number }> = [];
+  // per-plane framing grid — attachment feet snap onto these lines
+  const framingGrids: Array<{ fAz: number; spacingPx: number; bcx: number; bcy: number } | null> = [];
+  regPlanes.forEach((rp: any, ri: number) => {
+    const ptsXY = rp.vertices!.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
+    const pts = ptsXY.map((p: { x: number; y: number }) => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
 
-    // Roof plane fill — clean light cool-gray (was a busy beige + double hatch).
-    const roofFill = ri % 2 === 0 ? '#eceef1' : '#e3e6ea';
-    els.push(`<polygon points="${pts}" fill="${roofFill}" stroke="none"/>`);
-    // Subtle shingle texture only — dropped to a whisper (was opaque 0.92) and the
-    // second diagonal wood hatch removed entirely, which was the main "busy" look.
-    const tileClipId = `rtc${ri}`;
-    els.push(`<defs><clipPath id="${tileClipId}"><polygon points="${pts}"/></clipPath></defs>`);
-    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-roof-tile)" opacity="0.22" clip-path="url(#${tileClipId})"/>`);
+    // Roof plane — WHITE with fine black linework (reference CAD style; the gray
+    // fills + shingle texture were the "cartoony" read).
+    els.push(`<polygon points="${pts}" fill="#ffffff" stroke="none"/>`);
 
-    // Clean structural outline
-    els.push(`<polygon points="${pts}" fill="none" stroke="#2b2f36" stroke-width="2" stroke-linejoin="miter"/>`);
+    // Per-edge fire-setback bands + line weights. Classification:
+    //   interior (shared with another facet) = RIDGE/HIP → band + heavy line
+    //   perimeter, outward normal ≈ downslope   = EAVE   → NO band (no code
+    //     requirement — panels run to the gutter; Ray: "if there is no firewalk
+    //     on the eave it needs to not show") + fine line
+    //   perimeter otherwise                     = RAKE   → band + fine line
+    const nV = ptsXY.length;
+    const clipId = `sbclip${ri}`;
+    els.push(`<defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>`);
+    const bands: string[] = [];
+    const edgeLines: string[] = [];
+    const az = (typeof rp.azimuth === 'number' && isFinite(rp.azimuth)) ? rp.azimuth : null;
+    // downslope unit vector in (lng, lat) CAD space — azimuth 0° = faces north = +lat
+    const dsX = az != null ? Math.sin(az * Math.PI / 180) : 0;
+    const dsY = az != null ? Math.cos(az * Math.PI / 180) : 0;
 
-    // Fire setback inset (dashed red outline)
-    els.push(`<polygon points="${pts}" fill="none" class="line-setbk"/>`);
+    // ── Framing lines (rafters / truss top chords @ rafterSp O.C.) ──
+    // Thin light lines running along the fall line (eave → ridge), clipped to
+    // the facet — the reference sets show framing under the array, and the
+    // attachment dots land ON these lines. Snapped to the sheet axes like the
+    // modules so the grid reads drafted, not traced.
+    if (!isBranchColorMode && az != null) {
+      let fAz = ((az % 180) + 180) % 180;
+      if (fAz < 15 || fAz > 165) fAz = 0;
+      else if (Math.abs(fAz - 90) < 15) fAz = 90;
+      const fdX = Math.sin(fAz * Math.PI / 180), fdY = -Math.cos(fAz * Math.PI / 180); // screen dir (y down)
+      const fpX = -fdY, fpY = fdX;                                                     // across-slope
+      const bxs = ptsXY.map((p: { x: number; y: number }) => p.x);
+      const bys = ptsXY.map((p: { x: number; y: number }) => p.y);
+      const bcx = (Math.min(...bxs) + Math.max(...bxs)) / 2;
+      const bcy = (Math.min(...bys) + Math.max(...bys)) / 2;
+      const halfDiag = Math.hypot(Math.max(...bxs) - Math.min(...bxs), Math.max(...bys) - Math.min(...bys)) / 2 + 4;
+      const spacingPx = Math.max((rafterSp / 12) * scale, 6);
+      const nLines = Math.ceil(halfDiag / spacingPx);
+      const framing: string[] = [];
+      for (let k = -nLines; k <= nLines; k++) {
+        const oxp = bcx + fpX * k * spacingPx, oyp = bcy + fpY * k * spacingPx;
+        framing.push(`<line x1="${(oxp - fdX * halfDiag).toFixed(1)}" y1="${(oyp - fdY * halfDiag).toFixed(1)}" x2="${(oxp + fdX * halfDiag).toFixed(1)}" y2="${(oyp + fdY * halfDiag).toFixed(1)}" stroke="#c8cdd5" stroke-width="0.45"/>`);
+      }
+      els.push(`<g clip-path="url(#${clipId})">${framing.join('')}</g>`);
+      framingGrids[ri] = { fAz, spacingPx, bcx, bcy };
+    } else {
+      framingGrids[ri] = null;
+    }
+    for (let ei = 0; ei < nV; ei++) {
+      const a = ptsXY[ei], b = ptsXY[(ei + 1) % nV];
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 2) continue;   // degenerate/closing dup
+      const va = rp.vertices![ei], vb = rp.vertices![(ei + 1) % nV];
+      const interior = isInteriorEdge(va, vb, regPlanes, ri);
+      // Eave test (perimeter only): CAD-space OUTWARD normal vs the downslope dir.
+      let isEave = false;
+      if (!interior && az != null) {
+        const eLng = vb.lng - va.lng, eLat = vb.lat - va.lat;
+        const eLen = Math.hypot(eLng, eLat) || 1;
+        let onX = -eLat / eLen, onY = eLng / eLen;
+        const mLng = (va.lng + vb.lng) / 2, mLat = (va.lat + vb.lat) / 2;
+        if (ptInLatLngRing(mLat + onY * 1.5, mLng + onX * 1.5, rp.vertices!)) { onX = -onX; onY = -onY; }
+        isEave = (onX * dsX + onY * dsY) > 0.64;   // within ~50° of downslope
+      }
+      const dPx = setbackFt * scale;
+      // Inward unit normal (screen space) — probe a point just off the midpoint.
+      const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey);
+      let nx = -ey / el, ny = ex / el;
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      if (!ptInRingXY(mx + nx * 3, my + ny * 3, ptsXY)) { nx = -nx; ny = -ny; }
+      if (interior || !isEave) {
+        const a2x = a.x + nx * dPx, a2y = a.y + ny * dPx;
+        const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
+        bands.push(`<polygon points="${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)} ${b2x.toFixed(1)},${b2y.toFixed(1)} ${a2x.toFixed(1)},${a2y.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.45" stroke="none"/>`);
+        bands.push(`<line x1="${a2x.toFixed(1)}" y1="${a2y.toFixed(1)}" x2="${b2x.toFixed(1)}" y2="${b2y.toFixed(1)}" class="line-setbk"/>`);
+        bandQuads.push([{ x: a.x, y: a.y }, { x: b.x, y: b.y }, { x: b2x, y: b2y }, { x: a2x, y: a2y }]);
+        // Reference-style IN-BAND label on long bands (rotated to the band
+        // axis). Labels de-collide globally — every short hip band carrying
+        // its own rotated label produced the NW/SE-corner crisscross.
+        if (!isBranchColorMode && el > 150) {
+          const bmx = (a.x + b.x) / 2 + nx * dPx * 0.5;
+          const bmy = (a.y + b.y) / 2 + ny * dPx * 0.5;
+          if (!bandLabelPts.some(q => Math.hypot(q.x - bmx, q.y - bmy) < 60)) {
+            bandLabelPts.push({ x: bmx, y: bmy });
+            let angDeg = Math.atan2(ey, ex) * 180 / Math.PI;
+            if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;   // never upside-down
+            bands.push(`<text x="${bmx.toFixed(1)}" y="${(bmy + 2).toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#b91c1c" opacity="0.9">${ftToFtIn(setbackFt)} FIRE SETBACK</text>`);
+          }
+        }
+      }
+      if (interior) interiorEdgesXY.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
+      edgeLines.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#000" stroke-width="${interior ? 2.4 : 1.3}"/>`);
+    }
+    deferredBandEls.push(`<g clip-path="url(#${clipId})">${bands.join('')}</g>`);
+    els.push(...edgeLines);
 
     // Plane label — collected, rendered after panels (see planeLabels render below)
     const cx = rp.vertices!.reduce((s: number, v: any) => s + toX(v.lng), 0) / rp.vertices!.length;
     const cy = rp.vertices!.reduce((s: number, v: any) => s + toY(v.lat), 0) / rp.vertices!.length;
     planeLabels.push({ cx, cy, ri, pitch: rp.pitch, azimuth: rp.azimuth });
+  });
+
+  // ── Fire-access pathways (IFC 2021 §1204.2.1) — DRAWN, not just noted ──
+  // For each panel-bearing plane, find the widest module-free strip running
+  // eave→ridge; when it fits the required pathway width, hatch and label it.
+  // The pathway existed only as note TEXT before — a plan checker looking for
+  // the code-required 36" route found nothing in the geometry.
+  let _pathwaysDrawn = 0;
+  regPlanes.forEach((rp: any, ri: number) => {
+    if (!rp.vertices || rp.vertices.length < 3) return;
+    const planePanels = regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices));
+    if (!planePanels.length) return;
+    const ptsXY = rp.vertices.map((v: any) => ({ x: toX(v.lng), y: toY(v.lat) }));
+    // Screen-space downslope basis (v = eave→ridge axis, u = along-eave axis)
+    const az = (typeof rp.azimuth === 'number' && isFinite(rp.azimuth)) ? rp.azimuth : 180;
+    const c0lng = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
+    const c0lat = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
+    let vdx = toX(c0lng + Math.sin(az * Math.PI / 180)) - toX(c0lng);
+    let vdy = toY(c0lat + Math.cos(az * Math.PI / 180)) - toY(c0lat);
+    const vl = Math.hypot(vdx, vdy) || 1; vdx /= vl; vdy /= vl;
+    const udx = -vdy, udy = vdx;
+    const uOf = (x: number, y: number) => x * udx + y * udy;
+    const vOf = (x: number, y: number) => x * vdx + y * vdy;
+    const us = ptsXY.map((p: any) => uOf(p.x, p.y));
+    const vs = ptsXY.map((p: any) => vOf(p.x, p.y));
+    const uMin = Math.min(...us), uMax = Math.max(...us);
+    const vMin = Math.min(...vs), vMax = Math.max(...vs);
+    // Occupied intervals along the eave axis (panels padded to footprint)
+    const _padPx = (Math.max(panelLenIn, panelWidIn) / 12) * scale / 2 + 2;
+    const occ = planePanels
+      .map((p: any) => { const u = uOf(toX(p.lng), toY(p.lat)); return [u - _padPx, u + _padPx] as [number, number]; })
+      .sort((a: [number, number], b: [number, number]) => a[0] - b[0]);
+    const merged: Array<[number, number]> = [];
+    for (const iv of occ) {
+      const last = merged[merged.length - 1];
+      if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+      else merged.push([iv[0], iv[1]]);
+    }
+    const gaps: Array<[number, number]> = [];
+    let cur = uMin;
+    for (const [s, e] of merged) { if (s > cur) gaps.push([cur, s]); cur = Math.max(cur, e); }
+    if (cur < uMax) gaps.push([cur, uMax]);
+    const needPx = pathwayFt * scale;
+    const best = gaps.filter(g => g[1] - g[0] >= needPx)
+      .sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]))[0];
+    if (!best) return;
+    const gc = (best[0] + best[1]) / 2;
+    const g0 = gc - needPx / 2, g1 = gc + needPx / 2;
+    const corner = (u: number, v: number) => `${(u * udx + v * vdx).toFixed(1)},${(u * udy + v * vdy).toFixed(1)}`;
+    const poly = [corner(g0, vMin), corner(g1, vMin), corner(g1, vMax), corner(g0, vMax)].join(' ');
+    els.push(`<g clip-path="url(#sbclip${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
+    const lmx = gc * udx + ((vMin + vMax) / 2) * vdx;
+    const lmy = gc * udy + ((vMin + vMax) / 2) * vdy;
+    let angDeg = Math.atan2(vdy, vdx) * 180 / Math.PI;
+    if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;
+    els.push(`<text x="${lmx.toFixed(1)}" y="${lmy.toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${lmx.toFixed(1)} ${lmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#1a7a2e">${ftToFtIn(pathwayFt)} ACCESS PATHWAY</text>`);
+    _pathwaysDrawn++;
   });
 
   // ── Draw panels (from CAD fake-degree positions) ──
@@ -173,31 +436,273 @@ export function drawRoofPlan(
   const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
   const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
-  // Flat, crisp PV modules — uniform fill + thin frame (no gradient/reflection/
-  // busbar clip-art, which muddied to a blue smear at plan scale).
-  validPanels.forEach((p: any) => {
+  // Reference-style modules: WHITE rectangle, fine dark-blue frame, attachment
+  // dots at the rail-foot quarter points. Each module is ROTATED to its plane's
+  // fall line (portrait long axis runs up-slope) — drawing every module
+  // axis-aligned overlapped/poked-out the rotated end-plane (E/W) arrays.
+  // PV-2B keeps solid branch-colored fills — that sheet IS a color map.
+  regPanels.forEach((p: any) => {
     const px = toX(p.lng), py = toY(p.lat);
     const isLandscape = (p.orientation || 'landscape') === 'landscape';
     const pw = isLandscape ? panLenPx : panWidPx;
     const ph = isLandscape ? panWidPx : panLenPx;
     const x0 = px - pw / 2, y0 = py - ph / 2;
+    const azRot = Number(p.azimuth ?? p.heading);
+    // rotate so the long axis follows the plane azimuth — SNAPPED to the sheet
+    // axes: rotating grid-placed rects by the raw 3-4° trace azimuth made every
+    // row read gapped + crooked against the regularized (axis-square) outline.
+    let rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
+    if (rot < 15 || rot > 165) rot = 0;
+    else if (Math.abs(rot - 90) < 15) rot = 90;
+    const gOpen = rot > 1 && rot < 179
+      ? `<g transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">` : '<g>';
 
-    // Module body — single flat navy fill + thin dark frame
-    els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#1b3f74" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
-    // Thin aluminum frame inset
-    els.push(`<rect x="${(x0 + 0.7).toFixed(1)}" y="${(y0 + 0.7).toFixed(1)}" width="${Math.max(pw - 1.4, 0).toFixed(1)}" height="${Math.max(ph - 1.4, 0).toFixed(1)}" fill="none" stroke="rgba(190,210,235,0.5)" stroke-width="0.35"/>`);
-    // One subtle mid seam for the half-cell read (only when large enough)
-    if (ph > 12) {
-      els.push(`<line x1="${(x0 + 1).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(x0 + pw - 1).toFixed(1)}" y2="${py.toFixed(1)}" stroke="rgba(150,180,220,0.4)" stroke-width="0.4"/>`);
+    const branchFill = panelColorById?.get(p.id);
+    if (branchFill) {
+      els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/></g>`);
+    } else {
+      // ── System-aware rail + foot logic ──
+      // RAIL-LESS (RT-Mini etc.): 4 mounts under the module's long-side frame
+      // edges at the quarter points, X SNAPPED to the framing grid (mounts
+      // bolt into rafters/chords — feet floating between framing lines was
+      // the "doesn't make sense" read).
+      // RAILED (IronRidge etc.): two rail lines at 25/75% of module height
+      // (adjacent modules' segments join into continuous row rails) + one
+      // foot per rail snapped to the nearest framing line.
+      const hostIdx = regPlanes.findIndex((rp: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices ?? []));
+      const grid = hostIdx >= 0 ? framingGrids[hostIdx] : null;
+      const snapX = (x: number): number => {
+        if (!grid || rot !== 0 || grid.fAz !== 0) return x;
+        const s = grid.bcx + Math.round((x - grid.bcx) / grid.spacingPx) * grid.spacingPx;
+        return Math.max(x0 + 1, Math.min(x0 + pw - 1, s));
+      };
+      const fy1 = y0 + ph * 0.25, fy2 = y0 + ph * 0.75;
+      let hardware = '';
+      if (isRailless) {
+        const fxL = snapX(x0 + 1.6), fxR = snapX(x0 + pw - 1.6);
+        for (const [fx, fy] of [[fxL, fy1], [fxR, fy1], [fxL, fy2], [fxR, fy2]] as Array<[number, number]>) {
+          hardware += `<circle cx="${fx.toFixed(1)}" cy="${fy.toFixed(1)}" r="1.0" fill="#2a5db0"/>`;
+        }
+      } else {
+        const fxc = snapX(px);
+        hardware =
+          `<line x1="${x0.toFixed(1)}" y1="${fy1.toFixed(1)}" x2="${(x0 + pw).toFixed(1)}" y2="${fy1.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>` +
+          `<line x1="${x0.toFixed(1)}" y1="${fy2.toFixed(1)}" x2="${(x0 + pw).toFixed(1)}" y2="${fy2.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>` +
+          `<circle cx="${fxc.toFixed(1)}" cy="${fy1.toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
+          `<circle cx="${fxc.toFixed(1)}" cy="${fy2.toFixed(1)}" r="1.1" fill="#2a5db0"/>`;
+      }
+      els.push(
+        `${gOpen}` +
+        `<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
+        hardware +
+        `</g>`);
     }
   });
 
-  // ── Plane labels (rendered last, on top of panels — opaque pill, sized to text) ──
+  // ── Setback hatch OVER the modules + encroachment accounting ──
+  // Painting modules on top of the hatch hid every violation; the AHJ (and
+  // Ray) must SEE a module sitting in the band. Encroaching modules get a red
+  // corner flag; the count lands in the general notes.
+  els.push(...deferredBandEls);
+  let _encroachCount = 0;
+  if (!isBranchColorMode && bandQuads.length) {
+    regPanels.forEach((p: any) => {
+      const px = toX(p.lng), py = toY(p.lat);
+      if (bandQuads.some(q => ptInRingXY(px, py, q))) {
+        _encroachCount++;
+        els.push(`<rect x="${(px - 4).toFixed(1)}" y="${(py - 4).toFixed(1)}" width="8" height="8" fill="none" stroke="#cc0000" stroke-width="1.2" transform="rotate(45 ${px.toFixed(1)} ${py.toFixed(1)})"/>`);
+      }
+    });
+  }
+
+  // ── AC branch trunk routing (PV-2B): the daisy-chain per branch ──
+  // Branch MEMBERSHIP comes from panelColorById (arrayPages assignment; first-
+  // appearance order = B1..Bn = legend order). Wiring ORDER within a branch is
+  // computed HERE, geometrically, on the RENDERED coordinates — the canonical
+  // pipeline does not guarantee the map's insertion order matches rendered
+  // adjacency (prod panels arrive without planeId, so the upstream serpentine
+  // sort interleaved planes → the trunk polylines starburst through the roof
+  // center). Greedy nearest-neighbor chaining degenerates to a serpentine walk
+  // on any grid and never trusts upstream ordering.
+  if (isBranchColorMode && panelColorById) {
+    const byId = new Map<string, any>(regPanels.map((p: any) => [p.id, p]));
+    const branchGroups: Array<{ color: string; ps: any[] }> = [];
+    const seen = new Map<string, number>();
+    for (const [pid, color] of panelColorById) {
+      const p = byId.get(pid);
+      if (!p) continue;
+      if (!seen.has(color)) { seen.set(color, branchGroups.length); branchGroups.push({ color, ps: [] }); }
+      branchGroups[seen.get(color)!].ps.push(p);
+    }
+    // JB position FIRST — homeruns need a target. Keep it ON the roof near
+    // the SE eave, inside the outline: the old panel-bbox+26 offset dropped
+    // it into the hip setback / off the roof edge.
+    const _allVx = regPlanes.flatMap((rp: any) => (rp.vertices ?? []).map((v: any) => toX(v.lng)));
+    const _allVy = regPlanes.flatMap((rp: any) => (rp.vertices ?? []).map((v: any) => toY(v.lat)));
+    const _pbx = regPanels.map((p: any) => toX(p.lng)), _pby = regPanels.map((p: any) => toY(p.lat));
+    const jbX = Math.min(Math.max(..._pbx) + 14, (_allVx.length ? Math.max(..._allVx) : Math.max(..._pbx)) - 10);
+    const jbY = Math.min(Math.max(..._pby) + 12, (_allVy.length ? Math.max(..._allVy) : Math.max(..._pby)) - 8);
+
+    branchGroups.forEach((g, bi) => {
+      if (g.ps.length < 2) return;
+      // Per-plane serpentine segments joined by explicit Manhattan transitions.
+      // The old GLOBAL nearest-neighbor chain wandered across hips and setback
+      // zones mid-branch — cable draped over the ridge, unbuildable as drawn.
+      const byPlaneKey = new Map<string, any[]>();
+      for (const p of g.ps) {
+        const k = String(p.planeId ?? p.arrayId ?? '');
+        if (!byPlaneKey.has(k)) byPlaneKey.set(k, []);
+        byPlaneKey.get(k)!.push(p);
+      }
+      const chainGroup = (ps: any[]): any[] => {
+        // ALWAYS geometric nearest-neighbor in SCREEN space. Global row/col
+        // indices don't reflect a rotated end-plane's local layout — sorting
+        // by them re-created the starburst INSIDE the plane group.
+        const P = ps.map((p: any) => ({ p, x: toX(p.lng), y: toY(p.lat) }));
+        const used = new Array(P.length).fill(false);
+        let cur = 0;
+        for (let i = 1; i < P.length; i++) if (P[i].x + P[i].y < P[cur].x + P[cur].y) cur = i;
+        const out = [P[cur].p]; used[cur] = true;
+        for (let s = 1; s < P.length; s++) {
+          let best = -1, bestD = Infinity;
+          for (let i = 0; i < P.length; i++) {
+            if (used[i]) continue;
+            const d = (P[i].x - P[cur].x) ** 2 + (P[i].y - P[cur].y) ** 2;
+            if (d < bestD) { bestD = d; best = i; }
+          }
+          out.push(P[best].p); used[best] = true; cur = best;
+        }
+        return out;
+      };
+      // Plane-group sequence: largest first, then nearest centroid next.
+      const grps = [...byPlaneKey.values()].map(ps => {
+        const xs = ps.map((p: any) => toX(p.lng)), ys = ps.map((p: any) => toY(p.lat));
+        return { ps, cx: xs.reduce((a, b) => a + b, 0) / xs.length, cy: ys.reduce((a, b) => a + b, 0) / ys.length };
+      }).sort((a, b) => b.ps.length - a.ps.length);
+      const seq = [grps.shift()!];
+      while (grps.length) {
+        const last = seq[seq.length - 1];
+        let ni = 0, nd = Infinity;
+        grps.forEach((gr, i) => { const d = (gr.cx - last.cx) ** 2 + (gr.cy - last.cy) ** 2; if (d < nd) { nd = d; ni = i; } });
+        seq.push(grps.splice(ni, 1)[0]);
+      }
+      const orderedPs: any[] = [];
+      const transitionAt = new Set<number>();
+      for (const gr of seq) {
+        if (orderedPs.length) transitionAt.add(orderedPs.length);
+        orderedPs.push(...chainGroup(gr.ps));
+      }
+      const pts = orderedPs.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
+      const segs = pts.slice(1).map((b, k) => Math.hypot(b.x - pts[k].x, b.y - pts[k].y));
+      const medSeg = [...segs].sort((a, b) => a - b)[Math.floor(segs.length / 2)] || 1;
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1], b = pts[k];
+        const long = transitionAt.has(k) || segs[k - 1] > Math.max(3 * medSeg, 40);
+        if (long) {
+          // Plane-to-plane transition: MANHATTAN route (along the row, then
+          // across), dashed — a freehand diagonal slicing the setback hatch
+          // read as accidental wiring.
+          const midPts = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+          els.push(`<polyline points="${midPts}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.75" stroke-dasharray="5 4"/>`);
+          els.push(`<polyline points="${midPts}" fill="none" stroke="${g.color}" stroke-width="1.2" stroke-dasharray="5 4"/>`);
+        } else {
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.75"/>`);
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="1.2"/>`);
+        }
+      }
+      const h = pts[0];
+      els.push(`<rect x="${(h.x - 8).toFixed(1)}" y="${(h.y - 6).toFixed(1)}" width="16" height="12" rx="2" fill="#fff" stroke="${g.color}" stroke-width="1"/>`);
+      els.push(drawText(h.x, h.y + 3, `B${bi + 1}`, { anchor: 'middle', fontSize: 6.5, fontWeight: '900', fill: '#111' }));
+      // HOMERUN — every branch lands at the JB (the circuits previously ended
+      // in mid-roof with no terminus anywhere on the sheet).
+      const tail = pts[pts.length - 1];
+      const hr = `${tail.x.toFixed(1)},${tail.y.toFixed(1)} ${tail.x.toFixed(1)},${jbY.toFixed(1)} ${jbX.toFixed(1)},${jbY.toFixed(1)}`;
+      els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="2.2" opacity="0.7" stroke-dasharray="3 3"/>`);
+      els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="0.9" stroke-dasharray="3 3"/>`);
+    });
+
+    // Branch TERMINUS — JB symbol where the homeruns land, honest conduit note
+    // (a single hardcoded ¾" EMT for 6 branch circuits failed NEC fill/derate).
+    if (branchGroups.length > 0 && regPanels.length > 0) {
+      els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${(jbX + 16).toFixed(1)},${(jbY + 10).toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
+      els.push(`<rect x="${(jbX - 4).toFixed(1)}" y="${(jbY - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#000" stroke-width="1"/>`);
+      els.push(`<line x1="${(jbX - 4).toFixed(1)}" y1="${(jbY - 4).toFixed(1)}" x2="${(jbX + 4).toFixed(1)}" y2="${(jbY + 4).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+      els.push(drawText(jbX + 20, jbY + 16, `(N) JB — ${branchGroups.length} AC BRANCH CIRCUITS`, { anchor: 'end', fontSize: 5.8, fontWeight: 'bold', fill: '#000' }));
+      els.push(drawText(jbX + 20, jbY + 23, `CONDUIT SIZED PER NEC CH.9 — SEE PV-4B / E-1`, { anchor: 'end', fontSize: 5.2, fill: '#333' }));
+    }
+  }
+
+  // ── Roof obstructions + keep-out rings (Nearmap AI / vision / manual) ──
+  // Footprint drawn as a white circle with a cross, keep-out clearance as a
+  // dashed red ring with light hatch, type label above — the reference-set
+  // treatment for vents/chimneys/AC/skylights.
+  const roofObs = (project.roofObstructions ?? []).filter((o: any) => isFinite(o.lat) && isFinite(o.lng));
+  // Canopy is an UNVERIFIED-area flag, not a surveyed fixture — notes and the
+  // legend treat it separately from hard obstructions (vents/chimneys/etc.).
+  const _canopyObs = roofObs.filter((o: any) => o.type === 'canopy');
+  const _hardObs   = roofObs.filter((o: any) => o.type !== 'canopy');
+  // PV-2B is a CIRCUIT map — obstruction footprints/canopy hatch live on PV-2
+  // (they rendered as a giant faint circle mid-sheet under the wiring).
+  (isBranchColorMode ? [] : roofObs).forEach((o: any) => {
+    const ox = toX(o.lng), oy = toY(o.lat);
+    const rPx = Math.max(o.radiusFt * scale, 2.5);
+    const kPx = Math.max((o.radiusFt + o.clearanceFt) * scale, rPx + 2.5);
+    if (o.type === 'canopy') {
+      // Tree canopy over the roof: the aerial is BLIND here, so this is an
+      // UNVERIFIED zone (possible concealed vents/pipes), not a surveyed
+      // fixture — dashed green blob + hatch, no vent-style footprint dot.
+      els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${kPx.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.3" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="4 3"/>`);
+      els.push(drawText(ox, oy - kPx - 8.5, 'TREE CANOPY', {
+        anchor: 'middle', fontSize: 4.8, fontWeight: 'bold', fill: '#1a7a2e',
+      }));
+      els.push(drawText(ox, oy - kPx - 2.5, 'CONCEALED AREA — FIELD VERIFY', {
+        anchor: 'middle', fontSize: 4.2, fontWeight: 'bold', fill: '#1a7a2e',
+      }));
+      return;
+    }
+    els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${kPx.toFixed(1)}" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.6" stroke-dasharray="3 2"/>`);
+    // DESIGNED module inside this keep-out: designed positions are never
+    // silently deleted (they're the customer's layout), but drawing a module
+    // straight over a vent with no flag was a plan-check P0 — mark the
+    // conflict explicitly for field resolution.
+    for (const p of regPanels) {
+      const px2 = toX(p.lng), py2 = toY(p.lat);
+      if (Math.hypot(px2 - ox, py2 - oy) < kPx) {
+        const cr = Math.hypot(panLenPx, panWidPx) / 2 * 0.62;
+        els.push(`<circle cx="${px2.toFixed(1)}" cy="${py2.toFixed(1)}" r="${cr.toFixed(1)}" fill="none" stroke="#cc0000" stroke-width="1.4" stroke-dasharray="4 2.5"/>`);
+        els.push(drawText(px2, py2 - cr - 2.5, 'MODULE/OBSTRUCTION CONFLICT — FIELD VERIFY', {
+          anchor: 'middle', fontSize: 4.6, fontWeight: 'bold', fill: '#cc0000',
+        }));
+      }
+    }
+    els.push(`<circle cx="${ox.toFixed(1)}" cy="${oy.toFixed(1)}" r="${rPx.toFixed(1)}" fill="#fff" stroke="#000" stroke-width="0.9"/>`);
+    els.push(`<line x1="${(ox - rPx * 0.6).toFixed(1)}" y1="${(oy - rPx * 0.6).toFixed(1)}" x2="${(ox + rPx * 0.6).toFixed(1)}" y2="${(oy + rPx * 0.6).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+    els.push(`<line x1="${(ox - rPx * 0.6).toFixed(1)}" y1="${(oy + rPx * 0.6).toFixed(1)}" x2="${(ox + rPx * 0.6).toFixed(1)}" y2="${(oy - rPx * 0.6).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+    els.push(drawText(ox, oy - kPx - 2.5, String(o.type || 'obstruction').toUpperCase().replace(/_/g, ' '), {
+      anchor: 'middle', fontSize: 4.8, fontWeight: 'bold', fill: '#333',
+    }));
+  });
+
+  // ── Plane labels (rendered last — placed in OPEN roof area, never over modules) ──
+  const _panelPts = regPanels.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
   planeLabels.forEach(L => {
+    // candidate positions: centroid, then nudges along both axes — first one
+    // clear of every module center wins (critique: labels were masking modules)
+    const _cands = [
+      { x: L.cx, y: L.cy },
+      { x: L.cx, y: L.cy - 26 }, { x: L.cx, y: L.cy + 26 },
+      { x: L.cx - 34, y: L.cy }, { x: L.cx + 34, y: L.cy },
+      { x: L.cx - 34, y: L.cy - 26 }, { x: L.cx + 34, y: L.cy - 26 },
+    ];
+    const _clear = _cands.find(c => !_panelPts.some(p => Math.abs(p.x - c.x) < 40 && Math.abs(p.y - c.y) < 26));
+    if (_clear) { L.cx = _clear.x; L.cy = _clear.y; }
     const lines: string[] = ['PLANE ' + (L.ri + 1)];
     if (L.pitch !== undefined) {
+      // One-decimal rise:12 so the plane label matches the SYSTEM-DATA table /
+      // header (they show e.g. "4.8:12"); rounding to a whole "5:12" here made
+      // the same sheet show two different pitches.
       const rise12 = typeof L.pitch === 'number'
-        ? Math.round(Math.tan(L.pitch * Math.PI / 180) * 12)
+        ? Math.round(Math.tan(L.pitch * Math.PI / 180) * 12 * 10) / 10
         : L.pitch;
       lines.push(rise12 + ':12 PITCH');
     }
@@ -214,7 +719,155 @@ export function drawRoofPlan(
     });
   });
 
-  // ── DIMENSION HIERARCHY ──
+  // ── ROOF DESCRIPTION + ARRAY CALC tables (PV-2 only) ──────────────────────
+  // Mirrors the pro reference: a per-facet "MAIN HOME ROOF DESCRIPTION" table
+  // (roof # / modules / azimuth / tilt / truss) + an "ARRAY & ROOF CALC" summary
+  // (plan-view roof area / array area / % coverage). Rendered top-left, opaque.
+  if (!isBranchColorMode) {
+    const trussSize    = ((project as any).rafterSize || (project as any).trussSize || '2×4').toString();
+    const trussSpacing = `${rafterSp}" O.C.`;
+    // Module→facet attribution: point-in-poly first, NEAREST-PLANE fallback
+    // for modules on regularized facet borders — the column MUST sum to the
+    // declared module count (it read 41 of 53; a plan checker adds it up).
+    const _facetCounts = new Array(regPlanes.length).fill(0);
+    regPanels.forEach((p: any) => {
+      let idx = regPlanes.findIndex((rp: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices));
+      if (idx < 0) {
+        let bestD = Infinity;
+        regPlanes.forEach((rp: any, i: number) => {
+          const cLa = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
+          const cLo = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
+          const d = (p.lat - cLa) ** 2 + (p.lng - cLo) ** 2;
+          if (d < bestD) { bestD = d; idx = i; }
+        });
+      }
+      if (idx >= 0) _facetCounts[idx]++;
+    });
+    const facets = regPlanes.map((rp: any, i: number) => ({
+      n: i + 1,
+      mods: _facetCounts[i],
+      az: rp.azimuth != null && isFinite(rp.azimuth) ? `${Math.round(rp.azimuth)}°` : '—',
+      tilt: rp.pitch != null && isFinite(rp.pitch) ? `${Math.round(rp.pitch)}°` : '—',
+      truss: trussSize,
+      oc: trussSpacing,
+    }));
+    const roofAreaFt2  = regPlanes.reduce((s: number, rp: any) => s + planViewAreaFt2(rp.vertices), 0);
+    const panelAreaFt2 = (panelLenIn * panelWidIn) / 144;
+    const arrayAreaFt2 = totalPanels * panelAreaFt2;
+    const coverPct     = roofAreaFt2 > 0 ? (arrayAreaFt2 / roofAreaFt2) * 100 : 0;
+    const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+    // TRUSS SIZE + SPACING as real columns (reference parity) and typography
+    // sized to survive fit-to-width viewing — at the old 5.4px cells, "273°"
+    // rasterized as "2/3°" on Ray's screen (the 7 loses its top bar below
+    // ~5 rendered px). Data cells ≥7.2px + the larger roof canvas fix that.
+    const cols = [
+      { key: 'n',     hdr: 'ROOF',    w: 34 },
+      { key: 'mods',  hdr: 'MODULES', w: 52 },
+      { key: 'az',    hdr: 'AZIMUTH', w: 50 },
+      { key: 'tilt',  hdr: 'TILT',    w: 38 },
+      { key: 'truss', hdr: 'TRUSS',   w: 44 },
+      { key: 'oc',    hdr: 'SPACING', w: 50 },
+    ] as const;
+    const tblW = cols.reduce((s, c) => s + c.w, 0);
+    const rowH = 13, hdrH = 13, titleH = 14;
+    const tx = 8, ty = 30;
+    const tblH = titleH + hdrH + facets.length * rowH;
+
+    const t: string[] = [];
+    t.push(`<rect x="${tx}" y="${ty}" width="${tblW}" height="${tblH}" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
+    t.push(`<rect x="${tx}" y="${ty}" width="${tblW}" height="${titleH}" fill="#000"/>`);
+    t.push(drawText(tx + tblW / 2, ty + 10, 'MAIN HOME ROOF DESCRIPTION', { anchor: 'middle', fontSize: 7.2, fontWeight: 'bold', fill: '#fff' }));
+    // header row
+    let cxp = tx;
+    for (const c of cols) {
+      t.push(`<rect x="${cxp}" y="${ty + titleH}" width="${c.w}" height="${hdrH}" fill="#e8ebf0" stroke="#999" stroke-width="0.3"/>`);
+      t.push(drawText(cxp + c.w / 2, ty + titleH + 9, c.hdr, { anchor: 'middle', fontSize: 6.6, fontWeight: 'bold', fill: '#1a1a1a' }));
+      cxp += c.w;
+    }
+    // data rows
+    facets.forEach((f, ri) => {
+      const ry = ty + titleH + hdrH + ri * rowH;
+      cxp = tx;
+      for (const c of cols) {
+        t.push(`<rect x="${cxp}" y="${ry}" width="${c.w}" height="${rowH}" fill="none" stroke="#ccc" stroke-width="0.3"/>`);
+        t.push(drawText(cxp + c.w / 2, ry + 9, String((f as any)[c.key]), { anchor: 'middle', fontSize: 7.2, fill: '#333' }));
+        cxp += c.w;
+      }
+    });
+
+    // ── ARRAY & ROOF CALC — TOTAL ──
+    const cy2 = ty + tblH + 14;
+    const calc: Array<[string, string]> = [
+      ['ROOF AREA (PLAN VIEW)', `${fmt(roofAreaFt2)} ft²`],
+      ['NEW ARRAY AREA', `${fmt(arrayAreaFt2)} ft²`],
+      ['ROOF COVERED BY ARRAY', `${coverPct.toFixed(1)}%`],
+    ];
+    const calcH = titleH + calc.length * rowH;
+    t.push(`<rect x="${tx}" y="${cy2}" width="${tblW}" height="${calcH}" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
+    t.push(`<rect x="${tx}" y="${cy2}" width="${tblW}" height="${titleH}" fill="#000"/>`);
+    t.push(drawText(tx + tblW / 2, cy2 + 10, 'ARRAY & ROOF CALC — TOTAL', { anchor: 'middle', fontSize: 7.2, fontWeight: 'bold', fill: '#fff' }));
+    calc.forEach(([label, val], ri) => {
+      const ry = cy2 + titleH + ri * rowH;
+      t.push(`<rect x="${tx}" y="${ry}" width="${tblW}" height="${rowH}" fill="none" stroke="#ccc" stroke-width="0.3"/>`);
+      t.push(drawText(tx + 3, ry + 9, label, { anchor: 'start', fontSize: 6.4, fill: '#333' }));
+      t.push(drawText(tx + tblW - 3, ry + 9, val, { anchor: 'end', fontSize: 6.8, fontWeight: 'bold', fill: '#1a1a1a' }));
+    });
+
+    // ── GENERAL NOTES — numbered, upright, in the left column (replaces the
+    // single low-contrast italic footer line the critique flagged) ──
+    const gnY = cy2 + calcH + 16;
+    const gn: string[] = [
+      '1. FIELD VERIFY ALL DIMENSIONS PRIOR',
+      '   TO INSTALLATION.',
+      ..._pathwaysDrawn > 0
+        ? [
+            `2. ${ftToFtIn(pathwayFt)} FIRE ACCESS PATHWAYS SHOWN`,
+            '   HATCHED GREEN — IFC §1204.2.1.',
+          ]
+        : [
+            `2. MAINTAIN ${ftToFtIn(pathwayFt)} ACCESS PATHWAY PER`,
+            '   IFC §1204.2.1 — HIP CLEARANCES',
+            '   PROVIDE EAVE-TO-RIDGE ROUTES.',
+          ],
+      '3. ATTACHMENT SUBJECT TO FRAMING',
+      '   LOCATION — SEE PV-3.',
+      ...(_encroachCount > 0
+        ? [
+            `3A. ${_encroachCount} MODULE(S) ENCROACH THE`,
+            `   ${ftToFtIn(setbackFt)} SETBACK (RED ◇) — RELOCATE`,
+            '   OR OBTAIN AHJ EXCEPTION.',
+          ]
+        : []),
+      ...(_hardObs.length > 0
+        ? [
+            `4. ${_hardObs.length} ROOF OBSTRUCTION(S) PLOTTED W/`,
+            '   KEEP-OUT CLEARANCES (NEARMAP AI)',
+            '   — FIELD VERIFY LOCATIONS.',
+          ]
+        : [
+            '4. NO ROOF OBSTRUCTIONS MODELED IN',
+            '   ARRAY AREA — FIELD VERIFY.',
+          ]),
+      ...(_canopyObs.length > 0
+        ? [
+            '5. TREE CANOPY OVERHANGS ROOF —',
+            '   AERIAL COULD NOT VERIFY COVERED',
+            '   AREA (VENTS/PIPES MAY BE',
+            '   CONCEALED). FIELD VERIFY PRIOR',
+            '   TO MODULE LAYOUT.',
+          ]
+        : []),
+    ];
+    t.push(drawText(tx, gnY, 'GENERAL NOTES', { anchor: 'start', fontSize: 7.2, fontWeight: 'bold', fill: '#000' }));
+    t.push(`<line x1="${tx}" y1="${gnY + 2.5}" x2="${tx + tblW}" y2="${gnY + 2.5}" stroke="#000" stroke-width="0.8"/>`);
+    gn.forEach((line, i) => {
+      t.push(drawText(tx, gnY + 12 + i * 9.5, line, { anchor: 'start', fontSize: 6.4, fill: '#1a1a1a' }));
+    });
+    els.push(...t);
+  }
+
+  // ── DIMENSION HIERARCHY ── (PV-2 only — skipped for PV-2B branch-color mode)
   const roofMinX = toX(minLng);
   const roofMaxX = toX(maxLng);
   const roofMinY = toY(maxLat);
@@ -222,68 +875,198 @@ export function drawRoofPlan(
   const roofWFt  = lngSpan;   // because 1° == 1ft in fake-degree encoding
   const roofHFt  = latSpan;
 
-  // L1 — Overall width (bottom)
+  // L1 — Overall width (bottom) — PV-2 only. Value only: the "VERIFY IN FIELD"
+  // qualifier moved to GENERAL NOTES (critique: dim string was heavy + crowded).
+  if (!isBranchColorMode) {
   els.push(drawOverallDimension(
     roofMinX, roofMaxX,
-    roofMaxY + 18, 20,
-    ftToFtIn(roofWFt) + ' — VERIFY IN FIELD'
+    roofMaxY + 36, 24,
+    ftToFtIn(roofWFt)
   ));
+  }
 
-  // L1 — Overall height (left, vertical)
-  if (roofHFt > 3) {
+  // L1 — Overall height (vertical) — tight against the roof outline; at the old
+  // draw-zone edge its extension line struck through both data tables.
+  if (!isBranchColorMode && roofHFt > 3) {
     els.push(drawVerticalDimension(
-      dz.x - 14,
+      roofMinX - 26,
       roofMinY, roofMaxY,
       14,
       ftToFtIn(roofHFt)
     ));
   }
-
-  // L2 — Fire setback (top of draw zone, if space)
-  const sbPixels = setbackFt * scale;
-  if (sbPixels > 10 && roofMinX + sbPixels < roofMaxX) {
-    els.push(drawLinearDimension(
-      roofMinX, roofMinX + sbPixels,
-      roofMinY - 12, 10,
-      ftToFtIn(setbackFt) + ' SETBACK'
-    ));
-  }
+  // (fire-setback mini-dimension removed — it rendered as a broken-leader
+  // artifact; the legend + callout ② carry the value)
 
   // ── North arrow + scale bar ──
-  els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
-  const scaleBarPx = Math.round(10 * scale);   // 10-foot scale bar
-  els.push(drawScaleBar(zones.dims.left + 4, H - zones.dims.bottom + 28,
-    Math.max(scaleBarPx, 30), '0    10 FT'));
+  // North: PV-2B keeps the simple arrow; PV-2 gets a full N/E/S/W compass rose below.
+  if (isBranchColorMode) {
+    els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
+  }
+  const scaleBarPx = Math.max(Math.round(10 * scale), 30);   // 10-foot scale bar
+  const sbX = zones.dims.left + 4, sbY = H - zones.dims.bottom + 28;
+  els.push(drawScaleBar(sbX, sbY, scaleBarPx, ''));
+  // labels aligned to the graduations (was one crammed '0    10 FT' string)
+  els.push(drawText(sbX, sbY + 12, '0', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
+  els.push(drawText(sbX + scaleBarPx / 2, sbY + 12, '5', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
+  els.push(drawText(sbX + scaleBarPx, sbY + 12, '10 FT', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
 
-  // ── Callout bubbles ──
-  const cbY    = zones.dims.top + 12;
-  // Callout bubbles spread across the TOP of the roof, each pointing straight down
-  // to the nearest panel below it — short, near-vertical leaders instead of long
-  // diagonals fanning across the whole array (the old crossing "spider-web").
-  // Clamp the row just below the title bar so bubbles never render off-screen when
-  // the roof reaches the top edge (verified via the render harness).
-  const cbN      = 5;
-  const cbSpanX  = roofMaxX - roofMinX;
-  const cbRowY   = Math.max(roofMinY - 16, zones.dims.top + 10);
-  for (let i = 0; i < cbN; i++) {
-    const frac = (i + 0.5) / cbN;
-    const bx   = roofMinX + cbSpanX * frac;
-    // nearest panel to this bubble's x
-    let best: any = null, bestD = Infinity;
-    for (const p of validPanels) {
-      const d = Math.abs(toX(p.lng) - bx);
-      if (d < bestD) { bestD = d; best = p; }
-    }
-    if (best) {
-      els.push(drawCalloutWithLeader(bx, cbRowY, toX(best.lng), toY(best.lat), i + 1, 8));
-    }
+  // ── Compass rose + LEGEND (PV-2 only) ─────────────────────────────────────
+  if (!isBranchColorMode) {
+    // Compass rose — 4-point star with N/E/S/W, bottom-right corner.
+    const crX = W - zones.dims.right - 6, crY = H - zones.dims.bottom - 2, cr = 20;
+    const rose: string[] = [];
+    rose.push(`<circle cx="${crX}" cy="${crY}" r="${cr}" fill="rgba(255,255,255,0.9)" stroke="#2b2f36" stroke-width="0.9"/>`);
+    // vertical (N/S) star — N solid, S light
+    rose.push(`<polygon points="${crX},${crY - cr + 2} ${crX + 4},${crY} ${crX},${crY - 3} ${crX - 4},${crY}" fill="#1a1a1a"/>`);
+    rose.push(`<polygon points="${crX},${crY + cr - 2} ${crX + 4},${crY} ${crX},${crY + 3} ${crX - 4},${crY}" fill="#b0b4bc"/>`);
+    // horizontal (E/W) minor star
+    rose.push(`<polygon points="${crX + cr - 2},${crY} ${crX},${crY + 4} ${crX + 3},${crY} ${crX},${crY - 4}" fill="#6b7078"/>`);
+    rose.push(`<polygon points="${crX - cr + 2},${crY} ${crX},${crY + 4} ${crX - 3},${crY} ${crX},${crY - 4}" fill="#6b7078"/>`);
+    rose.push(`<circle cx="${crX}" cy="${crY}" r="1.4" fill="#1a1a1a"/>`);
+    rose.push(drawText(crX, crY - cr - 3, 'N', { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#1a1a1a' }));
+    rose.push(drawText(crX, crY + cr + 7, 'S', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    rose.push(drawText(crX + cr + 5, crY + 2.5, 'E', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    rose.push(drawText(crX - cr - 5, crY + 2.5, 'W', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    els.push(...rose);
+
+    // Legend — documents the symbols/line-styles actually on this sheet.
+    const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
+    const lg: Array<{ swatch: string; label: string }> = [
+      { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
+      ...(_encroachCount > 0 ? [{
+        swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
+        label: 'SETBACK ENCROACHMENT',
+      }] : []),
+      { swatch: _sbHatch, label: `${ftToFtIn(setbackFt)} FIRE SETBACK` },
+      ...(_pathwaysDrawn > 0 ? [{
+        swatch: `<rect x="0" y="-5" width="14" height="9" fill="#1a7a2e" opacity="0.12" stroke="#1a7a2e" stroke-width="0.7" stroke-dasharray="3 1.5"/>`,
+        label: `${ftToFtIn(pathwayFt)} ACCESS PATHWAY`,
+      }] : []),
+      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="2.4"/>`, label: 'RIDGE / HIP' },
+      { swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#000" stroke-width="1.1"/>`, label: 'EAVE / RAKE' },
+      { swatch: `<line x1="0" y1="-3" x2="14" y2="-3" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="0" x2="14" y2="0" stroke="#c8cdd5" stroke-width="0.7"/><line x1="0" y1="3" x2="14" y2="3" stroke="#c8cdd5" stroke-width="0.7"/>`, label: `FRAMING @ ${rafterSp}" O.C.` },
+      ...(_hardObs.length > 0 ? [{
+        swatch: `<circle cx="7" cy="-0.5" r="5.5" fill="url(#hatch-setback)" opacity="0.35" stroke="#cc2222" stroke-width="0.5" stroke-dasharray="2 1.5"/><circle cx="7" cy="-0.5" r="2.6" fill="#fff" stroke="#000" stroke-width="0.6"/>`,
+        label: 'OBSTRUCTION + KEEP-OUT',
+      }] : []),
+      ...(_canopyObs.length > 0 ? [{
+        swatch: `<circle cx="7" cy="-0.5" r="5.5" fill="url(#hatch-setback)" opacity="0.3" stroke="#1a7a2e" stroke-width="0.8" stroke-dasharray="2.5 2"/>`,
+        label: 'TREE CANOPY — VERIFY',
+      }] : []),
+      { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
+    ];
+    const lgW = 128, rowH = 13, lgX = W - zones.dims.right - lgW + 8, lgY = zones.dims.top + 6;
+    const lgH = 13 + lg.length * rowH;
+    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="${lgH}" rx="2" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
+    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="12" fill="#000"/>`);
+    els.push(drawText(lgX + lgW / 2, lgY + 8.5, 'LEGEND', { anchor: 'middle', fontSize: 6, fontWeight: 'bold', fill: '#fff', letterSpacing: 1 }));
+    lg.forEach((e, i) => {
+      const ry = lgY + 12 + i * rowH + rowH / 2;
+      els.push(`<g transform="translate(${lgX + 8},${ry})">${e.swatch}</g>`);
+      els.push(drawText(lgX + 30, ry + 2.3, e.label, { anchor: 'start', fontSize: 5.6, fill: '#1a1a1a' }));
+    });
   }
 
-  // ── System summary line ──
-  els.push(drawText(zones.dims.left, H - 8,
-    'ROOF ARRAY PLAN — FIELD VERIFY ALL DIMENSIONS — SUBJECT TO RAFTER LOCATION + AHJ APPROVAL', {
-      anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
-    }));
+  // ── Direct equipment callouts (PV-2 only — reference-set style) ──
+  // The pro sets annotate the PLAN with real "(N) make/model" text + short
+  // leaders — numbered bubbles wired to a remote schedule read as generated.
+  // Placement uses the white space above/below/beside the roof; every leader
+  // lands on a representative object and never crosses the array.
+  if (!isBranchColorMode && _panelPts.length > 0) {
+    const topP  = _panelPts.reduce((m, p) => (p.y < m.y ? p : m), _panelPts[0]);
+    const botP  = _panelPts.reduce((m, p) => (p.y > m.y ? p : m), _panelPts[0]);
+    const eastP = _panelPts.reduce((m, p) => (p.x > m.x ? p : m), _panelPts[0]);
+    let ridge: any = null, hip: any = null;
+    for (const e of interiorEdgesXY) {
+      const len = Math.hypot(e.bx - e.ax, e.by - e.ay);
+      const horiz = Math.abs(e.by - e.ay) < Math.abs(e.bx - e.ax) * 0.4;
+      if (horiz) { if (!ridge || len > ridge.len) ridge = { ...e, len }; }
+      else       { if (!hip   || len > hip.len)   hip   = { ...e, len }; }
+    }
+    const txtCallout = (
+      tx: number, ty: number, anchor: 'start' | 'end',
+      lines: string[], lx: number, ly: number,
+    ) => {
+      lines.forEach((ln, i) => {
+        els.push(drawText(tx, ty + i * 7.5, ln, { anchor, fontSize: 5.8, fontWeight: i === 0 ? 'bold' : 'normal', fill: '#000' }));
+      });
+      const sx = anchor === 'start' ? tx - 3 : tx + 3;
+      els.push(`<line x1="${sx.toFixed(1)}" y1="${(ty + (lines.length - 1) * 3.75).toFixed(1)}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#000" stroke-width="0.7"/>`);
+      els.push(`<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="1.4" fill="#000"/>`);
+    };
+    const wattStr = panelWatts ? ` (${panelWatts}W)` : '';
+    const modLine = _modNamed
+      ? `(N) ${totalPanels} — ${_modNamed}${wattStr} MODULES`
+      : `(N) ${totalPanels} PV MODULES${wattStr} — SEE EQUIPMENT SCHEDULE`;
+    const invLine = _invNamed
+      ? `(N) ${_invNamed} MICROINVERTER — 1 PER MODULE`
+      : `(N) MICROINVERTER (1 PER MODULE) — SEE EQUIPMENT SCHEDULE`;
+    const topRowY = Math.max(roofMinY - 26, zones.dims.top + 10);
+
+    // Modules + microinverters — ONE stacked block, ONE leader. The two
+    // separate top callouts targeted the same/adjacent top-row module from
+    // both sides and printed on top of each other (start-anchored left text
+    // met end-anchored right text at the same y with no width check).
+    txtCallout(Math.max(topP.x - 40, dz.x + 4), topRowY - 7.5, 'start',
+      [modLine, `ON ${mountSys}`, invLine], topP.x - 2, topP.y - 4);
+    // (fire-setback margin callout REMOVED — the value is now printed INSIDE
+    //  each long setback band, reference-style; the margin version's leader
+    //  crossed the array and its text collided with GENERAL NOTES)
+    // (N) junction box + conduit — JB symbol at the SE eave EXIT point (roof
+    // boundary, not on a module); text goes into the right margin when there
+    // is room, else drops below the SE corner.
+    const jbX = roofMaxX - 4, jbY = Math.min(eastP.y, roofMaxY - 14);
+    els.push(`<rect x="${(jbX - 3.5).toFixed(1)}" y="${(jbY - 3.5).toFixed(1)}" width="7" height="7" fill="#fff" stroke="#000" stroke-width="1"/>`);
+    els.push(`<line x1="${(jbX - 3.5).toFixed(1)}" y1="${(jbY - 3.5).toFixed(1)}" x2="${(jbX + 3.5).toFixed(1)}" y2="${(jbY + 3.5).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+    const cEndX = roofMaxX - 8, cEndY = roofMaxY - 6;
+    els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
+    const _jbLines = [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ROUTE FIELD-VERIFIED`];
+    const _jbTextW = Math.max(..._jbLines.map(l => l.length)) * 3.5;
+    const _rightGap = (W - zones.dims.right) - roofMaxX;
+    if (_rightGap >= _jbTextW + 18) {
+      txtCallout(roofMaxX + 10, jbY - 4, 'start', _jbLines, jbX + 4, jbY);
+    } else {
+      txtCallout(Math.min(jbX + 8, roofMaxX - 4), roofMaxY + 24, 'end', _jbLines, jbX, jbY + 4);
+    }
+    // (N) attachments — BELOW the overall-dimension band (dim owns
+    // roofMaxY+24..+40; the callout used to print through the dim line)
+    txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 48, 'start',
+      [`(N) ${mountSys} ATTACHMENTS @ ${attachSp}" O.C.`, `INTO FRAMING — SEE PV-3`],
+      botP.x - 2, botP.y + 4);
+  }
+
+  // ── Viewport title (reference style): numbered circle + underlined title +
+  // scale, directly below the drawing ──
+  if (!isBranchColorMode) {
+    const vtX = roofMinX, vtY = roofMaxY + 74;   // below the relocated attachments callout
+    els.push(`<circle cx="${vtX + 8}" cy="${vtY - 3}" r="8" fill="#fff" stroke="#000" stroke-width="1.4"/>`);
+    els.push(drawText(vtX + 8, vtY, '1', { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#000' }));
+    els.push(drawText(vtX + 22, vtY, svgTitle, { anchor: 'start', fontSize: 9, fontWeight: '900', fill: '#000', letterSpacing: 1 }));
+    els.push(`<line x1="${vtX + 22}" y1="${vtY + 3.5}" x2="${vtX + 22 + svgTitle.length * 6.4}" y2="${vtY + 3.5}" stroke="#000" stroke-width="1.2"/>`);
+    // Honest scale: the drawing is fit-to-frame, so print the nearest standard
+    // architect scale actually achieved (px/ft ÷ 96dpi → in/ft) — "3/32"" was
+    // hardcoded and only coincidentally true for one roof size.
+    const _inPerFt = scale / 96;
+    const _stdScales: Array<[string, number]> = [['1/16"', 1/16], ['3/32"', 3/32], ['1/8"', 1/8], ['3/16"', 3/16], ['1/4"', 1/4], ['3/8"', 3/8], ['1/2"', 1/2]];
+    const _nearest = _stdScales.reduce((b, s) => Math.abs(s[1] - _inPerFt) < Math.abs(b[1] - _inPerFt) ? s : b, _stdScales[0]);
+    const _scaleErr = Math.abs(_nearest[1] - _inPerFt) / _inPerFt;
+    els.push(drawText(vtX + 22, vtY + 11, _scaleErr < 0.05 ? `SCALE: ${_nearest[0]} = 1'-0"` : 'GRAPHIC SCALE — SEE BAR', { anchor: 'start', fontSize: 6, fill: '#333' }));
+  } else {
+    els.push(drawText(dz.x + 8, zones.dims.top + 16, svgTitle, { anchor: 'start', fontSize: 9, fontWeight: '900', fill: '#000', letterSpacing: 1 }));
+  }
+
+  // (Branch legend overlay REMOVED — it duplicated the data-zone BRANCH LEGEND
+  //  table and its opaque box painted straight over the viewport title, which
+  //  is why the sheet read "UT — AC BRANCH COLOR MAP".)
+
+  // ── System summary line (PV-2B only — PV-2 carries GENERAL NOTES instead) ──
+  if (isBranchColorMode) {
+    els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
+      'CIRCUIT LAYOUT — AC BRANCH COLOR MAP — SEE DATA ZONE FOR BRANCH SCHEDULE', {
+        anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
+      }));
+  }
 
   els.push(drawSVGClose());
   return els.join('');
@@ -312,8 +1095,26 @@ export function drawRoofStructural(
   const pitchStr   = pitchNum + ':12';
   const rafterSz   = project.rafterSize         || '2x6';
   const rafterSp   = project.rafterSpacing      || 24;
-  const attachSp   = project.attachmentSpacing  || 48;
-  const mountSys   = (project.mountingSystem    || 'IRONRIDGE XR100').toUpperCase();
+  // SINGLE-SOURCE with the specs table (sheetComposition getRoofData): the
+  // drawing/notes/callouts printed hardcoded 3/8" lag + 4'-0" spacing while
+  // the specs table said 5/16" @ 24" O.C. — contradictions ON ONE SHEET.
+  const _mSelD = (project as any).mountingSystemId
+    ? getMountingSystemById((project as any).mountingSystemId as string)
+    : undefined;
+  const attachSp   = (project as any).resolvedAttachSpacingIn
+    || project.attachmentSpacing
+    || _mSelD?.mount?.maxSpacingIn
+    || 48;
+  const mountSys   = (((project as any)._canonical?.mountSystem as string)
+    || project.mountingSystem
+    || (_mSelD ? `${_mSelD.manufacturer} ${_mSelD.model}` : 'IRONRIDGE XR100')).toUpperCase();
+  const isRaillessD = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(mountSys);
+  const _fracD = (v: number) =>
+    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
+  const _lagDiaD  = _mSelD?.mount?.fastenerDiameterIn ?? 0.375;
+  const _embedD   = _mSelD?.mount?.fastenerEmbedmentIn ?? 2.5;
+  const _lagLenD  = Math.ceil((_embedD + 1.5) * 2) / 2;
+  const lagLabelD = `${_fracD(_lagDiaD)}" DIA × ${_lagLenD}" SS LAG`;
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
   const panelLenIn = project.panelLengthIn      || 66;
   const panelWidIn = project.panelWidthIn       || 40;
@@ -336,15 +1137,17 @@ export function drawRoofStructural(
   els.push(drawTitleBar(W, 'ROOF ATTACHMENT DETAIL — CROSS-SECTION + MOUNTING', 'SCALE: 1"=1\'-0"'));
 
   // ── Cross-section geometry ──
-  // 3-bay rafter section. Scale: 1 inch = 3px (1 foot = 36px)
-  const IN_PX    = 3;
+  // 4-bay rafter section, scaled UP (1" = 4.5px) — at the old 3px scale the
+  // section + detail circle used barely half the drawing zone and the bottom
+  // 40% of the sheet shipped blank.
+  const IN_PX    = 4.5;
   const bayW     = rafterSp * IN_PX;
-  const nBays    = 3;
+  const nBays    = 4;
   const roofRun  = bayW * nBays;
   const roofRise = roofRun * (pitchNum / 12);
 
   const secX     = dz.x + dz.width * 0.02;
-  const roofBaseY = zones.dims.top + (dz.height * 0.78);
+  const roofBaseY = zones.dims.top + (dz.height * 0.80);
 
   // ── Bottom chord ──
   els.push(drawLine(secX, roofBaseY, secX + roofRun, roofBaseY, 'line-struct'));
@@ -396,8 +1199,8 @@ export function drawRoofStructural(
   };
   const layers: LayerDef[] = [
     { label: 'PV MODULE',              fill: '#1a3f8a', stroke: '#0a1e4a', h: 12 },
-    { label: 'RAIL / CLAMP',           fill: '#a0a0a0', stroke: '#444',    h: 5  },
-    { label: 'STANDOFF / L-FOOT',      fill: '#b8b8b8', stroke: '#444',    h: 8,  hatch: 'url(#hatch-steel)', hatchOpacity: 0.6 },
+    { label: isRaillessD ? 'MOUNT / CLAMP' : 'RAIL / CLAMP', fill: '#a0a0a0', stroke: '#444', h: 5 },
+    { label: isRaillessD ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', fill: '#b8b8b8', stroke: '#444', h: 8,  hatch: 'url(#hatch-steel)', hatchOpacity: 0.6 },
     { label: 'FLASHING',               fill: '#c8dce8', stroke: '#4488aa', h: 3  },
     { label: roofType + ' ROOF',       fill: '#b89060', stroke: '#665030', h: 8  },
     { label: 'SHEATHING (5/8" OSB)',   fill: 'url(#rafter-wood)', stroke: '#886030', h: 7,  hatch: 'url(#hatch-wood)', hatchOpacity: 0.35 },
@@ -413,10 +1216,11 @@ export function drawRoofStructural(
     curY += layer.h;
   });
 
-  // ── Detail circle (zoomed L-foot attachment) ──
-  const dcx = dz.x + dz.width * 0.76;
-  const dcy = zones.dims.top + dz.height * 0.42;
-  const dcr = 112;
+  // ── Detail circle (zoomed attachment) — enlarged; at r=112 it left the
+  // bottom of the drawing zone blank.
+  const dcx = dz.x + dz.width * 0.74;
+  const dcy = zones.dims.top + dz.height * 0.46;
+  const dcr = 148;
   els.push(`<circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="${dcr}"
     fill="#fffff8" stroke="#000" stroke-width="1.8"/>`);
   els.push(drawText(dcx, dcy - dcr - 6, 'DETAIL 1/PV-3', {
@@ -426,26 +1230,31 @@ export function drawRoofStructural(
     anchor: 'middle', fontSize: 7, fill: '#555',
   }));
 
-  // Zoomed layers inside circle
-  const dzX = dcx - 82, dzY = dcy - 55;
-  const dzW = 164;
+  // Zoomed layers inside circle — scaled to the r=148 circle. Labels sit at
+  // a FIXED 13px pitch with leader lines: the old label-per-layer-center put
+  // 7px type on 4px rows (FLASHING/ROOF/SHEATHING text overlapped itself).
+  const dzX = dcx - 105, dzY = dcy - 72;
+  const dzW = 190;
   type ZLayerDef = { label: string; fill: string; stroke?: string; h: number; hatch?: string; hatchOp?: number };
   const zLayers: ZLayerDef[] = [
-    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 16 },
-    { label: 'RAIL — ' + mountSys,                        fill: '#a0a0a0', stroke: '#444',    h: 7  },
-    { label: 'L-FOOT / STANDOFF',                         fill: '#b8b8b8', stroke: '#444',    h: 10, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
-    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 4  },
-    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 8  },
-    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 7,  hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
-    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 18, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
+    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 21 },
+    { label: (isRaillessD ? 'MOUNT — ' : 'RAIL — ') + mountSys, fill: '#a0a0a0', stroke: '#444', h: 9 },
+    { label: isRaillessD ? `MOUNT BASE — ${lagLabelD}` : `L-FOOT — ${lagLabelD}`, fill: '#b8b8b8', stroke: '#444', h: 13, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
+    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 5  },
+    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 10 },
+    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 9,  hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
+    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 23, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
   ];
   let zy = dzY;
+  const _lblX = dzX + dzW + 26;
   zLayers.forEach((zl, i) => {
     els.push(drawRectFilled(dzX, zy, dzW, zl.h, zl.fill, zl.stroke || '#333', 0.9));
     if (zl.hatch) {
       els.push(`<rect x="${dzX.toFixed(1)}" y="${zy.toFixed(1)}" width="${dzW}" height="${zl.h}" fill="${zl.hatch}" opacity="${zl.hatchOp ?? 0.5}"/>`);
     }
-    els.push(drawText(dzX + dzW + 5, zy + zl.h / 2 + 3, zl.label, {
+    const _lblY = dzY + i * 13 + 4;
+    els.push(`<line x1="${(dzX + dzW).toFixed(1)}" y1="${(zy + zl.h / 2).toFixed(1)}" x2="${(_lblX - 3).toFixed(1)}" y2="${(_lblY - 2.5).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
+    els.push(drawText(_lblX, _lblY, zl.label, {
       anchor: 'start', fontSize: 7, fill: '#222',
     }));
     els.push(drawCalloutWithLeader(dzX - 28, zy + zl.h / 2, dzX, zy + zl.h / 2, i + 1, 9));
@@ -470,31 +1279,27 @@ export function drawRoofStructural(
   }
 
   // ── DIMENSION HIERARCHY ──
-  // L1 — Rafter span (bottom)
-  els.push(drawOverallDimension(
-    secX, secX + roofRun,
-    roofBaseY + 28,
-    20,
-    rafterSp + '" RAFTER SPACING (TYP.)'
-  ));
-
-  // L2 — Single bay (rafter O.C.)
+  // Two distinct rows, no duplication: the old layout drew rafter spacing
+  // TWICE ('24" RAFTER SPACING (TYP.)' + '2'-0" O.C.') on overlapping rows,
+  // striking through each other and the section linework.
+  // Row 1 — single-bay rafter O.C., measured on the SECOND bay so the text
+  // clears the eave layer stack at the left edge (it struck through it).
   els.push(drawLinearDimension(
-    secX, secX + bayW,
-    roofBaseY + 14, 12,
-    ftToFtIn(rafterSp / 12) + ' O.C.'
+    secX + bayW, secX + bayW * 2,
+    roofBaseY + 20, 12,
+    `${rafterSp}" RAFTER O.C. (TYP.)`
   ));
 
-  // L2 — Attachment spacing (2-bay span)
+  // Row 2 — attachment spacing at its true scaled length, on the next row
   els.push(drawOverallDimension(
-    secX, secX + bayW * 2,
-    roofBaseY + 42, 16,
-    ftToFtIn(attachSp / 12) + ' ATTACH. O.C.'
+    secX + bayW, secX + bayW + Math.min(attachSp * IN_PX, roofRun - bayW),
+    roofBaseY + 44, 16,
+    ftToFtIn(attachSp / 12) + ' ATTACH. O.C. MAX'
   ));
 
   // L3 — Lag embedment (vertical, left)
   els.push(drawVerticalDimension(
-    secX + 5, roofBaseY, roofBaseY - 30, 10, '2.5" MIN. EMBED'
+    secX + 5, roofBaseY, roofBaseY - 30, 10, `${_embedD}" MIN. EMBED`
   ));
 
   // ── Callout schedule (right panel) ──
@@ -510,8 +1315,8 @@ export function drawRoofStructural(
   // ROOF-SPECIFIC callouts (STEP 8/9: roof terms only — NO posts/piles/fence)
   const structCallouts = [
     { n: 1, label: `PV MODULE — ${panelLenIn}" × ${panelWidIn}" @ ${panelWt} LBS` },
-    { n: 2, label: `MOUNTING RAIL — ${mountSys}` },
-    { n: 3, label: `STANDOFF / L-FOOT — 3/8" STAINLESS LAG` },
+    { n: 2, label: isRaillessD ? `DIRECT-ATTACH MOUNT — ${mountSys}` : `MOUNTING RAIL — ${mountSys}` },
+    { n: 3, label: `${isRaillessD ? 'MOUNT BASE' : 'STANDOFF / L-FOOT'} — ${lagLabelD}` },
     { n: 4, label: `FLASHING — UNDER ALL PENETRATIONS` },
     { n: 5, label: `RAFTER — ${rafterSz} @ ${rafterSp}" O.C.` },
     { n: 6, label: `${condType} CONDUIT — SEE CONDUCTOR SCHEDULE` },
@@ -538,7 +1343,8 @@ export function drawRoofStructural(
   const notes = [
     'VERIFY RAFTER SIZE + SPACING IN FIELD.',
     'ALL HARDWARE: 316 SS OR HOT-DIP GALVANIZED.',
-    'MIN. LAG BOLT EMBEDMENT INTO RAFTER: 2-1/2".',
+    `MIN. LAG THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
+    `LAG BOLT: ${lagLabelD}.`,
     `ATTACH. SPACING: ${ftToFtIn(attachSp / 12)} O.C. MAX.`,
     `WIND LOAD: ${windSpeedMph} MPH — REF: ASCE 7-22`,
     `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`,

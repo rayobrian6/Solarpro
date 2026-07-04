@@ -5,6 +5,7 @@
 
 import type { PermitInput } from '../types';
 import { utilityDisplayName, resolveEquipment } from './helpers';
+import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
 
 
@@ -18,7 +19,9 @@ export function titleBlock(
   totalPages: number
 ): string {
   const { project, compliance, system } = input;
-  const necVer  = compliance.jurisdiction?.necVersion || '2023';
+  // Some AHJ records carry 'NEC 2023' rather than '2023' — strip the prefix so
+  // the code line never prints 'NEC NEC 2023' (critique/red-line item).
+  const necVer  = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
   const ibcVer  = '2021';
   const ircVer  = '2021';
   const ifcVer  = necVer === '2023' ? '2024' : '2021';
@@ -40,37 +43,51 @@ export function titleBlock(
   const systemSizeKw    = system?.totalDcKw ? `${system.totalDcKw.toFixed(2)} kW DC` : '—';
   const panelCount      = system?.totalPanels ? `${system.totalPanels} modules` : '';
 
+  // Industry-standard VERTICAL title-block strip on the right edge of every
+  // sheet — firm block, project block, meta, revisions, PE seal, sheet name,
+  // and the big sheet ID in the extreme lower-right where plan reviewers and
+  // printers index a set. (The old full-width horizontal banner across the top
+  // was the single biggest "generated, not drafted" tell vs the PE-sealed
+  // reference.) Rendered position/size comes from .title-block CSS.
   return `
   <div class="title-block">
-    <div class="tb-left">
-      <div class="tb-company">SOLARPRO ENGINEERING</div>
-      <div class="tb-project">${project.projectName || 'SOLAR PV SYSTEM'}</div>
-      <div class="tb-address">${project.address || '—'}</div>
-      <div class="tb-client">CLIENT: ${project.clientName || '—'}</div>
-      <div class="tb-meta">APN: ${apn} &nbsp;|&nbsp; UTILITY: ${utility}</div>
-      <div class="tb-meta">AHJ: ${ahj} &nbsp;|&nbsp; ${state}</div>
+    <div class="tbs-firm">
+      <div class="tb-company">SOLARPRO<br/>ENGINEERING</div>
+      <div class="tbs-firm-sub">SOLAR PERMIT PLANSETS</div>
     </div>
-    <div class="tb-center">
-      <div class="tb-sheet-id">${sheetId}</div>
+    <div class="tbs-block">
+      <div class="tb-project">${escapeH(project.projectName || 'SOLAR PV SYSTEM')}</div>
+      <div class="tb-address">${escapeH(project.address || '—')}</div>
+      <div class="tb-client">CLIENT: ${escapeH(project.clientName || '—')}</div>
+      <div class="tb-meta">APN: ${apn}</div>
+      <div class="tb-meta">UTILITY: ${utility}</div>
+      <div class="tb-meta">AHJ: ${ahj} | ${state}</div>
+    </div>
+    <table class="tb-table">
+      <tr><td class="tbl">DESIGNER</td><td class="tbv">${escapeH(project.designer || '—')}</td></tr>
+      <tr><td class="tbl">DATE</td><td class="tbv">${escapeH(String(project.date ?? ''))}</td></tr>
+      <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
+      <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
+      <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
+      <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-2|PV-2B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
+    </table>
+    <div class="tbs-rev-hdr">REVISIONS</div>
+    <table class="tb-table">
+      <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; ${escapeH(String(project.date ?? ''))}</td></tr>
+    </table>
+    <div class="tbs-seal">
+      <div class="tbs-seal-caption">PE SEAL</div>
+      <div class="pe-seal-box">&nbsp;</div>
+    </div>
+    <div class="tbs-spacer"></div>
+    <div class="tbs-sheetname">
+      <div class="tbs-sn-label">SHEET NAME</div>
       <div class="tb-sheet-title">${pageTitle}</div>
       <div class="tb-codes">NEC ${necVer} &middot; IBC ${ibcVer} &middot; IRC ${ircVer} &middot; IFC ${ifcVer} &middot; ASCE 7-22</div>
-      <div class="tb-size">SHEET SIZE: ANSI B &mdash; 11&Prime; &times; 17&Prime;</div>
+      <div class="tb-size">ANSI B &mdash; 11&Prime; &times; 17&Prime; &nbsp;|&nbsp; SHEET ${pageNum} OF ${totalPages}</div>
     </div>
-    <div class="tb-right">
-      <table class="tb-table">
-        <tr><td class="tbl">DESIGNER</td><td class="tbv">${project.designer || '—'}</td></tr>
-        <tr><td class="tbl">DATE</td><td class="tbv">${project.date}</td></tr>
-        <tr><td class="tbl">SHEET</td><td class="tbv">${pageNum} OF ${totalPages}</td></tr>
-        <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
-        <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
-        <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
-        <tr><td class="tbl">UTILITY</td><td class="tbv">${utility}</td></tr>
-        <tr><td class="tbl">AHJ</td><td class="tbv">${ahj}</td></tr>
-        <tr class="tb-rev-hdr"><td class="tbl" colspan="2" style="text-align:center;font-weight:900;background:#000;color:#fff;letter-spacing:0.5px;">REVISIONS</td></tr>
-        <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; ${project.date}</td></tr>
-        <tr><td class="tbl">SCALE</td><td class="tbv">NTS</td></tr>
-        <tr><td class="tbl">PE SEAL</td><td class="tbv"><div class="pe-seal-box">SEAL / STAMP REQUIRED</div></td></tr>
-      </table>
+    <div class="tbs-id">
+      <div class="tb-sheet-id">${sheetId}</div>
     </div>
   </div>`;
 }
@@ -85,7 +102,12 @@ export function buildConstructionNotes(input: PermitInput): string[] {
   const notes: string[] = [
     `All work shall conform to NEC ${necVer}, ${ibcVer} IBC, ${ibcVer} IRC, ${ifcVer} IFC, ASCE 7-22, applicable state amendments, and AHJ requirements. All equipment shall be listed and labeled per NEC 110.3(B).`,
     `Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).`,
-    `System shall comply with NEC 705.12 for interconnected power production equipment. Backfeed breaker shall be sized per NEC 705.12(B)(2)(3)(b). Sum of all supply breakers shall not exceed 120% of bus rating.`,
+    // Interconnection note follows the ACTUAL method — the load-side backfeed
+    // boilerplate on a supply-side-tap job re-introduced the exact set-wide
+    // contradiction the teardown flagged.
+    project.interconnectionMethod === 'SUPPLY_SIDE_TAP'
+      ? `System shall interconnect via supply-side tap per NEC 705.11. Tap conductors shall be sized ≥ 125% of PV output current and terminate in a fused disconnect within 10 ft of the tap per NEC 705.11(C). The 120% busbar rule (NEC 705.12(B)) does not apply to supply-side connections.`
+      : `System shall comply with NEC 705.12 for interconnected power production equipment. Backfeed breaker shall be sized per NEC 705.12(B)(2)(3)(b). Sum of all supply breakers shall not exceed 120% of bus rating.`,
     project.rapidShutdown
       ? `Rapid shutdown system required per NEC 690.12. Module-level rapid shutdown (MLRS) shall reduce array conductors to \u2264 30V within 30 seconds. Initiator shall be located at utility meter per NEC 690.56(B).`
       : `Rapid shutdown initiator shall be installed per NEC 690.12. Array boundary conductors shall be de-energized to \u2264 30V within 30 seconds of initiation.`,
@@ -96,7 +118,7 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC 705.12 and manufacturer requirements.`,
     `Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.`,
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
-    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a7605.11.6. See sheet PV-5 for complete label schedule and placement diagram.`,
+    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
     // FIX v47.295: Only include roof attachment / flashing notes for roof systems
     ...((input.project)?.systemType === 'fence' || input.project?.systemType === 'solar_fence'
       ? [

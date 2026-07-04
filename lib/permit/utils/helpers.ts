@@ -98,11 +98,28 @@ export function roofTypeLabel(rt?: string) {
 export function interconnectionLabel(m?: string) {
   const map: Record<string, string> = {
     LOAD_SIDE: 'Load Side — NEC 705.12(B)',
-    SUPPLY_SIDE_TAP: 'Supply Side Tap — NEC 705.12(A)',
+    SUPPLY_SIDE_TAP: 'Supply Side Tap — NEC 705.11',
     MAIN_BREAKER_DERATE: 'Main Breaker Derate — NEC 705.12(B)(3)',
     PANEL_UPGRADE: 'Panel Upgrade Required',
   };
   return m ? (map[m] || m) : 'Load Side — NEC 705.12(B)';
+}
+
+/**
+ * One source of truth for "is this job a supply-side interconnection".
+ * Reads the RESOLVED electrical compliance first (generatePermit runs the
+ * electrical engine and assigns input.compliance.electrical before any sheet
+ * renders), falling back to the project's selected method. Every sheet
+ * generator must use this — never re-derive the method from local 120% math.
+ */
+export function isSupplySideInterconnection(input: {
+  project?: { interconnectionMethod?: string };
+  compliance?: { electrical?: { busbar?: { necReference?: string; method?: string } } };
+}): boolean {
+  const bus = input.compliance?.electrical?.busbar;
+  if (bus?.necReference?.includes('705.11')) return true;
+  if (bus?.method && /supply/i.test(bus.method)) return true;
+  return input.project?.interconnectionMethod === 'SUPPLY_SIDE_TAP';
 }
 
 // ─── FIX v47.341: Topology auto-detection ──────────────────────────────────────

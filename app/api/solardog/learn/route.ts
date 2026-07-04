@@ -19,8 +19,12 @@ import { getUserFromRequest } from '@/lib/auth';
 import { solardogSaveAlias } from '@/lib/db-neon';
 import { SITE_MAP, normalizePhrase } from '@/lib/solardog/siteMap';
 import { resolveRoute } from '@/lib/solardog/resolveRoute';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'solar-api');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const user = getUserFromRequest(req);
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

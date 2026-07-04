@@ -9,6 +9,7 @@ import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-prof
 import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
+import { balancedBranchSizes, microBranchCount, planMicroBranches } from './branching';
 
 /**
  * Build a live SLDProfessionalInput from PermitInput canonical data.
@@ -50,8 +51,19 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const inverterMfr   = eq.inverterManufacturer !== '—' ? eq.inverterManufacturer : '';
 
   // ── Electrical values from compliance/project ──
-  const acWireGauge  = compliance.electrical?.acConductorCallout ?? project.wireGauge ?? '#10 AWG';
-  const dcWireGauge  = compliance.electrical?.dcConductorCallout ?? '#10 AWG';
+  // acWireGauge must be a PLAIN gauge ('#8 AWG') — feeding the full conductor
+  // callout string ('3#8 THWN-2 + …') here made the renderer re-format it into
+  // garbage like '3#32 THWN-2' on every E-1 schedule row.
+  const _plainGauge = (callout?: string | null, fallback = '#10 AWG'): string => {
+    if (!callout) return fallback;
+    const t = callout.trim();
+    if (/^#\d+(\/0)?\s*AWG$/i.test(t)) return t;
+    const m = t.match(/#(\d+(?:\/0)?)/);
+    return m ? `#${m[1]} AWG` : fallback;
+  };
+  const acWireGauge  = compliance.electrical?.acWireGauge
+    ?? _plainGauge(compliance.electrical?.acConductorCallout, project.wireGauge ?? '#10 AWG');
+  const dcWireGauge  = _plainGauge(compliance.electrical?.dcConductorCallout);
   const acOCPD       = project.backfeedBreakerA ?? project.pvBackfeedA ?? (necNextStandardOcpd(acOutputAmps * 1.25) || 40);
   const backfeedAmps = project.backfeedBreakerA ?? acOCPD;
   const mainAmps     = project.mainPanelAmps ?? 200;
@@ -90,7 +102,34 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
 
   // ── Micro-specific ──
   const deviceCount = isMicro ? totalPanels : undefined;
-  const nBranches = isMicro ? Math.ceil(totalPanels / 16) : undefined;
+  // PLANE-AWARE branch count (same planner as PV-2B — branches never span
+  // roof faces) so the SLD can never disagree with the array sheet. Falls
+  // back to the flat per-model NEC count when panel positions are absent.
+  const _sldPanels = (project as any).panelPositions as Array<{id:string;planeId?:string;arrayId?:string;row?:number;col?:number}> | undefined;
+  const _branchModel = inv0?.model ?? eq.inverterModel;
+  const _sldPlan = isMicro && _sldPanels?.length ? planMicroBranches(_sldPanels, _branchModel) : null;
+  const nBranches = isMicro
+    ? (_sldPlan?.count ?? microBranchCount(totalPanels, _branchModel))
+    : undefined;
+  // Full per-branch plan for the renderer — without this the SLD fell back to
+  // ceil(modules/16) and a system-level 100A OCPD on the branch rows.
+  const _perMicroA = isMicro && totalPanels > 0 && totalAcKw > 0
+    ? (totalAcKw * 1000 / totalPanels) / 240
+    : 0;
+  const _branchSizes = isMicro
+    ? (_sldPlan?.sizes?.length ? _sldPlan.sizes : balancedBranchSizes(totalPanels, nBranches ?? 1))
+    : [];
+  const microBranches = isMicro ? _branchSizes.map((sz, i) => {
+    const amps = sz * _perMicroA;
+    return {
+      branchIndex: i + 1,
+      deviceCount: sz,
+      branchCurrentA: amps,
+      ocpdAmps: necNextStandardOcpd(amps * 1.25) || 20,
+      conductorCallout: '#10 AWG THWN-2',
+      necReference: 'NEC 690.8(B)',
+    };
+  }) : undefined;
 
   // ── DC OCPD (string topology only) ──
   // Error 5b fix: ocpd IS declared on string type — no need for `as any`
@@ -100,7 +139,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     projectName:             project.projectName ?? 'Solar PV System',
     clientName:              project.clientName ?? 'Homeowner',
     address:                 project.address ?? '',
-    designer:                project.designer ?? 'SolarPro Engineering',
+    designer:                project.designer ?? '',
     drawingDate:             project.date ?? new Date().toLocaleDateString(),
     drawingNumber:           'SLD-001',
     revision:                'A',
@@ -140,6 +179,15 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     atsAmpRating:            project.atsAmpRating ?? undefined,
     scale:                   'NOT TO SCALE',
     acWireLength,
+    // Real engine results — without these the renderer's fallback schedule
+    // fabricated 32% fill / canned voltage drops.
+    acConduitFillPct:        compliance.electrical?.conduitFill?.fillPercent ?? undefined,
+    acVoltageDropPct:        compliance.electrical?.acVoltageDrop ?? undefined,
+    // EGC sized by the engine per NEC 250.122 (e.g. #8 Cu on a 100A OCPD) —
+    // without this the renderer fell back to #10 AWG regardless of OCPD.
+    egcGauge:                compliance.electrical?.groundingConductor
+      ? _plainGauge(compliance.electrical.groundingConductor)
+      : undefined,
 
     // String-specific
     panelsPerString:         isMicro ? 1 : panelsPerString,
@@ -147,6 +195,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
 
     // Micro-specific
     deviceCount,
+    microBranches,
 
     // Topology / MPPT
     mpptChannels:            isMicro ? totalPanels : inv0?.mpptChannels ?? 2,

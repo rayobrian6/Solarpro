@@ -30,8 +30,24 @@ import {
   getPerEdgeSetbacks,
   generateMultipleRows,
   calcMinRowSpacing,
+  obstructionToKeepOutZone,
+  filterPanelsByObstructions,
+  type ObstructionKeepOut,
 } from '@/lib/placementEngine';
+import { type NearmapObstruction, OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
+import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
+
+// Ray-cast point-in-polygon on a lat/lng ring (planar approx — fine at parcel
+// scale). Used to prune panels that fall outside the subject building's planes.
+function pointInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+    if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
 // Phase 2: Compute & Recommend — provenance-aware form fields
 import { ComputedField, type ComputedFieldValue } from '@/components/recommend/ComputedField';
 import { ConfidenceBadge, type ConfidenceSource } from '@/components/recommend/ConfidenceBadge';
@@ -68,6 +84,12 @@ type SolarE2EState = {
   fullRebuildCount: number;
   /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
   roofPlaneEntityCount: number;
+  /** Centroids (lat/lng) of each rendered setback band polygon — used to verify
+   *  bands hug edges (not roof middle). cf0dd96b regression guard. */
+  setbackBandCentroids: Array<{ lat: number; lng: number }>;
+  /** Count of full rebuilds triggered during panel drag/move — should stay 0
+   *  for smooth moves. 2176e4d3 regression guard. */
+  panelMoveRebuildCount: number;
 };
 
 declare global {
@@ -494,7 +516,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Tile provider: 'auto' tries Google first, falls back to ESRI on error.
   // 'google' forces Google only. 'esri' forces ESRI only (caps at zoom 19).
   // 'auto' is the default — Google primary for zoom 20+, ESRI for zoom <=19 if Google fails.
-  const [tileProvider, setTileProvider] = useState<'auto' | 'google' | 'esri'>('auto');
+  const [tileProvider, setTileProvider] = useState<'auto' | 'google' | 'esri' | 'nearmap'>('auto');
   // High-res Google Solar RGB backdrop (~10 cm, covered addresses) — sharp enough to tag vents/obstructions
   const [hdImagery, setHdImagery] = useState(false);
   const [hdStatus, setHdStatus]   = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
@@ -502,7 +524,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Track which zoom levels ESRI has run out of imagery (variance too low)
   const esriBlankZoomsRef = React.useRef<Set<number>>(new Set());
   // Current active provider per tile batch (for the badge)
-  const [activeTileSource, setActiveTileSource] = useState<'google' | 'esri'>('google');
+  const [activeTileSource, setActiveTileSource] = useState<'google' | 'esri' | 'nearmap'>('google');
   const [mapTiles, setMapTiles] = useState<Map<string, HTMLImageElement>>(new Map());
   // Ref mirrors TILE_CACHE so drawCanvas can read tiles without stale closure issues.
   // We use a simple counter to trigger redraws instead of putting the full Map in deps.
@@ -545,7 +567,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [panels, setPanels] = useState<PlacedPanel[]>([]);
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([]);
   const [e2eStitchedCorners, setE2EStitchedCorners] = useState<Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>>([]);
-  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0 });
+  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0, setbackBandCentroids: [] as Array<{ lat: number; lng: number }>, panelMoveRebuildCount: 0 });
   const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
   const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
   
@@ -575,6 +597,8 @@ export default function DesignStudio({ project, onSave }: Props) {
       setbackInsets: e2eDiagnostics.setbackInsets,
       fullRebuildCount: e2eDiagnostics.fullRebuildCount,
       roofPlaneEntityCount: e2eDiagnostics.roofPlaneEntityCount,
+      setbackBandCentroids: e2eDiagnostics.setbackBandCentroids,
+      panelMoveRebuildCount: e2eDiagnostics.panelMoveRebuildCount,
     };
   }, [roofPlanes, panels, e2eStitchedCorners, e2eDiagnostics]);
 
@@ -799,6 +823,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   // v47.118: Align panel grid to longest roof edge (instead of pure azimuth)
   const [alignToEdge, setAlignToEdge] = useState(true);  // default ON for best visual alignment
   const [setbackZones, setSetbackZones] = useState<SetbackZone[]>([]);
+
+  // Nearmap AI obstruction keep-out zones (vents, chimneys, A/C units, etc.)
+  const [obstructions, setObstructions] = useState<NearmapObstruction[]>([]);
+  const [keepOutZones, setKeepOutZones] = useState<ObstructionKeepOut[]>([]);
+  const [showObstructionZones, setShowObstructionZones] = useState(true);
 
   // v30.9: Multi-row placement tool
   const [multiRowMode, setMultiRowMode] = useState(false);
@@ -1372,7 +1401,25 @@ export default function DesignStudio({ project, onSave }: Props) {
       setRoofPlanes(planes);
       setSolarApiStatus('loaded');
       if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
-      toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap · review pitch & azimuth, then confirm`);
+
+      // Cropped to the subject building? Note how many block roofs were dropped.
+      const cropNote = data.crop?.applied
+        ? ` · cropped to this building (${data.crop.planesKept} of ${data.crop.planesBefore} roofs on the block)`
+        : '';
+
+      // ── Obstruction keep-out zones from Nearmap AI ──
+      const fetchedObs: NearmapObstruction[] = Array.isArray(data.obstructions) ? data.obstructions : [];
+      setObstructions(fetchedObs);
+      if (fetchedObs.length > 0) {
+        const zones = fetchedObs.map(obstructionToKeepOutZone);
+        setKeepOutZones(zones);
+        const typeCounts: Record<string, number> = {};
+        for (const o of fetchedObs) typeCounts[o.type] = (typeCounts[o.type] || 0) + 1;
+        const summary = Object.entries(typeCounts).map(([t, c]) => `${c} ${t}${c !== 1 ? 's' : ''}`).join(', ');
+        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''}, ${fetchedObs.length} obstruction${fetchedObs.length !== 1 ? 's' : ''} (${summary})${cropNote} · review & confirm`);
+      } else {
+        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap${cropNote} · review pitch & azimuth, then confirm`);
+      }
     } catch (e) {
       setSolarApiStatus('unavailable');
       toast.error('Aerial detect failed', (e as Error).message);
@@ -1492,11 +1539,21 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Provider priority (v47.87):
   //   'auto'   — Google primary (zoom 21), ESRI fallback on error or blank tile
   //   'google' — Google only (forced)
-  //   'esri'   — ESRI only, capped at zoom 19
+  //   'esri'   — ESRI only, capped at ARCGIS_MAX_ZOOM
   // Smart quality detection: ESRI tiles with pixel variance <80 are flagged as blank
-  // (ESRI stops real imagery above zoom 19 for rural areas, returns solid grey tile)
+  // (ESRI stops real imagery above its native max for an area, returns solid grey tile)
   const GOOGLE_MAX_ZOOM = 21;
-  const ARCGIS_MAX_ZOOM = 19;
+  // ESRI World Imagery serves native z20 in most developed US areas (verified real z20
+  // imagery for the test address; z21 is grey there). Was hardcoded to 19, which forced
+  // an upscaled/blurry z19 above zoom 19 instead of the sharper native z20 that exists.
+  // Raised to 20; the variance-based blank-tile detection still falls back gracefully in
+  // rural areas that genuinely lack z20. (Ray, 2026-06-30 — sharper ESRI imagery.)
+  const ARCGIS_MAX_ZOOM = 20;
+  // Nearmap "Vert" imagery (~7.5 cm/px at z21) — far sharper than ESRI z20 (~15 cm) or
+  // Google z21. Licensed (NEARMAP_API_KEY); proxied through /api/admin/nearmap-tile to keep
+  // the key server-side. Opt-in only (costs Nearmap credits per tile). z21 is reliably
+  // native wherever Nearmap has coverage. (Ray, 2026-06-30 — the high-detail roof imagery.)
+  const NEARMAP_MAX_ZOOM = 21;
 
   // Cache Google Maps session token at component scope
   const googleSessionRef = React.useRef<{ token: string; key: string } | null>(null);
@@ -1568,12 +1625,19 @@ export default function DesignStudio({ project, onSave }: Props) {
     if (!canvas) return;
 
     const hasGoogle = !!googleSessionRef.current;
-    const forceEsri   = tileProvider === 'esri';
-    const forceGoogle = tileProvider === 'google';
+    const forceEsri    = tileProvider === 'esri';
+    const forceGoogle  = tileProvider === 'google';
+    const forceNearmap = tileProvider === 'nearmap';
 
-    // Determine fetch zoom based on provider capabilities
-    const MAX_ZOOM  = (!forceEsri && hasGoogle) ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
-    const fetchZoom = Math.min(zoom, MAX_ZOOM);
+    // Determine fetch zoom based on provider capabilities. Tile z MUST be an integer —
+    // `zoom` is fractional (smooth wheel zoom, e.g. 19.75), and a fractional z goes into the
+    // tile URL as ".../tile/19.75/..." which every provider rejects → grey tiles. Floor it;
+    // the fractional remainder is handled by `scale` (overzoom). (Previously the cap of 19
+    // accidentally clamped fractional zooms to an integer; raising the cap exposed this.)
+    const MAX_ZOOM  = forceNearmap ? NEARMAP_MAX_ZOOM
+                    : (!forceEsri && hasGoogle) ? GOOGLE_MAX_ZOOM
+                    : ARCGIS_MAX_ZOOM;
+    const fetchZoom = Math.min(Math.floor(zoom), MAX_ZOOM);
     const scale     = Math.pow(2, zoom - fetchZoom);
 
     const center = latLngToWorld(mapCenter.lat, mapCenter.lng, fetchZoom);
@@ -1617,7 +1681,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       img.crossOrigin = 'anonymous';
       TILE_INFLIGHT.add(key);
 
-      const commitTile = (source: 'google' | 'esri') => {
+      const commitTile = (source: 'google' | 'esri' | 'nearmap') => {
         (img as any)._loaded  = true;
         (img as any)._source  = source;
         TILE_INFLIGHT.delete(key);
@@ -1649,7 +1713,14 @@ export default function DesignStudio({ project, onSave }: Props) {
         img.src = esriUrl(fz, ftx, fty);
       };
 
-      if (forceEsri) {
+      if (forceNearmap) {
+        // Nearmap Vert tiles via the server proxy (key stays server-side). Path is z/x/y
+        // (standard XYZ). On any failure (no coverage / 502 / 403) fall back to ESRI so the
+        // map never goes blank.
+        img.onload  = () => commitTile('nearmap');
+        img.onerror = () => { img.onerror = null; tryEsri(); };
+        img.src = `/api/admin/nearmap-tile/${Math.min(fz, NEARMAP_MAX_ZOOM)}/${ftx}/${fty}`;
+      } else if (forceEsri) {
         img.onload  = () => commitTile('esri');
         img.onerror = () => { TILE_INFLIGHT.delete(key); };
         img.src = esriUrl(Math.min(fz, ARCGIS_MAX_ZOOM), ftx, fty);
@@ -1726,9 +1797,11 @@ export default function DesignStudio({ project, onSave }: Props) {
     // Draw map tiles
     // Tiles are stored at fetchZoom — clamped to GOOGLE_MAX_ZOOM=21 (or ARCGIS_MAX_ZOOM=19 fallback)
     // If display zoom > max, tiles are scaled up on canvas
-    const _tileMaxZoom = googleSessionRef.current ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
-    const fetchZoom = Math.min(zoom, _tileMaxZoom);
-    const tileScale = Math.pow(2, zoom - fetchZoom); // 1 at zoom<=max, 2 at +1, 4 at +2
+    const _tileMaxZoom = tileProvider === 'nearmap' ? NEARMAP_MAX_ZOOM
+                       : googleSessionRef.current ? GOOGLE_MAX_ZOOM
+                       : ARCGIS_MAX_ZOOM;
+    const fetchZoom = Math.min(Math.floor(zoom), _tileMaxZoom); // integer tile z (matches loadTiles)
+    const tileScale = Math.pow(2, zoom - fetchZoom); // 1 at integer native zoom, >1 when overzoomed
     const displayTileSize = TILE_SIZE * tileScale;
 
     // Center position in fetch-zoom world coords
@@ -2078,6 +2151,37 @@ export default function DesignStudio({ project, onSave }: Props) {
       });
     }
 
+    // Nearmap AI obstruction keep-out zones (orange/amber, distinct from fire setbacks)
+    if (showObstructionZones && keepOutZones.length > 0) {
+      keepOutZones.forEach(zone => {
+        if (zone.polygon.length < 3) return;
+        ctx.beginPath();
+        zone.polygon.forEach((v, i) => {
+          const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+        // Amber/orange fill and stroke — visually distinct from red (fire) and green (buildable)
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label the obstruction type
+        if (zone.polygon.length >= 3) {
+          const centLat = zone.polygon.reduce((s: number, v: {lat: number}) => s + v.lat, 0) / zone.polygon.length;
+          const centLng = zone.polygon.reduce((s: number, v: {lng: number}) => s + v.lng, 0) / zone.polygon.length;
+          const labelPos = latLngToCanvas(centLat, centLng, mapCenter, zoom, W, H);
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.95)';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.fillText(`${zone.description} (${(zone.clearanceM * 39.37).toFixed(0)}" clr)`, labelPos.x + 3, labelPos.y - 3);
+        }
+      });
+    }
+
     // Draw ground area
     if (groundArea.length >= 2) {
       ctx.beginPath();
@@ -2412,7 +2516,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   }, [mapCenter, zoom, tileRedrawTick, panels, roofPlanes, groundArea, fenceLine,
       drawnPoints, selectedPanelIds, selectedPanel, drawingMode, showPanels,
       measurePoints, measureDistance, showSetbackZones, setbackZones, showCADDebug,
-      multiRowMode, multiRowStart, hoverPos, multiRowCount, activeTileSource, orientation]);
+      multiRowMode, multiRowStart, hoverPos, multiRowCount, activeTileSource, tileProvider, orientation]);
 
   function drawCompass(ctx: CanvasRenderingContext2D, x: number, y: number) {
     ctx.save();
@@ -2444,13 +2548,15 @@ export default function DesignStudio({ project, onSave }: Props) {
   function drawTileSourceBadge(
     ctx: CanvasRenderingContext2D,
     W: number, H: number,
-    source: 'google' | 'esri',
+    source: 'google' | 'esri' | 'nearmap',
     currentZoom: number
   ) {
     const label = source === 'google'
       ? `📷 Google z${currentZoom}`
-      : `🌍 ESRI z${Math.min(currentZoom, 19)}`;
-    const color = source === 'google' ? '#60a5fa' : '#fbbf24';
+      : source === 'nearmap'
+        ? `🛰️ Nearmap z${Math.min(currentZoom, NEARMAP_MAX_ZOOM)}`
+        : `🌍 ESRI z${Math.min(currentZoom, ARCGIS_MAX_ZOOM)}`;
+    const color = source === 'google' ? '#60a5fa' : source === 'nearmap' ? '#34d399' : '#fbbf24';
     ctx.save();
     ctx.font = 'bold 9px Inter, sans-serif';
     const tw = ctx.measureText(label).width;
@@ -2748,8 +2854,12 @@ export default function DesignStudio({ project, onSave }: Props) {
     const mpp = metersPerPixel(mapCenter.lat, zoom);
     const degPerPixelLat = mpp / 111320;
     const degPerPixelLng = mpp / (111320 * Math.cos(mapCenter.lat * Math.PI / 180));
+    // "Grab the map" on BOTH axes, to match the 3D (Cesium) camera: the point under the
+    // cursor follows the cursor. Horizontal was already grab (lng - dx). The vertical was
+    // inverted (lat - dy = camera-pan) because screen-Y increases downward while latitude
+    // increases upward — so dragging down moved the map the wrong way. Flip it to lat + dy.
     setMapCenter({
-      lat: dragStartCenter.lat - dy * degPerPixelLat,
+      lat: dragStartCenter.lat + dy * degPerPixelLat,
       lng: dragStartCenter.lng - dx * degPerPixelLng,
     });
   };
@@ -3108,12 +3218,62 @@ export default function DesignStudio({ project, onSave }: Props) {
   }, [panels, roofPlanes, groundArea, selectedPanel, setback, panelSpacing, rowSpacing,
       tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks, alignToEdge, show3D, setPlacementMode3D]);
 
+  // ── "Only my building" guard (Ray, 2026-06-30) ──────────────────────────────
+  // Restrict the design to the SUBJECT building — the roof-plane cluster under the
+  // map centre (the house the user picked / is designing). Stray neighbour roofs
+  // (from a prior block-wide detect or saved data) must NOT get papered by Fill /
+  // Auto-Layout — that was the "997 panels on 10 houses" bug. Removes non-subject
+  // planes AND their panels from state and returns the kept planes (for the 2D
+  // path to iterate; the 3D auto_roof engine reads the now-cleaned roofPlanes).
+  const keepSubjectBuilding = useCallback((): RoofPlane[] => {
+    if (roofPlanes.length <= 1) return roofPlanes;
+    // Subject reference: prefer the user's MARKED planes (source 'manual' /
+    // createdFrom3D) over mapCenter — the geocode can land on the NEIGHBOUR (e.g.
+    // 3 Melvin Dr sits ~17m onto the next house), which would seed the filter on the
+    // wrong building and delete the roof the user actually drew. Marked plane = truth.
+    const marked = roofPlanes.filter(p => ((p as any).source === 'manual' || (p as any).createdFrom3D) && p.vertices && p.vertices.length >= 3);
+    const sv = marked.flatMap(p => p.vertices ?? []);
+    const subject = sv.length > 0
+      ? { lat: sv.reduce((s, v) => s + v.lat, 0) / sv.length, lng: sv.reduce((s, v) => s + v.lng, 0) / sv.length }
+      : { lat: mapCenter.lat, lng: mapCenter.lng };
+    const { kept: subjectKept, cropped } = filterToSubjectBuilding(
+      roofPlanes,
+      (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+      subject,
+      { maxDistM: 60 },  // hard cap: no plane >60m from the subject building
+    );
+    // De-dup: drop a detected (aerial_*) plane that overlaps a hand-traced plane —
+    // the same roof captured twice was double-filling panels (Melvin 134 = 54+80).
+    const { kept, dropped } = dropDetectedPlanesOverlappingManual(
+      subjectKept,
+      (p) => (p.vertices ?? []) as Array<{ lat: number; lng: number }>,
+      (p) => (p as any).source === 'manual' || (p as any).createdFrom3D === true,
+    );
+    const removed = roofPlanes.length - kept.length;
+    if (removed === 0 || kept.length === 0) return roofPlanes;  // never wipe the design
+    setRoofPlanes(kept);
+    setPanels(prev => prev.filter(pan => kept.some(pl => pointInLatLngRing(pan.lat, pan.lng, pl.vertices ?? []))));
+    const neighborN = roofPlanes.length - subjectKept.length;
+    const msg = [
+      neighborN > 0 ? `${neighborN} neighbor roof${neighborN !== 1 ? 's' : ''}` : '',
+      dropped > 0 ? `${dropped} duplicate detection${dropped !== 1 ? 's' : ''}` : '',
+    ].filter(Boolean).join(' + ');
+    toast.info('Kept your building', `Ignored ${msg} — panels go on your traced roof only`);
+    return kept;
+  }, [roofPlanes, mapCenter, toast]);
+
   const autoLayoutAll = useCallback(() => {
     const hasZones = roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0;
     if (!hasZones) {
       toast.error('No zones defined', 'Draw a roof, ground, or fence zone first, then click Auto Layout.');
       return;
     }
+
+    // "Only my building": drop neighbour roofs before laying out (both 2D + 3D).
+    // For 3D this setRoofPlanes lands before the engine fills: handleAutoRoof runs
+    // via setTimeout(100ms) off the placementMode effect, by which point the
+    // synchronous roofPlanesRef-sync effect has already applied the cleaned planes.
+    const subjectPlanes = keepSubjectBuilding();
 
     // v48.35: In 3D mode, the 2D layout engines produce panels without terrain heights,
     // which render underground. Route through SolarEngine3D's auto_roof engine instead,
@@ -3129,7 +3289,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
     let allNew: PlacedPanel[] = [];
 
-    roofPlanes.forEach(plane => {
+    subjectPlanes.forEach(plane => {
       const layoutId = uuidv4();
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
@@ -3167,14 +3327,18 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     // Combine: manual panels first (preserved), then new auto panels
-    setPanels([...manualPanels, ...allNew]);
+    // Filter out auto panels that overlap obstruction keep-out zones
+    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    setPanels([...manualPanels, ...filteredNew]);
     setAutoLayoutRunning(false);
+    const removedCount = allNew.length - filteredNew.length;
     toast.success(
       'Auto Layout complete',
-      `${allNew.length} panels placed · ${(calculateSystemSize(allNew)).toFixed(2)} kW`
+      `${filteredNew.length} panels placed · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW` +
+      (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [panels, roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D]);
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D, keepOutZones, keepSubjectBuilding]);
 
   // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
   const fillRoof = useCallback(() => {
@@ -3183,11 +3347,12 @@ export default function DesignStudio({ project, onSave }: Props) {
       return;
     }
     setAutoLayoutRunning(true);
+    const subjectPlanes = keepSubjectBuilding();  // "only my building" — skip neighbour roofs
     const minSetback = 0;    // v47.95: no minimum -- AHJ fire setbacks handle clearances
     const tightSpacing = midClampGapM; // v63: mid-clamp gap from selected racking (was hardcoded ¼")
     let allNew: PlacedPanel[] = [];
 
-    roofPlanes.forEach(plane => {
+    subjectPlanes.forEach(plane => {
       const layoutId = uuidv4();
       // v30.9: fire setback takes precedence over minSetback
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
@@ -3220,13 +3385,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
-    setPanels([...manualPanels, ...allNew]);
+    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    setPanels([...manualPanels, ...filteredNew]);
     setAutoLayoutRunning(false);
+    const removedCount = allNew.length - filteredNew.length;
     toast.success(
       'Fill Roof complete',
-      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW (max density)`
+      `${filteredNew.length} panels · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW (max density)` +
+      (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
-  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
+  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding]);
 
   // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
   const optimizeLayout = useCallback(() => {
@@ -3242,9 +3410,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     const optRowSpacingRoof   = rowSpacing; // roof: user-controlled, no shadow calc
     const optRowSpacingGround = Math.max(rowSpacing, selectedPanel.height + shadowLength * 0.5); // ground: shade avoidance
     const optSetback = setback; // v47.95: AHJ fire setbacks handle clearances
+    const subjectPlanes = keepSubjectBuilding();  // "only my building" — skip neighbour roofs
     let allNew: PlacedPanel[] = [];
 
-    roofPlanes.forEach(plane => {
+    subjectPlanes.forEach(plane => {
       const layoutId = uuidv4();
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
@@ -3273,13 +3442,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     const manualPanels2 = panels.filter(p => p.layoutSource === 'MANUAL');
-    setPanels([...manualPanels2, ...allNew]);
+    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    setPanels([...manualPanels2, ...filteredNew]);
     setAutoLayoutRunning(false);
+    const removedCount = allNew.length - filteredNew.length;
     toast.success(
       'Optimized Layout complete',
-      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW · min shading`
+      `${filteredNew.length} panels · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW · min shading` +
+      (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
-  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
+  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge, keepSubjectBuilding]);
 
   // ── Calculate production ───────────────────────────────────
   const buildSystemDefinition = () => {
@@ -3459,6 +3631,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     setPanels([]); setRoofPlanes([]); setGroundArea([]); setFenceLine([]);
     setDrawnPoints([]); setProduction(null); setCostEstimate(null);
     setSelectedPanelIds(new Set()); setMeasurePoints([]); setMeasureDistance(null);
+    setObstructions([]); setKeepOutZones([]);
   };
 
   const systemTypeLabel = { roof: 'Roof Mount', ground: 'Ground Mount', fence: 'Sol Fence' }[project.systemType];
@@ -3626,7 +3799,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           {/* Tile provider toggle — only shown in 2D mode */}
           {!show3D ? (
             <div className="flex items-center gap-0.5 bg-slate-800 border border-slate-600 rounded-lg overflow-hidden">
-              {(['auto', 'google', 'esri'] as const).map(p => (
+              {(['auto', 'google', 'esri', 'nearmap'] as const).map(p => (
                 <button
                   key={p}
                   onClick={() => {
@@ -3639,12 +3812,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                       : 'text-slate-400 hover:bg-slate-700 hover:text-white'
                   }`}
                   title={
-                    p === 'auto'   ? 'Auto: Google primary, ESRI fallback on blank tile' :
-                    p === 'google' ? 'Force Google Maps satellite (zoom 21)' :
-                                     'Force ESRI World Imagery (zoom 19 max)'
+                    p === 'auto'    ? 'Auto: Google primary, ESRI fallback on blank tile' :
+                    p === 'google'  ? 'Force Google Maps satellite (zoom 21)' :
+                    p === 'nearmap' ? 'Nearmap HD imagery (~7.5 cm, sharpest — uses Nearmap credits)' :
+                                      'Force ESRI World Imagery (native zoom 20)'
                   }
                 >
-                  {p === 'auto' ? '🔍 Auto' : p === 'google' ? 'Google' : 'ESRI'}
+                  {p === 'auto' ? '🔍 Auto' : p === 'google' ? 'Google' : p === 'nearmap' ? '🛰️ Nearmap HD' : 'ESRI'}
                 </button>
               ))}
               <span className={`px-1.5 py-1 text-[9px] font-bold border-l border-slate-600 ${
@@ -4679,6 +4853,17 @@ export default function DesignStudio({ project, onSave }: Props) {
                             {showSetbackZones ? <Eye size={10} /> : <EyeOff size={10} />}
                             {showSetbackZones ? 'Zones On' : 'Zones Off'}
                           </button>
+                          {/* Obstruction keep-out zones toggle (vents, chimneys, etc.) */}
+                          {keepOutZones.length > 0 && (
+                            <button
+                              onClick={() => setShowObstructionZones(v => !v)}
+                              className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${showObstructionZones ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                              title="Toggle obstruction keep-out zone visibility (vents, chimneys, A/C units, etc.)"
+                            >
+                              {showObstructionZones ? <Eye size={10} /> : <EyeOff size={10} />}
+                              {showObstructionZones ? `${keepOutZones.length} Obs.` : 'Obs. Off'}
+                            </button>
+                          )}
                           {/* v47.118: Align panels to longest roof edge */}
                           <button
                             onClick={() => setAlignToEdge(v => !v)}

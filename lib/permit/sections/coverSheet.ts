@@ -6,7 +6,9 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
+import { escapeH } from '../utils/drawing';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
+import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -48,8 +50,12 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const _c          = project._canonical as CanonicalInput | undefined;
   const mountSys    = _c?.mountSystem || project.mountingSystem || '';
   const roofType    = roofTypeLabel(project.roofType);
-  const pitch       = project.roofPitch
-    ? `${Math.round(Math.tan(project.roofPitch * Math.PI / 180) * 12)}:12`
+  // Prefer the CAD plane pitch (what PV-2's table prints) over the project
+  // default, and keep 1 decimal — integer rounding made PV-0 say "4:12" while
+  // PV-2 said "3.6:12" and PE-1 said "4/12 (20.0°)" on one package.
+  const _pitchDegCover = cad.roof?.planes?.[0]?.pitch ?? project.roofPitch;
+  const pitch       = _pitchDegCover
+    ? `${(Math.tan(_pitchDegCover * Math.PI / 180) * 12).toFixed(1)}:12`
     : '';
 
   // ── Derived electrical values ──────────────────────────────────────
@@ -69,6 +75,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const interconn = project.interconnectionMethod
     ? interconnectionLabel(project.interconnectionMethod)
     : '';
+  // Single-sourced supply-side flag (resolved compliance first, project field
+  // second). The 120% math above ONLY applies to load-side connections.
+  const isSupplySide = isSupplySideInterconnection(input);
 
   // ── Battery ───────────────────────────────────────────────────────────────
   const hasBattery    = (project.batteryCount ?? 0) > 0;
@@ -80,26 +89,34 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const aerial = input.aerialData;
   let vicinityMapHtml = '';
   if (aerial?.imageBase64) {
+    // Pin gets a LABEL ('PROJECT SITE' printed nothing before — empty div),
+    // NTS moves to the corner (it sat ON the subject house), a north arrow
+    // prints, and the address caption is normal document flow below the image
+    // so it can never silently fail to render.
     vicinityMapHtml = `
-        <div class=\"aerial-wrap\" style=\"height:280px;\">
-        <img src="${aerial.imageBase64}" style="width:100%;height:280px;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
-          <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;\">
-          <svg viewBox="0 0 36 46" width="32" height="42" style="display:block;margin:0 auto;">
+        <div class=\"aerial-wrap\" style=\"height:150px;\">
+        <img src="${aerial.imageBase64}" style="width:100%;height:150px;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
+          <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-58%);text-align:center;\">
+          <svg viewBox="0 0 36 46" width="26" height="34" style="display:block;margin:0 auto;">
             <circle cx="18" cy="18" r="16" fill="#000" stroke="#fff" stroke-width="2"/>
             <circle cx="18" cy="18" r="7" fill="#fff"/>
             <polygon points="18,34 12,27 24,27" fill="#000"/>
           </svg>
-          <div class=\"f-xs fw9 aerial-pin-label\">
+          <div style="font-size:7px;font-weight:900;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;letter-spacing:0.8px;">PROJECT SITE</div>
         </div>
-          <div class=\"f-xs fw7 aerial-nts\">NTS</div>
+          <div style="position:absolute;bottom:3px;right:5px;font-size:7px;font-weight:900;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;">NTS</div>
+          <div style="position:absolute;top:3px;right:5px;text-align:center;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;">
+            <div style="font-size:9px;font-weight:900;line-height:1;">▲</div>
+            <div style="font-size:7px;font-weight:900;line-height:1;">N</div>
+          </div>
       </div>
-        </div>`;
+        <div style="border:var(--border);border-top:none;padding:2px 5px;font-size:7px;font-weight:700;letter-spacing:0.4px;text-align:center;">${escapeH(project.address || '')}${project.city ? ' — ' + escapeH(String(project.city).toUpperCase()) : ''}</div>`;
   } else {
     vicinityMapHtml = `
-      <div style="background:#e8e8e8;width:100%;height:180px;display:flex;align-items:center;justify-content:center;text-align:center;">
+      <div style="background:#e8e8e8;width:100%;height:120px;display:flex;align-items:center;justify-content:center;text-align:center;">
         <div class="f-sm fw7" style="letter-spacing:0.5px;">
           VICINITY MAP — ATTACH SITE PHOTOGRAPH OR SATELLITE IMAGE<br/>
-          <span class="f-xs muted">${project.address || ''}</span>
+          <span class="f-xs muted">${escapeH(project.address || '')}</span>
         </div>
       </div>`;
   }
@@ -134,6 +151,11 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
     || input.planSetOptions?.cadAppendixPreviewV1 === true
     || input.permitOptions?.cadAppendixPreviewV1 === true;
+  // Mirror generatePermit's dynamic page assembly EXACTLY — a hardcoded list
+  // here shipped a 16-sheet set whose cover index listed only 15.
+  const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
+    || input.planSetOptions?.includeInternalValidation === true;
+  const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
   const sheets = [
     { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
     { id: 'PV-1',  title: 'SITE PLAN — EQUIPMENT LAYOUT & VICINITY' },
@@ -145,10 +167,12 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
     { id: 'PV-5',  title: 'WARNING LABELS & PLACARDS — NEC REQUIRED SIGNAGE' },
     { id: 'SCHED', title: 'EQUIPMENT SCHEDULE — MODULES, INVERTERS & BOM' },
+    ...(includeSchedCont ? [{ id: 'SCHED-2', title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' }] : []),
     { id: 'APP-A', title: 'SPECIFICATION REFERENCE — EQUIPMENT DATA SHEETS' },
     { id: 'CERT',  title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
     { id: 'PE-1',  title: 'PE STRUCTURAL LETTER — LETTER OF COMPLIANCE' },
     { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
+    ...(includeInternalValidation ? [{ id: 'VAL-1', title: 'VALIDATION SUMMARY — INTERNAL QA (NOT FOR CONSTRUCTION)' }] : []),
     ...(includeCADAppendixPreview ? [{ id: 'APP-CAD', title: 'CAD PREVIEW APPENDIX — NON-AUTHORITATIVE' }] : []),
   ];
 
@@ -167,9 +191,12 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // Only renders row if value is present (data authority enforcement)
   function infoRow(label: string, value: string | number | null | undefined): string {
     if (value === null || value === undefined || value === '' || value === '—') return '';
+    // XSS FIX (audit P0): escape user-controlled values (projectName, clientName, address,
+    // designer, etc.) — the permit HTML is served to the browser for preview, so raw
+    // interpolation was a stored-XSS vector.
     return `<tr>
-      <td class="il">${label}</td>
-      <td class="iv">${value}</td>
+      <td class="il">${escapeH(label)}</td>
+      <td class="iv">${escapeH(String(value))}</td>
     </tr>`;
   }
 
@@ -187,7 +214,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // ── System Summary ────────────────────────────────────────────────────────
   const summaryRows = [
     totalPanels > 0 && moduleDisplay
-      ? tagRow('N', `${totalPanels} × ${moduleDisplay}${eq.panelWatts > 0 ? ` (${eq.panelWatts}W)` : ''}`)
+      ? tagRow('N', `${totalPanels} × ${moduleDisplay}${eq.panelWatts > 0 && !/\b\d{3,4}\s?W\b/i.test(moduleDisplay) ? ` (${eq.panelWatts}W)` : ''}`)
       : '',
     // FIX v47.341: Use resolveInverterCount() — totalPanels for micro, inverters.length for string
     inverterDisplay
@@ -200,7 +227,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
       ? tagRow('E', `${svcAmps}A MAIN SERVICE PANEL${project.mainPanelBrand ? ' — ' + project.mainPanelBrand : ''}`)
       : '',
     backfeedA
-      ? tagRow('N', `${backfeedA}A BACKFEED BREAKER (NEC 705.12(B))`)
+      ? (isSupplySide
+          ? tagRow('N', `${backfeedA}A FUSED AC DISCONNECT — SUPPLY-SIDE TAP (NEC 705.11)`)
+          : tagRow('N', `${backfeedA}A BACKFEED BREAKER (NEC 705.12(B))`))
       : '',
     mountSys
       ? tagRow('N', mountSys.toUpperCase() + ' RACKING SYSTEM')
@@ -251,29 +280,46 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   ].join('');
 
   // ── Governing Codes ───────────────────────────────────────────────────────
-  const codesHtml = [
+  const codesList: Array<[string, string]> = [
     [`IBC ${ibcVer}`, 'INTERNATIONAL BUILDING CODE'],
     [`IRC ${ibcVer}`, 'INTERNATIONAL RESIDENTIAL CODE'],
-    [`IFC ${ifcVer}`, 'INTERNATIONAL FIRE CODE — CH. 6 §605'],
+    [`IFC ${ifcVer}`, 'INTERNATIONAL FIRE CODE — §1204 SOLAR PV SYSTEMS'],
     [`NEC ${necVer}`, 'NATIONAL ELECTRICAL CODE (NFPA 70)'],
     ['ASCE 7-22', 'MINIMUM DESIGN LOADS & ASSOCIATED CRITERIA'],
     ['IEEE 1547', 'INTERCONNECTION & INTEROPERABILITY OF DER'],
     ['UL 1741 SA', 'INVERTERS, CONVERTERS, CONTROLLERS (SMART INVERTER)'],
     ['UL 2703', 'MOUNTING SYSTEMS, RACKING — BONDING & GROUNDING'],
     ['UL 61730', 'PV MODULE SAFETY QUALIFICATION'],
-    ...(state ? [[`${state} AMENDMENTS`, 'STATE-ADOPTED LOCAL CODE AMENDMENTS']] : []),
-  ].map(([code, desc]: [string, string]) => `<tr><td class="il" style="width:100px;white-space:nowrap;">${code}</td><td class="iv">${desc}</td></tr>`).join('');
+    ...(state ? [[`${state} AMENDMENTS`, 'STATE-ADOPTED LOCAL CODE AMENDMENTS'] as [string, string]] : []),
+  ];
+  // Two-column codes block — the 10-row single column was a major contributor
+  // to the left column overrunning the fixed page height.
+  const _codeRow = ([code, desc]: [string, string]) =>
+    `<tr><td class="il" style="width:78px;white-space:nowrap;">${code}</td><td class="iv" style="font-size:7px;">${desc}</td></tr>`;
+  const _codesHalf = Math.ceil(codesList.length / 2);
+  const codesHtml = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);align-items:start;">
+      <table class="info-table">${codesList.slice(0, _codesHalf).map(_codeRow).join('')}</table>
+      <table class="info-table">${codesList.slice(_codesHalf).map(_codeRow).join('')}</table>
+    </div>`;
 
-  // ── Sheet index ───────────────────────────────────────────────────────────
-  const sheetIndexHtml = `
-    <tr>
+  // ── Sheet index — TWO columns so all 15+ sheets FIT on the fixed page.
+  // The single-column table ran past the column bottom and overflow:hidden
+  // silently ate everything after PV-5 (plus the construction notes below).
+  const _idxRow = (s: { id: string; title: string }) => `<tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">${s.id}</td>
+      <td class="iv" style="font-size:7px;">${s.title}</td>
+    </tr>`;
+  const _idxHdr = `<tr>
       <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;background:#000;color:#fff;white-space:nowrap;">SHEET</td>
       <td class="iv" style="background:#000;color:#fff;">DESCRIPTION</td>
-    </tr>` +
-    sheets.map(s => `<tr>
-      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">${s.id}</td>
-      <td class="iv">${s.title}</td>
-    </tr>`).join('');
+    </tr>`;
+  const _idxHalf = Math.ceil(sheets.length / 2);
+  const sheetIndexHtml = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);align-items:start;">
+      <table class="info-table">${_idxHdr}${sheets.slice(0, _idxHalf).map(_idxRow).join('')}</table>
+      <table class="info-table">${_idxHdr}${sheets.slice(_idxHalf).map(_idxRow).join('')}</table>
+    </div>`;
 
   // ── Right strip: project info ─────────────────────────────────────────────
   const projInfoRows = [
@@ -289,15 +335,22 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   ].join('');
 
   const sysInfoRows = [
-    infoRow('DC SYSTEM SIZE',  dcKw  !== null ? `${dcKw.toFixed(3)} kW DC`  : ''),
-    infoRow('AC SYSTEM SIZE',  acKw  !== null ? `${acKw.toFixed(3)} kW AC`  : ''),
+    infoRow('DC SYSTEM SIZE',  dcKw  !== null ? `${dcKw.toFixed(2)} kW DC`  : ''),
+    infoRow('AC SYSTEM SIZE',  acKw  !== null ? `${acKw.toFixed(2)} kW AC`  : ''),
     infoRow('MODULE',          totalPanels > 0 && moduleDisplay ? `${totalPanels} × ${moduleDisplay}` : ''),
     infoRow('INVERTER',        inverterDisplay ? `${inverterDisplay} — ${topologyLabel}` : ''),
     infoRow('MOUNTING',        mountLabel),
     infoRow('INTERCONNECTION', interconn),
-    rulePass !== null
-      ? infoRow('NEC 705.12(B)', rulePass ? 'PASS — LOAD SIDE TAP' : 'REQUIRES REVIEW')
-      : '',
+    // Never print an unresolved QA flag on the AHJ deliverable. Supply-side:
+    // the 120% busbar rule does not govern (NEC 705.11). Load-side fail:
+    // state the remedy and point at the PV-4B analysis.
+    isSupplySide
+      ? infoRow('NEC 705.11', 'SUPPLY-SIDE TAP — 120% BUSBAR RULE N/A')
+      : rulePass !== null
+        ? infoRow('NEC 705.12(B)', rulePass
+            ? 'PASS — 120% BUSBAR RULE'
+            : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQ’D (SEE PV-4B)')
+        : '',
   ].join('');
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -314,19 +367,16 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
       <!-- ═══ LEFT COLUMN (2fr): system + design data ═══ -->
       <div class="col-stack">
 
-        <!-- PROJECT OVERVIEW -->
+        <!-- PROJECT HEADLINE — reference covers lead with a LARGE system
+             title (the set's biggest text was a 13px strip, and it branded
+             the racking vendor instead of the system type). -->
         ${(dcKw !== null || totalPanels > 0) ? `
         <div class="sec">
-          <div class="sec-hdr">PHOTOVOLTAIC ${mountLabel} SYSTEM — PROJECT OVERVIEW</div>
-          <div class="sec-body sec-body-table">
-            <table class="info-table">
-              ${dcKw !== null ? `<tr><td class="il">SYSTEM SIZE (DC)</td><td class="iv-em">${dcKw.toFixed(2)} kW DC</td></tr>` : ''}
-              ${totalPanels > 0 ? `<tr><td class="il">SOLAR MODULES</td><td class="iv-em">${totalPanels} MODULES</td></tr>` : ''}
-              ${acKw !== null ? `<tr><td class="il">AC OUTPUT</td><td class="iv-em">${acKw.toFixed(2)} kW AC</td></tr>` : ''}
-              ${moduleDisplay ? `<tr><td class="il">MODULE TYPE</td><td class="iv">${moduleDisplay}</td></tr>` : ''}
-              ${topologyLabel ? `<tr><td class="il">TOPOLOGY</td><td class="iv">${topologyLabel}</td></tr>` : ''}
-              ${mountLabel ? `<tr><td class="il">MOUNT TYPE</td><td class="iv">${mountLabel} INSTALLATION</td></tr>` : ''}
-            </table>
+          <div class="sec-body" style="padding:7px 10px 6px;">
+            <div style="font-size:23px;font-weight:900;letter-spacing:1.4px;line-height:1.05;">PHOTOVOLTAIC ${isFence(_coverSysType) ? 'SOLAR FENCE' : isGround(_coverSysType) ? 'GROUND MOUNT' : 'ROOF MOUNT'} SYSTEM</div>
+            <div style="font-size:10.5px;font-weight:900;letter-spacing:0.4px;margin-top:4px;">
+            ${[dcKw !== null ? `${dcKw.toFixed(2)} kW DC` : '', acKw !== null ? `${acKw.toFixed(2)} kW AC` : '', totalPanels > 0 ? `${totalPanels} MODULES` : '', topologyLabel || '', mountLabel ? `${mountLabel}` : ''].filter(Boolean).join(' &nbsp;·&nbsp; ')}
+            </div>
           </div>
         </div>` : ''}
 
@@ -338,7 +388,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
             <div class="note-row"><div class="note-num">2.</div><div class="note-txt">INSTALL ${topologyLabel} POWER CONVERSION EQUIPMENT PER NEC ${necVer} ARTICLE 690.</div></div>
             <div class="note-row"><div class="note-num">3.</div><div class="note-txt">INSTALL ALL DC AND AC CONDUCTORS, CONDUIT, AND RACEWAYS PER NEC ${necVer}.</div></div>
             <div class="note-row"><div class="note-num">4.</div><div class="note-txt">INSTALL EQUIPMENT GROUNDING CONDUCTORS AND BONDING PER NEC 250 AND 690.43.</div></div>
-            <div class="note-row"><div class="note-num">5.</div><div class="note-txt">INTERCONNECT PV SYSTEM TO EXISTING ${svcAmps ? svcAmps + 'A' : ''} SERVICE PANEL PER NEC 705.12.</div></div>
+            <div class="note-row"><div class="note-num">5.</div><div class="note-txt">${isSupplySide
+              ? `INTERCONNECT PV SYSTEM VIA SUPPLY-SIDE TAP AHEAD OF THE EXISTING ${svcAmps ? svcAmps + 'A ' : ''}SERVICE DISCONNECT PER NEC 705.11.`
+              : `INTERCONNECT PV SYSTEM TO EXISTING ${svcAmps ? svcAmps + 'A ' : ''}SERVICE PANEL PER NEC 705.12.`}</div></div>
             <div class="note-row"><div class="note-num">6.</div><div class="note-txt">INSTALL ALL NEC-REQUIRED WARNING LABELS, PLACARDS, AND RAPID SHUTDOWN SIGNAGE.</div></div>
             <div class="note-row"><div class="note-num">7.</div><div class="note-txt">COORDINATE UTILITY INTERCONNECTION AND NET METERING APPLICATION.</div></div>
             ${hasBattery ? '<div class="note-row"><div class="note-num">8.</div><div class="note-txt">INSTALL ENERGY STORAGE SYSTEM (ESS) PER NEC ' + necVer + ' ARTICLE 706 AND NFPA 855.</div></div>' : ''}
@@ -371,30 +423,24 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
         <div class="sec">
           <div class="sec-hdr">GOVERNING CODES</div>
           <div class="sec-body sec-body-table">
-            <table class="info-table">
-              ${codesHtml}
-            </table>
+            ${codesHtml}
           </div>
         </div>
 
-        <!-- SHEET INDEX -->
+        <!-- ENGINEERING SUMMARY (condensed — the long paragraph pushed the
+             sheet index and construction notes off the fixed page) -->
         <div class="sec" style="margin-bottom:var(--xs);">
           <div class="sec-hdr">ENGINEERING SUMMARY</div>
-          <div class="sec-body" style="font-size:var(--f-md);line-height:1.5;padding:var(--xs);">
-            This permit package documents the design and engineering analysis for a ${system.totalDcKw?.toFixed(2) || '—'} kW DC
-            grid-tied photovoltaic system at ${project.address || '—'}. The system has been designed and evaluated in accordance with
-            NEC ${compliance?.jurisdiction?.necVersion || '2020'}, ASCE 7-22, IBC ${ibcVer}, and all applicable local amendments.
-            All calculations, equipment selections, and installation details contained herein have been prepared for permit submission
-            and are intended to demonstrate full compliance with governing codes and standards.
-            This document is issued for permit review and requires professional engineer (PE) review and wet stamp before AHJ submission.
+          <div class="sec-body" style="font-size:var(--f-md);line-height:1.45;padding:var(--xs);">
+            ${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}, designed per
+            NEC ${compliance?.jurisdiction?.necVersion || '2020'}, ASCE 7-22, IBC ${ibcVer}, and applicable local amendments.
+            Issued for permit review — requires PE review and wet stamp before AHJ submission.
           </div>
         </div>
       <div class="sec">
           <div class="sec-hdr">SHEET INDEX</div>
           <div class="sec-body sec-body-table">
-            <table class="info-table">
-              ${sheetIndexHtml}
-            </table>
+            ${sheetIndexHtml}
           </div>
         </div>
 
@@ -405,6 +451,25 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
             ${(() => {
               const filled = buckets.filter(b => b.notes.length > 0);
               if (filled.length === 0) return '<span class="f-sm">SEE PROJECT SPECIFICATIONS</span>';
+              // Dense packages: reference-style FLAT 3-column numbered list
+              // (bold inline category prefixes) — the bucketed 2-column layout
+              // physically could not fit 25+ notes on the fixed sheet, and
+              // overflow:hidden silently ate the bottom rows.
+              const totalNotes = filled.reduce((s, b) => s + b.notes.length, 0);
+              if (totalNotes > 18) {
+                const flat: Array<{ t?: string; n: string }> = [];
+                for (const b of filled) b.notes.forEach((n, i) => flat.push({ t: i === 0 ? b.title : undefined, n }));
+                const per = Math.ceil(flat.length / 3);
+                const cols = [flat.slice(0, per), flat.slice(per, per * 2), flat.slice(per * 2)];
+                let num = 0;
+                const renderCol = (c: typeof flat) => `<div>${c.map(x => {
+                  num++;
+                  return `<div style="display:flex;gap:3px;font-size:6.2px;line-height:1.18;margin-bottom:0.5px;">`
+                    + `<div style="font-weight:900;min-width:11px;">${num}.</div>`
+                    + `<div>${x.t ? `<span style="font-weight:900;">${x.t}: </span>` : ''}${x.n}</div></div>`;
+                }).join('')}</div>`;
+                return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--xs);align-items:start;grid-column:1 / -1;">${cols.map(renderCol).join('')}</div>`;
+              }
               const half  = Math.ceil(filled.length / 2);
               const left  = filled.slice(0, half);
               const right = filled.slice(half);
@@ -493,7 +558,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
               ${infoRow('SHEET SIZE',   'ANSI B — 11″ × 17″')}
               ${infoRow('TOTAL SHEETS', `${totalPages}`)}
               ${infoRow('PAGE',         `${pageNum} OF ${totalPages}`)}
-              ${infoRow('SCALE',        'NOT TO SCALE')}
+              ${infoRow('SCALE',        'NTS')}
             </table>
           </div>
         </div>
@@ -517,7 +582,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
             ${vicinityMapHtml}
         <div class=\"df aic bt-1\" style=\"padding:2px var(--xs);gap:var(--xs);\">
               <span class="f-sm fw7 f1">
-                ${project.address || ''}${project.city ? ` — ${project.city}` : ''}${state ? `, ${state}` : ''}
+                ${escapeH(project.address || '')}${project.city ? ` — ${escapeH(project.city)}` : ''}${state ? `, ${state}` : ''}
               </span>
               <svg viewBox="0 0 40 40" width="28" height="28" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="20" cy="20" r="18" fill="#fff" stroke="#000" stroke-width="1.5"/>

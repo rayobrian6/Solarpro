@@ -136,6 +136,7 @@ export interface AssistantResponse {
 
 // Imported from lib/solardog/detectMode to keep this module testable in isolation
 import { detectMode } from '@/lib/solardog/detectMode';
+import { rateLimitGuard } from '@/lib/rateLimitGuard';
 
 // ─── System prompt builder ────────────────────────────────────────────────────
 
@@ -1021,6 +1022,9 @@ async function formatActiveProject(projectId: string, userId: string): Promise<s
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const rlGuard = await rateLimitGuard(req, 'standard');
+  if (rlGuard.blocked) return rlGuard.response;
+
   const user = getUserFromRequest(req);
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

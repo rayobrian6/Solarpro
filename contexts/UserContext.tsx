@@ -31,6 +31,10 @@ export interface AppUser {
   // Tutorial tracking
   hasSeenTour: boolean;
   tourCompletedAt?: string | null;
+  // MFA (multi-factor authentication)
+  mfaEnabled: boolean;
+  mfaMethod: string | null;
+  mfaEnrolledAt: string | null;
 }
 
 interface UserContextValue {
@@ -146,6 +150,10 @@ async function fetchUserFromDb(): Promise<FetchResult> {
       // Tutorial tracking — default false so new users see the tour
       hasSeenTour: u.hasSeenTour === true,
       tourCompletedAt: u.tourCompletedAt || null,
+      // MFA fields from /api/auth/me
+      mfaEnabled: u.mfaEnabled === true,
+      mfaMethod: u.mfaMethod || null,
+      mfaEnrolledAt: u.mfaEnrolledAt || null,
     };
     return { status: 'ok', user };
 

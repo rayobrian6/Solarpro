@@ -6,6 +6,7 @@
 import type { PermitInput, CanonicalInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
 import { PLANSET_ENGINE_VERSION } from './constants';
+import { escapeH } from './utils/drawing';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import type { PermitInputShape } from '@/lib/drafting/permitInputShape';
@@ -22,13 +23,14 @@ import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
 import { pageSiteInformation } from './sections/sitePlan';
 import { pageArrayPrimary, pageArrayGeometry } from './sections/arrayPages';
-import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule } from './sections/structuralPages';
+import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
 import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter } from './sections/certPages';
@@ -284,7 +286,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     const needsCalc = !existingRafter
       || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0);
     if (needsCalc && sysType === 'roof') {
-      const { runStructuralCalcV4 } = require('@/lib/structural-engine-v4');
+      // (static import — the old lazy require('@/…') silently failed outside
+      // webpack, so test/render harnesses got '—' structural values)
       const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? input.project.roofPitch ?? 20;
       const windSpeed    = canonical.site.windSpeed || 115;
       const groundSnow   = canonical.site.groundSnowLoad || 0;
@@ -294,13 +297,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const framingType  = input.project.framingType || 'rafter';
       const totalPanels  = input.system?.totalPanels || cad.totalPanels || 1;
       const structInput = {
-        installationType: 'residential_pitched',
+        // 'residential_pitched' was never a valid InstallationType — the old
+        // untyped require() hid it; the engine fell through to its default.
+        installationType: 'roof_residential' as const,
         windSpeed,
-        windExposure: canonical.site.exposureCategory || 'C',
+        windExposure: ((): 'B' | 'C' | 'D' => {
+          const e = String(canonical.site.exposureCategory || 'C').toUpperCase();
+          return e === 'B' || e === 'D' ? e : 'C';
+        })(),
         groundSnowLoad: groundSnow,
         meanRoofHeight: 15,
         roofPitch: roofPitchDeg,
-        framingType: framingType === 'truss' ? 'truss' : 'rafter',
+        framingType: (framingType === 'truss' ? 'truss' : 'rafter') as 'truss' | 'rafter',
         rafterSize,
         rafterSpacingIn: rafterSpIn,
         rafterSpanFt: rafterSpFt,
@@ -333,16 +341,26 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
       const s = input.compliance.structural || {};
       s.wind = s.wind || {};
-      if (!s.wind.windSpeed)            s.wind.windSpeed = wa.designWindSpeedMph;
-      if (!s.wind.exposureCategory)     s.wind.exposureCategory = structInput.windExposure;
+      // V4 is the ENGINE OF RECORD for structural — overwrite any values a
+      // different engine (rules-engine) left behind. The old keep-if-set
+      // guards let PV-4A print one engine's uplift (370/984 lbs) while PV-4C
+      // and PE-1 printed V4's (210/500 lbs) on the same package.
+      s.wind.windSpeed           = wa.designWindSpeedMph;
+      s.wind.exposureCategory    = structInput.windExposure;
       // Error 5t fix: propagate exposure category to project level for coverSheet.ts
       if (!input.project.windExposure)   input.project.windExposure = structInput.windExposure;
-      if (!s.wind.velocityPressure)     s.wind.velocityPressure = wa.velocityPressurePsf;
-      if (!s.wind.netUpliftPressure)    s.wind.netUpliftPressure = wa.netUpliftPressurePsf;
-      if (!s.wind.upliftPerAttachment)  s.wind.upliftPerAttachment = ml?.upliftPerMountLbs;
+      s.wind.velocityPressure    = wa.velocityPressurePsf;
+      s.wind.netUpliftPressure   = wa.netUpliftPressurePsf;
+      if (ml?.upliftPerMountLbs) s.wind.upliftPerAttachment = ml.upliftPerMountLbs;
       s.snow = s.snow || {};
-      if (!s.snow.groundSnowLoad)       s.snow.groundSnowLoad = sa.groundSnowLoadPsf;
-      if (!s.snow.roofSnowLoad)         s.snow.roofSnowLoad = sa.roofSnowLoadPsf;
+      s.snow.groundSnowLoad      = sa.groundSnowLoadPsf;
+      s.snow.roofSnowLoad        = sa.roofSnowLoadPsf;
+      // Snow per attachment: roof snow psf × tributary area per mount (derived
+      // from uplift/pressure, both per-mount) — was never set → printed 0 lbs.
+      if (ml?.upliftPerMountLbs && wa.netUpliftPressurePsf > 0 && sa.roofSnowLoadPsf > 0) {
+        const _tribArea = ml.upliftPerMountLbs / wa.netUpliftPressurePsf;
+        s.snow.snowLoadPerAttachment = sa.roofSnowLoadPsf * _tribArea;
+      }
       s.rafter = {
         rafterSize:             ra.size,
         rafterSpacing:          ra.spacingIn,
@@ -353,17 +371,21 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         utilizationRatio:       ra.overallUtilization,
         deflection:             ra.deflectionIn,
         allowableDeflection:    ra.allowableDeflectionIn,
-        Fb_base:                1150,
+        // From the engine — the old hardcoded 1150×1.15×1.15=1521 omitted the
+        // size factor CF the capacity calc includes, so the printed F'b could
+        // never reproduce the printed allowable moment.
+        Fb_base:                ra.fbRefPsi ?? 1150,
         Cd: 1.15, Cr: 1.15,
-        Fb_prime:               1150 * 1.15 * 1.15,
+        Fb_prime:               ra.fbPrimePsi ?? (1150 * 1.15 * 1.15),
         totalLoadPsf:           ra.totalLoadPsf,
         lineLoad:               ra.totalLoadPsf * (ra.spacingIn / 12),
       };
       s.attachment = s.attachment || {};
-      if (!s.attachment.safetyFactor)         s.attachment.safetyFactor = ml?.safetyFactor;
-      if (!s.attachment.lagBoltCapacity)       s.attachment.lagBoltCapacity = ml?.upliftPerMountLbs ? ml.upliftPerMountLbs * (ml.safetyFactor || 2) : undefined;
-      if (!s.attachment.maxAllowedSpacing)     s.attachment.maxAllowedSpacing = ml?.mountSpacingIn;
-      if (!s.attachment.totalUpliftPerAttachment) s.attachment.totalUpliftPerAttachment = ml?.upliftPerMountLbs;
+      // Same single-engine rule as wind: V4 overwrites when it produced values.
+      if (ml?.safetyFactor)      s.attachment.safetyFactor = ml.safetyFactor;
+      if (ml?.upliftPerMountLbs) s.attachment.lagBoltCapacity = ml.upliftPerMountLbs * (ml.safetyFactor || 2);
+      if (ml?.mountSpacingIn)    s.attachment.maxAllowedSpacing = ml.mountSpacingIn;
+      if (ml?.upliftPerMountLbs) s.attachment.totalUpliftPerAttachment = ml.upliftPerMountLbs;
       if (!s.totalDeadLoadPsf)   s.totalDeadLoadPsf = ra.pvDeadLoadPsf + ra.roofDeadLoadPsf;
       if (!s.moduleLoadPsf)      s.moduleLoadPsf = ra.pvDeadLoadPsf;
       if (!s.rackingLoadPsf)     s.rackingLoadPsf = ra.pvDeadLoadPsf > 0 ? ra.pvDeadLoadPsf * 0.15 : 0.5;
@@ -387,10 +409,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     const needsElecCalc = !existingElec
       || (existingElec.busbar == null && existingElec.acConductorCallout == null);
     if (needsElecCalc && input.system?.inverters?.length) {
-      const { runElectricalCalc: _runElec } = require('@/lib/electrical-calc');
-      const { getPanelById: _getPanelById } = require('@/lib/equipment-db');
-      const { getInverterById: _getInvById } = require('@/lib/equipment-db');
-      const { getMicroinverterById: _getMicroById } = require('@/lib/equipment-db');
+      // Static imports (top of file) — the old lazy require('@/…') silently
+      // failed outside webpack, leaving the electrical section blank.
+      const _runElec = runElectricalCalc;
+      const _getPanelById = getPanelById;
+      const _getInvById = getInverterById;
+      const _getMicroById = getMicroinverterById;
 
       // ── Build InverterInput[] from system.inverters + equipment-db backfill ──
       const invInputs: InverterInput[] = input.system.inverters.map((inv, invIdx) => {
@@ -767,30 +791,39 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
     || input.planSetOptions?.cadAppendixPreviewV1 === true
     || input.permitOptions?.cadAppendixPreviewV1 === true;
-  const TOTAL = includeCADAppendixPreview ? 16 : 15;
+  // VAL-1 is internal QA telemetry (hashes, decision provenance, rule IDs) —
+  // NOT part of the AHJ deliverable. Opt back in for internal review runs.
+  const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
+    || input.planSetOptions?.includeInternalValidation === true;
+  // Long BOMs paginate onto SCHED-2 instead of clipping at the page edge.
+  const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
 
-  // Dynamic page assembly — CADModel + RenderContext passed to ALL page functions
-  const pages = [
-    pageCoverSheet(input, cad, 1, TOTAL),                              // PV-0: Cover (all systems)
-    pageSiteInformation(input, cad, 2, TOTAL),                         // PV-1: Site Plan (all systems)
-    pageArrayPrimary(input, cad, 3, TOTAL, renderCtx),                 // PV-2: Roof / Ground / Fence (cad.systemType)
-    pageArrayGeometry(input, cad, 4, TOTAL),                           // PV-2B: Array geometry (system-aware)
-    pageStructuralPrimary(input, cad, 5, TOTAL, renderCtx),            // PV-3: Structural (cad.systemType)
-    pageNECCompliance(input, cad, 6, TOTAL),                      // PV-4A: NEC (all)
-    pageConductorSchedule(input, cad, 7, TOTAL),                  // PV-4B: Conductor (system-aware)
-    pageStructural(input, cad, 8, TOTAL),                         // PV-4C: Structural calcs (system-aware)
-    pageWarningLabels(input, cad, 9, TOTAL),                      // PV-5: Labels (system-aware)
-    pageEquipmentSchedule(input, cad, 10, TOTAL),                 // SCHED (all)
-    pageSpecSheetReference(input, cad, 11, TOTAL),                // APP-A (all)
-    pageEngineerCert(input, cad, 12, TOTAL),                      // CERT (all)
-    pagePELetter(input, cad, 13, TOTAL),                          // PE-1 (all)
-    pageSingleLineDiagram(input, cad, 14, TOTAL, storedSldSvg),   // E-1: SLD (all, system-labeled)
-    pageValidationSummary(input, canonical, cad, 15, TOTAL),      // VAL-1: Validation summary (engineering authority)
+  // Dynamic page assembly — numbering derives from the list, so conditional
+  // sheets can never desync pageNum/TOTAL or the cover index again.
+  const pageFns: Array<(n: number, t: number) => string> = [
+    (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
+    (n, t) => pageSiteInformation(input, cad, n, t),                   // PV-1: Site Plan (all systems)
+    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-2: Roof / Ground / Fence (cad.systemType)
+    (n, t) => pageArrayGeometry(input, cad, n, t),                     // PV-2B: Array geometry (system-aware)
+    (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Structural (cad.systemType)
+    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (all)
+    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (system-aware)
+    (n, t) => pageStructural(input, cad, n, t),                        // PV-4C: Structural calcs (system-aware)
+    (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
+    (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (all)
+    ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
+    (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
+    (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
+    (n, t) => pagePELetter(input, cad, n, t),                          // PE-1 (all)
+    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (all, system-labeled)
+    ...(includeInternalValidation ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
   ];
+  const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);
+  const pages = pageFns.map((f, i) => f(i + 1, TOTAL));
 
   if (includeCADAppendixPreview) {
     try {
-      pages.push(pageCADAppendixPreview(input, cad, 16, TOTAL));       // APP-CAD: non-authoritative CAD preview appendix
+      pages.push(pageCADAppendixPreview(input, cad, TOTAL, TOTAL));    // APP-CAD: non-authoritative CAD preview appendix
     } catch (appendixErr: unknown) {
       console.warn('[generatePermitHTML] CAD appendix preview omitted (non-critical):', appendixErr instanceof Error ? appendixErr.message : appendixErr);
     }
@@ -801,7 +834,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 <head>
 <meta charset="UTF-8">
 <meta name="planset-version" content="${PLANSET_ENGINE_VERSION}">
-<title>Permit Package — ${project.projectName}</title>
+<title>Permit Package — ${escapeH(String(project.projectName ?? ''))}</title>
 <style>
   /* ═══════════════════════════════════════════════════════════════════════════
      SOLARPRO ENGINEERING DOCUMENT SYSTEM — CANONICAL STYLESHEET v47.270
@@ -877,10 +910,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .page {
     width: 17in;
     height: 11in;
-    padding: 0.28in 0.28in 0.16in 0.28in;
+    /* right padding reserves the vertical title-block strip (see .title-block) */
+    padding: 0.28in calc(0.28in + 1.72in) 0.16in 0.28in;
     page-break-after: always;
-    display: grid;
-    grid-template-rows: auto 1fr auto;
+    display: flex;
+    flex-direction: column;
     gap: 0;
     overflow: hidden;
     box-sizing: border-box;
@@ -1118,6 +1152,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .section-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
   .section-title:first-child { margin-top: 0; }
 
+  /* ── PE letter (PE-1) — engineering-letter typography. Ruled small-cap headings
+     instead of solid black banner bars, quiet label cells, hairline row rules:
+     the bar-heavy layout read "cartoony" beside the PE-sealed reference set. */
+  .pe-letter .section-title { background: transparent; color: #000; border-bottom: 2px solid #000; padding: 3px 0 2px; letter-spacing: 1.6px; margin-top: var(--sm); }
+  .pe-letter .sec-hdr { background: transparent; color: #000; border-bottom: 1.5px solid #000; letter-spacing: 1.6px; padding-left: 0; }
+  .pe-letter .sec { border: none; border-top: 1px solid #000; }
+  .pe-letter .il { background: transparent; border-right: none; color: #555; font-weight: 700; }
+  .pe-letter .info-table { border: none; }
+  .pe-letter .info-table tr { border-bottom: 1px solid #e2e2e2; }
+  .pe-letter .info-table tr.bg-lt { background: transparent; border-bottom: 1.5px solid #000; }
+  .pe-letter .info-table tr.bg-lt td { padding-top: 6px; letter-spacing: 1px; text-align: left !important; text-transform: uppercase; font-size: var(--f-sm); }
+
   /* ── Utility: dark header bar (reused across pages) ─────────────────────── */
   .sec-hdr-dark {
     background: #000; color: #fff;
@@ -1222,48 +1268,71 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   /* ── Title block (bottom strip on every sheet) ──────────────────────────── */
+  /* ── VERTICAL title-block strip (industry standard): absolutely positioned on
+     the right edge of every sheet, full height, with the big sheet ID in the
+     lower-right corner where reviewers/printers index a set. ── */
   .title-block {
-    display: table;
-    width: 100%;
+    position: absolute;
+    top: 0.34in;
+    right: 0.34in;
+    bottom: 0.22in;
+    width: 1.66in;
+    display: flex;
+    flex-direction: column;
     border: var(--border-hvy);
     background: #fff;
-    border-collapse: collapse;
-    flex-shrink: 0;
-    margin-bottom: var(--xs);
+    overflow: hidden;
+    z-index: 5;
   }
-  .tb-left {
-    display: table-cell;
-    width: 30%;
-    padding: var(--xs);
-    border-right: var(--border);
-    vertical-align: top;
-  }
-  .tb-center {
-    display: table-cell;
-    width: 40%;
-    padding: var(--xs);
-    border-right: var(--border);
-    vertical-align: middle;
+  .tbs-firm {
+    padding: 5px var(--xs);
+    border-bottom: var(--border-hvy);
     text-align: center;
   }
-  .tb-right {
-    display: table-cell;
-    width: 30%;
-    padding: 0;
-    vertical-align: top;
+  .tbs-firm-sub  { font-size: 6px; color: #555; letter-spacing: 1.5px; margin-top: 2px; }
+  .tbs-block {
+    padding: 4px var(--xs);
+    border-bottom: var(--border);
   }
-  .tb-company     { font-size: var(--f-xl); font-weight: 900; color: #000; letter-spacing: 2px; text-transform: uppercase; border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 2px; }
-  .tb-project     { font-size: var(--f-xl); font-weight: 700; color: #000; margin-top: 2px; text-transform: uppercase; }
-  .tb-address     { font-size: var(--f-sm); color: #333; margin-top: 1px; }
-  .tb-client      { font-size: var(--f-sm); color: #333; margin-top: 1px; }
-  .tb-meta        { font-size: var(--f-xs); color: #555; margin-top: 1px; }
-  .tb-sheet-id    { font-size: var(--f-4xl); font-weight: 900; color: #000; font-family: var(--mono); letter-spacing: 4px; border-bottom: var(--border-hvy); padding-bottom: 3px; margin-bottom: 2px; }
-  .tb-sheet-title { font-size: var(--f-2xl); font-weight: 900; color: #000; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
-  .tb-codes       { font-size: var(--f-xs); color: #555; margin-top: 3px; }
-  .tb-size        { font-size: var(--f-xs); color: #777; margin-top: 1px; }
+  .tbs-rev-hdr {
+    background: #000; color: #fff;
+    font-size: var(--f-xs); font-weight: 900;
+    letter-spacing: 1px; text-align: center;
+    padding: 2px 0;
+  }
+  .tbs-seal {
+    border-top: var(--border);
+    border-bottom: var(--border);
+    padding: 3px var(--xs) 5px;
+    text-align: center;
+  }
+  .tbs-seal-caption { font-size: 6px; color: #777; letter-spacing: 1.5px; margin-bottom: 2px; text-align: left; }
+  .tbs-seal .pe-seal-box { height: 1.35in; }
+  .tbs-spacer { flex: 1; }
+  .tbs-sheetname {
+    border-top: var(--border-hvy);
+    padding: 4px var(--xs);
+  }
+  .tbs-sn-label { font-size: 6px; color: #777; letter-spacing: 1.5px; }
+  .tbs-id {
+    border-top: var(--border-hvy);
+    text-align: center;
+    padding: 4px 0 5px;
+  }
+  .tb-company     { font-size: var(--f-lg); font-weight: 900; color: #000; letter-spacing: 2px; text-transform: uppercase; line-height: 1.25; }
+  .tb-project     { font-size: var(--f-sm); font-weight: 700; color: #000; text-transform: uppercase; line-height: 1.3; }
+  .tb-address     { font-size: var(--f-xs); color: #333; margin-top: 1px; line-height: 1.3; }
+  .tb-client      { font-size: var(--f-xs); color: #333; margin-top: 1px; }
+  .tb-meta        { font-size: 6.5px; color: #555; margin-top: 1px; line-height: 1.35; }
+  .tb-sheet-id    { font-size: 26px; font-weight: 900; color: #000; font-family: var(--mono); letter-spacing: 3px; line-height: 1; }
+  .tb-sheet-title { font-size: var(--f-sm); font-weight: 900; color: #000; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.3; }
+  .tb-codes       { font-size: 6px; color: #555; margin-top: 3px; line-height: 1.4; }
+  .tb-size        { font-size: 6px; color: #777; margin-top: 1px; }
 
-  /* Title block right column — meta table */
-  .tb-table { width: 100%; border-collapse: collapse; font-size: var(--f-sm); }
+  /* Title block meta table — compact for the narrow vertical strip */
+  .tb-table { width: 100%; border-collapse: collapse; font-size: 6.5px; }
+  .title-block .tbl { width: 34%; padding: 1.5px 3px; }
+  .title-block .tbv { padding: 1.5px 3px; word-break: break-word; }
   .tb-table tr { border-bottom: var(--border); }
   .tb-table tr:last-child { border-bottom: none; }
   .tbl {
@@ -1511,6 +1580,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     margin-bottom: var(--xs);
   }
   .cert-statement li { margin-bottom: 2px; margin-left: var(--md); }
+  .cert-subject { font-size: var(--f-sm); line-height: 1.5; color: #333; background: #f8f8f8; border: var(--border); padding: var(--xs) var(--md); margin-bottom: var(--xs); }
   .cert-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; margin-bottom: var(--xs); }
   .cert-block-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
   .cert-block-title:first-child { margin-top: 0; }
@@ -1567,8 +1637,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 
   /* ── SLD page ───────────────────────────────────────────────────────────── */
   .sld-page { padding: var(--xl); height: 11in; }
-  .sld-page .title-block { margin-bottom: var(--xs); }
-  .sld-page svg { max-width: 100%; max-height: calc(11in - 1.8in); object-fit: contain; }
+  .sld-page svg { max-width: 100%; max-height: calc(11in - 0.9in); object-fit: contain; }
 
   /* ── Two-column layout helper (legacy) ──────────────────────────────────── */
   .two-col-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-section); width: 100%; overflow: hidden; }

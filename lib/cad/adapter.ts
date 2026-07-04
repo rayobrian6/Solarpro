@@ -159,10 +159,24 @@ function adaptRoof(
     note: '1 degree == 1 foot; scale = pixels/ft; panLenPx = (in/12)*scale = correct',
   });
 
+  // Roof obstructions (vents/chimneys/AC/skylights) → fake-degree circles so
+  // PV-2 can draw the footprint + keep-out ring. x/y are local meters.
+  const adaptedObstructions = (cad.obstructions ?? []).map(o => {
+    const fd = xyToFakeDeg(o.x, o.y);
+    return {
+      lat:         fd.lat,
+      lng:         fd.lng,
+      radiusFt:    o.radiusM * METERS_TO_FEET,
+      clearanceFt: o.setbackM * METERS_TO_FEET,
+      type:        o.type,
+    };
+  });
+
   const project: DraftingProject = {
     ...originalProject(original),
-    roofPlanes:     adaptedRoofPlanes,
-    panelPositions: adaptedPanelPositions,
+    roofPlanes:       adaptedRoofPlanes,
+    panelPositions:   adaptedPanelPositions,
+    roofObstructions: adaptedObstructions.length > 0 ? adaptedObstructions : undefined,
   };
 
   const layout: DraftingLayout = {
@@ -284,6 +298,15 @@ function originalProject(original: PermitInputShape): DraftingProject {
     roofType:          original.project?.roofType,
     roofPitch:         original.project?.roofPitch,
     mountingSystem:    original.project?.mountingSystem,
+    // SINGLE-SOURCE PASS-THROUGH: stripping these here made the DRAWING half
+    // of PV-3 contradict its own SPECS table (IronRidge title vs RT-Mini
+    // callouts; 4'-0" drawn vs 12" O.C. MAX specified). The templates resolve
+    // racking + attachment spacing with the SAME chain sheetComposition uses.
+    mountingSystemId:  (original.project as Record<string, unknown> | undefined)?.['mountingSystemId'],
+    _canonical:        (original.project as Record<string, unknown> | undefined)?.['_canonical'],
+    resolvedAttachSpacingIn:
+      (original as unknown as { compliance?: { structural?: { attachment?: { maxAllowedSpacing?: number } } } })
+        .compliance?.structural?.attachment?.maxAllowedSpacing,
     rafterSize:        original.project?.rafterSize,
     rafterSpacing:     original.project?.rafterSpacing,
     attachmentSpacing: original.project?.attachmentSpacing,
