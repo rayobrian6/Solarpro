@@ -111,6 +111,11 @@ const F = {
 
 // ── Public Interface ─────────────────────────────────────────────────────────
 export interface SLDProfessionalInput {
+  /** Embedded in a planset sheet that has its own title block — suppress the
+   *  internal SOLARPRO title panel (it duplicated project/system/code data
+   *  right next to the sheet's title block on E-1) and crop the viewBox to
+   *  the diagram. Standalone Diagram-tab renders keep the panel. */
+  suppressTitleBlock?:     boolean;
   projectName:             string;
   clientName:              string;
   address:                 string;
@@ -1601,9 +1606,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const pvBreakerAmps = input.backfeedAmps ?? resolvedAcOCPD;
 
   // ── SVG root ──────────────────────────────────────────────────────────────
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:${WHT};">`);
-  parts.push(rect(0, 0, W, H, {fill:WHT, stroke:WHT, sw:0}));
-  parts.push(rect(MAR/2, MAR/2, W-MAR, H-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
+  // Embedded mode crops the viewBox at the title-block column so the diagram
+  // fills the sheet instead of reserving a blank right margin.
+  const effW = input.suppressTitleBlock ? TB_X - 10 : W;
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${H}" viewBox="0 0 ${effW} ${H}" style="background:${WHT};">`);
+  parts.push(rect(0, 0, effW, H, {fill:WHT, stroke:WHT, sw:0}));
+  parts.push(rect(MAR/2, MAR/2, effW-MAR, H-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
 
   // ── Title ─────────────────────────────────────────────────────────────────
   const tcx = (DX + TB_X) / 2;
@@ -1907,7 +1915,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // ── NODE 5: AC DISCONNECT ─────────────────────────────────────────────────
   const discoResult = renderDisco(xDisco, BUS_Y, resolvedAcOCPD, isMicro?4:5, isSupplySide);
   parts.push(discoResult.svg);
-  parts.push(txt(xDisco, BUS_Y-40, '(N) AC DISCONNECT', {sz:F.hdr, bold:true, anc:'middle'}));
+  // BUS_Y-58 sits ABOVE the enclosure — at BUS_Y-40 this landed exactly on
+  // renderDisco's internal "AC DISCONNECT" header strip and the two texts
+  // printed on top of each other (the garbled label on E-1).
+  parts.push(txt(xDisco, BUS_Y-58, '(N) AC DISCONNECT', {sz:F.hdr, bold:true, anc:'middle'}));
 
   // SEGMENT: Combiner/Inverter → AC Disco (terminal-to-terminal routing)
   // Source: combiner feederOutX/Y (micro) or inverter acOutX/Y (string)
@@ -2626,6 +2637,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   });
 
   // ── TITLE BLOCK ───────────────────────────────────────────────────────────
+  // Build badge stays even in embedded mode — invisible deployment telemetry.
+  parts.push(`<!-- ${getBuildBadge()} | SLD SYMBOLS V2 -->`);
+  if (input.suppressTitleBlock) {
+    parts.push('</svg>');
+    return parts.join('\n');
+  }
   const tbX = TB_X, tbY = DY, tbH = DH;
   parts.push(rect(tbX, tbY, TB_W, tbH, {fill:WHT, stroke:BLK, sw:SW_HEAVY}));
 
@@ -2638,10 +2655,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(rect(tbX, tbY+38, TB_W, 30, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(tbX+TB_W/2, tbY+51, 'SINGLE LINE DIAGRAM', {sz:F.tbTitle, bold:true, anc:'middle'}));
   parts.push(txt(tbX+TB_W/2, tbY+63, 'PHOTOVOLTAIC SYSTEM', {sz:F.tb, anc:'middle'}));
-  // Engine build badge removed from the customer sheet (internal QA telemetry
-  // on an AHJ deliverable). Deployment verification: the HTML meta
-  // planset-version tag + an SVG comment carry the same information invisibly.
-  parts.push(`<!-- ${getBuildBadge()} | SLD SYMBOLS V2 -->`);
+  // (build badge comment emitted above, before the embedded-mode early return)
 
   // Project info rows
   const tbRows: [string,string][] = [

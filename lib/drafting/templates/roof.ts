@@ -557,6 +557,69 @@ export function drawRoofPlan(
     const jbX = Math.min(Math.max(..._pbx) + 14, (_allVx.length ? Math.max(..._allVx) : Math.max(..._pbx)) - 10);
     const jbY = Math.min(Math.max(..._pby) + 12, (_allVy.length ? Math.max(..._allVy) : Math.max(..._pby)) - 8);
 
+    // Axis-aligned bboxes of every module (rotation-snapped like the module
+    // renderer) — transitions and homeruns are scored against these so a
+    // trunk polyline can never slice through another branch's modules.
+    const modRects = regPanels.map((p: any) => {
+      const px = toX(p.lng), py = toY(p.lat);
+      const isLandscape = (p.orientation || 'landscape') === 'landscape';
+      let pw = isLandscape ? panLenPx : panWidPx;
+      let ph = isLandscape ? panWidPx : panLenPx;
+      const azRot = Number(p.azimuth ?? p.heading);
+      let rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
+      if (rot >= 15 && rot <= 165 && Math.abs(rot - 90) < 15) { const t = pw; pw = ph; ph = t; }
+      return { x0: px - pw / 2, y0: py - ph / 2, x1: px + pw / 2, y1: py + ph / 2 };
+    });
+    const _ptInRect = (r: any, pt: { x: number; y: number }) =>
+      pt.x > r.x0 && pt.x < r.x1 && pt.y > r.y0 && pt.y < r.y1;
+    // Count module bboxes an axis-aligned polyline passes through, ignoring
+    // the rects that contain the endpoints (the cable legitimately starts and
+    // ends AT a module).
+    const routeHits = (pl: Array<{ x: number; y: number }>) => {
+      const ends = [pl[0], pl[pl.length - 1]];
+      let n = 0;
+      for (const r of modRects) {
+        if (ends.some(e => _ptInRect(r, e))) continue;
+        for (let q = 1; q < pl.length; q++) {
+          const s = pl[q - 1], t = pl[q];
+          const hit = Math.abs(s.y - t.y) < 0.01
+            ? (s.y > r.y0 && s.y < r.y1 && Math.max(s.x, t.x) > r.x0 && Math.min(s.x, t.x) < r.x1)
+            : (s.x > r.x0 && s.x < r.x1 && Math.max(s.y, t.y) > r.y0 && Math.min(s.y, t.y) < r.y1);
+          if (hit) { n++; break; }
+        }
+      }
+      return n;
+    };
+    const routeLen = (pl: Array<{ x: number; y: number }>) => {
+      let L = 0;
+      for (let q = 1; q < pl.length; q++) L += Math.abs(pl[q].x - pl[q - 1].x) + Math.abs(pl[q].y - pl[q - 1].y);
+      return L;
+    };
+    // Best axis-aligned route a→b: both Manhattan corners plus four skirts
+    // around the array bbox (clamped inside the roof outline).
+    const _arrX0 = Math.min(..._pbx), _arrX1 = Math.max(..._pbx);
+    const _arrY0 = Math.min(..._pby), _arrY1 = Math.max(..._pby);
+    const _roofX0 = _allVx.length ? Math.min(..._allVx) : _arrX0, _roofX1 = _allVx.length ? Math.max(..._allVx) : _arrX1;
+    const _roofY0 = _allVy.length ? Math.min(..._allVy) : _arrY0, _roofY1 = _allVy.length ? Math.max(..._allVy) : _arrY1;
+    const bestRoute = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+      const yS = Math.min(_arrY1 + 10, _roofY1 - 5), yN = Math.max(_arrY0 - 10, _roofY0 + 5);
+      const xE = Math.min(_arrX1 + 10, _roofX1 - 5), xW = Math.max(_arrX0 - 10, _roofX0 + 5);
+      const cands: Array<Array<{ x: number; y: number }>> = [
+        [a, { x: b.x, y: a.y }, b],
+        [a, { x: a.x, y: b.y }, b],
+        [a, { x: a.x, y: yS }, { x: b.x, y: yS }, b],
+        [a, { x: a.x, y: yN }, { x: b.x, y: yN }, b],
+        [a, { x: xE, y: a.y }, { x: xE, y: b.y }, b],
+        [a, { x: xW, y: a.y }, { x: xW, y: b.y }, b],
+      ];
+      let best = cands[0], bh = Infinity, bl = Infinity;
+      for (const c of cands) {
+        const h = routeHits(c), l = routeLen(c);
+        if (h < bh || (h === bh && l < bl)) { best = c; bh = h; bl = l; }
+      }
+      return best;
+    };
+
     branchGroups.forEach((g, bi) => {
       if (g.ps.length < 2) return;
       // Per-plane serpentine segments joined by explicit Manhattan transitions.
@@ -613,10 +676,11 @@ export function drawRoofPlan(
         const a = pts[k - 1], b = pts[k];
         const long = transitionAt.has(k) || segs[k - 1] > Math.max(3 * medSeg, 40);
         if (long) {
-          // Plane-to-plane transition: MANHATTAN route (along the row, then
-          // across), dashed — a freehand diagonal slicing the setback hatch
-          // read as accidental wiring.
-          const midPts = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${a.y.toFixed(1)} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+          // Plane-to-plane transition: collision-scored axis-aligned route,
+          // dashed. The old fixed Manhattan corner drew the trunk straight
+          // THROUGH other branches' modules (unbuildable as drawn).
+          const route = bestRoute(a, b);
+          const midPts = route.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
           els.push(`<polyline points="${midPts}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.75" stroke-dasharray="5 4"/>`);
           els.push(`<polyline points="${midPts}" fill="none" stroke="${g.color}" stroke-width="1.2" stroke-dasharray="5 4"/>`);
         } else {
@@ -630,7 +694,11 @@ export function drawRoofPlan(
       // HOMERUN — every branch lands at the JB (the circuits previously ended
       // in mid-roof with no terminus anywhere on the sheet).
       const tail = pts[pts.length - 1];
-      const hr = `${tail.x.toFixed(1)},${tail.y.toFixed(1)} ${tail.x.toFixed(1)},${jbY.toFixed(1)} ${jbX.toFixed(1)},${jbY.toFixed(1)}`;
+      // Same collision-scored routing as the plane transitions — the fixed
+      // drop-then-across leg ran a north-plane homerun straight through the
+      // south rows on its way to the JB.
+      const hrRoute = bestRoute(tail, { x: jbX, y: jbY });
+      const hr = hrRoute.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
       els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="2.2" opacity="0.7" stroke-dasharray="3 3"/>`);
       els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="0.9" stroke-dasharray="3 3"/>`);
     });
@@ -641,6 +709,9 @@ export function drawRoofPlan(
       els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${(jbX + 16).toFixed(1)},${(jbY + 10).toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
       els.push(`<rect x="${(jbX - 4).toFixed(1)}" y="${(jbY - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#000" stroke-width="1"/>`);
       els.push(`<line x1="${(jbX - 4).toFixed(1)}" y1="${(jbY - 4).toFixed(1)}" x2="${(jbX + 4).toFixed(1)}" y2="${(jbY + 4).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
+      // Opaque backing — the hip/eave linework struck straight through the
+      // JB note where it landed in the SE corner.
+      els.push(`<rect x="${(jbX - 128).toFixed(1)}" y="${(jbY + 9).toFixed(1)}" width="150" height="17" fill="rgba(255,255,255,0.92)" stroke="none"/>`);
       els.push(drawText(jbX + 20, jbY + 16, `(N) JB — ${branchGroups.length} AC BRANCH CIRCUITS`, { anchor: 'end', fontSize: 5.8, fontWeight: 'bold', fill: '#000' }));
       els.push(drawText(jbX + 20, jbY + 23, `CONDUIT SIZED PER NEC CH.9 — SEE PV-4B / E-1`, { anchor: 'end', fontSize: 5.2, fill: '#333' }));
     }
@@ -1264,17 +1335,22 @@ export function drawRoofStructural(
   ];
   let zy = dzY;
   const _lblX = dzX + dzW + 26;
+  // 16px label pitch: bubbles are r=7 circles, so a 13px pitch stacked the
+  // 2-3-4-5 bubbles on top of each other; leaders land at the BASELINE with
+  // a short horizontal landing (a mid-glyph endpoint at the text edge read
+  // as a strike-through at print size).
   zLayers.forEach((zl, i) => {
     els.push(drawRectFilled(dzX, zy, dzW, zl.h, zl.fill, zl.stroke || '#333', 0.9));
     if (zl.hatch) {
       els.push(`<rect x="${dzX.toFixed(1)}" y="${zy.toFixed(1)}" width="${dzW}" height="${zl.h}" fill="${zl.hatch}" opacity="${zl.hatchOp ?? 0.5}"/>`);
     }
-    const _lblY = dzY + i * 13 + 4;
-    els.push(`<line x1="${(dzX + dzW).toFixed(1)}" y1="${(zy + zl.h / 2).toFixed(1)}" x2="${(_lblX - 3).toFixed(1)}" y2="${(_lblY - 2.5).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
-    els.push(drawText(_lblX, _lblY, zl.label, {
+    const _rowY = dzY + i * 16 + 4;
+    els.push(`<line x1="${(dzX + dzW).toFixed(1)}" y1="${(zy + zl.h / 2).toFixed(1)}" x2="${(_lblX - 9).toFixed(1)}" y2="${(_rowY + 1).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
+    els.push(`<line x1="${(_lblX - 9).toFixed(1)}" y1="${(_rowY + 1).toFixed(1)}" x2="${(_lblX - 2).toFixed(1)}" y2="${(_rowY + 1).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
+    els.push(drawText(_lblX, _rowY, zl.label, {
       anchor: 'start', fontSize: 7, fill: '#222',
     }));
-    els.push(drawCalloutWithLeader(dzX - 28, zy + zl.h / 2, dzX, zy + zl.h / 2, i + 1, 9));
+    els.push(drawCalloutWithLeader(dzX - 28, _rowY - 2, dzX, zy + zl.h / 2, i + 1, 7));
     zy += zl.h;
   });
 
@@ -1301,16 +1377,20 @@ export function drawRoofStructural(
   // striking through each other and the section linework.
   // Row 1 — single-bay rafter O.C., measured on the SECOND bay so the text
   // clears the eave layer stack at the left edge (it struck through it).
+  // +36/12 puts the dim line 24px below the section's thick roof baseline —
+  // at +20/12 the label text landed ON that baseline (read as struck).
   els.push(drawLinearDimension(
     secX + bayW, secX + bayW * 2,
-    roofBaseY + 20, 12,
+    roofBaseY + 36, 12,
     `${rafterSp}" RAFTER O.C. (TYP.)`
   ));
 
   // Row 2 — attachment spacing at its true scaled length, on the next row
+  // (+68 clears row 1's relocated line + label — at +44 the two labels
+  // printed on top of each other).
   els.push(drawOverallDimension(
     secX + bayW, secX + bayW + Math.min(attachSp * IN_PX, roofRun - bayW),
-    roofBaseY + 44, 16,
+    roofBaseY + 68, 16,
     ftToFtIn(attachSp / 12) + ' ATTACH. O.C. MAX'
   ));
 

@@ -1182,10 +1182,14 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         1, 'ea', 'NEC 705.12', 'perSystem', '1', true));
     }
 
-    // Disconnecting means label
+    // Disconnecting means label — NEC 690.13 labels the DISCONNECTING MEANS
+    // (AC disco + point of interconnection), not every inverter: the old
+    // inverterCount+1 derivation printed "qty 53" for a 52-micro job.
+    const discLabelQty = (input.requiresACDisconnect !== false ? 1 : 0)
+      + (input.requiresDCDisconnect ? 1 : 0) + 1;   // +1 = point of interconnection
     items.push(addItem('labels', 'label', 'HellermannTyton', 'Disconnecting Means Label',
       'LABEL-DISC', 'Disconnecting means label per NEC 690.13',
-      input.inverterCount + 1, 'ea', 'NEC 690.13', 'inverterCount + 1', 'inverters + 1', true));
+      discLabelQty, 'ea', 'NEC 690.13', 'disconnecting means (AC/DC disco + POI)', 'AC disco + DC disco + POI', true));
 
     log.push({ stageId: 'labels', category: 'label', item: 'Warning Label Set',
       quantity: 5, derivedFrom: 'NEC 690.31, 690.54, 690.56, 705.12, 690.13', formula: 'perSystem', necReference: 'NEC 690' });

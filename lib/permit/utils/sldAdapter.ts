@@ -213,8 +213,11 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
 /**
  * Generate a live professional SLD SVG from PermitInput.
  * Pure data binding: PermitInput → SLDProfessionalInput → renderSLDProfessional()
+ * `embedded` = rendering inside a planset sheet that has its own title block —
+ * suppresses the SLD's internal SOLARPRO title panel (pure duplication on E-1).
  */
-export function generateLiveSLD(input: PermitInput, cad?: CADModel | null): string {
+export function generateLiveSLD(input: PermitInput, cad?: CADModel | null, opts?: { embedded?: boolean }): string {
   const sldInput = buildSLDInputFromPermit(input, cad);
+  if (opts?.embedded) sldInput.suppressTitleBlock = true;
   return renderSLDProfessional(sldInput);
 }

@@ -423,7 +423,35 @@ const PDF_PAGE_CONFIG = {
 // as "31 kW DC / 18 kW AC"); APP-A prints the red compatibility warning for
 // the same condition. Battery brand/model resolved from batteryId at permit
 // build (L-8 BESS placard printed "Manufacturer: —").
-const PLANSET_ENGINE_VERSION = 47385;
+// 47386 (2026-07-04): Ray's (13).html sweep ("plethora of problems") — 7 fixes.
+// (1) PV-2B trunk routing is COLLISION-SCORED: plane transitions + homeruns
+// pick the axis-aligned route (Manhattan corners + 4 array-bbox skirts) that
+// passes through the fewest module bboxes — the fixed corner drew the trunk
+// straight through other branches' modules. Cross-hip branch MEMBERSHIP is
+// intentional (Ray's economical-branch directive 2026-07-03).
+// (2) PV-4A now surfaces the micro overpower pairing as a WARNING row +
+// count — it declared "0 warnings / complies" while APP-A red-flagged the
+// same 600W-on-349W pairing.
+// (3) PV-1: equipment labels sit on opaque plates (were halo text on the
+// neighbor's parked cars), lot lines carry TRUE ground-length dimensions
+// from the county ring, and the non-standard computed "1
+// ≈ 14'" ratio is
+// gone (graphic scale bar carries the scale).
+// (4) PV-3: callout bubbles at a 16px pitch (r7 bubbles at 13px stacked on
+// each other), leaders land at the text BASELINE with a horizontal landing
+// (mid-glyph endpoints read as strike-throughs), rafter-O.C. dim moved off
+// the section's thick baseline, attach dim de-collided; utility name
+// humanized ('il-ameren-illinois' → 'Ameren Illinois').
+// (5) E-1: "(N) AC DISCONNECT" node label moved above the enclosure (it
+// printed exactly on renderDisco's internal header — the garbled label);
+// embedded SLDs suppress the internal SOLARPRO title panel + crop the
+// viewBox (it duplicated the sheet title block).
+// (6) BOM disconnecting-means labels = AC/DC disco + POI (NEC 690.13), not
+// inverterCount+1 (printed qty 53 on a 52-micro job).
+// (7) PV-4B supply-side jobs: AC Output lands at "Supply-Side Tap @
+// Service" and the EGC at the disco ground bus (both said "Main Panel");
+// PV-2B JB note gets an opaque backing (hip/eave linework struck it).
+const PLANSET_ENGINE_VERSION = 47386;
 
 
 

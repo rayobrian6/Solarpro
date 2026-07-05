@@ -27,6 +27,18 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   const _isRoof = isRoof(cad.systemType);
   const _isFence = isFence(cad.systemType);
   const _isGround = isGround(cad.systemType);
+  // Micro overpower pairing — computed-system flags MICRO_DC_AC_PAIRING but
+  // the snapshot's rulesResult (rules-engine) never carries it, so this sheet
+  // declared "0 warnings / complies" while APP-A red-flagged the same pairing
+  // on the same package. Same inputs APP-A uses.
+  const _inv0 = system?.inverters?.[0];
+  const _pairIsMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
+  const _pairModW = Number(_inv0?.strings?.[0]?.panelWatts)
+    || (cadTotalPanels > 0 ? (cadTotalDcKw * 1000) / cadTotalPanels : 0);
+  const _pairAcW = Number(_inv0?.acOutputKw) * 1000;
+  const _pairRatio = _pairIsMicro && _pairAcW > 0 && _pairModW > 0 ? _pairModW / _pairAcW : 0;
+  const _pairWarn = _pairRatio > 1.55;
+  const _extraWarn = _pairWarn ? 1 : 0;
   return `
   <div class="page">
     ${titleBlock(input, 'PV-4A', 'NEC COMPLIANCE SHEET', pageNum, totalPages)}
@@ -37,8 +49,8 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         <div class="rs" style="color:${rulesResult.errorCount > 0 ? '#cc0000' : '#000'}">
           <div class="rs-val">${rulesResult.errorCount}</div><div class="rs-lbl">Errors</div>
         </div>
-        <div class="rs" style="color:${rulesResult.warningCount > 0 ? '#cc6600' : '#000'}">
-          <div class="rs-val">${rulesResult.warningCount}</div><div class="rs-lbl">Warnings</div>
+        <div class="rs" style="color:${rulesResult.warningCount + _extraWarn > 0 ? '#cc6600' : '#000'}">
+          <div class="rs-val">${rulesResult.warningCount + _extraWarn}</div><div class="rs-lbl">Warnings</div>
         </div>
         <div class="rs" style="color:#000">
           <div class="rs-val">${rulesResult.autoFixCount}</div><div class="rs-lbl">Auto-Fixed</div>
@@ -64,6 +76,14 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
             <td style="font-family:monospace;font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
             <td style="text-align:center;font-weight:bold;color:${statusColor(rule.severity)}">${statusLabel(rule.severity)}</td>
           </tr>`).join('')}
+          ${_pairWarn ? `
+          <tr style="background:${statusBg('warning')}">
+            <td class="mono f-lg">Mfr pairing guide</td>
+            <td>Module / Microinverter Power Pairing</td>
+            <td style="font-size:9px;color:#333">${Math.round(_pairModW)}W module on a ${Math.round(_pairAcW)}W-AC microinverter — per-module DC/AC ${_pairRatio.toFixed(2)} exceeds the manufacturer pairing range; expect sustained output clipping</td>
+            <td style="font-family:monospace;font-size:9px;text-align:right">${_pairRatio.toFixed(2)} / 1.55</td>
+            <td style="text-align:center;font-weight:bold;color:${statusColor('warning')}">${statusLabel('warning')}</td>
+          </tr>` : ''}
         </tbody>
       </table>` : `
       ${compliance.electrical ? `
@@ -101,7 +121,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         <strong>PAGE CONCLUSION — NEC COMPLIANCE:</strong>
         This ${cadTotalDcKw.toFixed(2)} kW DC / ${cadTotalPanels} module photovoltaic system has been evaluated against NEC ${necVer} Articles 690, 705, 250, and 310.
         ${_isRoof ? '' : _isFence ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a fence-mounted system.' : 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a ground-mounted system.'}
-        ${rulesResult ? `The rules engine identified ${rulesResult.errorCount} error(s), ${rulesResult.warningCount} warning(s), and ${rulesResult.autoFixCount} auto-correction(s).` : 'Compliance evaluation is pending.'}
+        ${rulesResult ? `The rules engine identified ${rulesResult.errorCount} error(s), ${rulesResult.warningCount + _extraWarn} warning(s), and ${rulesResult.autoFixCount} auto-correction(s).` : 'Compliance evaluation is pending.'}
         System configuration ${rulesResult && rulesResult.errorCount === 0 ? 'complies with' : 'requires review per'} NEC ${necVer} and applicable local amendments.
       </div>
 
@@ -200,7 +220,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           ${elec ? `
           <tr style="background:#f5f5f5">
             <td class="fw7">AC Output</td>
-            <td>Inverter(s)</td><td>Main Panel</td>
+            <td>Inverter(s)</td><td>${isSupplySideInterconnection(input) ? 'Supply-Side Tap @ Service' : 'Main Panel'}</td>
             <td>${elec.acConductorCallout || project.wireGauge} THWN-2</td>
             <td>${typeof elec.acWireAmpacity === 'number' ? elec.acWireAmpacity.toFixed(1) : (elec.acWireAmpacity || '—')}A</td>
             <td>${elec.busbar?.backfeedBreakerRequired || '—'}A</td>
@@ -210,7 +230,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           </tr>
           <tr style="background:#fff">
             <td class="fw7">EGC</td>
-            <td>Array</td><td>Main Panel</td>
+            <td>Array</td><td>${isSupplySideInterconnection(input) ? 'AC Disconnect (ground bus)' : 'Main Panel'}</td>
             <td>${(() => {
               // FIX v47.341: Auto-size EGC per NEC 250.122 Table based on circuit OCPD
               // Always compute — stored groundingConductor may be stale / incorrect
@@ -865,10 +885,12 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(wireSeg(jbCX+jbW/2,cr.lx,resolveSegY(jbCX+jbW/2,cr.lx,BUS_Y),
       ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','IN 3/4" EMT']));
 
-    // NODE 5: AC DISCONNECT
+    // NODE 5: AC DISCONNECT — label ABOVE the enclosure (BUS_Y-40 landed on
+    // renderDisco's internal header strip; two texts printed on top of each
+    // other — same fix as the live renderer)
     const discoResult=renderDisco(xDisco,BUS_Y,acOCPD,4);
     parts.push(discoResult.svg);
-    parts.push(txt(xDisco,BUS_Y-40,'(N) AC DISCONNECT',{sz:F.hdr,bold:true,anc:'middle'}));
+    parts.push(txt(xDisco,BUS_Y-58,'(N) AC DISCONNECT',{sz:F.hdr,bold:true,anc:'middle'}));
 
     // SEGMENT: Combiner → AC Disco
     parts.push(wireSeg(node3RX,discoResult.loadInX,resolveSegY(node3RX,discoResult.loadInX,BUS_Y),
@@ -1274,7 +1296,9 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
   {
     let liveSvg: string | null = null;
     try {
-      liveSvg = generateLiveSLD(input, cad);
+      // embedded: E-1 has its own sheet title block — the SLD's internal
+      // SOLARPRO panel duplicated project/system/code data beside it.
+      liveSvg = generateLiveSLD(input, cad, { embedded: true });
       if (!liveSvg || !liveSvg.trim().startsWith('<svg')) {
         liveSvg = null;
       }

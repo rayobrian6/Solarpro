@@ -283,7 +283,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           };
         };
         const _vis = pts
-          .map((p, i) => _clipSeg(p, pts[(i + 1) % pts.length]))
+          .map((p, i) => { const s = _clipSeg(p, pts[(i + 1) % pts.length]); return s ? { ...s, i } : null; })
           .filter((s): s is NonNullable<typeof s> => !!s)
           .map(s => ({ ...s, len: Math.hypot(s.bx - s.ax, s.by - s.ay) }))
           .filter(s => s.len > 8);
@@ -292,6 +292,14 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           const d = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
           parcelSvg = `<polygon points="${d}" fill="none" stroke="#fff" stroke-width="3" opacity="0.7" stroke-dasharray="14 7"/>` +
                       `<polygon points="${d}" fill="none" stroke="#111" stroke-width="1.4" stroke-dasharray="14 7"/>`;
+          // TRUE ground length of a lot line (ft) from the county-GIS ring —
+          // examiners expect lot-line dimensions on a site plan; the line
+          // drew undimensioned.
+          const _edgeFt = (i: number) => {
+            const a = pv[i], b = pv[(i + 1) % pv.length];
+            const cosA = Math.cos(a.lat * Math.PI / 180);
+            return Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * cosA) * 3.28084;
+          };
           // Label every visible run long enough to carry text (so a clipped
           // edge can never read as a stray unexplained line).
           for (const s of _vis.filter(v => v.len > 110).slice(0, 3)) {
@@ -299,6 +307,10 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
             let ang = Math.atan2(s.by - s.ay, s.bx - s.ax) * 180 / Math.PI;
             if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
             parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="8.5" font-weight="900" letter-spacing="1.5" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="2.4" paint-order="stroke">PROPERTY LINE</text>`;
+            const _ft = _edgeFt(s.i);
+            if (isFinite(_ft) && _ft > 5) {
+              parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my + 12).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="2.2" paint-order="stroke">${_ft.toFixed(1)}'</text>`;
+            }
           }
         }
       }
@@ -424,10 +436,13 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           // wall tag: white square + code
           parts.push(`<rect x="${(p.x - 6).toFixed(1)}" y="${(p.y - 6).toFixed(1)}" width="12" height="12" fill="#fff" stroke="#111" stroke-width="1.3"/>`);
           parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${meta.tag.length > 2 ? 5.6 : 7}" font-weight="900" fill="#111">${meta.tag}</text>`);
-          // margin label: halo text, no box
+          // margin label on an opaque plate — halo text alone sat straight on
+          // the neighbor's parked cars and read as sloppy overlay.
           const anchor = colRight ? 'end' : 'start';
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="9.5" font-weight="900" fill="#111" stroke="#fff" stroke-width="2.6" paint-order="stroke">${meta.name}</text>`);
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="6.8" font-weight="bold" fill="#333" stroke="#fff" stroke-width="2" paint-order="stroke">${prov}</text>`);
+          const _plateX = colRight ? colX - _nameW - 4 : colX - 4;
+          parts.push(`<rect x="${_plateX.toFixed(1)}" y="${(ly - 10).toFixed(1)}" width="${(_nameW + 8).toFixed(1)}" height="23" rx="2" fill="rgba(255,255,255,0.90)" stroke="#c9ced6" stroke-width="0.6"/>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="9.5" font-weight="900" fill="#111">${meta.name}</text>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="6.8" font-weight="bold" fill="#333">${prov}</text>`);
           ly += 30;
         });
         eqSvg = parts.join('');
@@ -443,9 +458,11 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // blue module badge moved to the footer strip.
     const scalePx = Math.round(20 * 0.3048 * ppm);
     const seg = scalePx / 4;
-    const plateW = scalePx + 96;
+    // Graphic scale bar ONLY — the computed "1\" ≈ 14'" ratio is a
+    // non-standard scale an examiner red-lines; the bar carries the scale
+    // and the footer already says AS NOTED — SEE SCALE BAR.
+    const plateW = scalePx + 34;
     const fx = cropX + 12, fy = cropY + cropH - 34;
-    const scaleFeetPerInch = Math.round(cropW / ppm / 0.3048 / 10.6);   // ~10.6in printed drawing width
     const furniture = `
       <g>
         <rect x="${fx}" y="${fy}" width="${plateW}" height="26" rx="2" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1"/>
@@ -453,7 +470,6 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         <text x="${fx + 8}" y="${fy + 23}" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">0</text>
         <text x="${(fx + 8 + scalePx/2).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">10</text>
         <text x="${(fx + 8 + scalePx).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">20 FT</text>
-        <text x="${(fx + scalePx + 18).toFixed(1)}" y="${fy + 16}" font-family="Arial,sans-serif" font-size="7.5" font-weight="900" fill="#111">1" ≈ ${scaleFeetPerInch}'</text>
       </g>
       <g transform="translate(${(cropX + cropW - 30).toFixed(0)},${(cropY + 30).toFixed(0)})">
         <circle cx="0" cy="0" r="19" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1.5"/>
