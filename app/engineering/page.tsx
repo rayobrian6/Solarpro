@@ -6367,6 +6367,14 @@ function EngineeringPageInner() {
           roofPitch: config.roofPitch,
           rafterSize: config.rafterSize,
           rafterSpacing: config.rafterSpacing,
+          // Framing type + span were never threaded into the permit payload —
+          // the planset's structural engine received nothing, coerced to
+          // worst-case stick rafter @ 12 ft assumed, and printed DO-NOT-ISSUE
+          // letters on trussed houses (Ray, 2026-07-06). 'unknown' lets the
+          // engine auto-detect (24" O.C. → truss) with a provenance note.
+          framingType: config.framingType || 'unknown',
+          rafterSpan: config.rafterSpan || undefined,
+          rafterSpecies: config.rafterSpecies || undefined,
           attachmentSpacing: config.attachmentSpacing,
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,

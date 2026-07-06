@@ -484,7 +484,22 @@ const PDF_PAGE_CONFIG = {
 // in/out, fit-width, 100%, sheet prev/next + indicator, print), keyboard
 // +/−/0; print CSS hides the toolbar and resets the transform so print/PDF
 // output is byte-identical. Default = fit-width for laptop readability.
-const PLANSET_ENGINE_VERSION = 47388;
+// 47389 (2026-07-06): STRUCTURAL TRUTH — Ray zoomed into PE-1's DO-NOT-ISSUE
+// and called it ("we drive screws into trusses all the time"). The letter was
+// failing on FICTION: the UI held framingType 'unknown' but never threaded it
+// into the permit payload, and generatePermit coerced everything non-truss to
+// 'rafter' — the V4 engine's own auto-detect (24" O.C. → truss, BCSI capacity
+// path) was unreachable, and the span was a flat 12 ft guess. Now: (1) the
+// engineering payload threads framingType/rafterSpan/rafterSpecies; (2)
+// generatePermit passes 'unknown' through so auto-detect runs; (3) span
+// derives from the ROOF GEOMETRY when unset (truss = building short
+// dimension, stick = half of it) labeled 'PER ROOF GEOMETRY — FIELD VERIFY';
+// (4) PE-1 truss rows speak truss (BCSI basis, capacity in PSF, governing
+// utilization, deflection per truss mfr) instead of lb-ft stick concepts.
+// Melvin: truss @ 24" O.C., span 32.4 ft, 31.1/35 psf = 89% PASS — letter
+// certifies instead of DO-NOT-ISSUE. Explicit rafter still runs the honest
+// stick path.
+const PLANSET_ENGINE_VERSION = 47389;
 
 
 

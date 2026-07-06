@@ -293,8 +293,30 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const groundSnow   = canonical.site.groundSnowLoad || 0;
       const rafterSize   = input.project.rafterSize || '2x6';
       const rafterSpIn   = input.project.rafterSpacing || 24;
-      const rafterSpFt   = input.project.rafterSpan || 12;
-      const framingType  = input.project.framingType || 'rafter';
+      // Framing: pass 'unknown' THROUGH so the V4 engine's auto-detect runs
+      // (24" O.C. → truss, with a provenance note). The old || 'rafter'
+      // coercion made auto-detect unreachable and printed DO-NOT-ISSUE
+      // letters built on worst-case stick framing for trussed houses.
+      const framingType: 'truss' | 'rafter' | 'unknown' =
+        (input.project.framingType === 'truss' || input.project.framingType === 'rafter')
+          ? (input.project.framingType as 'truss' | 'rafter') : 'unknown';
+      const _effFraming: 'truss' | 'rafter' = framingType === 'unknown'
+        ? (rafterSpIn >= 24 ? 'truss' : 'rafter')   // mirror of the engine's own auto-detect
+        : framingType;
+      // Span: derive from the ROOF GEOMETRY when the project field is empty
+      // instead of a flat 12 ft guess. Trusses span the building's short
+      // dimension (bearing wall to bearing wall); stick rafters run roughly
+      // half of it (eave to ridge, horizontal projection).
+      const _geomSpanFt = (() => {
+        const polys = (cad.roof?.planes ?? []).flatMap((pl: any) => pl.polygon ?? []);
+        if (polys.length < 3) return undefined;
+        const xs = polys.map((p: any) => p.x), ys = polys.map((p: any) => p.y);
+        const depthM = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+        if (!isFinite(depthM) || depthM <= 0) return undefined;
+        const depthFt = depthM * 3.28084;
+        return Math.round((_effFraming === 'truss' ? depthFt : depthFt / 2) * 10) / 10;
+      })();
+      const rafterSpFt   = input.project.rafterSpan || _geomSpanFt || 12;
       const totalPanels  = input.system?.totalPanels || cad.totalPanels || 1;
       const structInput = {
         // 'residential_pitched' was never a valid InstallationType — the old
@@ -308,7 +330,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         groundSnowLoad: groundSnow,
         meanRoofHeight: 15,
         roofPitch: roofPitchDeg,
-        framingType: (framingType === 'truss' ? 'truss' : 'rafter') as 'truss' | 'rafter',
+        framingType,
         rafterSize,
         rafterSpacingIn: rafterSpIn,
         rafterSpanFt: rafterSpFt,
