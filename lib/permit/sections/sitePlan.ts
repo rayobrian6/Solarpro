@@ -133,6 +133,14 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     const inCrop = (p: { x: number; y: number }, pad = 4) =>
       p.x > cropX - pad && p.x < cropX + cropW + pad && p.y > cropY - pad && p.y < cropY + cropH + pad;
 
+    // ── FURNITURE SCALE — resolution independence ──────────────────────────
+    // Every overlay size below is in IMAGE pixels and the crop is what maps
+    // to the printed sheet. Sized for a ~900px Nearmap crop, the same 9.5px
+    // labels rendered ~2.4× oversized on a 640px Google-fallback crop (giant
+    // plates burying the aerial — Ray's 07-06 render). Scale all furniture
+    // with the crop width instead.
+    const fk = Math.min(1.35, Math.max(0.55, cropW / 900));
+
     // ── Registration shift: design GPS → imagery GPS ──────────────────────
     // Nearmap's AI roof polygons are registered to the SAME imagery as the
     // tiles; the design trace sits ~1 m off. When subject polygons are in
@@ -306,10 +314,10 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
             const mx = (s.ax + s.bx) / 2, my = (s.ay + s.by) / 2;
             let ang = Math.atan2(s.by - s.ay, s.bx - s.ax) * 180 / Math.PI;
             if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-            parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="8.5" font-weight="900" letter-spacing="1.5" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="2.4" paint-order="stroke">PROPERTY LINE</text>`;
+            parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8.5 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(1.5 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.4 * fk).toFixed(1)}" paint-order="stroke">PROPERTY LINE</text>`;
             const _ft = _edgeFt(s.i);
             if (isFinite(_ft) && _ft > 5) {
-              parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my + 12).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="2.2" paint-order="stroke">${_ft.toFixed(1)}'</text>`;
+              parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my + 12 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">${_ft.toFixed(1)}'</text>`;
             }
           }
         }
@@ -358,8 +366,8 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const cy = pts.reduce((s: number, p: any) => s + p.y, 0) / pts.length;
         parts.push(`<polygon points="${d}" fill="rgba(22,101,52,0.20)" stroke="#37c871" stroke-width="1.3" stroke-dasharray="5 3"/>`);
         if (i === 0) {
-          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy - 4).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#eafff2" stroke="#14532d" stroke-width="2.2" paint-order="stroke">TREE CANOPY</text>`);
-          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#eafff2" stroke="#14532d" stroke-width="1.8" paint-order="stroke">CONCEALED — FIELD VERIFY</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy - 4).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#eafff2" stroke="#14532d" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">TREE CANOPY</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(5.6 * fk).toFixed(1)}" font-weight="bold" fill="#eafff2" stroke="#14532d" stroke-width="${(1.8 * fk).toFixed(1)}" paint-order="stroke">CONCEALED — FIELD VERIFY</text>`);
         }
       });
       canopySvg = parts.join('');
@@ -389,11 +397,11 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           if (rot > 90) rot -= 180; else if (rot < -90) rot += 180;
         } else {
           // Degenerate pin (at the building) → bottom edge, horizontal
-          sx = cropX + cropW / 2; sy = cropY + cropH - 44; rot = 0;
+          sx = cropX + cropW / 2; sy = cropY + cropH - 44 * fk; rot = 0;
         }
-        sx = Math.max(cropX + 60, Math.min(cropX + cropW - 60, sx));
-        sy = Math.max(cropY + 26, Math.min(cropY + cropH - 20, sy));
-        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" letter-spacing="3" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="3" paint-order="stroke">${streetName}</text>`;
+        sx = Math.max(cropX + 60 * fk, Math.min(cropX + cropW - 60 * fk, sx));
+        sy = Math.max(cropY + 26 * fk, Math.min(cropY + cropH - 20 * fk, sy));
+        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(13 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(3 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="${(3 * fk).toFixed(1)}" paint-order="stroke">${streetName}</text>`;
       }
     }
 
@@ -420,30 +428,32 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           .filter(({ p }) => inCrop(p, -8))
           .sort((a, b) => a.p.y - b.p.y);
         const colRight = visible.length ? (visible[0].p.x > cropX + cropW / 2) : true;
-        const colX = colRight ? cropX + cropW - 14 : cropX + 14;
-        let ly = Math.max(cropY + cropH * 0.16, (visible[0]?.p.y ?? 0) - 34);
+        const colX = colRight ? cropX + cropW - 14 * fk : cropX + 14 * fk;
+        let ly = Math.max(cropY + cropH * 0.16, (visible[0]?.p.y ?? 0) - 34 * fk);
         visible.forEach(({ eq, p }) => {
           const meta = TAGS[eq.kind];
           const prov = eq.provenance === 'survey_photo_gps' ? 'PER SURVEY PHOTO GPS' : 'APPROX. — FIELD VERIFY';
-          ly = Math.max(ly, cropY + 22); ly = Math.min(ly, cropY + cropH - 26);
+          ly = Math.max(ly, cropY + 22 * fk); ly = Math.min(ly, cropY + cropH - 26 * fk);
           // leader: straight, white casing + dark line — ends BEFORE the text
           // block (it used to terminate under the label and read as a
           // strikethrough across its own 'FIELD VERIFY' subtext).
-          const _nameW = meta.name.length * 6.2 + 6;
-          const lexEnd = colRight ? colX - _nameW - 6 : colX + _nameW + 6;
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3).toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.9"/>`);
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3).toFixed(1)}" stroke="#111" stroke-width="1.1"/>`);
+          // EVERYTHING here scales with fk — fixed px buried a low-res crop
+          // under giant plates (Ray's Google-fallback render).
+          const _nameW = (meta.name.length * 6.2 + 6) * fk;
+          const lexEnd = colRight ? colX - _nameW - 6 * fk : colX + _nameW + 6 * fk;
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3 * fk).toFixed(1)}" stroke="#fff" stroke-width="${(2.6 * fk).toFixed(2)}" opacity="0.9"/>`);
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3 * fk).toFixed(1)}" stroke="#111" stroke-width="${(1.1 * fk).toFixed(2)}"/>`);
           // wall tag: white square + code
-          parts.push(`<rect x="${(p.x - 6).toFixed(1)}" y="${(p.y - 6).toFixed(1)}" width="12" height="12" fill="#fff" stroke="#111" stroke-width="1.3"/>`);
-          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${meta.tag.length > 2 ? 5.6 : 7}" font-weight="900" fill="#111">${meta.tag}</text>`);
+          parts.push(`<rect x="${(p.x - 6 * fk).toFixed(1)}" y="${(p.y - 6 * fk).toFixed(1)}" width="${(12 * fk).toFixed(1)}" height="${(12 * fk).toFixed(1)}" fill="#fff" stroke="#111" stroke-width="${(1.3 * fk).toFixed(2)}"/>`);
+          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${((meta.tag.length > 2 ? 5.6 : 7) * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.tag}</text>`);
           // margin label on an opaque plate — halo text alone sat straight on
           // the neighbor's parked cars and read as sloppy overlay.
           const anchor = colRight ? 'end' : 'start';
-          const _plateX = colRight ? colX - _nameW - 4 : colX - 4;
-          parts.push(`<rect x="${_plateX.toFixed(1)}" y="${(ly - 10).toFixed(1)}" width="${(_nameW + 8).toFixed(1)}" height="23" rx="2" fill="rgba(255,255,255,0.90)" stroke="#c9ced6" stroke-width="0.6"/>`);
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="9.5" font-weight="900" fill="#111">${meta.name}</text>`);
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="6.8" font-weight="bold" fill="#333">${prov}</text>`);
-          ly += 30;
+          const _plateX = colRight ? colX - _nameW - 4 * fk : colX - 4 * fk;
+          parts.push(`<rect x="${_plateX.toFixed(1)}" y="${(ly - 10 * fk).toFixed(1)}" width="${(_nameW + 8 * fk).toFixed(1)}" height="${(23 * fk).toFixed(1)}" rx="2" fill="rgba(255,255,255,0.90)" stroke="#c9ced6" stroke-width="0.6"/>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="${(9.5 * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.name}</text>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="${(6.8 * fk).toFixed(1)}" font-weight="bold" fill="#333">${prov}</text>`);
+          ly += 30 * fk;
         });
         eqSvg = parts.join('');
       }
@@ -461,22 +471,24 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // Graphic scale bar ONLY — the computed "1\" ≈ 14'" ratio is a
     // non-standard scale an examiner red-lines; the bar carries the scale
     // and the footer already says AS NOTED — SEE SCALE BAR.
-    const plateW = scalePx + 34;
-    const fx = cropX + 12, fy = cropY + cropH - 34;
+    // Plate paddings/fonts scale with fk (the bar itself is ground-true via
+    // ppm); the north arrow scales the same way.
+    const plateW = scalePx + 34 * fk;
+    const fx = cropX + 12 * fk, fy = cropY + cropH - 34 * fk;
     const furniture = `
       <g>
-        <rect x="${fx}" y="${fy}" width="${plateW}" height="26" rx="2" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1"/>
-        ${[0,1,2,3].map(i => `<rect x="${(fx + 8 + i*seg).toFixed(1)}" y="${fy + 8}" width="${seg.toFixed(1)}" height="7" fill="${i % 2 ? '#fff' : '#111'}" stroke="#111" stroke-width="0.8"/>`).join('')}
-        <text x="${fx + 8}" y="${fy + 23}" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">0</text>
-        <text x="${(fx + 8 + scalePx/2).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">10</text>
-        <text x="${(fx + 8 + scalePx).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">20 FT</text>
+        <rect x="${fx.toFixed(1)}" y="${fy.toFixed(1)}" width="${plateW.toFixed(1)}" height="${(26 * fk).toFixed(1)}" rx="2" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="${fk.toFixed(2)}"/>
+        ${[0,1,2,3].map(i => `<rect x="${(fx + 8 * fk + i*seg).toFixed(1)}" y="${(fy + 8 * fk).toFixed(1)}" width="${seg.toFixed(1)}" height="${(7 * fk).toFixed(1)}" fill="${i % 2 ? '#fff' : '#111'}" stroke="#111" stroke-width="${(0.8 * fk).toFixed(2)}"/>`).join('')}
+        <text x="${(fx + 8 * fk).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">0</text>
+        <text x="${(fx + 8 * fk + scalePx/2).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">10</text>
+        <text x="${(fx + 8 * fk + scalePx).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">20 FT</text>
       </g>
-      <g transform="translate(${(cropX + cropW - 30).toFixed(0)},${(cropY + 30).toFixed(0)})">
+      <g transform="translate(${(cropX + cropW - 30 * fk).toFixed(1)},${(cropY + 30 * fk).toFixed(1)}) scale(${fk.toFixed(3)})">
         <circle cx="0" cy="0" r="19" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1.5"/>
         <polygon points="0,-13 5,8 0,3 -5,8" fill="#111"/>
         <text x="0" y="-22" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.75)" stroke-width="2.4" paint-order="stroke">N</text>
       </g>
-      <rect x="${(cropX + 1.5).toFixed(1)}" y="${(cropY + 1.5).toFixed(1)}" width="${(cropW - 3).toFixed(1)}" height="${(cropH - 3).toFixed(1)}" fill="none" stroke="#111" stroke-width="2"/>`;
+      <rect x="${(cropX + 1.5).toFixed(1)}" y="${(cropY + 1.5).toFixed(1)}" width="${(cropW - 3).toFixed(1)}" height="${(cropH - 3).toFixed(1)}" fill="none" stroke="#111" stroke-width="${(2 * fk).toFixed(2)}"/>`;
 
     drawingContent = `
       <div class=\"f-lg fw9 caps center\">${addr}</div>

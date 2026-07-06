@@ -1739,6 +1739,37 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .note-num { display: table-cell; width: var(--md); font-family: var(--mono); font-weight: 900; font-size: var(--f-md); vertical-align: top; color: #000; }
   .note-txt { display: table-cell; font-size: var(--f-md); line-height: 1.5; color: #000; font-family: var(--sans); }
 
+  /* ── On-screen viewer (screen only — print output untouched) ───────────── */
+  /* The raw 17in sheets rendered edge-to-edge at 1:1 were unreadable on a
+     laptop and barely usable on a monitor. On screen the set now behaves
+     like a PDF viewer: gray desk, sheet shadows, zoom toolbar. */
+  @media screen {
+    body { background: #52565c; }
+    #sp-sheets { transform-origin: top center; width: 17in; margin: 46px auto 0; }
+    #sp-sheets .page { margin: 0 0 18px; box-shadow: 0 2px 14px rgba(0,0,0,0.45); }
+    #sp-toolbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      display: flex; align-items: center; gap: 6px; justify-content: center;
+      background: #23262b; color: #e8eaed; padding: 6px 10px;
+      font-family: Arial, sans-serif; font-size: 13px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.5); user-select: none;
+    }
+    #sp-toolbar button {
+      background: #3a3f46; color: #e8eaed; border: 1px solid #4a5058;
+      border-radius: 4px; padding: 4px 10px; font-size: 13px; cursor: pointer;
+      font-family: inherit;
+    }
+    #sp-toolbar button:hover { background: #4a5058; }
+    #sp-toolbar .sp-zoomval { min-width: 46px; text-align: center; font-weight: bold; }
+    #sp-toolbar .sp-pageind { margin-left: 10px; color: #aab; }
+    #sp-toolbar .sp-title { margin-right: 14px; font-weight: bold; letter-spacing: 0.5px; color: #fff; }
+  }
+  @media print {
+    #sp-toolbar { display: none !important; }
+    #sp-sheets { transform: none !important; width: auto !important; margin: 0 !important; }
+    #sp-sheets .page { margin: 0 !important; box-shadow: none !important; }
+  }
+
   /* ── Print ──────────────────────────────────────────────────────────────── */
   /* Explicit 17in x 11in IS landscape. Do NOT add the orientation keyword after
      explicit lengths — that combination is invalid CSS and browsers fall back to
@@ -1748,8 +1779,76 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 </style>
 </head>
 <body>
+<div id="sp-toolbar">
+  <span class="sp-title">SOLARPRO PLANSET</span>
+  <button data-act="out" title="Zoom out (-)">−</button>
+  <span class="sp-zoomval" id="sp-zoomval">100%</span>
+  <button data-act="in" title="Zoom in (+)">+</button>
+  <button data-act="fit" title="Fit page width">Fit Width</button>
+  <button data-act="full" title="Actual size (0)">100%</button>
+  <button data-act="prev" title="Previous sheet">◀</button>
+  <span class="sp-pageind" id="sp-pageind">Sheet 1 / ?</span>
+  <button data-act="next" title="Next sheet">▶</button>
+  <button data-act="print" title="Print / Save as PDF">Print / PDF</button>
+</div>
+<div id="sp-sheets">
 ${pages.join('\
 ')}
+</div>
+<script>
+(function () {
+  // Screen-only viewer — no-ops entirely when printing.
+  var sheets = document.getElementById('sp-sheets');
+  var pages = sheets ? [].slice.call(sheets.querySelectorAll('.page')) : [];
+  var zoomEl = document.getElementById('sp-zoomval');
+  var indEl = document.getElementById('sp-pageind');
+  var PAGE_W = 17 * 96;
+  var z = 1;
+  function apply() {
+    sheets.style.transform = 'scale(' + z + ')';
+    // transform doesn't affect layout size — compensate so scroll extents match
+    sheets.style.marginBottom = (-(1 - z) * sheets.scrollHeight) + 'px';
+    zoomEl.textContent = Math.round(z * 100) + '%';
+  }
+  function fit() {
+    z = Math.max(0.15, (window.innerWidth - 28) / PAGE_W);
+    apply();
+  }
+  function cur() {
+    var mid = window.scrollY + window.innerHeight / 2;
+    for (var i = pages.length - 1; i >= 0; i--) {
+      var r = pages[i].getBoundingClientRect();
+      if (r.top + window.scrollY <= mid) return i;
+    }
+    return 0;
+  }
+  function ind() { indEl.textContent = 'Sheet ' + (cur() + 1) + ' / ' + pages.length; }
+  function go(d) {
+    var n = Math.min(pages.length - 1, Math.max(0, cur() + d));
+    pages[n].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  document.getElementById('sp-toolbar').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    var act = b.getAttribute('data-act');
+    if (act === 'in')  { z = Math.min(3, z * 1.2); apply(); }
+    if (act === 'out') { z = Math.max(0.15, z / 1.2); apply(); }
+    if (act === 'fit') fit();
+    if (act === 'full') { z = 1; apply(); }
+    if (act === 'prev') go(-1);
+    if (act === 'next') go(1);
+    if (act === 'print') window.print();
+  });
+  window.addEventListener('keydown', function (e) {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    if (e.key === '+' || e.key === '=') { z = Math.min(3, z * 1.2); apply(); }
+    if (e.key === '-') { z = Math.max(0.15, z / 1.2); apply(); }
+    if (e.key === '0') { z = 1; apply(); }
+  });
+  window.addEventListener('scroll', ind, { passive: true });
+  window.addEventListener('resize', ind);
+  if (pages.length) { fit(); ind(); }
+})();
+</script>
 </body>
 </html>`;
 }

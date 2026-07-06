@@ -471,7 +471,20 @@ const PDF_PAGE_CONFIG = {
 // bonding) + WATERPROOFING & ROOFING NOTES fill the band below the section;
 // section + detail circle pinned to their original frame so the taller
 // canvas can't slide them.
-const PLANSET_ENGINE_VERSION = 47387;
+// 47388 (2026-07-06): Ray's Google-fallback render exposed a class bug —
+// PV-1 overlay furniture was sized in ABSOLUTE image pixels and ballooned
+// ~2.4× on a 640px Google crop (giant plates burying the aerial; Nearmap's
+// ~900px crop was the only case ever verified). All PV-1 furniture (labels,
+// plates, chips, leaders, street label, canopy/parcel labels, lot dims,
+// scale-bar plate, north arrow, neatline) now scales with fk = cropW/900,
+// verified at BOTH resolutions. (2) PV-2 fit-to-frame RESERVES the tables/
+// notes column (280px, plan mode only) so the roof can never slide under it
+// — replaces the opaque-backing patch that erased linework. (3) On-screen
+// VIEWER in the HTML shell: gray desk, sheet shadows, fixed toolbar (zoom
+// in/out, fit-width, 100%, sheet prev/next + indicator, print), keyboard
+// +/−/0; print CSS hides the toolbar and resets the transform so print/PDF
+// output is byte-identical. Default = fit-width for laptop readability.
+const PLANSET_ENGINE_VERSION = 47388;
 
 
 

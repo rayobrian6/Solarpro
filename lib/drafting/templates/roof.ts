@@ -254,7 +254,12 @@ export function drawRoofPlan(
 
   // Margin leaves room for the dimension lines + callout row outside the roof.
   const margin  = 52;
-  const scaleX  = (dz.width  - 2 * margin) / lngSpan;
+  // PV-2 (plan mode) carries the tables + general-notes column at the left
+  // INSIDE the draw zone (tx=8, ~268px + 31'-6" vertical dim clearance).
+  // Reserve that width in fit-to-frame so the roof can never slide under it
+  // — the opaque-backing patch just erased whatever linework it covered.
+  const leftReserve = isBranchColorMode ? 0 : 280;
+  const scaleX  = (dz.width  - 2 * margin - leftReserve) / lngSpan;
   const scaleY  = (dz.height - 2 * margin) / latSpan;
   // Fit-to-frame (was *1.35, which overzoomed and clipped the top hip + the
   // setback dimension off the page for frame-filling roofs — caught via harness).
@@ -264,9 +269,9 @@ export function drawRoofPlan(
   // space on the side when fit-to-frame is limited by the other dimension).
   const roofWpx = lngSpan * scale;
   const roofHpx = latSpan * scale;
-  const offX = Math.max(0, (dz.width  - 2 * margin - roofWpx) / 2);
+  const offX = Math.max(0, (dz.width  - 2 * margin - leftReserve - roofWpx) / 2);
   const offY = Math.max(0, (dz.height - 2 * margin - roofHpx) / 2);
-  const toX = (lng: number) => dz.x  + margin + offX + (lng - minLng) * scale;
+  const toX = (lng: number) => dz.x  + margin + leftReserve + offX + (lng - minLng) * scale;
   const toY = (lat: number) => dz.y  + (dz.height - margin) - offY - (lat - minLat) * scale;
 
   // ── Draw roof planes ──
