@@ -499,7 +499,18 @@ const PDF_PAGE_CONFIG = {
 // Melvin: truss @ 24" O.C., span 32.4 ft, 31.1/35 psf = 89% PASS — letter
 // certifies instead of DO-NOT-ISSUE. Explicit rafter still runs the honest
 // stick path.
-const PLANSET_ENGINE_VERSION = 47389;
+// 47390 (2026-07-06): PV-1 module↔imagery alignment on GOOGLE-FALLBACK
+// aerials (Ray's 07-06 render: modules hung past the south eave). Google has
+// no imagery-registered vector layer — Solar API roofSegments belong to a
+// NEIGHBOR building on Melvin (measured 14 m off), so registration now comes
+// from the IMAGE: utils/aerialEdgeSnap.ts grid-searches a ≤3.5 m translation
+// that lands the design roof hull on the strongest oriented Sobel edges
+// (route pre-pass → aerialData.registrationShift → PV-1 toPxD). Confidence
+// gates (score ratio ≥1.3, ≥50% of perimeter on edges, no boundary lock)
+// fail OPEN to the previous unshifted behavior. Melvin real-Google fixture:
+// 1.11 m shift, ratio 3.34 — modules land on the roof pixels; Nearmap path
+// byte-identical (its vector registration is untouched).
+const PLANSET_ENGINE_VERSION = 47390;
 
 
 

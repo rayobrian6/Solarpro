@@ -17,6 +17,7 @@ import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
+import { applyAerialEdgeSnapRegistration } from '@/lib/permit/utils/aerialEdgeSnap';
 import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
 import { fetchParcelBoundary } from '@/lib/aerial/parcelBoundary';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
@@ -146,6 +147,9 @@ export async function GET(req: NextRequest) {
       if ((!html || isStale) && inputJson) {
         try {
           const savedInput = JSON.parse(inputJson) as PermitInput;
+          // Google-fallback aerials need the async edge-snap registration
+          // computed before the (sync) render — see utils/aerialEdgeSnap.ts.
+          await applyAerialEdgeSnapRegistration(savedInput);
           const freshHtml = generatePermitHTML(savedInput);
           console.log(`[permit/GET] Self-heal: regenerated v${savedVerNum || 0} -> v${PLANSET_ENGINE_VERSION} from permit_input.json`, { projectId });
           html = freshHtml;
@@ -1202,6 +1206,12 @@ export async function POST(req: NextRequest) {
         console.log('[permit/obstructions] aerial vision sweep skipped:', (visErr as Error)?.message);
       }
     }
+
+    // Google-fallback aerials: compute the design→imagery edge-snap shift
+    // before the (sync) render. The shift lands in aerialData.registrationShift
+    // and is persisted with the permit_input.json snapshot below (the GET
+    // self-heal recomputes it anyway).
+    await applyAerialEdgeSnapRegistration(enrichedBody);
 
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });

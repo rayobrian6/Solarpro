@@ -206,6 +206,18 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         }
       }
     }
+    // GOOGLE-FALLBACK registration: no vector layer shares Google's imagery
+    // registration (Solar API roofSegments routinely belong to a NEIGHBOR
+    // building — measured 14 m off on Melvin), so the permit route pre-computes
+    // an image-space EDGE-SNAP shift (see utils/aerialEdgeSnap.ts) and stores
+    // it on aerialData.registrationShift. Applied through the same toPxD path
+    // as the Nearmap shift; absent/unconfident → unshifted, as before.
+    if (_dLat === 0 && _dLng === 0 && _subjPolys.length === 0) {
+      const _rs = (aerial as any).registrationShift as { dLat?: number; dLng?: number } | undefined;
+      if (_rs && isFinite(_rs.dLat as number) && isFinite(_rs.dLng as number)) {
+        _dLat = _rs.dLat as number; _dLng = _rs.dLng as number;
+      }
+    }
     const toPxD = (lat: number, lng: number) => toPx(lat + _dLat, lng + _dLng);
 
     // ── Layer 0: dim everything except the subject building ───────────────
@@ -666,6 +678,10 @@ export interface AerialRoofData {
    *  are pixel-true). Drives the PV-1 subject-dimming mask + the design→
    *  imagery registration shift. */
   subjectRoofPolygons?: Array<Array<{ lat: number; lng: number }>>;
+  /** Design→imagery shift for Google-fallback aerials, pre-computed by the
+   *  permit route via utils/aerialEdgeSnap.ts (generatePermitHTML is sync so
+   *  the image analysis can't run here). Degrees to ADD to design lat/lng. */
+  registrationShift?: { dLat: number; dLng: number; shiftM?: number; scoreRatio?: number; method?: string };
   roofSegments?: Array<{
     center?: { lat: number; lng: number };
     azimuthDegrees: number;
