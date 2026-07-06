@@ -11,6 +11,7 @@ import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, to
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { SOLAR_PANELS, MICROINVERTERS } from '@/lib/equipment-db';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
@@ -398,16 +399,28 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const invMfr = system.inverters?.[0]?.manufacturer || '—';
   const invModel = system.inverters?.[0]?.model || '—';
 
+  // REAL datasheet records from equipment-db (fuzzy model match) — the sheet
+  // previously ESTIMATED Vmp (Voc×0.83), derived Imp, and hardcoded the temp
+  // coefficients + NOCT while the DB carries the manufacturer values.
+  const _dbFind = <T extends { model: string }>(list: T[], model?: string): T | undefined => {
+    const m = (model || '').toLowerCase().trim();
+    if (!m) return undefined;
+    return list.find(e => e.model.toLowerCase() === m)
+      ?? list.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+  };
+  const _dbPanel = _dbFind(SOLAR_PANELS, panels?.panelModel);
+  const _dbMicro = system.inverters?.[0]?.type === 'micro'
+    ? _dbFind(MICROINVERTERS, system.inverters?.[0]?.model) : undefined;
+
   // Get specs from the spec sheet DB
-  const voc = panels?.panelVoc || project.panelVoc || 41.6;
-  const isc = panels?.panelIsc || project.panelIsc || 12.26;
+  const voc = panels?.panelVoc || project.panelVoc || _dbPanel?.voc || 41.6;
+  const isc = panels?.panelIsc || project.panelIsc || _dbPanel?.isc || 12.26;
   const pmax = modWatts;
-  // Vmp estimated from Voc; Imp DERIVED from Pmax/Vmp so the printed pair
-  // reproduces the nameplate (the old isc×0.94 guess printed 62.7V × 6.19A =
-  // 388W beside "400 Wp" — a checkable arithmetic error).
-  const vmp = parseFloat((voc * 0.83).toFixed(1));
-  const imp = parseFloat((pmax / vmp).toFixed(2));
-  const tempCoeff = -0.35;
+  // Vmp/Imp: manufacturer values when the DB record resolves; otherwise the
+  // nameplate-consistent estimate (Vmp≈Voc×0.83, Imp=Pmax/Vmp).
+  const vmp = _dbPanel?.vmp ?? parseFloat((voc * 0.83).toFixed(1));
+  const imp = _dbPanel?.imp ?? parseFloat((pmax / vmp).toFixed(2));
+  const tempCoeff = _dbPanel?.tempCoeffPmax ?? -0.35;
   // Defaults must match the layout engine's module footprint (66" × 40") —
   // APP-A used to claim a 79.9" module while PV-2/PV-3 drew 66".
   const panelLen = project.panelLengthIn || 66;
@@ -418,7 +431,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   // formula with the project design-low temp (same input the SLD/engines
   // use), matching the compatibility gate. The old blanket ×1.25 printed a
   // 62.3 V "max" beside a 60 V inverter DC limit on the same sheet.
-  const VOC_TEMP_COEFF = -0.27;                    // %/°C — matches the printed spec row
+  const VOC_TEMP_COEFF = _dbPanel?.tempCoeffVoc ?? -0.27;  // %/°C — manufacturer value when resolved; matches the printed spec row
   const designTempMinC = project.designTempMin ?? -10;
   const vocColdFactor = 1 + (VOC_TEMP_COEFF / 100) * (designTempMinC - 25);
   const NEC_SAFETY = 1.25;
@@ -442,8 +455,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">Max Power Voltage (Vmp)</td><td class="iv">${vmp} V</td></tr>
             <tr><td class="il">Max Power Current (Imp)</td><td class="iv">${imp} A</td></tr>
             <tr><td class="il">Temp. Coeff. Pmax</td><td class="iv">${tempCoeff}%/°C</td></tr>
-            <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">-0.27%/°C</td></tr>
-            <tr><td class="il">NOCT</td><td class="iv">45°C ±2°C</td></tr>
+            <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">${VOC_TEMP_COEFF}%/°C</td></tr>
+            <tr><td class="il">NOCT</td><td class="iv">${_dbPanel?.nominalOperatingTemp ?? 45}°C ±2°C</td></tr>
             <tr><td class="il">Module Efficiency</td><td class="iv">${((pmax / (panelLen/39.37 * panelWid/39.37)) / 10).toFixed(1)}%</td></tr>
           </table>
           <div style="font-size:7px;color:#555;margin:-2px 0 4px 0;">Vmp/Imp and temperature coefficients are typical values — verify against the manufacturer's certified datasheet before construction.</div>
@@ -455,11 +468,22 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">Weight</td><td class="iv">${panelWt} lbs (${(panelWt*0.453592).toFixed(1)} kg)</td></tr>
             <tr><td class="il">Front Load</td><td class="iv">5400 Pa (Wind/Snow)</td></tr>
             <tr><td class="il">Rear Load</td><td class="iv">2400 Pa</td></tr>
-            <tr><td class="il">Cell Type</td><td class="iv">Monocrystalline PERC / TOPCon</td></tr>
+            <tr><td class="il">Cell Type</td><td class="iv">${_dbPanel ? `${_dbPanel.cellType}${_dbPanel.bifacial ? ' — Bifacial' : ''}` : 'Monocrystalline PERC / TOPCon'}</td></tr>
             <tr><td class="il">Frame</td><td class="iv">Anodized Aluminum Alloy</td></tr>
             <tr><td class="il">Connector</td><td class="iv">MC4 Compatible</td></tr>
-            <tr><td class="il">UL Listing</td><td class="iv">UL 61730 / IEC 61215</td></tr>
+            <tr><td class="il">UL Listing</td><td class="iv">${_dbPanel?.ulListing || 'UL 61730 / IEC 61215'}</td></tr>
           </table>
+
+          ${_dbPanel ? `
+          <div class="section-title">PV Module — Datasheet Reference</div>
+          <table class="info-table" style="margin-bottom:6px;">
+            <tr><td class="il">Max System Voltage</td><td class="iv">${_dbPanel.maxSystemVoltage} V DC</td></tr>
+            <tr><td class="il">Max Series Fuse Rating</td><td class="iv">${_dbPanel.maxSeriesFuseRating} A</td></tr>
+            <tr><td class="il">Temp. Coeff. Isc</td><td class="iv">+${_dbPanel.tempCoeffIsc}%/°C</td></tr>
+            <tr><td class="il">Module Thickness</td><td class="iv">${_dbPanel.thickness}" (${(_dbPanel.thickness * 25.4).toFixed(0)}mm)</td></tr>
+            <tr><td class="il">Product Warranty</td><td class="iv">${_dbPanel.warranty}</td></tr>
+            <tr><td class="il">Source</td><td class="iv">Manufacturer datasheet — copies available upon AHJ request</td></tr>
+          </table>` : ''}
 
           <!-- NEC 690.8 Calculations from module specs -->
           <div class="section-title">NEC 690.8 — Module Electrical Calculations</div>
@@ -520,6 +544,21 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             })()}
           </div>
           `).join('') || '<p style="font-size:9px;color:#999">No inverter data</p>'}
+
+          ${_dbMicro ? `
+          <div class="section-title">Microinverter — Datasheet Reference</div>
+          <table class="info-table" style="margin-bottom:6px;">
+            <tr><td class="il">Peak AC Output</td><td class="iv">${_dbMicro.acOutputW} VA</td></tr>
+            <tr><td class="il">Max Continuous Output Current</td><td class="iv">${_dbMicro.acOutputCurrentMax} A @ ${_dbMicro.acOutputVoltage} V</td></tr>
+            <tr><td class="il">DC Input Power (Module STC Max)</td><td class="iv">${_dbMicro.dcInputWMax} W</td></tr>
+            <tr><td class="il">MPPT Voltage Range</td><td class="iv">${_dbMicro.mpptVoltageMin}–${_dbMicro.mpptVoltageMax} V</td></tr>
+            <tr><td class="il">Max DC Input Current</td><td class="iv">${_dbMicro.maxInputCurrent} A</td></tr>
+            ${_dbMicro.maxPerBranch20A ? `<tr><td class="il">Max Units / 20A Branch</td><td class="iv">${_dbMicro.maxPerBranch20A}</td></tr>` : ''}
+            <tr><td class="il">CEC Weighted Efficiency</td><td class="iv">${_dbMicro.cec_efficiency}%</td></tr>
+            <tr><td class="il">Rapid Shutdown</td><td class="iv">${_dbMicro.rapidShutdownCompliant ? 'Integrated — NEC 690.12 MLRS' : 'External MLRS required'}</td></tr>
+            <tr><td class="il">Unit Weight</td><td class="iv">${_dbMicro.weight} lbs</td></tr>
+            <tr><td class="il">Product Warranty</td><td class="iv">${_dbMicro.warranty}</td></tr>
+          </table>` : ''}
 
           <!-- Racking System Summary — from the SELECTED mounting system.
                The old static table printed IronRidge FlashFoot2 / 5/16" lag

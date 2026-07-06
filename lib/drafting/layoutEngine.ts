@@ -160,7 +160,10 @@ function roofLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones 
   // the tall zone with ~50% blank sheet above/below, which also shrank the
   // roof (and its 5.4px table text) to ~48% of achievable size. Ground/fence
   // plans keep CANVAS_PLAN_H.
-  const H = isPlan ? 920 : CANVAS_ELEV_H;
+  // Structural (PV-3) grew 520→800: the 2.4-aspect canvas letterboxed into
+  // the sheet's tall draw zone and the bottom half of PV-3 printed blank.
+  // The extra height carries the hardware schedule + roofing notes blocks.
+  const H = isPlan ? 920 : (viewType === 'structural' ? 800 : CANVAS_ELEV_H);
   const W = CANVAS_W;
 
   const dimLeft   = 70;

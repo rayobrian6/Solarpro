@@ -111,6 +111,50 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           <tr class="bg-lt"><td class="fw7">Ground-Fault Protection</td><td>GFDI required per system type</td><td class="mono">NEC 690.41, 690.5</td><td>Inverter-integrated or standalone</td></tr>
         </tbody>
       </table>
+      ${(() => {
+        // AC branch circuit schedule (micro topology) — the sheet's bottom
+        // 60% shipped blank while the branch plan existed in the engine.
+        if (!_pairIsMicro) return '';
+        const _pp = (input.project.panelPositions ?? []) as Array<{ id: string; planeId?: string; arrayId?: string; row?: number; col?: number; lat?: number; lng?: number }>;
+        if (!_pp.length || !(_pairAcW > 0)) return '';
+        const _plan = planMicroBranches(_pp, _inv0?.model);
+        const _perA = _pairAcW / 240;
+        const _rows = _plan.sizes.map((n, i) => {
+          const amps = n * _perA;
+          const cont = amps * 1.25;
+          return `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">` +
+            `<td class="fw9 mono">B${i + 1}</td>` +
+            `<td>${n} × microinverter</td>` +
+            `<td style="text-align:right;font-family:monospace">${amps.toFixed(1)} A</td>` +
+            `<td style="text-align:right;font-family:monospace">${cont.toFixed(1)} A</td>` +
+            `<td style="text-align:center;font-family:monospace">20 A</td>` +
+            `<td>#10 AWG THWN-2 + EGC</td>` +
+            `<td>${i < 4 ? 'IQ Combiner' : 'AC Subpanel (see E-1)'}</td>` +
+            `</tr>`;
+        }).join('');
+        return `
+      <div class="section-title">AC Branch Circuit Schedule — NEC 690.8(A)</div>
+      <table class="equip-table">
+        <thead><tr><th style="width:8%">Branch</th><th style="width:20%">Devices</th><th style="width:12%">Output</th><th style="width:14%">× 1.25 Cont.</th><th style="width:10%">OCPD</th><th style="width:20%">Conductor</th><th>Terminates</th></tr></thead>
+        <tbody>${_rows}</tbody>
+      </table>`;
+      })()}
+
+      <div class="section-title">Interconnection Summary — ${isSupplySideInterconnection(input) ? 'NEC 705.11 (Supply-Side Tap)' : 'NEC 705.12 (Load-Side)'}</div>
+      <table class="info-table">
+        <tr>
+          <td class="il">Method</td><td class="iv">${interconnectionLabel(input.project?.interconnectionMethod)}</td>
+          <td class="il">PV Output Current</td><td class="iv">${(Number(system?.totalAcKw || 0) * 1000 / 240).toFixed(1)} A</td>
+        </tr>
+        <tr>
+          <td class="il">Continuous (× 1.25)</td><td class="iv">${(Number(system?.totalAcKw || 0) * 1000 / 240 * 1.25).toFixed(1)} A</td>
+          <td class="il">${isSupplySideInterconnection(input) ? 'Tap OCPD' : 'Backfeed Breaker'}</td><td class="iv">${necNextStandardOcpd(Number(system?.totalAcKw || 0) * 1000 / 240 * 1.25)} A ${isSupplySideInterconnection(input) ? 'fused disconnect' : '2-pole breaker'}</td>
+        </tr>
+        <tr>
+          <td class="il">Connection Point</td><td class="iv" colspan="3">${isSupplySideInterconnection(input) ? 'Line side of the service disconnecting means — 120% busbar rule (NEC 705.12(B)) not applicable' : 'Load center busbar — 120% rule per NEC 705.12(B)(2)'}</td>
+        </tr>
+      </table>
+
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;background:#fafafa;">
         <strong>ENGINEERING INTERPRETATION:</strong> The above methodology is applied to all DC and AC circuits in this system.
         Each conductor, overcurrent device, and disconnect has been sized using the calculation chain shown.

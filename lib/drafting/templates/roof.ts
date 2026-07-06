@@ -522,7 +522,21 @@ export function drawRoofPlan(
   if (!isBranchColorMode && bandQuads.length) {
     regPanels.forEach((p: any) => {
       const px = toX(p.lng), py = toY(p.lat);
-      if (bandQuads.some(q => ptInRingXY(px, py, q))) {
+      // FOOTPRINT test — center + all four corners (rotation-snapped like the
+      // module renderer). The centers-only test let a module overlap a band by
+      // half its width and still read as clean.
+      const isLandscape = (p.orientation || 'landscape') === 'landscape';
+      let hw = (isLandscape ? panLenPx : panWidPx) / 2;
+      let hh = (isLandscape ? panWidPx : panLenPx) / 2;
+      const azRot = Number(p.azimuth ?? p.heading);
+      let rot = isFinite(azRot) ? ((azRot % 360) + 360) % 360 % 180 : 0;
+      if (rot >= 15 && rot <= 165 && Math.abs(rot - 90) < 15) { const t = hw; hw = hh; hh = t; }
+      const testPts = [
+        { x: px, y: py },
+        { x: px - hw, y: py - hh }, { x: px + hw, y: py - hh },
+        { x: px - hw, y: py + hh }, { x: px + hw, y: py + hh },
+      ];
+      if (testPts.some(t => bandQuads.some(q => ptInRingXY(t.x, t.y, q)))) {
         _encroachCount++;
         els.push(`<rect x="${(px - 4).toFixed(1)}" y="${(py - 4).toFixed(1)}" width="8" height="8" fill="none" stroke="#cc0000" stroke-width="1.2" transform="rotate(45 ${px.toFixed(1)} ${py.toFixed(1)})"/>`);
       }
@@ -828,10 +842,19 @@ export function drawRoofPlan(
       }
       if (idx >= 0) _facetCounts[idx]++;
     });
+    // Display azimuths snap to the sheet axes when within the SAME 8°
+    // tolerance regularizeRoof squares the linework with — the table printed
+    // raw trace headings (3°/273°/89°) beside axis-square drawing, which read
+    // as four planes that don't oppose each other.
+    const _snapAz = (az: number) => {
+      const n = ((az % 360) + 360) % 360;
+      const q = Math.round(n / 90) * 90 % 360;
+      return Math.abs(((n - q + 540) % 360) - 180) <= 8 ? q : Math.round(n);
+    };
     const facets = regPlanes.map((rp: any, i: number) => ({
       n: i + 1,
       mods: _facetCounts[i],
-      az: rp.azimuth != null && isFinite(rp.azimuth) ? `${Math.round(rp.azimuth)}°` : '—',
+      az: rp.azimuth != null && isFinite(rp.azimuth) ? `${_snapAz(rp.azimuth)}°` : '—',
       tilt: rp.pitch != null && isFinite(rp.pitch) ? `${Math.round(rp.pitch)}°` : '—',
       truss: trussSize,
       oc: trussSpacing,
@@ -1235,7 +1258,9 @@ export function drawRoofStructural(
   const roofRise = roofRun * (pitchNum / 12);
 
   const secX     = dz.x + dz.width * 0.02;
-  const roofBaseY = zones.dims.top + (dz.height * 0.80);
+  // Pinned (not %-of-height): the taller structural canvas would slide the
+  // section down and re-create the blank band ABOVE it.
+  const roofBaseY = zones.dims.top + Math.min(dz.height * 0.80, 350);
 
   // ── Bottom chord ──
   els.push(drawLine(secX, roofBaseY, secX + roofRun, roofBaseY, 'line-struct'));
@@ -1306,8 +1331,10 @@ export function drawRoofStructural(
 
   // ── Detail circle (zoomed attachment) — enlarged; at r=112 it left the
   // bottom of the drawing zone blank.
+  // Circle center pinned to the ORIGINAL 436px detail frame — %-of-height on
+  // the taller (800px) canvas dragged the circle down into the section.
   const dcx = dz.x + dz.width * 0.74;
-  const dcy = zones.dims.top + dz.height * 0.46;
+  const dcy = zones.dims.top + Math.min(dz.height, 436) * 0.46;
   const dcr = 148;
   els.push(`<circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="${dcr}"
     fill="#fffff8" stroke="#000" stroke-width="1.8"/>`);
@@ -1398,6 +1425,53 @@ export function drawRoofStructural(
   els.push(drawVerticalDimension(
     secX + 5, roofBaseY, roofBaseY - 30, 10, `${_embedD}" MIN. EMBED`
   ));
+
+  // ── FASTENER & HARDWARE SCHEDULE + ROOFING NOTES (below the section) ──
+  // The 520px canvas letterboxed into the sheet and the bottom half printed
+  // blank; the taller canvas carries install-critical content instead.
+  {
+    const hby = roofBaseY + 100;
+    const hbw = (dz.width - 24) / 2;
+    const hbx1 = secX, hbx2 = secX + hbw + 24;
+    const _torque = _lagDiaD <= 0.3125 ? '8–12 FT-LBS' : '15–20 FT-LBS';
+    const _pilot = _lagDiaD <= 0.3125 ? '7/32"' : '1/4"';
+    const hwRows: Array<[string, string]> = [
+      ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
+      ['LAG BOLT', `${lagLabelD}, 316 SS`],
+      ['EMBEDMENT', `${_embedD}" MIN INTO RAFTER`],
+      ['PILOT HOLE', `${_pilot} DIA — RAFTER CENTER`],
+      ['DRIVE TORQUE', `${_torque} — NO OVERDRIVE`],
+      ['FLASHING', 'MFR FLASHING — ALL PENETRATIONS'],
+      ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'],
+    ];
+    const rfNotes = [
+      `1. FLASH ALL PENETRATIONS PER MOUNTING MFR MANUAL.`,
+      `2. SEALANT AT EVERY LAG — ${roofType}-COMPATIBLE.`,
+      `3. ATTACH TO FRAMING ONLY — NEVER SHEATHING ALONE.`,
+      `4. NO ATTACHMENT AT SPLICES; 1-1/2" MIN EDGE DISTANCE.`,
+      `5. REPAIR DAMAGED ROOFING BEFORE MOUNTING.`,
+      `6. VERIFY ROOFING MFR WARRANTY COMPATIBILITY.`,
+    ];
+    const rowH = 15, hdrH = 14;
+    // Left: hardware schedule table
+    els.push(`<rect x="${hbx1}" y="${hby}" width="${hbw}" height="${hdrH}" fill="#000"/>`);
+    els.push(drawText(hbx1 + hbw / 2, hby + 10, 'FASTENER & HARDWARE SCHEDULE', { anchor: 'middle', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+    hwRows.forEach(([l, v], i) => {
+      const ry = hby + hdrH + i * rowH;
+      els.push(`<rect x="${hbx1}" y="${ry}" width="${hbw}" height="${rowH}" fill="${i % 2 ? '#f4f4f4' : '#fff'}" stroke="#c8c8c8" stroke-width="0.4"/>`);
+      els.push(drawText(hbx1 + 5, ry + 10.5, l, { anchor: 'start', fontSize: 6.4, fontWeight: 'bold', fill: '#333' }));
+      els.push(drawText(hbx1 + 92, ry + 10.5, v, { anchor: 'start', fontSize: 6.2, fill: '#111' }));
+    });
+    els.push(`<rect x="${hbx1}" y="${hby}" width="${hbw}" height="${hdrH + hwRows.length * rowH}" fill="none" stroke="#2b2f36" stroke-width="1"/>`);
+    // Right: waterproofing / roofing notes
+    els.push(`<rect x="${hbx2}" y="${hby}" width="${hbw}" height="${hdrH}" fill="#000"/>`);
+    els.push(drawText(hbx2 + hbw / 2, hby + 10, 'WATERPROOFING & ROOFING NOTES', { anchor: 'middle', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+    const nBoxH = hdrH + rfNotes.length * 15 + 6;
+    els.push(`<rect x="${hbx2}" y="${hby + hdrH}" width="${hbw}" height="${nBoxH - hdrH}" fill="#fff" stroke="#2b2f36" stroke-width="1"/>`);
+    rfNotes.forEach((n, i) => {
+      els.push(drawText(hbx2 + 6, hby + hdrH + 13 + i * 15, n, { anchor: 'start', fontSize: 6.4, fill: '#111' }));
+    });
+  }
 
   // ── Callout schedule (right panel) ──
   const schedLeft = W - zones.dims.right + 10;

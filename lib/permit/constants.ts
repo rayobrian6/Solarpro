@@ -451,7 +451,27 @@ const PDF_PAGE_CONFIG = {
 // (7) PV-4B supply-side jobs: AC Output lands at "Supply-Side Tap @
 // Service" and the EGC at the disco ground bus (both said "Main Panel");
 // PV-2B JB note gets an opaque backing (hip/eave linework struck it).
-const PLANSET_ENGINE_VERSION = 47386;
+// 47387 (2026-07-06): market-readiness round — honesty + density.
+// (1) Encroachment test = module FOOTPRINT (center + 4 rotation-aware
+// corners) vs setback bands — the centers-only test let a module overlap a
+// band by half its width silently.
+// (2) Display azimuths snap to the sheet axes within the regularizer's 8°
+// tolerance (table read 3°/273°/89° beside axis-squared linework).
+// (3) PV-4A carries an AC BRANCH CIRCUIT SCHEDULE (per-branch devices/amps/
+// ×1.25/OCPD/conductor/terminus from the same planMicroBranches plan PV-2B
+// draws) + an INTERCONNECTION SUMMARY block — the bottom 60% shipped blank.
+// (4) APP-A upgraded to DATASHEET-GRADE: real manufacturer Vmp/Imp/temp-
+// coefficients/NOCT/cell-type from equipment-db (Vmp was estimated Voc×0.83,
+// coeffs hardcoded), plus PV MODULE and MICROINVERTER datasheet-reference
+// tables (max system V, series fuse, MPPT range, max input current,
+// units/branch, CEC eff, RSD, warranties). The 690.7 Voc calc now uses the
+// module's own coefficient.
+// (5) PV-3 structural canvas 520→800 (was letterboxing into a half-blank
+// sheet): FASTENER & HARDWARE SCHEDULE (lag/embed/pilot/torque/flashing/
+// bonding) + WATERPROOFING & ROOFING NOTES fill the band below the section;
+// section + detail circle pinned to their original frame so the taller
+// canvas can't slide them.
+const PLANSET_ENGINE_VERSION = 47387;
 
 
 
