@@ -18,6 +18,7 @@ import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/l
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
 import { applyAerialEdgeSnapRegistration } from '@/lib/permit/utils/aerialEdgeSnap';
+import { deskewArrayToTrue } from '@/lib/permit/utils/deskewArrayToTrue';
 import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
 import { fetchParcelBoundary } from '@/lib/aerial/parcelBoundary';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
@@ -147,6 +148,9 @@ export async function GET(req: NextRequest) {
       if ((!html || isStale) && inputJson) {
         try {
           const savedInput = JSON.parse(inputJson) as PermitInput;
+          // Square the array to true lines (de-skew azimuth + grid) before
+          // anything else reads it — see utils/deskewArrayToTrue.ts.
+          deskewArrayToTrue(savedInput);
           // Google-fallback aerials need the async edge-snap registration
           // computed before the (sync) render — see utils/aerialEdgeSnap.ts.
           await applyAerialEdgeSnapRegistration(savedInput);
@@ -1211,6 +1215,11 @@ export async function POST(req: NextRequest) {
     // before the (sync) render. The shift lands in aerialData.registrationShift
     // and is persisted with the permit_input.json snapshot below (the GET
     // self-heal recomputes it anyway).
+    // Square the array to true lines (de-skew per-plane azimuth + grid noise)
+    // before rendering AND before the snapshot is saved, so every sheet draws
+    // the arrays on true horizontal/vertical lines — see deskewArrayToTrue.ts.
+    deskewArrayToTrue(enrichedBody);
+
     await applyAerialEdgeSnapRegistration(enrichedBody);
 
     const html = generatePermitHTML(enrichedBody, storedSldSvg);

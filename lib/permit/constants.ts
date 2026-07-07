@@ -531,7 +531,21 @@ const PDF_PAGE_CONFIG = {
 // panels tile as solid blocks; length already matched the ~66" row pitch.
 // Applies only when the real width is absent; sanity-bounded 0.6-2.5 m. Module
 // positions untouched — the hip layout is still the design's, just drawn tight.
-const PLANSET_ENGINE_VERSION = 47392;
+// 47393 (2026-07-07): DE-SKEW the array to TRUE lines (Ray: "the arrays are
+// slightly askewed and not recognizing lines of trueness … left side not
+// snapping true, other 3 fine"). Measured cause: the design's per-plane grid
+// noise is UNEVEN — Melvin's WEST plane grid sits 3.1° off cardinal while N/S/E
+// are all <0.8°, so only the west cluster looks crooked. New
+// utils/deskewArrayToTrue.ts runs ONCE at the source (route, before render +
+// snapshot): (1) snaps every plane's + panel's azimuth to the building cardinal
+// grid so rectangles draw true; (2) measures each plane's own grid tilt from
+// its row/col structure and rotates that plane's panels about their centroid to
+// remove it, so rows/columns land on true horizontal/vertical LINES. De-skew
+// only — same panels/count/arrangement/symmetry; a square plane barely moves; a
+// genuinely rotated building is preserved (target = dominant-plane tilt, not
+// forced cardinal). Every sheet (PV-1, PV-2, …) now draws the array identically
+// square. Verified: west 3.29°→0, all four planes 0.00°, both hips symmetric.
+const PLANSET_ENGINE_VERSION = 47393;
 
 
 
