@@ -12,6 +12,7 @@ import { isFence, isGround } from '@/lib/system';
 import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
 import { cropToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { locateEquipment } from '../utils/equipmentLocator';
+import { computeModuleAzimuthGrid, snapModuleAzimuth } from '../utils/moduleAzimuthGrid';
 
 // Ray-casting point-in-ring (lat/lng) — used to join a panel to its roof plane
 // for the azimuth fallback when the panel record carries no azimuth.
@@ -348,12 +349,20 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           (r.vertices?.length ?? 0) >= 3 && _pipRing(p.lat, p.lng, r.vertices));
         return (rp as any)?.azimuth;
       };
+      // ── Module-rotation regularizer (Ray 2026-07-06: "straighter to the
+      //    edge of the roof") — see utils/moduleAzimuthGrid.ts. Snaps each
+      //    module's draw rotation to the building's principal 90° grid so
+      //    arrays that should share a ridge render parallel (Melvin's noisy
+      //    N=3.2°/S=180.1° both → the sheet axes).
+      const _azForGrid = panelPos.map(p =>
+        isFinite((p as any).azimuth) ? (p as any).azimuth : planeAz(p)).filter(isFinite) as number[];
+      const azGridOffset = computeModuleAzimuthGrid(_azForGrid);
       const parts: string[] = [];
       for (const p of panelPos) {
         if (!isFinite(p.lat) || !isFinite(p.lng)) continue;
         const c = toPxD(p.lat, p.lng);
         if (c.x < -30 || c.x > imgW + 30 || c.y < -30 || c.y > imgH + 30) continue;
-        const az = isFinite((p as any).azimuth) ? (p as any).azimuth : (planeAz(p) ?? 180);
+        const az = snapModuleAzimuth(isFinite((p as any).azimuth) ? (p as any).azimuth : (planeAz(p) ?? 180), azGridOffset);
         const landscape = (p.orientation || '').toLowerCase() === 'landscape';
         const w = (landscape ? lM : wM) * ppm, h = (landscape ? wM : lM) * ppm;
         // Near-opaque navy — a DESIGN layer, not a photo tint; also absorbs

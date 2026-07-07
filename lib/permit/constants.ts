@@ -510,7 +510,18 @@ const PDF_PAGE_CONFIG = {
 // fail OPEN to the previous unshifted behavior. Melvin real-Google fixture:
 // 1.11 m shift, ratio 3.34 — modules land on the roof pixels; Nearmap path
 // byte-identical (its vector registration is untouched).
-const PLANSET_ENGINE_VERSION = 47390;
+// 47391 (2026-07-06): PV-1 module ROTATION regularizer (Ray: "straighter to
+// the edge of the roof"). PV-1 drew each module rotate(rawAzimuth); hand-
+// traced planes carry ~3° azimuth noise so opposite slopes of one ridge
+// weren't exact opposites (Melvin N 3.2° vs S 180.1°) → the top array
+// rendered canted off the eave while the bottom sat straight. New
+// utils/moduleAzimuthGrid.ts snaps each module's DRAW rotation to the
+// building's principal 90° grid (doubled-angle circular mean; near-square
+// buildings collapse to true cardinal → matches PV-2's 0/180/270/90),
+// leaving genuinely off-grid arrays (>10° from grid) alone. Display-only,
+// same spirit as regularizeRoofPlanes; positions untouched. Both Melvin
+// arrays now render upright and parallel to the roof edges.
+const PLANSET_ENGINE_VERSION = 47391;
 
 
 
