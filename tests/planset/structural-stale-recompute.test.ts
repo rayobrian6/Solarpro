@@ -9,7 +9,7 @@ const clone = <T>(o: T): T => JSON.parse(JSON.stringify(o));
 
 describe('structural: stale saved result is recomputed (not trusted)', () => {
   it('replaces a stale stick DO-NOT-ISSUE with the live truss analysis', () => {
-    const input = clone(roofProject) as Record<string, unknown>;
+    const input = clone(roofProject) as unknown as Record<string, unknown>;
     // roofProject is 24" O.C. with no explicit framing → resolves to TRUSS.
     // Bake in a stale STICK result (as an old engineering report would carry).
     (input.compliance as Record<string, unknown>) = {

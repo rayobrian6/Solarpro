@@ -555,7 +555,13 @@ const PDF_PAGE_CONFIG = {
 // selection, else 24" O.C.→truss). Melvin: stale rafter/109%/DO-NOT-ISSUE →
 // live truss/32.4ft-geometry-span/89%/PASS/certifies. Same stale-payload class
 // as the 600W module drift — never trust a saved result the inputs contradict.
-const PLANSET_ENGINE_VERSION = 47394;
+// 47395 (2026-07-07): CERT letter speaks TRUSS on trussed houses. The
+// certification paragraph hard-coded rafter language ("rafter bending stress
+// F'b …, bending utilization 0%, deflection Δ = — in") even for trusses (which
+// have no bending/deflection numbers). Now branches: truss → "pre-engineered
+// truss load capacity (governing utilization X%; member deflection to be
+// verified with the truss manufacturer)"; stick keeps the rafter wording.
+const PLANSET_ENGINE_VERSION = 47395;
 
 
 

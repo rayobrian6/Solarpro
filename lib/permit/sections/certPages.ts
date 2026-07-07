@@ -539,8 +539,9 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
               </div>
               ${_allPass ? `
               <div class="f-sm mt-xs" style="line-height:1.6;">
-                Lag bolt attachment capacity (safety factor ${safetyFact}), rafter bending stress (F’b = ${fbPrime} psi, bending utilization ${bendUtil}%),
-                and deflection (Δ = ${deflection} in vs Δ_allow = ${allowableDefl} in) are confirmed adequate for
+                ${_isTruss
+                  ? `Lag bolt attachment capacity (safety factor ${safetyFact}) and the pre-engineered truss load capacity (governing utilization ${utilization}%; member deflection to be verified with the truss manufacturer for the added PV load) are confirmed adequate for`
+                  : `Lag bolt attachment capacity (safety factor ${safetyFact}), rafter bending stress (F’b = ${fbPrime} psi, bending utilization ${bendUtil}%), and deflection (Δ = ${deflection} in vs Δ_allow = ${allowableDefl} in) are confirmed adequate for`}
                 the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
                 per ASCE 7-22 §26/27. Roof framing of ${rafterSize} @ ${rafterSpace}" O.C. (${_isTruss ? 'truss' : 'stick'} construction, span ${rafterSpanFt} ft) confirmed adequate for
                 the combined dead load (${totalLoadPsf} psf), wind, and snow loading per IBC Section 1607 and ASCE 7-22 §2.3.
