@@ -283,8 +283,21 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // calculated values instead of "0 ft-lbs".
   try {
     const existingRafter = input.compliance?.structural?.rafter;
+    // Recompute when the saved result is missing/zero OR STALE — i.e. its framing
+    // type disagrees with what the current design would resolve. A saved
+    // worst-case STICK analysis (from before the truss auto-detect, or from a
+    // stale engineering report) otherwise sticks around and prints a false
+    // "DO NOT ISSUE" on a trussed house. Same stale-payload class as the 600W
+    // module drift: never trust a saved structural result the inputs contradict.
+    const _expectedFraming: 'truss' | 'rafter' =
+      (input.project.framingType === 'truss' || input.project.framingType === 'rafter')
+        ? input.project.framingType
+        : ((input.project.rafterSpacing ?? 24) >= 24 ? 'truss' : 'rafter');
+    const _framingStale = !!existingRafter && !!existingRafter.framingType
+      && existingRafter.framingType !== _expectedFraming;
     const needsCalc = !existingRafter
-      || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0);
+      || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0)
+      || _framingStale;
     if (needsCalc && sysType === 'roof') {
       // (static import — the old lazy require('@/…') silently failed outside
       // webpack, so test/render harnesses got '—' structural values)

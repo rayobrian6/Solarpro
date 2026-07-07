@@ -545,7 +545,17 @@ const PDF_PAGE_CONFIG = {
 // genuinely rotated building is preserved (target = dominant-plane tilt, not
 // forced cardinal). Every sheet (PV-1, PV-2, …) now draws the array identically
 // square. Verified: west 3.29°→0, all four planes 0.00°, both hips symmetric.
-const PLANSET_ENGINE_VERSION = 47393;
+// 47394 (2026-07-07): PE-1 structural — recompute when the saved result is
+// STALE, not just missing. The V4 truss auto-detect (v47389) was being bypassed
+// whenever the payload already carried a structural result: needsCalc only fired
+// on missing/zero bending, so a stale worst-case STICK analysis (framingType
+// 'rafter', assumed 12ft span, 109% deflection) survived and printed a false
+// "DO NOT ISSUE" on a trussed house. needsCalc now also fires when the saved
+// framingType disagrees with what the current design resolves (explicit
+// selection, else 24" O.C.→truss). Melvin: stale rafter/109%/DO-NOT-ISSUE →
+// live truss/32.4ft-geometry-span/89%/PASS/certifies. Same stale-payload class
+// as the 600W module drift — never trust a saved result the inputs contradict.
+const PLANSET_ENGINE_VERSION = 47394;
 
 
 
