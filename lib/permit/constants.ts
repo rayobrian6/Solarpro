@@ -521,7 +521,17 @@ const PDF_PAGE_CONFIG = {
 // leaving genuinely off-grid arrays (>10° from grid) alone. Display-only,
 // same spirit as regularizeRoofPlanes; positions untouched. Both Melvin
 // arrays now render upright and parallel to the roof edges.
-const PLANSET_ENGINE_VERSION = 47391;
+// 47392 (2026-07-06): PV-1 module WIDTH from design pitch (Ray: "hip cluster
+// looks messy"). The payload often omits real panel dimensions and the 66×40"
+// default drew modules ~10% narrower than the placement pitch (1.13 m vs 40" =
+// 1.016 m) → an ~11 cm gap between every module. On the small triangular hip
+// clusters those gaps made 4 panels read as scattered tiles. sitePlan now
+// derives the drawn width from the median nearest-neighbour spacing (= module
+// footprint in its tightest-packing direction) less a hairline rail gap, so
+// panels tile as solid blocks; length already matched the ~66" row pitch.
+// Applies only when the real width is absent; sanity-bounded 0.6-2.5 m. Module
+// positions untouched — the hip layout is still the design's, just drawn tight.
+const PLANSET_ENGINE_VERSION = 47392;
 
 
 

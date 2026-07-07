@@ -343,7 +343,36 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // reads on outlines, not on fills).
     let modSvg = '';
     if (panelPos && panelPos.length > 0 && panelPos.length <= 800) {
-      const wM = panelWidIn * 0.0254, lM = panelLenIn * 0.0254;
+      let wM = panelWidIn * 0.0254;
+      const lM = panelLenIn * 0.0254;
+      // Module WIDTH from the design's own pitch. The payload often omits real
+      // panel dimensions, and the 66×40" default drew each module ~10% narrower
+      // than the placement pitch (design pitch 1.13 m vs 40" = 1.016 m) → an
+      // ~11 cm gap between every module. On the big rows that just looks loose;
+      // on the small triangular hip clusters those gaps make 4 panels read as
+      // scattered tiles (Ray 2026-07-06: "hip cluster looks messy"). The median
+      // nearest-neighbour spacing IS the module footprint in its tightest-
+      // packing direction (= width), so draw to it (less a hairline rail gap)
+      // and the panels tile as solid blocks. Length already matches the ~66"
+      // row pitch, so it's left alone. Only applies when the real width is
+      // absent; sanity-bounded so a stray coordinate can't balloon a module.
+      if (!project.panelWidthIn && panelPos.length >= 4) {
+        const _mPerLng = 111320 * Math.cos(cLat * Math.PI / 180);
+        const nn: number[] = [];
+        for (const a of panelPos) {
+          if (!isFinite(a.lat) || !isFinite(a.lng)) continue;
+          let best = Infinity;
+          for (const b of panelPos) {
+            if (b === a || !isFinite(b.lat) || !isFinite(b.lng)) continue;
+            const d = Math.hypot((b.lng - a.lng) * _mPerLng, (b.lat - a.lat) * 111320);
+            if (d > 0 && d < best) best = d;
+          }
+          if (isFinite(best)) nn.push(best);
+        }
+        nn.sort((x, y) => x - y);
+        const medNN = nn.length ? nn[Math.floor(nn.length / 2)] : 0;
+        if (medNN > 0.6 && medNN < 2.5) wM = medNN * 0.96;   // hairline gap
+      }
       const planeAz = (p: {lat:number;lng:number}) => {
         const rp = (project.roofPlanes ?? []).find((r: any) =>
           (r.vertices?.length ?? 0) >= 3 && _pipRing(p.lat, p.lng, r.vertices));
