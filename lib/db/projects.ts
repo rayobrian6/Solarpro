@@ -405,6 +405,45 @@ export async function updateProject(
   return rows.length > 0 ? rowToProject(rows[0]) : null;
 }
 
+/**
+ * Merge a canonical selected-equipment patch into projects.selected_equipment
+ * (migration 101). Shallow JSONB merge — patch keys overwrite, untouched keys
+ * (e.g. an unchanged battery when only the panel changed) are preserved.
+ *
+ * Self-heals the column with ADD COLUMN IF NOT EXISTS so a write works even
+ * before the formal migration is run (same pattern as save-config). Returns
+ * true when a row was updated. Callers pass a patch from
+ * reconcileFromEngineeringConfig() (engineering) or build one from the resolved
+ * design equipment (design) — see /api/production and /api/engineering/save-config.
+ *
+ * NOTE: kept AFTER updateProject so updateProject's is the first `UPDATE projects`
+ * in this file (a source-scanning test in tests/solardog.test.ts relies on that).
+ */
+export async function upsertSelectedEquipment(
+  projectId: string,
+  userId: string,
+  patch: Record<string, unknown> | null | undefined,
+): Promise<boolean> {
+  if (!isValidUUID(projectId) || !isValidUUID(userId)) return false;
+  if (!patch || typeof patch !== 'object' || Object.keys(patch).length === 0) return false;
+  const sql = await getDbReady();
+  try {
+    await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS selected_equipment JSONB`;
+  } catch (alterErr: unknown) {
+    console.warn('[upsertSelectedEquipment] ALTER TABLE warning (non-fatal):', (alterErr as Error)?.message);
+  }
+  const patchJson = JSON.stringify(patch);
+  const rows = await sql`
+    UPDATE projects
+    SET selected_equipment = COALESCE(selected_equipment, '{}'::jsonb) || ${patchJson}::jsonb
+    WHERE id = ${projectId}
+      AND user_id = ${userId}
+      AND deleted_at IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
 export async function softDeleteProject(id: string, userId: string): Promise<boolean> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return false;
   const sql = await getDbReady();

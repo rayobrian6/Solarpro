@@ -60,6 +60,7 @@ export {
   getProjectById,
   createProject,
   updateProject,
+  upsertSelectedEquipment,
   softDeleteProject,
   bulkSoftDeleteProjects,
   getLayoutByProject,

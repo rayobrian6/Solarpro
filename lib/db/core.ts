@@ -225,6 +225,20 @@ export function rowToProject(row: Record<string, unknown>): Project {
     city,
   } = hydrateBillData(rawBillData, row);
 
+  // Canonical selected equipment (migration 101) — the design's chosen panel /
+  // inverter / mounting / battery. Highest precedence: reaches BOTH getProjectById
+  // (plain SELECT *) and the list path. The legacy production/proposal snapshot
+  // hydration in enrichProjectRow remains a fallback (guarded by `if (!base.X)`),
+  // so pre-migration projects behave exactly as before.
+  let selEq: Record<string, unknown> | null = null;
+  if (row.selected_equipment) {
+    if (typeof row.selected_equipment === 'string') {
+      try { selEq = JSON.parse(row.selected_equipment as string); } catch { selEq = null; }
+    } else {
+      selEq = row.selected_equipment as Record<string, unknown>;
+    }
+  }
+
   return {
     id: row.id as string,
     userId: row.user_id as string,
@@ -237,6 +251,13 @@ export function rowToProject(row: Record<string, unknown>): Project {
     lat: parseDbFloat(row.lat),
     lng: parseDbFloat(row.lng),
     systemSizeKw: parseDbFloat(row.system_size_kw),
+    // Canonical design equipment (see selEq above). Undefined when the column is
+    // absent/empty → enrichProjectRow's legacy snapshot sources fill it in.
+    selectedPanel: (selEq?.panel as import('@/types').SolarPanel | undefined) ?? undefined,
+    selectedInverter: (selEq?.inverter as import('@/types').Inverter | undefined) ?? undefined,
+    selectedMounting: (selEq?.mounting as import('@/types').MountingSystem | undefined) ?? undefined,
+    selectedBatteries: (selEq?.batteries as import('@/types').Battery[] | undefined) ?? undefined,
+    batteryCount: typeof selEq?.batteryCount === 'number' ? (selEq.batteryCount as number) : undefined,
     billData: rawBillData,
     billAnalysis,
     utilityName,

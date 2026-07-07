@@ -1,0 +1,35 @@
+-- ============================================================================
+-- Migration 101: Add selected_equipment to projects (canonical design-equipment
+-- store — full-duplex Design <-> Engineering sync)
+-- ============================================================================
+-- Until now the design's chosen equipment (panel / inverter / mounting /
+-- battery) had NO canonical home on the projects row. `selectedPanel` etc. were
+-- smeared across productions.data_json and proposals.data_json snapshots and only
+-- hydrated on the LIST path (getProjectsByUser JOIN) — getProjectById (the path
+-- the engineering sync pipeline uses) never saw them. Worse, equipment changed in
+-- the Engineering page landed only in engineering_config and never flowed BACK to
+-- the design record, so the next design-triggered rebuild reverted engineering to
+-- the stale panel (the "reverted to 600W" class of bug).
+--
+-- This column is the single source of truth for the design's selected equipment.
+-- Both writers keep it fresh:
+--   * Design Studio persist  (/api/production)        source: 'design'
+--   * Engineering save-config (/api/engineering/...)   source: 'engineering'
+-- Whoever edits last wins — true full-duplex. rowToProject() hydrates it with the
+-- HIGHEST precedence (ahead of the legacy production/proposal snapshots), so it
+-- reaches getProjectById AND the list path. computeDesignVersionId() already
+-- hashes project.selectedPanel, so a write-back forces the engineering report to
+-- rebuild against the SAME resolved panel — a stable fixed point, not a ping-pong.
+--
+-- Shape (JSONB):
+--   { panelId, panel, inverterId, inverter, mountingId, mounting,
+--     batteryId, batteries[], batteryCount, batteryKwh,
+--     source: 'design' | 'engineering', updatedAt }
+--
+-- NULLable — existing projects simply have NULL and fall back to the legacy
+-- snapshot hydration exactly as before (zero regression).
+-- Idempotent: ADD COLUMN IF NOT EXISTS. No backfill, no destructive operations.
+-- ============================================================================
+
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS selected_equipment JSONB NULL;

@@ -5,8 +5,9 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID, getProjectById, upsertSelectedEquipment } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { reconcileFromEngineeringConfig } from '@/lib/system/selectedEquipment';
 
 const MAX_CONFIG_BYTES = 256 * 1024;
 
@@ -81,6 +82,29 @@ export async function POST(req: NextRequest) {
     if (result.length === 0) {
       console.error('[save-config] FAIL: project not found or ownership mismatch', { projectId, userId: user.id });
       return NextResponse.json({ success: false, error: 'Project not found.' }, { status: 404 });
+    }
+
+    // ── Full-duplex write-back: Engineering → Design ──────────────────────────
+    // If the engineer changed the panel / inverter / mounting / battery, flow the
+    // resolved equipment back into the canonical projects.selected_equipment store
+    // so the design record (and the next engineering rebuild) agree — no more
+    // "reverted to the stale panel". Non-fatal: a write-back failure never fails
+    // the config save.
+    try {
+      const project = await getProjectById(projectId, user.id);
+      const patch = reconcileFromEngineeringConfig(
+        config as Record<string, unknown>,
+        project,
+        new Date().toISOString(),
+      );
+      if (patch) {
+        const wrote = await upsertSelectedEquipment(projectId, user.id, patch as Record<string, unknown>);
+        console.info('[save-config] equipment write-back', {
+          projectId, wrote, changed: Object.keys(patch).filter(k => k !== 'source' && k !== 'updatedAt'),
+        });
+      }
+    } catch (wbErr: unknown) {
+      console.warn('[save-config] equipment write-back skipped (non-fatal):', (wbErr as Error)?.message);
     }
 
     console.info('[save-config] SUCCESS', { projectId, savedAt: result[0].engineering_updated_at });

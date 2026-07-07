@@ -7,9 +7,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import {
   getProjectById, getClientById, getLayoutByProject,
-  upsertLayout, updateProject, upsertProduction,
+  upsertLayout, updateProject, upsertProduction, upsertSelectedEquipment,
   handleRouteDbError,
 } from '@/lib/db-neon';
+import { designEquipmentPatch } from '@/lib/system/selectedEquipment';
 import { calculateProduction, calculateProductionFromDefinition } from '@/lib/pvwatts';
 import { calculateFinalPrice, calculateItemizedPrice, loadPricingConfig, type SalesOverride } from '@/lib/pricingEngine';
 import { buildArraysFromLayout, buildSystemConfig, buildArrayBreakdown } from '@/lib/multiArrayEngine';
@@ -389,6 +390,20 @@ export async function POST(req: NextRequest) {
         panelCount:       savedLayout.totalPanels,
       });
 
+      // Design → canonical selected_equipment (migration 101): keep the design a
+      // live writer of the store so it isn't shadowed by a stale engineering
+      // write-back. Non-fatal.
+      try {
+        const eqPatch = designEquipmentPatch(
+          body.selectedPanel ?? project.selectedPanel ?? null,
+          body.selectedInverter ?? project.selectedInverter ?? null,
+          new Date().toISOString(),
+        );
+        if (eqPatch) await upsertSelectedEquipment(projectId, user.id, eqPatch as Record<string, unknown>);
+      } catch (e: unknown) {
+        console.warn('[production] equipment write-back skipped (non-fatal):', (e as Error)?.message);
+      }
+
       return NextResponse.json({ success: true, data: { layout: savedLayout, production, costEstimate } });
     }
 
@@ -449,6 +464,18 @@ export async function POST(req: NextRequest) {
       systemSizeKw:     savedLayout.systemSizeKw,
       panelCount:       savedLayout.totalPanels,
     });
+
+    // Design → canonical selected_equipment (migration 101). Non-fatal.
+    try {
+      const eqPatch = designEquipmentPatch(
+        body.selectedPanel ?? project.selectedPanel ?? null,
+        body.selectedInverter ?? project.selectedInverter ?? null,
+        new Date().toISOString(),
+      );
+      if (eqPatch) await upsertSelectedEquipment(projectId, user.id, eqPatch as Record<string, unknown>);
+    } catch (e: unknown) {
+      console.warn('[production] equipment write-back skipped (non-fatal):', (e as Error)?.message);
+    }
 
     return NextResponse.json({ success: true, data: { layout: savedLayout, production, costEstimate } });
 
