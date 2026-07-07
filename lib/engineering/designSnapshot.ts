@@ -47,8 +47,12 @@ export function buildDesignSnapshot(project: Project, layout: Layout): DesignSna
   const panelCount = panels.length;
   const systemSizeKw = parseFloat((panelCount * ((project.selectedPanel?.wattage ?? 400) / 1000)).toFixed(2));
 
-  // Compute design version hash (for change detection)
-  const designVersionId = computeDesignVersionId(layout);
+  // Compute design version hash (for change detection). MUST include the
+  // selected equipment — otherwise a panel swap (model, wattage, or physical
+  // SIZE) leaves the version unchanged and engineering keeps a stale report
+  // (the "reverted to 600W" bug: the panel was changed to 440W but the version
+  // was hashed from the stale layout.systemSizeKw, so the old report survived).
+  const designVersionId = computeDesignVersionId(layout, project);
 
   // Extract roof segments from panels
   const roofSegments = extractRoofSegments(panels, layout);
@@ -101,15 +105,24 @@ export function buildDesignSnapshot(project: Project, layout: Layout): DesignSna
 }
 
 /**
- * Compute a deterministic version ID from the layout.
- * Changes when panels are added/removed/moved.
+ * Compute a deterministic version ID from the layout AND the selected
+ * equipment. Changes when panels are added/removed/moved OR when the panel /
+ * inverter / mounting / battery selection changes — including the panel's
+ * physical dimensions, so a size change (which alters the array footprint)
+ * invalidates the engineering report and forces a rebuild + layout recompute.
  */
-function computeDesignVersionId(layout: Layout): string {
+function computeDesignVersionId(layout: Layout, project?: Project): string {
+  const sp = project?.selectedPanel;
   const key = JSON.stringify({
     id: layout.id,
     panelCount: layout.totalPanels,
     systemSizeKw: layout.systemSizeKw,
     updatedAt: layout.updatedAt,
+    // Equipment selection — the single source of truth for what's installed.
+    panel: sp ? { m: sp.manufacturer, model: sp.model, w: sp.wattage, wd: sp.width, ht: sp.height, voc: sp.voc, isc: sp.isc } : null,
+    inverter: project?.selectedInverter ? { m: project.selectedInverter.manufacturer, model: project.selectedInverter.model } : null,
+    mounting: project?.selectedMounting ? { id: (project.selectedMounting as { id?: string }).id, model: (project.selectedMounting as { model?: string }).model } : null,
+    batteryCount: project?.batteryCount ?? 0,
   });
   // Simple hash
   let hash = 0;
