@@ -25,6 +25,56 @@ export const MOUNT_SYSTEM_MAP: Record<CanonicalSysType, string> = {
 export const VALID_CANONICAL_TYPES: CanonicalSysType[] = ['roof', 'ground_mount', 'solar_fence'];
 
 /**
+ * Single-source-of-truth guard for the module wattage. The planset resolves the
+ * module from engineering (system.inverters[].strings[]); this cross-checks that
+ * against every OTHER place a module wattage is stored and logs a loud warning
+ * when they disagree by >2%, naming each source and its value. Diagnostic only —
+ * never throws — but it turns a silent design↔engineering drift (design 440W vs
+ * engineering 600W) into a visible, attributable log line. Exported for tests.
+ */
+export function assertModuleConsistency(input: PermitInput, authoritativeWatts: number): Array<{ source: string; watts: number }> {
+  if (!isFinite(authoritativeWatts) || authoritativeWatts <= 0) return [];
+  const sys = input.system as Record<string, unknown> | undefined;
+  const proj = input.project as Record<string, unknown> | undefined;
+  const num = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) && v > 0 ? v : null);
+
+  const sources: Array<{ source: string; watts: number }> = [];
+  const push = (source: string, w: number | null) => { if (w != null) sources.push({ source, watts: Math.round(w) }); };
+
+  // System totals: DC kW ÷ module count (what several sheets derive Wp from).
+  const totalDcKw = num(sys?.['totalDcKw']);
+  const totalPanels = num(sys?.['totalPanels']);
+  if (totalDcKw && totalPanels) push('system.totalDcKw÷totalPanels', (totalDcKw * 1000) / totalPanels);
+
+  // The design's selected-panel object (the intended source of truth upstream).
+  push('project.selectedPanel.wattage', num((proj?.['selectedPanel'] as Record<string, unknown> | undefined)?.['wattage']));
+
+  // The alternate system.modules[] payload.
+  const modules = sys?.['modules'] as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(modules) && modules[0]) push('system.modules[0]', num(modules[0]['watts']) ?? num(modules[0]['panelWatts']));
+
+  // The design layout's per-panel wattage (modal value — some are 0/blank).
+  const panelPos = proj?.['panelPositions'] as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(panelPos) && panelPos.length) {
+    const counts = new Map<number, number>();
+    for (const p of panelPos) { const w = num(p['wattage']); if (w) counts.set(w, (counts.get(w) ?? 0) + 1); }
+    let modeW = 0, modeN = 0;
+    for (const [w, n] of counts) if (n > modeN) { modeN = n; modeW = w; }
+    if (modeW) push('project.panelPositions[].wattage', modeW);
+  }
+
+  const disagree = sources.filter(s => Math.abs(s.watts - authoritativeWatts) / authoritativeWatts > 0.02);
+  if (disagree.length) {
+    console.warn(
+      `[canonical] ⚠ MODULE WATTAGE DRIFT — planset uses ${Math.round(authoritativeWatts)}W (from engineering strings), but: ` +
+      disagree.map(s => `${s.source}=${s.watts}W`).join(', ') +
+      '. Design↔engineering out of sync — engineering report should rebuild from the current selected panel.',
+    );
+  }
+  return disagree;
+}
+
+/**
  * buildCanonical — Layout-locked pipeline entry point.
  * Reads layout.type, layout.panels, layout.geometry.
  * Throws hard on any missing/invalid field — no silent fallbacks.
@@ -154,6 +204,15 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
     voc:          eq.panelVoc,
     isc:          eq.panelIsc,
   };
+
+  // ── Single-source-of-truth guard ─────────────────────────────────────────
+  // The module resolves from engineering (system.inverters[].strings[]). Other
+  // places store their OWN module wattage — the design's per-panel field, the
+  // system totals (DC kW ÷ modules), the selected-panel object. When those
+  // disagree the layout drifted from engineering (the "reverted to 600W" class
+  // of bug: design 440W vs engineering 600W). Phase 0 stops it recurring; this
+  // makes any residual drift LOUD instead of silent, naming each source.
+  assertModuleConsistency(input, canonicalModule.wattage);
 
   // ── Step 5: Mount system — the SELECTED racking is authoritative ─────────
   // Hardcoding roof→'IronRidge XR100' here shipped packages whose PV-3
