@@ -421,11 +421,20 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const vmp = _dbPanel?.vmp ?? parseFloat((voc * 0.83).toFixed(1));
   const imp = _dbPanel?.imp ?? parseFloat((pmax / vmp).toFixed(2));
   const tempCoeff = _dbPanel?.tempCoeffPmax ?? -0.35;
-  // Defaults must match the layout engine's module footprint (66" × 40") —
-  // APP-A used to claim a 79.9" module while PV-2/PV-3 drew 66".
-  const panelLen = project.panelLengthIn || 66;
-  const panelWid = project.panelWidthIn || 40;
-  const panelWt = project.panelWeightLbs || 44;
+  // Physical dims: project override → resolved equipment-db record → generic
+  // default. Falling straight to the 66"×40" default made a 440W module read
+  // 25.8% efficiency (physically impossible for silicon; the DB carries the real
+  // 67.8"×44.6"). The real datasheet dims also match what PV-1 draws (module
+  // width is derived from design pitch ~44.5"), so this tightens cross-sheet
+  // consistency rather than loosening it.
+  const panelLen = project.panelLengthIn || _dbPanel?.length || 66;
+  const panelWid = project.panelWidthIn || _dbPanel?.width  || 40;
+  const panelWt  = project.panelWeightLbs || _dbPanel?.weight || 44;
+  // Module efficiency = manufacturer/CEC datasheet value when the DB record
+  // resolves; only fall back to the geometric estimate (Pmax ÷ area) when it
+  // doesn't. Back-computing from the drawn footprint is what produced the
+  // impossible 25.8% (real 22.57%).
+  const moduleEff = _dbPanel?.efficiency ?? (pmax / (panelLen / 39.37 * panelWid / 39.37)) / 10;
 
   // NEC 690.7/690.8 calculations — cold Voc uses the exact NEC 690.7(A)
   // formula with the project design-low temp (same input the SLD/engines
@@ -457,7 +466,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">Temp. Coeff. Pmax</td><td class="iv">${tempCoeff}%/°C</td></tr>
             <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">${VOC_TEMP_COEFF}%/°C</td></tr>
             <tr><td class="il">NOCT</td><td class="iv">${_dbPanel?.nominalOperatingTemp ?? 45}°C ±2°C</td></tr>
-            <tr><td class="il">Module Efficiency</td><td class="iv">${((pmax / (panelLen/39.37 * panelWid/39.37)) / 10).toFixed(1)}%</td></tr>
+            <tr><td class="il">Module Efficiency</td><td class="iv">${moduleEff.toFixed(1)}%</td></tr>
           </table>
           <div style="font-size:7px;color:#555;margin:-2px 0 4px 0;">Vmp/Imp and temperature coefficients are typical values — verify against the manufacturer's certified datasheet before construction.</div>
 

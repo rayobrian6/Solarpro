@@ -561,7 +561,19 @@ const PDF_PAGE_CONFIG = {
 // have no bending/deflection numbers). Now branches: truss → "pre-engineered
 // truss load capacity (governing utilization X%; member deflection to be
 // verified with the truss manufacturer)"; stick keeps the rafter wording.
-const PLANSET_ENGINE_VERSION = 47395;
+// 47396 (2026-07-07): APP-A module efficiency + physical dims from the
+// equipment-db record, not the 66"×40" layout default. A 440W module over the
+// generic 66×40 footprint back-computed to 25.8% efficiency (physically
+// impossible for silicon); now uses the manufacturer/CEC datasheet value
+// (Philadelphia Solar 440W → 22.6%) and real 67.8"×44.6"/46 lbs dims. Efficiency
+// is never back-computed from a drawn footprint when a DB record resolves.
+// 47397 (2026-07-07): two minor completeness fixes. (a) BOM PV Junction Box
+// manufacturer was hard-coded "TBD" → now specs a real Soladeck 0786-41 (or
+// approved equal), the industry-standard roof-flashed open-air-to-conduit box.
+// (b) NEC 220.82 dwelling-load Step 1 now labels the sqft as "assumed from the
+// service size — field verify" (no dwelling-area field exists on the project; it
+// is keyed to service amps), matching the HVAC row's existing field-verify note.
+const PLANSET_ENGINE_VERSION = 47397;
 
 
 

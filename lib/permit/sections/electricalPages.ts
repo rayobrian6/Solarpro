@@ -408,7 +408,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <th style="width:25%">Result</th>
           </tr></thead>
           <tbody>
-            <tr ><td class="fw9 mono">1</td><td>General Lighting — NEC 220.82(B)(1)</td><td>${sqft} sqft × 3 VA/sqft</td><td class="tr fw9">${lightingVA.toLocaleString()} VA</td></tr>
+            <tr ><td class="fw9 mono">1</td><td>General Lighting — NEC 220.82(B)(1)</td><td>${sqft.toLocaleString()} sqft (assumed from ${mainA}A service — field verify) × 3 VA/sqft</td><td class="tr fw9">${lightingVA.toLocaleString()} VA</td></tr>
             <tr class="bg-lt"><td class="fw9 mono">2</td><td>Small Appliance + Laundry — NEC 220.52</td><td>3 circuits × 1,500 VA</td><td class="tr fw9">${smallApplVA.toLocaleString()} VA</td></tr>
             <tr ><td class="fw9 mono">3</td><td>Demand Factor — NEC 220.82(B)</td><td>First 10 kVA @ 100% + remainder @ 40%</td><td class="tr fw9">${Math.round(demand).toLocaleString()} VA</td></tr>
             <tr class="bg-lt"><td class="fw9 mono">4</td><td>HVAC / Largest Motor Load</td><td>${mainA >= 200 ? '5-ton' : '3-ton'} AC unit (field verify)</td><td class="tr fw9">${hvacVA.toLocaleString()} VA</td></tr>

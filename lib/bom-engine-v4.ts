@@ -591,8 +591,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       junctionBoxQty = Math.ceil((input.deviceCount ?? input.moduleCount) / 16);
     }
     if (junctionBoxQty > 0) {
-      items.push(addItem('ac', 'junction_box', 'TBD', 'PV Junction Box',
-        'JB-PV-6', 'PV wire junction box — transitions open-air to conduit',
+      items.push(addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box (or approved equal)',
+        '0786-41', 'Roof-flashed PV junction box — transitions open-air PV wire to conduit',
         junctionBoxQty, 'ea', 'NEC 690.31', 'runSegments.to=JUNCTION BOX', 'ceil(deviceCount/16)', true));
       log.push({ stageId: 'ac', category: 'junction_box', item: 'PV Junction Box',
         quantity: junctionBoxQty, derivedFrom: 'runSegments', formula: 'segments ending at JUNCTION BOX', necReference: 'NEC 690.31' });
