@@ -663,7 +663,13 @@ const PDF_PAGE_CONFIG = {
 // Statutory clearance notes (gas-meter 3', vents, knife-blade disconnect)
 // migrated into the shared construction notes → cover General Notes. Cover
 // vicinity aerial enlarged. Downstream sheet indices renumbered set-wide.
-const PLANSET_ENGINE_VERSION = 47411;
+// 47412 (2026-07-08): PV-1B circuit-sheet polish (branch-color mode only, PV-1
+// untouched): removed the redundant in-drawing "CIRCUIT LAYOUT" watermark +
+// bottom caption reworded to a color key; AC-branch daisy-chain routing made
+// bold (the sheet's hero); fire-access pathway labels dropped (they live on
+// PV-1); and the drawing now frames the ARRAY (modules + margin) instead of the
+// whole roof plane, so a small array no longer renders tiny in a sea of white.
+const PLANSET_ENGINE_VERSION = 47412;
 
 
 

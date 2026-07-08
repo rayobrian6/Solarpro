@@ -285,9 +285,27 @@ export function drawRoofPlan(
     const parcelH = Math.max(..._pa) - Math.min(..._pa);
     _bigLot = parcelW > 2 * lngSpan || parcelH > 2 * latSpan;
   }
+  // Circuit sheet (PV-1B) frames the ARRAY, not the whole roof plane — a small
+  // array on a big roof otherwise renders as a tiny cluster in a sea of white.
+  // Frame the module bbox + a margin (~14% of the array's larger dimension so
+  // module rectangles + breathing room are covered), clamped to the roof extent.
+  const _arrayFit = (() => {
+    if (!isBranchColorMode || regPanels.length === 0) return null;
+    const alng = (regPanels as any[]).map(p => p.lng).filter((v: number) => isFinite(v));
+    const alat = (regPanels as any[]).map(p => p.lat).filter((v: number) => isFinite(v));
+    if (alng.length === 0 || alat.length === 0) return null;
+    const aMinLng = Math.min(...alng), aMaxLng = Math.max(...alng);
+    const aMinLat = Math.min(...alat), aMaxLat = Math.max(...alat);
+    const pad = Math.max(aMaxLng - aMinLng, aMaxLat - aMinLat, 0.0002) * 0.14;
+    return {
+      minLng: Math.max(aMinLng - pad, minLng), maxLng: Math.min(aMaxLng + pad, maxLng),
+      minLat: Math.max(aMinLat - pad, minLat), maxLat: Math.min(aMaxLat + pad, maxLat),
+    };
+  })();
   const _fit = (_site && _ctxPts.length > 0)
     ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.4 : 2.6 })
-    : { minLng, maxLng, minLat, maxLat };
+    : _arrayFit
+    ?? { minLng, maxLng, minLat, maxLat };
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
 
@@ -497,13 +515,17 @@ export function drawRoofPlan(
     const g0 = gc - needPx / 2, g1 = gc + needPx / 2;
     const corner = (u: number, v: number) => `${(u * udx + v * vdx).toFixed(1)},${(u * udy + v * vdy).toFixed(1)}`;
     const poly = [corner(g0, vMin), corner(g1, vMin), corner(g1, vMax), corner(g0, vMax)].join(' ');
-    els.push(`<g clip-path="url(#sbclip${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
-    const lmx = gc * udx + ((vMin + vMax) / 2) * vdx;
-    const lmy = gc * udy + ((vMin + vMax) / 2) * vdy;
-    let angDeg = Math.atan2(vdy, vdx) * 180 / Math.PI;
-    if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;
-    els.push(`<text x="${lmx.toFixed(1)}" y="${lmy.toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${lmx.toFixed(1)} ${lmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#1a7a2e">${ftToFtIn(pathwayFt)} ACCESS PATHWAY</text>`);
-    _pathwaysDrawn++;
+    // Fire-access pathways belong on PV-1 (the fire/setback sheet); on PV-1B's
+    // circuit map they just clutter the branch routing, so skip them here.
+    if (!isBranchColorMode) {
+      els.push(`<g clip-path="url(#sbclip${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
+      const lmx = gc * udx + ((vMin + vMax) / 2) * vdx;
+      const lmy = gc * udy + ((vMin + vMax) / 2) * vdy;
+      let angDeg = Math.atan2(vdy, vdx) * 180 / Math.PI;
+      if (angDeg > 90) angDeg -= 180; else if (angDeg < -90) angDeg += 180;
+      els.push(`<text x="${lmx.toFixed(1)}" y="${lmy.toFixed(1)}" transform="rotate(${angDeg.toFixed(1)} ${lmx.toFixed(1)} ${lmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#1a7a2e">${ftToFtIn(pathwayFt)} ACCESS PATHWAY</text>`);
+      _pathwaysDrawn++;
+    }
   });
 
   // ── Draw panels (from CAD fake-degree positions) ──
@@ -837,11 +859,11 @@ export function drawRoofPlan(
           // THROUGH other branches' modules (unbuildable as drawn).
           const route = bestRoute(a, b);
           const midPts = route.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-          els.push(`<polyline points="${midPts}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.75" stroke-dasharray="5 4"/>`);
-          els.push(`<polyline points="${midPts}" fill="none" stroke="${g.color}" stroke-width="1.2" stroke-dasharray="5 4"/>`);
+          els.push(`<polyline points="${midPts}" fill="none" stroke="#fff" stroke-width="4.0" opacity="0.85" stroke-dasharray="6 4"/>`);
+          els.push(`<polyline points="${midPts}" fill="none" stroke="${g.color}" stroke-width="2.2" stroke-dasharray="6 4"/>`);
         } else {
-          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.75"/>`);
-          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="1.2"/>`);
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="4.0" opacity="0.85"/>`);
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="2.2"/>`);
         }
       }
       const h = pts[0];
@@ -855,8 +877,8 @@ export function drawRoofPlan(
       // south rows on its way to the JB.
       const hrRoute = bestRoute(tail, { x: jbX, y: jbY });
       const hr = hrRoute.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-      els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="2.2" opacity="0.7" stroke-dasharray="3 3"/>`);
-      els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="0.9" stroke-dasharray="3 3"/>`);
+      els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="3.4" opacity="0.8" stroke-dasharray="4 3"/>`);
+      els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="1.7" stroke-dasharray="4 3"/>`);
     });
 
     // Branch TERMINUS — JB symbol where the homeruns land, honest conduit note
@@ -1303,19 +1325,21 @@ export function drawRoofPlan(
     const _nearest = _stdScales.reduce((b, s) => Math.abs(s[1] - _inPerFt) < Math.abs(b[1] - _inPerFt) ? s : b, _stdScales[0]);
     const _scaleErr = Math.abs(_nearest[1] - _inPerFt) / _inPerFt;
     els.push(drawText(vtX + 22, vtY + 11, _scaleErr < 0.05 ? `SCALE: ${_nearest[0]} = 1'-0"` : 'GRAPHIC SCALE — SEE BAR', { anchor: 'start', fontSize: 6, fill: '#333' }));
-  } else {
-    els.push(drawText(dz.x + 8, zones.dims.top + 16, svgTitle, { anchor: 'start', fontSize: 9, fontWeight: '900', fill: '#000', letterSpacing: 1 }));
   }
+  // Branch-color mode (PV-1B): the HTML draw-zone header already titles the sheet
+  // ("CIRCUIT LAYOUT — n MODULES / m BRANCHES"), so we DON'T repeat a title banner
+  // inside the drawing — it read as an orphaned watermark in the upper-left.
 
   // (Branch legend overlay REMOVED — it duplicated the data-zone BRANCH LEGEND
   //  table and its opaque box painted straight over the viewport title, which
   //  is why the sheet read "UT — AC BRANCH COLOR MAP".)
 
-  // ── System summary line (PV-2B only — PV-2 carries GENERAL NOTES instead) ──
+  // ── Color-key caption (PV-1B only — PV-2 carries GENERAL NOTES instead). This
+  // explains the module shading (useful) rather than repeating the sheet title. ──
   if (isBranchColorMode) {
     els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
-      'CIRCUIT LAYOUT — AC BRANCH COLOR MAP — SEE DATA ZONE FOR BRANCH SCHEDULE', {
-        anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
+      'MODULES SHADED BY AC BRANCH CIRCUIT · SOLID/DASHED LINES = BRANCH DAISY-CHAIN + HOMERUN TO JB · SEE LEGEND AT RIGHT', {
+        anchor: 'start', fontSize: 6.5, fill: '#555', italic: true,
       }));
   }
 

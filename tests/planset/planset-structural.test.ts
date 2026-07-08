@@ -79,16 +79,19 @@ describe('planset structural/golden coverage — Design Studio to permit guardra
     const pv1Svg = firstSvg(pv1);
     const pv1bSvg = firstSvg(pv1b);
 
-    // PV-1B SVG must contain CIRCUIT LAYOUT title (replaces PV-1's ROOF PLAN)
-    expect(pv1bSvg).toContain('CIRCUIT LAYOUT');
+    // The CIRCUIT LAYOUT title lives in the sheet header (draw-zone-hdr); the
+    // in-drawing duplicate banner was removed (read as an orphaned watermark).
+    // The SVG itself is distinguished from PV-1 by its AC-branch circuit content.
+    expect(pv1b).toContain('CIRCUIT LAYOUT');
+    expect(pv1bSvg).toContain('AC BRANCH');
     // v47376: the SVG BRANCH LEGEND overlay was REMOVED — it duplicated the
     // data-zone HTML legend and painted over the viewport title. The legend
     // must exist in the PAGE (data zone), not the drawing SVG.
     expect(pv1bSvg).not.toContain('BRANCH LEGEND');
     expect(pv1b).toContain('BRANCH LEGEND');
 
-    // PV-1 must NOT contain CIRCUIT LAYOUT or BRANCH LEGEND in its SVG
-    expect(pv1Svg).not.toContain('CIRCUIT LAYOUT');
+    // PV-1 must NOT contain the branch-circuit SVG content or BRANCH LEGEND.
+    expect(pv1Svg).not.toContain('AC BRANCH');
     expect(pv1Svg).not.toContain('BRANCH LEGEND');
 
     // PV-1B modules use branch-colored fills (at least the default navy #1b3f74)
