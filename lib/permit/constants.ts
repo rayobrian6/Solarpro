@@ -673,7 +673,12 @@ const PDF_PAGE_CONFIG = {
 // Modules are no longer garish solid branch-color blocks — they're clean uniform
 // white outlines (like PV-1), the branch identity carried by THIN colored circuit
 // WIRES + a small circuit number per module + an in-drawing CIRCUIT LEGEND box.
-const PLANSET_ENGINE_VERSION = 47413;
+// 47414 (2026-07-08): PV-1B pro-parity — Ray "should be visually similar to PV-1".
+// Un-gated PV-1's rich frame onto the circuit sheet: site context (faded 0.5 so
+// wires stay hero), overall dimensions, full N/E/S/W compass rose (was a plain
+// arrow), and the faint rafter framing lines. Full symbol legend stays PV-1-only
+// (PV-1B keeps the compact CIRCUIT LEGEND). PV-1B is now a sibling of PV-1.
+const PLANSET_ENGINE_VERSION = 47414;
 
 
 

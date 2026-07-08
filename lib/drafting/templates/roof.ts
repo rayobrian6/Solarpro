@@ -263,8 +263,11 @@ export function drawRoofPlan(
   // property line / driveway / sidewalk render to-scale around the roof; the
   // roof's own dimensions still use the roof span above. Absent → fit = roof
   // (identical to the prior behavior — no fabricated lot on parcel-less jobs).
-  const _site: SiteContext | null = (!isBranchColorMode
-    && (input as unknown as { _siteContext?: SiteContext | null })._siteContext) || null;
+  // Site context now renders on BOTH PV-1 and PV-1B (faded on PV-1B so the
+  // circuit wiring stays the hero) — a bare white circuit sheet read as
+  // unfinished next to PV-1's rich contextual plan.
+  const _site: SiteContext | null =
+    (input as unknown as { _siteContext?: SiteContext | null })._siteContext || null;
   // Expand the fit to include the parcel + surrounding building footprints so the
   // lot + neighbors show (capped inside computeFitWindow so the roof stays large).
   const _ctxPts = _site
@@ -340,7 +343,7 @@ export function drawRoofPlan(
       const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY);
       if (sr.els.length) {
         els.push(`<defs><clipPath id="pv2site-clip"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
-        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)">${sr.els.join('')}</g>`);
+        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
         _siteLegend = sr.legend;
         svgTitle = 'SITE & ROOF PLAN WITH MODULES';
       }
@@ -385,7 +388,7 @@ export function drawRoofPlan(
     // the facet — the reference sets show framing under the array, and the
     // attachment dots land ON these lines. Snapped to the sheet axes like the
     // modules so the grid reads drafted, not traced.
-    if (!isBranchColorMode && az != null) {
+    if (az != null) {
       let fAz = ((az % 180) + 180) % 180;
       if (fAz < 15 || fAz > 165) fAz = 0;
       else if (Math.abs(fAz - 90) < 15) fAz = 90;
@@ -1161,19 +1164,18 @@ export function drawRoofPlan(
   const roofWFt  = lngSpan;   // because 1° == 1ft in fake-degree encoding
   const roofHFt  = latSpan;
 
-  // L1 — Overall width (bottom) — PV-2 only. Value only: the "VERIFY IN FIELD"
-  // qualifier moved to GENERAL NOTES (critique: dim string was heavy + crowded).
-  if (!isBranchColorMode) {
+  // L1 — Overall width (bottom) — BOTH sheets now (dimensions are part of the
+  // professional look Ray wants on PV-1B too). Extension lines sit at the roof
+  // perimeter, clear of the module-mounted circuit wires.
   els.push(drawOverallDimension(
     roofMinX, roofMaxX,
     roofMaxY + 36, 24,
     ftToFtIn(roofWFt)
   ));
-  }
 
   // L1 — Overall height (vertical) — tight against the roof outline; at the old
   // draw-zone edge its extension line struck through both data tables.
-  if (!isBranchColorMode && roofHFt > 3) {
+  if (roofHFt > 3) {
     els.push(drawVerticalDimension(
       roofMinX - 26,
       roofMinY, roofMaxY,
@@ -1185,10 +1187,8 @@ export function drawRoofPlan(
   // artifact; the legend + callout ② carry the value)
 
   // ── North arrow + scale bar ──
-  // North: PV-2B keeps the simple arrow; PV-2 gets a full N/E/S/W compass rose below.
-  if (isBranchColorMode) {
-    els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
-  }
+  // North: full N/E/S/W compass rose on BOTH sheets (below) — the simple arrow
+  // read as less finished than PV-1's rose.
   const scaleBarPx = Math.max(Math.round(10 * scale), 30);   // 10-foot scale bar
   const sbX = zones.dims.left + 4, sbY = H - zones.dims.bottom + 28;
   els.push(drawScaleBar(sbX, sbY, scaleBarPx, ''));
@@ -1197,8 +1197,8 @@ export function drawRoofPlan(
   els.push(drawText(sbX + scaleBarPx / 2, sbY + 12, '5', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
   els.push(drawText(sbX + scaleBarPx, sbY + 12, '10 FT', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
 
-  // ── Compass rose + LEGEND (PV-2 only) ─────────────────────────────────────
-  if (!isBranchColorMode) {
+  // ── Compass rose (BOTH sheets) + LEGEND (PV-1 only) ───────────────────────
+  {
     // Compass rose — 4-point star with N/E/S/W, bottom-right corner.
     const crX = W - zones.dims.right - 6, crY = H - zones.dims.bottom - 2, cr = 20;
     const rose: string[] = [];
@@ -1215,8 +1215,11 @@ export function drawRoofPlan(
     rose.push(drawText(crX + cr + 5, crY + 2.5, 'E', { anchor: 'middle', fontSize: 6, fill: '#555' }));
     rose.push(drawText(crX - cr - 5, crY + 2.5, 'W', { anchor: 'middle', fontSize: 6, fill: '#555' }));
     els.push(...rose);
+  }
 
-    // Legend — documents the symbols/line-styles actually on this sheet.
+  // Legend — documents the symbols/line-styles on this sheet. PV-1 only; PV-1B
+  // carries the compact CIRCUIT LEGEND instead (a full legend would double-label).
+  if (!isBranchColorMode) {
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
