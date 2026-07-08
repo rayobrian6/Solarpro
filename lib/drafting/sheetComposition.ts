@@ -607,6 +607,11 @@ function roofComposition(
 ): SheetComposition {
   const d = getRoofData(cad, input);
   const isPlan = viewType === 'plan';
+  // RT-Mini (rail-less) runs 48" O.C. STAGGERED, not one foot per module and not
+  // the rafter spacing (Ray 2026-07-08). Keep the railed L-foot value as-is.
+  const _railless = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys);
+  const _attachDisplay = _railless ? '48" O.C. STAGGERED' : `${d.attachSpacing}" O.C. MAX`;
+  const _attachInto = _railless ? 'direct-attach mounts @ 48" O.C. staggered' : `L-foot @ ${d.attachSpacing}" O.C.`;
 
   const dataRows: DataRow[] = isPlan
     ? [
@@ -618,14 +623,14 @@ function roofComposition(
         { label: 'AZIMUTH',        value: d.azimuthLabel },
         { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' RIDGE · 18" HIP · ${d.pathwayFt}' PATHWAY`, bold: true },
         { label: 'FRAMING',        value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX` },
+        { label: 'ATTACH SPACING', value: _attachDisplay },
         { label: 'MODULES',        value: `${d.totalPanels} @ ${d.dcKw} kWdc`, bold: true },
       ]
     : [
         { label: 'MOUNTING SYS',   value: d.mountSys },
         { label: 'RAFTER SIZE',    value: d.rafterSize },
         { label: 'RAFTER SPACING', value: `${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX`,   bold: true },
+        { label: 'ATTACH SPACING', value: _attachDisplay,   bold: true },
         { label: 'LAG BOLT',       value: d.lagSpec },
         { label: 'EMBEDMENT',      value: d.embedSpec,                      bold: true, highlight: true },
         { label: 'ROOF TYPE',      value: d.roofType },
@@ -640,7 +645,7 @@ function roofComposition(
         { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
-        { n: 5, label: 'ATTACHMENT ZONE', sub: `${/RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'direct-attach mounts' : 'L-foot'} @ ${d.attachSpacing}" O.C. into rafters` },
+        { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into rafters` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
@@ -666,7 +671,7 @@ function roofComposition(
     dataPct:        18,
     drawHeader:     isPlan
       ? `ROOF PLAN — ${d.totalPanels} MOD @ ${d.dcKw} kWdc | ${d.roofType} ROOF @ ${d.pitchStr} | AZ: ${d.azimuthLabel} | ${d.mountSys}`
-      : `ATTACHMENT DETAIL — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${d.attachSpacing}" O.C. MAX`,
+      : `ATTACHMENT DETAIL — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${_attachDisplay}`,
     secondaryHeader: isPlan ? 'SETBACK & OBSTRUCTION OVERLAY' : 'ATTACHMENT DETAIL — NTS',
     dataTitle:      isPlan ? 'SYSTEM DATA' : 'ATTACHMENT SPECS',
     dataRows,

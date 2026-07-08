@@ -32,7 +32,7 @@ import {
   drawSVGOpen, drawSVGClose, drawBackground, drawTitleBar,
   drawNorthArrow, drawScaleBar, drawText, drawLine, drawRect, drawRectFilled,
   drawCircleFilled, drawPolyline, drawPolygon, drawHatch,
-  drawArrowhead, ftToFtIn, escapeXml, compassDir,
+  drawArrowhead, ftToFtIn, escapeXml,
 } from '../primitives';
 import {
   drawDimension, drawLinearDimension, drawVerticalDimension,
@@ -146,6 +146,10 @@ export function drawRoofPlan(
   const attachSp    = (project as any).resolvedAttachSpacingIn
     || project.attachmentSpacing
     || 48;
+  // RT-Mini (rail-less) mounts run 48" O.C. STAGGERED (Ray 2026-07-08) — feet
+  // share rafters at 4 ft O.C., not one per module. The drawn feet + the
+  // attachment callout both use this so the plan matches the field/labor.
+  const railFootOcIn = 48;
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
   // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
   // (drawn as a band on every edge) and ahjRoofSetbackIn is the ACCESS PATHWAY
@@ -536,10 +540,8 @@ export function drawRoofPlan(
       const fy1 = y0 + ph * 0.25, fy2 = y0 + ph * 0.75;
       let hardware = '';
       if (isRailless) {
-        const fxL = snapX(x0 + 1.6), fxR = snapX(x0 + pw - 1.6);
-        for (const [fx, fy] of [[fxL, fy1], [fxR, fy1], [fxL, fy2], [fxR, fy2]] as Array<[number, number]>) {
-          hardware += `<circle cx="${fx.toFixed(1)}" cy="${fy.toFixed(1)}" r="1.0" fill="#2a5db0"/>`;
-        }
+        // RT-Mini feet are NOT per-module — they share rafters at 4 ft O.C.,
+        // staggered. Drawn in a per-plane pass AFTER this loop (Ray 2026-07-08).
       } else {
         const fxc = snapX(px);
         hardware =
@@ -555,6 +557,55 @@ export function drawRoofPlan(
         `</g>`);
     }
   });
+
+  // ── RT-Mini attachment feet — STAGGERED 4 ft O.C. (Ray 2026-07-08) ──────────
+  // We do NOT put a foot on every module (that read as ~2 ft O.C. — over-built,
+  // extra labor). Feet share rafters at 4 ft O.C. in two foot-rows per panel row:
+  // both rows START on the same rafter; the top row then jumps 2 ft and runs 4 ft
+  // O.C. (staggered), the bottom row runs straight 4 ft O.C. Drawn per plane in
+  // the plane's fall-line basis, snapped to the framing grid, clipped to the facet.
+  if (isRailless && !isBranchColorMode) {
+    const FT = scale;                 // 1 ft in px (1 fake-degree unit = 1 ft)
+    const ocPx = railFootOcIn / 12 * FT;    // 4 ft O.C.
+    const stagPx = ocPx / 2;                // 2 ft stagger
+    const halfUp = panLenPx / 2;            // module up-slope half-height (portrait)
+    regPlanes.forEach((rp: any, ri: number) => {
+      const pp = regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices ?? []));
+      if (!pp.length) return;
+      // plane fall-line basis in screen space: v = eave→ridge, u = along the eave
+      const az = (typeof rp.azimuth === 'number' && isFinite(rp.azimuth)) ? rp.azimuth : 180;
+      const c0lng = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
+      const c0lat = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
+      let vdx = toX(c0lng + Math.sin(az * Math.PI / 180)) - toX(c0lng);
+      let vdy = toY(c0lat + Math.cos(az * Math.PI / 180)) - toY(c0lat);
+      const vl = Math.hypot(vdx, vdy) || 1; vdx /= vl; vdy /= vl;
+      const udx = -vdy, udy = vdx;
+      const uOf = (x: number, y: number) => x * udx + y * udy;
+      const vOf = (x: number, y: number) => x * vdx + y * vdy;
+      const grid = framingGrids[ri];
+      const uPhase = grid ? uOf(grid.bcx, grid.bcy) : 0;     // rafter phase (feet land ON rafters)
+      const rowsMap = new Map<number, any[]>();
+      pp.forEach((p: any) => { const r = p.row ?? 0; if (!rowsMap.has(r)) rowsMap.set(r, []); rowsMap.get(r)!.push(p); });
+      const feet: string[] = [];
+      const foot = (u: number, vLine: number) =>
+        feet.push(`<circle cx="${(u * udx + vLine * vdx).toFixed(1)}" cy="${(u * udy + vLine * vdy).toFixed(1)}" r="1.15" fill="#2a5db0"/>`);
+      rowsMap.forEach((rowPanels) => {
+        const us = rowPanels.map((p: any) => uOf(toX(p.lng), toY(p.lat)));
+        const vs = rowPanels.map((p: any) => vOf(toX(p.lng), toY(p.lat)));
+        const uMin = Math.min(...us), uMax = Math.max(...us);
+        const vMid = vs.reduce((a: number, b: number) => a + b, 0) / vs.length;
+        const vBot = vMid - halfUp * 0.72, vTop = vMid + halfUp * 0.72;   // near frame edges
+        // start on the first rafter at/after the row's left edge
+        const uStart = uPhase + Math.ceil((uMin - uPhase) / (2 * FT)) * (2 * FT);
+        // bottom foot-row: straight 4 ft O.C. from the start rafter
+        for (let u = uStart; u <= uMax + 1; u += ocPx) if (u >= uMin - 1) foot(u, vBot);
+        // top foot-row: same start rafter, then 2 ft out, then 4 ft O.C. (stagger)
+        if (uStart >= uMin - 1) foot(uStart, vTop);
+        for (let u = uStart + stagPx; u <= uMax + 1; u += ocPx) if (u >= uMin - 1) foot(u, vTop);
+      });
+      if (feet.length) els.push(`<g clip-path="url(#sbclip${ri})">${feet.join('')}</g>`);
+    });
+  }
 
   // ── Setback hatch OVER the modules + encroachment accounting ──
   // Painting modules on top of the hatch hid every violation; the AHJ (and
@@ -825,40 +876,22 @@ export function drawRoofPlan(
     }));
   });
 
-  // ── Plane labels (rendered last — placed in OPEN roof area, never over modules) ──
+  // ── Plane markers — small numbered badges keyed to the MAIN HOME ROOF
+  // DESCRIPTION table (ROOF #). The old 3-line PLANE/PITCH/FACING boxes buried
+  // the modules on compact multi-plane roofs (Ray 2026-07-08: "cluttering the
+  // roof layout beyond recognition"). All that data already lives in the table,
+  // so the roof only needs a small reference number. ──
   const _panelPts = regPanels.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
   planeLabels.forEach(L => {
-    // candidate positions: centroid, then nudges along both axes — first one
-    // clear of every module center wins (critique: labels were masking modules)
+    // nudge the badge toward an OPEN spot near the centroid (clear of modules)
     const _cands = [
       { x: L.cx, y: L.cy },
-      { x: L.cx, y: L.cy - 26 }, { x: L.cx, y: L.cy + 26 },
-      { x: L.cx - 34, y: L.cy }, { x: L.cx + 34, y: L.cy },
-      { x: L.cx - 34, y: L.cy - 26 }, { x: L.cx + 34, y: L.cy - 26 },
+      { x: L.cx, y: L.cy - 15 }, { x: L.cx, y: L.cy + 15 },
+      { x: L.cx - 18, y: L.cy }, { x: L.cx + 18, y: L.cy },
     ];
-    const _clear = _cands.find(c => !_panelPts.some(p => Math.abs(p.x - c.x) < 40 && Math.abs(p.y - c.y) < 26));
-    if (_clear) { L.cx = _clear.x; L.cy = _clear.y; }
-    const lines: string[] = ['PLANE ' + (L.ri + 1)];
-    if (L.pitch !== undefined) {
-      // One-decimal rise:12 so the plane label matches the SYSTEM-DATA table /
-      // header (they show e.g. "4.8:12"); rounding to a whole "5:12" here made
-      // the same sheet show two different pitches.
-      const rise12 = typeof L.pitch === 'number'
-        ? Math.round(Math.tan(L.pitch * Math.PI / 180) * 12 * 10) / 10
-        : L.pitch;
-      lines.push(rise12 + ':12 PITCH');
-    }
-    if (L.azimuth !== undefined) lines.push(compassDir(L.azimuth) + ' FACING');
-    const bw = 52, bh = 6 + lines.length * 8.5;
-    els.push(`<rect x="${(L.cx - bw / 2).toFixed(1)}" y="${(L.cy - bh / 2).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="2" fill="rgba(255,255,255,0.93)" stroke="#555" stroke-width="0.6"/>`);
-    lines.forEach((t, i) => {
-      els.push(drawText(L.cx, L.cy - bh / 2 + 7.5 + i * 8.5, t, {
-        anchor: 'middle',
-        fontSize: i === 0 ? 7 : 6.3,
-        fill: i === 0 ? '#1a1a1a' : '#555',
-        fontWeight: i === 0 ? 'bold' : 'normal',
-      }));
-    });
+    const _clear = _cands.find(c => !_panelPts.some(p => Math.abs(p.x - c.x) < 11 && Math.abs(p.y - c.y) < 11)) || _cands[0];
+    els.push(`<circle cx="${_clear.x.toFixed(1)}" cy="${_clear.y.toFixed(1)}" r="7" fill="rgba(255,255,255,0.95)" stroke="#1a1a1a" stroke-width="1.1"/>`);
+    els.push(drawText(_clear.x, _clear.y + 2.7, String(L.ri + 1), { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#1a1a1a' }));
   });
 
   // ── ROOF DESCRIPTION + ARRAY CALC tables (PV-2 only) ──────────────────────
@@ -1189,7 +1222,10 @@ export function drawRoofPlan(
     // (N) attachments — BELOW the overall-dimension band (dim owns
     // roofMaxY+24..+40; the callout used to print through the dim line)
     txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 48, 'start',
-      [`(N) ${mountSys} ATTACHMENTS @ ${attachSp}" O.C.`, `INTO FRAMING — SEE PV-3`],
+      [isRailless
+        ? `(N) ${mountSys} ATTACHMENTS @ ${railFootOcIn}" O.C. STAGGERED`
+        : `(N) ${mountSys} ATTACHMENTS @ ${attachSp}" O.C.`,
+       `INTO FRAMING — SEE PV-3`],
       botP.x - 2, botP.y + 4);
   }
 

@@ -602,7 +602,14 @@ const PDF_PAGE_CONFIG = {
 // building footprints (critical for apartment complexes: Braidon's building is
 // 1 of ~13 on a single 3.12-ac parcel). REMOVED the inferred driveway/sidewalk
 // (no data behind them). Fetched in the async permit route alongside the parcel.
-const PLANSET_ENGINE_VERSION = 47401;
+// 47402 (2026-07-08): (1) RT-Mini feet drawn STAGGERED @ 48" O.C. (Ray: not a
+// foot per module / not 2 ft O.C. — over-built labor). Both foot-rows start on
+// the same rafter; top row +2 ft then 4 ft O.C., bottom row straight 4 ft O.C.
+// Attach-spacing callout + SYSTEM DATA + ATTACHMENT ZONE now say 48" O.C.
+// STAGGERED for rail-less. (2) Plane callouts decluttered → small numbered
+// badges keyed to the ROOF DESCRIPTION table (were 3-line boxes burying the
+// modules). (3) Fixed the OSM site-features fetch (GET not POST — POST→406).
+const PLANSET_ENGINE_VERSION = 47402;
 
 
 
