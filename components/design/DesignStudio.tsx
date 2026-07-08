@@ -5615,7 +5615,18 @@ export default function DesignStudio({ project, onSave }: Props) {
                     {filteredPanels.map(p => (
                       <button
                         key={p.id}
-                        onClick={() => { clearGridCache(); setSelectedPanel(p); }}
+                        onClick={() => {
+                          clearGridCache();
+                          setSelectedPanel(p);
+                          // Immediately persist to the canonical selected_equipment store
+                          // (single source of truth both pages read) — don't wait on the
+                          // debounced layout auto-save. Engineering picks it up on next load.
+                          fetch(`/api/projects/${project.id}/equipment`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ selectedPanel: p }),
+                          }).catch(() => {/* non-fatal; auto-save is the backup */});
+                        }}
                         className={`w-full text-left p-2.5 rounded-lg border transition-all ${
                           selectedPanel.id === p.id
                             ? 'bg-amber-500/15 border-amber-500/40'
