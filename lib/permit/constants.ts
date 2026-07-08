@@ -695,7 +695,11 @@ const PDF_PAGE_CONFIG = {
 // actual point of an attachment detail. Removed the triplicated ①–⑦ callout list
 // (killed the in-drawing "ATTACHMENT CALLOUT SCHEDULE"; the data-zone keeps the
 // one schedule) and the stray UTILITY ANALYSIS block that doesn't belong here.
-const PLANSET_ENGINE_VERSION = 47417;
+// 47418 (2026-07-08): PV-3 detail circle under-filled at 47417 (stack only filled
+// the middle half → still read as an empty bubble). Enlarged the zoomed layer
+// stack (~119→~194px) so the detail fills the r=122 circle edge-to-edge; lag bolt
+// auto-scales with it. Page-level blank lower area still pending a layout pass.
+const PLANSET_ENGINE_VERSION = 47418;
 
 
 

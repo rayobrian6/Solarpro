@@ -1572,16 +1572,16 @@ export function drawRoofStructural(
 
   type ZLayerDef = { label: string; fill: string; stroke?: string; h: number; hatch?: string; hatchOp?: number };
   const zLayers: ZLayerDef[] = [
-    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 25 },
-    { label: (isRaillessD ? 'MOUNT — ' : 'RAIL — ') + mountSys, fill: '#a0a0a0', stroke: '#444', h: 12 },
-    { label: isRaillessD ? `MOUNT BASE — ${lagLabelD}` : `L-FOOT — ${lagLabelD}`, fill: '#b8b8b8', stroke: '#444', h: 16, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
-    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 7  },
-    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 13 },
-    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 12, hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
-    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 34, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
+    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 40 },
+    { label: (isRaillessD ? 'MOUNT — ' : 'RAIL — ') + mountSys, fill: '#a0a0a0', stroke: '#444', h: 20 },
+    { label: isRaillessD ? `MOUNT BASE — ${lagLabelD}` : `L-FOOT — ${lagLabelD}`, fill: '#b8b8b8', stroke: '#444', h: 26, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
+    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 11 },
+    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 21 },
+    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 20, hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
+    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 56, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
   ];
-  const _zTotal = zLayers.reduce((s, z) => s + z.h, 0);
-  const dzW = 140;
+  const _zTotal = zLayers.reduce((s, z) => s + z.h, 0);   // ~194 — fills the r=122 bubble
+  const dzW = 150;
   const dzX = dcx - dzW / 2 - 14;         // stack just left of center; labels to the right
   const dzY = dcy - _zTotal / 2;
   const _lblPitch = _zTotal / zLayers.length;
