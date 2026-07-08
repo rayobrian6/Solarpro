@@ -261,8 +261,13 @@ export function drawRoofPlan(
   // (identical to the prior behavior — no fabricated lot on parcel-less jobs).
   const _site: SiteContext | null = (!isBranchColorMode
     && (input as unknown as { _siteContext?: SiteContext | null })._siteContext) || null;
-  const _fit = (_site && _site.parcel.length >= 3)
-    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _site.parcel)
+  // Expand the fit to include the parcel + surrounding building footprints so the
+  // lot + neighbors show (capped inside computeFitWindow so the roof stays large).
+  const _ctxPts = _site
+    ? [...(_site.parcel ?? []), ..._site.buildings.flat()]
+    : [];
+  const _fit = (_site && _ctxPts.length > 0)
+    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts)
     : { minLng, maxLng, minLat, maxLat };
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
@@ -289,14 +294,19 @@ export function drawRoofPlan(
   const toX = (lng: number) => dz.x  + margin + leftReserve + offX + (lng - _fit.minLng) * scale;
   const toY = (lat: number) => dz.y  + (dz.height - margin) - offY - (lat - _fit.minLat) * scale;
 
-  // ── Site layer — drawn UNDER the roof (roof linework paints on top) ──
+  // ── Site layer — drawn UNDER the roof (roof linework paints on top), clipped
+  // to the draw zone so off-window neighbors/roads can't spill onto the tables
+  // or off-sheet. ──
   let _siteLegend: Array<{ swatch: string; label: string }> = [];
-  if (_site && _site.parcel.length >= 3) {
+  if (_site) {
     try {
       const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY);
-      els.push(`<g class="pv2-site">${sr.els.join('')}</g>`);
-      _siteLegend = sr.legend;
-      svgTitle = 'SITE & ROOF PLAN WITH MODULES';
+      if (sr.els.length) {
+        els.push(`<defs><clipPath id="pv2site-clip"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
+        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)">${sr.els.join('')}</g>`);
+        _siteLegend = sr.legend;
+        svgTitle = 'SITE & ROOF PLAN WITH MODULES';
+      }
     } catch (e) {
       console.warn('[drawRoofPlan] site context skipped (non-fatal):', (e as Error)?.message);
     }

@@ -42,14 +42,17 @@ describe('PV-2 carries NO separate site/plot-plan visual', () => {
     }
 
     // WITH a parcel: the site context is drawn INTEGRATED into the main roof
-    // drawing (one drawing), not a box — property line + driveway rendered in
-    // the roof's own frame (class "pv2-site").
+    // drawing (one drawing), not a box — property line rendered in the roof's
+    // own frame (class "pv2-site").
     expect(withParcel).toContain('pv2-site');
     expect(withParcel).toContain('PROPERTY LINE');
-    expect(withParcel).toContain('DRIVEWAY');
 
-    // WITHOUT a parcel: no fabricated lot — roof plan exactly as before.
+    // No fabricated driveway/sidewalk — those only come from real data now
+    // (OSM/aerial), never inferred.
+    expect(withParcel).not.toContain('DRIVEWAY (APPROX)');
+    expect(withParcel).not.toContain('SIDEWALK (APPROX)');
+
+    // WITHOUT a parcel or site features: no fabricated lot — roof plan as before.
     expect(withoutParcel).not.toContain('pv2-site');
-    expect(withoutParcel).not.toContain('DRIVEWAY');
   });
 });

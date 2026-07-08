@@ -596,7 +596,13 @@ const PDF_PAGE_CONFIG = {
 // cad.origin → fake-degree → toX/toY), fit window expands to include the lot
 // (capped so the roof stays prominent). Gated on a county-GIS parcel; roof-only
 // (byte-identical) when absent. See lib/drafting/templates/roofSiteContext.ts.
-const PLANSET_ENGINE_VERSION = 47400;
+// 47401 (2026-07-08): PV-2 site plan now draws REALITY, not guesses. Added
+// lib/aerial/siteFeatures.ts (OpenStreetMap via Overpass) → real road
+// centerlines + names (drawn where the road actually is) and real surrounding
+// building footprints (critical for apartment complexes: Braidon's building is
+// 1 of ~13 on a single 3.12-ac parcel). REMOVED the inferred driveway/sidewalk
+// (no data behind them). Fetched in the async permit route alongside the parcel.
+const PLANSET_ENGINE_VERSION = 47401;
 
 
 

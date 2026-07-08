@@ -27,24 +27,40 @@ import { deskewArrayToTrue } from '@/lib/permit/utils/deskewArrayToTrue';
  * are then simply omitted (no fabricated lot geometry).
  */
 async function attachParcelIfMissing(input: PermitInput): Promise<void> {
-  const aerial = (input as unknown as { aerialData?: { parcel?: unknown } }).aerialData;
-  if (!aerial || aerial.parcel) return;
+  const aerial = (input as unknown as { aerialData?: { parcel?: unknown; siteFeatures?: unknown } }).aerialData;
+  if (!aerial) return;
   const lat = Number(input.project?.lat), lng = Number(input.project?.lng);
   if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) < 0.001) return;
   const county = (input.project as { county?: string | null })?.county || null;
   const state = (input.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || null;
   try {
-    const parcel = await fetchParcelBoundary(lat, lng, county, state);
-    if (parcel) {
-      (aerial as { parcel?: unknown }).parcel = parcel;
-      console.log('[permit] parcel boundary attached:', parcel.polygon.length, 'pts, APN', parcel.apn ?? '—');
+    if (!aerial.parcel) {
+      const parcel = await fetchParcelBoundary(lat, lng, county, state);
+      if (parcel) {
+        (aerial as { parcel?: unknown }).parcel = parcel;
+        console.log('[permit] parcel boundary attached:', parcel.polygon.length, 'pts, APN', parcel.apn ?? '—');
+      }
     }
   } catch (e: unknown) {
     console.warn('[permit] parcel fetch skipped (non-fatal):', (e as Error)?.message);
   }
+  // Real roads + surrounding building footprints (OSM) — the "reality around the
+  // home", critical for multi-building complexes on one parcel. Non-fatal.
+  try {
+    if (!aerial.siteFeatures) {
+      const sf = await fetchSiteFeatures(lat, lng, 160);
+      if (sf) {
+        (aerial as { siteFeatures?: unknown }).siteFeatures = sf;
+        console.log('[permit] site features attached:', sf.roads.length, 'roads,', sf.buildings.length, 'buildings');
+      }
+    }
+  } catch (e: unknown) {
+    console.warn('[permit] site features skipped (non-fatal):', (e as Error)?.message);
+  }
 }
 import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
 import { fetchParcelBoundary } from '@/lib/aerial/parcelBoundary';
+import { fetchSiteFeatures } from '@/lib/aerial/siteFeatures';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
 
@@ -687,6 +703,17 @@ export async function POST(req: NextRequest) {
           console.log('[permit/POST] parcel boundary:', _parcel.polygon.length, 'pts, APN', _parcel.apn ?? '—');
         }
       } catch (e: unknown) { console.warn('[permit/POST] parcel fetch skipped (non-fatal):', (e as Error)?.message); }
+    }
+    // Real roads + surrounding building footprints (OSM) — reality around the home.
+    if (aerialData && !(aerialData as { siteFeatures?: unknown }).siteFeatures
+        && isFinite(_centerLat) && isFinite(_centerLng) && Math.abs(_centerLat) > 0.001) {
+      try {
+        const _sf = await fetchSiteFeatures(_centerLat, _centerLng, 160);
+        if (_sf) {
+          (aerialData as { siteFeatures?: unknown }).siteFeatures = _sf;
+          console.log('[permit/POST] site features:', _sf.roads.length, 'roads,', _sf.buildings.length, 'buildings');
+        }
+      } catch (e: unknown) { console.warn('[permit/POST] site features skipped (non-fatal):', (e as Error)?.message); }
     }
     const enrichedBody: PermitInput = { ...body, aerialData };
 
