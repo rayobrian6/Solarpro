@@ -582,7 +582,14 @@ const PDF_PAGE_CONFIG = {
 // fabricated lot). All GIS-derived geometry/dimensions labeled APPROXIMATE. No
 // driveways/sidewalks/roads fabricated; a provider seam (approved-only) is left
 // for later. Parcel fetch wired into the permit route (POST + GET self-heal).
-const PLANSET_ENGINE_VERSION = 47398;
+// 47399 (2026-07-08): PV-2 inset render fix for REAL parcels. A large apartment/
+// complex lot (Braidon's actual parcel) shrank the building to a dot and drew a
+// clutter of ~12 overlapping edge-length labels over a jagged boundary. Now the
+// inset ZOOMS to the building + adaptive margin (enough to show the nearest
+// property line when reasonable), CLIPS the parcel to that window (nearest lines
+// only), and skips per-edge dimension labels on complex (>8-vertex) lots. Footer
+// cleaned. Simple small lots still show the full parcel with edge dims.
+const PLANSET_ENGINE_VERSION = 47399;
 
 
 

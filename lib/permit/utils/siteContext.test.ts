@@ -96,6 +96,24 @@ describe('buildSiteContextInset', () => {
     }
   });
 
+  it('LARGE COMPLEX PARCEL (apartment lot): zooms to building, clips parcel, no edge-label clutter', () => {
+    // ~300 ft many-vertex parcel; the small building sits inside it.
+    const big: LatLng[] = [];
+    const N = 24;
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      big.push({ lat: 40.00025 + 0.0014 * Math.sin(a) + (i % 2) * 0.00004, lng: -87.9998 + 0.0020 * Math.cos(a) });
+    }
+    const svg = buildSiteContextInset({ ...baseInput, parcel: { polygon: big, apn: '03-04-401-003', source: 'Madison County IL CCAO' } }, box);
+    expect(svg).toContain('site-context-inset');
+    expect(svg).toContain('clip-path');                 // parcel clipped to the window
+    // NO per-edge dimension explosion for a >8-vertex parcel
+    expect(svg.split("'</text>").length - 1).toBe(0);
+    // Building/array still drawn and the setback provenance present
+    expect(svg).toContain('PV ARRAY');
+    expect(svg).toContain('BASED ON COUNTY GIS');
+  });
+
   it('review_required feature is OMITTED from the permit; only approved+renderable draws', () => {
     const mk = (reviewState: SiteContextFeature['reviewState'], permitRenderable: boolean): SiteContextFeature => ({
       id: 'f1', kind: 'driveway', geometryType: 'polygon',

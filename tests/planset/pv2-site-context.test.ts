@@ -25,7 +25,7 @@ const OUT = process.env.PV2_OUT_DIR; // set by the evidence run to also dump HTM
 describe('PV-2 site-context inset (integration render)', () => {
   it('renders the inset WITH a parcel and omits it (roof plan intact) WITHOUT one', () => {
     const before = generatePermitHTML(clone(roofProject));                                   // no aerialData.parcel
-    const afterInput = clone(roofProject) as Record<string, unknown>;
+    const afterInput = clone(roofProject) as unknown as Record<string, unknown>;
     afterInput.aerialData = { parcel: REP_PARCEL };
     const after = generatePermitHTML(afterInput as never);
 

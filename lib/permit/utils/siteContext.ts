@@ -148,109 +148,117 @@ export function buildSiteContextInset(input: SiteContextInsetInput, box: InsetBo
   const pPan = projectToLocalM(panels, origin);
   const eqPts = (input.equipment ?? []).map(e => ({ ...e, ...latLngToXY(e.lat, e.lng, origin.lat, origin.lng) }));
 
-  const all = [...pPar, ...pBld, ...pPan, ...eqPts];
-  const minX = Math.min(...all.map(p => p.x)), maxX = Math.max(...all.map(p => p.x));
-  const minY = Math.min(...all.map(p => p.y)), maxY = Math.max(...all.map(p => p.y));
-  const spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+  // ── Window: subject BUILDING + generous margin, matched to the draw aspect —
+  // NOT the whole parcel. A large apartment/complex lot would otherwise shrink
+  // the building to a dot and clutter the view; we zoom to the building and CLIP
+  // the parcel to the window, showing only the NEAREST property lines.
+  const bldPts = pBld.length >= 2 ? pBld : (pPan.length ? pPan : pPar);
+  const bMinX = Math.min(...bldPts.map(p => p.x)), bMaxX = Math.max(...bldPts.map(p => p.x));
+  const bMinY = Math.min(...bldPts.map(p => p.y)), bMaxY = Math.max(...bldPts.map(p => p.y));
+  const bW = Math.max(bMaxX - bMinX, 3), bH = Math.max(bMaxY - bMinY, 3);
+  const cx0 = (bMinX + bMaxX) / 2, cy0 = (bMinY + bMaxY) / 2;
 
-  const pad = 10, hdrH = 16, ftrH = 30;
+  const arraySetback = panels.length ? minSetbackFt(panels, parcel, origin) : null;
+  const buildingSetback = building.length ? minSetbackFt(building, parcel, origin) : null;
+
+  const pad = 10, hdrH = 16, ftrH = 34;
   const drawW = box.w - 2 * pad, drawH = box.h - 2 * pad - hdrH - ftrH;
-  const scale = Math.min(drawW / spanX, drawH / spanY); // px per metre
-  const offX = (drawW - spanX * scale) / 2;
-  const offY = (drawH - spanY * scale) / 2;
-  const toX = (p: { x: number }) => box.x + pad + offX + (p.x - minX) * scale;
-  const toY = (p: { y: number }) => box.y + pad + hdrH + offY + (maxY - p.y) * scale; // north up
-
+  const aspect = drawW / drawH;
+  // Window margin: enough to always show ~40 ft of context, and — when the nearest
+  // property line is within a sane range — enough to actually SHOW that line (so a
+  // plot plan isn't a bare building). Capped so a huge lot doesn't zoom the building
+  // back down to a dot; the setback number conveys the rest.
+  const nearestFt = Math.min(buildingSetback ?? Infinity, arraySetback ?? Infinity);
+  const nearestM = isFinite(nearestFt) ? nearestFt / M_TO_FT : 12;
+  const marginM = Math.max(0.6 * Math.max(bW, bH), 12, Math.min(nearestM + 5, 40));
+  let halfW = bW / 2 + marginM, halfH = bH / 2 + marginM;
+  if (halfW / halfH > aspect) halfH = halfW / aspect; else halfW = halfH * aspect;
+  const winMinX = cx0 - halfW, winMaxX = cx0 + halfW, winMinY = cy0 - halfH, winMaxY = cy0 + halfH;
+  const scale = drawW / (2 * halfW); // px per metre (uniform; window matches aspect)
+  const toX = (p: { x: number }) => box.x + pad + (p.x - winMinX) * scale;
+  const toY = (p: { y: number }) => box.y + pad + hdrH + (winMaxY - p.y) * scale; // north up
+  const inWin = (p: { x: number; y: number }) => p.x >= winMinX && p.x <= winMaxX && p.y >= winMinY && p.y <= winMaxY;
   const polyStr = (pp: Array<{ x: number; y: number }>) => pp.map(p => `${toX(p).toFixed(1)},${toY(p).toFixed(1)}`).join(' ');
 
   const els: string[] = [];
-  // Panel bounding box for a "closest approach" array setback + array footprint
-  let arraySetback: number | null = null;
-  if (panels.length) {
-    arraySetback = minSetbackFt(panels, parcel, origin);
-  }
-  const buildingSetback = building.length ? minSetbackFt(building, parcel, origin) : null;
-
   // Frame + header
   els.push(`<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
   els.push(`<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${hdrH}" fill="#111"/>`);
   els.push(`<text x="${box.x + 6}" y="${box.y + 11}" font-family="Arial" font-size="8" font-weight="700" fill="#fff" letter-spacing="0.5">SITE / PLOT PLAN — APPROXIMATE (NOT A SURVEY)</text>`);
 
-  // Parcel boundary (solid, approximate)
-  els.push(`<polygon points="${polyStr(pPar)}" fill="none" stroke="#111" stroke-width="1.4"/>`);
-  // Parcel edge length dimensions
-  const edgeFt = polygonEdgeLengthsFt(parcel);
-  for (let i = 0; i < pPar.length; i++) {
-    const a = pPar[i], b = pPar[(i + 1) % pPar.length];
-    const mx = (toX(a) + toX(b)) / 2, my = (toY(a) + toY(b)) / 2;
-    els.push(`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" font-family="Arial" font-size="6" fill="#111" text-anchor="middle" stroke="#fff" stroke-width="1.6" paint-order="stroke">${edgeFt[i].toFixed(0)}'</text>`);
-  }
-
-  // Building footprint (hull)
-  if (pBld.length >= 3) {
-    els.push(`<polygon points="${polyStr(pBld)}" fill="rgba(120,120,120,0.18)" stroke="#444" stroke-width="1"/>`);
-  }
-  // PV array footprint (hull of panel centers, hatched)
+  // Everything geometric is clipped to the draw window so a large parcel spilling
+  // beyond the frame is trimmed cleanly instead of drawing a tangle.
+  const clipId = `sci-${Math.round(box.x)}-${Math.round(box.y)}`;
+  els.push(`<clipPath id="${clipId}"><rect x="${(box.x + pad).toFixed(1)}" y="${(box.y + pad + hdrH).toFixed(1)}" width="${drawW.toFixed(1)}" height="${drawH.toFixed(1)}"/></clipPath>`);
+  const clip: string[] = [];
+  clip.push(`<polygon points="${polyStr(pPar)}" fill="none" stroke="#111" stroke-width="1.2"/>`);
+  if (pBld.length >= 3) clip.push(`<polygon points="${polyStr(pBld)}" fill="rgba(120,120,120,0.20)" stroke="#333" stroke-width="1"/>`);
   if (pPan.length >= 3) {
-    const ah = convexHullLatLng(panels);
-    const pah = projectToLocalM(ah, origin);
-    els.push(`<polygon points="${polyStr(pah)}" fill="rgba(23,58,161,0.28)" stroke="#173aa1" stroke-width="1"/>`);
-    const cx = pah.reduce((s, p) => s + toX(p), 0) / pah.length;
-    const cy = pah.reduce((s, p) => s + toY(p), 0) / pah.length;
-    els.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" font-family="Arial" font-size="6.5" font-weight="700" fill="#173aa1" text-anchor="middle">PV ARRAY</text>`);
+    const pah = projectToLocalM(convexHullLatLng(panels), origin);
+    clip.push(`<polygon points="${polyStr(pah)}" fill="rgba(23,58,161,0.28)" stroke="#173aa1" stroke-width="1"/>`);
+    const cx = pah.reduce((s, p) => s + toX(p), 0) / pah.length, cy = pah.reduce((s, p) => s + toY(p), 0) / pah.length;
+    clip.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" font-family="Arial" font-size="6.5" font-weight="700" fill="#173aa1" text-anchor="middle">PV ARRAY</text>`);
   }
-
-  // Service equipment markers (existing provenance kept as tiny tag)
   const kindTag: Record<string, string> = { utility_meter: 'UM', msp: 'MSP', ac_disconnect: 'AC' };
   for (const e of eqPts) {
+    if (!inWin(e)) continue;
     const x = toX(e), y = toY(e);
-    els.push(`<rect x="${(x - 4).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#111" stroke-width="0.8"/>`);
-    els.push(`<text x="${x.toFixed(1)}" y="${(y + 2).toFixed(1)}" font-family="Arial" font-size="5" font-weight="700" fill="#111" text-anchor="middle">${kindTag[e.kind] ?? '?'}</text>`);
+    clip.push(`<rect x="${(x - 4).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="8" height="8" fill="#fff" stroke="#111" stroke-width="0.8"/>`);
+    clip.push(`<text x="${x.toFixed(1)}" y="${(y + 2).toFixed(1)}" font-family="Arial" font-size="5" font-weight="700" fill="#111" text-anchor="middle">${kindTag[e.kind] ?? '?'}</text>`);
   }
+  // Parcel edge dimensions ONLY for a simple lot with edges fully in view — skip
+  // on complex/large parcels (an apartment lot) to avoid a clutter of labels.
+  if (parcel.length <= 8) {
+    const edgeFt = polygonEdgeLengthsFt(parcel);
+    for (let i = 0; i < pPar.length; i++) {
+      const a = pPar[i], b = pPar[(i + 1) % pPar.length];
+      if (!inWin(a) || !inWin(b) || edgeFt[i] < 8) continue;
+      clip.push(`<text x="${((toX(a) + toX(b)) / 2).toFixed(1)}" y="${((toY(a) + toY(b)) / 2).toFixed(1)}" font-family="Arial" font-size="6" fill="#111" text-anchor="middle" stroke="#fff" stroke-width="1.6" paint-order="stroke">${edgeFt[i].toFixed(0)}'</text>`);
+    }
+  }
+  els.push(`<g clip-path="url(#${clipId})">${clip.join('')}</g>`);
 
-  // Street name — LABEL ONLY, near the frontage edge. No road/curb geometry drawn.
+  // Street name — LABEL ONLY, clamped inside the draw area. No road/curb drawn.
   if (input.streetName && input.streetPin && isFinite(input.streetPin.lat)) {
     const sp = latLngToXY(input.streetPin.lat, input.streetPin.lng, origin.lat, origin.lng);
-    const sx = Math.max(box.x + 6, Math.min(box.x + box.w - 6, toX(sp)));
+    const sx = Math.max(box.x + pad + 4, Math.min(box.x + box.w - pad - 4, toX(sp)));
     const sy = Math.max(box.y + hdrH + 10, Math.min(box.y + box.h - ftrH - 4, toY(sp)));
-    els.push(`<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" font-family="Arial" font-size="6.5" font-weight="700" fill="#555" text-anchor="middle" stroke="#fff" stroke-width="1.6" paint-order="stroke">${esc(input.streetName)}</text>`);
+    els.push(`<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" font-family="Arial" font-size="6.5" font-weight="700" fill="#555" text-anchor="middle" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(input.streetName)}</text>`);
   }
 
-  // North arrow (small, top-right of inset)
-  const nax = box.x + box.w - 16, nay = box.y + hdrH + 14;
+  // North arrow (top-right of the draw area)
+  const nax = box.x + box.w - 15, nay = box.y + hdrH + 15;
   els.push(`<line x1="${nax}" y1="${nay + 8}" x2="${nax}" y2="${nay - 6}" stroke="#111" stroke-width="1"/>`);
   els.push(`<path d="M ${nax} ${nay - 9} L ${nax - 3} ${nay - 3} L ${nax + 3} ${nay - 3} Z" fill="#111"/>`);
   els.push(`<text x="${nax}" y="${nay - 11}" font-family="Arial" font-size="6" font-weight="700" fill="#111" text-anchor="middle">N</text>`);
 
-  // Footer: approximate setbacks + graphic/written scale + APN + provenance
+  // Footer — 3 clean rows: setbacks · scale bar + APN · provenance
   const fy = box.y + box.h - ftrH;
   els.push(`<line x1="${box.x}" y1="${fy}" x2="${box.x + box.w}" y2="${fy}" stroke="#ccc" stroke-width="0.6"/>`);
   const sbBits: string[] = [];
   if (buildingSetback != null) sbBits.push(`BLDG→P/L ~${buildingSetback.toFixed(0)}'`);
   if (arraySetback != null) sbBits.push(`ARRAY→P/L ~${arraySetback.toFixed(0)}'`);
-  els.push(`<text x="${box.x + 6}" y="${fy + 9}" font-family="Arial" font-size="6" font-weight="700" fill="#111">${sbBits.join('   ')}  ·  APPROXIMATE — BASED ON COUNTY GIS</text>`);
-  // Graphic scale bar (10 ft)
-  const barPx = Math.max(10 * (scale * M_TO_FT), 14); // scale is px/m → px per 10 ft
-  const bx = box.x + 6, by = fy + 20;
+  els.push(`<text x="${box.x + 6}" y="${fy + 10}" font-family="Arial" font-size="6" font-weight="700" fill="#111">${sbBits.join('   ')}${sbBits.length ? '   ' : ''}(APPROXIMATE — BASED ON COUNTY GIS)</text>`);
+  const barPx = Math.max(10 * (scale * M_TO_FT), 14);
+  const bx = box.x + 6, by = fy + 22;
   els.push(`<line x1="${bx}" y1="${by}" x2="${(bx + barPx).toFixed(1)}" y2="${by}" stroke="#111" stroke-width="1.4"/>`);
   els.push(`<line x1="${bx}" y1="${by - 3}" x2="${bx}" y2="${by + 3}" stroke="#111" stroke-width="1"/>`);
   els.push(`<line x1="${(bx + barPx).toFixed(1)}" y1="${by - 3}" x2="${(bx + barPx).toFixed(1)}" y2="${by + 3}" stroke="#111" stroke-width="1"/>`);
-  els.push(`<text x="${(bx + barPx + 4).toFixed(1)}" y="${by + 2.5}" font-family="Arial" font-size="6" fill="#111">10 FT (APPROX)</text>`);
+  els.push(`<text x="${(bx + barPx + 4).toFixed(1)}" y="${by + 2.5}" font-family="Arial" font-size="6" fill="#111">10 FT</text>`);
   const apn = input.parcel?.apn ? `APN ${esc(String(input.parcel.apn))}` : '';
   const src = input.parcel?.source ? esc(String(input.parcel.source)) : 'COUNTY GIS';
-  els.push(`<text x="${box.x + box.w - 6}" y="${fy + 9}" font-family="Arial" font-size="5.5" fill="#555" text-anchor="end">${apn}</text>`);
-  els.push(`<text x="${box.x + box.w - 6}" y="${fy + 20}" font-family="Arial" font-size="5.5" fill="#555" text-anchor="end">APPROXIMATE PROPERTY LINE — ${src} — VERIFY</text>`);
+  if (apn) els.push(`<text x="${box.x + box.w - 6}" y="${fy + 10}" font-family="Arial" font-size="5.5" fill="#555" text-anchor="end">${apn}</text>`);
+  els.push(`<text x="${box.x + box.w / 2}" y="${fy + 32}" font-family="Arial" font-size="5.5" fill="#555" text-anchor="middle">APPROXIMATE PROPERTY LINE — ${src} — VERIFY</text>`);
 
   // Provider-supplied site features — ONLY approved + permit-renderable ones.
+  const featEls: string[] = [];
   for (const f of (input.features ?? [])) {
-    if (!isPermitRenderable(f)) continue; // detected/inferred/review_required → omitted from permit
+    if (!isPermitRenderable(f)) continue; // detected/inferred/review_required → omitted
     const fp = projectToLocalM(f.geometryWgs84, origin);
-    if (f.geometryType === 'polygon') {
-      els.push(`<polygon data-feature="${esc(f.kind)}" points="${polyStr(fp)}" fill="rgba(150,150,150,0.25)" stroke="#666" stroke-width="0.8"/>`);
-    } else {
-      els.push(`<polyline data-feature="${esc(f.kind)}" points="${polyStr(fp)}" fill="none" stroke="#666" stroke-width="0.8"/>`);
-    }
+    if (f.geometryType === 'polygon') featEls.push(`<polygon data-feature="${esc(f.kind)}" points="${polyStr(fp)}" fill="rgba(150,150,150,0.25)" stroke="#666" stroke-width="0.8"/>`);
+    else featEls.push(`<polyline data-feature="${esc(f.kind)}" points="${polyStr(fp)}" fill="none" stroke="#666" stroke-width="0.8"/>`);
   }
+  if (featEls.length) els.push(`<g clip-path="url(#${clipId})">${featEls.join('')}</g>`);
 
   return `<g class="site-context-inset">${els.join('')}</g>`;
 }
