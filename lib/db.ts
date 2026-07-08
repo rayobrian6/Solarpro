@@ -382,7 +382,7 @@ export const defaultInverters: Inverter[] = [
 export const defaultBatteries: Battery[] = [
   // ── Tesla ──
   {
-    id: 'bat-ts1', manufacturer: 'Tesla', model: 'Powerwall 3',
+    id: 'tesla-powerwall-3', manufacturer: 'Tesla', model: 'Powerwall 3',
     capacityKwh: 13.5, powerKw: 11.5, peakPowerKw: 22.0,
     roundTripEfficiency: 97.5, chemistry: 'LFP',
     cycles: 4000, warranty: 10, pricePerUnit: 11500,
@@ -390,7 +390,7 @@ export const defaultBatteries: Battery[] = [
     dimensions: '43.25" × 24" × 7.6"', weight: 130,
   },
   {
-    id: 'bat-ts2', manufacturer: 'Tesla', model: 'Powerwall 2',
+    id: 'tesla-powerwall-2', manufacturer: 'Tesla', model: 'Powerwall 2',
     capacityKwh: 13.5, powerKw: 7.0, peakPowerKw: 10.0,
     roundTripEfficiency: 90.0, chemistry: 'NMC',
     cycles: 3500, warranty: 10, pricePerUnit: 9200,
@@ -399,7 +399,7 @@ export const defaultBatteries: Battery[] = [
   },
   // ── Enphase ──
   {
-    id: 'bat-enp1', manufacturer: 'Enphase', model: 'IQ Battery 5P',
+    id: 'enphase-iq-battery-5p', manufacturer: 'Enphase', model: 'IQ Battery 5P',
     capacityKwh: 5.0, powerKw: 3.84, peakPowerKw: 7.68,
     roundTripEfficiency: 96.0, chemistry: 'LFP',
     cycles: 4000, warranty: 15, pricePerUnit: 4500,
@@ -407,7 +407,7 @@ export const defaultBatteries: Battery[] = [
     dimensions: '26.1" × 12.8" × 7.7"', weight: 54,
   },
   {
-    id: 'bat-enp2', manufacturer: 'Enphase', model: 'IQ Battery 10T',
+    id: 'enphase-iq-battery-10t', manufacturer: 'Enphase', model: 'IQ Battery 10T',
     capacityKwh: 10.08, powerKw: 7.68, peakPowerKw: 15.36,
     roundTripEfficiency: 96.0, chemistry: 'LFP',
     cycles: 4000, warranty: 15, pricePerUnit: 8500,
@@ -477,7 +477,7 @@ export const defaultBatteries: Battery[] = [
   },
   // ── Panasonic ──
   {
-    id: 'bat-pan1', manufacturer: 'Panasonic', model: 'EverVolt 11.4kWh',
+    id: 'panasonic-evervolt-11', manufacturer: 'Panasonic', model: 'EverVolt 11.4kWh',
     capacityKwh: 11.4, powerKw: 5.5, peakPowerKw: 9.0,
     roundTripEfficiency: 89.0, chemistry: 'NMC',
     cycles: 3500, warranty: 10, pricePerUnit: 9800,

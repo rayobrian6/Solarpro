@@ -1,33 +1,45 @@
 /** @vitest-environment node */
 /**
- * Single source of truth for the panel catalog: every panel the DESIGN offers
- * (the unified /api/hardware list) must resolve in ENGINEERING's SOLAR_PANELS,
- * so a panel picked in Design is renderable/selectable in Engineering (and the
- * canonical panelId resolves on both sides).
+ * Single source of truth for the equipment catalog: every panel / inverter /
+ * battery the DESIGN offers must resolve in ENGINEERING's equipment-db, so a
+ * pick in Design is renderable/selectable in Engineering and resolves in the
+ * planset (the canonical id syncs both sides).
  */
 import { describe, it, expect } from 'vitest';
-import { SOLAR_PANELS, getPanelById } from '@/lib/equipment-db';
-import { getAllUnifiedPanels } from '@/lib/equipment-library';
+import {
+  SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, OPTIMIZERS, BATTERIES,
+  getPanelById, getInverterById, getBatteryById,
+} from '@/lib/equipment-db';
+import { getAllUnifiedPanels, getAllUnifiedInverters } from '@/lib/equipment-library';
 import db from '@/lib/db';
 
-describe('panel catalog is single-source (design ⊆ engineering)', () => {
-  const engIds = new Set(SOLAR_PANELS.map(p => p.id));
-  const designPanels = getAllUnifiedPanels(db.getPanels());
-
-  it('every design panel id resolves in engineering', () => {
-    const missing = designPanels.filter(p => !engIds.has(p.id));
+describe('equipment catalog is single-source (design ⊆ engineering)', () => {
+  it('every design PANEL resolves in engineering', () => {
+    const engIds = new Set(SOLAR_PANELS.map(p => p.id));
+    const missing = getAllUnifiedPanels(db.getPanels()).filter(p => !engIds.has(p.id));
     expect(missing.map(p => `${p.id} (${p.model})`)).toEqual([]);
   });
 
-  it('REC 405 exists in the single source', () => {
-    const rec405 = SOLAR_PANELS.find(p => p.manufacturer === 'REC Group' && p.watts === 405);
-    expect(rec405).toBeDefined();
-    expect(getPanelById(rec405!.id)).toBeDefined();
+  it('every design INVERTER resolves in engineering', () => {
+    const engIds = new Set([...STRING_INVERTERS, ...MICROINVERTERS, ...OPTIMIZERS].map(i => i.id));
+    // /api/hardware now serves inverters from the engineering DB directly.
+    const missing = getAllUnifiedInverters([]).filter(i => !engIds.has(i.id));
+    expect(missing.map(i => `${i.id} (${i.model})`)).toEqual([]);
+    expect(getAllUnifiedInverters([]).length).toBeGreaterThan(30);
   });
 
-  it('curated design panels (e.g. Jinko Eagle Neo 440) are engineering-resolvable', () => {
-    for (const id of ['panel-std440', 'panel-jk2', 'panel-cs2', 'panel-fence1']) {
-      expect(getPanelById(id), `getPanelById(${id})`).toBeDefined();
-    }
+  it('every design BATTERY resolves in engineering', () => {
+    const engIds = new Set(BATTERIES.map(b => b.id));
+    const designBatteries = db.getBatteries ? db.getBatteries() : [];
+    const missing = designBatteries.filter((b: { id: string }) => !engIds.has(b.id));
+    expect(missing.map((b: { id: string; model: string }) => `${b.id} (${b.model})`)).toEqual([]);
+  });
+
+  it('curated items are engineering-resolvable by id', () => {
+    expect(getPanelById('panel-std440')).toBeDefined();          // Jinko Eagle Neo 440
+    expect(getPanelById('rec-alpha-pure-405')).toBeDefined();    // REC 405
+    expect(getBatteryById('bat-lg1')).toBeDefined();             // LG RESU16H (migrated)
+    expect(getBatteryById('bat-fp1')).toBeDefined();             // Fortress eVault (migrated)
+    expect(getInverterById('se-7600h')).toBeDefined();           // SolarEdge
   });
 });

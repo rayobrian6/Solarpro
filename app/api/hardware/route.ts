@@ -16,13 +16,16 @@ import { getAllUnifiedPanels, getAllUnifiedInverters } from '@/lib/equipment-lib
 export async function GET(req: NextRequest) {
   try {
     const libPanels    = db.getPanels();
-    const libInverters = db.getInverters();
     const mountings    = db.getMountings();
     const batteries    = db.getBatteries ? db.getBatteries() : [];
 
-    // Merge engineering DB + user library for panels and inverters
+    // Single source of truth = equipment-db. Panels merge the (now id-aligned)
+    // curated library with the engineering DB. Inverters are served straight from
+    // the engineering DB (getAllUnifiedInverters([])) — its 66 models cover every
+    // brand and carry the real MPPT electrical specs the planset/string-sizing
+    // need, so a design inverter pick always resolves in Engineering.
     const panels    = getAllUnifiedPanels(libPanels);
-    const inverters = getAllUnifiedInverters(libInverters);
+    const inverters = getAllUnifiedInverters([]);
 
     return NextResponse.json({ 
       success: true, 
