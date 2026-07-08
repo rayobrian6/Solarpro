@@ -13184,9 +13184,8 @@ function EngineeringPageInner() {
             ) : (() => {
               const _sheets = [
                 { label: 'PV-0  Cover Sheet',                         done: true },
-                { label: 'PV-1  Site Plan',                           done: !!config.address },
-                { label: 'PV-2  Roof Plan — Module Layout & Fire Setbacks', done: !!(projectLayout?.panels?.length > 0) },
-                { label: 'PV-2B  Array Geometry & String Layout',     done: !!(projectLayout?.panels?.length > 0) },
+                { label: 'PV-1  Site & Roof Plan — Module Layout & Fire Setbacks', done: !!config.address && !!(projectLayout?.panels?.length > 0) },
+                { label: 'PV-1B  Array Geometry & String Layout',     done: !!(projectLayout?.panels?.length > 0) },
                 { label: 'PV-3  Attachment Detail — Mounting & Cross-Section', done: true },
                 { label: 'PV-4A  NEC Compliance Sheet',               done: !!compliance.electrical },
                 { label: 'PV-4B  Conductor & Conduit Schedule',       done: true },

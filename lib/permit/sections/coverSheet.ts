@@ -94,7 +94,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     // prints, and the address caption is normal document flow below the image
     // so it can never silently fail to render.
     vicinityMapHtml = `
-        <div class=\"aerial-wrap\" style=\"position:relative;flex:1 1 auto;min-height:90px;overflow:hidden;\">
+        <div class=\"aerial-wrap\" style=\"position:relative;flex:1 1 auto;min-height:160px;overflow:hidden;\">
         <img src="${aerial.imageBase64}" style="position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
           <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-58%);text-align:center;\">
           <svg viewBox="0 0 36 46" width="26" height="34" style="display:block;margin:0 auto;">
@@ -113,7 +113,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
         <div style="border:var(--border);border-top:none;padding:2px 5px;font-size:7px;font-weight:700;letter-spacing:0.4px;text-align:center;">${escapeH(project.address || '')}${project.city ? ' — ' + escapeH(String(project.city).toUpperCase()) : ''}</div>`;
   } else {
     vicinityMapHtml = `
-      <div style="background:#e8e8e8;width:100%;height:120px;display:flex;align-items:center;justify-content:center;text-align:center;">
+      <div style="background:#e8e8e8;width:100%;height:160px;display:flex;align-items:center;justify-content:center;text-align:center;">
         <div class="f-sm fw7" style="letter-spacing:0.5px;">
           VICINITY MAP — ATTACH SITE PHOTOGRAPH OR SATELLITE IMAGE<br/>
           <span class="f-xs muted">${escapeH(project.address || '')}</span>
@@ -158,9 +158,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
   const sheets = [
     { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
-    { id: 'PV-1',  title: 'SITE PLAN — EQUIPMENT LAYOUT & VICINITY' },
-    { id: 'PV-2',  title: pv2Title(cad.systemType as SysType) },
-    { id: 'PV-2B', title: 'ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION' },
+    { id: 'PV-1',  title: pv2Title(cad.systemType as SysType) },
+    { id: 'PV-1B', title: 'ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION' },
     { id: 'PV-3',  title: pv3Title(cad.systemType as SysType) },
     { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
     { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },

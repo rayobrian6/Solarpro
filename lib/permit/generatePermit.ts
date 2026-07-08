@@ -28,7 +28,6 @@ import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
-import { pageSiteInformation } from './sections/sitePlan';
 import { pageArrayPrimary, pageArrayGeometry } from './sections/arrayPages';
 import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
@@ -837,9 +836,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // sheets can never desync pageNum/TOTAL or the cover index again.
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
-    (n, t) => pageSiteInformation(input, cad, n, t),                   // PV-1: Site Plan (all systems)
-    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-2: Roof / Ground / Fence (cad.systemType)
-    (n, t) => pageArrayGeometry(input, cad, n, t),                     // PV-2B: Array geometry (system-aware)
+    // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
+    // the roof/array drawing now carries the integrated site context (parcel,
+    // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.
+    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-1: Site & Roof / Ground / Fence (cad.systemType)
+    (n, t) => pageArrayGeometry(input, cad, n, t),                     // PV-1B: Array geometry (system-aware)
     (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Structural (cad.systemType)
     (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (all)
     (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (system-aware)

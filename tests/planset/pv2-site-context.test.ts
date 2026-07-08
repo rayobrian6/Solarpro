@@ -3,7 +3,8 @@ import { generatePermitHTML } from '@/lib/permit';
 import { roofProject } from '../../test-fixtures/roofProject';
 
 // Representative rectangular parcel around the roofProject building. Even WITH a
-// county-GIS parcel available, PV-2 must NOT carry a second plot-plan visual.
+// county-GIS parcel available, the PV-1 site & roof sheet must NOT carry a
+// second bolted-on plot-plan visual.
 const REP_PARCEL = {
   polygon: [
     { lat: 33.44820, lng: -112.07455 },
@@ -19,20 +20,20 @@ const REP_PARCEL = {
 function clone<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
 
 // Ray, 2026-07-08: the site/plot context (property line, street, driveway,
-// service equipment) belongs on the ONE integrated site drawing — PV-1
-// "SITE PLAN WITH ROOF PLAN" — matching the professional reference. PV-2 is
-// ONLY the to-scale module layout + fire setbacks. A separate plot-plan box
-// bolted onto PV-2 was removed; this guards it from ever coming back.
-describe('PV-2 carries NO separate site/plot-plan visual', () => {
+// service equipment) is drawn INTEGRATED into the ONE site & roof drawing —
+// now the combined PV-1 sheet (the standalone site plan was folded in) —
+// matching the professional reference. The site context lives in the roof
+// drawing's own frame, never a separate bolted-on plot-plan box.
+describe('PV-1 site & roof sheet carries NO separate plot-plan box', () => {
   it('omits any bolted-on plot inset even when a county-GIS parcel is present', () => {
     const withoutParcel = generatePermitHTML(clone(roofProject));
     const withParcelInput = clone(roofProject) as unknown as Record<string, unknown>;
     withParcelInput.aerialData = { parcel: REP_PARCEL };
     const withParcel = generatePermitHTML(withParcelInput as never);
 
-    // Both are full plansets with a PV-2 sheet.
-    expect(withoutParcel).toContain('PV-2');
-    expect(withParcel).toContain('PV-2');
+    // Both are full plansets with the combined PV-1 site & roof sheet.
+    expect(withoutParcel).toContain('PV-1');
+    expect(withParcel).toContain('PV-1');
 
     // NEVER a second plot-plan visual on the module-layout sheet — with or
     // without a parcel available.

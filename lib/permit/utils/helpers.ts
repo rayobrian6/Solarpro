@@ -36,10 +36,12 @@ export function sysTypeLabel(t: SysType): string {
   return 'ROOF-MOUNTED';
 }
 
+// Title for the combined PV-1 site & array sheet (the old standalone PV-1 site
+// plan was folded in 2026-07-08). Kept named pv2Title for call-site stability.
 export function pv2Title(t: SysType): string {
   if (t === 'solar_fence')  return 'SOLAR FENCE ELEVATION & PLAN';
-  if (t === 'ground_mount') return 'GROUND ARRAY PLAN';
-  return 'ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS';
+  if (t === 'ground_mount') return 'SITE & GROUND ARRAY PLAN';
+  return 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS';
 }
 
 export function pv3Title(t: SysType): string {

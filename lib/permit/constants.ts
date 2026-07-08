@@ -657,7 +657,13 @@ const PDF_PAGE_CONFIG = {
 // disconnect located on the building wall (survey-photo GPS or street-side
 // heuristic, the same locateEquipment PV-1 uses) and drawn as UM/MSP/AC tags
 // clamped just outside the roof footprint, keyed to a "SERVICE EQUIP" legend row.
-const PLANSET_ENGINE_VERSION = 47410;
+// 47411 (2026-07-08): FOLD PV-1 → drop a page ("less is more"). The standalone
+// site plan is retired; the array sheet now IS the site plan (integrated site
+// context) and is renamed PV-1 (was PV-2); array geometry → PV-1B (was PV-2B).
+// Statutory clearance notes (gas-meter 3', vents, knife-blade disconnect)
+// migrated into the shared construction notes → cover General Notes. Cover
+// vicinity aerial enlarged. Downstream sheet indices renumbered set-wide.
+const PLANSET_ENGINE_VERSION = 47411;
 
 
 

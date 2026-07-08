@@ -9,7 +9,7 @@ describe('permit generation smoke', () => {
     const html = generatePermitHTML(JSON.parse(JSON.stringify(roofProject)));
     expect(typeof html).toBe('string');
     expect(html.length).toBeGreaterThan(5000);
-    expect(html).toContain('PV-2');
-    expect(html).toContain('PV-2B');
+    expect(html).toContain('PV-1');
+    expect(html).toContain('PV-1B');
   });
 });

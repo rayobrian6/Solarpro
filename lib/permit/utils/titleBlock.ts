@@ -69,7 +69,7 @@ export function titleBlock(
       <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
       <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
       <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
-      <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-2|PV-2B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
+      <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-1B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
     </table>
     <div class="tbs-rev-hdr">REVISIONS</div>
     <table class="tb-table">
@@ -119,6 +119,11 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     `Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.`,
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
     `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
+    // Statutory site/clearance notes \u2014 migrated from the retired PV-1 site sheet
+    // (2026-07-08 fold) so they persist in the set's general notes.
+    `All electrical equipment \u2014 inverters, disconnects, main service panel, and junction/combiner boxes \u2014 shall be located a minimum of 3 ft from the gas meter supply and demand piping.`,
+    `Existing plumbing vents, skylights, and mechanical/roof vents shall not be covered, moved, re-routed, or relocated by the PV installation.`,
+    `A visible, lockable, labeled, knife-blade AC disconnect shall be located within 10 ft of the utility meter and accessible to utility personnel per NEC 690.13 and AHJ requirements.`,
     // FIX v47.295: Only include roof attachment / flashing notes for roof systems
     ...((input.project)?.systemType === 'fence' || input.project?.systemType === 'solar_fence'
       ? [

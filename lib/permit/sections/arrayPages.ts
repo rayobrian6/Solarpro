@@ -35,11 +35,10 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
     throw new Error(`[pageRoofPlan] getPrimaryView(${comp.primaryView}) returned empty SVG`);
   }
 
-  // ── Site/plot context lives on PV-1 (SITE PLAN WITH ROOF PLAN), the single
-  // integrated site drawing — property line, street, driveway (aerial), and
-  // service equipment are drawn there, matching the professional reference.
-  // PV-2 is ONLY the to-scale module layout + fire setbacks; no second
-  // plot-plan visual is bolted onto this sheet (removed 2026-07-08 per Ray).
+  // ── This IS the site plan now (PV-1). The standalone site sheet was folded
+  // in 2026-07-08: the roof drawing carries the integrated site context —
+  // property line, street, driveway (aerial), and service equipment — drawn
+  // by drawRoofPlan via drawSiteContextEls, matching the professional reference.
 
   // ── Secondary view (Step 6) ───────────────────────────────────────────────
   // Roof plan: no secondary strip (setbacks/obstructions integrated into primary)
@@ -47,7 +46,7 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2', 'ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-1', 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -76,7 +75,7 @@ export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: 
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2', 'GROUND ARRAY PLAN', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-1', 'SITE & GROUND ARRAY PLAN', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -84,7 +83,7 @@ export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: 
 
 
 export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
-  console.log('[PLANSET ENGINE] pageFencePlan — PV-2 fence elevation is PRIMARY view');
+  console.log('[PLANSET ENGINE] pageFencePlan — PV-1 fence elevation is PRIMARY view');
   const vr = validateSheetComposition('solar_fence', cad);
   if (!vr.valid) console.warn('[pageFencePlan] CAD warnings:', vr.errors);
 
@@ -110,7 +109,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2', 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-1', 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
     ${composeDrawPage(comp, primarySvg, secondarySvg)}
   </div>`;
 }
@@ -121,11 +120,11 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 // Detailed schematic showing array groupings, string assignments, row/col grid
 
 
-// PV-2B must show the STRING LAYOUT (a string-colored grouping schematic) -- a
-// DIFFERENT drawing from PV-2 s to-scale roof plan. A prior "professional CAD"
-// override here called drawingEngine.getArrayPlanFromCAD, the very renderer PV-2
-// uses via getPrimaryView(roof_plan), so PV-2 and PV-2B came out as literal
-// duplicates. Removed: PV-2B now renders its own schematicGridSvg below.
+// PV-1B must show the STRING LAYOUT (a string-colored grouping schematic) -- a
+// DIFFERENT drawing from PV-1's to-scale site & roof plan. A prior "professional CAD"
+// override here called drawingEngine.getArrayPlanFromCAD, the very renderer PV-1
+// uses via getPrimaryView(roof_plan), so PV-1 and PV-1B came out as literal
+// duplicates. Removed: PV-1B now renders its own schematicGridSvg below.
 
 export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system } = input;
@@ -490,7 +489,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2B', 'ARRAY GEOMETRY & STRING LAYOUT', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-1B', 'ARRAY GEOMETRY & STRING LAYOUT', pageNum, totalPages)}
     <!-- PIPELINE v47.343: PV-2B now uses draw-zone/data-zone layout -->
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->

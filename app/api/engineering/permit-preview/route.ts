@@ -11,22 +11,22 @@
 //   3. Wrap it in a minimal HTML shell and return it
 //
 // Sheet index (matches generatePermitHTML page assembly order exactly):
+// PV-1 standalone site plan folded into the array sheet 2026-07-08 — indices shifted.
 //   PV-0  → page index 0  (Cover Sheet)
-//   PV-1  → page index 1  (Site Information)
-//   PV-2  → page index 2  (Array Plan — Roof / Ground / Fence, system-routed)
-//   PV-2B → page index 3  (Array Geometry & String Layout)
-//   PV-3  → page index 4  (Structural Details — system-routed)
-//   PV-4A → page index 5  (NEC Compliance)
-//   PV-4B → page index 6  (Conductor Schedule)
-//   PV-4C → page index 7  (Structural Calculations — ASCE 7-22)
-//   PV-5  → page index 8  (Warning Labels)
-//   SCHED → page index 9  (Equipment Schedule)
-//   APP-A → page index 10 (Specification Sheets)
-//   CERT  → page index 11 (Engineering Certification)
-//   PE-1  → page index 12 (PE Structural Letter)
-//   E-1   → page index 13 (Single-Line Diagram)
-//   VAL-1 → page index 14 (Validation Summary)
-//   APP-CAD → page index 15 (CAD Preview Appendix, when generated)
+//   PV-1  → page index 1  (Site & Array Plan — Roof / Ground / Fence, system-routed)
+//   PV-1B → page index 2  (Array Geometry & String Layout)
+//   PV-3  → page index 3  (Structural Details — system-routed)
+//   PV-4A → page index 4  (NEC Compliance)
+//   PV-4B → page index 5  (Conductor Schedule)
+//   PV-4C → page index 6  (Structural Calculations — ASCE 7-22)
+//   PV-5  → page index 7  (Warning Labels)
+//   SCHED → page index 8  (Equipment Schedule)
+//   APP-A → page index 9  (Specification Sheets)
+//   CERT  → page index 10 (Engineering Certification)
+//   PE-1  → page index 11 (PE Structural Letter)
+//   E-1   → page index 12 (Single-Line Diagram)
+//   VAL-1 → page index 13 (Validation Summary)
+//   APP-CAD → page index 14 (CAD Preview Appendix, when generated)
 //
 // If no saved HTML exists the route returns a styled "not yet generated"
 // guidance page instead of an error.
@@ -42,27 +42,27 @@ export const runtime     = 'nodejs';
 export const maxDuration = 30;
 
 // ── Sheet ID → page index map (must match generatePermitHTML page order) ──────
-// v47.312: Sheet ID → page index map — must match generatePermitHTML() assembly order exactly.
+// Sheet ID → page index map — must match generatePermitHTML() assembly order exactly.
+// PV-1 standalone site plan folded into the array sheet 2026-07-08 — indices shifted down by 1.
 // Page indices (0-based):
-//   0=PV-0  1=PV-1  2=PV-2  3=PV-2B  4=PV-3  5=PV-4A  6=PV-4B  7=PV-4C
-//   8=PV-5  9=SCHED  10=APP-A  11=CERT  12=PE-1  13=E-1  14=VAL-1  15=APP-CAD
+//   0=PV-0  1=PV-1  2=PV-1B  3=PV-3  4=PV-4A  5=PV-4B  6=PV-4C
+//   7=PV-5  8=SCHED  9=APP-A  10=CERT  11=PE-1  12=E-1  13=VAL-1  14=APP-CAD
 const SHEET_PAGE_INDEX: Record<string, number> = {
   'PV-0':  0,   // Cover Sheet
-  'PV-1':  1,   // Site Information
-  'PV-2':  2,   // Array Plan (Roof / Ground / Fence — system-routed)
-  'PV-2B': 3,   // Array Geometry & String Layout
-  'PV-3':  4,   // Structural Details (system-routed)
-  'PV-4A': 5,   // NEC Compliance
-  'PV-4B': 6,   // Conductor Schedule
-  'PV-4C': 7,   // Structural Calculations (ASCE 7-22)
-  'PV-5':  8,   // Warning Labels
-  'SCHED': 9,   // Equipment Schedule
-  'APP-A': 10,  // Specification Sheets
-  'CERT':  11,  // Engineering Certification
-  'PE-1':  12,  // PE Structural Letter
-  'E-1':   13,  // Single-Line Diagram
-  'VAL-1': 14,  // Validation Summary
-  'APP-CAD': 15, // CAD Preview Appendix (non-authoritative)
+  'PV-1':  1,   // Site & Array Plan (Roof / Ground / Fence — system-routed)
+  'PV-1B': 2,   // Array Geometry & String Layout
+  'PV-3':  3,   // Structural Details (system-routed)
+  'PV-4A': 4,   // NEC Compliance
+  'PV-4B': 5,   // Conductor Schedule
+  'PV-4C': 6,   // Structural Calculations (ASCE 7-22)
+  'PV-5':  7,   // Warning Labels
+  'SCHED': 8,   // Equipment Schedule
+  'APP-A': 9,   // Specification Sheets
+  'CERT':  10,  // Engineering Certification
+  'PE-1':  11,  // PE Structural Letter
+  'E-1':   12,  // Single-Line Diagram
+  'VAL-1': 13,  // Validation Summary
+  'APP-CAD': 14, // CAD Preview Appendix (non-authoritative)
 };
 
 const VALID_SHEETS = Object.keys(SHEET_PAGE_INDEX);

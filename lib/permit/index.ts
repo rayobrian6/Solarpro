@@ -8,7 +8,8 @@ export type { PermitInput, CanonicalInput, CanonicalSysType } from './types';
 
 // Section exports (for direct use / testing)
 export { pageCoverSheet } from './sections/coverSheet';
-export { pageSiteInformation, buildPv1Page, fetchAerialRoofData } from './sections/sitePlan';
+// pageSiteInformation / buildPv1Page retired 2026-07-08 (PV-1 folded into PV-1 site&roof sheet); fetchAerialRoofData still used by the permit route.
+export { fetchAerialRoofData } from './sections/sitePlan';
 export { pageRoofPlan, pageGroundArrayPlan, pageFencePlan, pageArrayGeometry, pageArrayPrimary } from './sections/arrayPages';
 export { pageRoofStructural, pageGroundStructural, pageFenceStructural, pageStructural, pageStructuralPrimary, pageEquipmentSchedule } from './sections/structuralPages';
 export { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
