@@ -9,7 +9,7 @@
 //   • AC branch circuits: IQ8 units connect to Q Cable trunk runs.
 //     Branch circuit breaker sizing: ceil(units × acCurrentPerUnit / 0.8)A.
 //     Typical 20A breaker: floor(20 × 0.8 / acCurrentPerUnit) units max.
-//   • IQ8+: 0.295kW AC, 1.21A AC output @ 240V. 16 units per 20A branch.
+//   • IQ8+: 0.295kW AC, 1.21A AC output @ 240V. 13 units per 20A branch.
 //   • IQ8M:  0.330kW AC, 1.39A AC output @ 240V. 11 units per 20A branch.
 //   • IQ8H:  0.380kW AC, 1.59A AC output @ 240V.  9 units per 20A branch.
 //   • IQ8A:  0.366kW AC, 1.53A AC output @ 240V. 10 units per 20A branch.

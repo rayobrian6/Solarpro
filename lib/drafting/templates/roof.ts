@@ -938,9 +938,9 @@ export function drawRoofPlan(
   // legend treat it separately from hard obstructions (vents/chimneys/etc.).
   const _canopyObs = roofObs.filter((o: any) => o.type === 'canopy');
   const _hardObs   = roofObs.filter((o: any) => o.type !== 'canopy');
-  // PV-2B is a CIRCUIT map — obstruction footprints/canopy hatch live on PV-2
-  // (they rendered as a giant faint circle mid-sheet under the wiring).
-  (isBranchColorMode ? [] : roofObs).forEach((o: any) => {
+  // Vents/obstructions render on BOTH sheets (Ray wants the vent/obstruction
+  // callouts on PV-1B too — a circuit can't route through a vent keep-out).
+  roofObs.forEach((o: any) => {
     const ox = toX(o.lng), oy = toY(o.lat);
     const rPx = Math.max(o.radiusFt * scale, 2.5);
     const kPx = Math.max((o.radiusFt + o.clearanceFt) * scale, rPx + 2.5);
@@ -985,17 +985,28 @@ export function drawRoofPlan(
   // the modules on compact multi-plane roofs (Ray 2026-07-08: "cluttering the
   // roof layout beyond recognition"). All that data already lives in the table,
   // so the roof only needs a small reference number. ──
+  // Plane badges OFF the plane, connected by a leader (Ray 2026-07-08: "number the
+  // planes off of the plane, a line stretching to the number"). Each badge is
+  // pushed just outside the roof bbox in the direction from the roof center to the
+  // plane's centroid (a bowtie's 4 facets fan out to 4 sides), with a thin leader
+  // from the centroid to the badge — declutters the roof, reads like a pro callout.
   const _panelPts = regPanels.map((p: any) => ({ x: toX(p.lng), y: toY(p.lat) }));
+  // Roof bbox in screen coords — computed here from toX/toY (the roofMinX/… consts
+  // aren't declared until the dimension section further down).
+  const _bMinX = toX(minLng), _bMaxX = toX(maxLng), _bMinY = toY(maxLat), _bMaxY = toY(minLat);
+  const _rcx = (_bMinX + _bMaxX) / 2, _rcy = (_bMinY + _bMaxY) / 2;
+  const _halfW = Math.max((_bMaxX - _bMinX) / 2, 1), _halfH = Math.max((_bMaxY - _bMinY) / 2, 1);
   planeLabels.forEach(L => {
-    // nudge the badge toward an OPEN spot near the centroid (clear of modules)
-    const _cands = [
-      { x: L.cx, y: L.cy },
-      { x: L.cx, y: L.cy - 15 }, { x: L.cx, y: L.cy + 15 },
-      { x: L.cx - 18, y: L.cy }, { x: L.cx + 18, y: L.cy },
-    ];
-    const _clear = _cands.find(c => !_panelPts.some(p => Math.abs(p.x - c.x) < 11 && Math.abs(p.y - c.y) < 11)) || _cands[0];
-    els.push(`<circle cx="${_clear.x.toFixed(1)}" cy="${_clear.y.toFixed(1)}" r="7" fill="rgba(255,255,255,0.95)" stroke="#1a1a1a" stroke-width="1.1"/>`);
-    els.push(drawText(_clear.x, _clear.y + 2.7, String(L.ri + 1), { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#1a1a1a' }));
+    let dx = L.cx - _rcx, dy = L.cy - _rcy;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) { dx = 0; dy = -1; }   // single/centered plane → push up
+    const dlen = Math.hypot(dx, dy) || 1;
+    dx /= dlen; dy /= dlen;
+    // distance from roof center to the bbox edge along (dx,dy), then a fixed lead-out
+    const tEdge = Math.min(dx !== 0 ? _halfW / Math.abs(dx) : Infinity, dy !== 0 ? _halfH / Math.abs(dy) : Infinity);
+    const bx = _rcx + dx * (tEdge + 17), by = _rcy + dy * (tEdge + 17);
+    els.push(`<line x1="${L.cx.toFixed(1)}" y1="${L.cy.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#1a1a1a" stroke-width="0.7"/>`);
+    els.push(`<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="7.5" fill="rgba(255,255,255,0.97)" stroke="#1a1a1a" stroke-width="1.1"/>`);
+    els.push(drawText(bx, by + 2.7, String(L.ri + 1), { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#1a1a1a' }));
   });
 
   // ── ROOF DESCRIPTION + ARRAY CALC tables (PV-2 only) ──────────────────────

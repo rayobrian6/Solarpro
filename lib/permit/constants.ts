@@ -683,7 +683,12 @@ const PDF_PAGE_CONFIG = {
 // outline) + "IQ8 MICROINVERTER" legend row + caption; the AC branch wires
 // daisy-chain them per circuit. Also matched leftReserve (280) on both sheets so
 // PV-1B frames at the same zoom/scale as PV-1 (was more zoomed at reserve 0).
-const PLANSET_ENGINE_VERSION = 47415;
+// 47416 (2026-07-08): PV-1B cleanup — un-gated vents/obstructions onto PV-1B
+// (a circuit can't route through a vent keep-out); plane numbers now sit OFF the
+// plane with a leader line to the facet centroid (both sheets), decluttering the
+// roof. Verified the micro string sizing matches Enphase IQ8 spec (IQ8+ = 13 per
+// 20A branch) and fixed a stale "16 units" comment (that was IQ7+, not IQ8+).
+const PLANSET_ENGINE_VERSION = 47416;
 
 
 
