@@ -58,40 +58,40 @@ export const defaultPanels: SolarPanel[] = [
   },
   // ── SunPower ──
   {
-    id: 'panel-sp1', manufacturer: 'SunPower', model: 'Maxeon 7 440W',
+    id: 'sp-maxeon7-440', manufacturer: 'SunPower', model: 'Maxeon 7 440W',
     wattage: 440, width: 1.046, height: 1.812, efficiency: 22.8,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.27,
     pricePerWatt: 0.52, warranty: 40, cellType: 'Maxeon IBC',
   },
   {
-    id: 'panel-sp2', manufacturer: 'SunPower', model: 'Maxeon 6 AC 400W',
+    id: 'sp-maxeon6-400', manufacturer: 'SunPower', model: 'Maxeon 6 AC 400W',
     wattage: 400, width: 1.046, height: 1.690, efficiency: 22.7,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.27,
     pricePerWatt: 0.48, warranty: 40, cellType: 'Maxeon IBC',
   },
   // ── REC Group ──
   {
-    id: 'panel-rec1', manufacturer: 'REC Group', model: 'Alpha Pure-R 430W',
+    id: 'rec-alpha-pure-430', manufacturer: 'REC Group', model: 'Alpha Pure-R 430W',
     wattage: 430, width: 1.016, height: 1.821, efficiency: 23.2,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.24,
     pricePerWatt: 0.44, warranty: 25, cellType: 'HJT',
   },
   {
-    id: 'panel-rec2', manufacturer: 'REC Group', model: 'TwinPeak 5 405W',
+    id: 'rec-alpha-pure-405', manufacturer: 'REC Group', model: 'TwinPeak 5 405W',
     wattage: 405, width: 1.016, height: 1.821, efficiency: 21.9,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.26,
     pricePerWatt: 0.36, warranty: 25, cellType: 'Mono PERC',
   },
   // ── Panasonic / EverVolt ──
   {
-    id: 'panel-pan1', manufacturer: 'Panasonic', model: 'EverVolt HK Black 410W',
+    id: 'pan-evervolt-410', manufacturer: 'Panasonic', model: 'EverVolt HK Black 410W',
     wattage: 410, width: 1.052, height: 1.765, efficiency: 22.2,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.26,
     pricePerWatt: 0.45, warranty: 25, cellType: 'HIT',
   },
   // ── Jinko Solar ──
   {
-    id: 'panel-jk1', manufacturer: 'Jinko Solar', model: 'Tiger Neo N-type 580W',
+    id: 'jinko-tiger-neo-580', manufacturer: 'Jinko Solar', model: 'Tiger Neo N-type 580W',
     wattage: 580, width: 1.134, height: 2.278, efficiency: 22.4,
     bifacial: true, bifacialFactor: 1.15, temperatureCoeff: -0.29,
     pricePerWatt: 0.28, warranty: 30, cellType: 'TOPCon N-type',
@@ -110,7 +110,7 @@ export const defaultPanels: SolarPanel[] = [
   },
   // ── Canadian Solar ──
   {
-    id: 'panel-cs1', manufacturer: 'Canadian Solar', model: 'HiKu7 Bifacial 600W',
+    id: 'cs-hiku7-600', manufacturer: 'Canadian Solar', model: 'HiKu7 Bifacial 600W',
     wattage: 600, width: 1.303, height: 2.384, efficiency: 21.9,
     bifacial: true, bifacialFactor: 1.20, temperatureCoeff: -0.34,
     pricePerWatt: 0.26, warranty: 25, cellType: 'Mono PERC',
@@ -129,7 +129,7 @@ export const defaultPanels: SolarPanel[] = [
   },
   // ── LONGi Solar ──
   {
-    id: 'panel-lo1', manufacturer: 'LONGi Solar', model: 'Hi-MO 6 580W',
+    id: 'longi-himo6-580', manufacturer: 'LONGi Solar', model: 'Hi-MO 6 580W',
     wattage: 580, width: 1.134, height: 2.278, efficiency: 22.4,
     bifacial: true, bifacialFactor: 1.15, temperatureCoeff: -0.29,
     pricePerWatt: 0.25, warranty: 30, cellType: 'HPBC',
@@ -142,7 +142,7 @@ export const defaultPanels: SolarPanel[] = [
   },
   // ── Trina Solar ──
   {
-    id: 'panel-tr1', manufacturer: 'Trina Solar', model: 'Vertex S+ 435W',
+    id: 'trina-vertex-s-435', manufacturer: 'Trina Solar', model: 'Vertex S+ 435W',
     wattage: 435, width: 1.096, height: 1.754, efficiency: 22.6,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.30,
     pricePerWatt: 0.30, warranty: 25, cellType: 'TOPCon N-type',
@@ -155,7 +155,7 @@ export const defaultPanels: SolarPanel[] = [
   },
   // ── Q CELLS ──
   {
-    id: 'panel-qc1', manufacturer: 'Q CELLS', model: 'Q.PEAK DUO BLK ML-G10+ 400W',
+    id: 'qcells-peak-duo-400', manufacturer: 'Q CELLS', model: 'Q.PEAK DUO BLK ML-G10+ 400W',
     wattage: 400, width: 1.024, height: 1.740, efficiency: 22.4,
     bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.34,
     pricePerWatt: 0.32, warranty: 25, cellType: 'Mono PERC',
@@ -168,7 +168,7 @@ export const defaultPanels: SolarPanel[] = [
   },
   // ── Silfab ──
   {
-    id: 'panel-sf1', manufacturer: 'Silfab Solar', model: 'SIL-430 BG',
+    id: 'silfab-sil430', manufacturer: 'Silfab Solar', model: 'SIL-430 BG',
     wattage: 430, width: 1.048, height: 1.879, efficiency: 21.8,
     bifacial: true, bifacialFactor: 1.12, temperatureCoeff: -0.30,
     pricePerWatt: 0.38, warranty: 30, cellType: 'Mono PERC',
