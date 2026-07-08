@@ -192,6 +192,16 @@ export function drawSiteContextEls(
   const polyStr = (b: FakePt[]) => b.map(p => { const q = px(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
   const inRoof = (lng: number, lat: number) =>
     lng >= roof.minLng && lng <= roof.maxLng && lat >= roof.minLat && lat <= roof.maxLat;
+  // De-noise / subject emphasis: fade discrete features (neighbor buildings,
+  // trees) by distance from the subject so its immediate context reads crisp and
+  // the far complex recedes to context. 1.0 near → 0.4 far.
+  const _rcLng = (roof.minLng + roof.maxLng) / 2, _rcLat = (roof.minLat + roof.maxLat) / 2;
+  const _rHalf = Math.max(roof.maxLng - roof.minLng, roof.maxLat - roof.minLat) / 2 || 20;
+  const fadeAt = (lng: number, lat: number) => {
+    const d = Math.hypot(lng - _rcLng, lat - _rcLat);
+    const near = _rHalf * 1.8, far = _rHalf * 3.6;
+    return d <= near ? 1 : d >= far ? 0.4 : 1 - 0.6 * (d - near) / (far - near);
+  };
 
   // ── SOFTSCAPE base: lawn / pervious (light green), drawn UNDER everything so
   // the site reads as landscape, not a gray hardscape sea (Nearmap AI). ──
@@ -251,7 +261,7 @@ export function drawSiteContextEls(
     const cLat = b.reduce((s, p) => s + p.lat, 0) / b.length;
     if (inRoof(cLng, cLat)) continue; // subject building — roof draws over it
     const pts = b.map(p => { const q = px(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
-    els.push(`<polygon points="${pts}" fill="#f1f3f5" stroke="#7f8894" stroke-width="1.0"/>`);
+    els.push(`<polygon points="${pts}" fill="#f1f3f5" stroke="#7f8894" stroke-width="1.0" opacity="${fadeAt(cLng, cLat).toFixed(2)}"/>`);
     drewBuilding = true;
   }
   if (drewBuilding) legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#f1f3f5" stroke="#7f8894" stroke-width="1.0"/>`, label: 'EXISTING BUILDING' });
@@ -265,8 +275,10 @@ export function drawSiteContextEls(
     for (const t of site.trees) {
       const over = t.some(p => p.lng >= roof.minLng - rPad && p.lng <= roof.maxLng + rPad && p.lat >= roof.minLat - rPad && p.lat <= roof.maxLat + rPad);
       if (over) shades = true;
+      const tcLng = t.reduce((s, p) => s + p.lng, 0) / t.length, tcLat = t.reduce((s, p) => s + p.lat, 0) / t.length;
+      const tOp = over ? 1 : fadeAt(tcLng, tcLat);   // shading trees never fade
       const pts = t.map(p => { const q = px(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
-      els.push(`<polygon points="${pts}" fill="rgba(120,165,102,0.34)" stroke="${over ? '#b45309' : '#5f8a4a'}" stroke-width="${over ? 1.1 : 0.7}"${over ? ' stroke-dasharray="3 2"' : ''}/>`);
+      els.push(`<polygon points="${pts}" fill="rgba(120,165,102,${(0.34 * tOp).toFixed(2)})" stroke="${over ? '#b45309' : '#5f8a4a'}" stroke-width="${over ? 1.1 : 0.7}" stroke-opacity="${tOp.toFixed(2)}"${over ? ' stroke-dasharray="3 2"' : ''}/>`);
     }
     legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="rgba(120,165,102,0.34)" stroke="#5f8a4a" stroke-width="0.7"/>`, label: 'TREE CANOPY (NEARMAP AI)' });
     if (shades) {
@@ -330,20 +342,62 @@ export function drawSiteContextEls(
       }
     }
 
-    // Closest building→property-line approach (ft) — a site-plan setback datum.
-    let minFt = Infinity;
-    const bcorners: FakePt[] = [
-      { lat: roof.minLat, lng: roof.minLng }, { lat: roof.minLat, lng: roof.maxLng },
-      { lat: roof.maxLat, lng: roof.maxLng }, { lat: roof.maxLat, lng: roof.minLng },
+    // ── SETBACK DIMENSIONS — building side → nearest property line, per side.
+    // Ray-cast outward from each roof edge to the nearest parcel edge; draw a
+    // dimension line + distance where it FITS (≤70 ft) — normal home lots get
+    // front/side/rear dims; a big shared lot (P/L far off-frame) draws none and
+    // falls back to the closest-approach note. All APPROXIMATE (county GIS). ──
+    const cross = (ax: number, ay: number, bx: number, by: number) => ax * by - ay * bx;
+    const rayHit = (sx: number, sy: number, dx: number, dy: number): number | null => {
+      let best = Infinity;
+      for (let i = 0; i < n; i++) {
+        const a = P[i], b = P[(i + 1) % n];
+        const ex = b.lng - a.lng, ey = b.lat - a.lat;
+        const denom = cross(dx, dy, ex, ey);
+        if (Math.abs(denom) < 1e-9) continue;
+        const apx = a.lng - sx, apy = a.lat - sy;
+        const t1 = cross(apx, apy, ex, ey) / denom;   // dist along ray (ft)
+        const t2 = cross(apx, apy, dx, dy) / denom;   // param along edge
+        if (t1 > 0.5 && t2 >= 0 && t2 <= 1 && t1 < best) best = t1;
+      }
+      return isFinite(best) ? best : null;
+    };
+    const cLng = (roof.minLng + roof.maxLng) / 2, cLat = (roof.minLat + roof.maxLat) / 2;
+    const sides: Array<[number, number, number, number]> = [
+      [roof.minLng, cLat, -1, 0], [roof.maxLng, cLat, 1, 0],   // W, E
+      [cLng, roof.minLat, 0, -1], [cLng, roof.maxLat, 0, 1],   // S, N
     ];
-    for (const v of bcorners) for (let i = 0; i < n; i++) {
-      const d = ptSegDist(v, P[i], P[(i + 1) % n]); // fake-deg = ft
-      if (d < minFt) minFt = d;
+    let dimsDrawn = 0;
+    for (const [sx, sy, dx, dy] of sides) {
+      const d = rayHit(sx, sy, dx, dy);
+      if (d == null || d < 1 || d > 70) continue;   // skip: no P/L in range (fits typical lots only)
+      const s = px({ lat: sy, lng: sx }), e = px({ lat: sy + dy * d, lng: sx + dx * d });
+      let ux = e.x - s.x, uy = e.y - s.y; const L = Math.hypot(ux, uy) || 1; ux /= L; uy /= L;
+      const tx = -uy * 2.5, ty = ux * 2.5;   // tick perpendicular
+      els.push(`<line x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${e.x.toFixed(1)}" y2="${e.y.toFixed(1)}" stroke="#2b2f36" stroke-width="0.6"/>`);
+      els.push(`<line x1="${(s.x - tx).toFixed(1)}" y1="${(s.y - ty).toFixed(1)}" x2="${(s.x + tx).toFixed(1)}" y2="${(s.y + ty).toFixed(1)}" stroke="#2b2f36" stroke-width="0.6"/>`);
+      els.push(`<line x1="${(e.x - tx).toFixed(1)}" y1="${(e.y - ty).toFixed(1)}" x2="${(e.x + tx).toFixed(1)}" y2="${(e.y + ty).toFixed(1)}" stroke="#2b2f36" stroke-width="0.6"/>`);
+      const mx = (s.x + e.x) / 2, my = (s.y + e.y) / 2;
+      els.push(`<text x="${mx.toFixed(1)}" y="${(my - 1.5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.5" paint-order="stroke">${Math.round(d)}'</text>`);
+      dimsDrawn++;
     }
-    if (isFinite(minFt) && minFt > 0.5) {
-      const bx = toX((roof.minLng + roof.maxLng) / 2);
-      els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.minLat) + 12).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.2" fill="#555" stroke="#fff" stroke-width="1.4" paint-order="stroke">BLDG → P/L ~${Math.round(minFt)}' (APPROX — COUNTY GIS)</text>`);
+    if (!dimsDrawn) {
+      // Big/shared lot — P/L off-frame; report the closest approach instead.
+      let minFt = Infinity;
+      const bcorners: FakePt[] = [
+        { lat: roof.minLat, lng: roof.minLng }, { lat: roof.minLat, lng: roof.maxLng },
+        { lat: roof.maxLat, lng: roof.maxLng }, { lat: roof.maxLat, lng: roof.minLng },
+      ];
+      for (const v of bcorners) for (let i = 0; i < n; i++) {
+        const d = ptSegDist(v, P[i], P[(i + 1) % n]);
+        if (d < minFt) minFt = d;
+      }
+      if (isFinite(minFt) && minFt > 0.5) {
+        const bx = toX(cLng);
+        els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.minLat) + 12).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.2" fill="#555" stroke="#fff" stroke-width="1.4" paint-order="stroke">BLDG → P/L ~${Math.round(minFt)}' (APPROX — COUNTY GIS)</text>`);
+      }
     }
+    if (dimsDrawn) legend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#2b2f36" stroke-width="0.6"/><line x1="0" y1="-2.5" x2="0" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/><line x1="14" y1="-2.5" x2="14" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/>`, label: 'SETBACK (APPROX)' });
   }
 
   return { els, legend };

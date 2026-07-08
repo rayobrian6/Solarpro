@@ -647,7 +647,13 @@ const PDF_PAGE_CONFIG = {
 // (site reads as landscape, not a gray hardscape sea) and tree canopies as
 // semi-transparent green; a canopy reaching the array is outlined amber + noted
 // (SHADING — FIELD VERIFY). Same cached AI response, no extra parcel.
-const PLANSET_ENGINE_VERSION = 47408;
+// 47409 (2026-07-08): SETBACK DIMS + SUBJECT EMPHASIS. (1) Setback dimensions —
+// ray-cast from each building side to the nearest property line; draw a dim line
+// + distance where it fits (≤70 ft, so normal home lots get front/side/rear
+// setbacks; big shared lots skip and keep the closest-approach note). (2) De-
+// noise — neighbor buildings + non-shading trees fade with distance from the
+// subject so it + its immediate context read crisp and the far complex recedes.
+const PLANSET_ENGINE_VERSION = 47409;
 
 
 
