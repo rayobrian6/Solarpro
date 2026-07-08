@@ -534,6 +534,15 @@ export function drawRoofPlan(
   const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
   const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
+  // PV-1B circuit sheet: map each branch color → its circuit number (1-based), in
+  // the order arrayPages assigned them (first appearance = B1..Bn = legend order).
+  const branchIndexByColor = new Map<string, number>();
+  if (isBranchColorMode && panelColorById) {
+    for (const c of panelColorById.values()) {
+      if (!branchIndexByColor.has(c)) branchIndexByColor.set(c, branchIndexByColor.size);
+    }
+  }
+
   // Reference-style modules: WHITE rectangle, fine dark-blue frame, attachment
   // dots at the rail-foot quarter points. Each module is ROTATED to its plane's
   // fall line (portrait long axis runs up-slope) — drawing every module
@@ -555,9 +564,21 @@ export function drawRoofPlan(
     const gOpen = rot > 1 && rot < 179
       ? `<g transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">` : '<g>';
 
-    const branchFill = panelColorById?.get(p.id);
-    if (branchFill) {
-      els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/></g>`);
+    const branchColor = panelColorById?.get(p.id);
+    if (branchColor) {
+      // PV-1B circuit sheet (Cannon-style): a CLEAN uniform module outline — the
+      // thin colored CIRCUIT wires (drawn below) carry branch identity, not a
+      // garish solid fill. A small circuit number in the branch color ties each
+      // module to its circuit. Drawn UPRIGHT (outside the rotate group) so the
+      // number stays readable on E/W (rotated) planes.
+      const cNum = (branchIndexByColor.get(branchColor) ?? 0) + 1;
+      // Small circuit tag, capped so it never dominates the module (a big number
+      // read as a module label, not a circuit id). Sits just below the module's
+      // top edge, upright, clear of the center wire line.
+      const numFs = Math.max(Math.min(Math.min(pw, ph) * 0.22, 9), 4.2);
+      const tagY = py - ph * 0.5 + numFs + 1.5;
+      els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/></g>`);
+      els.push(`<text x="${px.toFixed(1)}" y="${tagY.toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}" opacity="0.9">${cNum}</text>`);
     } else {
       // ── System-aware rail + foot logic ──
       // RAIL-LESS (RT-Mini etc.): 4 mounts under the module's long-side frame
@@ -859,11 +880,11 @@ export function drawRoofPlan(
           // THROUGH other branches' modules (unbuildable as drawn).
           const route = bestRoute(a, b);
           const midPts = route.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-          els.push(`<polyline points="${midPts}" fill="none" stroke="#fff" stroke-width="4.0" opacity="0.85" stroke-dasharray="6 4"/>`);
-          els.push(`<polyline points="${midPts}" fill="none" stroke="${g.color}" stroke-width="2.2" stroke-dasharray="6 4"/>`);
+          els.push(`<polyline points="${midPts}" fill="none" stroke="#fff" stroke-width="2.8" opacity="0.9" stroke-dasharray="5 3"/>`);
+          els.push(`<polyline points="${midPts}" fill="none" stroke="${g.color}" stroke-width="1.5" stroke-dasharray="5 3"/>`);
         } else {
-          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="4.0" opacity="0.85"/>`);
-          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="2.2"/>`);
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#fff" stroke-width="2.8" opacity="0.9"/>`);
+          els.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${g.color}" stroke-width="1.5"/>`);
         }
       }
       const h = pts[0];
@@ -877,8 +898,8 @@ export function drawRoofPlan(
       // south rows on its way to the JB.
       const hrRoute = bestRoute(tail, { x: jbX, y: jbY });
       const hr = hrRoute.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-      els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="3.4" opacity="0.8" stroke-dasharray="4 3"/>`);
-      els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="1.7" stroke-dasharray="4 3"/>`);
+      els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.85" stroke-dasharray="3 2"/>`);
+      els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="1.3" stroke-dasharray="3 2"/>`);
     });
 
     // Branch TERMINUS — JB symbol where the homeruns land, honest conduit note
@@ -1328,7 +1349,23 @@ export function drawRoofPlan(
   }
   // Branch-color mode (PV-1B): the HTML draw-zone header already titles the sheet
   // ("CIRCUIT LAYOUT — n MODULES / m BRANCHES"), so we DON'T repeat a title banner
-  // inside the drawing — it read as an orphaned watermark in the upper-left.
+  // inside the drawing. Instead, a small Cannon-style CIRCUIT LEGEND keys the thin
+  // colored circuit wires to their circuit numbers (top-left, over the margin).
+  if (isBranchColorMode && branchIndexByColor.size > 0) {
+    const circuits = [...branchIndexByColor.entries()].sort((a, b) => a[1] - b[1]);
+    const lx = dz.x + 10, ly = zones.dims.top + 12;
+    const rowH = 10.5, boxW = 98, boxH = 22 + circuits.length * rowH;
+    els.push(`<rect x="${lx}" y="${ly}" width="${boxW}" height="${boxH.toFixed(1)}" fill="rgba(255,255,255,0.95)" stroke="#000" stroke-width="0.8"/>`);
+    els.push(drawText(lx + 6, ly + 12, 'CIRCUIT LEGEND', { anchor: 'start', fontSize: 6.6, fontWeight: 'bold', fill: '#000' }));
+    els.push(`<line x1="${lx}" y1="${(ly + 15).toFixed(1)}" x2="${lx + boxW}" y2="${(ly + 15).toFixed(1)}" stroke="#000" stroke-width="0.5"/>`);
+    circuits.forEach(([color, idx]) => {
+      const ry = ly + 15 + 10 + idx * rowH;
+      els.push(`<line x1="${lx + 7}" y1="${ry.toFixed(1)}" x2="${lx + 27}" y2="${ry.toFixed(1)}" stroke="${color}" stroke-width="2.2"/>`);
+      els.push(`<circle cx="${(lx + 17).toFixed(1)}" cy="${ry.toFixed(1)}" r="2.4" fill="#fff" stroke="${color}" stroke-width="0.8"/>`);
+      els.push(`<text x="${(lx + 17).toFixed(1)}" y="${(ry + 1.9).toFixed(1)}" text-anchor="middle" font-size="4.6" font-weight="700" fill="${color}">${idx + 1}</text>`);
+      els.push(drawText(lx + 33, (ry + 2.2), `CIRCUIT ${idx + 1}`, { anchor: 'start', fontSize: 6, fill: '#111' }));
+    });
+  }
 
   // (Branch legend overlay REMOVED — it duplicated the data-zone BRANCH LEGEND
   //  table and its opaque box painted straight over the viewport title, which

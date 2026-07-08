@@ -669,7 +669,11 @@ const PDF_PAGE_CONFIG = {
 // bold (the sheet's hero); fire-access pathway labels dropped (they live on
 // PV-1); and the drawing now frames the ARRAY (modules + margin) instead of the
 // whole roof plane, so a small array no longer renders tiny in a sea of white.
-const PLANSET_ENGINE_VERSION = 47412;
+// 47413 (2026-07-08): PV-1B redesigned to the CANNON PE-set style (Ray's ref).
+// Modules are no longer garish solid branch-color blocks — they're clean uniform
+// white outlines (like PV-1), the branch identity carried by THIN colored circuit
+// WIRES + a small circuit number per module + an in-drawing CIRCUIT LEGEND box.
+const PLANSET_ENGINE_VERSION = 47413;
 
 
 
