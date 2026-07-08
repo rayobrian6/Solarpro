@@ -5,9 +5,11 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, handleRouteDbError, getDbReady, isValidUUID} from '@/lib/db-neon';
+import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, handleRouteDbError, getDbReady, isValidUUID, upsertSelectedEquipment } from '@/lib/db-neon';
 import { syncProjectPipeline } from '@/lib/engineering/syncPipeline';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { getPanelById } from '@/lib/equipment-db';
+import { equipmentPanelToTypesPanel, applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -123,6 +125,42 @@ export async function POST(req: NextRequest, context: RouteContext) {
       } catch (syncErr) {
         console.error('[layout/route] Failed to sync project system_type (non-critical):', syncErr);
       }
+    }
+
+    // ── Full-duplex Design→Engineering: propagate a DESIGN panel change ─────────
+    // The design auto-save is the reliable persist path (the production route only
+    // fires when kW changes). When the designer changes the PANEL, flow it into (1)
+    // the canonical selected_equipment store (design's source of truth, also drives
+    // the pipeline rebuild below) and (2) the saved engineering_config's per-string
+    // panelId, so the Engineering page reflects it on next load. Guarded on an
+    // ACTUAL change vs the previous design panel, so merely moving panels never
+    // clobbers a deliberate engineering-only panel choice. Non-fatal.
+    try {
+      const newPanelId = designElectrical?.panelId as string | undefined;
+      const prevPanelId = (existingLayout as { designElectrical?: { panelId?: string } } | null)?.designElectrical?.panelId;
+      if (newPanelId && newPanelId !== prevPanelId) {
+        const panel = getPanelById(newPanelId);
+        if (panel) {
+          await upsertSelectedEquipment(projectId, user.id, {
+            panelId: panel.id,
+            panel: equipmentPanelToTypesPanel(panel),
+            source: 'design',
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        const updatedCfg = applyPanelToEngineeringConfig(project.engineeringConfig, newPanelId);
+        if (updatedCfg) {
+          const sql = await getDbReady();
+          await sql`
+            UPDATE projects
+            SET engineering_config = ${JSON.stringify(updatedCfg)}::jsonb, engineering_updated_at = NOW()
+            WHERE id = ${projectId} AND user_id = ${user.id} AND deleted_at IS NULL
+          `;
+        }
+        console.log('[layout/route] design panel change propagated', { projectId, newPanelId, engConfigUpdated: !!updatedCfg });
+      }
+    } catch (propErr: unknown) {
+      console.warn('[layout/route] design panel propagation skipped (non-fatal):', (propErr as Error)?.message);
     }
 
     // Save version snapshot (async, non-blocking for response).

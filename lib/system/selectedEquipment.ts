@@ -95,6 +95,37 @@ export function batterySystemToBattery(b: BatterySystem): Battery {
 }
 
 /**
+ * Reciprocal (Design→Engineering): when the designer changes the panel, update a
+ * saved engineering ProjectConfig's per-string panelId to match, preserving all
+ * other engineering work (string layout, wiring, inverters, battery). Returns the
+ * updated config, or null when there's nothing to change (no config, no strings,
+ * or every string already on this panel — so the caller skips the DB write and a
+ * legitimate engineering-only panel choice is never clobbered by an unrelated
+ * design save).
+ */
+export function applyPanelToEngineeringConfig(
+  config: unknown,
+  panelId: string,
+): Record<string, unknown> | null {
+  if (!config || typeof config !== 'object' || !panelId) return null;
+  const cfg = config as { inverters?: Array<{ strings?: Array<{ panelId?: string }> }> };
+  if (!Array.isArray(cfg.inverters)) return null;
+  let changed = false;
+  const inverters = cfg.inverters.map(inv => {
+    if (!inv || !Array.isArray(inv.strings)) return inv;
+    return {
+      ...inv,
+      strings: inv.strings.map(s => {
+        if (s && s.panelId !== panelId) { changed = true; return { ...s, panelId }; }
+        return s;
+      }),
+    };
+  });
+  if (!changed) return null;
+  return { ...(config as Record<string, unknown>), inverters };
+}
+
+/**
  * Build a canonical patch from the DESIGN side (Design Studio persist path),
  * where panel/inverter are already resolved full records. Keeps the design as a
  * live writer of the canonical store so a later design edit is never shadowed by
