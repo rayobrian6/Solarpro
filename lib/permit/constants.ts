@@ -653,7 +653,11 @@ const PDF_PAGE_CONFIG = {
 // setbacks; big shared lots skip and keep the closest-approach note). (2) De-
 // noise — neighbor buildings + non-shading trees fade with distance from the
 // subject so it + its immediate context read crisp and the far complex recedes.
-const PLANSET_ENGINE_VERSION = 47409;
+// 47410 (2026-07-08): EQUIPMENT ON THE SITE PLAN (roadmap #4) — meter/MSP/AC
+// disconnect located on the building wall (survey-photo GPS or street-side
+// heuristic, the same locateEquipment PV-1 uses) and drawn as UM/MSP/AC tags
+// clamped just outside the roof footprint, keyed to a "SERVICE EQUIP" legend row.
+const PLANSET_ENGINE_VERSION = 47410;
 
 
 

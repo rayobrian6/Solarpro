@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { latLngToXY } from '@/lib/cad/geometry';
+import { locateEquipment } from '@/lib/permit/utils/equipmentLocator';
 
 const M_TO_FT = 3.280_839_895;
 const FAKE_DEG_OFFSET = 10; // must match lib/cad/adapter.ts xyToFakeDeg
@@ -44,6 +45,7 @@ export interface SiteContext {
   roadSurfaces: FakePt[][];
   lawn: FakePt[][];                 // grass / pervious softscape (Nearmap)
   trees: FakePt[][];                // tall vegetation — shading (Nearmap)
+  equipment: Array<{ kind: string; pt: FakePt; provenance: string }>;   // UM/MSP/AC on the wall
   source: string;                   // e.g. "County GIS" / "Nearmap AI"
   hasNearmap: boolean;              // Nearmap surfaces drove the site layer
   streetName: string | null;
@@ -77,7 +79,11 @@ export function buildSiteContext(
         trees?: Array<Array<{ lat: number; lng: number }>>;
       };
     };
-    project?: { address?: string };
+    project?: {
+      address?: string; lat?: number; lng?: number;
+      roofPlanes?: Array<{ vertices?: Array<{ lat: number; lng: number }> }>;
+      surveyPhotoHints?: unknown[];
+    };
   } | null;
 
   const toFake = (v: { lat: number; lng: number }) => latLngToFakeDeg(v.lat, v.lng, originLat, originLng);
@@ -112,6 +118,17 @@ export function buildSiteContext(
   const streetName = (proj.address || '').split(',')[0]
     .replace(/^\s*\d+\s+/, '').replace(/\b(apt|unit|ste|#)\.?\s*\S*$/i, '').trim().toUpperCase() || null;
 
+  // ── Service equipment (meter / MSP / AC disconnect) located on the building
+  // wall from labeled survey photos (GPS) or the street-side heuristic, then
+  // projected into this frame — same locator PV-1 uses. ──
+  const realRing = clean((proj.roofPlanes ?? []).flatMap(rp => rp.vertices ?? []));
+  const realPin = (isFinite(proj.lat as number) && isFinite(proj.lng as number) && Math.abs(proj.lat as number) > 0.001)
+    ? { lat: proj.lat as number, lng: proj.lng as number } : null;
+  const equipment = realRing.length >= 3
+    ? locateEquipment(realRing, realPin, (proj.surveyPhotoHints ?? []) as never[])
+        .map(e => ({ kind: e.kind, pt: latLngToFakeDeg(e.lat, e.lng, originLat, originLng), provenance: e.provenance }))
+    : [];
+
   return {
     parcel,
     roads,
@@ -121,6 +138,7 @@ export function buildSiteContext(
     roadSurfaces,
     lawn,
     trees,
+    equipment,
     hasNearmap,
     streetName,
     apn: pi?.aerialData?.parcel?.apn ?? null,
@@ -398,6 +416,29 @@ export function drawSiteContextEls(
       }
     }
     if (dimsDrawn) legend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#2b2f36" stroke-width="0.6"/><line x1="0" y1="-2.5" x2="0" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/><line x1="14" y1="-2.5" x2="14" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/>`, label: 'SETBACK (APPROX)' });
+  }
+
+  // ── Service-equipment tags (UM / MSP / AC) on the wall — clamped just outside
+  // the roof footprint so they read; drawn last so nothing covers them. ──
+  if (site.equipment.length) {
+    const TAG: Record<string, string> = { utility_meter: 'UM', msp: 'MSP', ac_disconnect: 'AC' };
+    const clampOut = (p: FakePt): FakePt => {
+      let lng = p.lng, lat = p.lat;
+      if (lng > roof.minLng && lng < roof.maxLng && lat > roof.minLat && lat < roof.maxLat) {
+        const dL = lng - roof.minLng, dR = roof.maxLng - lng, dB = lat - roof.minLat, dT = roof.maxLat - lat;
+        const m = Math.min(dL, dR, dB, dT);
+        if (m === dL) lng = roof.minLng - 3.5; else if (m === dR) lng = roof.maxLng + 3.5;
+        else if (m === dB) lat = roof.minLat - 3.5; else lat = roof.maxLat + 3.5;
+      }
+      return { lat, lng };
+    };
+    for (const e of site.equipment) {
+      const q = px(clampOut(e.pt));
+      const tag = TAG[e.kind] ?? '?';
+      els.push(`<rect x="${(q.x - 4).toFixed(1)}" y="${(q.y - 4).toFixed(1)}" width="8" height="8" fill="#ffffff" stroke="#111" stroke-width="0.9"/>`);
+      els.push(`<text x="${q.x.toFixed(1)}" y="${(q.y + 2.2).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${tag.length > 2 ? '4.4' : '5.4'}" font-weight="900" fill="#111">${tag}</text>`);
+    }
+    legend.push({ swatch: `<rect x="3" y="-4" width="8" height="8" fill="#fff" stroke="#111" stroke-width="0.9"/>`, label: 'SERVICE EQUIP — UM/MSP/AC (FIELD VERIFY)' });
   }
 
   return { els, legend };
