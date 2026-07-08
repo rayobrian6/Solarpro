@@ -1570,55 +1570,71 @@ export function drawRoofStructural(
   els.push(drawText(dcx, dcy - dcr - 6, 'DETAIL 1/PV-3', { anchor: 'middle', fontSize: 8.5, fontWeight: '900', fill: '#000' }));
   els.push(drawText(dcx, dcy - dcr + 10, `ATTACHMENT DETAIL — ${isRaillessD ? 'DIRECT MOUNT' : 'RAIL MOUNT'}`, { anchor: 'middle', fontSize: 6.4, fill: '#555' }));
 
-  type ZLayerDef = { label: string; fill: string; stroke?: string; h: number; hatch?: string; hatchOp?: number };
-  const zLayers: ZLayerDef[] = [
-    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 40 },
-    { label: (isRaillessD ? 'MOUNT — ' : 'RAIL — ') + mountSys, fill: '#a0a0a0', stroke: '#444', h: 20 },
-    { label: isRaillessD ? `MOUNT BASE — ${lagLabelD}` : `L-FOOT — ${lagLabelD}`, fill: '#b8b8b8', stroke: '#444', h: 26, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
-    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 11 },
-    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 21 },
-    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 20, hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
-    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 56, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
-  ];
-  const _zTotal = zLayers.reduce((s, z) => s + z.h, 0);   // ~194 — fills the r=122 bubble
-  const dzW = 150;
-  const dzX = dcx - dzW / 2 - 14;         // stack just left of center; labels to the right
-  const dzY = dcy - _zTotal / 2;
-  const _lblPitch = _zTotal / zLayers.length;
-  const _lblX = dzX + dzW + 12;
-  const _layerTop: number[] = [];
-  let zy = dzY;
-  zLayers.forEach((zl, i) => {
-    _layerTop.push(zy);
-    els.push(drawRectFilled(dzX, zy, dzW, zl.h, zl.fill, zl.stroke || '#333', 0.9));
-    if (zl.hatch) {
-      els.push(`<rect x="${dzX.toFixed(1)}" y="${zy.toFixed(1)}" width="${dzW}" height="${zl.h}" fill="${zl.hatch}" opacity="${zl.hatchOp ?? 0.5}"/>`);
-    }
-    const _rowY = dzY + i * _lblPitch + 6;
-    els.push(`<line x1="${(dzX + dzW).toFixed(1)}" y1="${(zy + zl.h / 2).toFixed(1)}" x2="${(_lblX - 3).toFixed(1)}" y2="${(_rowY + 1).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
-    els.push(drawText(_lblX, _rowY, zl.label, { anchor: 'start', fontSize: 6.6, fill: '#222' }));
-    els.push(drawCalloutWithLeader(dzX - 26, _rowY - 2, dzX, zy + zl.h / 2, i + 1, 7));
-    zy += zl.h;
-  });
-
-  // ── Lag bolt: hex head at the mount base, shank down through flashing/shingle/
-  // sheathing, threaded INTO the rafter with the embedment dimensioned. ──
-  {
-    const bx = dzX + dzW * 0.40;
-    const headY = _layerTop[2];             // top of MOUNT BASE layer
-    const rafterTop = _layerTop[6];         // top of RAFTER layer
-    const tipY = rafterTop + Math.min(zLayers[6].h - 5, 24);
-    els.push(`<line x1="${bx.toFixed(1)}" y1="${headY.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${tipY.toFixed(1)}" stroke="#2b2f36" stroke-width="2"/>`);
-    els.push(`<rect x="${(bx - 4).toFixed(1)}" y="${(headY - 3.5).toFixed(1)}" width="8" height="4" fill="#2b2f36"/>`);
-    for (let t = rafterTop + 2; t < tipY; t += 2.6) {
-      els.push(`<line x1="${(bx - 2).toFixed(1)}" y1="${t.toFixed(1)}" x2="${(bx + 2).toFixed(1)}" y2="${(t + 1.3).toFixed(1)}" stroke="#2b2f36" stroke-width="0.5"/>`);
-    }
-    // embedment dimension (red)
-    els.push(`<line x1="${(bx + 9).toFixed(1)}" y1="${rafterTop.toFixed(1)}" x2="${(bx + 9).toFixed(1)}" y2="${tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
-    els.push(`<line x1="${(bx + 6).toFixed(1)}" y1="${rafterTop.toFixed(1)}" x2="${(bx + 12).toFixed(1)}" y2="${rafterTop.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
-    els.push(`<line x1="${(bx + 6).toFixed(1)}" y1="${tipY.toFixed(1)}" x2="${(bx + 12).toFixed(1)}" y2="${tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
-    els.push(drawText(bx + 14, (rafterTop + tipY) / 2 + 2, `${_embedD}" EMBED`, { anchor: 'start', fontSize: 5.4, fontWeight: 'bold', fill: '#cc0000' }));
+  // ── Mechanical attachment cross-section (real hardware assembly, not a flat
+  // colored layer-cake): module frame + clamp + mount + base plate + butyl
+  // flashing seated on shingle / sheathing / rafter, with the lag bolt (hex head
+  // + EPDM washer) driven into the rafter and the embedment dimensioned. ──
+  const _cx = dcx - 20;                     // assembly left of center; labels stack to the right
+  const roofW = 150;
+  const _rlx = _cx - roofW * 0.42;
+  const deckTop = dcy + 18;                 // roof surface (top of shingle)
+  const _shH = 9, _sheH = 12, _rafH = 60;
+  const _rafTop = deckTop + _shH + _sheH;
+  // rafter
+  els.push(`<rect x="${_rlx.toFixed(1)}" y="${_rafTop.toFixed(1)}" width="${roofW}" height="${_rafH}" fill="url(#rafter-wood)" stroke="#7a5a20" stroke-width="1"/>`);
+  els.push(`<rect x="${_rlx.toFixed(1)}" y="${_rafTop.toFixed(1)}" width="${roofW}" height="${_rafH}" fill="url(#hatch-wood)" opacity="0.5"/>`);
+  // sheathing (OSB)
+  els.push(`<rect x="${_rlx.toFixed(1)}" y="${(deckTop + _shH).toFixed(1)}" width="${roofW}" height="${_sheH}" fill="url(#rafter-wood)" stroke="#886030" stroke-width="0.8"/>`);
+  // shingle roof
+  els.push(`<rect x="${_rlx.toFixed(1)}" y="${deckTop.toFixed(1)}" width="${roofW}" height="${_shH}" fill="#b89060" stroke="#665030" stroke-width="0.8"/>`);
+  // butyl flashing pad
+  const _butW = 46;
+  els.push(`<rect x="${(_cx - _butW / 2).toFixed(1)}" y="${(deckTop - 4).toFixed(1)}" width="${_butW}" height="4" fill="#7fa8c8" stroke="#3a6a88" stroke-width="0.7"/>`);
+  // mount base plate (steel)
+  const _mbW = 34, _mbTop = deckTop - 4 - 6;
+  els.push(`<rect x="${(_cx - _mbW / 2).toFixed(1)}" y="${_mbTop.toFixed(1)}" width="${_mbW}" height="6" fill="#ccd0d6" stroke="#444" stroke-width="1"/>`);
+  els.push(`<rect x="${(_cx - _mbW / 2).toFixed(1)}" y="${_mbTop.toFixed(1)}" width="${_mbW}" height="6" fill="url(#hatch-steel)" opacity="0.5"/>`);
+  // mount upstand
+  const _armX = _cx + 4, _armW = 7, _armTop = _mbTop - 38;
+  els.push(`<rect x="${_armX.toFixed(1)}" y="${_armTop.toFixed(1)}" width="${_armW}" height="${(_mbTop - _armTop).toFixed(1)}" fill="#ccd0d6" stroke="#444" stroke-width="1"/>`);
+  els.push(`<rect x="${_armX.toFixed(1)}" y="${_armTop.toFixed(1)}" width="${_armW}" height="${(_mbTop - _armTop).toFixed(1)}" fill="url(#hatch-steel)" opacity="0.5"/>`);
+  // module frame (aluminum) + laminate
+  const _frTop = _armTop - 2, _frH = 20, _frL = _cx - 6, _frW = 60;
+  els.push(`<rect x="${_frL.toFixed(1)}" y="${_frTop.toFixed(1)}" width="${_frW}" height="${_frH}" fill="#e2e6ea" stroke="#555" stroke-width="1"/>`);
+  els.push(`<rect x="${(_frL - 3).toFixed(1)}" y="${(_frTop - 5).toFixed(1)}" width="${(_frW + 9)}" height="5" fill="#1a3f8a" stroke="#0a1e4a" stroke-width="0.8"/>`);
+  // clamp gripping the frame edge over the arm
+  els.push(`<path d="M ${(_armX - 2).toFixed(1)} ${(_armTop + 6).toFixed(1)} L ${(_armX - 2).toFixed(1)} ${(_frTop - 3).toFixed(1)} L ${(_frL + 12).toFixed(1)} ${(_frTop - 3).toFixed(1)} L ${(_frL + 12).toFixed(1)} ${(_frTop + 1).toFixed(1)} L ${(_armX + _armW + 2).toFixed(1)} ${(_frTop + 1).toFixed(1)} L ${(_armX + _armW + 2).toFixed(1)} ${(_armTop + 6).toFixed(1)} Z" fill="#9096a0" stroke="#333" stroke-width="0.9"/>`);
+  // lag bolt (hex head + EPDM washer, shank into rafter, threads, embedment)
+  const _boltX = _cx - 7, _tipY = _rafTop + Math.min(_rafH - 8, 26);
+  els.push(`<rect x="${(_boltX - 6).toFixed(1)}" y="${(_mbTop - 1).toFixed(1)}" width="12" height="2" fill="#333"/>`);
+  els.push(`<rect x="${(_boltX - 4).toFixed(1)}" y="${(_mbTop - 5).toFixed(1)}" width="8" height="4.5" fill="#2b2f36"/>`);
+  els.push(`<line x1="${_boltX.toFixed(1)}" y1="${(_mbTop - 1).toFixed(1)}" x2="${_boltX.toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#2b2f36" stroke-width="2.4"/>`);
+  for (let t = _rafTop + 2; t < _tipY; t += 3) {
+    els.push(`<line x1="${(_boltX - 2.5).toFixed(1)}" y1="${t.toFixed(1)}" x2="${(_boltX + 2.5).toFixed(1)}" y2="${(t + 1.6).toFixed(1)}" stroke="#2b2f36" stroke-width="0.6"/>`);
   }
+  const _edX = _boltX - 11;
+  els.push(`<line x1="${_edX.toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${_edX.toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
+  els.push(`<line x1="${(_edX - 3).toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${(_edX + 3).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
+  els.push(`<line x1="${(_edX - 3).toFixed(1)}" y1="${_tipY.toFixed(1)}" x2="${(_edX + 3).toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
+  els.push(drawText(_edX - 4, (_rafTop + _tipY) / 2 + 2, `${_embedD}"`, { anchor: 'end', fontSize: 5.6, fontWeight: 'bold', fill: '#cc0000' }));
+
+  // ── Leaders + numbered labels (stacked to the right of the circle) ──
+  const _callouts: Array<{ ax: number; ay: number; text: string }> = [
+    { ax: _frL + _frW - 8,     ay: _frTop - 3,                        text: `PV MODULE (${panelLenIn}"×${panelWidIn}")` },
+    { ax: _armX + _armW,       ay: _armTop + 5,                       text: `${mountSys} ${isRaillessD ? 'MOUNT + CLAMP' : 'RAIL + CLAMP'}` },
+    { ax: _cx + _mbW / 2 - 4,  ay: _mbTop + 3,                        text: `MOUNT BASE — ${lagLabelD}` },
+    { ax: _cx + _butW / 2 - 5, ay: deckTop - 2,                       text: 'BUTYL FLASHING' },
+    { ax: _rlx + roofW - 8,    ay: deckTop + _shH / 2,                text: `${roofType} SHINGLE` },
+    { ax: _rlx + roofW - 8,    ay: deckTop + _shH + _sheH / 2,        text: 'SHEATHING (5/8" OSB)' },
+    { ax: _rlx + roofW - 8,    ay: _rafTop + _rafH / 2,               text: `${rafterSz} RAFTER @ ${rafterSp}" O.C.` },
+  ];
+  const _clX = dcx + dcr - 6;
+  _callouts.forEach((c, i) => {
+    const _ly = dcy - 66 + i * 20;
+    els.push(`<line x1="${c.ax.toFixed(1)}" y1="${c.ay.toFixed(1)}" x2="${(_clX - 2).toFixed(1)}" y2="${(_ly + 1).toFixed(1)}" stroke="#777" stroke-width="0.6"/>`);
+    els.push(drawCallout({ cx: _clX + 6, cy: _ly, number: i + 1, r: 7 }));
+    els.push(drawText(_clX + 17, _ly + 2.3, c.text, { anchor: 'start', fontSize: 6.4, fill: '#222' }));
+  });
 
   // ── STEP 7: Load arrows ──
   const midPanY = detY + 5;   // top of layer stack

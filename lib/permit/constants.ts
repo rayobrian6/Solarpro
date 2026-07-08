@@ -699,7 +699,14 @@ const PDF_PAGE_CONFIG = {
 // the middle half → still read as an empty bubble). Enlarged the zoomed layer
 // stack (~119→~194px) so the detail fills the r=122 circle edge-to-edge; lag bolt
 // auto-scales with it. Page-level blank lower area still pending a layout pass.
-const PLANSET_ENGINE_VERSION = 47418;
+// 47419 (2026-07-08): PV-3 detail rebuilt to a REAL MECHANICAL ASSEMBLY vs the
+// flat colored layer-cake (Ray sent the Cannon PE reference — "looks like dook").
+// Now draws the actual hardware: module frame + laminate, clamp, mount + base
+// plate (steel-hatched), butyl flashing pad, seated on shingle/sheathing/rafter,
+// with the lag bolt (hex head + EPDM washer) driven into the rafter + embedment
+// dim; numbered leaders out to labels. Still to do toward full Cannon match: iso
+// context view + mounting BOM + finer clamp/rail geometry + page vertical-fill.
+const PLANSET_ENGINE_VERSION = 47419;
 
 
 
