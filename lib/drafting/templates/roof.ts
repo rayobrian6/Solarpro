@@ -318,7 +318,9 @@ export function drawRoofPlan(
   // INSIDE the draw zone (tx=8, ~268px + 31'-6" vertical dim clearance).
   // Reserve that width in fit-to-frame so the roof can never slide under it
   // — the opaque-backing patch just erased whatever linework it covered.
-  const leftReserve = isBranchColorMode ? 0 : 280;
+  // Same left reserve on BOTH sheets so PV-1B frames at the IDENTICAL zoom/position
+  // as PV-1 (they're sibling views of the same roof; different zoom read as sloppy).
+  const leftReserve = 280;
   const scaleX  = (dz.width  - 2 * margin - leftReserve) / fitLngSpan;
   const scaleY  = (dz.height - 2 * margin) / fitLatSpan;
   // Fit-to-frame (was *1.35, which overzoomed and clipped the top hip + the
@@ -582,6 +584,14 @@ export function drawRoofPlan(
       const tagY = py - ph * 0.5 + numFs + 1.5;
       els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/></g>`);
       els.push(`<text x="${px.toFixed(1)}" y="${tagY.toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}" opacity="0.9">${cNum}</text>`);
+      // IQ8 microinverter mounted UNDER the module (Enphase micro system) — a small
+      // dark device box in the module's lower area, outlined in its branch color.
+      // The AC branch wire daisy-chains these micros in series to the JB, so the
+      // sheet shows the module-level electronics + the string attached to each.
+      const micW = Math.max(Math.min(pw, ph) * 0.44, 4);
+      const micH = Math.max(Math.min(pw, ph) * 0.16, 1.8);
+      const micCy = py + ph * 0.20;
+      els.push(`<rect x="${(px - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
     } else {
       // ── System-aware rail + foot logic ──
       // RAIL-LESS (RT-Mini etc.): 4 mounts under the module's long-side frame
@@ -1357,7 +1367,7 @@ export function drawRoofPlan(
   if (isBranchColorMode && branchIndexByColor.size > 0) {
     const circuits = [...branchIndexByColor.entries()].sort((a, b) => a[1] - b[1]);
     const lx = dz.x + 10, ly = zones.dims.top + 12;
-    const rowH = 10.5, boxW = 98, boxH = 22 + circuits.length * rowH;
+    const rowH = 10.5, boxW = 112, boxH = 22 + (circuits.length + 1) * rowH + 4;
     els.push(`<rect x="${lx}" y="${ly}" width="${boxW}" height="${boxH.toFixed(1)}" fill="rgba(255,255,255,0.95)" stroke="#000" stroke-width="0.8"/>`);
     els.push(drawText(lx + 6, ly + 12, 'CIRCUIT LEGEND', { anchor: 'start', fontSize: 6.6, fontWeight: 'bold', fill: '#000' }));
     els.push(`<line x1="${lx}" y1="${(ly + 15).toFixed(1)}" x2="${lx + boxW}" y2="${(ly + 15).toFixed(1)}" stroke="#000" stroke-width="0.5"/>`);
@@ -1368,6 +1378,11 @@ export function drawRoofPlan(
       els.push(`<text x="${(lx + 17).toFixed(1)}" y="${(ry + 1.9).toFixed(1)}" text-anchor="middle" font-size="4.6" font-weight="700" fill="${color}">${idx + 1}</text>`);
       els.push(drawText(lx + 33, (ry + 2.2), `CIRCUIT ${idx + 1}`, { anchor: 'start', fontSize: 6, fill: '#111' }));
     });
+    // Device row: the IQ8 microinverter symbol drawn under each module.
+    const dry = ly + 15 + 10 + circuits.length * rowH + 3;
+    els.push(`<line x1="${lx + 4}" y1="${(dry - 6).toFixed(1)}" x2="${lx + boxW - 4}" y2="${(dry - 6).toFixed(1)}" stroke="#ccc" stroke-width="0.4"/>`);
+    els.push(`<rect x="${(lx + 10).toFixed(1)}" y="${(dry - 2.4).toFixed(1)}" width="14" height="4.8" fill="#2b2f36" stroke="#555" stroke-width="0.5" rx="0.6"/>`);
+    els.push(drawText(lx + 33, (dry + 2.0), 'IQ8 MICROINVERTER', { anchor: 'start', fontSize: 5.6, fill: '#111' }));
   }
 
   // (Branch legend overlay REMOVED — it duplicated the data-zone BRANCH LEGEND
@@ -1378,7 +1393,7 @@ export function drawRoofPlan(
   // explains the module shading (useful) rather than repeating the sheet title. ──
   if (isBranchColorMode) {
     els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
-      'MODULES SHADED BY AC BRANCH CIRCUIT · SOLID/DASHED LINES = BRANCH DAISY-CHAIN + HOMERUN TO JB · SEE LEGEND AT RIGHT', {
+      'IQ8 MICROINVERTER (▪) UNDER EACH MODULE · WIRED IN SERIES PER AC BRANCH (COLORED) · DASHED = HOMERUN TO JB · SEE CIRCUIT LEGEND', {
         anchor: 'start', fontSize: 6.5, fill: '#555', italic: true,
       }));
   }
