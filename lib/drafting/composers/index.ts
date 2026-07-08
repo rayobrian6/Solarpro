@@ -35,6 +35,7 @@ import type { DraftingInput, SysType } from '../types';
 import type { PermitInputShape } from '../permitInputShape';
 import { resolveSystemType } from '../resolver';
 import { drawRoofPlan, drawRoofStructural } from '../templates/roof';
+import { buildSiteContext, type SiteContext } from '../templates/roofSiteContext';
 import { drawGroundArray, drawGroundStructural } from '../templates/ground';
 import { drawFencePlan, drawFenceElevation } from '../templates/fence';
 import { safeBuildIntent } from '../designIntent';
@@ -250,6 +251,15 @@ export function getArrayPlanFromCAD(
   // Convert pre-solved CADModel → DraftingInput
   const dInput = adaptCADToDrafting(cad, input);
   const intent = safeBuildIntent(dInput);
+
+  // Site context (county-GIS parcel + street) projected into the roof's own
+  // fake-degree frame so PV-2 can draw the property line / driveway / sidewalk
+  // INTEGRATED with the roof (not a separate box). Null when no parcel/origin →
+  // roof plan renders exactly as before.
+  try {
+    (dInput as unknown as { _siteContext?: SiteContext | null })._siteContext =
+      buildSiteContext(cad, input);
+  } catch { /* non-fatal — roof-only render */ }
 
   // Route to template using cad.systemType (authoritative), passing cad directly
   let svg: string;

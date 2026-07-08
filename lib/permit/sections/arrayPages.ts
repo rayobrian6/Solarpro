@@ -16,8 +16,6 @@ import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escap
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
 import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
-import { buildSiteContextInset, type LatLng } from '../utils/siteContext';
-import { locateEquipment } from '../utils/equipmentLocator';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -37,39 +35,11 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
     throw new Error(`[pageRoofPlan] getPrimaryView(${comp.primaryView}) returned empty SVG`);
   }
 
-  // ── Secondary site-context inset (parcel-scale plot view) ─────────────────
-  // Injected into the roof SVG's bottom-left reserve column so the MAIN roof
-  // viewport (modules/setbacks/edges/equipment/labels) is untouched. Renders
-  // ONLY when a county-GIS parcel boundary is present; otherwise the roof plan
-  // is kept exactly as-is (no fabricated lot geometry).
-  try {
-    const prj = input.project as unknown as {
-      roofPlanes?: Array<{ vertices?: LatLng[] }>;
-      panelPositions?: Array<{ lat?: number; lng?: number }>;
-      address?: string; lat?: number; lng?: number;
-    };
-    const parcel = (input as unknown as { aerialData?: { parcel?: unknown } }).aerialData?.parcel;
-    const roofVerts: LatLng[] = (prj.roofPlanes ?? []).flatMap(p => (p.vertices ?? []))
-      .filter(v => isFinite(v?.lat) && isFinite(v?.lng));
-    const panelCenters: LatLng[] = (prj.panelPositions ?? [])
-      .filter(p => isFinite(p?.lat as number) && isFinite(p?.lng as number))
-      .map(p => ({ lat: p.lat as number, lng: p.lng as number }));
-    const streetName = (prj.address || '').split(',')[0]
-      .replace(/^\s*\d+\s+/, '').replace(/\b(apt|unit|ste|#)\.?\s*\S*$/i, '').trim().toUpperCase() || null;
-    const streetPin: LatLng | null = isFinite(prj.lat as number)
-      ? { lat: prj.lat as number, lng: prj.lng as number } : null;
-    const equipment = roofVerts.length >= 3 ? locateEquipment(roofVerts, streetPin, []) : [];
-    const inset = buildSiteContextInset(
-      { parcel: parcel as never, roofPlaneVertices: roofVerts, panelCenters, streetName, streetPin, equipment, features: [] },
-      { x: 122, y: 588, w: 270, h: 268 },
-    );
-    if (inset) {
-      const idx = drawingSvg.lastIndexOf('</svg>');
-      if (idx >= 0) drawingSvg = drawingSvg.slice(0, idx) + inset + drawingSvg.slice(idx);
-    }
-  } catch (insetErr: unknown) {
-    console.warn('[pageRoofPlan] site-context inset skipped (non-fatal):', (insetErr as Error)?.message);
-  }
+  // ── Site/plot context lives on PV-1 (SITE PLAN WITH ROOF PLAN), the single
+  // integrated site drawing — property line, street, driveway (aerial), and
+  // service equipment are drawn there, matching the professional reference.
+  // PV-2 is ONLY the to-scale module layout + fire setbacks; no second
+  // plot-plan visual is bolted onto this sheet (removed 2026-07-08 per Ray).
 
   // ── Secondary view (Step 6) ───────────────────────────────────────────────
   // Roof plan: no secondary strip (setbacks/obstructions integrated into primary)

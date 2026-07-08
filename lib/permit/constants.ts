@@ -589,7 +589,14 @@ const PDF_PAGE_CONFIG = {
 // property line when reasonable), CLIPS the parcel to that window (nearest lines
 // only), and skips per-edge dimension labels on complex (>8-vertex) lots. Footer
 // cleaned. Simple small lots still show the full parcel with edge dims.
-const PLANSET_ENGINE_VERSION = 47399;
+// 47400 (2026-07-08): PV-2 site context INTEGRATED into the main roof drawing
+// (Ray: the driveways/sidewalks belong WITH the roof drawout, not a separate
+// box). Removed the bolted-on plot inset; drawRoofPlan now draws the property
+// line + street + driveway + sidewalk in the roof's own frame (real lat/lng →
+// cad.origin → fake-degree → toX/toY), fit window expands to include the lot
+// (capped so the roof stays prominent). Gated on a county-GIS parcel; roof-only
+// (byte-identical) when absent. See lib/drafting/templates/roofSiteContext.ts.
+const PLANSET_ENGINE_VERSION = 47400;
 
 
 

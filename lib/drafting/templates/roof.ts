@@ -44,6 +44,7 @@ import {
 import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
+import { computeFitWindow, drawSiteContextEls, type SiteContext } from './roofSiteContext';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -240,7 +241,7 @@ export function drawRoofPlan(
   const bandLabelPts: Array<{ x: number; y: number }> = [];
   // Viewport title (reference style) renders BELOW the drawing — the old
   // full-width solid-black banner read as a web dashboard, not a CAD sheet.
-  const svgTitle = isBranchColorMode
+  let svgTitle = isBranchColorMode
     ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP'
     : 'ROOF PLAN WITH MODULES';
 
@@ -249,8 +250,22 @@ export function drawRoofPlan(
   const allLngs = regPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
   const minLat = Math.min(...allLats), maxLat = Math.max(...allLats);
   const minLng = Math.min(...allLngs), maxLng = Math.max(...allLngs);
-  const latSpan = maxLat - minLat || 0.001;
+  const latSpan = maxLat - minLat || 0.001;   // ROOF span — drives the overall dimensions
   const lngSpan = maxLng - minLng || 0.001;
+
+  // ── Site context (PV-2 only): county-GIS parcel + street projected into THIS
+  // frame (roofSiteContext already converted real lat/lng → fake-degrees via the
+  // CAD origin). When present, the FIT WINDOW expands to include the lot so the
+  // property line / driveway / sidewalk render to-scale around the roof; the
+  // roof's own dimensions still use the roof span above. Absent → fit = roof
+  // (identical to the prior behavior — no fabricated lot on parcel-less jobs).
+  const _site: SiteContext | null = (!isBranchColorMode
+    && (input as unknown as { _siteContext?: SiteContext | null })._siteContext) || null;
+  const _fit = (_site && _site.parcel.length >= 3)
+    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _site.parcel)
+    : { minLng, maxLng, minLat, maxLat };
+  const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
+  const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
 
   // Margin leaves room for the dimension lines + callout row outside the roof.
   const margin  = 52;
@@ -259,20 +274,33 @@ export function drawRoofPlan(
   // Reserve that width in fit-to-frame so the roof can never slide under it
   // — the opaque-backing patch just erased whatever linework it covered.
   const leftReserve = isBranchColorMode ? 0 : 280;
-  const scaleX  = (dz.width  - 2 * margin - leftReserve) / lngSpan;
-  const scaleY  = (dz.height - 2 * margin) / latSpan;
+  const scaleX  = (dz.width  - 2 * margin - leftReserve) / fitLngSpan;
+  const scaleY  = (dz.height - 2 * margin) / fitLatSpan;
   // Fit-to-frame (was *1.35, which overzoomed and clipped the top hip + the
   // setback dimension off the page for frame-filling roofs — caught via harness).
   const scale   = Math.min(scaleX, scaleY);
 
-  // Center the roof in the draw zone (was left/bottom-justified, leaving dead
-  // space on the side when fit-to-frame is limited by the other dimension).
-  const roofWpx = lngSpan * scale;
-  const roofHpx = latSpan * scale;
-  const offX = Math.max(0, (dz.width  - 2 * margin - leftReserve - roofWpx) / 2);
-  const offY = Math.max(0, (dz.height - 2 * margin - roofHpx) / 2);
-  const toX = (lng: number) => dz.x  + margin + leftReserve + offX + (lng - minLng) * scale;
-  const toY = (lat: number) => dz.y  + (dz.height - margin) - offY - (lat - minLat) * scale;
+  // Center the fit WINDOW (roof, or roof+lot when site context is present) in
+  // the draw zone.
+  const winWpx = fitLngSpan * scale;
+  const winHpx = fitLatSpan * scale;
+  const offX = Math.max(0, (dz.width  - 2 * margin - leftReserve - winWpx) / 2);
+  const offY = Math.max(0, (dz.height - 2 * margin - winHpx) / 2);
+  const toX = (lng: number) => dz.x  + margin + leftReserve + offX + (lng - _fit.minLng) * scale;
+  const toY = (lat: number) => dz.y  + (dz.height - margin) - offY - (lat - _fit.minLat) * scale;
+
+  // ── Site layer — drawn UNDER the roof (roof linework paints on top) ──
+  let _siteLegend: Array<{ swatch: string; label: string }> = [];
+  if (_site && _site.parcel.length >= 3) {
+    try {
+      const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY);
+      els.push(`<g class="pv2-site">${sr.els.join('')}</g>`);
+      _siteLegend = sr.legend;
+      svgTitle = 'SITE & ROOF PLAN WITH MODULES';
+    } catch (e) {
+      console.warn('[drawRoofPlan] site context skipped (non-fatal):', (e as Error)?.message);
+    }
+  }
 
   // ── Draw roof planes ──
   // Plane labels are collected here and rendered AFTER the panels so the modules
@@ -1071,6 +1099,9 @@ export function drawRoofPlan(
         label: 'TREE CANOPY — VERIFY',
       }] : []),
       { swatch: `<circle cx="7" cy="0" r="4.5" fill="#fff" stroke="#000" stroke-width="1"/><text x="7" y="2.3" text-anchor="middle" font-size="5" font-weight="900" fill="#000">#</text>`, label: 'CALLOUT REF.' },
+      // Site-context symbols (property line / driveway / sidewalk) — only when a
+      // parcel was drawn on this sheet.
+      ..._siteLegend,
     ];
     const lgW = 128, rowH = 13, lgX = W - zones.dims.right - lgW + 8, lgY = zones.dims.top + 6;
     const lgH = 13 + lg.length * rowH;
