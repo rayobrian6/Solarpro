@@ -214,6 +214,41 @@ export function rowToClient(row: Record<string, unknown>): Client {
   };
 }
 
+/**
+ * Parse the canonical projects.selected_equipment JSONB (migration 101) into the
+ * app-level equipment fields. Single source of hydration so every read path
+ * (rowToProject AND getProjectWithDetails) reflects the design's chosen panel /
+ * inverter / mounting / battery identically — a hand-rolled second copy in
+ * getProjectWithDetails is exactly what let an Engineering panel change fail to
+ * surface. Returns all-undefined when the column is absent/empty (pre-migration
+ * projects behave as before; callers fall back to the legacy snapshot).
+ */
+export function hydrateCanonicalEquipment(row: Record<string, unknown>): {
+  selectedPanel?: import('@/types').SolarPanel;
+  selectedInverter?: import('@/types').Inverter;
+  selectedMounting?: import('@/types').MountingSystem;
+  selectedBatteries?: import('@/types').Battery[];
+  batteryCount?: number;
+} {
+  const raw = row.selected_equipment;
+  let selEq: Record<string, unknown> | null = null;
+  if (raw) {
+    if (typeof raw === 'string') {
+      try { selEq = JSON.parse(raw); } catch { selEq = null; }
+    } else if (typeof raw === 'object') {
+      selEq = raw as Record<string, unknown>;
+    }
+  }
+  if (!selEq) return {};
+  return {
+    selectedPanel: (selEq.panel as import('@/types').SolarPanel | undefined) ?? undefined,
+    selectedInverter: (selEq.inverter as import('@/types').Inverter | undefined) ?? undefined,
+    selectedMounting: (selEq.mounting as import('@/types').MountingSystem | undefined) ?? undefined,
+    selectedBatteries: (selEq.batteries as import('@/types').Battery[] | undefined) ?? undefined,
+    batteryCount: typeof selEq.batteryCount === 'number' ? (selEq.batteryCount as number) : undefined,
+  };
+}
+
 export function rowToProject(row: Record<string, unknown>): Project {
   const rawBillData = row.bill_data as Record<string, unknown> | undefined;
   // Delegate all bill_data hydration to shared helper (see lib/bill/hydrateBillData.ts)
@@ -225,19 +260,7 @@ export function rowToProject(row: Record<string, unknown>): Project {
     city,
   } = hydrateBillData(rawBillData, row);
 
-  // Canonical selected equipment (migration 101) — the design's chosen panel /
-  // inverter / mounting / battery. Highest precedence: reaches BOTH getProjectById
-  // (plain SELECT *) and the list path. The legacy production/proposal snapshot
-  // hydration in enrichProjectRow remains a fallback (guarded by `if (!base.X)`),
-  // so pre-migration projects behave exactly as before.
-  let selEq: Record<string, unknown> | null = null;
-  if (row.selected_equipment) {
-    if (typeof row.selected_equipment === 'string') {
-      try { selEq = JSON.parse(row.selected_equipment as string); } catch { selEq = null; }
-    } else {
-      selEq = row.selected_equipment as Record<string, unknown>;
-    }
-  }
+  const canonEq = hydrateCanonicalEquipment(row);
 
   return {
     id: row.id as string,
@@ -251,13 +274,14 @@ export function rowToProject(row: Record<string, unknown>): Project {
     lat: parseDbFloat(row.lat),
     lng: parseDbFloat(row.lng),
     systemSizeKw: parseDbFloat(row.system_size_kw),
-    // Canonical design equipment (see selEq above). Undefined when the column is
-    // absent/empty → enrichProjectRow's legacy snapshot sources fill it in.
-    selectedPanel: (selEq?.panel as import('@/types').SolarPanel | undefined) ?? undefined,
-    selectedInverter: (selEq?.inverter as import('@/types').Inverter | undefined) ?? undefined,
-    selectedMounting: (selEq?.mounting as import('@/types').MountingSystem | undefined) ?? undefined,
-    selectedBatteries: (selEq?.batteries as import('@/types').Battery[] | undefined) ?? undefined,
-    batteryCount: typeof selEq?.batteryCount === 'number' ? (selEq.batteryCount as number) : undefined,
+    // Canonical design equipment (migration 101, highest precedence). Undefined
+    // when the column is absent/empty → enrichProjectRow's legacy snapshot sources
+    // fill it in.
+    selectedPanel: canonEq.selectedPanel,
+    selectedInverter: canonEq.selectedInverter,
+    selectedMounting: canonEq.selectedMounting,
+    selectedBatteries: canonEq.selectedBatteries,
+    batteryCount: canonEq.batteryCount,
     billData: rawBillData,
     billAnalysis,
     utilityName,
