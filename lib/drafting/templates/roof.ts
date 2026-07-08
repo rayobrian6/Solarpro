@@ -270,8 +270,23 @@ export function drawRoofPlan(
   const _ctxPts = _site
     ? [...(_site.parcel ?? []), ..._site.buildings.flat(), ..._site.roads.flatMap(r => r.pts)]
     : [];
+  // ── BIG / SHARED PARCEL → frame the SUBJECT building only ──────────────────
+  // If the parcel is far larger than the roof (an apartment complex — Braidon's
+  // building is 1 of ~13 on a 3.12-ac lot — or a big rural parcel), fitting the
+  // whole lot shrinks the building to a dot. We only want to see what we're
+  // working on (Ray 2026-07-08), so frame the subject building tight (attachment
+  // detail stays readable). A normal home lot (parcel ≈ a couple× the roof) still
+  // shows the full lot + street. Uses parcel-vs-roof extent — robust, unlike a
+  // point-in-parcel test against OSM footprints that don't register to the GIS lot.
+  let _bigLot = false;
+  if (_site?.parcel && _site.parcel.length >= 3) {
+    const _pl = _site.parcel.map(p => p.lng), _pa = _site.parcel.map(p => p.lat);
+    const parcelW = Math.max(..._pl) - Math.min(..._pl);   // fake-deg = ft
+    const parcelH = Math.max(..._pa) - Math.min(..._pa);
+    _bigLot = parcelW > 2 * lngSpan || parcelH > 2 * latSpan;
+  }
   const _fit = (_site && _ctxPts.length > 0)
-    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts)
+    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.4 : 2.6 })
     : { minLng, maxLng, minLat, maxLat };
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;

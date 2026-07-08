@@ -616,7 +616,15 @@ const PDF_PAGE_CONFIG = {
 // end panel edge (else the panel droops). Legend + general note added. Also:
 // roads pulled into the PV-2 fit window + more Overpass mirrors (datacenter IPs
 // like Vercel get rate-limited on the main instance — parcel uses a diff source).
-const PLANSET_ENGINE_VERSION = 47403;
+// 47404 (2026-07-08): BIG/SHARED PARCEL → frame the SUBJECT building (Ray: when
+// the parcel holds >1 livable building we only want to see what we're working
+// on). When the parcel is >2× the roof extent (apartment complex / big rural
+// lot), the PV-2 fit tightens to 1.4× the roof so the building dominates and the
+// attachment detail stays readable, instead of cramming the whole 3-ac lot in.
+// A normal home lot still shows the full lot + street. Uses parcel-vs-roof extent
+// (robust) rather than a point-in-parcel test on OSM footprints (they don't
+// register to the county GIS lot — 0/13 matched Braidon's parcel).
+const PLANSET_ENGINE_VERSION = 47404;
 
 
 
