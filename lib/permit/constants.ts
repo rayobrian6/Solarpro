@@ -609,7 +609,14 @@ const PDF_PAGE_CONFIG = {
 // STAGGERED for rail-less. (2) Plane callouts decluttered → small numbered
 // badges keyed to the ROOF DESCRIPTION table (were 3-line boxes burying the
 // modules). (3) Fixed the OSM site-features fetch (GET not POST — POST→406).
-const PLANSET_ENGINE_VERSION = 47402;
+// 47403 (2026-07-08): RT-Mini CANTILEVER logic (Ray). Foot+RAIL now drawn at the
+// 25%/75% points of the module (equal cantilevers, 50% span carries the load);
+// feet on rafters @ 48" O.C. staggered; END OVERHANG capped at 18" — a
+// DECK-MOUNTED foot (open ◻) is placed where no rafter falls within 18" of the
+// end panel edge (else the panel droops). Legend + general note added. Also:
+// roads pulled into the PV-2 fit window + more Overpass mirrors (datacenter IPs
+// like Vercel get rate-limited on the main instance — parcel uses a diff source).
+const PLANSET_ENGINE_VERSION = 47403;
 
 
 

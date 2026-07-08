@@ -268,7 +268,7 @@ export function drawRoofPlan(
   // Expand the fit to include the parcel + surrounding building footprints so the
   // lot + neighbors show (capped inside computeFitWindow so the roof stays large).
   const _ctxPts = _site
-    ? [...(_site.parcel ?? []), ..._site.buildings.flat()]
+    ? [...(_site.parcel ?? []), ..._site.buildings.flat(), ..._site.roads.flatMap(r => r.pts)]
     : [];
   const _fit = (_site && _ctxPts.length > 0)
     ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts)
@@ -558,17 +558,22 @@ export function drawRoofPlan(
     }
   });
 
-  // ── RT-Mini attachment feet — STAGGERED 4 ft O.C. (Ray 2026-07-08) ──────────
-  // We do NOT put a foot on every module (that read as ~2 ft O.C. — over-built,
-  // extra labor). Feet share rafters at 4 ft O.C. in two foot-rows per panel row:
-  // both rows START on the same rafter; the top row then jumps 2 ft and runs 4 ft
-  // O.C. (staggered), the bottom row runs straight 4 ft O.C. Drawn per plane in
-  // the plane's fall-line basis, snapped to the framing grid, clipped to the facet.
+  // ── RT-Mini foot + rail attachment — cantilever logic (Ray 2026-07-08) ──────
+  // Two rail lines per panel row at the 25% / 75% points of the module (25% down
+  // from the top, 25% up from the bottom): equal cantilevers top & bottom, the
+  // 50% span between carries the load efficiently. Feet land ON rafters at 48"
+  // O.C., STAGGERED (both rails start on the same rafter; the top rail then jumps
+  // 24" and runs 48" O.C., the bottom rail runs straight 48" O.C. — not a foot
+  // per module). END CANTILEVER: the overhang from the outermost foot to the end
+  // of the end panel must be ≤ 18" or that panel droops; if no rafter falls within
+  // 18" of the edge, a DECK-MOUNTED foot (open ◻ marker) is added there instead.
+  let _deckMountUsed = false;
   if (isRailless && !isBranchColorMode) {
-    const FT = scale;                 // 1 ft in px (1 fake-degree unit = 1 ft)
-    const ocPx = railFootOcIn / 12 * FT;    // 4 ft O.C.
-    const stagPx = ocPx / 2;                // 2 ft stagger
-    const halfUp = panLenPx / 2;            // module up-slope half-height (portrait)
+    const FT = scale;                       // 1 ft in px (1 fake-degree unit = 1 ft)
+    const quarterUp = panLenPx * 0.25;      // rail at 25% down from top / up from bottom
+    const cantMaxPx = 1.5 * FT;             // 18" max overhang from outer foot to panel end
+    const halfPanU = panWidPx / 2;          // panel half-width across the eave (portrait)
+    const endInsetPx = Math.min(cantMaxPx * 0.6, 0.5 * FT);   // deck foot ~6" from the edge
     regPlanes.forEach((rp: any, ri: number) => {
       const pp = regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices ?? []));
       if (!pp.length) return;
@@ -583,27 +588,55 @@ export function drawRoofPlan(
       const uOf = (x: number, y: number) => x * udx + y * udy;
       const vOf = (x: number, y: number) => x * vdx + y * vdy;
       const grid = framingGrids[ri];
+      const rafStep = grid ? grid.spacingPx : 2 * FT;        // rafter spacing (24" default)
       const uPhase = grid ? uOf(grid.bcx, grid.bcy) : 0;     // rafter phase (feet land ON rafters)
+      const stride = Math.max(2, Math.round((railFootOcIn / 12 * FT) / rafStep)); // rafters between feet (48"/24"=2)
+      const stagStride = Math.max(1, Math.floor(stride / 2));                       // 24" stagger = 1 rafter
       const rowsMap = new Map<number, any[]>();
       pp.forEach((p: any) => { const r = p.row ?? 0; if (!rowsMap.has(r)) rowsMap.set(r, []); rowsMap.get(r)!.push(p); });
-      const feet: string[] = [];
-      const foot = (u: number, vLine: number) =>
-        feet.push(`<circle cx="${(u * udx + vLine * vdx).toFixed(1)}" cy="${(u * udy + vLine * vdy).toFixed(1)}" r="1.15" fill="#2a5db0"/>`);
+      const rails: string[] = [], rFeet: string[] = [], dFeet: string[] = [];
+      const P = (u: number, v: number) => ({ x: u * udx + v * vdx, y: u * udy + v * vdy });
+      const rafterFoot = (u: number, v: number) => { const q = P(u, v); rFeet.push(`<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="1.15" fill="#2a5db0"/>`); };
+      const deckFoot = (u: number, v: number) => { const q = P(u, v); dFeet.push(`<rect x="${(q.x - 1.5).toFixed(1)}" y="${(q.y - 1.5).toFixed(1)}" width="3" height="3" fill="#fff" stroke="#b45309" stroke-width="0.9"/>`); _deckMountUsed = true; };
       rowsMap.forEach((rowPanels) => {
         const us = rowPanels.map((p: any) => uOf(toX(p.lng), toY(p.lat)));
         const vs = rowPanels.map((p: any) => vOf(toX(p.lng), toY(p.lat)));
-        const uMin = Math.min(...us), uMax = Math.max(...us);
         const vMid = vs.reduce((a: number, b: number) => a + b, 0) / vs.length;
-        const vBot = vMid - halfUp * 0.72, vTop = vMid + halfUp * 0.72;   // near frame edges
-        // start on the first rafter at/after the row's left edge
-        const uStart = uPhase + Math.ceil((uMin - uPhase) / (2 * FT)) * (2 * FT);
-        // bottom foot-row: straight 4 ft O.C. from the start rafter
-        for (let u = uStart; u <= uMax + 1; u += ocPx) if (u >= uMin - 1) foot(u, vBot);
-        // top foot-row: same start rafter, then 2 ft out, then 4 ft O.C. (stagger)
-        if (uStart >= uMin - 1) foot(uStart, vTop);
-        for (let u = uStart + stagPx; u <= uMax + 1; u += ocPx) if (u >= uMin - 1) foot(u, vTop);
+        const uEdgeL = Math.min(...us) - halfPanU, uEdgeR = Math.max(...us) + halfPanU;   // panel-row extent
+        const vBot = vMid - quarterUp, vTop = vMid + quarterUp;                            // 25% / 75% rails
+        // rail lines span the panels (they cantilever past the end feet)
+        for (const vLine of [vBot, vTop]) {
+          const a = P(uEdgeL, vLine), b = P(uEdgeR, vLine);
+          rails.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#5a6478" stroke-width="0.8"/>`);
+        }
+        // rafter feet at 48" O.C. — both rails start on the first rafter inside the row
+        const uStart = uPhase + Math.ceil((uEdgeL - uPhase) / rafStep) * rafStep;
+        const botUs: number[] = [], topUs: number[] = [];
+        for (let u = uStart; u <= uEdgeR + 0.5; u += stride * rafStep) if (u >= uEdgeL - 0.5) botUs.push(u);
+        if (uStart >= uEdgeL - 0.5 && uStart <= uEdgeR + 0.5) topUs.push(uStart);
+        for (let u = uStart + stagStride * rafStep; u <= uEdgeR + 0.5; u += stride * rafStep) if (u >= uEdgeL - 0.5) topUs.push(u);
+        for (const u of botUs) rafterFoot(u, vBot);
+        for (const u of topUs) rafterFoot(u, vTop);
+        // END CANTILEVER guard per rail: overhang to the panel edge ≤ 18", else a
+        // rafter within 18" if one exists, else a deck-mounted foot at the edge.
+        for (const [lineUs, vLine] of [[botUs, vBot], [topUs, vTop]] as Array<[number[], number]>) {
+          const s = [...lineUs].sort((a, b) => a - b);
+          // LEFT end
+          if (!s.length || s[0] - uEdgeL > cantMaxPx) {
+            const r = uPhase + Math.ceil((uEdgeL - uPhase) / rafStep) * rafStep;
+            if (r - uEdgeL <= cantMaxPx && (!s.length || r < s[0] - 0.5)) rafterFoot(r, vLine);
+            else deckFoot(uEdgeL + endInsetPx, vLine);
+          }
+          // RIGHT end
+          if (!s.length || uEdgeR - s[s.length - 1] > cantMaxPx) {
+            const r = uPhase + Math.floor((uEdgeR - uPhase) / rafStep) * rafStep;
+            if (uEdgeR - r <= cantMaxPx && (!s.length || r > s[s.length - 1] + 0.5)) rafterFoot(r, vLine);
+            else deckFoot(uEdgeR - endInsetPx, vLine);
+          }
+        }
       });
-      if (feet.length) els.push(`<g clip-path="url(#sbclip${ri})">${feet.join('')}</g>`);
+      if (rails.length || rFeet.length || dFeet.length)
+        els.push(`<g clip-path="url(#sbclip${ri})">${rails.join('')}${rFeet.join('')}${dFeet.join('')}</g>`);
     });
   }
 
@@ -1016,6 +1049,14 @@ export function drawRoofPlan(
           ],
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
+      ...(isRailless
+        ? [
+            `3B. MOUNTS @ ${railFootOcIn}" O.C. STAGGERED, ON`,
+            '   RAFTERS, AT 25%/75% OF MODULE.',
+            '   END OVERHANG ≤ 18" — DECK-MOUNT (◻)',
+            '   WHERE NO RAFTER FALLS IN RANGE.',
+          ]
+        : []),
       ...(_encroachCount > 0
         ? [
             `3A. ${_encroachCount} MODULE(S) ENCROACH THE`,
@@ -1121,6 +1162,8 @@ export function drawRoofPlan(
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
+      ...(isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${railFootOcIn}" O.C.` }] : []),
+      ...(_deckMountUsed ? [{ swatch: `<rect x="4.5" y="-2.5" width="5" height="5" fill="#fff" stroke="#b45309" stroke-width="1"/>`, label: 'DECK-MOUNTED FOOT (NO RAFTER)' }] : []),
       ...(_encroachCount > 0 ? [{
         swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
         label: 'SETBACK ENCROACHMENT',

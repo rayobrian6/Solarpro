@@ -33,9 +33,15 @@ export interface SiteFeatures {
   source: string;
 }
 
+// Multiple public mirrors — the main instance rate-limits/blocks datacenter IPs
+// (e.g. Vercel) that a residential dev IP sails through, so we fall through the
+// list. If ALL fail in production the sheet still renders (parcel + roof only).
 const OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.osm.jp/api/interpreter',
 ];
 const TIMEOUT_MS = 12000;
 const MAX_RING_PTS = 80;
