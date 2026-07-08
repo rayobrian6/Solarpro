@@ -268,7 +268,7 @@ export function drawRoofPlan(
   // Expand the fit to include the parcel + surrounding building footprints so the
   // lot + neighbors show (capped inside computeFitWindow so the roof stays large).
   const _ctxPts = _site
-    ? [...(_site.parcel ?? []), ..._site.buildings.flat(), ..._site.roads.flatMap(r => r.pts)]
+    ? [...(_site.parcel ?? []), ..._site.buildings.flat(), ..._site.roads.flatMap(r => r.pts), ..._site.driveways.flat()]
     : [];
   // ── BIG / SHARED PARCEL → frame the SUBJECT building only ──────────────────
   // If the parcel is far larger than the roof (an apartment complex — Braidon's

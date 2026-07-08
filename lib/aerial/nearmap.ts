@@ -533,6 +533,78 @@ export function mapNearmapObstructions(responseJson: unknown): NearmapObstructio
   return obstructions;
 }
 
+// ── Ground surfaces (Phase B: real driveways / sidewalks / paving / neighbor
+// buildings for the PV-2 site plan) ─────────────────────────────────────────
+// From the SAME AI Feature response (no extra credit). Nearmap classes seen on
+// a real lot: Driveway, Road (Driveable Surface), Concrete Slab / Asphalt /
+// Hard Surface (walks & pads), Building (footprint). Each is a GeoJSON
+// Polygon or MultiPolygon of real lon/lat.
+export interface NearmapSurfaces {
+  buildings: Array<Array<{ lat: number; lng: number }>>;   // real footprints
+  driveways: Array<Array<{ lat: number; lng: number }>>;
+  paved:     Array<Array<{ lat: number; lng: number }>>;   // concrete/asphalt/hard (walks & pads)
+  roads:     Array<Array<{ lat: number; lng: number }>>;   // driveable-surface polygons
+  surveyDate: string | null;
+}
+
+/** Every outer ring from a GeoJSON Polygon or MultiPolygon (MultiPolygon → many). */
+function allOuterRings(geom: any): number[][][] {
+  const out: number[][][] = [];
+  if (!geom) return out;
+  if (geom.type === 'Polygon' && Array.isArray(geom.coordinates?.[0])) out.push(geom.coordinates[0]);
+  else if (geom.type === 'MultiPolygon' && Array.isArray(geom.coordinates)) {
+    for (const poly of geom.coordinates) if (Array.isArray(poly?.[0])) out.push(poly[0]);
+  }
+  return out;
+}
+
+const _PAVED_CLASSES = new Set(['Concrete Slab', 'Asphalt', 'Hard Surface']);
+
+/**
+ * Raw AI Feature response for an AOI. The coverage check is SKIPPED on purpose —
+ * trial/eval keys have AI-feature access but NOT the coverage v2 product (that
+ * gate would 403 and block the AI call). Returns null on no-key / error.
+ * ⚠ COSTS 1 AI parcel per successful call — callers MUST cache (see
+ * lib/aerial/nearmapCache.ts). radiusM ~55 covers a home + its driveway/walks.
+ */
+export async function fetchNearmapAIRaw(lat: number, lng: number, radiusM = 55): Promise<any | null> {
+  const key = process.env.NEARMAP_API_KEY;
+  if (!key) return null;
+  try {
+    const polygon = aoiPolygonAround(lat, lng, radiusM);
+    const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) { console.warn(`[nearmap] AI raw HTTP ${res.status}`); return null; }
+    return await res.json();
+  } catch (e) {
+    console.warn('[nearmap] AI raw fetch failed:', (e as Error)?.message);
+    return null;
+  }
+}
+
+/** Pure mapper: Nearmap AI Feature response → ground surfaces for the site plan.
+ *  Exported for testing off a cached response (no network). */
+export function mapNearmapSurfaces(responseJson: unknown): NearmapSurfaces {
+  const d = responseJson as any;
+  const feats: any[] = Array.isArray(d?.features) ? d.features : [];
+  const res: NearmapSurfaces = { buildings: [], driveways: [], paved: [], roads: [], surveyDate: d?.surveyDate ?? null };
+  for (const f of feats) {
+    const desc = String(f?.description ?? '');
+    for (const ring of allOuterRings(f.geometry)) {
+      const poly = ring
+        .filter((pt: number[]) => Array.isArray(pt) && pt.length >= 2 && isFinite(pt[0]) && isFinite(pt[1]))
+        .map((pt: number[]) => ({ lat: pt[1], lng: pt[0] }));
+      if (poly.length < 3) continue;
+      if (desc === 'Building') res.buildings.push(poly);
+      else if (desc === 'Driveway') res.driveways.push(poly);
+      else if (desc.startsWith('Road')) res.roads.push(poly);
+      else if (_PAVED_CLASSES.has(desc)) res.paved.push(poly);
+    }
+  }
+  return res;
+}
+
 /**
  * Canopy roof-overlap filter. Tree/vegetation features are only meaningful
  * when they actually reach over a roof plane — a yard tree is scenery, an

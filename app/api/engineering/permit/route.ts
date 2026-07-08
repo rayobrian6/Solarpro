@@ -44,13 +44,28 @@ async function attachParcelIfMissing(input: PermitInput): Promise<void> {
   } catch (e: unknown) {
     console.warn('[permit] parcel fetch skipped (non-fatal):', (e as Error)?.message);
   }
-  // Real roads + surrounding building footprints (OSM) — the "reality around the
-  // home", critical for multi-building complexes on one parcel. Non-fatal.
+  // Nearmap AI ground surfaces (REAL driveways/walks/paving/footprints) — DB-
+  // cached (migration 102) so a property costs AT MOST ONE AI parcel, ever.
+  // Preferred over OSM; when present we skip the OSM call entirely.
+  const _aerialX = aerial as { siteFeatures?: unknown; nearmapSurfaces?: unknown };
   try {
-    if (!aerial.siteFeatures) {
+    if (!_aerialX.nearmapSurfaces && process.env.NEARMAP_API_KEY) {
+      const nm = await getNearmapSurfacesCached(lat, lng, 55);
+      if (nm) {
+        _aerialX.nearmapSurfaces = nm;
+        console.log('[permit] nearmap surfaces:', nm.driveways.length, 'driveways,', nm.buildings.length, 'buildings,', nm.paved.length, 'paved');
+      }
+    }
+  } catch (e: unknown) {
+    console.warn('[permit] nearmap surfaces skipped (non-fatal):', (e as Error)?.message);
+  }
+  // Real roads + surrounding building footprints (OSM) — fallback ONLY when
+  // Nearmap didn't supply surfaces. Non-fatal.
+  try {
+    if (!_aerialX.siteFeatures && !_aerialX.nearmapSurfaces) {
       const sf = await fetchSiteFeatures(lat, lng, 160);
       if (sf) {
-        (aerial as { siteFeatures?: unknown }).siteFeatures = sf;
+        _aerialX.siteFeatures = sf;
         console.log('[permit] site features attached:', sf.roads.length, 'roads,', sf.buildings.length, 'buildings');
       }
     }
@@ -61,6 +76,7 @@ async function attachParcelIfMissing(input: PermitInput): Promise<void> {
 import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
 import { fetchParcelBoundary } from '@/lib/aerial/parcelBoundary';
 import { fetchSiteFeatures } from '@/lib/aerial/siteFeatures';
+import { getNearmapSurfacesCached } from '@/lib/aerial/nearmapCache';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
 
@@ -704,13 +720,26 @@ export async function POST(req: NextRequest) {
         }
       } catch (e: unknown) { console.warn('[permit/POST] parcel fetch skipped (non-fatal):', (e as Error)?.message); }
     }
-    // Real roads + surrounding building footprints (OSM) — reality around the home.
-    if (aerialData && !(aerialData as { siteFeatures?: unknown }).siteFeatures
+    // Nearmap AI ground surfaces (REAL) — DB-cached (migration 102), ≤1 AI parcel
+    // per property. Preferred; OSM is the fallback only when Nearmap is absent.
+    const _aX = aerialData as { siteFeatures?: unknown; nearmapSurfaces?: unknown };
+    if (aerialData && !_aX.nearmapSurfaces && process.env.NEARMAP_API_KEY
+        && isFinite(_centerLat) && isFinite(_centerLng) && Math.abs(_centerLat) > 0.001) {
+      try {
+        const _nm = await getNearmapSurfacesCached(_centerLat, _centerLng, 55);
+        if (_nm) {
+          _aX.nearmapSurfaces = _nm;
+          console.log('[permit/POST] nearmap surfaces:', _nm.driveways.length, 'driveways,', _nm.buildings.length, 'buildings,', _nm.paved.length, 'paved');
+        }
+      } catch (e: unknown) { console.warn('[permit/POST] nearmap surfaces skipped (non-fatal):', (e as Error)?.message); }
+    }
+    // Real roads + surrounding building footprints (OSM) — fallback only.
+    if (aerialData && !_aX.siteFeatures && !_aX.nearmapSurfaces
         && isFinite(_centerLat) && isFinite(_centerLng) && Math.abs(_centerLat) > 0.001) {
       try {
         const _sf = await fetchSiteFeatures(_centerLat, _centerLng, 160);
         if (_sf) {
-          (aerialData as { siteFeatures?: unknown }).siteFeatures = _sf;
+          _aX.siteFeatures = _sf;
           console.log('[permit/POST] site features:', _sf.roads.length, 'roads,', _sf.buildings.length, 'buildings');
         }
       } catch (e: unknown) { console.warn('[permit/POST] site features skipped (non-fatal):', (e as Error)?.message); }

@@ -624,7 +624,15 @@ const PDF_PAGE_CONFIG = {
 // A normal home lot still shows the full lot + street. Uses parcel-vs-roof extent
 // (robust) rather than a point-in-parcel test on OSM footprints (they don't
 // register to the county GIS lot — 0/13 matched Braidon's parcel).
-const PLANSET_ENGINE_VERSION = 47404;
+// 47405 (2026-07-08): PHASE B — REAL site surfaces from Nearmap AI. mapNearmapSurfaces
+// pulls Driveway / Concrete-Asphalt-HardSurface (walks+paving) / Road / Building
+// footprints from the AI Feature response; drawn as filled polygons on PV-2's
+// site layer (preferred over OSM). QUOTA SAFETY (trial = 100 parcels): new
+// lib/aerial/nearmapCache.ts + migration 102 (nearmap_ai_cache) persist each
+// location's response so a property costs AT MOST 1 AI parcel EVER (in-memory
+// cache dies on Vercel cold starts). Coverage check SKIPPED (trial keys lack
+// coverage v2 → would 403). Route fetches once, prefers Nearmap, OSM fallback.
+const PLANSET_ENGINE_VERSION = 47405;
 
 
 

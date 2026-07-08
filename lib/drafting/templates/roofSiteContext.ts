@@ -35,11 +35,17 @@ export interface SiteRoadFake { name: string | null; klass: string; pts: FakePt[
 
 export interface SiteContext {
   parcel: FakePt[] | null;          // parcel ring in fake-degrees (null when no parcel)
-  roads: SiteRoadFake[];            // REAL road centerlines (OSM), fake-degrees
-  buildings: FakePt[][];            // REAL building footprints (OSM), fake-degrees
+  roads: SiteRoadFake[];            // road centerlines (OSM polylines), fake-degrees
+  buildings: FakePt[][];            // building footprints (OSM or Nearmap), fake-degrees
+  // Nearmap AI ground surfaces (filled polygons) — present when Nearmap AI ran;
+  // real driveways / walks-&-pads / road surface, far better than OSM.
+  driveways: FakePt[][];
+  paved: FakePt[][];
+  roadSurfaces: FakePt[][];
+  source: string;                   // e.g. "County GIS" / "Nearmap AI"
+  hasNearmap: boolean;              // Nearmap surfaces drove the site layer
   streetName: string | null;
   apn: string | null;
-  source: string;                   // e.g. "County GIS"
 }
 
 /** Pull the parcel + real site features off the PermitInput and project into the
@@ -60,6 +66,12 @@ export function buildSiteContext(
         roads?: Array<{ name?: string | null; klass?: string; points?: Array<{ lat: number; lng: number }> }>;
         buildings?: Array<{ points?: Array<{ lat: number; lng: number }> }>;
       };
+      nearmapSurfaces?: {
+        buildings?: Array<Array<{ lat: number; lng: number }>>;
+        driveways?: Array<Array<{ lat: number; lng: number }>>;
+        paved?: Array<Array<{ lat: number; lng: number }>>;
+        roads?: Array<Array<{ lat: number; lng: number }>>;
+      };
     };
     project?: { address?: string };
   } | null;
@@ -67,19 +79,28 @@ export function buildSiteContext(
   const toFake = (v: { lat: number; lng: number }) => latLngToFakeDeg(v.lat, v.lng, originLat, originLng);
   const clean = (a?: Array<{ lat: number; lng: number }>) =>
     (a ?? []).filter(v => isFinite(v?.lat) && isFinite(v?.lng) && Math.abs(v.lat) > 0.001);
+  const ringsToFake = (rings?: Array<Array<{ lat: number; lng: number }>>): FakePt[][] =>
+    (rings ?? []).map(r => clean(r).map(toFake)).filter(r => r.length >= 3);
 
   const ring = clean(pi?.aerialData?.parcel?.polygon);
   const parcel = ring.length >= 3 ? ring.map(toFake) : null;
 
-  const sf = pi?.aerialData?.siteFeatures;
-  const roads: SiteRoadFake[] = (sf?.roads ?? [])
+  // Prefer Nearmap AI surfaces (real driveways/walks/paving/footprints from
+  // aerial); fall back to OSM (footprints + road centerlines, no surfaces).
+  const nm = pi?.aerialData?.nearmapSurfaces;
+  const hasNearmap = !!nm && ((nm.buildings?.length ?? 0) + (nm.driveways?.length ?? 0) + (nm.paved?.length ?? 0) + (nm.roads?.length ?? 0) > 0);
+
+  const driveways = hasNearmap ? ringsToFake(nm!.driveways) : [];
+  const paved = hasNearmap ? ringsToFake(nm!.paved) : [];
+  const roadSurfaces = hasNearmap ? ringsToFake(nm!.roads) : [];
+  const buildings: FakePt[][] = hasNearmap
+    ? ringsToFake(nm!.buildings)
+    : (pi?.aerialData?.siteFeatures?.buildings ?? []).map(b => clean(b.points).map(toFake)).filter(b => b.length >= 3);
+  const roads: SiteRoadFake[] = hasNearmap ? [] : (pi?.aerialData?.siteFeatures?.roads ?? [])
     .map(r => ({ name: r.name ?? null, klass: r.klass || 'road', pts: clean(r.points).map(toFake) }))
     .filter(r => r.pts.length >= 2);
-  const buildings: FakePt[][] = (sf?.buildings ?? [])
-    .map(b => clean(b.points).map(toFake))
-    .filter(b => b.length >= 3);
 
-  if (!parcel && !roads.length && !buildings.length) return null;
+  if (!parcel && !roads.length && !buildings.length && !driveways.length && !paved.length && !roadSurfaces.length) return null;
 
   const proj = pi?.project ?? {};
   const streetName = (proj.address || '').split(',')[0]
@@ -89,9 +110,13 @@ export function buildSiteContext(
     parcel,
     roads,
     buildings,
+    driveways,
+    paved,
+    roadSurfaces,
+    hasNearmap,
     streetName,
     apn: pi?.aerialData?.parcel?.apn ?? null,
-    source: pi?.aerialData?.parcel?.source || 'COUNTY GIS',
+    source: hasNearmap ? 'Nearmap AI' : (pi?.aerialData?.parcel?.source || 'COUNTY GIS'),
   };
 }
 
@@ -156,8 +181,34 @@ export function drawSiteContextEls(
   const els: string[] = [];
   const legend: SiteRender['legend'] = [];
   const px = (p: FakePt): XY => ({ x: toX(p.lng), y: toY(p.lat) });
+  const polyStr = (b: FakePt[]) => b.map(p => { const q = px(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
   const inRoof = (lng: number, lat: number) =>
     lng >= roof.minLng && lng <= roof.maxLng && lat >= roof.minLat && lat <= roof.maxLat;
+
+  // ── 0) Nearmap AI ground surfaces (REAL, filled) — drawn bottom-up so driveways
+  // read on top of general paving: road surface → walks/pads → driveways. These
+  // come from actual aerial AI (not OSM/guesses); clipped to the draw zone. ──
+  if (site.roadSurfaces.length) {
+    let big = site.roadSurfaces[0], bigA = -1;
+    for (const s of site.roadSurfaces) {
+      els.push(`<polygon points="${polyStr(s)}" fill="#e4e7ec" stroke="#c7ccd3" stroke-width="0.5"/>`);
+      const xs = s.map(p => p.lng), ys = s.map(p => p.lat);
+      const a = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+      if (a > bigA) { bigA = a; big = s; }
+    }
+    if (site.streetName) {
+      const cx = big.reduce((s, p) => s + px(p).x, 0) / big.length;
+      const cy = big.reduce((s, p) => s + px(p).y, 0) / big.length;
+      els.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="900" letter-spacing="1.5" fill="#666" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(site.streetName)}</text>`);
+    }
+    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#e4e7ec" stroke="#c7ccd3" stroke-width="0.5"/>`, label: 'ROAD (NEARMAP AI)' });
+  }
+  for (const s of site.paved) els.push(`<polygon points="${polyStr(s)}" fill="#eef0f3" stroke="#cfd4db" stroke-width="0.4"/>`);
+  if (site.paved.length) legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#eef0f3" stroke="#cfd4db" stroke-width="0.4"/>`, label: 'WALK / PAVING (NEARMAP AI)' });
+  if (site.driveways.length) {
+    for (const s of site.driveways) els.push(`<polygon points="${polyStr(s)}" fill="#d7dbe0" stroke="#a9b0ba" stroke-width="0.6"/>`);
+    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#d7dbe0" stroke="#a9b0ba" stroke-width="0.6"/>`, label: 'DRIVEWAY (NEARMAP AI)' });
+  }
 
   // ── 1) REAL surrounding building footprints (OSM) — the "reality around the
   // home". The SUBJECT building (footprint centroid inside the roof bbox) is
