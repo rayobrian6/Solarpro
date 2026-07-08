@@ -642,7 +642,12 @@ const PDF_PAGE_CONFIG = {
 // them; the parcel survived only because it's re-fetched post-recenter. Moved the
 // surface fetch (Nearmap AI + OSM fallback) to AFTER the re-center, next to the
 // parcel re-attach, so driveways/paving/buildings actually land on PV-2.
-const PLANSET_ENGINE_VERSION = 47407;
+// 47408 (2026-07-08): SOFTSCAPE + SHADING — mapNearmapSurfaces now also extracts
+// Lawn/Pervious and tall Vegetation (>2m). PV-2 draws lawn as a light-green base
+// (site reads as landscape, not a gray hardscape sea) and tree canopies as
+// semi-transparent green; a canopy reaching the array is outlined amber + noted
+// (SHADING — FIELD VERIFY). Same cached AI response, no extra parcel.
+const PLANSET_ENGINE_VERSION = 47408;
 
 
 

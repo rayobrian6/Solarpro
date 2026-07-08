@@ -42,6 +42,8 @@ export interface SiteContext {
   driveways: FakePt[][];
   paved: FakePt[][];
   roadSurfaces: FakePt[][];
+  lawn: FakePt[][];                 // grass / pervious softscape (Nearmap)
+  trees: FakePt[][];                // tall vegetation — shading (Nearmap)
   source: string;                   // e.g. "County GIS" / "Nearmap AI"
   hasNearmap: boolean;              // Nearmap surfaces drove the site layer
   streetName: string | null;
@@ -71,6 +73,8 @@ export function buildSiteContext(
         driveways?: Array<Array<{ lat: number; lng: number }>>;
         paved?: Array<Array<{ lat: number; lng: number }>>;
         roads?: Array<Array<{ lat: number; lng: number }>>;
+        lawn?: Array<Array<{ lat: number; lng: number }>>;
+        trees?: Array<Array<{ lat: number; lng: number }>>;
       };
     };
     project?: { address?: string };
@@ -93,6 +97,8 @@ export function buildSiteContext(
   const driveways = hasNearmap ? ringsToFake(nm!.driveways) : [];
   const paved = hasNearmap ? ringsToFake(nm!.paved) : [];
   const roadSurfaces = hasNearmap ? ringsToFake(nm!.roads) : [];
+  const lawn = hasNearmap ? ringsToFake(nm!.lawn) : [];
+  const trees = hasNearmap ? ringsToFake(nm!.trees) : [];
   const buildings: FakePt[][] = hasNearmap
     ? ringsToFake(nm!.buildings)
     : (pi?.aerialData?.siteFeatures?.buildings ?? []).map(b => clean(b.points).map(toFake)).filter(b => b.length >= 3);
@@ -113,6 +119,8 @@ export function buildSiteContext(
     driveways,
     paved,
     roadSurfaces,
+    lawn,
+    trees,
     hasNearmap,
     streetName,
     apn: pi?.aerialData?.parcel?.apn ?? null,
@@ -185,6 +193,13 @@ export function drawSiteContextEls(
   const inRoof = (lng: number, lat: number) =>
     lng >= roof.minLng && lng <= roof.maxLng && lat >= roof.minLat && lat <= roof.maxLat;
 
+  // ── SOFTSCAPE base: lawn / pervious (light green), drawn UNDER everything so
+  // the site reads as landscape, not a gray hardscape sea (Nearmap AI). ──
+  if (site.lawn.length) {
+    for (const s of site.lawn) els.push(`<polygon points="${polyStr(s)}" fill="#e7f0e3" stroke="none"/>`);
+    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#e7f0e3" stroke="#bcd3b2" stroke-width="0.5"/>`, label: 'LAWN / PERVIOUS (NEARMAP AI)' });
+  }
+
   // ── 0) Nearmap AI ground surfaces (REAL, filled) — drawn bottom-up so driveways
   // read on top of general paving: road surface → walks/pads → driveways. These
   // come from actual aerial AI (not OSM/guesses); clipped to the draw zone.
@@ -240,6 +255,25 @@ export function drawSiteContextEls(
     drewBuilding = true;
   }
   if (drewBuilding) legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#f1f3f5" stroke="#7f8894" stroke-width="1.0"/>`, label: 'EXISTING BUILDING' });
+
+  // ── TREE CANOPY (tall vegetation >2m, Nearmap) — semi-transparent green so the
+  // ground/structures show through. A canopy reaching the roof is a SHADING flag
+  // (relevant to production + AHJ); it's outlined amber-dashed and noted. ──
+  if (site.trees.length) {
+    const rPad = 6; // ft — "near the array" tolerance for a shading flag
+    let shades = false;
+    for (const t of site.trees) {
+      const over = t.some(p => p.lng >= roof.minLng - rPad && p.lng <= roof.maxLng + rPad && p.lat >= roof.minLat - rPad && p.lat <= roof.maxLat + rPad);
+      if (over) shades = true;
+      const pts = t.map(p => { const q = px(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
+      els.push(`<polygon points="${pts}" fill="rgba(120,165,102,0.34)" stroke="${over ? '#b45309' : '#5f8a4a'}" stroke-width="${over ? 1.1 : 0.7}"${over ? ' stroke-dasharray="3 2"' : ''}/>`);
+    }
+    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="rgba(120,165,102,0.34)" stroke="#5f8a4a" stroke-width="0.7"/>`, label: 'TREE CANOPY (NEARMAP AI)' });
+    if (shades) {
+      const bx = toX((roof.minLng + roof.maxLng) / 2);
+      els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.maxLat) - 6).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.2" font-weight="bold" fill="#b45309" stroke="#fff" stroke-width="1.5" paint-order="stroke">TREE CANOPY NEAR ARRAY — SHADING, FIELD VERIFY</text>`);
+    }
+  }
 
   // ── 2) REAL road centerlines (OSM) — drawn where the road ACTUALLY is, with
   // the real name. Each unique name labeled once, on its longest segment. ──

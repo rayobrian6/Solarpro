@@ -544,6 +544,8 @@ export interface NearmapSurfaces {
   driveways: Array<Array<{ lat: number; lng: number }>>;
   paved:     Array<Array<{ lat: number; lng: number }>>;   // concrete/asphalt/hard (walks & pads)
   roads:     Array<Array<{ lat: number; lng: number }>>;   // driveable-surface polygons
+  lawn:      Array<Array<{ lat: number; lng: number }>>;   // grass / pervious softscape
+  trees:     Array<Array<{ lat: number; lng: number }>>;   // tall vegetation (>2m) — shading
   surveyDate: string | null;
 }
 
@@ -559,6 +561,12 @@ function allOuterRings(geom: any): number[][][] {
 }
 
 const _PAVED_CLASSES = new Set(['Concrete Slab', 'Asphalt', 'Hard Surface']);
+const _LAWN_CLASSES = new Set(['Lawn Grass', 'Natural Pervious Surface', 'Natural (soft)']);
+const _TREE_CLASSES = new Set([
+  'Medium and High Vegetation (>2m)',
+  'Medium and High Vegetation with Woody Vegetation',
+  'Woody Vegetation',
+]);
 
 /**
  * Raw AI Feature response for an AOI. The coverage check is SKIPPED on purpose —
@@ -588,7 +596,7 @@ export async function fetchNearmapAIRaw(lat: number, lng: number, radiusM = 55):
 export function mapNearmapSurfaces(responseJson: unknown): NearmapSurfaces {
   const d = responseJson as any;
   const feats: any[] = Array.isArray(d?.features) ? d.features : [];
-  const res: NearmapSurfaces = { buildings: [], driveways: [], paved: [], roads: [], surveyDate: d?.surveyDate ?? null };
+  const res: NearmapSurfaces = { buildings: [], driveways: [], paved: [], roads: [], lawn: [], trees: [], surveyDate: d?.surveyDate ?? null };
   for (const f of feats) {
     const desc = String(f?.description ?? '');
     for (const ring of allOuterRings(f.geometry)) {
@@ -600,6 +608,8 @@ export function mapNearmapSurfaces(responseJson: unknown): NearmapSurfaces {
       else if (desc === 'Driveway') res.driveways.push(poly);
       else if (desc.startsWith('Road')) res.roads.push(poly);
       else if (_PAVED_CLASSES.has(desc)) res.paved.push(poly);
+      else if (_LAWN_CLASSES.has(desc)) res.lawn.push(poly);
+      else if (_TREE_CLASSES.has(desc)) res.trees.push(poly);
     }
   }
   return res;
