@@ -187,11 +187,16 @@ export function drawSiteContextEls(
 
   // ── 0) Nearmap AI ground surfaces (REAL, filled) — drawn bottom-up so driveways
   // read on top of general paving: road surface → walks/pads → driveways. These
-  // come from actual aerial AI (not OSM/guesses); clipped to the draw zone. ──
+  // come from actual aerial AI (not OSM/guesses); clipped to the draw zone.
+  // Driveways get a diagonal HATCH (the standard site-plan treatment) so they're
+  // unmistakable; roads/walks are solid grays with clear outlines. ──
+  if (site.driveways.length || site.paved.length || site.roadSurfaces.length) {
+    els.push(`<defs><pattern id="nm-drive" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#d5dae1"/><line x1="0" y1="0" x2="0" y2="5" stroke="#8b93a0" stroke-width="0.7"/></pattern></defs>`);
+  }
   if (site.roadSurfaces.length) {
     let big = site.roadSurfaces[0], bigA = -1;
     for (const s of site.roadSurfaces) {
-      els.push(`<polygon points="${polyStr(s)}" fill="#e4e7ec" stroke="#c7ccd3" stroke-width="0.5"/>`);
+      els.push(`<polygon points="${polyStr(s)}" fill="#d3d8df" stroke="#a3abb6" stroke-width="0.7"/>`);
       const xs = s.map(p => p.lng), ys = s.map(p => p.lat);
       const a = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
       if (a > bigA) { bigA = a; big = s; }
@@ -199,15 +204,25 @@ export function drawSiteContextEls(
     if (site.streetName) {
       const cx = big.reduce((s, p) => s + px(p).x, 0) / big.length;
       const cy = big.reduce((s, p) => s + px(p).y, 0) / big.length;
-      els.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="900" letter-spacing="1.5" fill="#666" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(site.streetName)}</text>`);
+      els.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="900" letter-spacing="1.5" fill="#4a4f57" stroke="#fff" stroke-width="1.8" paint-order="stroke">${esc(site.streetName)}</text>`);
     }
-    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#e4e7ec" stroke="#c7ccd3" stroke-width="0.5"/>`, label: 'ROAD (NEARMAP AI)' });
+    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#d3d8df" stroke="#a3abb6" stroke-width="0.7"/>`, label: 'ROAD (NEARMAP AI)' });
   }
-  for (const s of site.paved) els.push(`<polygon points="${polyStr(s)}" fill="#eef0f3" stroke="#cfd4db" stroke-width="0.4"/>`);
-  if (site.paved.length) legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#eef0f3" stroke="#cfd4db" stroke-width="0.4"/>`, label: 'WALK / PAVING (NEARMAP AI)' });
+  for (const s of site.paved) els.push(`<polygon points="${polyStr(s)}" fill="#e6e9ee" stroke="#c0c6cf" stroke-width="0.5"/>`);
+  if (site.paved.length) legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#e6e9ee" stroke="#c0c6cf" stroke-width="0.5"/>`, label: 'WALK / PAVING (NEARMAP AI)' });
   if (site.driveways.length) {
-    for (const s of site.driveways) els.push(`<polygon points="${polyStr(s)}" fill="#d7dbe0" stroke="#a9b0ba" stroke-width="0.6"/>`);
-    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#d7dbe0" stroke="#a9b0ba" stroke-width="0.6"/>`, label: 'DRIVEWAY (NEARMAP AI)' });
+    // Merge/label: hatch each driveway polygon; label the largest one.
+    let dBig = site.driveways[0], dA = -1;
+    for (const s of site.driveways) {
+      els.push(`<polygon points="${polyStr(s)}" fill="url(#nm-drive)" stroke="#7f8894" stroke-width="0.9"/>`);
+      const xs = s.map(p => p.lng), ys = s.map(p => p.lat);
+      const a = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+      if (a > dA) { dA = a; dBig = s; }
+    }
+    const dcx = dBig.reduce((s, p) => s + px(p).x, 0) / dBig.length;
+    const dcy = dBig.reduce((s, p) => s + px(p).y, 0) / dBig.length;
+    els.push(`<text x="${dcx.toFixed(1)}" y="${dcy.toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#4a4f57" stroke="#fff" stroke-width="1.4" paint-order="stroke">DRIVEWAY</text>`);
+    legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="url(#nm-drive)" stroke="#7f8894" stroke-width="0.9"/>`, label: 'DRIVEWAY (NEARMAP AI)' });
   }
 
   // ── 1) REAL surrounding building footprints (OSM) — the "reality around the
@@ -221,10 +236,10 @@ export function drawSiteContextEls(
     const cLat = b.reduce((s, p) => s + p.lat, 0) / b.length;
     if (inRoof(cLng, cLat)) continue; // subject building — roof draws over it
     const pts = b.map(p => { const q = px(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
-    els.push(`<polygon points="${pts}" fill="#edeff2" stroke="#b7bcc4" stroke-width="0.7"/>`);
+    els.push(`<polygon points="${pts}" fill="#f1f3f5" stroke="#7f8894" stroke-width="1.0"/>`);
     drewBuilding = true;
   }
-  if (drewBuilding) legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#edeff2" stroke="#b7bcc4" stroke-width="0.7"/>`, label: 'EXISTING BUILDING' });
+  if (drewBuilding) legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#f1f3f5" stroke="#7f8894" stroke-width="1.0"/>`, label: 'EXISTING BUILDING' });
 
   // ── 2) REAL road centerlines (OSM) — drawn where the road ACTUALLY is, with
   // the real name. Each unique name labeled once, on its longest segment. ──

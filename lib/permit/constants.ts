@@ -632,7 +632,11 @@ const PDF_PAGE_CONFIG = {
 // location's response so a property costs AT MOST 1 AI parcel EVER (in-memory
 // cache dies on Vercel cold starts). Coverage check SKIPPED (trial keys lack
 // coverage v2 → would 403). Route fetches once, prefers Nearmap, OSM fallback.
-const PLANSET_ENGINE_VERSION = 47405;
+// 47406 (2026-07-08): Nearmap surface CONTRAST — the light-gray fills blended into
+// the sheet. Neighbor buildings now draw with a clear dark outline (read as
+// footprints), driveways get a diagonal HATCH + "DRIVEWAY" label (standard
+// site-plan treatment), road/walk grays darkened. Same real data, readable.
+const PLANSET_ENGINE_VERSION = 47406;
 
 
 
