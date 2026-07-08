@@ -1559,57 +1559,66 @@ export function drawRoofStructural(
     curY += layer.h;
   });
 
-  // ── Detail circle (zoomed attachment) — enlarged; at r=112 it left the
-  // bottom of the drawing zone blank.
-  // Circle center pinned to the ORIGINAL 436px detail frame — %-of-height on
-  // the taller (800px) canvas dragged the circle down into the section.
-  const dcx = dz.x + dz.width * 0.74;
+  // ── Detail circle (zoomed attachment) — sized to the detail (was r=148 with a
+  // tiny stack floating in a mostly-empty bubble). The zoomed layers fill the
+  // circle and a LAG BOLT penetrates flashing/shingle/sheathing INTO the rafter
+  // with the embedment called out — the actual point of an attachment detail. ──
+  const dcx = dz.x + dz.width * 0.72;
   const dcy = zones.dims.top + Math.min(dz.height, 436) * 0.46;
-  const dcr = 148;
-  els.push(`<circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="${dcr}"
-    fill="#fffff8" stroke="#000" stroke-width="1.8"/>`);
-  els.push(drawText(dcx, dcy - dcr - 6, 'DETAIL 1/PV-3', {
-    anchor: 'middle', fontSize: 8.5, fontWeight: '900', fill: '#000',
-  }));
-  els.push(drawText(dcx, dcy - dcr + 10, 'ATTACHMENT DETAIL', {
-    anchor: 'middle', fontSize: 7, fill: '#555',
-  }));
+  const dcr = 122;
+  els.push(`<circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="${dcr}" fill="#fffff8" stroke="#000" stroke-width="1.8"/>`);
+  els.push(drawText(dcx, dcy - dcr - 6, 'DETAIL 1/PV-3', { anchor: 'middle', fontSize: 8.5, fontWeight: '900', fill: '#000' }));
+  els.push(drawText(dcx, dcy - dcr + 10, `ATTACHMENT DETAIL — ${isRaillessD ? 'DIRECT MOUNT' : 'RAIL MOUNT'}`, { anchor: 'middle', fontSize: 6.4, fill: '#555' }));
 
-  // Zoomed layers inside circle — scaled to the r=148 circle. Labels sit at
-  // a FIXED 13px pitch with leader lines: the old label-per-layer-center put
-  // 7px type on 4px rows (FLASHING/ROOF/SHEATHING text overlapped itself).
-  const dzX = dcx - 105, dzY = dcy - 72;
-  const dzW = 190;
   type ZLayerDef = { label: string; fill: string; stroke?: string; h: number; hatch?: string; hatchOp?: number };
   const zLayers: ZLayerDef[] = [
-    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 21 },
-    { label: (isRaillessD ? 'MOUNT — ' : 'RAIL — ') + mountSys, fill: '#a0a0a0', stroke: '#444', h: 9 },
-    { label: isRaillessD ? `MOUNT BASE — ${lagLabelD}` : `L-FOOT — ${lagLabelD}`, fill: '#b8b8b8', stroke: '#444', h: 13, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
-    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 5  },
-    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 10 },
-    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 9,  hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
-    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 23, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
+    { label: `MODULE (${panelLenIn}" × ${panelWidIn}")`,  fill: '#1a3f8a', stroke: '#0a1e4a', h: 25 },
+    { label: (isRaillessD ? 'MOUNT — ' : 'RAIL — ') + mountSys, fill: '#a0a0a0', stroke: '#444', h: 12 },
+    { label: isRaillessD ? `MOUNT BASE — ${lagLabelD}` : `L-FOOT — ${lagLabelD}`, fill: '#b8b8b8', stroke: '#444', h: 16, hatch: 'url(#hatch-steel)', hatchOp: 0.5 },
+    { label: 'FLASHING',                                  fill: '#c8dce8', stroke: '#4488aa', h: 7  },
+    { label: roofType + ' ROOF',                          fill: '#b89060', stroke: '#665030', h: 13 },
+    { label: 'SHEATHING (5/8" OSB)',                      fill: 'url(#rafter-wood)', stroke: '#886030', h: 12, hatch: 'url(#hatch-wood)', hatchOp: 0.35 },
+    { label: rafterSz + ' RAFTER @ ' + rafterSp + '" O.C.', fill: 'url(#rafter-wood)', stroke: '#7a5a20', h: 34, hatch: 'url(#hatch-wood)', hatchOp: 0.5 },
   ];
+  const _zTotal = zLayers.reduce((s, z) => s + z.h, 0);
+  const dzW = 140;
+  const dzX = dcx - dzW / 2 - 14;         // stack just left of center; labels to the right
+  const dzY = dcy - _zTotal / 2;
+  const _lblPitch = _zTotal / zLayers.length;
+  const _lblX = dzX + dzW + 12;
+  const _layerTop: number[] = [];
   let zy = dzY;
-  const _lblX = dzX + dzW + 26;
-  // 16px label pitch: bubbles are r=7 circles, so a 13px pitch stacked the
-  // 2-3-4-5 bubbles on top of each other; leaders land at the BASELINE with
-  // a short horizontal landing (a mid-glyph endpoint at the text edge read
-  // as a strike-through at print size).
   zLayers.forEach((zl, i) => {
+    _layerTop.push(zy);
     els.push(drawRectFilled(dzX, zy, dzW, zl.h, zl.fill, zl.stroke || '#333', 0.9));
     if (zl.hatch) {
       els.push(`<rect x="${dzX.toFixed(1)}" y="${zy.toFixed(1)}" width="${dzW}" height="${zl.h}" fill="${zl.hatch}" opacity="${zl.hatchOp ?? 0.5}"/>`);
     }
-    const _rowY = dzY + i * 16 + 4;
-    els.push(`<line x1="${(dzX + dzW).toFixed(1)}" y1="${(zy + zl.h / 2).toFixed(1)}" x2="${(_lblX - 9).toFixed(1)}" y2="${(_rowY + 1).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
-    els.push(`<line x1="${(_lblX - 9).toFixed(1)}" y1="${(_rowY + 1).toFixed(1)}" x2="${(_lblX - 2).toFixed(1)}" y2="${(_rowY + 1).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
-    els.push(drawText(_lblX, _rowY, zl.label, {
-      anchor: 'start', fontSize: 7, fill: '#222',
-    }));
-    els.push(drawCalloutWithLeader(dzX - 28, _rowY - 2, dzX, zy + zl.h / 2, i + 1, 7));
+    const _rowY = dzY + i * _lblPitch + 6;
+    els.push(`<line x1="${(dzX + dzW).toFixed(1)}" y1="${(zy + zl.h / 2).toFixed(1)}" x2="${(_lblX - 3).toFixed(1)}" y2="${(_rowY + 1).toFixed(1)}" stroke="#888" stroke-width="0.6"/>`);
+    els.push(drawText(_lblX, _rowY, zl.label, { anchor: 'start', fontSize: 6.6, fill: '#222' }));
+    els.push(drawCalloutWithLeader(dzX - 26, _rowY - 2, dzX, zy + zl.h / 2, i + 1, 7));
     zy += zl.h;
   });
+
+  // ── Lag bolt: hex head at the mount base, shank down through flashing/shingle/
+  // sheathing, threaded INTO the rafter with the embedment dimensioned. ──
+  {
+    const bx = dzX + dzW * 0.40;
+    const headY = _layerTop[2];             // top of MOUNT BASE layer
+    const rafterTop = _layerTop[6];         // top of RAFTER layer
+    const tipY = rafterTop + Math.min(zLayers[6].h - 5, 24);
+    els.push(`<line x1="${bx.toFixed(1)}" y1="${headY.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${tipY.toFixed(1)}" stroke="#2b2f36" stroke-width="2"/>`);
+    els.push(`<rect x="${(bx - 4).toFixed(1)}" y="${(headY - 3.5).toFixed(1)}" width="8" height="4" fill="#2b2f36"/>`);
+    for (let t = rafterTop + 2; t < tipY; t += 2.6) {
+      els.push(`<line x1="${(bx - 2).toFixed(1)}" y1="${t.toFixed(1)}" x2="${(bx + 2).toFixed(1)}" y2="${(t + 1.3).toFixed(1)}" stroke="#2b2f36" stroke-width="0.5"/>`);
+    }
+    // embedment dimension (red)
+    els.push(`<line x1="${(bx + 9).toFixed(1)}" y1="${rafterTop.toFixed(1)}" x2="${(bx + 9).toFixed(1)}" y2="${tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
+    els.push(`<line x1="${(bx + 6).toFixed(1)}" y1="${rafterTop.toFixed(1)}" x2="${(bx + 12).toFixed(1)}" y2="${rafterTop.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
+    els.push(`<line x1="${(bx + 6).toFixed(1)}" y1="${tipY.toFixed(1)}" x2="${(bx + 12).toFixed(1)}" y2="${tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
+    els.push(drawText(bx + 14, (rafterTop + tipY) / 2 + 2, `${_embedD}" EMBED`, { anchor: 'start', fontSize: 5.4, fontWeight: 'bold', fill: '#cc0000' }));
+  }
 
   // ── STEP 7: Load arrows ──
   const midPanY = detY + 5;   // top of layer stack
@@ -1703,42 +1712,16 @@ export function drawRoofStructural(
     });
   }
 
-  // ── Callout schedule (right panel) ──
+  // ── Right panel: STRUCTURAL NOTES. The ①–⑦ callout schedule lives ONCE in the
+  // page data-zone; the in-drawing copy that used to sit here (plus the utility
+  // block below) was pure duplication. ──
   const schedLeft = W - zones.dims.right + 10;
-  const schedY0   = zones.dims.top + 4;
-
-  els.push(drawRectFilled(schedLeft - 2, schedY0 - 2, zones.dims.right - 12, 14, '#000', '#000', 0));
-  els.push(drawText(schedLeft + (zones.dims.right - 14) / 2 - 2, schedY0 + 9,
-    'ATTACHMENT CALLOUT SCHEDULE', {
-      anchor: 'middle', fontSize: 8.5, fontWeight: '900', fill: '#fff',
-    }));
-
-  // ROOF-SPECIFIC callouts (STEP 8/9: roof terms only — NO posts/piles/fence)
-  const structCallouts = [
-    { n: 1, label: `PV MODULE — ${panelLenIn}" × ${panelWidIn}" @ ${panelWt} LBS` },
-    { n: 2, label: isRaillessD ? `DIRECT-ATTACH MOUNT — ${mountSys}` : `MOUNTING RAIL — ${mountSys}` },
-    { n: 3, label: `${isRaillessD ? 'MOUNT BASE' : 'STANDOFF / L-FOOT'} — ${lagLabelD}` },
-    { n: 4, label: `FLASHING — UNDER ALL PENETRATIONS` },
-    { n: 5, label: `RAFTER — ${rafterSz} @ ${rafterSp}" O.C.` },
-    { n: 6, label: `${condType} CONDUIT — SEE CONDUCTOR SCHEDULE` },
-    { n: 7, label: `BONDING JUMPER — NEC 690.43` },
-  ];
-
-  const rowH = 20;
-  structCallouts.forEach((sc, i) => {
-    const rowY = schedY0 + 14 + i * rowH;
-    const bg   = i % 2 === 0 ? '#fff' : '#f5f5f5';
-    els.push(drawRectFilled(schedLeft - 2, rowY, zones.dims.right - 12, rowH - 1, bg, '#ddd', 0.5));
-    els.push(drawCallout({ cx: schedLeft + 11, cy: rowY + 9, number: sc.n, r: 8 }));
-    els.push(drawText(schedLeft + 24, rowY + 12, sc.label, {
-      anchor: 'start', fontSize: 7, fill: '#222',
-    }));
-  });
-
-  // Notes
-  const noteY = schedY0 + 14 + structCallouts.length * rowH + 6;
-  els.push(`<line x1="${schedLeft - 2}" y1="${noteY}" x2="${W - 8}" y2="${noteY}"
-    stroke="#ccc" stroke-width="0.7"/>`);
+  const noteHdrY  = zones.dims.top + 4;
+  els.push(drawRectFilled(schedLeft - 2, noteHdrY - 2, zones.dims.right - 12, 14, '#000', '#000', 0));
+  els.push(drawText(schedLeft + (zones.dims.right - 14) / 2 - 2, noteHdrY + 9, 'STRUCTURAL NOTES', {
+    anchor: 'middle', fontSize: 8.5, fontWeight: '900', fill: '#fff',
+  }));
+  const noteY = noteHdrY + 18;
 
   // ROOF-SPECIFIC NOTES (no fence/ground terms)
   const notes = [
@@ -1759,13 +1742,8 @@ export function drawRoofStructural(
     }));
   });
 
-  // UTILITY ANALYSIS (Bill Intelligence Layer — injected if ctx present)
-  if (ctx) {
-    const utilY   = noteY + 10 + notes.length * 9 + 6;
-    const utilW   = zones.dims.right - 12;
-    const utilSvg = drawUtilityAnalysis(ctx, schedLeft - 2, utilY, utilW);
-    if (utilSvg) els.push(utilSvg);
-  }
+  // (UTILITY ANALYSIS removed — a utility-bill block does not belong on the
+  // structural attachment sheet; it lives on the electrical/system sheets.)
 
   // Scale note
   els.push(drawText(zones.dims.left, H - 8,

@@ -688,7 +688,14 @@ const PDF_PAGE_CONFIG = {
 // plane with a leader line to the facet centroid (both sheets), decluttering the
 // roof. Verified the micro string sizing matches Enphase IQ8 spec (IQ8+ = 13 per
 // 20A branch) and fixed a stale "16 units" comment (that was IQ7+, not IQ8+).
-const PLANSET_ENGINE_VERSION = 47416;
+// 47417 (2026-07-08): PV-3 attachment-detail cleanup (Ray "absolute trainwreck").
+// The giant empty detail circle (r=148, tiny stack floating in it) is right-sized
+// (r=122) with the zoomed layers filling it and a LAG BOLT drawn penetrating
+// flashing/shingle/sheathing INTO the rafter with the embedment dimensioned — the
+// actual point of an attachment detail. Removed the triplicated ①–⑦ callout list
+// (killed the in-drawing "ATTACHMENT CALLOUT SCHEDULE"; the data-zone keeps the
+// one schedule) and the stray UTILITY ANALYSIS block that doesn't belong here.
+const PLANSET_ENGINE_VERSION = 47417;
 
 
 
