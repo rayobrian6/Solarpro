@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import { systemTypeToInstallationType } from '@/lib/structural/types';
 import { resolveEquipment } from '@/lib/systemEquipmentResolver';
+import { applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -1002,6 +1003,11 @@ function EngineeringPageInner() {
   // Hoisted here from its original (~line 3130) location so the panel count
   // resolver can run during the same render pass as totalPanels.
   const [projectLayout, setProjectLayout] = useState<any>(null);
+  // Canonical design panel id (projects.selected_equipment) from the loaded project.
+  // Single source of truth for "which panel" — the effect below forces the config
+  // onto it so a panel changed in Design reconciles into Engineering.
+  const [canonicalPanelId, setCanonicalPanelId] = useState<string | null>(null);
+  const appliedCanonPanelRef = useRef<string | null>(null);
   const [projectAutoLoaded, setProjectAutoLoaded] = useState(false);
   const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -1063,6 +1069,8 @@ function EngineeringPageInner() {
           return;
         }
         const p = data.data;
+        // Canonical panel (projects.selected_equipment) — authoritative "which panel".
+        setCanonicalPanelId((p.selectedPanel?.id as string | undefined) ?? null);
         const seed = p.engineeringSeed;
         const layout = p.layout;
         // STEP 4 -- LOADED PROJECT LAYOUT LOGGING
@@ -2288,6 +2296,21 @@ function EngineeringPageInner() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, currentProjectId, isHydrated]);
+
+  // ── Canonical panel reconciliation (Design→Engineering single source of truth) ──
+  // projects.selected_equipment is authoritative for "which panel". When the project
+  // loads (or its canonical panel changes because the Design side changed it), force
+  // every string onto that panel — ABOVE the saved engineering_config, which may hold
+  // an older panel. Runs once per distinct canonical id (ref-guarded), so in-session
+  // engineering panel edits — which flow to canonical via the save-config write-back —
+  // are not fought. Only acts on a real, resolvable equipment-db panel.
+  useEffect(() => {
+    const canonId = canonicalPanelId;
+    if (!canonId || appliedCanonPanelRef.current === canonId) return;
+    if (!SOLAR_PANELS.find(pp => pp.id === canonId)) return;
+    appliedCanonPanelRef.current = canonId;
+    setConfig(prev => (applyPanelToEngineeringConfig(prev, canonId) as unknown as ProjectConfig | null) ?? prev);
+  }, [canonicalPanelId]);
 
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);

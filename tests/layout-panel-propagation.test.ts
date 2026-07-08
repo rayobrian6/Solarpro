@@ -48,6 +48,7 @@ vi.mock('@/lib/db-neon', () => ({
   handleRouteDbError: () => new Response(JSON.stringify({ success: false }), { status: 500 }),
   getProjectById: async () => ({
     id: PROJECT_ID, systemType: 'roof',
+    selectedPanel: { id: OLD.id }, // current canonical panel
     engineeringConfig: { inverters: [{ id: 'i1', strings: [{ id: 's1', panelId: OLD.id }] }] },
   }),
   getLayoutByProject: async () => ({ systemType: 'roof', designElectrical: { panelId: OLD.id } }),
@@ -70,26 +71,19 @@ const ctx = { params: Promise.resolve({ id: PROJECT_ID }) };
 describe('POST layout route — design panel change propagation', () => {
   beforeEach(() => { upsertEqSpy.mockClear(); sqlSpy.mockClear(); });
 
-  it('writes canonical + updates engineering_config when the design panel changes', async () => {
+  it('writes canonical with the NEW panel when the design panel differs from canonical', async () => {
     const res = await POST(makeReq(NEW.id), ctx);
     expect((await res.json()).success).toBe(true);
 
-    // canonical write with the NEW panel
     expect(upsertEqSpy).toHaveBeenCalledTimes(1);
     const patch = (upsertEqSpy.mock.calls[0] as unknown as unknown[])[2] as { panelId?: string; source?: string };
     expect(patch.panelId).toBe(NEW.id);
     expect(patch.source).toBe('design');
-
-    // engineering_config UPDATE issued with the new panelId
-    const engUpdate = sqlSpy.mock.calls.find(c => String(c[0]).includes('engineering_config'));
-    expect(engUpdate).toBeDefined();
-    expect(String(engUpdate![1])).toContain(NEW.id);
   });
 
-  it('does NOT propagate when the design panel is unchanged (moving panels only)', async () => {
-    const res = await POST(makeReq(OLD.id), ctx); // same as existing layout designElectrical.panelId
+  it('does NOT write when the design panel already matches canonical (moving panels only)', async () => {
+    const res = await POST(makeReq(OLD.id), ctx); // OLD === current canonical
     expect((await res.json()).success).toBe(true);
     expect(upsertEqSpy).not.toHaveBeenCalled();
-    expect(sqlSpy.mock.calls.find(c => String(c[0]).includes('engineering_config'))).toBeUndefined();
   });
 });

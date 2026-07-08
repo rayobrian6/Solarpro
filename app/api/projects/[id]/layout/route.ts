@@ -9,7 +9,7 @@ import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, h
 import { syncProjectPipeline } from '@/lib/engineering/syncPipeline';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { getPanelById } from '@/lib/equipment-db';
-import { equipmentPanelToTypesPanel, applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
+import { equipmentPanelToTypesPanel } from '@/lib/system/selectedEquipment';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -127,18 +127,16 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     }
 
-    // ── Full-duplex Design→Engineering: propagate a DESIGN panel change ─────────
+    // ── Full-duplex Design→Engineering: write the canonical panel ───────────────
     // The design auto-save is the reliable persist path (the production route only
-    // fires when kW changes). When the designer changes the PANEL, flow it into (1)
-    // the canonical selected_equipment store (design's source of truth, also drives
-    // the pipeline rebuild below) and (2) the saved engineering_config's per-string
-    // panelId, so the Engineering page reflects it on next load. Guarded on an
-    // ACTUAL change vs the previous design panel, so merely moving panels never
-    // clobbers a deliberate engineering-only panel choice. Non-fatal.
+    // fires when kW changes). When the design's panel differs from the canonical
+    // selected_equipment (i.e. the designer changed it), write canonical — the
+    // single source of truth that BOTH pages read (design on mount, engineering via
+    // the canonical-panel reconciliation effect). Compared against canonical (not the
+    // previous layout) so a diverged pair converges. Non-fatal.
     try {
       const newPanelId = designElectrical?.panelId as string | undefined;
-      const prevPanelId = (existingLayout as { designElectrical?: { panelId?: string } } | null)?.designElectrical?.panelId;
-      if (newPanelId && newPanelId !== prevPanelId) {
+      if (newPanelId && newPanelId !== project.selectedPanel?.id) {
         const panel = getPanelById(newPanelId);
         if (panel) {
           await upsertSelectedEquipment(projectId, user.id, {
@@ -147,20 +145,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
             source: 'design',
             updatedAt: new Date().toISOString(),
           });
+          console.log('[layout/route] design panel → canonical', { projectId, newPanelId });
         }
-        const updatedCfg = applyPanelToEngineeringConfig(project.engineeringConfig, newPanelId);
-        if (updatedCfg) {
-          const sql = await getDbReady();
-          await sql`
-            UPDATE projects
-            SET engineering_config = ${JSON.stringify(updatedCfg)}::jsonb, engineering_updated_at = NOW()
-            WHERE id = ${projectId} AND user_id = ${user.id} AND deleted_at IS NULL
-          `;
-        }
-        console.log('[layout/route] design panel change propagated', { projectId, newPanelId, engConfigUpdated: !!updatedCfg });
       }
     } catch (propErr: unknown) {
-      console.warn('[layout/route] design panel propagation skipped (non-fatal):', (propErr as Error)?.message);
+      console.warn('[layout/route] design panel canonical write skipped (non-fatal):', (propErr as Error)?.message);
     }
 
     // Save version snapshot (async, non-blocking for response).
