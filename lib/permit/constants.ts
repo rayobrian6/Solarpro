@@ -573,7 +573,16 @@ const PDF_PAGE_CONFIG = {
 // (b) NEC 220.82 dwelling-load Step 1 now labels the sqft as "assumed from the
 // service size — field verify" (no dwelling-area field exists on the project; it
 // is keyed to service amps), matching the HVAC row's existing field-verify note.
-const PLANSET_ENGINE_VERSION = 47397;
+// 47398 (2026-07-08): PV-2 site-context inset (Phase 1). A parcel-scale plot view
+// (county-GIS property line + edge dims, building/roof footprint, PV array,
+// street name label, service equipment, approximate building/array→property-line
+// setbacks, north, scale, APN, provenance) is injected into the roof SVG's empty
+// bottom-left reserve — the main roof/module viewport is untouched. Renders only
+// when a county-GIS parcel is present; otherwise the roof plan is kept as-is (no
+// fabricated lot). All GIS-derived geometry/dimensions labeled APPROXIMATE. No
+// driveways/sidewalks/roads fabricated; a provider seam (approved-only) is left
+// for later. Parcel fetch wired into the permit route (POST + GET self-heal).
+const PLANSET_ENGINE_VERSION = 47398;
 
 
 

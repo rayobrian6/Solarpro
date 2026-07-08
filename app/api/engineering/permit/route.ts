@@ -19,6 +19,30 @@ import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
 import { applyAerialEdgeSnapRegistration } from '@/lib/permit/utils/aerialEdgeSnap';
 import { deskewArrayToTrue } from '@/lib/permit/utils/deskewArrayToTrue';
+
+/**
+ * Attach the county-GIS parcel boundary to input.aerialData.parcel when missing
+ * (PV-2 site-context inset + PV-1 property lines read it). Non-fatal; returns
+ * null-safe when the county isn't registered or the fetch fails — property lines
+ * are then simply omitted (no fabricated lot geometry).
+ */
+async function attachParcelIfMissing(input: PermitInput): Promise<void> {
+  const aerial = (input as unknown as { aerialData?: { parcel?: unknown } }).aerialData;
+  if (!aerial || aerial.parcel) return;
+  const lat = Number(input.project?.lat), lng = Number(input.project?.lng);
+  if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) < 0.001) return;
+  const county = (input.project as { county?: string | null })?.county || null;
+  const state = (input.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || null;
+  try {
+    const parcel = await fetchParcelBoundary(lat, lng, county, state);
+    if (parcel) {
+      (aerial as { parcel?: unknown }).parcel = parcel;
+      console.log('[permit] parcel boundary attached:', parcel.polygon.length, 'pts, APN', parcel.apn ?? '—');
+    }
+  } catch (e: unknown) {
+    console.warn('[permit] parcel fetch skipped (non-fatal):', (e as Error)?.message);
+  }
+}
 import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
 import { fetchParcelBoundary } from '@/lib/aerial/parcelBoundary';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
@@ -151,6 +175,9 @@ export async function GET(req: NextRequest) {
           // Square the array to true lines (de-skew azimuth + grid) before
           // anything else reads it — see utils/deskewArrayToTrue.ts.
           deskewArrayToTrue(savedInput);
+          // Attach the county-GIS parcel boundary if the saved snapshot predates
+          // the site-context feature (non-fatal, null-safe).
+          await attachParcelIfMissing(savedInput);
           // Google-fallback aerials need the async edge-snap registration
           // computed before the (sync) render — see utils/aerialEdgeSnap.ts.
           await applyAerialEdgeSnapRegistration(savedInput);
@@ -647,6 +674,20 @@ export async function POST(req: NextRequest) {
     console.log('[permit/POST] aerialData.imageBase64:', aerialData.imageBase64 ? `YES (${aerialData.imageBase64.length} chars)` : 'NO');
     console.log('[permit/POST] aerialData.roofSegments:', aerialData.roofSegments?.length ?? 0);
     console.log('[permit/POST] aerialData.error:', aerialData.error || 'none');
+    // County-GIS parcel boundary for the PV-2 site-context inset (+ PV-1 property
+    // lines). Uses the accurate (re-geocoded) center. Null-safe when the county
+    // isn't registered — property lines are then omitted (no fabricated lot).
+    if (aerialData && !(aerialData as { parcel?: unknown }).parcel
+        && isFinite(_centerLat) && isFinite(_centerLng) && Math.abs(_centerLat) > 0.001) {
+      try {
+        const _stateP = body.project?.state || (body.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || null;
+        const _parcel = await fetchParcelBoundary(_centerLat, _centerLng, body.project?.county || null, _stateP);
+        if (_parcel) {
+          (aerialData as { parcel?: unknown }).parcel = _parcel;
+          console.log('[permit/POST] parcel boundary:', _parcel.polygon.length, 'pts, APN', _parcel.apn ?? '—');
+        }
+      } catch (e: unknown) { console.warn('[permit/POST] parcel fetch skipped (non-fatal):', (e as Error)?.message); }
+    }
     const enrichedBody: PermitInput = { ...body, aerialData };
 
     // ── Fetch latest stored SLD SVG for this project ──────────────────────
