@@ -720,30 +720,10 @@ export async function POST(req: NextRequest) {
         }
       } catch (e: unknown) { console.warn('[permit/POST] parcel fetch skipped (non-fatal):', (e as Error)?.message); }
     }
-    // Nearmap AI ground surfaces (REAL) — DB-cached (migration 102), ≤1 AI parcel
-    // per property. Preferred; OSM is the fallback only when Nearmap is absent.
-    const _aX = aerialData as { siteFeatures?: unknown; nearmapSurfaces?: unknown };
-    if (aerialData && !_aX.nearmapSurfaces && process.env.NEARMAP_API_KEY
-        && isFinite(_centerLat) && isFinite(_centerLng) && Math.abs(_centerLat) > 0.001) {
-      try {
-        const _nm = await getNearmapSurfacesCached(_centerLat, _centerLng, 55);
-        if (_nm) {
-          _aX.nearmapSurfaces = _nm;
-          console.log('[permit/POST] nearmap surfaces:', _nm.driveways.length, 'driveways,', _nm.buildings.length, 'buildings,', _nm.paved.length, 'paved');
-        }
-      } catch (e: unknown) { console.warn('[permit/POST] nearmap surfaces skipped (non-fatal):', (e as Error)?.message); }
-    }
-    // Real roads + surrounding building footprints (OSM) — fallback only.
-    if (aerialData && !_aX.siteFeatures && !_aX.nearmapSurfaces
-        && isFinite(_centerLat) && isFinite(_centerLng) && Math.abs(_centerLat) > 0.001) {
-      try {
-        const _sf = await fetchSiteFeatures(_centerLat, _centerLng, 160);
-        if (_sf) {
-          _aX.siteFeatures = _sf;
-          console.log('[permit/POST] site features:', _sf.roads.length, 'roads,', _sf.buildings.length, 'buildings');
-        }
-      } catch (e: unknown) { console.warn('[permit/POST] site features skipped (non-fatal):', (e as Error)?.message); }
-    }
+    // NOTE: site-context surfaces (Nearmap AI / OSM) are fetched LATER, AFTER the
+    // aerial re-center (which replaces enrichedBody.aerialData) — see below. If
+    // fetched here they'd be wiped by that re-assignment (the bug that dropped
+    // driveways/buildings from PV-2 while the re-fetched parcel survived).
     const enrichedBody: PermitInput = { ...body, aerialData };
 
     // ── Fetch latest stored SLD SVG for this project ──────────────────────
@@ -1201,6 +1181,38 @@ export async function POST(req: NextRequest) {
       }
     } catch (parcelErr: unknown) {
       console.log('[parcel] lookup skipped:', (parcelErr as Error)?.message);
+    }
+
+    // ── Site-context ground surfaces for the PV-2 site plan ───────────────────
+    // Fetched HERE (after the aerial re-center replaced aerialData, and next to
+    // the re-fetched parcel) so they actually survive to the render. Nearmap AI
+    // (REAL driveways/walks/paving/footprints, DB-cached ≤1 parcel/property) is
+    // preferred; OSM roads/buildings are the fallback when Nearmap is absent.
+    {
+      const _slat = Number(enrichedBody.project?.lat), _slng = Number(enrichedBody.project?.lng);
+      const _ax = enrichedBody.aerialData as { siteFeatures?: unknown; nearmapSurfaces?: unknown } | undefined;
+      if (_ax && isFinite(_slat) && isFinite(_slng) && Math.abs(_slat) > 0.001) {
+        if (!_ax.nearmapSurfaces && process.env.NEARMAP_API_KEY) {
+          try {
+            const _nm = await getNearmapSurfacesCached(_slat, _slng, 55);
+            if (_nm) {
+              _ax.nearmapSurfaces = _nm;
+              console.log('[permit/POST] nearmap surfaces:', _nm.driveways.length, 'driveways,', _nm.buildings.length, 'buildings,', _nm.paved.length, 'paved');
+            } else {
+              console.log('[permit/POST] nearmap surfaces: none (fetch returned null)');
+            }
+          } catch (e: unknown) { console.warn('[permit/POST] nearmap surfaces skipped:', (e as Error)?.message); }
+        }
+        if (!_ax.siteFeatures && !_ax.nearmapSurfaces) {
+          try {
+            const _sf = await fetchSiteFeatures(_slat, _slng, 160);
+            if (_sf) {
+              _ax.siteFeatures = _sf;
+              console.log('[permit/POST] site features (OSM fallback):', _sf.roads.length, 'roads,', _sf.buildings.length, 'buildings');
+            }
+          } catch (e: unknown) { console.warn('[permit/POST] site features skipped:', (e as Error)?.message); }
+        }
+      }
     }
 
     // ── Survey-photo GPS hints → PV-1 equipment markers (tier 1) ──────────────

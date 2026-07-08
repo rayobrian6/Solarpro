@@ -636,7 +636,13 @@ const PDF_PAGE_CONFIG = {
 // the sheet. Neighbor buildings now draw with a clear dark outline (read as
 // footprints), driveways get a diagonal HATCH + "DRIVEWAY" label (standard
 // site-plan treatment), road/walk grays darkened. Same real data, readable.
-const PLANSET_ENGINE_VERSION = 47406;
+// 47407 (2026-07-08): ★ THE BUG — Nearmap/OSM surfaces never reached the render.
+// The POST route fetched them onto aerialData, but the aerial RE-CENTER
+// (enrichedBody.aerialData = _recentered) REPLACED aerialData right after, wiping
+// them; the parcel survived only because it's re-fetched post-recenter. Moved the
+// surface fetch (Nearmap AI + OSM fallback) to AFTER the re-center, next to the
+// parcel re-attach, so driveways/paving/buildings actually land on PV-2.
+const PLANSET_ENGINE_VERSION = 47407;
 
 
 
