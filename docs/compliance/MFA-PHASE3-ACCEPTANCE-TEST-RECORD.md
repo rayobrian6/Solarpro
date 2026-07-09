@@ -4,9 +4,9 @@
 **Auditor:** Automated acceptance audit (SolarPro CI agent)  
 **Branch:** dev (commit `b49f5e55`, MFA work from `ad20626e` / `451d8d3d`)  
 **Target:** solarpro-dev.vercel.app (dev deployment)  
-**Test account:** mfatest@solarpro.solutions  
+**Test account:** mfatest@solarpro.solutions (role: `user`)  
 **Classification:** Internal — Redacted  
-**Status:** Complete — All automated acceptance tests PASS (37/37). One test DEFERRED by design (MFA disable — no endpoint exists by deliberate security decision).
+**Status:** 37 automated tests passed. MFA disable/re-enable was not tested because no disable endpoint exists — this is a deliberate current design choice, not a passed test or a deferred test.
 
 ---
 
@@ -14,129 +14,163 @@
 
 This record documents the acceptance audit findings for SolarPro MFA Phase 3, covering:
 
-- Enrollment with a real authenticator (TOTP via pyotp RFC 6238 simulation)
+- Enrollment using RFC 6238 TOTP generated through pyotp (software TOTP simulation — no physical authenticator application was used)
 - Successful login using TOTP second factor
 - Invalid and expired codes fail
 - Pending-login and enrollment cookies scoped and rejected without proper credentials
 - One recovery code succeeds once and fails when reused (atomic single-use)
 - Remaining recovery-code count updates correctly
-- Disabling and re-enabling MFA (DEFERRED — no disable endpoint by design)
+- Disabling and re-enabling MFA — NOT TESTED because no disable endpoint exists (deliberate design choice, not a test outcome)
 - Rate limiting and lockout behavior (429 confirmed)
 - Expected MFA audit events are written (source-level + operational evidence)
-- No plaintext MFA secrets or recovery codes stored or logged
+- Plaintext-secret handling — verified at source-code level and via API response inspection; direct database and server-log inspection was NOT performed
 
-All tests were executed against the live dev deployment at `solarpro-dev.vercel.app` using an automated Python test suite (`tests/mfa_acceptance.py`) with `pyotp` for TOTP code generation and `requests` for HTTP API calls.
+All tests were executed against the live dev deployment at `solarpro-dev.vercel.app` using an automated Python test suite (`tests/mfa_acceptance.py`) with `pyotp` for TOTP code generation (RFC 6238) and `requests` for HTTP API calls.
+
+**Important scope limitation:** The test account (`mfatest@solarpro.solutions`) has role `user`, which does NOT trigger mandatory MFA enforcement. MFA was tested through voluntary enrollment (the MFA setup endpoint accepts full session cookies regardless of role). Mandatory MFA enforcement for `admin` and `super_admin` accounts was verified at the source-code level only — no end-to-end operational test with an admin/super_admin account was performed. See Section 4, Outstanding Item 2.
 
 ---
 
-## 2. Test Results
+## 2. Evidence Classification
 
-### 2.1 Dev Deployment Health & MFA Key Verification
+All evidence in this record falls into one of three verification tiers. Claims are scoped to the tier in which they were verified.
+
+### 2.0.1 Black-Box Operational Verification
+
+Evidence obtained by sending HTTP requests to the live dev deployment (`solarpro-dev.vercel.app`) and observing HTTP status codes, response bodies, and cookie behavior. No access to the database, server logs, or source code was required for this tier.
+
+**What was verified operationally:** Health endpoint responses, login success/failure, MFA enrollment (POST + PUT), TOTP code acceptance/rejection, recovery code single-use/reuse-failure, cookie presence/absence/scoping, rate-limit 429 responses, and API response field inspection (no encrypted secret or hash fields exposed in any response).
+
+### 2.0.2 Source-Code Verification
+
+Evidence obtained by reading the application source code (`lib/mfa.ts`, `lib/auth.ts`, `lib/rateLimiter.ts`, `lib/auditLog.ts`, route handlers, migration SQL). This confirms what the code is designed to do but does not prove what the database or logs actually contain at runtime.
+
+**What was verified at source level:** Encryption algorithm (AES-256-GCM), secret storage format (`iv:authTag:encrypted`), recovery code hashing (SHA-256 one-way), cookie TTL/path/sameSite attributes, rate-limit bucket configuration, audit event types and call sites, hash-chain implementation, and log-statement content (error messages and user IDs only — no secret values in log statements).
+
+### 2.0.3 Database / Log Verification — NOT YET PERFORMED
+
+The following were NOT verified because no direct database access or server-log inspection was performed:
+
+- Direct query of the `users` table to confirm that `mfa_secret_encrypted` values are stored in encrypted form (not plaintext)
+- Direct query of the `mfa_recovery_codes` table to confirm that `code_hash` values are stored as SHA-256 hashes (not plaintext)
+- Direct query of the `audit_log` table to confirm that audit events were actually written with correct payloads and that the SHA-256 hash chain is intact (each `entry_hash` = SHA-256 of `prev_hash` + payload)
+- Inspection of Vercel function logs to confirm that no TOTP secrets, recovery codes, or encrypted secrets appear in runtime log output
+- Inspection of the database to confirm that no plaintext TOTP secret or recovery code column exists
+
+Source-code review confirms that the code is designed to encrypt secrets at rest, hash recovery codes, and log only error messages and user IDs. API response inspection confirms that no encrypted secret or hash fields are exposed in any HTTP response. However, these do not constitute proof of what is actually stored in the database or written to logs at runtime. Direct database and log inspection is required to make that claim. See Section 4, Outstanding Item 3.
+
+---
+
+## 3. Test Results
+
+### 3.1 Dev Deployment Health & MFA Key Verification
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T0.1 | Dev health endpoint responsive | HTTP GET | ✅ PASS | `GET /api/health` → 200, status=healthy, database=connected, version=v60.5 |
-| T0.2 | MFA_ENCRYPTION_KEY configured on dev | HTTP GET | ✅ PASS | `GET /api/system/health` → `mfa_encryption.configured=true` |
-| T0.3 | MFA_ENCRYPTION_KEY valid length (32 bytes) | HTTP GET | ✅ PASS | `mfa_encryption.valid_length=true` (base64-decoded === 32 bytes) |
-| T0.4 | MFA key value NOT exposed in health response | HTTP GET | ✅ PASS | Health endpoint reports only `name`, `configured`, `valid_length` — no key value, hash, or derivative exposed |
+| T0.1 | Dev health endpoint responsive | Black-box (HTTP GET) | ✅ PASS | `GET /api/health` → 200, status=healthy, database=connected, version=v60.5 |
+| T0.2 | MFA_ENCRYPTION_KEY configured on dev | Black-box (HTTP GET) | ✅ PASS | `GET /api/system/health` → `mfa_encryption.configured=true` |
+| T0.3 | MFA_ENCRYPTION_KEY valid length (32 bytes) | Black-box (HTTP GET) | ✅ PASS | `mfa_encryption.valid_length=true` (base64-decoded === 32 bytes) |
+| T0.4 | MFA key value NOT exposed in health response | Black-box (HTTP GET) | ✅ PASS | Health endpoint reports only `name`, `configured`, `valid_length` — no key value, hash, or derivative exposed |
 
 **Note:** Tests T0.2–T0.4 resolve the previous BLOCKED status of T3.3/T3.4 from the prior audit. The `/api/system/health` endpoint (commit `ad20626e`) now directly reports MFA encryption key configuration status without exposing the key value.
 
-### 2.2 Login & Session Acquisition
+### 3.2 Login & Session Acquisition
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T1.1 | Login succeeds with valid credentials | HTTP POST | ✅ PASS | `POST /api/auth/login` → 200, success=true, role=user (pre-MFA enrollment state) |
-| T1.2 | Session cookie (solarpro_session) obtained | HTTP | ✅ PASS | `solarpro_session` cookie set with httpOnly, secure, sameSite=lax, path=/ |
-| T1.3 | /api/auth/me returns user state | HTTP GET | ✅ PASS | `GET /api/auth/me` → 200, returns role, mfaEnabled, mfaMethod, mfaEnrolledAt |
+| T1.1 | Login succeeds with valid credentials | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/login` → 200, success=true, role=user (pre-MFA enrollment state) |
+| T1.2 | Session cookie (solarpro_session) obtained | Black-box (HTTP) | ✅ PASS | `solarpro_session` cookie set with httpOnly, secure, sameSite=lax, path=/ |
+| T1.3 | /api/auth/me returns user state | Black-box (HTTP GET) | ✅ PASS | `GET /api/auth/me` → 200, returns role, mfaEnabled, mfaMethod, mfaEnrolledAt |
 
-### 2.3 MFA Enrollment Flow (Real Authenticator via pyotp)
-
-| Test ID | Test Case | Method | Result | Evidence |
-|---------|-----------|--------|--------|----------|
-| T2.1 | MFA enrollment (POST setup) returns TOTP secret + URI | HTTP POST | ✅ PASS | `POST /api/auth/mfa/setup` → 200, returns `uri` (otpauth://) + `secret` (base32, 32 chars) |
-| T2.1a | POST setup does NOT return recovery codes (timing fix) | HTTP POST | ✅ PASS | No `recovery_codes` field in POST response — recovery codes only generated on PUT after TOTP proof-of-possession |
-| T2.1b | POST setup response contains no encrypted secret/hash | HTTP POST | ✅ PASS | Response contains only `uri` (plaintext, for QR) and `secret` (plaintext, for manual entry). No `mfa_secret_encrypted` or `code_hash` exposed |
-| T2.2 | MFA enrollment verification (PUT setup) succeeds with valid TOTP | HTTP PUT | ✅ PASS | `PUT /api/auth/mfa/setup` with pyotp-generated 6-digit TOTP code → 200, success=true, MFA enabled |
-| T2.3 | Recovery codes generated after TOTP proof-of-possession | HTTP PUT | ✅ PASS | 10 recovery codes returned on PUT (after TOTP verified), not on POST |
-| T2.3a | Recovery codes are 8-character format | HTTP PUT | ✅ PASS | Each recovery code is 8 characters (base64url uppercased) |
-
-### 2.4 Invalid Code Rejection
+### 3.3 MFA Enrollment Flow (RFC 6238 TOTP via pyotp — Software Simulation)
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T3.1 | Invalid TOTP code rejected | HTTP PUT/POST | ✅ PASS | Invalid 6-digit code → HTTP 400, error="Invalid verification code" at both PUT setup and POST verify endpoints |
-| T4.3 | Invalid TOTP code rejected during login challenge | HTTP POST | ✅ PASS | `POST /api/auth/mfa/verify` with wrong code → 400, error="Invalid verification code" |
+| T2.1 | MFA enrollment (POST setup) returns TOTP secret + URI | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/setup` → 200, returns `uri` (otpauth://) + `secret` (base32, 32 chars) |
+| T2.1a | POST setup does NOT return recovery codes (timing fix) | Black-box (HTTP POST) | ✅ PASS | No `recovery_codes` field in POST response — recovery codes only generated on PUT after TOTP proof-of-possession |
+| T2.1b | POST setup response contains no encrypted secret/hash | Black-box (HTTP POST) | ✅ PASS | Response contains only `uri` (plaintext, for QR) and `secret` (plaintext, for manual entry). No `mfa_secret_encrypted` or `code_hash` exposed |
+| T2.2 | MFA enrollment verification (PUT setup) succeeds with valid TOTP | Black-box (HTTP PUT) | ✅ PASS | `PUT /api/auth/mfa/setup` with pyotp-generated 6-digit TOTP code → 200, success=true, MFA enabled |
+| T2.3 | Recovery codes generated after TOTP proof-of-possession | Black-box (HTTP PUT) | ✅ PASS | 10 recovery codes returned on PUT (after TOTP verified), not on POST |
+| T2.3a | Recovery codes are 8-character format | Black-box (HTTP PUT) | ✅ PASS | Each recovery code is 8 characters (base64url uppercased) |
 
-### 2.5 MFA Login Challenge Flow
-
-| Test ID | Test Case | Method | Result | Evidence |
-|---------|-----------|--------|--------|----------|
-| T4.1 | MFA login challenge (MFA_REQUIRED) issued | HTTP POST | ✅ PASS | `POST /api/auth/login` with MFA-enabled account → 200, code=MFA_REQUIRED, mfa_method=totp |
-| T4.1a | MFA pending cookie set (not full session) | HTTP | ✅ PASS | `solarpro_mfa_pending` cookie set; `solarpro_session` NOT set — pending cookie is restricted, does not grant app access |
-| T4.2 | Successful TOTP verification during login | HTTP POST | ✅ PASS | `POST /api/auth/mfa/verify` with valid pyotp TOTP → 200, success=true |
-| T4.2a | Full session cookie issued after TOTP verify | HTTP | ✅ PASS | `solarpro_session` cookie set after verify; `solarpro_mfa_pending` cleared (maxAge=0) |
-| T4.2b | /api/auth/me confirms authenticated session | HTTP GET | ✅ PASS | `GET /api/auth/me` → 200, returns user with mfaEnabled=true |
-
-### 2.6 Recovery Code Flow
+### 3.4 Invalid Code Rejection
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T5.1 | Recovery code login (single-use) succeeds | HTTP POST | ✅ PASS | `POST /api/auth/mfa/verify` with `recovery_code` → 200, success=true, should_reenroll=true |
-| T5.1a | Full session issued after recovery code | HTTP | ✅ PASS | `solarpro_session` cookie set after recovery code verification |
-| T5.2 | Recovery code reuse fails (single-use enforcement) | HTTP POST | ✅ PASS | Second attempt with same recovery code → 400, error="Invalid recovery code" — atomic consumption prevents reuse |
-| T5.3 | Invalid recovery code rejected | HTTP POST | ✅ PASS | `POST /api/auth/mfa/verify` with invalid recovery code → 400, error="Invalid recovery code" |
+| T3.1 | Invalid TOTP code rejected | Black-box (HTTP PUT/POST) | ✅ PASS | Invalid 6-digit code → HTTP 400, error="Invalid verification code" at both PUT setup and POST verify endpoints |
+| T4.3 | Invalid TOTP code rejected during login challenge | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/verify` with wrong code → 400, error="Invalid verification code" |
 
-### 2.7 Recovery Code Count Verification
+### 3.5 MFA Login Challenge Flow
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T6.1 | Second recovery code consumed successfully | HTTP POST | ✅ PASS | Second distinct recovery code (index 1) consumed → 200, success=true |
-| T6.2 | Remaining recovery-code count (2 used, 8 remaining) | HTTP | ✅ PASS | 2 of 10 recovery codes consumed (indices 0 and 1); 8 remain. Verified via sequential consumption + reuse failure on consumed codes. API does not expose remaining count directly (security design — prevents enumeration). |
+| T4.1 | MFA login challenge (MFA_REQUIRED) issued | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/login` with MFA-enabled account → 200, code=MFA_REQUIRED, mfa_method=totp |
+| T4.1a | MFA pending cookie set (not full session) | Black-box (HTTP) | ✅ PASS | `solarpro_mfa_pending` cookie set; `solarpro_session` NOT set — pending cookie is restricted, does not grant app access |
+| T4.2 | Successful TOTP verification during login | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/verify` with valid pyotp TOTP → 200, success=true |
+| T4.2a | Full session cookie issued after TOTP verify | Black-box (HTTP) | ✅ PASS | `solarpro_session` cookie set after verify; `solarpro_mfa_pending` cleared (maxAge=0) |
+| T4.2b | /api/auth/me confirms authenticated session | Black-box (HTTP GET) | ✅ PASS | `GET /api/auth/me` → 200, returns user with mfaEnabled=true |
 
-### 2.8 Cookie Scoping & Access Control
+### 3.6 Recovery Code Flow
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T7.1 | MFA verify without pending cookie → 401 | HTTP POST | ✅ PASS | `POST /api/auth/mfa/verify` with no cookies → 401, error="MFA session expired. Please log in again." |
-| T7.2 | MFA setup without auth → 401 | HTTP POST | ✅ PASS | `POST /api/auth/mfa/setup` with no cookies → 401, error="Authentication required for MFA setup" |
+| T5.1 | Recovery code login (single-use) succeeds | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/verify` with `recovery_code` → 200, success=true, should_reenroll=true |
+| T5.1a | Full session issued after recovery code | Black-box (HTTP) | ✅ PASS | `solarpro_session` cookie set after recovery code verification |
+| T5.2 | Recovery code reuse fails (single-use enforcement) | Black-box (HTTP POST) | ✅ PASS | Second attempt with same recovery code → 400, error="Invalid recovery code" — atomic consumption prevents reuse |
+| T5.3 | Invalid recovery code rejected | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/verify` with invalid recovery code → 400, error="Invalid recovery code" |
 
-**Cookie security properties verified (source-level + operational):**
+### 3.7 Recovery Code Count Verification
+
+| Test ID | Test Case | Method | Result | Evidence |
+|---------|-----------|--------|--------|----------|
+| T6.1 | Second recovery code consumed successfully | Black-box (HTTP POST) | ✅ PASS | Second distinct recovery code (index 1) consumed → 200, success=true |
+| T6.2 | Remaining recovery-code count (2 used, 8 remaining) | Black-box (HTTP) | ✅ PASS | 2 of 10 recovery codes consumed (indices 0 and 1); 8 remain. Verified via sequential consumption + reuse failure on consumed codes. API does not expose remaining count directly (security design — prevents enumeration). |
+
+### 3.8 Cookie Scoping & Access Control
+
+| Test ID | Test Case | Method | Result | Evidence |
+|---------|-----------|--------|--------|----------|
+| T7.1 | MFA verify without pending cookie → 401 | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/verify` with no cookies → 401, error="MFA session expired. Please log in again." |
+| T7.2 | MFA setup without auth → 401 | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/setup` with no cookies → 401, error="Authentication required for MFA setup" |
+
+**Cookie security properties verified (source-level for attributes; operational for presence/absence):**
 - `solarpro_mfa_pending`: 5-minute TTL, path=`/api/auth/mfa`, httpOnly, secure, sameSite=lax — cannot access other API paths or pages
 - `solarpro_mfa_enroll_pending`: 10-minute TTL, path=`/api/auth/mfa`, httpOnly, secure, sameSite=lax — restricted credential, only authorizes MFA setup
 - Both MFA cookies are cleared (maxAge=0) after successful verification — single-use design
 
-### 2.9 Rate Limiting & Lockout Behavior
+### 3.9 Rate Limiting & Lockout Behavior
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
 | T8.1 | Rate limiting verified via source review | Source review | ✅ PASS | `lib/rateLimiter.ts`: `mfa_setup` = 3 req/15min, `mfa_verify` = 10 req/5min, `login` = 5 req/60s per IP. Uses Upstash Redis with ALLOW fallback on Redis error. |
-| T8.2 | Rate-limited (429) response correctly formatted | HTTP POST | ✅ PASS | Rapid failed-login burst triggered HTTP 429 with error="Too many login attempts. Please wait before trying again." — login rate limit (5/60s) confirmed operationally |
+| T8.2 | Rate-limited (429) response correctly formatted | Black-box (HTTP POST) | ✅ PASS | Rapid failed-login burst triggered HTTP 429 with error="Too many login attempts. Please wait before trying again." — login rate limit (5/60s) confirmed operationally |
 
-### 2.10 MFA Audit Events
+### 3.10 MFA Audit Events
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
 | T9.1 | MFA audit events written (source-level + operational) | Source + operational | ✅ PASS | All MFA operations completed successfully → `auditAuth()` calls executed without throwing. Events: `mfa_setup_initiated`, `mfa_enabled`, `mfa_challenge_issued`, `mfa_challenge_success`, `mfa_challenge_failure`, `mfa_recovery_code_used`, `mfa_recovery_code_failed`, `login_failure`, `login_success`. Source review confirms `auditAuth()`/`auditSecurity()` called at every MFA state transition in `setup/route.ts`, `verify/route.ts`, and `login/route.ts`. |
-| T9.2 | Audit log hash chain (source-level) | Source review | ✅ PASS | `lib/auditLog.ts` implements `prev_hash`/`entry_hash` SHA-256 hash chain. Migration 100 created `audit_log` table with hash chain columns. Direct hash chain integrity verification requires DB query access. |
+| T9.2 | Audit log hash chain (source-level) | Source review | ✅ PASS | `lib/auditLog.ts` implements `prev_hash`/`entry_hash` SHA-256 hash chain. Migration 100 created `audit_log` table with hash chain columns. Direct hash chain integrity verification requires DB query access — NOT YET PERFORMED. |
 
-### 2.11 No Plaintext Secrets Storage
-
-| Test ID | Test Case | Method | Result | Evidence |
-|---------|-----------|--------|--------|----------|
-| T10.1 | TOTP secret returned as plaintext (for QR enrollment) | HTTP + source | ✅ PASS | Plaintext secret returned by POST setup (expected — needed for authenticator app per RFC 6238). Encrypted form (`mfa_secret_encrypted`) stored server-side only, never returned. |
-| T10.2 | No encrypted secret in API responses | HTTP + source | ✅ PASS | No `mfa_secret_encrypted` or `encrypted_secret` field in any API response (POST setup, PUT setup, verify, me). |
-| T10.3 | Recovery codes hashed (SHA-256) in storage | Source review | ✅ PASS | `lib/mfa.ts` `hashRecoveryCode()` = `crypto.createHash('sha256').update(code).digest('hex')`. Migration 100 created `mfa_recovery_codes` table with `code_hash` column (not plaintext). |
-| T10.4 | Recovery code hashes not exposed in API responses | HTTP + source | ✅ PASS | Verify endpoint returns only success/error + user data. `/api/auth/me` returns `mfaEnabled`/`mfaMethod`/`mfaEnrolledAt` but NOT recovery code hashes or counts. |
-| T10.5 | No plaintext secrets in server logs | Source review | ✅ PASS | `console.error`/`log` statements in `setup/route.ts`, `verify/route.ts`, `login/route.ts` log only error messages and user IDs — no secret values, no recovery codes, no TOTP secrets. Login route explicitly removed email from logs (PII fix). |
-
-### 2.12 MFA Disable / Re-enable (DEFERRED by Design)
+### 3.11 Plaintext-Secret Handling
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T-DISABLE | Disabling and re-enabling MFA | — | ⏸️ DEFERRED | No MFA disable endpoint exists — this is a deliberate security design decision, not a gap. Documented in `components/settings/SecurityPanel.tsx`: "No unsafe MFA disable endpoint exists." Deferred per MFA Phase 3 handoff. Future implementation must require re-authentication and admin approval per POL-SEC-009. |
+| T10.1 | TOTP secret returned as plaintext (for QR enrollment) | Black-box + source | ✅ PASS | Plaintext secret returned by POST setup (expected — needed for authenticator app per RFC 6238). Source review confirms encrypted form (`mfa_secret_encrypted`) stored server-side only, never returned in API responses. |
+| T10.2 | No encrypted secret in API responses | Black-box + source | ✅ PASS | No `mfa_secret_encrypted` or `encrypted_secret` field in any API response (POST setup, PUT setup, verify, me). |
+| T10.3 | Recovery codes hashed (SHA-256) in storage — source review | Source review | ✅ PASS | `lib/mfa.ts` `hashRecoveryCode()` = `crypto.createHash('sha256').update(code).digest('hex')`. Migration 100 created `mfa_recovery_codes` table with `code_hash` column (not plaintext). NOTE: This is source-code verification only — direct database query to confirm stored values are hashes (not plaintext) was NOT performed. |
+| T10.4 | Recovery code hashes not exposed in API responses | Black-box + source | ✅ PASS | Verify endpoint returns only success/error + user data. `/api/auth/me` returns `mfaEnabled`/`mfaMethod`/`mfaEnrolledAt` but NOT recovery code hashes or counts. |
+| T10.5 | No plaintext secrets in server logs — source review | Source review | ✅ PASS (source-level only) | `console.error`/`log` statements in `setup/route.ts`, `verify/route.ts`, `login/route.ts` log only error messages and user IDs — no secret values, no recovery codes, no TOTP secrets. Login route explicitly removed email from logs (PII fix). NOTE: This is source-code review only — direct inspection of runtime server logs (Vercel function logs) was NOT performed. |
 
-### 2.13 Implementation Verification (Source-Level — Prior Audit, Retained)
+**What was verified regarding plaintext secrets:** Source-code review confirms that the application is designed to (a) store TOTP secrets in AES-256-GCM encrypted form, (b) store recovery codes as SHA-256 one-way hashes, and (c) write only error messages and user IDs to log statements. Black-box API testing confirms that no encrypted secret or hash field appears in any HTTP response. **What was NOT verified:** Direct database inspection to confirm that stored values are actually encrypted/hashed at rest, and direct server-log inspection to confirm that no secret values appear in runtime log output. These require database access and Vercel log access respectively. See Section 2.0.3 and Section 4, Outstanding Item 3.
+
+### 3.12 MFA Disable / Re-enable — NOT TESTED (No Endpoint Exists)
+
+| Test ID | Test Case | Method | Result | Evidence |
+|---------|-----------|--------|--------|----------|
+| T-DISABLE | Disabling and re-enabling MFA | — | ⛔ NOT TESTED | No MFA disable endpoint exists — this is a deliberate current design choice, not a gap to be remediated immediately and not a test that was deferred. No test was run because there is no endpoint to test. A secure administrator MFA reset procedure is proposed in Section 6 of this record. This is NOT a passed test. |
+
+### 3.13 Implementation Verification (Source-Level — Prior Audit, Retained)
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
@@ -151,7 +185,7 @@ All tests were executed against the live dev deployment at `solarpro-dev.vercel.
 | T1.9 | Enrollment pending cookie cleared after completion | Source review | ✅ PASS | `app/api/auth/mfa/setup/route.ts` — PUT handler: sets `MFA_ENROLLMENT_PENDING_COOKIE` with `maxAge: 0` |
 | T1.10 | Enrollment pending cookie scoped to /api/auth/mfa | Source review | ✅ PASS | Login route sets cookie with `path: '/api/auth/mfa'`; cannot access other API paths |
 
-### 2.14 Recovery-Code Timing Verification (Source-Level — Prior Audit, Retained)
+### 3.14 Recovery-Code Timing Verification (Source-Level — Prior Audit, Retained)
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
@@ -162,7 +196,7 @@ All tests were executed against the live dev deployment at `solarpro-dev.vercel.
 | T2.5 | SecurityPanel handles recovery_codes from PUT response | Source review | ✅ PASS | `components/settings/SecurityPanel.tsx` — `verifyAndEnable` callback: checks `data.recovery_codes` from PUT, stores in `setupData` |
 | T2.6 | Enrollment page handles recovery_codes from PUT response | Source review | ✅ PASS | `app/auth/mfa/enroll/page.tsx` — `MFAVerifyResponse` interface includes `recovery_codes?: string[]`; displayed in success step |
 
-### 2.15 Compliance Report Corrections (Prior Audit, Retained)
+### 3.15 Compliance Report Corrections (Prior Audit, Retained)
 
 | Test ID | Correction | Result | Evidence |
 |---------|-----------|--------|----------|
@@ -175,39 +209,138 @@ All tests were executed against the live dev deployment at `solarpro-dev.vercel.
 
 ---
 
-## 3. Test Summary
+## 4. Test Summary
 
 | Category | Count |
 |----------|-------|
-| ✅ PASS | 37 |
-| ❌ FAIL | 0 |
-| ⏸️ DEFERRED (by design) | 1 (MFA disable — no endpoint exists) |
-| ⚠️ BLOCKED | 0 |
+| ✅ Automated tests passed | 37 |
+| ❌ Automated tests failed | 0 |
+| ⛔ Not tested (no endpoint exists) | 1 scenario (MFA disable/re-enable — deliberate design choice, not a deferred test) |
+| ⚠️ Blocked | 0 |
 
-**Test execution:** Automated Python suite (`tests/mfa_acceptance.py`) using `pyotp` (RFC 6238 TOTP) + `requests` (HTTP). Executed against `solarpro-dev.vercel.app` on 2026-07-09. Results saved to `tests/mfa_acceptance_results.json`.
+**Precise statement of results:** 37 automated tests were executed against `solarpro-dev.vercel.app` and all 37 passed. MFA disable/re-enable was not tested because no disable endpoint exists — this is a deliberate current design choice and is not a passed test, a failed test, or a deferred test. It is an untested capability that requires a secure administrator MFA reset procedure (proposed in Section 6).
 
----
-
-## 4. Outstanding Items
-
-1. **MFA disable / re-enable testing** — DEFERRED by design. No MFA disable endpoint exists; this is a deliberate security decision documented in `SecurityPanel.tsx`. Future implementation must require re-authentication and admin approval per POL-SEC-009.
-
-2. **Direct audit_log table verification** — Audit events are written via `auditAuth()`/`auditSecurity()` at every MFA state transition (source-verified). All MFA operations completed successfully during testing, proving the audit calls executed without throwing. Direct query of the `audit_log` table to verify hash chain integrity and event payloads requires database access (deferred to Raymond or an ops engineer with DB credentials).
-
-3. **Enrollment-required flow (MFA_ENROLLMENT_REQUIRED)** — The enrollment-required flow (admin/staff login without MFA → forced enrollment) was verified at the source level (T1.1–T1.10) and the underlying API mechanics were verified operationally through the standard enrollment flow (T2.1–T2.3). Full end-to-end testing of the `MFA_ENROLLMENT_REQUIRED` login response requires an admin/staff account without MFA — the test account (`mfatest@solarpro.solutions`) has role `user` which does not trigger MFA enforcement. Promoting the test account to `admin` would trigger this flow; this is a data change (not a schema change) and can be done via the existing `PATCH /api/admin/users` endpoint (action: `set_role`) by a super_admin without requiring Migration 101.
-
-4. **Recovery code remaining-count API** — The API does not expose a "remaining recovery codes" count endpoint (deliberate security design — prevents enumeration). Count was verified indirectly through sequential consumption and reuse-failure testing (T6.1–T6.2). A future enhancement could add an authenticated endpoint returning only the count (not the codes) for user awareness.
-
-5. **'staff' role inconsistency** — `MFA_REQUIRED_ROLES` in `lib/mfa.ts` includes `'staff'`, but the database `users_role_check` constraint only allows `('user', 'admin', 'super_admin')`. A user cannot be assigned the `staff` role. This does not block MFA testing (admin/super_admin roles trigger enforcement) but is a code/DB inconsistency that should be resolved in a future schema change.
+**Test execution:** Automated Python suite (`tests/mfa_acceptance.py`) using `pyotp` (RFC 6238 TOTP generation — software simulation, not a physical authenticator application) + `requests` (HTTP). Executed against `solarpro-dev.vercel.app` on 2026-07-09. Results saved to `tests/mfa_acceptance_results.json` and `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-RESULTS.json`.
 
 ---
 
-## 5. Test Artifacts
+## 5. Outstanding Items
+
+1. **MFA disable / re-enable — not tested by design.** No MFA disable endpoint exists. This is a deliberate current design choice, not a passed test or a deferred test. A secure administrator MFA reset procedure is proposed in Section 6 of this record. Implementation of that procedure (when approved by Raymond) would close this item.
+
+2. **Voluntary vs. mandatory MFA enforcement — mandatory enforcement untested operationally.** All operational MFA tests used the test account `mfatest@solarpro.solutions` (role: `user`), which does NOT trigger mandatory MFA enforcement. MFA was tested through voluntary enrollment (the MFA setup endpoint accepts full session cookies regardless of role). The mandatory MFA enforcement path for `admin` and `super_admin` accounts — where login returns `MFA_ENROLLMENT_REQUIRED` (403) and forces enrollment — was verified at the source-code level only (T1.1–T1.10 in Section 3.13). No end-to-end operational test with an admin or super_admin account was performed. Promoting the test account to `admin` would trigger this flow; this is a data change (not a schema change) and can be done via the existing `PATCH /api/admin/users` endpoint (action: `set_role`) by a super_admin. This requires Raymond's intervention or DB access.
+
+3. **Direct database and log verification — NOT YET PERFORMED.** The following require direct database access or Vercel log access and were not performed: (a) direct query of the `users` table to confirm `mfa_secret_encrypted` values are stored encrypted, (b) direct query of the `mfa_recovery_codes` table to confirm `code_hash` values are SHA-256 hashes, (c) direct query of the `audit_log` table to verify hash chain integrity and event payloads, (d) inspection of Vercel function logs to confirm no secret values appear in runtime output. Source-code review and API response inspection provide strong indirect evidence but do not constitute direct proof. See Section 2.0.3.
+
+4. **Recovery code remaining-count API.** The API does not expose a "remaining recovery codes" count endpoint (deliberate security design — prevents enumeration). Count was verified indirectly through sequential consumption and reuse-failure testing (T6.1–T6.2). A future enhancement could add an authenticated endpoint returning only the count (not the codes) for user awareness.
+
+5. **'staff' role inconsistency — audit findings and recommendation.** See Section 7 of this record for the full staff-role audit.
+
+---
+
+## 6. Proposed Secure Administrator MFA Reset Procedure
+
+**Status:** PROPOSAL — not implemented. This section defines a controlled reset flow for future implementation. No public MFA disable endpoint should be added. The procedure below is designed to satisfy POL-SEC-009 requirements while maintaining fail-closed security posture.
+
+### 6.1 Design Principles
+
+- No publicly accessible MFA disable endpoint. The reset flow is an administrative operation, not a user self-service feature.
+- Reset authority is restricted to authenticated `super_admin` users only.
+- The affected user's MFA is reset (not disabled for ongoing use) — the user must re-enroll MFA before regaining application access.
+- Every step is audit-logged with the hash-chained audit log.
+- Reauthentication of the super_admin is required at the moment of reset to prevent session-hijack-driven resets.
+- Recovery safeguards prevent lockout: the user receives new recovery codes upon re-enrollment, and the reset itself is logged for review.
+
+### 6.2 Proposed Flow
+
+1. **Request initiation:** A super_admin navigates to the user management panel and selects "Reset MFA" for a target user. The UI presents a confirmation dialog requiring the super_admin to re-enter their own password.
+
+2. **Reauthentication:** The super_admin submits their current password. The backend verifies the password hash against the database (`bcrypt.compare`). If verification fails, the request is rejected with a 401 and an audit event `mfa_reset_reauth_failure` is logged. Rate limiting applies (same `login` bucket: 5/60s per IP).
+
+3. **Authorization check:** The backend confirms the requesting user has role `super_admin` (read from DB, not JWT). If not, reject with 403 and log `mfa_reset_unauthorized`.
+
+4. **Reset execution (atomic transaction):**
+   - Set `users.mfa_enabled = false` for the target user
+   - Set `users.mfa_secret_encrypted = NULL` for the target user
+   - Set `users.mfa_method = NULL` for the target user
+   - Set `users.mfa_enrolled_at = NULL` for the target user
+   - Delete all rows from `mfa_recovery_codes` where `user_id = target`
+   - Invalidate all active sessions for the target user (set `password_changed_at = NOW()` to trigger session staleness check)
+   - All of the above in a single database transaction
+
+5. **Audit logging:** Write `mfa_reset_by_admin` audit event with: `actor_id` (super_admin), `actor_role` (`super_admin`), `target_user_id`, `target_email` (redacted in logs per PII policy), `timestamp`, `prev_hash`/`entry_hash` (hash chain).
+
+6. **Enrollment-required flow activation:** The target user's next login attempt will trigger `isMFARequiredButNotEnabled()` → `MFA_ENROLLMENT_REQUIRED` (403) → enrollment pending cookie → `/auth/mfa/enroll` page. The user must re-enroll MFA with a new TOTP secret and will receive new recovery codes.
+
+7. **Notification:** The system sends an email notification to the target user stating that their MFA was reset by an administrator and that they must re-enroll. The email does NOT contain any secrets, recovery codes, or TOTP secrets.
+
+### 6.3 Safeguards
+
+- The reset endpoint is NOT listed in `PUBLIC_PATHS` and requires `super_admin` role enforcement via `requireAdminApi()`.
+- The reset endpoint is rate-limited (proposed: `mfa_reset` bucket, 3 req/hour per IP).
+- The target user's existing sessions are invalidated immediately — no window of access without MFA.
+- The audit log entry is tamper-evident (hash-chained) and cannot be modified without breaking the chain.
+- No plaintext TOTP secret or recovery code is exposed at any point in the flow.
+- The super_admin's reauthentication password is verified against the stored hash and never logged.
+
+### 6.4 What This Procedure Does NOT Do
+
+- It does not add a public or user-accessible MFA disable endpoint.
+- It does not allow a user to disable their own MFA.
+- It does not allow an `admin` (non-super_admin) to reset another user's MFA.
+- It does not bypass MFA for the target user — the target user must re-enroll before regaining access.
+
+---
+
+## 7. Staff Role Audit
+
+### 7.1 Findings
+
+A full audit of the `staff` role across the SolarPro codebase was performed. The findings are:
+
+**Where 'staff' appears:**
+- `lib/mfa.ts` line 42: `MFA_REQUIRED_ROLES = ['admin', 'super_admin', 'staff']` — 'staff' is included in the MFA enforcement list
+- `docs/compliance/REF-RBAC-001-Role-Access-Matrix.md`: 'staff' is defined as a role at Level 2 with MFA required
+- `docs/compliance/POL-SEC-009-Password-and-Authentication-Policy.md`: references 'staff' in the MFA enforcement matrix (Section 4) and session management (Section 5)
+- `components/settings/SecurityPanel.tsx`: comments reference "admin/staff" roles
+- `lib/migrations/100_compliance_audit_mfa_consent.sql` line 52: column comment references "admin and staff roles"
+
+**Where 'staff' does NOT appear (or cannot be used):**
+- `lib/migrations/006_users_subscriptions_whitelabel.sql` (the migration that creates the `users` table): defines `role TEXT NOT NULL DEFAULT 'user'` with a comment of `-- 'user' | 'admin'` — only two values documented. **No CHECK constraint exists on the `role` column.** The `users_role_check` constraint referenced in prior documentation does not exist in any migration file.
+- `app/api/admin/users/route.ts` line 150: the application-level role validation allows `['user', 'admin', 'super_admin', 'sales']` — 'staff' is NOT in this list. A super_admin cannot assign the 'staff' role to any user via the admin API.
+- `lib/adminAuth.ts`: `isAdminRole()` recognizes only `'admin'` and `'super_admin'` — 'staff' is not treated as an admin role.
+- No code path anywhere in the application assigns, checks for, or enforces the 'staff' role as a distinct role with its own permissions.
+
+**Conclusion:** The `staff` role is referenced in documentation and in `MFA_REQUIRED_ROLES` but does not exist as a functional role in the application. It cannot be assigned to any user through the admin API. The RBAC matrix (`REF-RBAC-001`) defines it as an aspirational/planned role that was never implemented in the application code. The `MFA_REQUIRED_ROLES` array includes it, but since no user can hold the `staff` role, this entry has no operational effect.
+
+### 7.2 Recommendation
+
+Two options exist, requiring Raymond's decision:
+
+**Option A — Remove 'staff' from `MFA_REQUIRED_ROLES` (recommended if 'staff' is not an intended role):**
+- Change `lib/mfa.ts` line 42 from `['admin', 'super_admin', 'staff']` to `['admin', 'super_admin']`
+- Update `docs/compliance/REF-RBAC-001-Role-Access-Matrix.md` to remove 'staff' or mark it as "planned, not implemented"
+- Update `docs/compliance/POL-SEC-009` to reference only implemented roles
+- Update `components/settings/SecurityPanel.tsx` comments
+- No database migration required
+- This is a code + documentation change only
+
+**Option B — Implement 'staff' as a real role (if 'staff' is intended to exist):**
+- Add 'staff' to the application-level role validation in `app/api/admin/users/route.ts` line 150
+- Optionally add a database CHECK constraint via Migration 101: `ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin', 'super_admin', 'staff', 'sales'))`
+- Implement role-based permission checks for 'staff' in `lib/permissions.ts`
+- **Migration 101 must NOT be created without Raymond's explicit approval.**
+
+**No action has been taken.** This audit is documentation only. Raymond must confirm whether 'staff' is an intended role before either option is implemented.
+
+---
+
+## 8. Test Artifacts
 
 | Artifact | Location | Description |
 |----------|----------|-------------|
-| Test script | `tests/mfa_acceptance.py` | Automated Python acceptance test suite (pyotp + requests) |
-| Test results | `tests/mfa_acceptance_results.json` | JSON output with all 37 test results, evidence, and notes |
+| Test script | `tests/mfa_acceptance.py` / `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-SCRIPT.py` | Automated Python acceptance test suite (pyotp + requests) |
+| Test results | `tests/mfa_acceptance_results.json` / `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-RESULTS.json` | JSON output with all 37 test results, evidence, and notes |
 | This record | `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-RECORD.md` | Human-readable acceptance test record |
 
 ---

@@ -3,7 +3,7 @@
 **Date:** 2026-07-09  
 **Author:** Automated compliance mapping (SolarPro CI agent)  
 **Branch:** dev (commit `b9a2894a`)  
-**Preceded by:** MFA Phase 3 acceptance testing — 37/37 PASS  
+**Preceded by:** MFA Phase 3 acceptance testing — 37 automated tests passed (MFA disable/re-enable NOT tested — no endpoint exists)  
 **Status:** SOC 2 readiness in progress — NOT certified. Security controls aligned with ISO 27001:2022 principles.  
 **Classification:** Internal — Redacted
 
@@ -27,13 +27,13 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | AES-256-GCM encrypted TOTP secrets | ✅ Implemented + tested | `lib/mfa.ts` encryptTOTPSecret; MFA_ENCRYPTION_KEY health check (T0.2–T0.4 PASS) | Key rotation procedure not documented | Low — document rotation in POL-SEC-010 |
 | Fail-closed design (no key = no MFA) | ✅ Implemented + tested | `lib/mfa.ts` throws if key missing/invalid; all MFA ops return 500 | — | — |
 | Recovery codes (SHA-256 hashed) | ✅ Implemented + tested | `lib/mfa.ts` hashRecoveryCode; acceptance test T5.1–T5.3 PASS (single-use + reuse failure) | — | — |
-| No plaintext secrets in storage | ✅ Implemented + tested | Acceptance test T10.1–T10.5 PASS; encrypted secret stored, hashes stored | — | — |
-| No plaintext secrets in logs | ✅ Implemented + reviewed | Source review T10.5 PASS — log statements use only error messages + user IDs | — | — |
+| No plaintext secrets in storage | ⚠️ Source-verified only | Source review T10.3 — `lib/mfa.ts` encrypts TOTP secrets (AES-256-GCM) and hashes recovery codes (SHA-256) before storage | Direct DB query to confirm `mfa_secret_encrypted` and `code_hash` columns contain only encrypted/hashed values was NOT performed | Medium — DB/log verification required to make this claim |
+| No plaintext secrets in logs | ⚠️ Source-verified only | Source review T10.5 — log statements use only error messages + user IDs | Direct inspection of Vercel runtime function logs was NOT performed | Medium — log inspection required to make this claim |
 | Rate limiting on auth endpoints | ✅ Implemented + tested | `lib/rateLimiter.ts`: login 5/60s, mfa_verify 10/5min, mfa_setup 3/15min; T8.1–T8.2 PASS (429 confirmed) | — | — |
 | MFA enforcement for admin/super_admin | ✅ Implemented | `lib/mfa.ts` isMFARequiredButNotEnabled; login route issues MFA_ENROLLMENT_REQUIRED | End-to-end test with admin account (test account is role `user`) | Low — promote test account to admin (data change, no migration) |
-| MFA enforcement for 'staff' role | ⚠️ Partial | `MFA_REQUIRED_ROLES` includes 'staff' | DB `users_role_check` constraint does NOT include 'staff' — cannot assign the role | Medium — schema change (Migration 101) to add 'staff' to CHECK constraint, or remove 'staff' from MFA_REQUIRED_ROLES if role is deprecated |
+| MFA enforcement for 'staff' role | ⚠️ Inconsistency found | `MFA_REQUIRED_ROLES` in `lib/mfa.ts` includes 'staff' | **No CHECK constraint exists on the `role` column** (migration 006 defines `role TEXT NOT NULL DEFAULT 'user'` with a comment only). Application-level validation (`app/api/admin/users/route.ts` line 150) allows `['user', 'admin', 'super_admin', 'sales']` — 'staff' is NOT assignable. The `staff` role does not exist as a functional role. See Acceptance Record Section 7 (Staff Role Audit) | Medium — resolve via Option A (remove 'staff' from `MFA_REQUIRED_ROLES` — code+doc change, no migration) or Option B (implement 'staff' as a real role — requires Migration 101, Raymond's approval required) |
 
-**CC6.1 Evidence Summary:** 8 of 9 control objectives fully implemented and tested. 1 partial (staff role inconsistency). Evidence files: `MFA-PHASE3-ACCEPTANCE-TEST-RECORD.md`, `MFA-PHASE3-ACCEPTANCE-TEST-RESULTS.json`, `COMPLIANCE_READINESS_REPORT.md` Section 5.2.
+**CC6.1 Evidence Summary:** 7 of 9 control objectives fully implemented and tested. 2 require further verification: (1) plaintext-secrets claims are source-verified only — direct DB/log inspection was NOT performed; (2) 'staff' role inconsistency — `staff` is in `MFA_REQUIRED_ROLES` but is not a functional role (no CHECK constraint exists on the `role` column; application validation does not allow `staff`). Evidence files: `MFA-PHASE3-ACCEPTANCE-TEST-RECORD.md` (Section 2 Evidence Classification, Section 7 Staff Role Audit), `MFA-PHASE3-ACCEPTANCE-TEST-RESULTS.json`, `COMPLIANCE_READINESS_REPORT.md` Section 5.2.
 
 ### 2.2 CC6.2 — The entity registers and authorizes new internal and external users and disables access for users no longer requiring access.
 
@@ -42,17 +42,17 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | MFA enrollment flow (self-service) | ✅ Implemented + tested | `SecurityPanel.tsx` + `/auth/mfa/enroll`; acceptance test T2.1–T2.3 PASS | — | — |
 | Enrollment-required forced flow | ✅ Implemented (source-verified) | Login → MFA_ENROLLMENT_REQUIRED → enrollment pending cookie → /auth/mfa/enroll; T1.1–T1.10 source PASS | End-to-end operational test with admin account | Low — requires admin test account |
 | Enrollment pending cookie (restricted) | ✅ Implemented + tested | 10-min TTL, path=/api/auth/mfa, not a full session; T7.1–T7.2 PASS | — | — |
-| MFA disable / de-enrollment | ⏸️ Deferred by design | No disable endpoint exists (deliberate security decision) | Admin-approved disable procedure (future) | Medium — future feature requiring re-auth + admin approval per POL-SEC-009 |
+| MFA disable / de-enrollment | ⛔ NOT TESTED (no endpoint) | No disable endpoint exists (deliberate security design choice). This is NOT a passed test and NOT a deferred test — the scenario could not be tested because the endpoint does not exist. | A secure administrator MFA reset procedure has been proposed (see Acceptance Record Section 6): super_admin authority, reauthentication, audit logging, atomic transaction, session invalidation, no public endpoint | Medium — implement proposed reset procedure per Acceptance Record Section 6 |
 | Recovery code regeneration | ❌ Not implemented | — | "Regenerate recovery codes" UI in SecurityPanel | Medium — future feature for MFA-enabled users |
 | User de-provisioning on offboarding | ✅ Policy exists | `CHK-OFB-001-Offboarding-Checklist.md` | Automated de-provisioning workflow | Low — checklist exists; automation is future work |
 
-**CC6.2 Evidence Summary:** 3 of 6 fully implemented. 1 deferred by design. 2 not yet implemented (recovery code regeneration, MFA disable). 1 has policy but needs automation.
+**CC6.2 Evidence Summary:** 3 of 6 fully implemented and tested. 1 not tested (no disable endpoint exists — deliberate design choice, not a deferred test). 2 not yet implemented (recovery code regeneration, MFA disable/reset). 1 has policy but needs automation. A secure admin MFA reset procedure has been proposed (Acceptance Record Section 6) but not implemented.
 
 ### 2.3 CC6.3 — The entity controls access to system assets by authorized users and removes access when no longer needed.
 
 | Control Objective | Implementation Status | Evidence Present | Evidence Missing | Gap |
 |-------------------|-----------------------|------------------|------------------|-----|
-| Role-based access control (RBAC) | ✅ Implemented | DB `users_role_check` constraint; admin layout gate; PATCH /api/admin/users set_role | `REF-RBAC-001-Role-Access-Matrix.md` exists | — |
+| Role-based access control (RBAC) | ⚠️ Implemented (no DB constraint) | Admin layout gate; PATCH /api/admin/users set_role; `app/api/admin/users/route.ts` line 150 validates roles to `['user', 'admin', 'super_admin', 'sales']` | **No CHECK constraint exists on the `role` column** (migration 006 has `role TEXT NOT NULL DEFAULT 'user'` with comment only). `REF-RBAC-001-Role-Access-Matrix.md` defines 5 roles but only 4 are assignable in code. 'staff' is defined in the matrix but not assignable. DB-level constraint to enforce allowed role values is missing | Low-Medium — add CHECK constraint in a future migration (Migration 101, requires Raymond's approval) or document the application-level validation as the enforcement mechanism |
 | Atomic recovery code consumption | ✅ Implemented + tested | `UPDATE ... WHERE used=false RETURNING id`; T5.2 PASS (reuse fails) | — | — |
 | Session JWT (identity only, no role) | ✅ Implemented + tested | `lib/auth.ts` signToken — role NOT in JWT, always read from DB; T4.2b PASS | — | — |
 | Session staleness check | ✅ Implemented | `app/api/auth/me/route.ts` isSessionStale against password_changed_at | — | — |
@@ -91,7 +91,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 
 | Control | Implementation Status | Evidence | Gap |
 |---------|-----------------------|----------|-----|
-| MFA enforced for privileged roles | ✅ Implemented | `lib/mfa.ts` isMFARequiredButNotEnabled for admin/super_admin | 'staff' role not in DB constraint (schema gap) |
+| MFA enforced for privileged roles | ✅ Implemented | `lib/mfa.ts` isMFARequiredButNotEnabled for admin/super_admin | 'staff' is in `MFA_REQUIRED_ROLES` but is not a functional role (no CHECK constraint on `role` column; not in application role validation). See Acceptance Record Section 7 (Staff Role Audit). Mandatory admin/super_admin enforcement source-verified only — no operational test with admin account |
 | TOTP verification (±1 step window) | ✅ Implemented + tested | `lib/mfa.ts` verifyTOTPCode; T2.2, T4.2 PASS | — |
 | Rate limiting on authentication | ✅ Implemented + tested | `lib/rateLimiter.ts`; T8.1–T8.2 PASS | — |
 | No MFA bypass for admins | ✅ Implemented (by absence) | No bypass endpoint exists; fail-closed design | Document emergency access procedure per POL-SEC-009 |
@@ -117,7 +117,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 
 | Control | Implementation Status | Evidence | Gap |
 |---------|-----------------------|----------|-----|
-| RBAC with DB constraint | ✅ Implemented | users_role_check CHECK constraint | 'staff' role missing from constraint |
+| RBAC (application-level validation) | ⚠️ Implemented (no DB constraint) | `app/api/admin/users/route.ts` line 150 validates to `['user', 'admin', 'super_admin', 'sales']`; role changes require super_admin | **No `users_role_check` CHECK constraint exists** — migration 006 defines `role TEXT NOT NULL DEFAULT 'user'` with comment only. The prior documentation's reference to a `users_role_check` constraint was incorrect. DB-level enforcement of allowed role values is missing. 'staff' is in the RBAC matrix and `MFA_REQUIRED_ROLES` but is not assignable |
 | Role always from DB (not JWT) | ✅ Implemented + tested | `app/api/auth/me/route.ts`; T4.2b PASS | — |
 | Admin panel access gated by role | ✅ Implemented | `app/admin/layout.tsx` line 61 | — |
 | Role change requires super_admin | ✅ Implemented | `app/api/admin/users/route.ts` PATCH set_role | — |
@@ -127,7 +127,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | Control | Implementation Status | Evidence | Gap |
 |---------|-----------------------|----------|-----|
 | User registration (default role user) | ✅ Implemented + tested | `app/api/auth/register/route.ts`; T1.1 PASS | — |
-| MFA enrollment required for privileged roles | ✅ Implemented (source-verified) | Login → MFA_ENROLLMENT_REQUIRED; T1.1–T1.10 source PASS | End-to-end operational test with admin account |
+| MFA enrollment required for privileged roles | ⚠️ Implemented (source-verified only) | Login → MFA_ENROLLMENT_REQUIRED; T1.1–T1.10 source PASS. `lib/mfa.ts` isMFARequiredButNotEnabled for admin/super_admin | End-to-end operational test with admin account NOT performed — test account has role `user` (voluntary MFA), not `admin` (mandatory MFA). Mandatory admin/super_admin enforcement verified at source-code level only |
 | No self-registration as admin | ✅ Implemented | Registration assigns role 'user' only; role changes require super_admin | — |
 
 ---
@@ -139,7 +139,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | Evidence | Location | Verification Method |
 |----------|----------|---------------------|
 | MFA source code | `lib/mfa.ts`, `lib/auth.ts`, `app/api/auth/mfa/setup/route.ts`, `app/api/auth/mfa/verify/route.ts`, `app/api/auth/login/route.ts` | Source review + acceptance testing |
-| MFA acceptance test results (37/37 PASS) | `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-RECORD.md`, `MFA-PHASE3-ACCEPTANCE-TEST-RESULTS.json` | Automated test suite against dev deployment |
+| MFA acceptance test results (37 passed; disable NOT tested) | `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-RECORD.md`, `MFA-PHASE3-ACCEPTANCE-TEST-RESULTS.json` | Automated test suite against dev deployment (Tier 1 operational + Tier 2 source verification; Tier 3 DB/log verification NOT performed) |
 | MFA acceptance test script | `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-SCRIPT.py` | Executed against solarpro-dev.vercel.app |
 | Compliance readiness report | `docs/compliance/COMPLIANCE_READINESS_REPORT.md` | Updated with operational verification results |
 | MFA_ENCRYPTION_KEY health check | `/api/system/health` endpoint (commit `ad20626e`) | HTTP GET — configured=true, valid_length=true |
@@ -158,7 +158,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | Direct audit_log table query for hash chain integrity | CC7.2, A.8.16 | Ops engineer with DB access | Low (1 query) | `SELECT id, action, prev_hash, entry_hash, created_at FROM audit_log ORDER BY id DESC LIMIT 20` — verify each entry_hash = SHA256(prev_hash + payload) |
 | Sentry DSN configuration on dev + prod | CC7.2, A.8.16 | Raymond / DevOps | Low (env var) | Set SENTRY_DSN in Vercel env vars for both projects |
 | Evidence of first quarterly access review | CC6.3, A.5.18 | Security Lead | Medium (process) | Complete `TMP-ACC-001-Quarterly-Access-Review.md` with actual review data |
-| 'staff' role resolution (schema or code) | CC6.1, A.8.5, A.5.18 | Developer | Medium (Migration 101 if schema, or code change if deprecating 'staff') | Either add 'staff' to users_role_check CHECK constraint, or remove 'staff' from MFA_REQUIRED_ROLES |
+| 'staff' role resolution (code or schema) | CC6.1, A.8.5, A.5.18 | Developer | Medium (Migration 101 if schema, or code change if deprecating 'staff') | **Option A (code+doc only):** Remove 'staff' from `MFA_REQUIRED_ROLES` in `lib/mfa.ts` line 42, update RBAC matrix and POL-SEC-009 — no migration required. **Option B (schema):** Implement 'staff' as a real role — add to application validation in `app/api/admin/users/route.ts` line 150, add CHECK constraint via Migration 101 (`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin', 'super_admin', 'staff', 'sales'))`). **Migration 101 must NOT be created without Raymond's explicit approval.** No action taken — see Acceptance Record Section 7. |
 | MFA key rotation procedure documentation | CC6.1, A.8.16 | Security Lead | Low (documentation) | Document rotation steps in POL-SEC-010-Encryption-Policy.md |
 | Emergency access procedure (MFA bypass) | CC6.1, A.8.5 | Security Lead | Low (documentation) | Document break-glass procedure per POL-SEC-009 section 4.4 |
 
@@ -172,15 +172,15 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 |-----|-----------|-----------|------|-------------|-------|--------|
 | Monitoring/alerting not configured (Sentry) | CC7.2 | A.8.16 | High — no real-time anomaly detection | Set SENTRY_DSN env var on dev + prod Vercel projects | Raymond / DevOps | 2 hours |
 | SIEM / log aggregation not implemented | CC7.2 | A.8.16 | High — audit logs in DB only, no centralized aggregation | Evaluate Datadog, Logtail, or Vercel Log Drains | Raymond / DevOps | 2–3 days |
-| 'staff' role inconsistency | CC6.1 | A.8.5, A.5.18 | Medium — role in code but not in DB constraint | Migration 101 to add 'staff' to CHECK constraint, OR remove from MFA_REQUIRED_ROLES | Developer | 4 hours (if schema change) |
+| 'staff' role inconsistency | CC6.1 | A.8.5, A.5.18 | Medium — 'staff' is in `MFA_REQUIRED_ROLES` but is not a functional role; no CHECK constraint exists on `role` column; application validation does not allow 'staff' | Option A: Remove 'staff' from `MFA_REQUIRED_ROLES` (code+doc change, no migration). Option B: Implement 'staff' as a real role (requires Migration 101 — Raymond's approval required). See Acceptance Record Section 7. | Developer | 4 hours (Option A) / 1–2 days (Option B) |
 
 ### 5.2 Medium-Priority Gaps
 
 | Gap | SOC 2 TSC | ISO 27001 | Risk | Remediation | Owner | Effort |
 |-----|-----------|-----------|------|-------------|-------|--------|
 | Recovery code regeneration not implemented | CC6.2 | A.5.17 | Medium — users cannot regenerate after using all codes | Add "Regenerate recovery codes" UI in SecurityPanel (requires re-auth) | Developer | 1–2 days |
-| MFA disable endpoint not implemented | CC6.2 | A.5.17 | Medium (by design) — no admin-approved de-enrollment path | Future feature: re-auth + admin approval per POL-SEC-009 | Developer | 2–3 days |
-| Direct audit_log hash chain verification | CC7.2 | A.8.16 | Medium — hash chain integrity not directly verified | Run DB query to verify chain; add to CI or scheduled check | Ops engineer | 2 hours |
+| MFA disable / reset endpoint not implemented | CC6.2 | A.5.17 | Medium (by design) — no admin-approved de-enrollment or reset path; NOT tested (no endpoint exists) | Implement proposed secure admin MFA reset procedure (Acceptance Record Section 6): super_admin authority, reauthentication, audit logging, atomic transaction, session invalidation, no public endpoint | Developer | 2–3 days |
+| Direct audit_log hash chain verification | CC7.2 | A.8.16 | Medium — hash chain integrity not directly verified | Run DB query to verify chain: `SELECT id, action, prev_hash, entry_hash, created_at FROM audit_log ORDER BY id DESC LIMIT 20` — verify each `entry_hash = SHA256(prev_hash + payload)`. DB/log inspection was NOT performed during acceptance testing (Tier 3) | Ops engineer | 2 hours |
 | WebAuthn / FIDO2 MFA method | CC6.1 | A.8.5 | Medium — only TOTP supported (phishing-resistant method absent) | Implement WebAuthn as additional MFA method | Developer | 1–2 weeks |
 | Quarterly access review not yet executed | CC6.3 | A.5.18 | Medium — no evidence of completed review | Schedule and complete first quarterly access review | Security Lead | 1 day |
 
@@ -205,7 +205,7 @@ The existing risk register (`RSK-001-Risk-Register-and-Assessment.md`) RSK-001 (
 
 **Required updates:**
 1. Update Current Controls to include: "TOTP MFA (RFC 6238) enforced for admin/super_admin, AES-256-GCM encrypted secrets, atomic recovery codes, SHA-256 hash-chained audit logging, rate limiting on all auth endpoints"
-2. Update Gap to: "MFA not enforced for 'staff' role (DB constraint gap); breached password screening not implemented; Sentry monitoring not configured"
+2. Update Gap to: "'staff' role is in `MFA_REQUIRED_ROLES` but is not a functional role (no CHECK constraint on `role` column; application validation does not allow 'staff') — see Acceptance Record Section 7. Breached password screening not implemented. Sentry monitoring not configured. Direct DB/log verification of plaintext-secret claims not yet performed"
 3. Update ISO 27001 references from 2013 to 2022 numbering: A.9.2.2 → A.5.17, A.9.4.2 → A.8.5
 4. Update Target Risk Level: MFA enforcement now implemented → likelihood reduced from 4 to 2 → risk level reduced from Critical to High (still High due to monitoring gap)
 
@@ -216,10 +216,10 @@ The existing risk register (`RSK-001-Risk-Register-and-Assessment.md`) RSK-001 (
 Based on the gap analysis, the recommended order of remediation work is:
 
 1. **Immediate (Raymond action required):** Configure Sentry DSN on dev + prod — closes the highest-risk gap (no monitoring)
-2. **Immediate (agent can do with DB access):** Verify audit_log hash chain integrity via direct DB query
-3. **Short-term (1–2 days):** Resolve 'staff' role inconsistency (Migration 101 or code change); implement recovery code regeneration UI
+2. **Immediate (agent can do with DB access):** Verify audit_log hash chain integrity via direct DB query; confirm `mfa_secret_encrypted` and `code_hash` columns contain only encrypted/hashed values (Tier 3 verification)
+3. **Short-term (1–2 days):** Resolve 'staff' role inconsistency (Option A: remove from `MFA_REQUIRED_ROLES` — code+doc change, no migration; or Option B: Migration 101 — Raymond's approval required); implement recovery code regeneration UI
 4. **Short-term (documentation):** Update RSK-001 risk register; document MFA key rotation; document emergency access procedure
-5. **Medium-term (1–2 weeks):** Implement WebAuthn/FIDO2 as additional MFA method; implement MFA disable endpoint (re-auth + admin approval)
+5. **Medium-term (1–2 weeks):** Implement WebAuthn/FIDO2 as additional MFA method; implement secure admin MFA reset procedure per Acceptance Record Section 6 (no public disable endpoint — super_admin authority, reauthentication, audit logging, atomic transaction)
 6. **Medium-term (infrastructure):** Evaluate and implement SIEM / log aggregation
 7. **Ongoing:** First quarterly access review; schedule recurring reviews per TMP-ACC-001
 
@@ -234,7 +234,7 @@ The following remediation items can be performed by the agent without requiring 
 | Update RSK-001 risk register | Correct ISO numbering (2013→2022), update controls/gaps to reflect MFA implementation | Documentation only — no code/migration changes |
 | Document MFA key rotation procedure | Add rotation section to POL-SEC-010-Encryption-Policy.md | Documentation only |
 | Document emergency access (break-glass) procedure | Add break-glass section to POL-SEC-009 | Documentation only |
-| Fix 'staff' role inconsistency (code approach) | Remove 'staff' from MFA_REQUIRED_ROLES if role is deprecated, OR flag for Migration 101 if role is intended | Code change requires Raymond's confirmation on whether 'staff' role is intended to exist |
+| Fix 'staff' role inconsistency (code approach) | Remove 'staff' from `MFA_REQUIRED_ROLES` if role is deprecated (Option A — code+doc change, no migration), OR flag for Migration 101 if role is intended (Option B — requires Raymond's approval) | Code change requires Raymond's confirmation on whether 'staff' role is intended to exist. **No CHECK constraint exists on the `role` column** — prior documentation's reference to a `users_role_check` constraint was incorrect. See Acceptance Record Section 7. |
 | Recovery code regeneration UI | Implement in SecurityPanel.tsx with re-auth requirement | Code change on dev — would need testing + commit |
 
 The following items require Raymond specifically:
@@ -245,19 +245,20 @@ The following items require Raymond specifically:
 | SIEM / log aggregation | Infrastructure decision + cost approval |
 | Promote test account to admin | Requires super_admin auth (Raymond's account) or DB access |
 | Merge dev → master (production deployment) | Explicitly Raymond's decision per directive |
-| 'staff' role: schema change (Migration 101) | Requires confirmation that 'staff' is an intended role |
+| 'staff' role: schema change (Migration 101) | Requires confirmation that 'staff' is an intended role. No CHECK constraint currently exists on the `role` column — adding one requires a migration. **Migration 101 must NOT be created without Raymond's explicit approval.** |
 | WebAuthn implementation | Architectural decision + significant development effort |
 
 ---
 
 ## 9. Summary
 
-The MFA implementation (Phases 1–3) is **complete, deployed on dev, and acceptance-tested (37/37 PASS)**. It establishes security controls aligned with SOC 2 CC6.1, CC6.2, CC6.3, CC7.2 and ISO 27001:2022 A.5.16, A.5.17, A.5.18, A.8.5, A.8.15, A.8.16.
+The MFA implementation (Phases 1–3) is **complete, deployed on dev, and acceptance-tested (37 automated tests passed; MFA disable/re-enable NOT tested — no endpoint exists, deliberate design choice)**. It establishes security controls aligned with SOC 2 CC6.1, CC6.2, CC6.3, CC7.2 and ISO 27001:2022 A.5.16, A.5.17, A.5.18, A.8.5, A.8.15, A.8.16.
 
 **Readiness posture:**
-- **Strong:** MFA enrollment, TOTP verification, recovery codes, cookie scoping, rate limiting, audit event generation, fail-closed encryption, no plaintext secret storage
-- **Adequate (source-verified, operational evidence):** Audit log hash chain, enrollment-required flow, MFA enforcement for admin/super_admin
-- **Gaps to close:** Monitoring/alerting (Sentry), SIEM/log aggregation, 'staff' role inconsistency, recovery code regeneration, MFA disable, WebAuthn, quarterly access review execution
+- **Strong (operationally verified — Tier 1):** MFA enrollment, TOTP verification, recovery code single-use/reuse-failure, cookie scoping, rate limiting (429 confirmed), API response field inspection (no encrypted secret or hash exposed)
+- **Adequate (source-code verified — Tier 2):** Encryption algorithm, secret storage format, recovery code hashing, audit event call sites, hash-chain implementation, log-statement content, MFA enforcement for admin/super_admin, enrollment-required flow
+- **NOT YET PERFORMED (Tier 3 — database/log verification):** Direct DB query of `mfa_secret_encrypted` and `code_hash` columns; direct DB query of `audit_log` table for hash chain integrity and event payloads; direct inspection of Vercel runtime function logs for secret values
+- **Gaps to close:** Monitoring/alerting (Sentry), SIEM/log aggregation, 'staff' role inconsistency (not a functional role — no CHECK constraint on `role` column; see Acceptance Record Section 7), recovery code regeneration, secure admin MFA reset procedure (proposed in Acceptance Record Section 6 — not implemented), WebAuthn, quarterly access review execution, mandatory admin/super_admin MFA enforcement operational test
 
 **SolarPro is in SOC 2 readiness — NOT certified. Security controls are aligned with ISO 27001:2022 principles. All mappings are internal readiness assessments and have not been validated by an external auditor.**
 

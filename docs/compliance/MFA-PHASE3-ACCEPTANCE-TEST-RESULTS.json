@@ -6,9 +6,17 @@
   "summary": {
     "pass": 37,
     "fail": 0,
+    "not_tested": 1,
     "deferred": 0,
     "blocked": 0,
     "total": 37
+  },
+  "scope_notes": {
+    "totp_method": "RFC 6238 TOTP generated through pyotp (software TOTP simulation — no physical authenticator application was used)",
+    "test_account_role": "user — voluntary MFA enrollment tested; mandatory admin/super_admin MFA enforcement NOT tested operationally (source-verified only)",
+    "not_tested_scenario": "MFA disable/re-enable — no disable endpoint exists (deliberate design choice, not a passed or deferred test)",
+    "db_log_verification": "NOT performed — direct database and server-log inspection was not conducted; plaintext-secret claims are based on source-code review and API response inspection only",
+    "evidence_tiers": "Tier 1: black-box operational (HTTP requests to dev deployment); Tier 2: source-code verification; Tier 3: database/log verification (NOT yet performed)"
   },
   "results": [
     {
@@ -51,7 +59,7 @@
       "test_name": "Session cookie (solarpro_session) obtained",
       "status": "PASS",
       "evidence": "Cookies: ['solarpro_session']",
-      "notes": "Note: for MFA_REQUIRED, only mfa_pending cookie is set, not session"
+      "notes": "Test account role=user; voluntary MFA enrollment tested. Mandatory admin/super_admin MFA enforcement (MFA_ENROLLMENT_REQUIRED flow) verified at source-code level only — no operational test with admin/super_admin account performed."
     },
     {
       "test_id": "T1.3",
@@ -226,14 +234,14 @@
       "test_name": "MFA audit events written (source-level + operational evidence)",
       "status": "PASS",
       "evidence": "All MFA operations completed successfully \u2192 auditAuth() calls executed without throwing. Events: mfa_setup_initiated, mfa_enabled, mfa_challenge_issued, mfa_challenge_success, mfa_challenge_failure, mfa_recovery_code_used, mfa_recovery_code_failed, login_failure, login_success.",
-      "notes": "Direct audit_log table verification requires DB access (deferred to Raymond). Source review confirms auditAuth() is called at every MFA state transition in setup/route.ts, verify/route.ts, and login/route.ts."
+      "notes": "VERIFICATION TIER: source-code + operational (audit calls executed without throwing). Direct audit_log table verification was NOT performed — requires DB access. Source review confirms auditAuth() is called at every MFA state transition in setup/route.ts, verify/route.ts, and login/route.ts. The fact that operations succeeded operationally does not prove the DB rows were written correctly; DB query required to confirm."
     },
     {
       "test_id": "T9.2",
       "test_name": "Audit log hash chain (source-level)",
       "status": "PASS",
       "evidence": "lib/auditLog.ts implements prev_hash/entry_hash SHA-256 hash chain. Migration 100 created audit_log table with hash chain columns.",
-      "notes": "Direct verification of hash chain integrity requires DB query access."
+      "notes": "VERIFICATION TIER: source-code only. Direct verification of hash chain integrity was NOT performed — requires DB query access. Source review confirms the implementation pattern but does not prove the chain is intact at runtime."
     },
     {
       "test_id": "T10.1",
@@ -254,7 +262,7 @@
       "test_name": "Recovery codes hashed (SHA-256) in storage",
       "status": "PASS",
       "evidence": "lib/mfa.ts hashRecoveryCode() uses SHA-256 one-way hash. Migration 100 created mfa_recovery_codes table with code_hash column (not plaintext).",
-      "notes": "Source review: hashRecoveryCode() = crypto.createHash('sha256').update(code).digest('hex'). Recovery codes are returned in plaintext ONLY ONCE on PUT setup (user must save them)."
+      "notes": "VERIFICATION TIER: source-code only. Source review: hashRecoveryCode() = crypto.createHash('sha256').update(code).digest('hex'). Recovery codes are returned in plaintext ONLY ONCE on PUT setup (user must save them). Direct database query to confirm code_hash values are stored as SHA-256 hashes (not plaintext) was NOT performed."
     },
     {
       "test_id": "T10.4",
@@ -268,7 +276,7 @@
       "test_name": "No plaintext secrets in server logs (source review)",
       "status": "PASS",
       "evidence": "console.error/log statements in setup/route.ts, verify/route.ts, login/route.ts log only error messages and user IDs \u2014 no secret values, no recovery codes, no TOTP secrets. Login route explicitly removed email from logs (PII fix).",
-      "notes": "Source review confirms all log statements use safe fields only."
+      "notes": "VERIFICATION TIER: source-code only. Source review confirms all log statements use safe fields only. Direct inspection of Vercel runtime function logs to confirm no secret values appear was NOT performed."
     }
   ]
 }
