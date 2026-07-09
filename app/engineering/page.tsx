@@ -5585,18 +5585,22 @@ function EngineeringPageInner() {
     return () => { if (calcDebounceRef.current) clearTimeout(calcDebounceRef.current); };
   }, [config]);
 
-  // Auto-refresh SLD whenever compliance data updates AND an SLD was already generated
-  // This ensures string config changes flow through to the diagram automatically
+  // Auto-propagate the SLD: keep the single-line diagram current as the design
+  // changes — no manual "Generate SLD" click needed. Fires when the SLD tab is
+  // open (incl. the first time) and whenever the equipment/strings/compliance
+  // change while viewing it. Debounced; guarded on a real system. Plan-set export
+  // fetches the SLD separately, so we only auto-refresh for the live preview here.
   const sldAutoRefDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!sldSvg) return; // Only auto-refresh if SLD was already generated once
+    if (activeTab !== 'diagram') return;
+    if (!(totalPanels > 0)) return;
     if (sldAutoRefDebounce.current) clearTimeout(sldAutoRefDebounce.current);
     sldAutoRefDebounce.current = setTimeout(() => {
       fetchSLD();
-    }, 1200);
+    }, 900);
     return () => { if (sldAutoRefDebounce.current) clearTimeout(sldAutoRefDebounce.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compliance]);
+  }, [activeTab, compliance, config.inverters, config.batteryId, config.mountingId, totalPanels]);
 
   const handlePrint = () => window.print();
 
