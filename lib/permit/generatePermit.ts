@@ -843,9 +843,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.
     (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-1: Site & Roof / Ground / Fence (cad.systemType)
     (n, t) => pageArrayGeometry(input, cad, n, t),                     // PV-1B: Array geometry (system-aware)
-    (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Structural (cad.systemType)
+    // ── Reading order (2026-07-09): electrical grouped together, E-1 with them ──
     (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (all)
     (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (system-aware)
+    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (was orphaned after the certs — moved up with the electrical set)
+    (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Attachment detail (structural group)
     (n, t) => pageStructural(input, cad, n, t),                        // PV-4C: Structural calcs (system-aware)
     (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (all)
@@ -856,7 +858,6 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     ...equipmentDatasheetPageFns(input, cad),
     (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
     (n, t) => pagePELetter(input, cad, n, t),                          // PE-1 (all)
-    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (all, system-labeled)
     ...(includeInternalValidation ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
   ];
   const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);

@@ -23,6 +23,8 @@ import {
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
+import { buildSheetManifest } from '@/lib/permit/sheetManifest';
+import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
 
 // ── Mounting systems from the canonical mounting-hardware-db (38 systems, 24 manufacturers) ──
@@ -13182,22 +13184,42 @@ function EngineeringPageInner() {
                 </a>
               </div>
             ) : (() => {
-              const _sheets = [
-                { label: 'PV-0  Cover Sheet',                         done: true },
-                { label: 'PV-1  Site & Roof Plan — Module Layout & Fire Setbacks', done: !!config.address && !!(projectLayout?.panels?.length > 0) },
-                { label: 'PV-1B  Array Geometry & String Layout',     done: !!(projectLayout?.panels?.length > 0) },
-                { label: 'PV-3  Attachment Detail — Mounting & Cross-Section', done: true },
-                { label: 'PV-4A  NEC Compliance Sheet',               done: !!compliance.electrical },
-                { label: 'PV-4B  Conductor & Conduit Schedule',       done: true },
-                { label: 'PV-4C  Structural Calculation Sheet',       done: !!compliance.structural },
-                { label: 'PV-5  Warning Labels & Required Placards',  done: true },
-                { label: 'SCHED  Equipment Schedule',                 done: totalPanels > 0 },
-                { label: 'APP-A  Equipment Specification Reference',  done: true },
-                { label: 'CERT  Engineer Certification',              done: !!config.designer },
-                { label: 'PE-1  PE Structural Letter of Compliance',  done: true },
-                { label: 'E-1  Single-Line Electrical Diagram',       done: true },
-                { label: 'APP-CAD  CAD Preview Appendix — Non-Authoritative', done: !!(projectLayout?.panels?.length > 0) },
-              ];
+              // Sheet list derived from the SAME manifest the generator + cover
+              // index use, so order/count match the actual package. The set is
+              // dynamic: manufacturer datasheet (DS-n) pages are added per selected
+              // equipment that has a datasheet on file, so page count varies per job.
+              const _dsRefs: { id: string; title: string }[] = [];
+              const _pushDs = (t: string, hit: { imageUrl: string | null } | null) => {
+                if (hit?.imageUrl) _dsRefs.push({ id: `DS-${_dsRefs.length + 1}`, title: `MANUFACTURER DATASHEET — ${t}` });
+              };
+              _pushDs('PV MODULE', getManufacturerAsset(config.inverters?.[0]?.strings?.[0]?.panelId, 'module_spec'));
+              const _invId = config.inverters?.[0]?.inverterId;
+              _pushDs('INVERTER',
+                getManufacturerAsset(_invId, 'inverter_spec')
+                ?? getManufacturerAsset(_invId, 'microinverter_spec')
+                ?? getManufacturerAsset(_invId, 'optimizer_spec'));
+              _pushDs('BATTERY', getManufacturerAsset(config.batteryId, 'battery_spec'));
+
+              const _manifest = buildSheetManifest({
+                pv1Title: 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS',
+                pv3Title: 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION',
+                datasheets: _dsRefs,
+                includeCadAppendix: !!(projectLayout?.panels?.length > 0),
+              });
+              const _doneFor = (id: string): boolean => {
+                if (id === 'PV-1')   return !!config.address && !!(projectLayout?.panels?.length > 0);
+                if (id === 'PV-1B')  return !!(projectLayout?.panels?.length > 0);
+                if (id === 'PV-4A')  return !!compliance.electrical;
+                if (id === 'PV-4C')  return !!compliance.structural;
+                if (id === 'SCHED')  return totalPanels > 0;
+                if (id === 'CERT')   return !!config.designer;
+                if (id === 'APP-CAD') return !!(projectLayout?.panels?.length > 0);
+                return true;
+              };
+              const _sheets = _manifest.map(s => ({
+                label: `${s.id}  ${s.title.split(' — ')[0].replace(/\b\w+/g, w => w[0] + w.slice(1).toLowerCase())}`,
+                done: _doneFor(s.id),
+              }));
               const _doneCount  = _sheets.filter(s => s.done).length;
               const _readyPct   = Math.round((_doneCount / _sheets.length) * 100);
               const _compStatus = compliance.overallStatus;
@@ -13328,7 +13350,7 @@ function EngineeringPageInner() {
                         <div>
                           <h4 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
                             <Stamp size={14} className="text-amber-400" /> Permit Package Generator
-                            <span className="text-xs font-normal bg-slate-700/60 text-slate-400 border border-slate-600/50 px-2 py-0.5 rounded-full">14 Sheets</span>
+                            <span className="text-xs font-normal bg-slate-700/60 text-slate-400 border border-slate-600/50 px-2 py-0.5 rounded-full">{_sheets.length} Sheets</span>
                           </h4>
                           <p className="text-slate-400 text-xs">Full permit-ready documentation — CAD, NEC compliance, structural calcs, SLD, equipment schedule, PE letter, warning labels.</p>
                         </div>

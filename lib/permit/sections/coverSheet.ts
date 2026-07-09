@@ -10,6 +10,7 @@ import { escapeH } from '../utils/drawing';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
 import { equipmentDatasheetIndexRows } from './datasheetAppendix';
+import { buildSheetManifest } from '../sheetManifest';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -157,27 +158,16 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
     || input.planSetOptions?.includeInternalValidation === true;
   const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
-  const sheets = [
-    { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
-    { id: 'PV-1',  title: pv2Title(cad.systemType as SysType) },
-    { id: 'PV-1B', title: 'ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION' },
-    { id: 'PV-3',  title: pv3Title(cad.systemType as SysType) },
-    { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
-    { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
-    { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
-    { id: 'PV-5',  title: 'WARNING LABELS & PLACARDS — NEC REQUIRED SIGNAGE' },
-    { id: 'SCHED', title: 'EQUIPMENT SCHEDULE — MODULES, INVERTERS & BOM' },
-    ...(includeSchedCont ? [{ id: 'SCHED-2', title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' }] : []),
-    { id: 'APP-A', title: 'SPECIFICATION REFERENCE — EQUIPMENT DATA SHEETS' },
-    // DS-n: real manufacturer datasheet pages — mirror generatePermit's insertion
-    // after APP-A so the cover index count/order matches the actual set.
-    ...equipmentDatasheetIndexRows(input),
-    { id: 'CERT',  title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
-    { id: 'PE-1',  title: 'PE STRUCTURAL LETTER — LETTER OF COMPLIANCE' },
-    { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
-    ...(includeInternalValidation ? [{ id: 'VAL-1', title: 'VALIDATION SUMMARY — INTERNAL QA (NOT FOR CONSTRUCTION)' }] : []),
-    ...(includeCADAppendixPreview ? [{ id: 'APP-CAD', title: 'CAD PREVIEW APPENDIX — NON-AUTHORITATIVE' }] : []),
-  ];
+  // Single source of truth for order/titles/count — same manifest generatePermit
+  // and the engineering-page sheet status derive from, so they can't drift.
+  const sheets = buildSheetManifest({
+    pv1Title: pv2Title(cad.systemType as SysType),
+    pv3Title: pv3Title(cad.systemType as SysType),
+    datasheets: equipmentDatasheetIndexRows(input),
+    includeSchedCont,
+    includeValidation: includeInternalValidation,
+    includeCadAppendix: includeCADAppendixPreview,
+  });
 
   // ── Topology label ────────────────────────────────────────────────────────
   const _coverSysType = cad.systemType as SysType;
