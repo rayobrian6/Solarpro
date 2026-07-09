@@ -39,6 +39,7 @@ import {
   type EquipmentRegistryEntry,
 } from '@/lib/equipment-registry-v4';
 import { necNextStandardOcpd } from './helpers';
+import { buildConductorAuthority } from './conductorAuthority';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -357,7 +358,10 @@ export function generateBOMForPermit(
   const mainPanelA   = project.mainPanelAmps || 200;
   const acKw         = totalAcKw;
   const acOutputAmps = acKw * 1000 / 240;
-  const backfeedAmps = necNextStandardOcpd(acOutputAmps * 1.25);
+  // Shared conductor authority — the BOM's AC feeder gauge + OCPD must match
+  // what PV-4A/PV-4B/E-1 print (the "4th independent compute" this collapses).
+  const _auth        = buildConductorAuthority(input, cad);
+  const backfeedAmps = _auth.acFeeder.ocpdAmps ?? necNextStandardOcpd(acOutputAmps * 1.25);
   const isMicro      = (system.topology || '').toLowerCase() === 'micro' ||
                        firstInv?.type === 'micro';
 
@@ -367,7 +371,9 @@ export function generateBOMForPermit(
 
   const elec = compliance.electrical;
   const dcWireGauge   = firstStr?.wireGauge || elec?.dcConductorCallout || '#10 AWG';
-  const acWireGauge   = elec?.acConductorCallout || '#8 AWG';
+  // Plain gauge from the authority (e.g. '#8 AWG'), not the raw callout string
+  // ('3#8 THWN-2 …') which V4 mis-parsed into an oversized conductor.
+  const acWireGauge   = _auth.acFeeder.wireGauge;
   const dcWireLength  = firstStr?.wireLength || project.wireLength || 50;
   const acWireLength  = project.wireLength || 60;
   const conduitType   = (project.conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';

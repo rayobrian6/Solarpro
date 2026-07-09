@@ -14,7 +14,7 @@ import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../u
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
-import { planMicroBranches } from '../utils/branching';
+import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import {
@@ -1230,19 +1230,21 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // field wiring is AC branch circuits (Q-Cable). Use the SAME branch planner
   // PV-4A/PV-4B/E-1 use so the schedule can't disagree with them.
   const _schedIsMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
-  const _schedInv0    = system.inverters?.[0];
-  const _schedAcW     = Number(_schedInv0?.acOutputKw) * 1000;
   const _schedPP      = (project.panelPositions ?? []) as Array<{ id: string }>;
   const _schedGroupLabel = _schedIsMicro ? 'Array' : 'String';
-  // AC branch circuit schedule for micro (replaces the DC source-circuit table).
-  const _schedPerA = _schedAcW > 0 ? _schedAcW / 240 : 0;
-  const _schedBranchSizes = (_schedIsMicro && _schedPP.length && _schedPerA > 0)
-    ? planMicroBranches(_schedPP, _schedInv0?.model).sizes : [];
-  const _schedAcRows = _schedBranchSizes.map((n, i) => {
-    const amps = n * _schedPerA; const cont = amps * 1.25;
-    return `<tr><td class="fw7 mono">B${i + 1}</td><td>${n} &times; microinverter</td>`
-      + `<td class="tr mono">${amps.toFixed(1)}A</td><td class="tr mono">${cont.toFixed(1)}A</td>`
-      + `<td class="tr mono fw7">20A</td><td>#10 AWG THWN-2 + EGC</td><td class="tr">30A (#10)</td>`
+  // AC branch circuit schedule for micro — OCPD / conductor / ampacity come
+  // from the shared conductor authority (same values PV-4A/PV-4B/E-1/BOM print),
+  // not a hardcoded 20A/#10 row.
+  const _schedAuth = buildConductorAuthority(input, cad);
+  // 75°C ampacity display keyed to conductor size (NEC 310.16).
+  const _schedAmpacity = (gauge: string): string => ({
+    '#12 AWG': '25A (#12)', '#10 AWG': '35A (#10)', '#8 AWG': '50A (#8)',
+    '#6 AWG': '65A (#6)', '#4 AWG': '85A (#4)',
+  } as Record<string, string>)[gauge] ?? gauge;
+  const _schedAcRows = (_schedIsMicro && _schedPP.length ? _schedAuth.microBranches : []).map((b) => {
+    return `<tr><td class="fw7 mono">B${b.index}</td><td>${b.deviceCount} &times; microinverter</td>`
+      + `<td class="tr mono">${b.branchCurrentA.toFixed(1)}A</td><td class="tr mono">${b.continuousA.toFixed(1)}A</td>`
+      + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td>${b.conductorCallout}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
       + `<td class="center fw7">&check;</td></tr>`;
   }).join('');
   const _schedAcBranchBlock = `
@@ -1254,7 +1256,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>WIRE SIZING INTERPRETATION (MICROINVERTER):</strong>
         Each module is paired 1:1 with a microinverter, so this system has no DC series string and no DC source-circuit sizing &mdash; DC / Voc / Isc string calculations do not apply.
-        AC branch (trunk) circuits are sized per NEC 690.8(A) with the continuous-duty factor (&times;1.25); each branch is protected at 20A and terminates at the AC combiner. THWN-2 (90&deg;C) conductors are specified.
+        AC branch (trunk) circuits are sized per NEC 690.8(A) with the continuous-duty factor (&times;1.25); each branch is protected at its calculated OCPD (see table) and terminates at the AC combiner. THWN-2 (90&deg;C) conductors are specified.
       </div>`;
   return `
   <div class="page">

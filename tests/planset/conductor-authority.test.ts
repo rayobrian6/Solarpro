@@ -61,4 +61,16 @@ describe('conductor authority — single source of truth', () => {
     // the old non-standard double-continuous EGC math must be gone from source output
     expect(html).not.toContain('1.25 * 1.25');
   });
+
+  it('renders the same branch OCPD across PV-4A, PV-4B and SCHED (no stray hardcode)', () => {
+    const html = generatePermitHTML(clone());
+    const auth = buildConductorAuthority(clone(), null);
+    const ocpd = auth.microBranches[0]?.ocpdAmps;
+    expect(ocpd).toBeGreaterThan(0);
+    // All three branch schedules print the authority OCPD (…>NN A< / >NNA<).
+    expect(html).toMatch(new RegExp(`>${ocpd}\\s?A<`));
+    // The old hardcoded SCHED ampacity cell ('30A (#10)') is gone — SCHED now
+    // flows conductor/ampacity through the authority's gauge map.
+    expect(html).not.toContain('30A (#10)');
+  });
 });
