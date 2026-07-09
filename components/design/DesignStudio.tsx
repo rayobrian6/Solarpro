@@ -3779,22 +3779,70 @@ export default function DesignStudio({ project, onSave }: Props) {
       <div className="flex flex-1 min-h-0">
         {/* ── Left Toolbar ── */}
         <div className="w-14 bg-slate-900 border-r border-slate-700/50 flex flex-col items-center py-3 gap-1 flex-shrink-0">
-          {/* Active zone type badge */}
-          <div className={`w-9 h-9 rounded-xl border flex items-center justify-center mb-2 text-sm ${
-            activeZoneType === 'roof' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' :
-            activeZoneType === 'ground' ? 'bg-teal-500/10 border-teal-500/20 text-teal-400' :
-            'bg-purple-500/10 border-purple-500/20 text-purple-400'
-          }`}>
-            {activeZoneType === 'roof' ? '🏠' : activeZoneType === 'ground' ? '🌱' : '🔲'}
-          </div>
+          {/* design-page-simplify P2a: Segmented zone control — replaces the previous zone-type
+              badge + 3 separate draw buttons. Sets both `drawingMode` and `activeZoneType`
+              in a single click, mirroring the original onClick behavior (incl. the multi-row
+              reset that fires when switching tools). Active state = filled with the zone
+              color; inactive = muted slate-500/30 hover slate-700. Keyboard shortcuts
+              (R/G/F) are wired in the canvas keydown handler below. */}
+          {(() => {
+            const zoneTools: Array<{
+              type: SystemType;
+              drawMode: DrawingMode;
+              icon: React.ReactNode;
+              label: string;
+              key: string;
+              activeColor: string;
+              accent: string;
+            }> = [
+              { type: 'roof',   drawMode: 'draw_roof',   icon: <Home size={14} />,   label: 'Draw Roof Zone',   key: 'R', accent: 'amber',   activeColor: 'bg-amber-500/20 border-amber-500/40 text-amber-400' },
+              { type: 'ground', drawMode: 'draw_ground', icon: <Square size={14} />, label: 'Draw Ground Zone', key: 'G', accent: 'teal',    activeColor: 'bg-teal-500/20 border-teal-500/40 text-teal-400' },
+              { type: 'fence',  drawMode: 'draw_fence',  icon: <Minus size={14} />,  label: 'Draw Fence Line',  key: 'F', accent: 'purple',  activeColor: 'bg-purple-500/20 border-purple-500/40 text-purple-400' },
+            ];
+            return (
+              <div className="flex flex-col items-center gap-0.5 mb-2 p-0.5 rounded-xl bg-slate-800/40 border border-slate-700/40">
+                {zoneTools.map(zone => {
+                  const isActive = drawingMode === zone.drawMode;
+                  return (
+                    <button
+                      key={zone.type}
+                      onClick={() => {
+                        setActiveZoneType(zone.type);
+                        setDrawingMode(zone.drawMode);
+                        setMeasurePoints([]);
+                        setMeasureDistance(null);
+                        // v31.1: deactivate multi-row mode when switching tools
+                        setMultiRowMode(false);
+                        setMultiRowStart(null);
+                        setMultiRowEnd(null);
+                      }}
+                      title={`${zone.label} (${zone.key})`}
+                      aria-label={zone.label}
+                      aria-pressed={isActive}
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all group relative border ${
+                        isActive
+                          ? zone.activeColor
+                          : 'border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-700/60'
+                      }`}
+                    >
+                      {zone.icon}
+                      <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50 transition-opacity">
+                        {zone.label} <span className="text-slate-500">{zone.key}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
           <div className="w-8 border-t border-slate-700/50 mb-1" />
 
-          {/* Tools - ALL system types always available */}
+          {/* Tools - generic (not zone-specific). The zone-specific draw modes are
+              handled by the segmented control above. P2b: Multi-Row removed from here
+              (it now lives in RoofEditPanel.tsx). */}
           {[
             { id: 'select' as DrawingMode, icon: <MousePointer2 size={16} />, label: 'Select / Pan', key: 'V', color: '' },
-            { id: 'draw_roof' as DrawingMode, icon: <Home size={16} />, label: 'Draw Roof Zone', key: 'R', color: 'text-amber-400', activeColor: 'bg-amber-500/20 border-amber-500/40 text-amber-400' },
-            { id: 'draw_ground' as DrawingMode, icon: <Square size={16} />, label: 'Draw Ground Zone', key: 'G', color: 'text-teal-400', activeColor: 'bg-teal-500/20 border-teal-500/40 text-teal-400' },
-            { id: 'draw_fence' as DrawingMode, icon: <Minus size={16} />, label: 'Draw Fence Line', key: 'F', color: 'text-purple-400', activeColor: 'bg-purple-500/20 border-purple-500/40 text-purple-400' },
             { id: 'measure' as DrawingMode, icon: <Ruler size={16} />, label: 'Measure Distance', key: 'M', color: '' },
           ].map(tool => (
             <button
@@ -3807,16 +3855,12 @@ export default function DesignStudio({ project, onSave }: Props) {
                 setMultiRowMode(false);
                 setMultiRowStart(null);
                 setMultiRowEnd(null);
-                // Set active zone type based on tool
-                if (tool.id === 'draw_roof') setActiveZoneType('roof');
-                else if (tool.id === 'draw_ground') setActiveZoneType('ground');
-                else if (tool.id === 'draw_fence') setActiveZoneType('fence');
               }}
               title={`${tool.label} (${tool.key})`}
               className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all group relative ${
                 drawingMode === tool.id
-                  ? ((tool as any).activeColor || 'bg-amber-500/20 border border-amber-500/40 text-amber-400')
-                  : `text-slate-500 hover:text-slate-300 hover:bg-slate-700/60 ${(tool as any).color || ''}`
+                  ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400'
+                  : `text-slate-500 hover:text-slate-300 hover:bg-slate-700/60 ${tool.color}`
               } border border-transparent`}
             >
               {tool.icon}
@@ -3825,24 +3869,6 @@ export default function DesignStudio({ project, onSave }: Props) {
               </div>
             </button>
           ))}
-
-          <div className="w-8 border-t border-slate-700/50 my-1" />
-
-          {/* v30.9: Multi-Row Tool */}
-          <button
-            onClick={() => { setMultiRowMode(v => !v); setMultiRowStart(null); setMultiRowEnd(null); }}
-            title={`Multi-Row Placement (${multiRowCount} rows)`}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all group relative border ${
-              multiRowMode
-                ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
-                : 'border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-700/60'
-            }`}
-          >
-            <span className="text-sm font-bold leading-none">⊞</span>
-            <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50 transition-opacity">
-              Multi-Row ({multiRowCount} rows)
-            </div>
-          </button>
 
           {drawnPoints.length >= 2 ? (
             <button
@@ -4221,6 +4247,10 @@ export default function DesignStudio({ project, onSave }: Props) {
             ridgeSetbackInches={ahjRecord?.ridgeSetbackInches}
             pathwayWidthInches={ahjRecord?.pathwayWidthInches}
             eaveSetbackInches={ahjRecord?.eaveSetbackInches}
+            multiRowMode={multiRowMode}
+            setMultiRowMode={setMultiRowMode}
+            multiRowCount={multiRowCount}
+            setMultiRowCount={setMultiRowCount}
             show3D={show3D}
             toggle3D={() => setShow3D(v => !v)}
             onClose={() => {

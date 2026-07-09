@@ -19,7 +19,7 @@
 import React from 'react';
 import {
   Home, Settings, Zap, Brush, Compass, ChevronDown, ChevronUp,
-  Box, X, Layers
+  Box, X, Layers, Rows3
 } from 'lucide-react';
 import { RACKING_SYSTEMS } from '@/lib/equipment-db';
 import type { SystemType } from '@/types';
@@ -87,6 +87,12 @@ interface Props {
   pathwayWidthInches?: number;
   eaveSetbackInches?: number;
 
+  // ── Multi-Row (P2b) — moved out of the left toolbar into this panel ──
+  multiRowMode: boolean;
+  setMultiRowMode: (v: boolean | ((prev: boolean) => boolean)) => void;
+  multiRowCount: number;
+  setMultiRowCount: (v: number | ((prev: number) => number)) => void;
+
   // ── 3D view toggle (Aurora-style 3D-cube corner button) ───────────────
   show3D: boolean;
   toggle3D: () => void;
@@ -118,6 +124,10 @@ export default function RoofEditPanel({
   ridgeSetbackInches,
   pathwayWidthInches,
   eaveSetbackInches,
+  multiRowMode,
+  setMultiRowMode,
+  multiRowCount,
+  setMultiRowCount,
   show3D,
   toggle3D,
   onClose,
@@ -125,6 +135,7 @@ export default function RoofEditPanel({
   const [ahjOpen, setAhjOpen] = React.useState(true);
   const [paintOpen, setPaintOpen] = React.useState(true);
   const [rackingOpen, setRackingOpen] = React.useState(false);
+  const [multiRowOpen, setMultiRowOpen] = React.useState(true);
 
   // Outer panel: transform translate-y-full ↔ translate-y-0 with opacity.
   // Pure CSS transition (300ms) keeps it crisp.
@@ -282,6 +293,62 @@ export default function RoofEditPanel({
                 ) : null}
                 <p className="text-[10px] text-slate-500">
                   Manual string painting — click a panel in the 3D view to assign it to the active string.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          {/* design-page-simplify P2b: Multi-Row (was inline in the left toolbar) */}
+          <div className="mb-4">
+            <button
+              onClick={() => setMultiRowOpen(v => !v)}
+              className="w-full flex items-center justify-between mb-1.5"
+            >
+              <div className="flex items-center gap-1.5">
+                <Rows3 size={11} className="text-amber-400" />
+                <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Multi-row placement</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                  multiRowMode ? 'border-amber-500/60 bg-amber-500/10 text-amber-300' : 'border-slate-700 text-slate-500'
+                }`}>
+                  {multiRowMode ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              {multiRowOpen ? <ChevronUp size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
+            </button>
+            {multiRowOpen ? (
+              <div className="px-3 py-3 bg-slate-900/60 rounded-xl border border-slate-700/40 space-y-2">
+                <button
+                  onClick={() => setMultiRowMode(v => !v)}
+                  className={`w-full flex items-center justify-center gap-1.5 text-xs px-2 py-1.5 rounded-lg border transition-colors ${
+                    multiRowMode
+                      ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                      : 'border-slate-600 text-slate-300 hover:bg-slate-700/40'
+                  }`}
+                >
+                  {multiRowMode ? '✓ Active — click end of first row on the canvas' : '⊞ Activate multi-row mode'}
+                </button>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">Rows per placement</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setMultiRowCount(v => Math.max(2, v - 1))}
+                      className="w-6 h-6 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center justify-center text-xs"
+                      aria-label="Decrease row count"
+                    >
+                      −
+                    </button>
+                    <span className="text-xs font-semibold text-white w-5 text-center tabular-nums">{multiRowCount}</span>
+                    <button
+                      onClick={() => setMultiRowCount(v => Math.min(20, v + 1))}
+                      className="w-6 h-6 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center justify-center text-xs"
+                      aria-label="Increase row count"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  Roof-only tool. Click two points on the canvas to lay down {multiRowCount} stacked rows of panels.
                 </p>
               </div>
             ) : null}
