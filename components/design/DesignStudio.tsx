@@ -54,6 +54,10 @@ import {
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+// P0: Aurora-style slide-up bottom panel for roof edit context
+import RoofEditPanel from '@/components/design/RoofEditPanel';
+// P1: Aurora-style header metrics pill (Size · Energy · Savings)
+import DesignHeaderMetrics from '@/components/design/DesignHeader';
 
 interface Props {
   project: Project;
@@ -826,6 +830,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   }, [billAnalysis, project.lat, project.lng, project.stateCode, tilt, azimuth, pvwattsSizing]);
 
   const [activeTab, setActiveTab] = useState<'design' | 'bill' | 'equipment' | 'battery'>('design');
+  // design-page-simplify (P0/P1): right sidebar hidden by default for the clean Aurora look.
+  // A header gear button toggles it on demand so Bill/Equipment/Battery workflows remain reachable.
+  const [rightSidebarOpen, setRightSidebarOpen] = useState<boolean>(false);
 
   // Calculation state
   const [calculating, setCalculating] = useState(false);
@@ -3706,6 +3713,33 @@ export default function DesignStudio({ project, onSave }: Props) {
             lastSavedAt={lastSavedAt}
             className="ml-1"
           />
+          {/* design-page-simplify P1: persistent system metrics pill (Size · Energy · Savings). Click expands to a popover with the full breakdown. */}
+          <DesignHeaderMetrics
+            systemSizeKw={systemSizeKw}
+            offsetPercentage={production?.offsetPercentage ?? null}
+            annualSavings={costEstimate?.annualSavings ?? null}
+            annualProductionKwh={production?.annualProductionKwh ?? null}
+            monthlyProductionKwh={production?.monthlyProductionKwh ?? null}
+            co2OffsetTons={production?.co2OffsetTons ?? null}
+            roi={costEstimate?.roi ?? null}
+            lifetimeSavings={costEstimate?.lifetimeSavings ?? null}
+            paybackYears={costEstimate?.paybackYears ?? null}
+            hasPanels={panels.length > 0}
+          />
+          {/* design-page-simplify: cog button toggles the right sidebar (Bill / Equipment / Battery workflows) on demand */}
+          <button
+            onClick={() => setRightSidebarOpen(v => !v)}
+            title={rightSidebarOpen ? 'Hide management panel' : 'Show management panel'}
+            aria-label={rightSidebarOpen ? 'Hide management panel' : 'Show management panel'}
+            aria-pressed={rightSidebarOpen}
+            className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-colors flex-shrink-0 ${
+              rightSidebarOpen
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+            }`}
+          >
+            <Settings size={14} />
+          </button>
           {/* Unsaved Design badge — shown when panels exist but design has never been saved this session */}
           {panels.length > 0 && saveStatus !== 'saving' && saveStatus !== 'saved' && lastSavedAt === null && !layoutLoadedFromDB ? (
             <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1 flex-shrink-0">
@@ -4169,10 +4203,37 @@ export default function DesignStudio({ project, onSave }: Props) {
               ) : null}
             </>
           )}
+          {/* design-page-simplify P0: contextual bottom slide-up panel — render only when in draw_roof mode */}
+          <RoofEditPanel
+            activeZoneType={activeZoneType}
+            open={drawingMode === 'draw_roof'}
+            setback={setback}
+            setSetback={(v) => { clearGridCache(); setSetback(v); }}
+            rackingId={rackingId}
+            onRackingChange={applyRacking}
+            paintMode={paintMode}
+            togglePaintMode={togglePaintMode}
+            paintStringCount={stringAssignment.strings.length}
+            paintStringIndex={paintStringIndex}
+            setPaintStringIndex={setPaintStringIndex}
+            ahjCity={ahjRecord?.city ?? null}
+            ahjCounty={ahjRecord?.county ?? null}
+            ridgeSetbackInches={ahjRecord?.ridgeSetbackInches}
+            pathwayWidthInches={ahjRecord?.pathwayWidthInches}
+            eaveSetbackInches={ahjRecord?.eaveSetbackInches}
+            show3D={show3D}
+            toggle3D={() => setShow3D(v => !v)}
+            onClose={() => {
+              // Exit roof-edit mode — go back to select so the panel slides down.
+              setDrawingMode('select');
+              setActiveZoneType(project.systemType);
+            }}
+          />
         </div>
 
         {/* ── Right Sidebar ── */}
-        <div className="w-64 xl:w-80 bg-slate-900 border-l border-slate-700/50 flex flex-col flex-shrink-0 min-h-0">
+        {rightSidebarOpen ? (
+          <div className="w-64 xl:w-80 bg-slate-900 border-l border-slate-700/50 flex flex-col flex-shrink-0 min-h-0">
           {/* Tab bar */}
           <div className="flex border-b border-slate-700/50 flex-shrink-0">
             {[
@@ -5589,6 +5650,7 @@ export default function DesignStudio({ project, onSave }: Props) {
             ) : null}
           </div>
         </div>
+        ) : null}
       </div>
     </div>
   );
