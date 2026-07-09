@@ -1,7 +1,7 @@
 # SolarPro — Next Three Highest-Priority Compliance Work Packages
 
 **Date:** 2026-07-09
-**Author:** Automated compliance analysis (SolarPro CI agent)
+**Author:** Automated compliance analysis (automated acceptance test agent)
 **Branch:** dev (commit `930fde1e`)
 **Preceded by:** MFA Phase 3 evidence correction — documentation & gap cleanup (commit `930fde1e`)
 **Status:** SOC 2 readiness in progress — NOT certified. Security controls aligned with ISO 27001:2022 principles.

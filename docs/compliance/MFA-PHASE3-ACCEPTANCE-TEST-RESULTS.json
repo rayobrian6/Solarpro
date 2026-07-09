@@ -16,14 +16,18 @@
     "test_account_role": "user — voluntary MFA enrollment tested; mandatory admin/super_admin MFA enforcement NOT tested operationally (source-verified only)",
     "not_tested_scenario": "MFA disable/re-enable — no disable endpoint exists (deliberate design choice, not a passed or deferred test)",
     "db_log_verification": "NOT performed — direct database and server-log inspection was not conducted; plaintext-secret claims are based on source-code review and API response inspection only",
-    "evidence_tiers": "Tier 1: black-box operational (HTTP requests to dev deployment); Tier 2: source-code verification; Tier 3: database/log verification (NOT yet performed)"
+    "evidence_tiers": "Tier 1: black-box operational (HTTP requests to dev deployment); Tier 2: source-code verification; Tier 3: database/log verification (NOT yet performed)",
+    "deployment_identification": "Source commit b49f5e55 (confirmed via git on local working copy); BUILD_VERSION v60.5 reported by health endpoint. The exact Vercel deployment ID (deploymentId / build UID) was NOT captured during testing and cannot be proven from available evidence. No Vercel API or dashboard query was performed. Documented limitation.",
+    "cookie_ttl_verification": "5-minute (solarpro_mfa_pending) and 10-minute (solarpro_mfa_enroll_pending) TTL values are source-code verified (lib/auth.ts maxAge settings). Operational testing proved cookie presence, clearing (maxAge=0 after verify), path scoping, and rejection when absent. Timed expiration was NOT operationally tested — the test suite did not wait 5 or 10 minutes for a cookie to expire. The longest sleep in the suite is 0.3 seconds (rate-limit burst spacing).",
+    "recovery_code_count_method": "8 of 10 remaining is a mathematical inference (10 generated - 2 consumed = 8), not a value from a direct stored-count database query or API response. The API does not expose a remaining-count field.",
+    "audit_event_persistence": "Audit-event emission paths exercised (source-level call sites + operational no-throw confirmation). Database persistence of audit events remains unverified until the audit_log table is directly queried (Tier 3 — not yet performed)."
   },
   "results": [
     {
       "test_id": "T0.1",
       "test_name": "Dev health endpoint responsive",
       "status": "PASS",
-      "evidence": "GET /api/health \u2192 200, status=healthy",
+      "evidence": "GET /api/health → 200, status=healthy",
       "notes": ""
     },
     {
@@ -86,7 +90,7 @@
       "test_id": "T2.1b",
       "test_name": "POST setup response contains no encrypted secret/hash",
       "status": "PASS",
-      "evidence": "Clean \u2014 only plaintext TOTP secret (needed for QR)",
+      "evidence": "Clean — only plaintext TOTP secret (needed for QR)",
       "notes": ""
     },
     {
@@ -129,7 +133,7 @@
       "test_name": "MFA pending cookie set (not full session)",
       "status": "PASS",
       "evidence": "mfa_pending=True, session=False",
-      "notes": "MFA pending cookie is restricted \u2014 does not grant app access"
+      "notes": "MFA pending cookie is restricted — does not grant app access. Cookie presence verified operationally. The 5-minute TTL was NOT operationally tested (suite did not wait for expiration); TTL value is source-code verified (lib/auth.ts maxAge)."
     },
     {
       "test_id": "T4.2",
@@ -143,7 +147,7 @@
       "test_name": "Full session cookie issued after TOTP verify",
       "status": "PASS",
       "evidence": "session=True, mfa_pending_cleared=True",
-      "notes": ""
+      "notes": "Session cookie issued and mfa_pending cookie cleared (maxAge=0) after verify — clearing observed operationally. The 5-minute TTL expiration was NOT operationally tested (suite did not wait for expiration); TTL value is source-code verified only."
     },
     {
       "test_id": "T4.2b",
@@ -196,24 +200,24 @@
     },
     {
       "test_id": "T6.2",
-      "test_name": "Remaining recovery-code count (2 used, 8 remaining)",
+      "test_name": "Remaining recovery-code count (2 used, 8 remaining — mathematically inferred)",
       "status": "PASS",
-      "evidence": "2 recovery codes consumed (indices 0 and 1); 8 of 10 remain",
-      "notes": "Note: API does not expose remaining count directly; verified via sequential consumption + reuse failure"
+      "evidence": "2 recovery codes consumed (indices 0 and 1); reuse of both failed (atomic single-use). 8 of 10 remain (inferred: 10 generated - 2 consumed = 8).",
+      "notes": "Note: The '8 remaining' figure is a mathematical inference (10 generated - 2 consumed = 8), not a value from a direct stored-count database query or API response. The API does not expose a remaining-count field (security design — prevents enumeration). Verified via sequential consumption + reuse failure on consumed codes."
     },
     {
       "test_id": "T7.1",
-      "test_name": "MFA verify without pending cookie \u2192 401",
+      "test_name": "MFA verify without pending cookie → 401",
       "status": "PASS",
       "evidence": "status=401, error=MFA session expired. Please log in again.",
-      "notes": "Without solarpro_mfa_pending cookie, verify endpoint correctly rejects"
+      "notes": "Without solarpro_mfa_pending cookie, verify endpoint correctly rejects (401). This proves rejection when the cookie is absent. The 5-minute TTL was NOT operationally tested — the suite did not wait for expiration. TTL value is source-code verified only (lib/auth.ts maxAge)."
     },
     {
       "test_id": "T7.2",
-      "test_name": "MFA setup without auth \u2192 401",
+      "test_name": "MFA setup without auth → 401",
       "status": "PASS",
       "evidence": "status=401, error=Authentication required for MFA setup",
-      "notes": "Without session or enrollment-pending cookie, setup endpoint correctly rejects"
+      "notes": "Without session or enrollment-pending cookie, setup endpoint correctly rejects (401). This proves rejection when cookies are absent. The 10-minute enrollment-pending TTL was NOT operationally tested — the suite did not wait for expiration. TTL value is source-code verified only (lib/auth.ts maxAge)."
     },
     {
       "test_id": "T8.1",
@@ -231,10 +235,10 @@
     },
     {
       "test_id": "T9.1",
-      "test_name": "MFA audit events written (source-level + operational evidence)",
+      "test_name": "MFA audit-event emission paths exercised (source + operational no-throw)",
       "status": "PASS",
-      "evidence": "All MFA operations completed successfully \u2192 auditAuth() calls executed without throwing. Events: mfa_setup_initiated, mfa_enabled, mfa_challenge_issued, mfa_challenge_success, mfa_challenge_failure, mfa_recovery_code_used, mfa_recovery_code_failed, login_failure, login_success.",
-      "notes": "VERIFICATION TIER: source-code + operational (audit calls executed without throwing). Direct audit_log table verification was NOT performed — requires DB access. Source review confirms auditAuth() is called at every MFA state transition in setup/route.ts, verify/route.ts, and login/route.ts. The fact that operations succeeded operationally does not prove the DB rows were written correctly; DB query required to confirm."
+      "evidence": "All MFA operations completed successfully → auditAuth() calls executed without throwing. Events: mfa_setup_initiated, mfa_enabled, mfa_challenge_issued, mfa_challenge_success, mfa_challenge_failure, mfa_recovery_code_used, mfa_recovery_code_failed, login_failure, login_success.",
+      "notes": "VERIFICATION TIER: source-code + operational (audit calls executed without throwing). Database persistence remains UNVERIFIED — the fact that operations succeeded and calls did not throw does not prove rows were written to audit_log with correct payloads and an intact hash chain. Direct audit_log table query required to confirm (Tier 3 — not yet performed). Source review confirms auditAuth() is called at every MFA state transition in setup/route.ts, verify/route.ts, and login/route.ts."
     },
     {
       "test_id": "T9.2",
@@ -247,7 +251,7 @@
       "test_id": "T10.1",
       "test_name": "TOTP secret returned as plaintext (for QR enrollment)",
       "status": "PASS",
-      "evidence": "Plaintext secret returned by POST setup (expected \u2014 needed for authenticator app). Encrypted form (mfa_secret_encrypted) is stored server-side, never returned.",
+      "evidence": "Plaintext secret returned by POST setup (expected — needed for authenticator app). Encrypted form (mfa_secret_encrypted) is stored server-side, never returned.",
       "notes": "Per RFC 6238: the TOTP secret must be shared with the client authenticator. Server stores AES-256-GCM encrypted form only."
     },
     {
@@ -275,7 +279,7 @@
       "test_id": "T10.5",
       "test_name": "No plaintext secrets in server logs (source review)",
       "status": "PASS",
-      "evidence": "console.error/log statements in setup/route.ts, verify/route.ts, login/route.ts log only error messages and user IDs \u2014 no secret values, no recovery codes, no TOTP secrets. Login route explicitly removed email from logs (PII fix).",
+      "evidence": "console.error/log statements in setup/route.ts, verify/route.ts, login/route.ts log only error messages and user IDs — no secret values, no recovery codes, no TOTP secrets. Login route explicitly removed email from logs (PII fix).",
       "notes": "VERIFICATION TIER: source-code only. Source review confirms all log statements use safe fields only. Direct inspection of Vercel runtime function logs to confirm no secret values appear was NOT performed."
     }
   ]

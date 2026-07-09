@@ -1,8 +1,9 @@
 # SolarPro — Next Compliance-Phase Plan: MFA → SOC 2 Trust Services Criteria & ISO 27001:2022 Control Mapping
 
 **Date:** 2026-07-09  
-**Author:** Automated compliance mapping (SolarPro CI agent)  
+**Author:** Automated compliance mapping (automated acceptance test agent)  
 **Branch:** dev (commit `b9a2894a`)  
+**Deployment identification:** Health endpoint reported `version=v60.5`; source commit tested was `b49f5e55` (per `git`). The exact Vercel deployment ID was NOT captured during testing and cannot be proven from available evidence.  
 **Preceded by:** MFA Phase 3 acceptance testing — 37 automated tests passed (MFA disable/re-enable NOT tested — no endpoint exists)  
 **Status:** SOC 2 readiness in progress — NOT certified. Security controls aligned with ISO 27001:2022 principles.  
 **Classification:** Internal — Redacted
@@ -41,7 +42,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 |-------------------|-----------------------|------------------|------------------|-----|
 | MFA enrollment flow (self-service) | ✅ Implemented + tested | `SecurityPanel.tsx` + `/auth/mfa/enroll`; acceptance test T2.1–T2.3 PASS | — | — |
 | Enrollment-required forced flow | ✅ Implemented (source-verified) | Login → MFA_ENROLLMENT_REQUIRED → enrollment pending cookie → /auth/mfa/enroll; T1.1–T1.10 source PASS | End-to-end operational test with admin account | Low — requires admin test account |
-| Enrollment pending cookie (restricted) | ✅ Implemented + tested | 10-min TTL, path=/api/auth/mfa, not a full session; T7.1–T7.2 PASS | — | — |
+| Enrollment pending cookie (restricted) | ✅ Implemented + tested | 10-min TTL (source-verified; expiration NOT operationally tested), path=/api/auth/mfa, not a full session; T7.1–T7.2 PASS (rejection when absent) | — | — |
 | MFA disable / de-enrollment | ⛔ NOT TESTED (no endpoint) | No disable endpoint exists (deliberate security design choice). This is NOT a passed test and NOT a deferred test — the scenario could not be tested because the endpoint does not exist. | A secure administrator MFA reset procedure has been proposed (see Acceptance Record Section 6): super_admin authority, reauthentication, audit logging, atomic transaction, session invalidation, no public endpoint | Medium — implement proposed reset procedure per Acceptance Record Section 6 |
 | Recovery code regeneration | ❌ Not implemented | — | "Regenerate recovery codes" UI in SecurityPanel | Medium — future feature for MFA-enabled users |
 | User de-provisioning on offboarding | ✅ Policy exists | `CHK-OFB-001-Offboarding-Checklist.md` | Automated de-provisioning workflow | Low — checklist exists; automation is future work |
@@ -56,7 +57,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | Atomic recovery code consumption | ✅ Implemented + tested | `UPDATE ... WHERE used=false RETURNING id`; T5.2 PASS (reuse fails) | — | — |
 | Session JWT (identity only, no role) | ✅ Implemented + tested | `lib/auth.ts` signToken — role NOT in JWT, always read from DB; T4.2b PASS | — | — |
 | Session staleness check | ✅ Implemented | `app/api/auth/me/route.ts` isSessionStale against password_changed_at | — | — |
-| MFA pending cookie single-use | ✅ Implemented + tested | 5-min TTL, cleared after verify (maxAge=0); T4.1a, T4.2a PASS | — | — |
+| MFA pending cookie single-use | ✅ Implemented + tested | 5-min TTL (source-verified; expiration NOT operationally tested), cleared after verify (maxAge=0 — clearing observed operationally); T4.1a, T4.2a PASS | — | — |
 | Quarterly access review | ✅ Policy exists | `TMP-ACC-001-Quarterly-Access-Review.md` | Evidence of completed reviews | Low — schedule first review |
 
 **CC6.3 Evidence Summary:** 5 of 6 fully implemented and tested. 1 has policy template but no evidence of completed review.
@@ -65,14 +66,14 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 
 | Control Objective | Implementation Status | Evidence Present | Evidence Missing | Gap |
 |-------------------|-----------------------|------------------|------------------|-----|
-| SHA-256 hash-chained audit log | ✅ Implemented | `lib/auditLog.ts` prev_hash/entry_hash; Migration 100 `audit_log` table | Direct DB query for hash chain integrity | Medium — requires DB access to verify chain |
-| MFA audit events (all transitions) | ✅ Implemented + operationally verified | mfa_setup_initiated, mfa_enabled, mfa_challenge_issued, mfa_challenge_success, mfa_challenge_failure, mfa_recovery_code_used, mfa_recovery_code_failed, mfa_enrollment_required, mfa_failure; T9.1 PASS | Direct query of audit_log table to verify event payloads | Medium — requires DB access |
-| Login audit events | ✅ Implemented + operationally verified | login_success, login_failure (with reason: user_not_found, invalid_password, legacy_hash_reset_required); T9.1 PASS | — | — |
+| SHA-256 hash-chained audit log | ✅ Implemented | `lib/auditLog.ts` prev_hash/entry_hash; Migration 100 `audit_log` table | Direct DB query for hash chain integrity (Tier 3 — not performed) | Medium — requires DB access to verify chain |
+| MFA audit-event emission paths exercised | ✅ Implemented + operationally verified (no-throw) | mfa_setup_initiated, mfa_enabled, mfa_challenge_issued, mfa_challenge_success, mfa_challenge_failure, mfa_recovery_code_used, mfa_recovery_code_failed, mfa_enrollment_required, mfa_failure; T9.1 PASS (emission paths; DB persistence unverified) | Direct query of audit_log table to verify event payloads and persistence (Tier 3 — not performed) | Medium — requires DB access |
+| Login audit events | ✅ Implemented + operationally verified (no-throw) | login_success, login_failure (with reason: user_not_found, invalid_password, legacy_hash_reset_required); T9.1 PASS (emission paths; DB persistence unverified) | Direct query of audit_log for login event payloads | Low — emission paths verified; persistence query is confirmation |
 | Security audit events | ✅ Implemented | `auditSecurity()` for mfa_enrollment_required, mfa_failure | — | — |
 | Monitoring / alerting (Sentry) | ❌ Not configured | Health endpoint shows `monitoring.ok: false, provider: 'console-only'` | Sentry DSN not set on dev | Medium — configure Sentry DSN on dev + prod |
 | SIEM / log aggregation | ❌ Not implemented | Vercel function logs only (console) | Centralized log aggregation (Datadog, Logtail, or similar) | High — future infrastructure investment |
 
-**CC7.2 Evidence Summary:** 4 of 6 fully implemented. 2 not configured (Sentry monitoring, SIEM/log aggregation). Audit event verification is source-level + operational (no throws) but direct DB query for hash chain integrity is deferred.
+**CC7.2 Evidence Summary:** 4 of 6 fully implemented. 2 not configured (Sentry monitoring, SIEM/log aggregation). Audit-event emission paths are source-level + operationally verified (no throws during MFA operations), but **database persistence of audit events remains unverified** — direct DB query for hash chain integrity and event payloads is deferred (Tier 3 — not performed).
 
 ---
 
@@ -83,8 +84,8 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | Control | Implementation Status | Evidence | Gap |
 |---------|-----------------------|----------|-----|
 | TOTP secret generation (RFC 6238) | ✅ Implemented | `lib/mfa.ts` generateTOTPSecret (20-byte random, base32) | — |
-| MFA pending cookie (5-min TTL) | ✅ Implemented + tested | `lib/auth.ts` MFA_PENDING_COOKIE; T4.1a PASS | — |
-| Enrollment pending cookie (10-min TTL, restricted) | ✅ Implemented + tested | `lib/auth.ts` MFA_ENROLLMENT_PENDING_COOKIE; T7.1–T7.2 PASS | — |
+| MFA pending cookie (5-min TTL) | ✅ Implemented + tested | `lib/auth.ts` MFA_PENDING_COOKIE (TTL source-verified; expiration NOT operationally tested); T4.1a PASS (presence) | TTL timed expiration not operationally tested |
+| Enrollment pending cookie (10-min TTL, restricted) | ✅ Implemented + tested | `lib/auth.ts` MFA_ENROLLMENT_PENDING_COOKIE (TTL source-verified; expiration NOT operationally tested); T7.1–T7.2 PASS (rejection when absent) | TTL timed expiration not operationally tested |
 | Recovery codes (SHA-256 hashed, single-use) | ✅ Implemented + tested | `lib/mfa.ts` hashRecoveryCode; T5.1–T5.3 PASS | — |
 
 ### 3.2 A.8.5 — Secure authentication
@@ -101,7 +102,7 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | Control | Implementation Status | Evidence | Gap |
 |---------|-----------------------|----------|-----|
 | Hash-chained audit log | ✅ Implemented | `lib/auditLog.ts`; Migration 100 | Direct hash chain verification (DB access) |
-| MFA state transition audit events | ✅ Implemented + verified | 9 distinct MFA audit event types; T9.1 PASS | — |
+| MFA state transition audit events | ✅ Implemented + emission paths verified | 9 distinct MFA audit event types; T9.1 PASS (emission paths exercised; DB persistence unverified) | Direct DB query to confirm rows written (Tier 3 — not performed) |
 | Real-time monitoring/alerting | ❌ Not configured | Health: monitoring.ok=false | Configure Sentry or equivalent |
 
 ### 3.4 A.8.15 — Logging of events
@@ -109,8 +110,8 @@ This document maps the completed MFA implementation (Phases 1–3) to the SOC 2 
 | Control | Implementation Status | Evidence | Gap |
 |---------|-----------------------|----------|-----|
 | Audit log table (tamper-evident) | ✅ Implemented | Migration 100 `audit_log` with hash chain | — |
-| Recovery code consumption logged | ✅ Implemented + tested | mfa_recovery_code_used, mfa_recovery_code_failed (race condition); T9.1 PASS | — |
-| Login events logged | ✅ Implemented + tested | login_success, login_failure; T9.1 PASS | — |
+| Recovery code consumption logged | ✅ Implemented + emission paths verified | mfa_recovery_code_used, mfa_recovery_code_failed (race condition); T9.1 PASS (emission paths; DB persistence unverified) | Direct DB query to confirm rows written (Tier 3 — not performed) |
+| Login events logged | ✅ Implemented + emission paths verified | login_success, login_failure; T9.1 PASS (emission paths; DB persistence unverified) | Direct DB query to confirm rows written (Tier 3 — not performed) |
 | Log retention policy | ✅ Policy exists | `POL-SEC-007-Data-Retention-and-Disposal-Policy.md` | Operational enforcement of retention period |
 
 ### 3.5 A.5.18 — Access rights
@@ -255,10 +256,10 @@ The following items require Raymond specifically:
 The MFA implementation (Phases 1–3) is **complete, deployed on dev, and acceptance-tested (37 automated tests passed; MFA disable/re-enable NOT tested — no endpoint exists, deliberate design choice)**. It establishes security controls aligned with SOC 2 CC6.1, CC6.2, CC6.3, CC7.2 and ISO 27001:2022 A.5.16, A.5.17, A.5.18, A.8.5, A.8.15, A.8.16.
 
 **Readiness posture:**
-- **Strong (operationally verified — Tier 1):** MFA enrollment, TOTP verification, recovery code single-use/reuse-failure, cookie scoping, rate limiting (429 confirmed), API response field inspection (no encrypted secret or hash exposed)
-- **Adequate (source-code verified — Tier 2):** Encryption algorithm, secret storage format, recovery code hashing, audit event call sites, hash-chain implementation, log-statement content, MFA enforcement for admin/super_admin, enrollment-required flow
+- **Strong (operationally verified — Tier 1):** MFA enrollment, TOTP verification, recovery code single-use/reuse-failure, cookie presence/clearing/path-scoping/rejection-when-absent, rate limiting (429 confirmed), API response field inspection (no encrypted secret or hash exposed). NOTE: cookie TTL timed expiration was NOT operationally tested — only presence, clearing, scoping, and rejection-when-absent were verified; TTL values are source-verified (Tier 2).
+- **Adequate (source-code verified — Tier 2):** Encryption algorithm, secret storage format, recovery code hashing, cookie TTL values (5-min, 10-min) and path/attribute configuration, audit event call sites, hash-chain implementation, log-statement content, MFA enforcement for admin/super_admin, enrollment-required flow
 - **NOT YET PERFORMED (Tier 3 — database/log verification):** Direct DB query of `mfa_secret_encrypted` and `code_hash` columns; direct DB query of `audit_log` table for hash chain integrity and event payloads; direct inspection of Vercel runtime function logs for secret values
-- **Gaps to close:** Monitoring/alerting (Sentry), SIEM/log aggregation, 'staff' role inconsistency (not a functional role — no CHECK constraint on `role` column; see Acceptance Record Section 7), recovery code regeneration, secure admin MFA reset procedure (proposed in Acceptance Record Section 6 — not implemented), WebAuthn, quarterly access review execution, mandatory admin/super_admin MFA enforcement operational test
+- **Gaps to close:** Monitoring/alerting (Sentry), SIEM/log aggregation, 'staff' role inconsistency (not a functional role — no CHECK constraint on `role` column; see Acceptance Record Section 7), recovery code regeneration, secure admin MFA reset procedure (proposed in Acceptance Record Section 6 — not implemented), WebAuthn, quarterly access review execution, mandatory admin/super_admin MFA enforcement operational test, cookie TTL timed-expiration operational test (source-verified only), recovery-code remaining-count direct verification (currently mathematically inferred), Vercel deployment ID capture (not recorded during testing)
 
 **SolarPro is in SOC 2 readiness — NOT certified. Security controls are aligned with ISO 27001:2022 principles. All mappings are internal readiness assessments and have not been validated by an external auditor.**
 

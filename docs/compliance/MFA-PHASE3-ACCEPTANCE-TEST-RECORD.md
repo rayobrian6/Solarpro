@@ -1,12 +1,13 @@
 # MFA Phase 3 — Acceptance Test Record
 
 **Date:** 2026-07-09  
-**Auditor:** Automated acceptance audit (SolarPro CI agent)  
-**Branch:** dev (commit `b49f5e55`, MFA work from `ad20626e` / `451d8d3d`)  
+**Auditor:** Automated acceptance test agent  
+**Branch:** dev (source commit `b49f5e55` per `git`; MFA work from `ad20626e` / `451d8d3d`)  
 **Target:** solarpro-dev.vercel.app (dev deployment)  
+**Deployment identification:** The health endpoint reported `version=v60.5` (BUILD_VERSION) and `status=healthy`. The source commit tested is `b49f5e55` (confirmed via `git` on the local working copy). The exact Vercel deployment ID (the Vercel-assigned `deploymentId` / build UID) was **not captured** during testing and cannot be proven from the available evidence. Only the build version string and the local source commit SHA are known; no Vercel API or dashboard query was performed to retrieve the deployment UID. This is a documented limitation, not an inferred value.
 **Test account:** mfatest@solarpro.solutions (role: `user`)  
 **Classification:** Internal — Redacted  
-**Status:** 37 automated tests passed. MFA disable/re-enable was not tested because no disable endpoint exists — this is a deliberate current design choice, not a passed test or a deferred test.
+**Status:** 37 automated tests passed. MFA disable/re-enable was not tested because no disable endpoint exists — this is a deliberate current design choice, not a passed test or a deferred test. **MFA Phase 3 is CLOSED** as of this evidence precision patch — see Section 9 (Closure).
 
 ---
 
@@ -17,12 +18,12 @@ This record documents the acceptance audit findings for SolarPro MFA Phase 3, co
 - Enrollment using RFC 6238 TOTP generated through pyotp (software TOTP simulation — no physical authenticator application was used)
 - Successful login using TOTP second factor
 - Invalid and expired codes fail
-- Pending-login and enrollment cookies scoped and rejected without proper credentials
+- Pending-login and enrollment cookies: presence, clearing (maxAge=0 after verify), path scoping, and rejection when absent were verified operationally. The 5-minute and 10-minute TTL values were verified at the **source-code level only**. **Timed expiration was NOT operationally tested** — the test suite did not wait 5 or 10 minutes for a cookie to expire. The longest sleep in the suite is 0.3 seconds (used for rate-limit burst spacing), which is insufficient to exercise TTL expiry.
 - One recovery code succeeds once and fails when reused (atomic single-use)
-- Remaining recovery-code count updates correctly
+- Recovery-code remaining count: ten codes were generated on enrollment; two were consumed (indices 0 and 1) and reuse of those two failed (atomic single-use). The "eight remaining" figure is a **mathematical inference** (10 generated − 2 consumed = 8 remain), not a value obtained from a direct stored-count database query or from an API response. The API does not expose a remaining-count field.
 - Disabling and re-enabling MFA — NOT TESTED because no disable endpoint exists (deliberate design choice, not a test outcome)
 - Rate limiting and lockout behavior (429 confirmed)
-- Expected MFA audit events are written (source-level + operational evidence)
+- MFA audit-event emission paths exercised (source-level call sites + operational no-throw confirmation). **Database persistence of these events remains unverified** until the `audit_log` table is directly queried.
 - Plaintext-secret handling — verified at source-code level and via API response inspection; direct database and server-log inspection was NOT performed
 
 All tests were executed against the live dev deployment at `solarpro-dev.vercel.app` using an automated Python test suite (`tests/mfa_acceptance.py`) with `pyotp` for TOTP code generation (RFC 6238) and `requests` for HTTP API calls.
@@ -45,7 +46,7 @@ Evidence obtained by sending HTTP requests to the live dev deployment (`solarpro
 
 Evidence obtained by reading the application source code (`lib/mfa.ts`, `lib/auth.ts`, `lib/rateLimiter.ts`, `lib/auditLog.ts`, route handlers, migration SQL). This confirms what the code is designed to do but does not prove what the database or logs actually contain at runtime.
 
-**What was verified at source level:** Encryption algorithm (AES-256-GCM), secret storage format (`iv:authTag:encrypted`), recovery code hashing (SHA-256 one-way), cookie TTL/path/sameSite attributes, rate-limit bucket configuration, audit event types and call sites, hash-chain implementation, and log-statement content (error messages and user IDs only — no secret values in log statements).
+**What was verified at source level:** Encryption algorithm (AES-256-GCM), secret storage format (`iv:authTag:encrypted`), recovery code hashing (SHA-256 one-way), cookie TTL values (5-minute `solarpro_mfa_pending`, 10-minute `solarpro_mfa_enroll_pending`), cookie path/sameSite/httpOnly/secure attributes, rate-limit bucket configuration, audit event types and call sites, hash-chain implementation, and log-statement content (error messages and user IDs only — no secret values in log statements). The TTL values were read from source (`maxAge` settings in `lib/auth.ts`); they were not proven operationally by waiting for expiration (see Section 3.8 note).
 
 ### 2.0.3 Database / Log Verification — NOT YET PERFORMED
 
@@ -124,19 +125,21 @@ Source-code review confirms that the code is designed to encrypt secrets at rest
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
 | T6.1 | Second recovery code consumed successfully | Black-box (HTTP POST) | ✅ PASS | Second distinct recovery code (index 1) consumed → 200, success=true |
-| T6.2 | Remaining recovery-code count (2 used, 8 remaining) | Black-box (HTTP) | ✅ PASS | 2 of 10 recovery codes consumed (indices 0 and 1); 8 remain. Verified via sequential consumption + reuse failure on consumed codes. API does not expose remaining count directly (security design — prevents enumeration). |
+| T6.2 | Remaining recovery-code count (2 used, 8 remaining — mathematically inferred) | Black-box (HTTP) | ✅ PASS | 2 of 10 recovery codes consumed (indices 0 and 1); reuse of both failed (atomic single-use). The "8 remaining" figure is a **mathematical inference** (10 generated − 2 consumed = 8), not a value obtained from a direct stored-count database query or API response. The API does not expose a remaining-count field (security design — prevents enumeration). |
 
-### 3.8 Cookie Scoping & Access Control
+### 3.8 Cookie Scoping & Access Control (TTL Expiration NOT Operationally Tested)
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
 | T7.1 | MFA verify without pending cookie → 401 | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/verify` with no cookies → 401, error="MFA session expired. Please log in again." |
 | T7.2 | MFA setup without auth → 401 | Black-box (HTTP POST) | ✅ PASS | `POST /api/auth/mfa/setup` with no cookies → 401, error="Authentication required for MFA setup" |
 
-**Cookie security properties verified (source-level for attributes; operational for presence/absence):**
-- `solarpro_mfa_pending`: 5-minute TTL, path=`/api/auth/mfa`, httpOnly, secure, sameSite=lax — cannot access other API paths or pages
-- `solarpro_mfa_enroll_pending`: 10-minute TTL, path=`/api/auth/mfa`, httpOnly, secure, sameSite=lax — restricted credential, only authorizes MFA setup
-- Both MFA cookies are cleared (maxAge=0) after successful verification — single-use design
+**Cookie security properties verified:**
+
+- TTL values (5-minute `solarpro_mfa_pending`, 10-minute `solarpro_mfa_enroll_pending`): **source-code verified only** — read from `maxAge` settings in `lib/auth.ts`. **Timed expiration was NOT operationally tested.** The test suite did not wait for cookies to expire; the longest delay in the suite is 0.3 seconds (rate-limit burst spacing). Operational testing proved cookie **presence** (T4.1a), **clearing** (T4.2a — `maxAge=0` observed after verify), **path scoping** (T7.1/T7.2 — rejection when cookie absent or wrong path), and **rejection when absent** — but did not prove that a cookie becomes invalid exactly at its TTL boundary.
+- `solarpro_mfa_pending`: 5-minute TTL (source), path=`/api/auth/mfa`, httpOnly, secure, sameSite=lax — cannot access other API paths or pages
+- `solarpro_mfa_enroll_pending`: 10-minute TTL (source), path=`/api/auth/mfa`, httpOnly, secure, sameSite=lax — restricted credential, only authorizes MFA setup
+- Both MFA cookies are cleared (maxAge=0) after successful verification — single-use design (clearing observed operationally; expiration timing not tested)
 
 ### 3.9 Rate Limiting & Lockout Behavior
 
@@ -149,7 +152,7 @@ Source-code review confirms that the code is designed to encrypt secrets at rest
 
 | Test ID | Test Case | Method | Result | Evidence |
 |---------|-----------|--------|--------|----------|
-| T9.1 | MFA audit events written (source-level + operational) | Source + operational | ✅ PASS | All MFA operations completed successfully → `auditAuth()` calls executed without throwing. Events: `mfa_setup_initiated`, `mfa_enabled`, `mfa_challenge_issued`, `mfa_challenge_success`, `mfa_challenge_failure`, `mfa_recovery_code_used`, `mfa_recovery_code_failed`, `login_failure`, `login_success`. Source review confirms `auditAuth()`/`auditSecurity()` called at every MFA state transition in `setup/route.ts`, `verify/route.ts`, and `login/route.ts`. |
+| T9.1 | MFA audit-event emission paths exercised (source + operational no-throw) | Source + operational | ✅ PASS | All MFA operations completed successfully → `auditAuth()` calls executed without throwing. Events: `mfa_setup_initiated`, `mfa_enabled`, `mfa_challenge_issued`, `mfa_challenge_success`, `mfa_challenge_failure`, `mfa_recovery_code_used`, `mfa_recovery_code_failed`, `login_failure`, `login_success`. Source review confirms `auditAuth()`/`auditSecurity()` called at every MFA state transition in `setup/route.ts`, `verify/route.ts`, and `login/route.ts`. **Database persistence remains unverified** — the fact that calls did not throw does not prove rows were written to `audit_log` with correct payloads and an intact hash chain. Direct `audit_log` table query required to confirm (Tier 3 — not yet performed). |
 | T9.2 | Audit log hash chain (source-level) | Source review | ✅ PASS | `lib/auditLog.ts` implements `prev_hash`/`entry_hash` SHA-256 hash chain. Migration 100 created `audit_log` table with hash chain columns. Direct hash chain integrity verification requires DB query access — NOT YET PERFORMED. |
 
 ### 3.11 Plaintext-Secret Handling
@@ -232,7 +235,7 @@ Source-code review confirms that the code is designed to encrypt secrets at rest
 
 3. **Direct database and log verification — NOT YET PERFORMED.** The following require direct database access or Vercel log access and were not performed: (a) direct query of the `users` table to confirm `mfa_secret_encrypted` values are stored encrypted, (b) direct query of the `mfa_recovery_codes` table to confirm `code_hash` values are SHA-256 hashes, (c) direct query of the `audit_log` table to verify hash chain integrity and event payloads, (d) inspection of Vercel function logs to confirm no secret values appear in runtime output. Source-code review and API response inspection provide strong indirect evidence but do not constitute direct proof. See Section 2.0.3.
 
-4. **Recovery code remaining-count API.** The API does not expose a "remaining recovery codes" count endpoint (deliberate security design — prevents enumeration). Count was verified indirectly through sequential consumption and reuse-failure testing (T6.1–T6.2). A future enhancement could add an authenticated endpoint returning only the count (not the codes) for user awareness.
+4. **Recovery code remaining-count API.** The API does not expose a "remaining recovery codes" count endpoint (deliberate security design — prevents enumeration). The "8 of 10 remaining" figure stated in T6.2 is a **mathematical inference** (10 generated − 2 consumed = 8), derived from the known generation count (T2.3: 10 codes returned on PUT) and the observed consumption count (T5.1 + T6.1: 2 codes consumed, reuse of both failed). It was NOT obtained from a direct stored-count database query or API response. A future enhancement could add an authenticated endpoint returning only the count (not the codes) for user awareness, which would also provide direct verification of the remaining count.
 
 5. **'staff' role inconsistency — audit findings and recommendation.** See Section 7 of this record for the full staff-role audit.
 
@@ -342,6 +345,43 @@ Two options exist, requiring Raymond's decision:
 | Test script | `tests/mfa_acceptance.py` / `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-SCRIPT.py` | Automated Python acceptance test suite (pyotp + requests) |
 | Test results | `tests/mfa_acceptance_results.json` / `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-RESULTS.json` | JSON output with all 37 test results, evidence, and notes |
 | This record | `docs/compliance/MFA-PHASE3-ACCEPTANCE-TEST-RECORD.md` | Human-readable acceptance test record |
+
+---
+
+## 9. MFA Phase 3 Closure
+
+**Closure date:** 2026-07-09 (evidence precision patch)  
+**Closure status:** MFA Phase 3 acceptance testing and evidence documentation are **CLOSED**. No further acceptance-test corrections are planned for this phase. The 37 automated tests passed, 1 scenario was not tested (no disable endpoint exists — deliberate design choice), and all evidence claims have been scoped to their verification tier (Tier 1 operational, Tier 2 source-code, Tier 3 database/log — not yet performed).
+
+**Carried to compliance backlog (not closed — open work items):**
+
+The following items are explicitly carried forward into the compliance backlog and are NOT part of MFA Phase 3 closure. They require future work:
+
+1. **Tier 3 database/log verification (NOT performed):**
+   - Direct query of `audit_log` table to verify event payloads and SHA-256 hash-chain integrity (each `entry_hash` = SHA-256 of `prev_hash` + payload)
+   - Direct query of `users` table to confirm `mfa_secret_encrypted` values are stored encrypted (not plaintext)
+   - Direct query of `mfa_recovery_codes` table to confirm `code_hash` values are stored as SHA-256 hashes (not plaintext)
+   - Direct inspection of Vercel runtime function logs to confirm no secret values appear in log output
+
+2. **Mandatory admin/super_admin MFA enforcement — operational test NOT performed:**
+   - All operational MFA tests used a `user`-role account (voluntary enrollment). The `MFA_ENROLLMENT_REQUIRED` (403) forced-enrollment flow for `admin`/`super_admin` accounts was verified at source-code level only (T1.1–T1.10). An end-to-end operational test requires promoting the test account to `admin` (a data change via `PATCH /api/admin/users` by a super_admin) and re-running the acceptance suite.
+
+3. **Cookie TTL timed expiration — NOT operationally tested:**
+   - The 5-minute and 10-minute TTL values are source-code verified (`lib/auth.ts` `maxAge` settings). Operational testing proved cookie presence, clearing, path scoping, and rejection when absent — but did NOT wait for expiration. A future test that sleeps past the TTL boundary and confirms rejection would close this gap.
+
+4. **Recovery-code remaining count — mathematically inferred, not directly verified:**
+   - "8 of 10 remaining" is an inference (10 generated − 2 consumed). A direct stored-count query or a remaining-count API endpoint would close this gap.
+
+5. **Vercel deployment ID — not captured:**
+   - The exact Vercel deployment UID was not recorded during testing. Only `BUILD_VERSION=v60.5` (from the health endpoint) and source commit `b49f5e55` (from `git`) are known. A Vercel API/dashboard query would close this gap.
+
+6. **Secure administrator MFA reset procedure — proposed, not implemented:**
+   - See Section 6. Requires Raymond's approval to implement.
+
+7. **'staff' role inconsistency — requires Raymond's decision:**
+   - See Section 7. Option A (remove from `MFA_REQUIRED_ROLES`) or Option B (implement as a real role — requires Migration 101, Raymond's approval).
+
+These items are tracked in `NEXT-COMPLIANCE-PHASE-PLAN.md` (Evidence Missing, Control Gaps & Remediation Roadmap) and `NEXT-THREE-COMPLIANCE-WORK-PACKAGES.md`. MFA Phase 3 code is NOT changed by this closure — this is documentation only.
 
 ---
 

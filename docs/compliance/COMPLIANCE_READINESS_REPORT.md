@@ -3,7 +3,8 @@
 **Date:** July 2026  
 **Scope:** Multi-Factor Authentication (MFA) — Backend Hardening + Frontend UI + Enrollment Flow  
 **Status:** SOC 2 readiness in progress — NOT certified  
-**Branch:** dev (commit `b49f5e55`; MFA work in `ad20626e` / `451d8d3d`)  
+**Branch:** dev (source commit `b49f5e55` per `git`; MFA work in `ad20626e` / `451d8d3d`)  
+**Deployment identification:** Health endpoint reported `version=v60.5` (BUILD_VERSION). Source commit tested: `b49f5e55` (confirmed via `git`). **The exact Vercel deployment ID was NOT captured** and cannot be proven from available evidence — no Vercel API or dashboard query was performed. Documented limitation.  
 **Acceptance test date:** 2026-07-09 — 37 automated tests passed against solarpro-dev.vercel.app (MFA disable/re-enable NOT tested — no endpoint exists; deliberate design choice)  
 **Mapping Disclaimer:** All standard-to-control mappings in this report are internal readiness assessments. They have NOT been validated by an external auditor and do not constitute certification or attestation of any kind.
 
@@ -28,8 +29,8 @@ This report documents the MFA implementation work completed across three phases,
 | TOTP second factor | `lib/mfa.ts` — generateTOTPSecret, verifyTOTPCode | CC6.1 | A.8.5 |
 | AES-256-GCM encrypted secrets | encryptTOTPSecret/decryptTOTPSecret with MFA_ENCRYPTION_KEY | CC6.1 | A.8.16 |
 | Base32 encoding (RFC 4226) | Secret stored as base32 for authenticator compat | CC6.1 | A.8.5 |
-| MFA pending cookie flow | 5-min TTL cookie, no full session until TOTP verified | CC6.2 | A.5.17 |
-| Enrollment pending cookie flow | 10-min TTL restricted credential, only authorizes /api/auth/mfa | CC6.2 | A.5.17 |
+| MFA pending cookie flow | 5-min TTL cookie (source-verified; TTL expiration NOT operationally tested), no full session until TOTP verified | CC6.2 | A.5.17 |
+| Enrollment pending cookie flow | 10-min TTL restricted credential (source-verified; TTL expiration NOT operationally tested), only authorizes /api/auth/mfa | CC6.2 | A.5.17 |
 
 ### 2.2 Recovery Code System
 
@@ -57,7 +58,7 @@ This report documents the MFA implementation work completed across three phases,
 |---------|---------------|----------------------|-------------------------------|
 | Missing encryption key | All MFA operations throw → API returns 500 → no bypass | CC6.1 | A.8.5 |
 | Missing TOTP secret | `/api/auth/mfa/verify` returns 400 "MFA secret not found" | CC6.1 | A.8.5 |
-| Expired MFA pending cookie | Returns 401 "MFA session expired" | CC6.2 | A.5.17 |
+| Expired MFA pending cookie | Returns 401 "MFA session expired" (source-verified TTL; operational test proved rejection when cookie absent, not timed expiration) | CC6.2 | A.5.17 |
 | No unsafe disable endpoint | MFA disable endpoint does NOT exist | CC6.1 | A.8.5 |
 
 ### 2.5 Rate Limiting
@@ -93,7 +94,7 @@ This report documents the MFA implementation work completed across three phases,
 
 1. Admin/staff user without MFA attempts login → API returns `MFA_ENROLLMENT_REQUIRED` (status 403)
 2. Login frontend redirects immediately to `/auth/mfa/enroll` (dedicated enrollment page)
-3. Enrollment pending cookie (`solarpro_mfa_enroll_pending`, 10-min TTL) authorizes only `/api/auth/mfa/setup`
+3. Enrollment pending cookie (`solarpro_mfa_enroll_pending`, 10-min TTL — source-verified; TTL expiration NOT operationally tested) authorizes only `/api/auth/mfa/setup`
 4. Enrollment page: standalone (no AppShell/UserContext), auto-initiates MFA setup on mount
 5. After TOTP verification succeeds → server issues full session + clears enrollment cookie → redirect to `/dashboard`
 6. If enrollment cookie expires → user must re-authenticate (no persistent unauthenticated access)
@@ -172,10 +173,10 @@ All operational tests were executed against `solarpro-dev.vercel.app` using an a
 | Recovery code single-use success | ✅ PASS | Recovery code login → 200, success=true, should_reenroll=true |
 | Recovery code reuse fails | ✅ PASS | Second attempt with same code → 400, error="Invalid recovery code" (atomic consumption) |
 | Invalid recovery code rejected | ✅ PASS | Invalid code → 400, error="Invalid recovery code" |
-| Recovery code count (2 used, 8 remaining) | ✅ PASS | Sequential consumption verified; reuse failure confirms single-use |
-| Cookie scoping (no pending cookie → 401) | ✅ PASS | MFA verify without `solarpro_mfa_pending` → 401; setup without auth → 401 |
+| Recovery code count (2 used, 8 remaining — mathematically inferred) | ✅ PASS | Sequential consumption verified (2 codes consumed, indices 0 and 1); reuse failure confirms single-use. "8 remaining" is a mathematical inference (10 generated − 2 consumed = 8), not a value from a direct query or API response. |
+| Cookie scoping & presence (no pending cookie → 401) | ✅ PASS | MFA verify without `solarpro_mfa_pending` → 401; setup without auth → 401. Cookie presence, clearing (maxAge=0 after verify), and path scoping verified operationally. **TTL timed expiration NOT tested** — suite did not wait 5 or 10 min; TTL values (5-min, 10-min) are source-code verified only. |
 | Rate limiting (429 response) | ✅ PASS | Login rate limit (5/60s) triggered by failed-login burst → 429 with proper error message |
-| MFA audit events written | ✅ PASS | All MFA operations completed → `auditAuth()` calls executed; source-verified at every state transition |
+| MFA audit-event emission paths exercised | ✅ PASS | All MFA operations completed → `auditAuth()` calls executed without throwing; source-verified at every state transition. **Database persistence unverified** — no-throws does not prove `audit_log` rows written. Direct DB query required (Tier 3 — not performed). |
 | No plaintext secrets in API responses | ✅ PASS (operational) | Black-box operational verification: no `mfa_secret_encrypted` or `code_hash` field appears in any API response (POST/PUT setup, verify, me endpoints). T10.2, T10.4 PASS. |
 | No plaintext secrets in server logs | ⚠️ SOURCE-VERIFIED ONLY | Source-code verification (Tier 2): log statements in setup/verify/login route handlers use only error messages and user IDs — no secret values. T10.5 PASS (source). **Direct inspection of Vercel runtime function logs was NOT performed.** The claim is based on source review only, not on actual log output inspection. |
 | No plaintext secrets in database storage | ⚠️ SOURCE-VERIFIED ONLY | Source-code verification (Tier 2): `lib/mfa.ts` encrypts TOTP secrets with AES-256-GCM before storage; `hashRecoveryCode()` applies SHA-256 one-way hash. **Direct database query to confirm `mfa_secret_encrypted` and `code_hash` columns contain only encrypted/hashed values was NOT performed.** Source review confirms the code is designed to store encrypted/hashed values; this does not prove what is actually in the database. |
