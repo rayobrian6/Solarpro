@@ -706,7 +706,14 @@ const PDF_PAGE_CONFIG = {
 // with the lag bolt (hex head + EPDM washer) driven into the rafter + embedment
 // dim; numbered leaders out to labels. Still to do toward full Cannon match: iso
 // context view + mounting BOM + finer clamp/rail geometry + page vertical-fill.
-const PLANSET_ENGINE_VERSION = 47419;
+// 47420 (2026-07-08): PV-3 detail → TRUE CAD LINE-ART (multi-agent workflow spec):
+// white/hatched fills (zero saturated color), strict 4:2:1 line weights, real
+// hardware profiles (hollow frame extrusion, top-hat clamp + WEEB serration,
+// T-slot base + riser, lag screw w/ chamfered hex head + EPDM washer + hidden
+// threads in rafter), rebalanced proportions (bigger hardware, thin separated
+// layers). This is now the FALLBACK; the plan (Ray-approved) is to EMBED real
+// MANUFACTURER attachment details from a DB asset library keyed by racking brand.
+const PLANSET_ENGINE_VERSION = 47420;
 
 
 

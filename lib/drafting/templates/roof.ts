@@ -1570,70 +1570,222 @@ export function drawRoofStructural(
   els.push(drawText(dcx, dcy - dcr - 6, 'DETAIL 1/PV-3', { anchor: 'middle', fontSize: 8.5, fontWeight: '900', fill: '#000' }));
   els.push(drawText(dcx, dcy - dcr + 10, `ATTACHMENT DETAIL — ${isRaillessD ? 'DIRECT MOUNT' : 'RAIL MOUNT'}`, { anchor: 'middle', fontSize: 6.4, fill: '#555' }));
 
-  // ── Mechanical attachment cross-section (real hardware assembly, not a flat
-  // colored layer-cake): module frame + clamp + mount + base plate + butyl
-  // flashing seated on shingle / sheathing / rafter, with the lag bolt (hex head
-  // + EPDM washer) driven into the rafter and the embedment dimensioned. ──
-  const _cx = dcx - 20;                     // assembly left of center; labels stack to the right
-  const roofW = 150;
-  const _rlx = _cx - roofW * 0.42;
-  const deckTop = dcy + 18;                 // roof surface (top of shingle)
-  const _shH = 9, _sheH = 12, _rafH = 60;
-  const _rafTop = deckTop + _shH + _sheH;
-  // rafter
-  els.push(`<rect x="${_rlx.toFixed(1)}" y="${_rafTop.toFixed(1)}" width="${roofW}" height="${_rafH}" fill="url(#rafter-wood)" stroke="#7a5a20" stroke-width="1"/>`);
-  els.push(`<rect x="${_rlx.toFixed(1)}" y="${_rafTop.toFixed(1)}" width="${roofW}" height="${_rafH}" fill="url(#hatch-wood)" opacity="0.5"/>`);
-  // sheathing (OSB)
-  els.push(`<rect x="${_rlx.toFixed(1)}" y="${(deckTop + _shH).toFixed(1)}" width="${roofW}" height="${_sheH}" fill="url(#rafter-wood)" stroke="#886030" stroke-width="0.8"/>`);
-  // shingle roof
-  els.push(`<rect x="${_rlx.toFixed(1)}" y="${deckTop.toFixed(1)}" width="${roofW}" height="${_shH}" fill="#b89060" stroke="#665030" stroke-width="0.8"/>`);
-  // butyl flashing pad
-  const _butW = 46;
-  els.push(`<rect x="${(_cx - _butW / 2).toFixed(1)}" y="${(deckTop - 4).toFixed(1)}" width="${_butW}" height="4" fill="#7fa8c8" stroke="#3a6a88" stroke-width="0.7"/>`);
-  // mount base plate (steel)
-  const _mbW = 34, _mbTop = deckTop - 4 - 6;
-  els.push(`<rect x="${(_cx - _mbW / 2).toFixed(1)}" y="${_mbTop.toFixed(1)}" width="${_mbW}" height="6" fill="#ccd0d6" stroke="#444" stroke-width="1"/>`);
-  els.push(`<rect x="${(_cx - _mbW / 2).toFixed(1)}" y="${_mbTop.toFixed(1)}" width="${_mbW}" height="6" fill="url(#hatch-steel)" opacity="0.5"/>`);
-  // mount upstand
-  const _armX = _cx + 4, _armW = 7, _armTop = _mbTop - 38;
-  els.push(`<rect x="${_armX.toFixed(1)}" y="${_armTop.toFixed(1)}" width="${_armW}" height="${(_mbTop - _armTop).toFixed(1)}" fill="#ccd0d6" stroke="#444" stroke-width="1"/>`);
-  els.push(`<rect x="${_armX.toFixed(1)}" y="${_armTop.toFixed(1)}" width="${_armW}" height="${(_mbTop - _armTop).toFixed(1)}" fill="url(#hatch-steel)" opacity="0.5"/>`);
-  // module frame (aluminum) + laminate
-  const _frTop = _armTop - 2, _frH = 20, _frL = _cx - 6, _frW = 60;
-  els.push(`<rect x="${_frL.toFixed(1)}" y="${_frTop.toFixed(1)}" width="${_frW}" height="${_frH}" fill="#e2e6ea" stroke="#555" stroke-width="1"/>`);
-  els.push(`<rect x="${(_frL - 3).toFixed(1)}" y="${(_frTop - 5).toFixed(1)}" width="${(_frW + 9)}" height="5" fill="#1a3f8a" stroke="#0a1e4a" stroke-width="0.8"/>`);
-  // clamp gripping the frame edge over the arm
-  els.push(`<path d="M ${(_armX - 2).toFixed(1)} ${(_armTop + 6).toFixed(1)} L ${(_armX - 2).toFixed(1)} ${(_frTop - 3).toFixed(1)} L ${(_frL + 12).toFixed(1)} ${(_frTop - 3).toFixed(1)} L ${(_frL + 12).toFixed(1)} ${(_frTop + 1).toFixed(1)} L ${(_armX + _armW + 2).toFixed(1)} ${(_frTop + 1).toFixed(1)} L ${(_armX + _armW + 2).toFixed(1)} ${(_armTop + 6).toFixed(1)} Z" fill="#9096a0" stroke="#333" stroke-width="0.9"/>`);
-  // lag bolt (hex head + EPDM washer, shank into rafter, threads, embedment)
-  const _boltX = _cx - 7, _tipY = _rafTop + Math.min(_rafH - 8, 26);
-  els.push(`<rect x="${(_boltX - 6).toFixed(1)}" y="${(_mbTop - 1).toFixed(1)}" width="12" height="2" fill="#333"/>`);
-  els.push(`<rect x="${(_boltX - 4).toFixed(1)}" y="${(_mbTop - 5).toFixed(1)}" width="8" height="4.5" fill="#2b2f36"/>`);
-  els.push(`<line x1="${_boltX.toFixed(1)}" y1="${(_mbTop - 1).toFixed(1)}" x2="${_boltX.toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#2b2f36" stroke-width="2.4"/>`);
-  for (let t = _rafTop + 2; t < _tipY; t += 3) {
-    els.push(`<line x1="${(_boltX - 2.5).toFixed(1)}" y1="${t.toFixed(1)}" x2="${(_boltX + 2.5).toFixed(1)}" y2="${(t + 1.6).toFixed(1)}" stroke="#2b2f36" stroke-width="0.6"/>`);
-  }
-  const _edX = _boltX - 11;
-  els.push(`<line x1="${_edX.toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${_edX.toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
-  els.push(`<line x1="${(_edX - 3).toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${(_edX + 3).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
-  els.push(`<line x1="${(_edX - 3).toFixed(1)}" y1="${_tipY.toFixed(1)}" x2="${(_edX + 3).toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.7"/>`);
-  els.push(drawText(_edX - 4, (_rafTop + _tipY) / 2 + 2, `${_embedD}"`, { anchor: 'end', fontSize: 5.6, fontWeight: 'bold', fill: '#cc0000' }));
+  // ── Mechanical attachment cross-section — TRUE CAD SECTION (Style A: white +
+  // material hatch, thin crisp lines, real hardware profiles). Cut ALONG the roof
+  // slope: rafter shows its long face; stack builds up; lag drives straight down.
+  // Line-weight hierarchy 4:2:1, all ink black except the one red embed dim. ──
+  const CUT = 0.7, OBJ = 0.4, HID = 0.32, DIM = 0.25, HAT = 0.18, INK = '#1a1a1a';
+  const CL = 'stroke-dasharray="4 1.5 1 1.5"';   // dash-dot centerline
+  const HD = 'stroke-dasharray="2.4 1.4"';       // hidden-line dashes
 
-  // ── Leaders + numbered labels (stacked to the right of the circle) ──
+  // assembly anchors (compressed low-profile stack for rail-less RT-Mini)
+  const _cx     = dcx - 14;                       // assembly center (labels stack right)
+  const roofW   = 168;
+  const _rlx    = _cx - roofW * 0.44;
+  const deckTop = dcy + 44;                        // top of shingle surface
+  const _shH = 7, _sheH = 10;
+  let   _rafH = 40;
+  const _rafTop = deckTop + _shH + _sheH;
+  if (_rafTop + _rafH > dcy + dcr - 8) _rafH = (dcy + dcr - 8) - _rafTop;
+
+  // helper: white cut pass + hatch overlay for a rect (steel or wood)
+  const _hatchRect = (x: number, y: number, w: number, h: number, hatch: string, sw = CUT) => {
+    els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="#ffffff" stroke="${INK}" stroke-width="${sw}"/>`);
+    els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${hatch}" stroke="none" opacity="0.55"/>`);
+  };
+
+  // ═══════════════ 1. RAFTER (wood, long-grain face) ═══════════════
+  _hatchRect(_rlx, _rafTop, roofW, _rafH, 'url(#hatch-wood)', CUT);
+  // long-grain lines running WITH the member (along-slope cut = side face)
+  for (let g = 1; g <= 3; g++) {
+    const gy = _rafTop + (_rafH * g) / 4;
+    els.push(`<line x1="${(_rlx + 3).toFixed(1)}" y1="${gy.toFixed(1)}" x2="${(_rlx + roofW - 3).toFixed(1)}" y2="${(gy + (g % 2 ? 0.8 : -0.8)).toFixed(1)}" stroke="${INK}" stroke-width="${HAT}"/>`);
+  }
+
+  // ═══════════════ 2. SHEATHING (5/8" OSB) — separate member ═══════════════
+  _hatchRect(_rlx, deckTop + _shH, roofW, _sheH, 'url(#hatch-wood)', CUT);
+  // its own cut lines top+bottom so it reads distinct from the rafter slab
+  els.push(`<line x1="${_rlx.toFixed(1)}" y1="${(deckTop + _shH).toFixed(1)}" x2="${(_rlx + roofW).toFixed(1)}" y2="${(deckTop + _shH).toFixed(1)}" stroke="${INK}" stroke-width="${CUT}"/>`);
+  els.push(`<line x1="${_rlx.toFixed(1)}" y1="${(deckTop + _shH + _sheH).toFixed(1)}" x2="${(_rlx + roofW).toFixed(1)}" y2="${(deckTop + _shH + _sheH).toFixed(1)}" stroke="${INK}" stroke-width="${CUT}"/>`);
+  // strand stipple (sparse) so OSB reads different from solid rafter
+  for (let s = 0; s < 9; s++) {
+    const sx = _rlx + 8 + s * (roofW - 16) / 8, sy = deckTop + _shH + 3 + (s % 3) * 2.5;
+    els.push(`<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${(sx + 3).toFixed(1)}" y2="${(sy + 0.6).toFixed(1)}" stroke="${INK}" stroke-width="${HAT}"/>`);
+  }
+
+  // ═══════════════ 3. UNDERLAYMENT (single line, no body) ═══════════════
+  els.push(`<line x1="${_rlx.toFixed(1)}" y1="${(deckTop + _shH).toFixed(1)}" x2="${(_rlx + roofW).toFixed(1)}" y2="${(deckTop + _shH).toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+
+  // ═══════════════ 4. ASPHALT SHINGLE (stepped band, light poché) ═══════════════
+  els.push(`<rect x="${_rlx.toFixed(1)}" y="${deckTop.toFixed(1)}" width="${roofW}" height="${_shH}" fill="#ffffff" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // sparse horizontal shingle hatch dashes (NOT tan)
+  for (let sh = 0; sh < 2; sh++) {
+    const shy = deckTop + 2.5 + sh * 3;
+    for (let d = 0; d < 12; d++) {
+      const dx = _rlx + 4 + d * (roofW - 8) / 12;
+      els.push(`<line x1="${dx.toFixed(1)}" y1="${shy.toFixed(1)}" x2="${(dx + 5).toFixed(1)}" y2="${shy.toFixed(1)}" stroke="${INK}" stroke-width="${HAT}"/>`);
+    }
+  }
+  // downslope (right) butt step — course overlap
+  const _stepX = _rlx + roofW - 26;
+  els.push(`<rect x="${_stepX.toFixed(1)}" y="${(deckTop - 2).toFixed(1)}" width="26" height="2.5" fill="#ffffff" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  els.push(`<line x1="${_stepX.toFixed(1)}" y1="${(deckTop - 2).toFixed(1)}" x2="${_stepX.toFixed(1)}" y2="${deckTop.toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // break the shingle top line where the pad crosses (pad on top left, shingle top right)
+  els.push(`<line x1="${(_cx + 24).toFixed(1)}" y1="${deckTop.toFixed(1)}" x2="${(_rlx + roofW).toFixed(1)}" y2="${deckTop.toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+
+  // ═══════════════ 5. BUTYL FLASHING PAD (AlphaSeal — SOLID BLACK poché) ═══════════════
+  const _butW = 48, _padTop = deckTop - 3;
+  els.push(`<rect x="${(_cx - _butW / 2).toFixed(1)}" y="${_padTop.toFixed(1)}" width="${_butW}" height="3" fill="${INK}"/>`);
+  // edge squeeze-out beads flaring onto shingle (left + right)
+  els.push(`<path d="M ${(_cx - _butW / 2).toFixed(1)} ${_padTop.toFixed(1)} L ${(_cx - _butW / 2 - 2.5).toFixed(1)} ${(deckTop).toFixed(1)} L ${(_cx - _butW / 2).toFixed(1)} ${(deckTop).toFixed(1)} Z" fill="${INK}"/>`);
+  els.push(`<path d="M ${(_cx + _butW / 2).toFixed(1)} ${_padTop.toFixed(1)} L ${(_cx + _butW / 2 + 2.5).toFixed(1)} ${(deckTop).toFixed(1)} L ${(_cx + _butW / 2).toFixed(1)} ${(deckTop).toFixed(1)} Z" fill="${INK}"/>`);
+  // screw-penetration neck — pad necks DOWN into the hole around bolt axis
+  els.push(`<path d="M ${(_cx - 3).toFixed(1)} ${(_padTop + 3).toFixed(1)} L ${(_cx - 1.2).toFixed(1)} ${(deckTop + 3).toFixed(1)} L ${(_cx + 1.2).toFixed(1)} ${(deckTop + 3).toFixed(1)} L ${(_cx + 3).toFixed(1)} ${(_padTop + 3).toFixed(1)} Z" fill="${INK}"/>`);
+
+  // ═══════════════ 6. MOUNT BASE PLATE (aluminum, steel-hatch) ═══════════════
+  const _mbW = 54, _mbH = 8, _mbTop = _padTop - _mbH;
+  _hatchRect(_cx - _mbW / 2, _mbTop, _mbW, _mbH, 'url(#hatch-steel)', CUT);
+  // tiny top-corner chamfer lines
+  els.push(`<line x1="${(_cx - _mbW / 2).toFixed(1)}" y1="${(_mbTop + 1.4).toFixed(1)}" x2="${(_cx - _mbW / 2 + 1.4).toFixed(1)}" y2="${_mbTop.toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  els.push(`<line x1="${(_cx + _mbW / 2).toFixed(1)}" y1="${(_mbTop + 1.4).toFixed(1)}" x2="${(_cx + _mbW / 2 - 1.4).toFixed(1)}" y2="${_mbTop.toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // raised center platform (2"×4" housing the T-slot)
+  const _plW = 30, _plH = 5, _plTop = _mbTop - _plH;
+  _hatchRect(_cx - _plW / 2, _plTop, _plW, _plH, 'url(#hatch-steel)', CUT);
+  // T-slot notch (black) in platform top where riser bolt seats
+  els.push(`<rect x="${(_cx - 2).toFixed(1)}" y="${_plTop.toFixed(1)}" width="4" height="2" fill="${INK}"/>`);
+
+  // ═══════════════ mount stack: rail-less riser+clamp, OR rail branch ═══════════════
+  let _clampBaseTop: number;   // y where the clamp sits
+  let _label2: string;
+  let _clampAnchorY: number;
+
+  if (isRaillessD) {
+    // ── 7. RISER T-BOLT (5/16-18 × 1", short — NO tall post) ──
+    const _riseTop = _plTop - 16;
+    // captive square/T nut below in the slot
+    els.push(`<rect x="${(_cx - 2.5).toFixed(1)}" y="${(_plTop - 1).toFixed(1)}" width="5" height="2.5" fill="${INK}"/>`);
+    // shank: two parallel object lines on centerline
+    els.push(`<line x1="${(_cx - 1.1).toFixed(1)}" y1="${_riseTop.toFixed(1)}" x2="${(_cx - 1.1).toFixed(1)}" y2="${(_plTop - 1).toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+    els.push(`<line x1="${(_cx + 1.1).toFixed(1)}" y1="${_riseTop.toFixed(1)}" x2="${(_cx + 1.1).toFixed(1)}" y2="${(_plTop - 1).toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+    _clampBaseTop = _riseTop;
+    _label2 = `${mountSys} RT-MID CLAMP`;
+  } else {
+    // ── GUARD: rail extrusion (hollow box, steel-hatch, internal bolt-channel) ──
+    const _railH = 18, _railW = 14, _railTop = _plTop - _railH;
+    _hatchRect(_cx - _railW / 2, _railTop, _railW, _railH, 'url(#hatch-steel)', CUT);
+    // internal void (bolt channel) — double-wall
+    els.push(`<rect x="${(_cx - _railW / 2 + 3).toFixed(1)}" y="${(_railTop + 3).toFixed(1)}" width="${(_railW - 6).toFixed(1)}" height="${(_railH - 6).toFixed(1)}" fill="#ffffff" stroke="${INK}" stroke-width="${OBJ}"/>`);
+    // T-bolt in channel
+    els.push(`<line x1="${_cx.toFixed(1)}" y1="${(_railTop + 2).toFixed(1)}" x2="${_cx.toFixed(1)}" y2="${(_plTop).toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+    _clampBaseTop = _railTop;
+    _label2 = 'RAIL + CLAMP';
+  }
+
+  // ═══════════════ 8. RT-MID CLAMP (stepped top-hat saddle, steel-hatch) ═══════════════
+  const _clH = 17, _clTop = _clampBaseTop - _clH;
+  const _clWebW = 12;                         // central web over riser bolt
+  const _clEar = 22;                          // ear reach each side over frame top lip
+  _clampAnchorY = _clTop + 3;
+  // top-hat path (white cut pass)
+  const _clPath =
+    `M ${(_cx - _clWebW / 2).toFixed(1)} ${_clTop.toFixed(1)} ` +
+    `L ${(_cx + _clWebW / 2).toFixed(1)} ${_clTop.toFixed(1)} ` +
+    `L ${(_cx + _clWebW / 2).toFixed(1)} ${(_clTop + 4).toFixed(1)} ` +
+    `L ${(_cx + _clEar).toFixed(1)} ${(_clTop + 4).toFixed(1)} ` +
+    `L ${(_cx + _clEar).toFixed(1)} ${(_clampBaseTop).toFixed(1)} ` +
+    `L ${(_cx + _clEar - 3).toFixed(1)} ${(_clampBaseTop).toFixed(1)} ` +
+    `L ${(_cx + _clEar - 3).toFixed(1)} ${(_clTop + 7).toFixed(1)} ` +
+    `L ${(_cx - _clEar + 3).toFixed(1)} ${(_clTop + 7).toFixed(1)} ` +
+    `L ${(_cx - _clEar + 3).toFixed(1)} ${(_clampBaseTop).toFixed(1)} ` +
+    `L ${(_cx - _clEar).toFixed(1)} ${(_clampBaseTop).toFixed(1)} ` +
+    `L ${(_cx - _clEar).toFixed(1)} ${(_clTop + 4).toFixed(1)} ` +
+    `L ${(_cx - _clWebW / 2).toFixed(1)} ${(_clTop + 4).toFixed(1)} Z`;
+  els.push(`<path d="${_clPath}" fill="#ffffff" stroke="${INK}" stroke-width="${CUT}"/>`);
+  els.push(`<path d="${_clPath}" fill="url(#hatch-steel)" stroke="none" opacity="0.55"/>`);
+  // clamp bolt down the center into the platform T-slot
+  els.push(`<line x1="${_cx.toFixed(1)}" y1="${(_clTop + 1).toFixed(1)}" x2="${_cx.toFixed(1)}" y2="${(_clampBaseTop + 2).toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // bonding serration (WEEB bite) — tiny black sawtooth at clamp-arm/frame contact
+  for (let w = 0; w < 3; w++) {
+    const wx = _cx + _clEar - 10 + w * 3;
+    els.push(`<path d="M ${wx.toFixed(1)} ${(_clampBaseTop).toFixed(1)} L ${(wx + 1.5).toFixed(1)} ${(_clampBaseTop + 1.6).toFixed(1)} L ${(wx + 3).toFixed(1)} ${(_clampBaseTop).toFixed(1)} Z" fill="${INK}"/>`);
+  }
+
+  // ═══════════════ 9. PV MODULE FRAME (hollow box extrusion) + LAMINATE ═══════════════
+  const _frW = 90, _frH = 30;
+  const _frL = _cx - 6;                       // frame slightly right; clamp grabs its left-top lip
+  const _frTop = _clampBaseTop - _frH + 3;    // frame foot lands on the platform/clamp
+  // outer box (white cut pass)
+  els.push(`<rect x="${_frL.toFixed(1)}" y="${_frTop.toFixed(1)}" width="${_frW}" height="${_frH}" fill="#ffffff" stroke="${INK}" stroke-width="${CUT}"/>`);
+  // wall-band hatch only (steel) then inner void white to show wall thickness
+  els.push(`<rect x="${_frL.toFixed(1)}" y="${_frTop.toFixed(1)}" width="${_frW}" height="${_frH}" fill="url(#hatch-steel)" stroke="none" opacity="0.55"/>`);
+  els.push(`<rect x="${(_frL + 2.5).toFixed(1)}" y="${(_frTop + 2.5).toFixed(1)}" width="${(_frW - 5).toFixed(1)}" height="${(_frH - 5).toFixed(1)}" fill="#ffffff" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // top lip (inward-turning flange the clamp grabs) at top-outer (left) corner
+  els.push(`<path d="M ${_frL.toFixed(1)} ${(_frTop + 3).toFixed(1)} L ${_frL.toFixed(1)} ${_frTop.toFixed(1)} L ${(_frL + 6).toFixed(1)} ${_frTop.toFixed(1)} L ${(_frL + 6).toFixed(1)} ${(_frTop + 1.6).toFixed(1)} L ${(_frL + 2.5).toFixed(1)} ${(_frTop + 1.6).toFixed(1)} L ${(_frL + 2.5).toFixed(1)} ${(_frTop + 3).toFixed(1)} Z" fill="#ffffff" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // glazing pocket + laminate: 3-line glass/cell/backsheet sandwich in the inner U
+  const _lamL = _frL + 6, _lamR = _frL + _frW - 3, _lamY = _frTop + 4.5;
+  for (let L = 0; L < 3; L++) {
+    els.push(`<line x1="${_lamL.toFixed(1)}" y1="${(_lamY + L * 1.6).toFixed(1)}" x2="${_lamR.toFixed(1)}" y2="${(_lamY + L * 1.6).toFixed(1)}" stroke="${INK}" stroke-width="${HID}"/>`);
+  }
+  // tiny butyl bead dot where laminate seats in channel
+  els.push(`<rect x="${(_lamL - 1).toFixed(1)}" y="${(_lamY - 0.6).toFixed(1)}" width="1.6" height="${(3 * 1.6 + 0.6).toFixed(1)}" fill="${INK}"/>`);
+
+  // ═══════════════ (b) LAG SCREW — 5/16" SS hex head + EPDM washer + embed ═══════════════
+  const _boltX = _cx;                          // on rafter centerline
+  let   _tipY  = _rafTop + Number(_embedD) * 10;
+  if (_tipY > _rafTop + _rafH - 8) _tipY = _rafTop + _rafH - 8;
+  const _headTop = _mbTop - 9, _headH = 8, _headW = 13;
+  // 1. centerline first (under everything)
+  els.push(`<line x1="${_boltX.toFixed(1)}" y1="${(_headTop - 2).toFixed(1)}" x2="${_boltX.toFixed(1)}" y2="${(_tipY + 3).toFixed(1)}" stroke="${INK}" stroke-width="0.22" ${CL}/>`);
+  // 2. hex head (chamfered) — path with top corners cut
+  els.push(`<path d="M ${(_boltX - _headW / 2 + 1.4).toFixed(1)} ${_headTop.toFixed(1)} L ${(_boltX + _headW / 2 - 1.4).toFixed(1)} ${_headTop.toFixed(1)} L ${(_boltX + _headW / 2).toFixed(1)} ${(_headTop + 1.4).toFixed(1)} L ${(_boltX + _headW / 2).toFixed(1)} ${(_headTop + _headH).toFixed(1)} L ${(_boltX - _headW / 2).toFixed(1)} ${(_headTop + _headH).toFixed(1)} L ${(_boltX - _headW / 2).toFixed(1)} ${(_headTop + 1.4).toFixed(1)} Z" fill="#ffffff" stroke="${INK}" stroke-width="${CUT}"/>`);
+  els.push(`<path d="M ${(_boltX - _headW / 2 + 1.4).toFixed(1)} ${_headTop.toFixed(1)} L ${(_boltX + _headW / 2 - 1.4).toFixed(1)} ${_headTop.toFixed(1)} L ${(_boltX + _headW / 2).toFixed(1)} ${(_headTop + 1.4).toFixed(1)} L ${(_boltX + _headW / 2).toFixed(1)} ${(_headTop + _headH).toFixed(1)} L ${(_boltX - _headW / 2).toFixed(1)} ${(_headTop + _headH).toFixed(1)} L ${(_boltX - _headW / 2).toFixed(1)} ${(_headTop + 1.4).toFixed(1)} Z" fill="url(#hatch-steel)" stroke="none" opacity="0.55"/>`);
+  // two chamfer arcs across the face (hex tell)
+  els.push(`<path d="M ${(_boltX - _headW / 2 + 0.6).toFixed(1)} ${(_headTop + 2).toFixed(1)} Q ${_boltX.toFixed(1)} ${(_headTop + 1).toFixed(1)} ${(_boltX + _headW / 2 - 0.6).toFixed(1)} ${(_headTop + 2).toFixed(1)}" fill="none" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  els.push(`<path d="M ${(_boltX - _headW / 2 + 0.6).toFixed(1)} ${(_headTop + 3.8).toFixed(1)} Q ${_boltX.toFixed(1)} ${(_headTop + 2.8).toFixed(1)} ${(_boltX + _headW / 2 - 0.6).toFixed(1)} ${(_headTop + 3.8).toFixed(1)}" fill="none" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // 3. EPDM sealing washer (SOLID BLACK poché) + thin metal washer line above
+  const _washTop = _headTop + _headH;
+  els.push(`<line x1="${(_boltX - 5).toFixed(1)}" y1="${(_washTop).toFixed(1)}" x2="${(_boltX + 5).toFixed(1)}" y2="${(_washTop).toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  els.push(`<rect x="${(_boltX - 5.5).toFixed(1)}" y="${(_washTop + 0.3).toFixed(1)}" width="11" height="1.6" fill="${INK}"/>`);
+  // 4. unthreaded shank (clearance through base + sheathing) — two clean parallel lines
+  const _shankTop = _washTop + 1.9;
+  els.push(`<line x1="${(_boltX - 1.2).toFixed(1)}" y1="${_shankTop.toFixed(1)}" x2="${(_boltX - 1.2).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  els.push(`<line x1="${(_boltX + 1.2).toFixed(1)}" y1="${_shankTop.toFixed(1)}" x2="${(_boltX + 1.2).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // 5. threaded portion (in rafter only) — HIDDEN schematic zigzag, wood hatch behind
+  for (let t = _rafTop + 1; t < _tipY - 1; t += 2.2) {
+    els.push(`<line x1="${(_boltX - 1.6).toFixed(1)}" y1="${t.toFixed(1)}" x2="${(_boltX + 1.6).toFixed(1)}" y2="${(t + 1.1).toFixed(1)}" stroke="${INK}" stroke-width="${HID}" ${HD}/>`);
+  }
+  // 6. self-drill tip
+  els.push(`<path d="M ${(_boltX - 1.6).toFixed(1)} ${(_tipY - 2).toFixed(1)} L ${_boltX.toFixed(1)} ${(_tipY + 1.5).toFixed(1)} L ${(_boltX + 1.6).toFixed(1)} ${(_tipY - 2).toFixed(1)}" fill="none" stroke="${INK}" stroke-width="${OBJ}"/>`);
+  // 7. embedment dimension (the ONE red element) — left of bolt
+  const _edX = _boltX - 12;
+  els.push(`<line x1="${_edX.toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${_edX.toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.6"/>`);
+  els.push(`<line x1="${(_edX - 2.5).toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${(_edX + 2.5).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="#cc0000" stroke-width="0.6"/>`);
+  els.push(`<line x1="${(_edX - 2.5).toFixed(1)}" y1="${_tipY.toFixed(1)}" x2="${(_edX + 2.5).toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="0.6"/>`);
+  // extension lines from bolt to dim line
+  els.push(`<line x1="${_edX.toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${(_boltX - 2).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="#cc0000" stroke-width="${DIM}"/>`);
+  els.push(`<line x1="${_edX.toFixed(1)}" y1="${_tipY.toFixed(1)}" x2="${(_boltX - 2).toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="${DIM}"/>`);
+  els.push(drawText(_edX - 3, (_rafTop + _tipY) / 2 + 2, `${_embedD}" MIN EMBED`, { anchor: 'end', fontSize: 5.4, fontWeight: 'bold', fill: '#cc0000' }));
+
+  // rail-less character note (left of assembly, small italic)
+  els.push(drawText(_cx - roofW * 0.42, deckTop - 30, isRaillessD ? 'LOW-PROFILE — NO RAIL' : 'RAIL-MOUNTED', { anchor: 'start', fontSize: 5.2, italic: true, fill: '#555' }));
+
+  // ═══════════════ (d) LEADERS + numbered labels (right-stacked) ═══════════════
   const _callouts: Array<{ ax: number; ay: number; text: string }> = [
-    { ax: _frL + _frW - 8,     ay: _frTop - 3,                        text: `PV MODULE (${panelLenIn}"×${panelWidIn}")` },
-    { ax: _armX + _armW,       ay: _armTop + 5,                       text: `${mountSys} ${isRaillessD ? 'MOUNT + CLAMP' : 'RAIL + CLAMP'}` },
-    { ax: _cx + _mbW / 2 - 4,  ay: _mbTop + 3,                        text: `MOUNT BASE — ${lagLabelD}` },
-    { ax: _cx + _butW / 2 - 5, ay: deckTop - 2,                       text: 'BUTYL FLASHING' },
-    { ax: _rlx + roofW - 8,    ay: deckTop + _shH / 2,                text: `${roofType} SHINGLE` },
-    { ax: _rlx + roofW - 8,    ay: deckTop + _shH + _sheH / 2,        text: 'SHEATHING (5/8" OSB)' },
-    { ax: _rlx + roofW - 8,    ay: _rafTop + _rafH / 2,               text: `${rafterSz} RAFTER @ ${rafterSp}" O.C.` },
+    { ax: _frL,                 ay: _frTop + 1.5,                text: `PV MODULE (${panelLenIn}"×${panelWidIn}") — CLAMP GRIPS TOP LIP` },
+    { ax: _cx + _clEar - 3,     ay: _clampAnchorY,               text: `${_label2}` },
+    { ax: _cx + _plW / 2 - 2,   ay: _plTop + 1.5,                text: 'MOUNT BASE PLATE + T-BOLT' },
+    { ax: _boltX + _headW / 2,  ay: _headTop + 2.5,              text: `${lagLabelD}` },
+    { ax: _cx + _butW / 2 - 4,  ay: _padTop + 1.5,               text: 'ALPHASEAL BUTYL FLASHING (SELF-SEAL)' },
+    { ax: _rlx + roofW - 8,     ay: deckTop + _shH / 2,          text: `${roofType} SHINGLE / UNDERLAYMENT` },
+    { ax: _rlx + roofW - 8,     ay: _rafTop + _rafH / 2,         text: `SHEATHING (5/8" OSB) + ${rafterSz} RAFTER @ ${rafterSp}" O.C.` },
   ];
   const _clX = dcx + dcr - 6;
   _callouts.forEach((c, i) => {
-    const _ly = dcy - 66 + i * 20;
-    els.push(`<line x1="${c.ax.toFixed(1)}" y1="${c.ay.toFixed(1)}" x2="${(_clX - 2).toFixed(1)}" y2="${(_ly + 1).toFixed(1)}" stroke="#777" stroke-width="0.6"/>`);
+    const _ly = dcy - 72 + i * 18;
+    els.push(`<line x1="${c.ax.toFixed(1)}" y1="${c.ay.toFixed(1)}" x2="${(_clX - 2).toFixed(1)}" y2="${(_ly + 1).toFixed(1)}" stroke="${INK}" stroke-width="${DIM}"/>`);
+    els.push(`<circle cx="${c.ax.toFixed(1)}" cy="${c.ay.toFixed(1)}" r="0.9" fill="${INK}"/>`);
     els.push(drawCallout({ cx: _clX + 6, cy: _ly, number: i + 1, r: 7 }));
-    els.push(drawText(_clX + 17, _ly + 2.3, c.text, { anchor: 'start', fontSize: 6.4, fill: '#222' }));
+    els.push(drawText(_clX + 17, _ly + 2.3, c.text, { anchor: 'start', fontSize: 6.4, fill: INK }));
   });
 
   // ── STEP 7: Load arrows ──
