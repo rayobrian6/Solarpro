@@ -35,6 +35,7 @@ import { pageWarningLabels, pageSpecSheetReference } from './sections/compliance
 import { pageEngineerCert, pagePELetter } from './sections/certPages';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
+import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
 
@@ -849,6 +850,9 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (all)
     ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
     (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
+    // DS-n: full-page REAL manufacturer datasheets (module/inverter/battery),
+    // one per selected-equipment id that has an image on file (manufacturer_assets).
+    ...equipmentDatasheetPageFns(input, cad),
     (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
     (n, t) => pagePELetter(input, cad, n, t),                          // PE-1 (all)
     (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (all, system-labeled)
