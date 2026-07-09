@@ -184,28 +184,31 @@ describe('Defect 5 — Structural prose guards against — values', () => {
 });
 
 // ── Defect 9: OCPD formula display ─────────────────────────────────
-describe('Defect 9 — OCPD formula uses ×1.56 with NEC section citations', () => {
-  it('equipment schedule (SCHED) shows OCPD ≥ Isc×1.56 in wire sizing table', () => {
+// NOTE (EL-1, topology remediation): the DC source-circuit OCPD formula
+// (Isc×1.56, NEC 690.8) only applies to STRING-inverter systems. roofProject is
+// a MICROINVERTER fixture, which has no DC source circuits — SCHED now correctly
+// renders an AC branch circuit schedule instead of the DC Isc×1.56 table. See
+// tests/planset/sched-topology.test.ts. These assertions verify the schedule is
+// topology-correct rather than asserting the (inapplicable) DC formula.
+describe('Defect 9 — OCPD formula is topology-aware (DC ×1.56 only for string systems)', () => {
+  it('microinverter SCHED shows an AC branch schedule, not the DC Isc×1.56 table', () => {
     const html = generatePermitHTML(clone(roofProject));
     const sched = sheetPage(html, 'SCHED');
     expect(sched).toBeTruthy();
 
-    // The header should use the clearer "Isc×1.56" format with NEC reference
-    expect(sched).toContain('Isc×1.56');
-    // Should NOT contain the old ambiguous "×1.25 OCPD" header
+    // micro topology → AC branch circuit schedule, no DC source-circuit formula
+    expect(sched).toContain('AC Branch Circuit Schedule');
+    expect(sched).not.toContain('Isc×1.56');
     expect(sched).not.toContain('×1.25 OCPD');
   });
 
-  it('equipment schedule formula reference cites NEC 690.8(A)(1)×(B)(1)', () => {
+  it('microinverter SCHED wire-sizing interpretation is AC (no DC source-circuit claim)', () => {
     const html = generatePermitHTML(clone(roofProject));
     const sched = sheetPage(html, 'SCHED');
     expect(sched).toBeTruthy();
 
-    // Formula reference should include NEC section citations
-    expect(sched).toContain('690.8(A)(1)');
-    expect(sched).toContain('690.8(A)(1)×(B)(1)');
-    // Wire sizing interpretation should use ×1.56
-    expect(sched).toContain('Isc × 1.56');
+    expect(sched).toContain('WIRE SIZING INTERPRETATION (MICROINVERTER)');
+    expect(sched).not.toContain('All DC source circuit conductors');
   });
 });
 

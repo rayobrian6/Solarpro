@@ -13,7 +13,8 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
-import {  isFence, isGround, isRoof } from '@/lib/system';
+import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
+import { planMicroBranches } from '../utils/branching';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import {
@@ -1214,13 +1215,44 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // CAD-sourced equipment counts
   const cadTotalPanels = cad.totalPanels;
   const cadTotalDcKw   = cad.totalDcKw;
+  // Topology-aware: a microinverter system has NO 52-module DC series string
+  // and no DC source circuits — modules pair 1:1 with microinverters and the
+  // field wiring is AC branch circuits (Q-Cable). Use the SAME branch planner
+  // PV-4A/PV-4B/E-1 use so the schedule can't disagree with them.
+  const _schedIsMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
+  const _schedInv0    = system.inverters?.[0];
+  const _schedAcW     = Number(_schedInv0?.acOutputKw) * 1000;
+  const _schedPP      = (project.panelPositions ?? []) as Array<{ id: string }>;
+  const _schedGroupLabel = _schedIsMicro ? 'Array' : 'String';
+  // AC branch circuit schedule for micro (replaces the DC source-circuit table).
+  const _schedPerA = _schedAcW > 0 ? _schedAcW / 240 : 0;
+  const _schedBranchSizes = (_schedIsMicro && _schedPP.length && _schedPerA > 0)
+    ? planMicroBranches(_schedPP, _schedInv0?.model).sizes : [];
+  const _schedAcRows = _schedBranchSizes.map((n, i) => {
+    const amps = n * _schedPerA; const cont = amps * 1.25;
+    return `<tr><td class="fw7 mono">B${i + 1}</td><td>${n} &times; microinverter</td>`
+      + `<td class="tr mono">${amps.toFixed(1)}A</td><td class="tr mono">${cont.toFixed(1)}A</td>`
+      + `<td class="tr mono fw7">20A</td><td>#10 AWG THWN-2 + EGC</td><td class="tr">30A (#10)</td>`
+      + `<td class="center fw7">&check;</td></tr>`;
+  }).join('');
+  const _schedAcBranchBlock = `
+      <div class="section-title">AC Branch Circuit Schedule &mdash; NEC 690.8(A) / 705.12</div>
+      <table class="equip-table">
+        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>Status</th></tr></thead>
+        <tbody>${_schedAcRows || '<tr><td colspan="8" class="center">AC branch layout pending module placement &mdash; see PV-4A</td></tr>'}</tbody>
+      </table>
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+        <strong>WIRE SIZING INTERPRETATION (MICROINVERTER):</strong>
+        Each module is paired 1:1 with a microinverter, so this system has no DC series string and no DC source-circuit sizing &mdash; DC / Voc / Isc string calculations do not apply.
+        AC branch (trunk) circuits are sized per NEC 690.8(A) with the continuous-duty factor (&times;1.25); each branch is protected at 20A and terminates at the AC combiner. THWN-2 (90&deg;C) conductors are specified.
+      </div>`;
   return `
   <div class="page">
     ${titleBlock(input, 'SCHED', 'EQUIPMENT SCHEDULE', pageNum, totalPages)}
     <div class="page-content">
-      <div class="section-title">Solar Modules</div>
+      <div class="section-title">Solar Modules${_schedIsMicro ? ' — each module paired 1:1 with a microinverter (no series DC string)' : ''}</div>
       <table class="equip-table">
-        <thead><tr><th>String</th><th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
+        <thead><tr><th>${_schedGroupLabel}</th><th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
         <tbody>
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => `
@@ -1259,7 +1291,8 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           </tr>`).join('')}
         </tbody>
       </table>
-      <!-- Wire Sizing Justification -->
+      <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string) -->
+      ${_schedIsMicro ? _schedAcBranchBlock : `
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>
       <table class="equip-table">
         <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Isc×1.25 (A)</th><th>OCPD ≥ Isc×1.56 (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
@@ -1299,7 +1332,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           All PV source circuits use USE-2/THWN-2 rated at 90\u00b0C to maximize available ampacity under ${isRoof(cad.systemType) ? 'rooftop temperature' : 'outdoor'} conditions.
         </span>
         <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>
-      </div>
+      </div>`}
 
       ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST)}
 
