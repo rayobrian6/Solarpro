@@ -9,6 +9,7 @@ import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
+import { equipmentDatasheetIndexRows } from './datasheetAppendix';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -168,6 +169,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     { id: 'SCHED', title: 'EQUIPMENT SCHEDULE — MODULES, INVERTERS & BOM' },
     ...(includeSchedCont ? [{ id: 'SCHED-2', title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' }] : []),
     { id: 'APP-A', title: 'SPECIFICATION REFERENCE — EQUIPMENT DATA SHEETS' },
+    // DS-n: real manufacturer datasheet pages — mirror generatePermit's insertion
+    // after APP-A so the cover index count/order matches the actual set.
+    ...equipmentDatasheetIndexRows(input),
     { id: 'CERT',  title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
     { id: 'PE-1',  title: 'PE STRUCTURAL LETTER — LETTER OF COMPLIANCE' },
     { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },

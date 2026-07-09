@@ -566,7 +566,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">GROUND MOUNT PILE REQUIREMENTS</div>
           <div style="margin-bottom:3px;">1. Pile type: ${structType} — verify diameter and wall thickness with geotechnical report.</div>
           <div style="margin-bottom:3px;">2. Embedment: <strong>${pileDepth} ft min.</strong> below finish grade — must be below local frost depth.</div>
-          <div style="margin-bottom:3px;">3. Pile spacing: <strong>${pileSp} ft O.C.</strong> per structural analysis — see array layout on PV-2.</div>
+          <div style="margin-bottom:3px;">3. Pile spacing: <strong>${pileSp} ft O.C.</strong> per structural analysis — see array layout on PV-1.</div>
           <div style="margin-bottom:3px;">4. Ground clearance: <strong>${groundClr}" min.</strong> from lowest module edge to finish grade.</div>
           <div style="margin-bottom:3px;">5. Tilt angle: <strong>${tiltDeg}°</strong> from horizontal — verify per final array design.</div>
           <div style="margin-bottom:3px;">6. Grounding: Drive ground rod per NEC 690.47 — bond all metallic structure per NEC 250.97.</div>

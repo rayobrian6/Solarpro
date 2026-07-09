@@ -333,7 +333,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
             <div style="margin-bottom:2px;">2. Any deviation from the approved design shall be reported to the engineer of record.</div>
             <div style=\"margin-bottom:2px;\">3. ${_isRoof ? 'All roof penetrations shall be waterproofed per roofing manufacturer requirements.' : 'All below-grade conduit and conductors shall be rated for wet/direct burial locations per NEC 300.5.'}</div>\n
             <div style="margin-bottom:2px;">4. Module and racking installation per manufacturer instructions and UL 2703 listing.</div>
-            <div style="margin-bottom:2px;">5. Maintain fire access per IFC \u00a71204.2.1: 36" access pathways and the ridge setback shown on PV-2 (18" permitted only where array \u2264 33% of roof area).</div>
+            <div style="margin-bottom:2px;">5. Maintain fire access per IFC \u00a71204.2.1: 36" access pathways and the ridge setback shown on PV-1 (18" permitted only where array \u2264 33% of roof area).</div>
           </div>
         </div>
       </div>

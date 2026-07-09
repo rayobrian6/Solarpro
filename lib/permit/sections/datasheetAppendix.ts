@@ -88,3 +88,14 @@ export function equipmentDatasheetPageFns(
   const entries = resolveEquipmentDatasheets(input);
   return entries.map((entry, i) => (n: number, t: number) => datasheetPage(input, `DS-${i + 1}`, entry, n, t));
 }
+
+/**
+ * Cover SHEET INDEX rows for the datasheet appendix — MUST mirror
+ * equipmentDatasheetPageFns() order/count so the cover index matches the set.
+ */
+export function equipmentDatasheetIndexRows(input: PermitInput): Array<{ id: string; title: string }> {
+  return resolveEquipmentDatasheets(input).map((entry, i) => ({
+    id: `DS-${i + 1}`,
+    title: `MANUFACTURER DATASHEET — ${entry.label} (${entry.asset.brand} ${entry.asset.model})`.toUpperCase(),
+  }));
+}
