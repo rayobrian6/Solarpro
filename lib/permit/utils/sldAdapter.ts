@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-professional-renderer';
-import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd } from './helpers';
+import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { balancedBranchSizes, microBranchCount, planMicroBranches } from './branching';
@@ -89,7 +89,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     : rawInterconnection;
 
   // ── Battery / Generator / ATS ──
-  const hasBattery = !!(project.batteryCount && project.batteryCount > 0) || !!(project.batteryModel);
+  const hasBattery = hasRealBattery(project);
   // Total battery kWh (system total). For multi-unit systems the per-unit kWh
   // appears in the PV-1 equipment legend; the SLD label includes the breakdown
   // for clarity: e.g. "15 kWh (3 × 5.0)" instead of just "15 kWh".

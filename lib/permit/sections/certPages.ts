@@ -7,7 +7,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
-import { roofTypeLabel } from '../utils/helpers';
+import { roofTypeLabel, hasRealBattery } from '../utils/helpers';
 import { getEquipmentContext, isFence, isGround } from '@/lib/system';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { BUILD_VERSION } from '@/lib/version';
@@ -56,7 +56,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
         <ul style="margin-top:var(--xs);line-height:1.6;padding-left:var(--md);">
           <li>National Electrical Code (NEC) ${necVer}, Article 690 — Solar Photovoltaic Systems</li>
           <li>National Electrical Code (NEC) ${necVer}, Article 705 — Interconnected Electric Power Production Sources</li>
-          ${(project.batteryCount || 0) > 0 ? `<li>National Electrical Code (NEC) ${necVer}, Article 706 — Energy Storage Systems; NFPA 855</li>` : ''}
+          ${hasRealBattery(project) ? `<li>National Electrical Code (NEC) ${necVer}, Article 706 — Energy Storage Systems; NFPA 855</li>` : ''}
           <li>ASCE 7-22 — Minimum Design Loads and Associated Criteria for Buildings and Other Structures</li>
           <li>International Building Code (IBC) / International Residential Code (IRC) — Structural requirements</li>
           <li>International Fire Code (IFC) ${necVer === '2023' ? '2024' : '2021'} — §1204 Solar Photovoltaic Systems (rooftop access & pathways)</li>

@@ -108,6 +108,22 @@ export function interconnectionLabel(m?: string) {
 }
 
 /**
+ * One source of truth for "does this job actually have a battery". A count alone
+ * is not enough — a stale config can carry batteryCount>0 with no model/id (a
+ * "phantom battery"), which otherwise renders ESS labels, ESS certification refs,
+ * and a 48V/xx-kWh line across the planset for a project that has no battery.
+ * A real battery has an identifying model or id, not just a count.
+ */
+export function hasRealBattery(project: {
+  batteryCount?: number; batteryModel?: string; batteryId?: string;
+} | null | undefined): boolean {
+  if (!project) return false;
+  if (!((project.batteryCount ?? 0) > 0)) return false;
+  const model = (project.batteryModel ?? '').trim();
+  return !!(project.batteryId || (model && model !== '—'));
+}
+
+/**
  * One source of truth for "is this job a supply-side interconnection".
  * Reads the RESOLVED electrical compliance first (generatePermit runs the
  * electrical engine and assigns input.compliance.electrical before any sheet

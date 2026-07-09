@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, isSupplySideInterconnection, utilityDisplayName, necNextStandardOcpd, type SysType } from '../utils/helpers';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, isSupplySideInterconnection, utilityDisplayName, necNextStandardOcpd, hasRealBattery, type SysType } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
 import { balancedBranchSizes, microBranchCount, planMicroBranches } from '../utils/branching';
@@ -843,7 +843,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const pvBreakerAmps = backfeedAmps;
     // FIX v47.341: Convert utility slug to display name in SLD
     const utilityName  = utilityDisplayName(project.utilityName ?? '') || 'Utility';
-    const hasBattery   = !!(project.batteryCount && project.batteryCount > 0);
+    const hasBattery   = hasRealBattery(project);
     const batteryModel = project.batteryModel ?? 'IQ Battery 5P';
     const batteryKwh   = hasBattery ? (project.batteryCount! * (project.batteryKwh ?? 5.0)) : 0;
     // Error 5ba fix: battery backfeed fallback — 20A per unit (typical residential), not 46

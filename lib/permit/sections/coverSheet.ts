@@ -7,7 +7,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, hasRealBattery, type SysType } from '../utils/helpers';
 import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
 import { equipmentDatasheetIndexRows } from './datasheetAppendix';
 import { buildSheetManifest } from '../sheetManifest';
@@ -82,7 +82,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const isSupplySide = isSupplySideInterconnection(input);
 
   // ── Battery ───────────────────────────────────────────────────────────────
-  const hasBattery    = (project.batteryCount ?? 0) > 0;
+  const hasBattery    = hasRealBattery(project);
   const batteryDisplay = hasBattery
     ? [project.batteryBrand, project.batteryModel].filter(Boolean).join(' ')
     : '';
@@ -150,9 +150,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   }
 
   // ── Sheet index ───────────────────────────────────────────────────────────
-  const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
-    || input.planSetOptions?.cadAppendixPreviewV1 === true
-    || input.permitOptions?.cadAppendixPreviewV1 === true;
+  // APP-CAD removed from the deliverable (Ray, 2026-07-09) — match generatePermit's
+  // distinct internal opt-in so the cover index and page set stay in sync.
+  const includeCADAppendixPreview = (input.permitOptions as { includeCadAppendixInternal?: boolean } | undefined)?.includeCadAppendixInternal === true;
   // Mirror generatePermit's dynamic page assembly EXACTLY — a hardcoded list
   // here shipped a 16-sheet set whose cover index listed only 15.
   const includeInternalValidation = input.permitOptions?.includeInternalValidation === true

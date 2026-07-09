@@ -13204,7 +13204,7 @@ function EngineeringPageInner() {
                 pv1Title: 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS',
                 pv3Title: 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION',
                 datasheets: _dsRefs,
-                includeCadAppendix: !!(projectLayout?.panels?.length > 0),
+                // APP-CAD removed from the deliverable (Ray, 2026-07-09)
               });
               const _doneFor = (id: string): boolean => {
                 if (id === 'PV-1')   return !!config.address && !!(projectLayout?.panels?.length > 0);
@@ -13213,7 +13213,6 @@ function EngineeringPageInner() {
                 if (id === 'PV-4C')  return !!compliance.structural;
                 if (id === 'SCHED')  return totalPanels > 0;
                 if (id === 'CERT')   return !!config.designer;
-                if (id === 'APP-CAD') return !!(projectLayout?.panels?.length > 0);
                 return true;
               };
               const _sheets = _manifest.map(s => ({

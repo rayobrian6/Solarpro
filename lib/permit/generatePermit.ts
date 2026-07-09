@@ -824,9 +824,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     staleStateMetadata: staleMetadataForState(engineeringStateRegistry.stateRecords.find((record: any) => record.stateId === 'state:renderContext:renderContext:primary') ?? engineeringStateRegistry.stateRecords[0]),
   });
 
-  const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
-    || input.planSetOptions?.cadAppendixPreviewV1 === true
-    || input.permitOptions?.cadAppendixPreviewV1 === true;
+  // APP-CAD (non-authoritative CAD preview appendix) removed from the deliverable
+  // 2026-07-09 (Ray) — it was a rough, non-construction preview page. Kept behind a
+  // distinct internal opt-in (nothing sets it today) so it's OFF by default and can
+  // still be requested for internal review.
+  const includeCADAppendixPreview = (input.permitOptions as { includeCadAppendixInternal?: boolean } | undefined)?.includeCadAppendixInternal === true;
   // VAL-1 is internal QA telemetry (hashes, decision provenance, rule IDs) —
   // NOT part of the AHJ deliverable. Opt back in for internal review runs.
   const includeInternalValidation = input.permitOptions?.includeInternalValidation === true

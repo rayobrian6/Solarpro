@@ -7,7 +7,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
-import { interconnectionLabel } from '../utils/helpers';
+import { interconnectionLabel, hasRealBattery } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
@@ -18,7 +18,7 @@ import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
   const necVer = compliance.jurisdiction?.necVersion || '2020';
-  const hasBattery = (project.batteryCount || 0) > 0;
+  const hasBattery = hasRealBattery(project);
   const hasGenerator = (project.generatorKw || 0) > 0;
   const _isRoof = isRoof(cad.systemType);   // FIX v47.295: system-aware warning labels
   const _isFence = isFence(cad.systemType);
