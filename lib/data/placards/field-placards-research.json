@@ -1,0 +1,447 @@
+{
+  "$schema": "internal://solarpro/field-placards-research",
+  "description": "Authoritative research dataset of REAL NEC/IFC-required solar PV field placards, labels, stickers, and the service-disconnect directory plaque. Every entry is sourced to a specific code section. Wording, colors, letter heights, and materials reflect ANSI Z535.4 signal-word conventions and NEC 110.21(B) marking rules. Intended to drive the SolarPro permit-planset placard renderer (PV-5 stickers + DISCONNECT PLACARD).",
+  "generatedBy": "research-worker",
+  "generatedDate": "2026-07-09",
+  "codeCyclesCovered": ["NEC 2017", "NEC 2020", "NEC 2023", "IFC 2018", "IFC 2021"],
+  "primarySources": [
+    "NFPA 70 (NEC) Article 690 Part VI (labeling), 705.10/705.11/705.12/705.13, Article 706 (ESS)",
+    "IFC 2018/2021 Chapter 12 (1204/1205 PV, 1206/1207 ESS)",
+    "HellermannTyton 'PV Labeling NEC 2020 Section 690' white paper",
+    "Minnesota DLI 2020 NEC Solar Label Guide",
+    "SolarPermitSolutions NEC 690 labeling guides; Mayfield Renewables / Solar Builder NEC-2020 change review; PlansetSigns 705.10 & 706 guides"
+  ],
+  "ansiZ535Reference": {
+    "note": "ANSI Z535.4 defines the signal-word color scheme reused by NEC 110.21(B) safety labels. Signal-word panel colors below are the ANSI standard.",
+    "signalWords": {
+      "DANGER": { "meaning": "Immediate hazard; will result in death/serious injury", "panel": "white text on safety red (#C8102E)" },
+      "WARNING": { "meaning": "Hazard that could result in death/serious injury", "panel": "black text on safety orange (#FF8200)" },
+      "CAUTION": { "meaning": "Hazard that could result in minor/moderate injury", "panel": "black text on safety yellow (#FFD100)" },
+      "NOTICE": { "meaning": "Information / property-damage message, not a personal-injury hazard", "panel": "white text on safety blue (#005EB8)" }
+    }
+  },
+
+  "labels": [
+    {
+      "id": "rapid-shutdown-building-placard",
+      "title": "Rapid Shutdown Building/Service Placard (with roof diagram)",
+      "text": "SOLAR PV SYSTEM IS EQUIPPED WITH RAPID SHUTDOWN\nTURN RAPID SHUTDOWN SWITCH TO THE \"OFF\" POSITION TO SHUT DOWN PV SYSTEM AND REDUCE SHOCK HAZARD IN THE ARRAY.",
+      "diagram": "Simple line diagram of the building with a roof; array area cross-hatched/shaded to show the PV array boundary; rapid-shutdown initiation-device location indicated.",
+      "signalWord": null,
+      "colors": { "background": "#FFFFFF", "text": "#000000", "border": "#000000", "titleBackground": "#C8102E", "titleText": "#FFFFFF" },
+      "minLetterHeightIn": 0.375,
+      "letterHeightNotes": "Title 'SOLAR PV SYSTEM IS EQUIPPED WITH RAPID SHUTDOWN' capitalized, min 3/8 in (9.5 mm). Remaining body text capitalized, min 3/16 in (4.8 mm). NEC 2017/2020 title required WHITE on RED; NEC 2023 dropped the mandated red/reflective color but still requires the diagram + title text.",
+      "material": "Reflective (2017/2020), UV-resistant weatherproof engraved or laminated; NEC 2023 requires durable/permanent but not specifically reflective.",
+      "location": "At each service equipment location to which the PV system(s) are connected, or an approved readily visible location (main service disconnect / meter-main).",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.56(C)" },
+        { "code": "NEC 2020", "section": "690.56(C)" },
+        { "code": "NEC 2023", "section": "690.12(D) / 690.56(C)" }
+      ],
+      "appliesWhen": "rapid shutdown present (all rooftop PV on buildings)",
+      "cycleNotes": "Wording evolved: 2017 used 'PHOTOVOLTAIC SYSTEM'; 2020 revised to a controlled-conductors description; 2023 standardized on 'SOLAR PV SYSTEM IS EQUIPPED WITH RAPID SHUTDOWN' and relocated the requirement from 690.56(C) into 690.12(D)."
+    },
+    {
+      "id": "rapid-shutdown-array-boundary-label",
+      "title": "Rapid Shutdown Array-Boundary / Conductor-Type Label",
+      "text": "TURN RAPID SHUTDOWN SWITCH TO THE \"OFF\" POSITION TO SHUT DOWN PV SYSTEM. CONDUCTORS OUTSIDE THE ARRAY BOUNDARY REDUCE TO A SAFE LEVEL.",
+      "signalWord": null,
+      "colors": { "background": "#C8102E", "text": "#FFFFFF", "border": "#FFFFFF" },
+      "minLetterHeightIn": 0.375,
+      "letterHeightNotes": "White capitalized letters min 3/8 in (9.5 mm) on red. Alternate wording for systems that reduce conductors INSIDE the array boundary to a safe level per 690.12(B)(2).",
+      "material": "Reflective, UV-resistant weatherproof (rooftop exposure).",
+      "location": "On the rapid-shutdown initiation device and/or at the array boundary where conductor-control type must be identified.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.56(C)(3)" },
+        { "code": "NEC 2020", "section": "690.56(C)(2)" },
+        { "code": "NEC 2023", "section": "690.12(D)" }
+      ],
+      "appliesWhen": "rapid shutdown present; wording selected by controlled-conductor type (inside vs outside array boundary)"
+    },
+    {
+      "id": "rapid-shutdown-switch-initiator-label",
+      "title": "Rapid Shutdown Initiation Device Label",
+      "text": "RAPID SHUTDOWN SWITCH FOR SOLAR PV SYSTEM",
+      "signalWord": null,
+      "colors": { "background": "#C8102E", "text": "#FFFFFF", "border": "#FFFFFF" },
+      "minLetterHeightIn": 0.375,
+      "letterHeightNotes": "Capitalized white reflective letters min 3/8 in (9.5 mm) on red. This color scheme is UNCHANGED across NEC 2017/2020/2023.",
+      "material": "Reflective, weatherproof (mounted on/adjacent to the initiator).",
+      "location": "On or within 1 m (3 ft) of the rapid-shutdown switch / initiation device.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.56(C)(3)" },
+        { "code": "NEC 2020", "section": "690.56(C)(3)" },
+        { "code": "NEC 2023", "section": "690.12(D)(2)" }
+      ],
+      "appliesWhen": "rapid shutdown initiation device present"
+    },
+    {
+      "id": "pv-system-dc-disconnect",
+      "title": "PV System DC Disconnect Marking",
+      "text": "PV SYSTEM DISCONNECT",
+      "signalWord": null,
+      "colors": { "background": "#FFD100", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Permanent legible marking; must also indicate open(off)/closed(on) position. Wording 'PV SYSTEM DISCONNECT' or equivalent (older editions: 'PHOTOVOLTAIC SYSTEM DISCONNECT').",
+      "material": "Engraved laminated plastic or durable UV-resistant label; weatherproof if outdoors.",
+      "location": "On the DC / PV system disconnecting means enclosure.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.13(B)" },
+        { "code": "NEC 2020", "section": "690.13(B)" },
+        { "code": "NEC 2023", "section": "690.13(B)" }
+      ],
+      "appliesWhen": "always (PV system disconnecting means present)"
+    },
+    {
+      "id": "energized-in-open-position-warning",
+      "title": "Line/Load Energized-in-Open-Position Warning",
+      "text": "WARNING\nELECTRIC SHOCK HAZARD\nTERMINALS ON THE LINE AND LOAD SIDES MAY BE ENERGIZED IN THE OPEN POSITION",
+      "signalWord": "WARNING",
+      "colors": { "background": "#FF8200", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "ANSI Z535 WARNING header. Legible, durable. Some AHJs/kits render this red/white 'DANGER' style; NEC text calls it a warning.",
+      "material": "Engraved or UV-resistant weatherproof label.",
+      "location": "On PV system disconnecting means where line and load terminals may be energized in the open position (typical of PV disconnects fed from both directions).",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.13(B) / 690.15(D)" },
+        { "code": "NEC 2020", "section": "690.13(B) / 690.15" },
+        { "code": "NEC 2023", "section": "690.13(B)" }
+      ],
+      "appliesWhen": "disconnect line and load terminals may both be energized when open"
+    },
+    {
+      "id": "do-not-touch-terminals-warning",
+      "title": "Do Not Touch Terminals / Shock Hazard Warning",
+      "text": "WARNING\nELECTRIC SHOCK HAZARD\nDO NOT TOUCH TERMINALS\nTERMINALS ON BOTH THE LINE AND LOAD SIDES MAY BE ENERGIZED IN THE OPEN POSITION",
+      "signalWord": "WARNING",
+      "colors": { "background": "#FF8200", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Commonly furnished as a combined shock-hazard/do-not-touch label on disconnects and combiner boxes.",
+      "material": "Engraved or UV-resistant weatherproof vinyl.",
+      "location": "On DC disconnects, combiner boxes, and inverter DC input where energized terminals are accessible.",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "690.13(B)" },
+        { "code": "NEC 2023", "section": "690.13(B)" }
+      ],
+      "appliesWhen": "accessible terminals may remain energized"
+    },
+    {
+      "id": "photovoltaic-power-source-conduit",
+      "title": "Photovoltaic Power Source (Conduit/Raceway/Combiner Marking)",
+      "text": "WARNING\nPHOTOVOLTAIC POWER SOURCE",
+      "signalWord": "WARNING",
+      "colors": { "background": "#C8102E", "text": "#FFFFFF", "border": "#FFFFFF" },
+      "minLetterHeightIn": 0.375,
+      "letterHeightNotes": "White capitalized letters on red; ~3/8 in commonly specified. Marks the presence of PV DC circuits so a first responder cutting into a raceway is warned. 2023 permits equivalent wording such as 'SOLAR PV DC CIRCUIT'.",
+      "material": "UV-resistant weatherproof label (IFC requires reflective/durable outdoors).",
+      "location": "On exposed raceways, cable trays, cable assemblies, enclosures, combiner/junction box covers, and at intervals not exceeding 10 ft (3 m) and at turns/above-below penetrations.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.31(G)(3)/(G)(4)" },
+        { "code": "NEC 2020", "section": "690.31(D)" },
+        { "code": "NEC 2023", "section": "690.31(D)" }
+      ],
+      "appliesWhen": "PV DC circuits in raceways/enclosures inside a building or exposed"
+    },
+    {
+      "id": "dc-photovoltaic-power-source-ratings",
+      "title": "DC Photovoltaic Power Source Ratings Label",
+      "text": "PHOTOVOLTAIC POWER SOURCE\nMAX SYSTEM VOLTAGE:            ____ V DC\nMAX CIRCUIT CURRENT (Isc x 1.25): ____ A\nRATED MAX POWER-POINT CURRENT: ____ A\nRATED MAX POWER-POINT VOLTAGE: ____ V",
+      "signalWord": null,
+      "colors": { "background": "#FFFFFF", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Machine-printed engraved data label; legible/durable. In NEC 2023 the max-system-voltage data label moved to 690.7(D); 2017/2020 lived in 690.53.",
+      "material": "Engraved laminated plastic or printed weatherproof label.",
+      "location": "On the DC PV system disconnecting means or the PV electronic power conversion equipment (inverter/optimizer).",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.53" },
+        { "code": "NEC 2020", "section": "690.53" },
+        { "code": "NEC 2023", "section": "690.7(D)" }
+      ],
+      "appliesWhen": "always (DC PV source present)"
+    },
+    {
+      "id": "ac-point-of-connection-disconnect",
+      "title": "AC / Interactive System Point-of-Interconnection Disconnect Rating",
+      "text": "PHOTOVOLTAIC SYSTEM AC DISCONNECT\nRATED AC OUTPUT CURRENT:  ____ A\nNOMINAL OPERATING AC VOLTAGE: ____ V",
+      "signalWord": null,
+      "colors": { "background": "#FFFFFF", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Interactive-inverter output rating marking. Include a cross-reference to the DC disconnect location.",
+      "material": "Engraved laminated plastic or durable weatherproof label.",
+      "location": "On the AC disconnecting means at the point of interconnection.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "690.54" },
+        { "code": "NEC 2020", "section": "690.54 / 705.10" },
+        { "code": "NEC 2023", "section": "705.10" }
+      ],
+      "appliesWhen": "utility-interactive (grid-tied) system"
+    },
+    {
+      "id": "ac-disconnect-marking",
+      "title": "AC Disconnect Identification",
+      "text": "PV SYSTEM AC DISCONNECT",
+      "signalWord": null,
+      "colors": { "background": "#FFD100", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Must indicate open/closed position. Utility often requires a visible, lockable, load-side AC disconnect labeled clearly for the lineman.",
+      "material": "Engraved laminated plastic; weatherproof if outdoors at meter.",
+      "location": "On the exterior AC disconnect switch (typically near the utility meter).",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "690.13 / 705.20" },
+        { "code": "NEC 2023", "section": "705.20" }
+      ],
+      "appliesWhen": "utility-interactive; AC disconnect required by AHJ/utility"
+    },
+    {
+      "id": "backfeed-breaker-do-not-relocate",
+      "title": "Backfed Breaker \"Do Not Relocate\" Warning",
+      "text": "WARNING\nPOWER SOURCE OUTPUT CONNECTION\nDO NOT RELOCATE THIS OVERCURRENT DEVICE",
+      "signalWord": "WARNING",
+      "colors": { "background": "#FF8200", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "NEC 2023 wording uses 'POWER SOURCE OUTPUT CONNECTION'; NEC 2017/2020 used 'INVERTER OUTPUT CONNECTION'. Must comply with 110.21(B).",
+      "material": "Durable engraved or UV-resistant label.",
+      "location": "On the distribution equipment (main panel/subpanel) adjacent to the back-fed breaker from the PV/power source.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "705.12(D)(2)(3)(b)" },
+        { "code": "NEC 2020", "section": "705.12(B)(2)(3)(b)" },
+        { "code": "NEC 2023", "section": "705.12(B)(3) / 705.13" }
+      ],
+      "appliesWhen": "load-side interconnection via back-fed breaker (busbar/breaker method)"
+    },
+    {
+      "id": "dual-power-source-inverter-output",
+      "title": "Dual Power Source / Inverter-Output Connection Warning",
+      "text": "WARNING\nDUAL POWER SUPPLY\nSOURCES: UTILITY GRID AND PV SOLAR ELECTRIC SYSTEM",
+      "signalWord": "WARNING",
+      "colors": { "background": "#FF8200", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Common utility/AHJ-required marking indicating a second power source feeds the equipment. Often paired with the 705.10 directory.",
+      "material": "Durable engraved or UV-resistant label.",
+      "location": "On the main service panel / meter-main and any panel fed by more than one source.",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "705.10 / 705.12(B)(2)" },
+        { "code": "NEC 2023", "section": "705.10" }
+      ],
+      "appliesWhen": "utility-interactive (multiple sources feed the equipment)"
+    },
+    {
+      "id": "multiple-sources-of-power-directory",
+      "title": "Multiple Sources of Power / Power-Source Directory Marking",
+      "text": "CAUTION\nMULTIPLE SOURCES OF POWER",
+      "signalWord": "CAUTION",
+      "colors": { "background": "#FFD100", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.375,
+      "letterHeightNotes": "Marking that accompanies the 705.10 directory/plaque (see directoryPlacard). NEC 2023 705.10 requires the plaque to denote the location of each power-source disconnect and be grouped with other on-site source plaques.",
+      "material": "Permanent engraved plaque; weatherproof if at exterior service.",
+      "location": "At each service equipment location or an approved readily visible location.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "705.10" },
+        { "code": "NEC 2020", "section": "705.10" },
+        { "code": "NEC 2023", "section": "705.10" }
+      ],
+      "appliesWhen": "utility-interactive / multiple on-site power sources"
+    },
+    {
+      "id": "line-side-tap-warning",
+      "title": "Line-Side (Supply-Side) Tap / Service-Connection Warning",
+      "text": "WARNING\nPHOTOVOLTAIC SYSTEM CONNECTED ON LINE SIDE OF SERVICE DISCONNECT\nDO NOT DISCONNECT PV SUPPLY-SIDE CONNECTION WITHOUT DE-ENERGIZING SERVICE",
+      "signalWord": "WARNING",
+      "colors": { "background": "#FF8200", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Marks a supply-side / line-side connection ahead of the service disconnect; alerts that the tap remains energized from the utility.",
+      "material": "Durable engraved or UV-resistant label; weatherproof at meter/service.",
+      "location": "At the supply-side connection point and on the service equipment/meter-main.",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "705.11 / 705.12(A)" },
+        { "code": "NEC 2023", "section": "705.11" }
+      ],
+      "appliesWhen": "supply-side (line-side / service-side) interconnection"
+    },
+    {
+      "id": "photovoltaic-system-connected",
+      "title": "\"Photovoltaic System Connected\" Service Marking",
+      "text": "CAUTION\nPHOTOVOLTAIC SYSTEM CONNECTED\nUTILITY-INTERACTIVE",
+      "signalWord": "CAUTION",
+      "colors": { "background": "#FFD100", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.375,
+      "letterHeightNotes": "Utility-facing marking on the service so linemen know a generating source is present. Often required by the interconnecting utility in addition to NEC.",
+      "material": "Durable engraved or UV-resistant weatherproof label.",
+      "location": "On the utility meter / service disconnect.",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "705.10 / 705.12" },
+        { "code": "NEC 2023", "section": "705.10" }
+      ],
+      "appliesWhen": "utility-interactive"
+    },
+    {
+      "id": "ess-disconnect",
+      "title": "Energy Storage System Disconnect",
+      "text": "ENERGY STORAGE SYSTEM DISCONNECT",
+      "signalWord": null,
+      "colors": { "background": "#FFD100", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Disconnect must indicate open/closed position. For non-1-/2-family dwellings, disconnect marking must also include nominal output voltage, available fault current, arc-flash label, and date of calculation.",
+      "material": "Engraved laminated plastic or UV-resistant durable label.",
+      "location": "On the ESS disconnecting means.",
+      "codeRefs": [
+        { "code": "NEC 2017", "section": "706.15 / 706.16" },
+        { "code": "NEC 2020", "section": "706.15 / 706.16" },
+        { "code": "NEC 2023", "section": "706.15" }
+      ],
+      "appliesWhen": "energy storage present"
+    },
+    {
+      "id": "ess-master-placard",
+      "title": "Energy Storage System Presence Placard / Signage",
+      "text": "ENERGY STORAGE SYSTEM\nON-SITE ENERGY STORAGE (BATTERY) PRESENT\nSEE EMERGENCY SHUTDOWN PROCEDURE AT SERVICE DISCONNECT",
+      "signalWord": "WARNING",
+      "colors": { "background": "#FF8200", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.375,
+      "letterHeightNotes": "IFC 1207 (and CFC 1207) require durable weather-resistant 'ENERGY STORAGE SYSTEM' identification at every external access point, readable from a safe approach distance. A master placard at the main service must indicate presence + location + shutdown procedure.",
+      "material": "Engraved phenolic, UV-rated vinyl on aluminum, or printed metal placard (fire-marshal accepted).",
+      "location": "At each external access point to the ESS and at the main service disconnect.",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "706" },
+        { "code": "NEC 2023", "section": "706" },
+        { "code": "IFC 2018", "section": "1206 / 1207" },
+        { "code": "IFC 2021", "section": "1207" }
+      ],
+      "appliesWhen": "energy storage present"
+    },
+    {
+      "id": "grounding-electrode-conductor-marking",
+      "title": "Grounding / Bonding Conductor Identification",
+      "text": "GROUNDING ELECTRODE CONDUCTOR — DO NOT DISCONNECT",
+      "signalWord": null,
+      "colors": { "background": "#FFFFFF", "text": "#008000", "border": "#000000" },
+      "minLetterHeightIn": 0.1875,
+      "letterHeightNotes": "Equipment grounding/bonding conductors identified by green (or green/yellow) color per 250.119; GEC connection points labeled where required. Bonding jumpers at array marked.",
+      "material": "Durable weatherproof label / green tape marker.",
+      "location": "At grounding electrode conductor terminations, array equipment-ground bonding points, and irreversible ground connections.",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "250.119 / 690.43 / 690.47" },
+        { "code": "NEC 2023", "section": "250.119 / 690.43 / 690.47" }
+      ],
+      "appliesWhen": "always (grounding/bonding system)"
+    },
+    {
+      "id": "inverter-listing-label",
+      "title": "Inverter / PVRSS Equipment Rating & Listing Label",
+      "text": "INVERTER — UTILITY-INTERACTIVE\nLISTED PER UL 1741 (SA/SB)\nMAX AC OUTPUT: ____ A @ ____ V\nRAPID SHUTDOWN: PV RAPID SHUTDOWN EQUIPMENT (PVRSS) — LISTED",
+      "signalWord": null,
+      "colors": { "background": "#FFFFFF", "text": "#000000", "border": "#000000" },
+      "minLetterHeightIn": 0.125,
+      "letterHeightNotes": "Typically factory-applied nameplate; field-verify listing/ratings. Identifies rapid-shutdown method/PVRSS where applicable.",
+      "material": "Manufacturer nameplate (metal/engraved) + field label as needed.",
+      "location": "On the inverter / power conversion equipment enclosure.",
+      "codeRefs": [
+        { "code": "NEC 2020", "section": "690.4 / 690.56 / 110.21(B)" },
+        { "code": "NEC 2023", "section": "690.4 / 690.12" }
+      ],
+      "appliesWhen": "always (inverter/PCE present)"
+    }
+  ],
+
+  "directoryPlacard": {
+    "id": "service-disconnect-directory-plaque",
+    "title": "Solar/PV System Permanent Directory Plaque at Main Service Disconnect",
+    "purpose": "A single permanent plaque/directory at the main service equipment that (a) marks the presence of PV and any on-site power sources, (b) shows the location of every disconnecting means and PV/ESS equipment via a building directory diagram, and (c) gives first responders the rapid-shutdown / emergency-shutdown steps. Satisfies the grouped power-source directory (705.10), the PV-disconnect-location plaque (690.56(B)), and the rapid-shutdown building placard requirement (690.12(D)/690.56(C)).",
+    "sections": [
+      {
+        "heading": "MULTIPLE SOURCES OF POWER",
+        "contentDescription": "ANSI CAUTION header identifying that the building is served by more than one source. Grouped with any other on-site source plaques.",
+        "exampleLines": [
+          "CAUTION: MULTIPLE SOURCES OF POWER",
+          "THIS BUILDING IS SERVED BY: UTILITY GRID + SOLAR PV",
+          "(+ ENERGY STORAGE, IF PRESENT)"
+        ]
+      },
+      {
+        "heading": "SYSTEM RATINGS",
+        "contentDescription": "Key electrical ratings of the PV/ESS output as seen at the point of interconnection.",
+        "exampleLines": [
+          "RATED AC OUTPUT CURRENT: ____ A",
+          "NOMINAL OPERATING AC VOLTAGE: ____ V",
+          "MAX DC SYSTEM VOLTAGE: ____ V DC",
+          "INTERCONNECTION TYPE: LOAD-SIDE BACK-FED BREAKER / SUPPLY-SIDE TAP"
+        ]
+      },
+      {
+        "heading": "LOCATION OF DISCONNECTS & PV EQUIPMENT (DIRECTORY DIAGRAM)",
+        "contentDescription": "A simple plan/elevation diagram of the building marking the location of each disconnecting means and PV/ESS equipment: main service disconnect, AC PV disconnect, DC/PV system disconnect, inverter(s), rapid-shutdown initiator, and ESS/battery. Each item keyed to the diagram.",
+        "exampleLines": [
+          "1. MAIN SERVICE DISCONNECT — EXTERIOR, RIGHT OF METER",
+          "2. PV AC DISCONNECT — EXTERIOR, LEFT OF METER (LOCKABLE)",
+          "3. PV DC / SYSTEM DISCONNECT — AT INVERTER, GARAGE WALL",
+          "4. INVERTER — GARAGE EXTERIOR WALL",
+          "5. RAPID SHUTDOWN SWITCH — ADJACENT TO PV AC DISCONNECT",
+          "6. ENERGY STORAGE (ESS) DISCONNECT — GARAGE (IF PRESENT)"
+        ]
+      },
+      {
+        "heading": "RAPID SHUTDOWN",
+        "contentDescription": "Rapid-shutdown type + roof diagram with array boundary; instruction to operate the initiator. Reproduces the 690.12(D)/690.56(C) placard within the directory.",
+        "exampleLines": [
+          "SOLAR PV SYSTEM IS EQUIPPED WITH RAPID SHUTDOWN",
+          "TURN RAPID SHUTDOWN SWITCH TO THE \"OFF\" POSITION",
+          "TYPE: CONDUCTORS OUTSIDE ARRAY BOUNDARY REDUCE TO A SAFE LEVEL (or INSIDE, per system)",
+          "[ROOF DIAGRAM WITH SHADED ARRAY BOUNDARY]"
+        ]
+      },
+      {
+        "heading": "EMERGENCY SHUTDOWN PROCEDURE",
+        "contentDescription": "Numbered steps a first responder follows to de-energize the system.",
+        "exampleLines": [
+          "1. OPEN MAIN SERVICE / UTILITY DISCONNECT",
+          "2. OPEN PV AC DISCONNECT",
+          "3. TURN RAPID SHUTDOWN SWITCH TO \"OFF\"",
+          "4. OPEN ESS / BATTERY DISCONNECT (IF PRESENT)",
+          "5. ARRAY CONDUCTORS REMAIN ENERGIZED IN DAYLIGHT — TREAT AS LIVE"
+        ]
+      },
+      {
+        "heading": "SYSTEM OWNER / INSTALLER",
+        "contentDescription": "Installer identification and (NEC 2023 705.10 addition) an off-site emergency/monitoring contact.",
+        "exampleLines": [
+          "INSTALLED BY: ____________________",
+          "EMERGENCY / MONITORING CONTACT: ____________________",
+          "INSTALL DATE: __________"
+        ]
+      }
+    ],
+    "layoutNotes": "Real permanent plaques are laid out as a single durable placard: a CAUTION banner across the top; a labeled building directory DIAGRAM (plan or simple building outline with a roof, array boundary shaded, and numbered callouts to each disconnect) occupying the center-left; a ratings/interconnection block and numbered emergency-shutdown steps on the right; the rapid-shutdown roof diagram + title text in a bottom band. Engraved phenolic or UV-stable printed aluminum, high-contrast, permanently affixed at the service disconnect and readable at eye level. Group with other on-site source directories so all appear together.",
+    "codeRefs": [
+      { "code": "NEC 2017", "section": "690.56(B) / 705.10" },
+      { "code": "NEC 2020", "section": "690.56(B) / 705.10 / 690.56(C)" },
+      { "code": "NEC 2023", "section": "705.10 / 690.12(D) / 690.56(B)" },
+      { "code": "IFC 2018", "section": "1204 (rooftop-mounted PV marking) / 1207 (ESS)" },
+      { "code": "IFC 2021", "section": "1205 (PV) / 1207 (ESS)" }
+    ]
+  },
+
+  "vendors": [
+    { "name": "HellermannTyton", "note": "Publishes the widely used PV labeling white paper and sells NEC-compliant reflective/UV label kits keyed to specific 690/705 sections." },
+    { "name": "Diversified Marking Systems / Solar Label Kits", "note": "Prepackaged NEC 690/705/706 solar label kits by code cycle (2017/2020/2023) for residential and commercial." },
+    { "name": "PVLabels.com", "note": "Solar-specific rapid-shutdown and disconnect labels; per-section and per-AHJ label kits." },
+    { "name": "Planset Signs (plansetsigns.com)", "note": "Custom engraved directory plaques and 705.10 identification / 705.12 backfeed placards built to plan-set specs." },
+    { "name": "Metal Marker Mfg.", "note": "Engraved metal/phenolic nameplates and permanent directory plaques for service disconnects." },
+    { "name": "Brady Corp. (Bradley)", "note": "Industrial ANSI Z535 safety labels and durable engraved placards; arc-flash and warning labels." },
+    { "name": "DuraLabel / Graphic Products", "note": "On-demand UV/weatherproof label printers and pre-made NEC PV/ESS label templates." },
+    { "name": "PrintPro AZ", "note": "Title 24 / CFC 1207 and NEC 706 ESS placard specialist (California fire-marshal-accepted formats)." }
+  ],
+
+  "notes": [
+    "CODE CYCLE MATTERS: Always confirm the AHJ's adopted NEC edition (2017 vs 2020 vs 2023) — label wording and section numbers changed. 2023 relocated the rapid-shutdown building placard from 690.56(C) to 690.12(D).",
+    "RAPID-SHUTDOWN WORDING CHANGED: 2017 said 'PHOTOVOLTAIC SYSTEM'; 2020 used the controlled-conductor descriptions; 2023 standardized on 'SOLAR PV SYSTEM IS EQUIPPED WITH RAPID SHUTDOWN' and requires a building diagram with the array boundary.",
+    "REFLECTIVE / COLOR: NEC 2017 & 2020 mandated the rapid-shutdown building placard be reflective with white on red for the title; NEC 2023 dropped the specific reflective/red color mandate for that placard but the RSD INITIATOR label is still white-on-red reflective across all cycles. Rooftop/outdoor labels must be UV-resistant and weatherproof regardless.",
+    "LETTER HEIGHTS DIFFER BY LABEL: RSD title text = min 3/8 in (9.5 mm); RSD body/other body text = min 3/16 in (4.8 mm). 'PHOTOVOLTAIC POWER SOURCE' conduit marking commonly 3/8 in. Data/ratings labels only need to be legible/durable. Do not apply one height to all labels.",
+    "BACKFEED BREAKER WORDING: NEC 2017/2020 used 'INVERTER OUTPUT CONNECTION'; NEC 2023 (705.12(B)(3)/705.13) uses 'POWER SOURCE OUTPUT CONNECTION — DO NOT RELOCATE THIS OVERCURRENT DEVICE' to cover all interconnected sources.",
+    "MAX DC VOLTAGE LABEL MOVED: In 2017/2020 the DC max-system-voltage data label is 690.53; in 2023 it moved to 690.7(D).",
+    "705.10 DIRECTORY (2023): must be grouped with other on-site power-source directories and, new in 2023, include the off-site emergency/monitoring contact; it denotes the location of every power-source disconnect.",
+    "ESS DUAL CODE PATH: NEC 706 satisfies the electrical inspector; IFC/CFC 1207 (Chapter 12) satisfies the fire marshal — a battery project generally needs BOTH. ESS ID signage must be at every external access point and readable from a safe approach distance.",
+    "ALL 690/705/706 SAFETY LABELS must comply with NEC 110.21(B): permanently affixed, of sufficient durability for the environment, and NOT handwritten. Engraved phenolic or UV-rated printed vinyl/aluminum are the accepted formats.",
+    "AHJ / UTILITY VARIATION: Utilities often require an additional visible, lockable, load-side AC disconnect with their own 'PHOTOVOLTAIC SYSTEM CONNECTED' / 'DUAL POWER SUPPLY' wording beyond the NEC minimum. Verify local amendments before finalizing the sticker sheet.",
+    "SIGNAL WORDS follow ANSI Z535.4: DANGER (white on red), WARNING (black on orange), CAUTION (black on yellow), NOTICE (white on blue). Some off-the-shelf solar kits render NEC 'WARNING' items in red/white; NEC text calls them warnings — match the adopted standard and AHJ preference."
+  ]
+}
