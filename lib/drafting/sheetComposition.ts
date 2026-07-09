@@ -345,6 +345,7 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   mountSys: string;
   rafterSize: string;
   rafterSpacing: number;
+  isTruss: boolean;
   attachSpacing: number;
   lagSpec: string;
   embedSpec: string;
@@ -437,6 +438,11 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     mountSys:      _mountName.toUpperCase(),
     rafterSize:    ((p?.rafterSize as string) || '2x6'),
     rafterSpacing: (p?.rafterSpacing as number) || 24,
+    // Framing type mirrors the SAME determination PV-4C/PE-1/CERT use, so PV-3
+    // labels the framing consistently with the structural sheets (truss vs stick).
+    isTruss: ((c?.structural as any)?.rafter?.framingType === 'truss')
+      || (((c?.structural as any)?.rafter?.bendingMoment === 0)
+        && (((c?.structural as any)?.rafter?.allowableBendingMoment as number) || 0) > 0),
     // Engineering-resolved spacing first (V4 mount layout — e.g. auto-resolved
     // 36"), then the user's input, then the racking system's rated max.
     attachSpacing: (_ca?.maxAllowedSpacing as number)
@@ -612,6 +618,9 @@ function roofComposition(
   const _railless = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys);
   const _attachDisplay = _railless ? '48" O.C. STAGGERED' : `${d.attachSpacing}" O.C. MAX`;
   const _attachInto = _railless ? 'direct-attach mounts @ 48" O.C. staggered' : `L-foot @ ${d.attachSpacing}" O.C.`;
+  // Framing term matches the structural authority (PV-4C/PE-1/CERT) so the set
+  // doesn't say "RAFTER" on PV-3 while the calcs certify a pre-engineered truss.
+  const _frameLabel = d.isTruss ? 'TRUSS' : 'RAFTER';
 
   const dataRows: DataRow[] = isPlan
     ? [
@@ -628,8 +637,8 @@ function roofComposition(
       ]
     : [
         { label: 'MOUNTING SYS',   value: d.mountSys },
-        { label: 'RAFTER SIZE',    value: d.rafterSize },
-        { label: 'RAFTER SPACING', value: `${d.rafterSpacing}" O.C.` },
+        { label: `${_frameLabel} SIZE`,    value: d.rafterSize },
+        { label: `${_frameLabel} SPACING`, value: `${d.rafterSpacing}" O.C.` },
         { label: 'ATTACH SPACING', value: _attachDisplay,   bold: true },
         { label: 'LAG BOLT',       value: d.lagSpec },
         { label: 'EMBEDMENT',      value: d.embedSpec,                      bold: true, highlight: true },
@@ -645,14 +654,14 @@ function roofComposition(
         { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
-        { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into rafters` },
+        { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into ${_frameLabel.toLowerCase()}s` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
         { n: 2, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'DIRECT-ATTACH MOUNT' : 'MOUNTING RAIL', sub: d.mountSys },
         { n: 3, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
         { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
-        { n: 5, label: `RAFTER ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
+        { n: 5, label: `${_frameLabel} ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
         { n: 6, label: d.conduitType + ' CONDUIT', sub: 'see conductor schedule' },
         { n: 7, label: 'BONDING JUMPER', sub: 'NEC 690.43' },
       ];
