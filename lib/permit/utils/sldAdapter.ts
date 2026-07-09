@@ -9,7 +9,7 @@ import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-prof
 import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
-import { balancedBranchSizes, microBranchCount, planMicroBranches } from './branching';
+import { buildConductorAuthority } from './conductorAuthority';
 
 /**
  * Build a live SLDProfessionalInput from PermitInput canonical data.
@@ -18,6 +18,10 @@ import { balancedBranchSizes, microBranchCount, planMicroBranches } from './bran
  */
 export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | null): SLDProfessionalInput {
   const { project, system, compliance } = input;
+
+  // Shared conductor authority — E-1's branch conductors and system EGC MUST
+  // match PV-4A/PV-4B/BOM; they all read this same function.
+  const _auth = buildConductorAuthority(input, cad);
 
   // ── Equipment resolution (same 4-source priority as all planset pages) ──
   const eq = getEquipmentContext(input, cad);
@@ -102,34 +106,16 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
 
   // ── Micro-specific ──
   const deviceCount = isMicro ? totalPanels : undefined;
-  // PLANE-AWARE branch count (same planner as PV-2B — branches never span
-  // roof faces) so the SLD can never disagree with the array sheet. Falls
-  // back to the flat per-model NEC count when panel positions are absent.
-  const _sldPanels = (project as any).panelPositions as Array<{id:string;planeId?:string;arrayId?:string;row?:number;col?:number}> | undefined;
-  const _branchModel = inv0?.model ?? eq.inverterModel;
-  const _sldPlan = isMicro && _sldPanels?.length ? planMicroBranches(_sldPanels, _branchModel) : null;
-  const nBranches = isMicro
-    ? (_sldPlan?.count ?? microBranchCount(totalPanels, _branchModel))
-    : undefined;
-  // Full per-branch plan for the renderer — without this the SLD fell back to
-  // ceil(modules/16) and a system-level 100A OCPD on the branch rows.
-  const _perMicroA = isMicro && totalPanels > 0 && totalAcKw > 0
-    ? (totalAcKw * 1000 / totalPanels) / 240
-    : 0;
-  const _branchSizes = isMicro
-    ? (_sldPlan?.sizes?.length ? _sldPlan.sizes : balancedBranchSizes(totalPanels, nBranches ?? 1))
-    : [];
-  const microBranches = isMicro ? _branchSizes.map((sz, i) => {
-    const amps = sz * _perMicroA;
-    return {
-      branchIndex: i + 1,
-      deviceCount: sz,
-      branchCurrentA: amps,
-      ocpdAmps: necNextStandardOcpd(amps * 1.25) || 20,
-      conductorCallout: '#10 AWG THWN-2',
-      necReference: 'NEC 690.8(B)',
-    };
-  }) : undefined;
+  // Branch rows come from the shared authority (same planner, same OCPD math)
+  // so the SLD's conductor gauge tracks PV-4A/PV-4B instead of a hardcoded #10.
+  const microBranches = isMicro ? _auth.microBranches.map((b) => ({
+    branchIndex: b.index,
+    deviceCount: b.deviceCount,
+    branchCurrentA: b.branchCurrentA,
+    ocpdAmps: b.ocpdAmps,
+    conductorCallout: `${b.wireGauge} THWN-2`,
+    necReference: 'NEC 690.8(B)',
+  })) : undefined;
 
   // ── DC OCPD (string topology only) ──
   // Error 5b fix: ocpd IS declared on string type — no need for `as any`
@@ -183,11 +169,10 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // fabricated 32% fill / canned voltage drops.
     acConduitFillPct:        compliance.electrical?.conduitFill?.fillPercent ?? undefined,
     acVoltageDropPct:        compliance.electrical?.acVoltageDrop ?? undefined,
-    // EGC sized by the engine per NEC 250.122 (e.g. #8 Cu on a 100A OCPD) —
-    // without this the renderer fell back to #10 AWG regardless of OCPD.
-    egcGauge:                compliance.electrical?.groundingConductor
-      ? _plainGauge(compliance.electrical.groundingConductor)
-      : undefined,
+    // EGC from the shared authority — same value PV-4B prints (prefers the
+    // engine groundingConductor, falls back to NEC 250.122 on the governing
+    // OCPD). Never re-derive here.
+    egcGauge:                _auth.egc.gauge,
 
     // String-specific
     panelsPerString:         isMicro ? 1 : panelsPerString,

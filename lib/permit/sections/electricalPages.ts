@@ -9,7 +9,8 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, isSupplySideInterconnection, utilityDisplayName, necNextStandardOcpd, hasRealBattery, type SysType } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
-import { balancedBranchSizes, microBranchCount, planMicroBranches } from '../utils/branching';
+import { microBranchCount, planMicroBranches } from '../utils/branching';
+import { buildConductorAuthority } from '../utils/conductorAuthority';
 
 // ─── (Existing pages reused with minor upgrades) ─────────────────────────────
 
@@ -20,6 +21,7 @@ import { balancedBranchSizes, microBranchCount, planMicroBranches } from '../uti
 
 export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance, rulesResult, overrides, system } = input;
+  const _auth = buildConductorAuthority(input, cad);
   const necVer = compliance.jurisdiction?.necVersion || '2020';
   // CAD-sourced electrical values — authoritative
   const cadTotalDcKw  = cad.totalDcKw  || system?.totalDcKw  || 0;
@@ -117,18 +119,17 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         if (!_pairIsMicro) return '';
         const _pp = (input.project.panelPositions ?? []) as Array<{ id: string; planeId?: string; arrayId?: string; row?: number; col?: number; lat?: number; lng?: number }>;
         if (!_pp.length || !(_pairAcW > 0)) return '';
-        const _plan = planMicroBranches(_pp, _inv0?.model);
-        const _perA = _pairAcW / 240;
-        const _rows = _plan.sizes.map((n, i) => {
-          const amps = n * _perA;
-          const cont = amps * 1.25;
+        // Branch OCPD / conductor / EGC come from the shared conductor
+        // authority — the SAME values E-1, PV-4B and the BOM print, so this
+        // schedule can never show a flat 20A/#10 while the SLD shows another.
+        const _rows = _auth.microBranches.map((b, i) => {
           return `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">` +
-            `<td class="fw9 mono">B${i + 1}</td>` +
-            `<td>${n} × microinverter</td>` +
-            `<td style="text-align:right;font-family:monospace">${amps.toFixed(1)} A</td>` +
-            `<td style="text-align:right;font-family:monospace">${cont.toFixed(1)} A</td>` +
-            `<td style="text-align:center;font-family:monospace">20 A</td>` +
-            `<td>#10 AWG THWN-2 + EGC</td>` +
+            `<td class="fw9 mono">B${b.index}</td>` +
+            `<td>${b.deviceCount} × microinverter</td>` +
+            `<td style="text-align:right;font-family:monospace">${b.branchCurrentA.toFixed(1)} A</td>` +
+            `<td style="text-align:right;font-family:monospace">${b.continuousA.toFixed(1)} A</td>` +
+            `<td style="text-align:center;font-family:monospace">${b.ocpdAmps} A</td>` +
+            `<td>${b.conductorCallout}</td>` +
             `<td>${i < 4 ? 'IQ Combiner' : 'AC Subpanel (see E-1)'}</td>` +
             `</tr>`;
         }).join('');
@@ -191,6 +192,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
 export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
   const elec = compliance.electrical;
+  const _auth = buildConductorAuthority(input, cad);
   // CAD-sourced electrical values
   const cadTotalPanels = cad.totalPanels;
   const cadTotalDcKw   = cad.totalDcKw;
@@ -211,38 +213,22 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             // FIX v47.341: Topology-aware DC/AC branch rows
             const _csTopo = topologyToLegacy(getInverterTopology(input, cad));
             if (_csTopo === 'MICRO') {
-              // Microinverter: No traditional DC strings — show AC branch circuit rows.
-              // Branch current is AC: (micros on branch) × per-micro AC output amps.
-              // The old code used the MODULE DC Isc×1.25 (8.22A) with a 15A OCPD —
-              // fabricated numbers on an AC circuit schedule.
-              const eq_cs = getEquipmentContext(input, cad);
-              const _csModules = system.totalPanels || 0;
-              // PLANE-AWARE branch plan — same planner as PV-2B/SLD (economical,
-              // never desyncs); flat NEC fallback without positions.
-              const _csPanels = (project as any).panelPositions as Array<{id:string;planeId?:string;arrayId?:string;row?:number;col?:number}> | undefined;
-              const _csPlan = _csPanels?.length ? planMicroBranches(_csPanels, eq_cs.inverterModel) : null;
-              const _csSizes = _csPlan?.sizes?.length
-                ? _csPlan.sizes
-                : balancedBranchSizes(_csModules, microBranchCount(_csModules, eq_cs.inverterModel));
-              const _csPerMicroA = (_csModules > 0 && (system.totalAcKw || 0) > 0)
-                ? ((system.totalAcKw as number) * 1000 / _csModules) / 240
-                : 0;
-              return _csSizes.map((sz, i) => {
-                const amps = sz * _csPerMicroA;
-                const ocpd = necNextStandardOcpd(amps * 1.25) || 20;
-                return `
+              // Microinverter: No traditional DC strings — show AC branch circuit
+              // rows sourced from the shared conductor authority (same branch
+              // OCPD/gauge as PV-4A + E-1). The old code hardcoded '#10 AWG' and
+              // re-derived the OCPD locally.
+              return _auth.microBranches.map((b) => `
               <tr>
-                <td class="fw7">AC Branch ${i + 1}</td>
-                <td>${sz} × Microinverter</td>
+                <td class="fw7">AC Branch ${b.index}</td>
+                <td>${b.deviceCount} × Microinverter</td>
                 <td>AC Combiner / Panel</td>
-                <td>#10 AWG THWN-2</td>
-                <td>${amps.toFixed(1)}A</td>
-                <td>${ocpd}A</td>
+                <td>${b.wireGauge} THWN-2</td>
+                <td>${b.branchCurrentA.toFixed(1)}A</td>
+                <td>${b.ocpdAmps}A</td>
                 <td>—</td>
                 <td>${project.conduitType || 'EMT'}</td>
                 <td>${project.wireLength || '—'} ft</td>
-              </tr>`;
-              }).join('');
+              </tr>`).join('');
             } else {
               // String / Optimizer: Show traditional DC string rows
               return (system.inverters?.flatMap((inv, invIdx) =>
@@ -275,30 +261,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           <tr style="background:#fff">
             <td class="fw7">EGC</td>
             <td>Array</td><td>${isSupplySideInterconnection(input) ? 'AC Disconnect (ground bus)' : 'Main Panel'}</td>
-            <td>${(() => {
-              // FIX v47.341: Auto-size EGC per NEC 250.122 Table based on circuit OCPD
-              // Always compute — stored groundingConductor may be stale / incorrect
-              const _egcTopo = topologyToLegacy(getInverterTopology(input, cad));
-              let _egcOcpd = 20; // default
-              if (_egcTopo === 'MICRO') {
-                // Micro: EGC sized per branch circuit OCPD
-                const _egcEq = getEquipmentContext(input, cad);
-                const _egcIsc = _egcEq.panelIsc || 0;
-                _egcOcpd = _egcIsc > 0 ? necNextStandardOcpd(_egcIsc * 1.25 * 1.25) : 20;
-              } else {
-                // String/Optimizer: EGC sized per largest string OCPD
-                const _egcStr0 = system.inverters?.[0]?.strings?.[0];
-                const _egcIscStr = _egcStr0?.isc || 0;
-                _egcOcpd = _egcIscStr > 0 ? necNextStandardOcpd(_egcIscStr * 1.25 * 1.25) : 20;
-              }
-              if (_egcOcpd <= 15)  return '#14 AWG';
-              if (_egcOcpd <= 20)  return '#12 AWG';
-              if (_egcOcpd <= 30)  return '#10 AWG';
-              if (_egcOcpd <= 60)  return '#10 AWG';
-              if (_egcOcpd <= 100) return '#8 AWG';
-              if (_egcOcpd <= 200) return '#6 AWG';
-              return '#4 AWG';
-            })()} bare Cu</td>
+            <td>${_auth.egc.gauge} bare Cu</td>
             <td>—</td><td>—</td><td>—</td>
             <td>${project.conduitType}</td>
             <td>${project.wireLength} ft</td>
@@ -480,7 +443,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <!-- EGC rail -> inverter -->
             <line x1="150" y1="71" x2="150" y2="94" stroke="#127a3e" stroke-width="1.8"/>
             <text x="156" y="86" font-size="7" fill="#0f5c30" font-weight="bold">EGC</text>
-            <text x="156" y="94" font-size="6" fill="#0f5c30">#12 Cu · 250.122</text>
+            <text x="156" y="94" font-size="6" fill="#0f5c30">${_auth.egc.gauge} Cu · 250.122</text>
             <!-- inverter / combiner -->
             <rect x="108" y="94" width="84" height="26" fill="#f4f6f9" stroke="#1a2230" stroke-width="1.2" rx="1"/>
             <text x="150" y="110" text-anchor="middle" font-size="7" fill="#1a2230" font-weight="bold">INVERTER / AC COMBINER</text>
@@ -503,14 +466,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         <div style="font-size:var(--f-sm);line-height:1.6;">
           <div style="font-weight:900;font-size:9px;margin-bottom:4px;letter-spacing:0.5px;">GROUNDING & BONDING REQUIREMENTS</div>
           <div style="margin-bottom:3px;">1. All module frames bonded to mounting rail via listed bonding hardware (WEEB, lay-in lug, or equivalent) per UL 2703.</div>
-          <div style="margin-bottom:3px;">2. Equipment grounding conductor (EGC): ${(() => {
-            const _egcT = topologyToLegacy(getInverterTopology(input, cad));
-            let _oc = 20;
-            if (_egcT === 'MICRO') { const _eq = getEquipmentContext(input, cad); _oc = _eq.panelIsc > 0 ? necNextStandardOcpd(_eq.panelIsc * 1.25 * 1.25) : 20; }
-            else { const _s0 = input.system?.inverters?.[0]?.strings?.[0]; _oc = _s0?.isc ? necNextStandardOcpd(_s0.isc * 1.25 * 1.25) : 20; }
-            if (_oc <= 15) return '#14 AWG'; if (_oc <= 20) return '#12 AWG'; if (_oc <= 30) return '#10 AWG';
-            if (_oc <= 60) return '#10 AWG'; if (_oc <= 100) return '#8 AWG'; if (_oc <= 200) return '#6 AWG'; return '#4 AWG';
-          })()} bare Cu min. per NEC 250.122 and 690.45.</div>
+          <div style="margin-bottom:3px;">2. Equipment grounding conductor (EGC): ${_auth.egc.gauge} bare Cu min. per NEC 250.122 and 690.45.</div>
           <div style="margin-bottom:3px;">3. EGC routed with circuit conductors in same raceway per NEC 690.43(A).</div>
           <div style="margin-bottom:3px;">4. Grounding electrode conductor (GEC) connected to existing building grounding electrode system per NEC 250.166.</div>
           <div style="margin-bottom:3px;">5. All connections made with listed connectors rated for the conductor material and environment.</div>
