@@ -218,7 +218,7 @@ export interface SLDProfessionalInput {
 // ── SVG Primitives ───────────────────────────────────────────────────────────
 
 function esc(s: string): string {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s ?? '').replace(/&(?![a-zA-Z0-9#]+;)/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function txt(x: number, y: number, s: string,

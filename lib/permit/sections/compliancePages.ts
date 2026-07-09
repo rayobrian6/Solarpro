@@ -6,6 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
+import { escapeH } from '../utils/drawing';
 import { interconnectionLabel } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
@@ -260,7 +261,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     const lineHtml = lbl.lines.map((line, i) =>
       `<div style="font-size:${i === 0 ? '10.5px' : '8.5px'};font-weight:${i === 0 ? '900' : '700'};` +
       `letter-spacing:${i === 0 ? '0.8px' : '0.2px'};line-height:1.45;` +
-      `white-space:normal;word-break:break-word;">${line}</div>`
+      `white-space:normal;word-break:break-word;">${escapeH(line)}</div>`
     ).join('');
     return `<div class=\"lbl-card\">` +
       `<div class=\"lbl-hdr\">` +

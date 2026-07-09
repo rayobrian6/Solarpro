@@ -180,7 +180,7 @@ export function computeFitWindow(
   return { minLng: minLng - marginFt, maxLng: maxLng + marginFt, minLat: minLat - marginFt, maxLat: maxLat + marginFt };
 }
 
-const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const esc = (s: string) => String(s).replace(/&(?![a-zA-Z0-9#]+;)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Point→segment distance (fake-degree space). */
 function ptSegDist(p: FakePt, a: FakePt, b: FakePt): number {

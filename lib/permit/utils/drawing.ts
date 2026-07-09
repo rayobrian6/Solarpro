@@ -594,9 +594,14 @@ export function composeDrawPage(
 }
 
 export function escapeH(s: string): string {
+  // Idempotent HTML escape: escapes bare <>&"' but leaves existing entities
+  // (&amp; &mdash; &#39; …) intact, so values that already contain entities or
+  // are escaped twice don't become &amp;mdash;. (Historically this function was
+  // a no-op — replacing each char with itself — a repo-wide XSS hole.)
   return String(s)
-    .replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')
-    .replace(/"/g,'"');
+    .replace(/&(?![a-zA-Z0-9#]+;)/g, '&amp;')   // escape bare & but keep &mdash; &#39; &times; …
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 

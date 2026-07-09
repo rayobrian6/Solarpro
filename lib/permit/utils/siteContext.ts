@@ -115,7 +115,7 @@ export function convexHullLatLng(pts: LatLng[]): LatLng[] {
 }
 
 // ── SVG helpers ─────────────────────────────────────────────────────────────
-const esc = (s: string) => String(s).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
+const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export interface SiteContextInsetInput {
   parcel?: { polygon?: LatLng[]; apn?: string | null; acres?: number | null; source?: string } | null;

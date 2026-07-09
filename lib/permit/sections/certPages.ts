@@ -23,14 +23,14 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
   const panelCount = system?.totalPanels ?? 0;
   const eq_cert = getEquipmentContext(input, cad);
   const invModel = eq_cert.inverterModel !== '—' ? eq_cert.inverterModel : '';
-  const address = project.address || '—';
+  const address = escapeH(project.address || '—');
   return `
   <div class="page">
     ${titleBlock(input, 'CERT', 'ENGINEER CERTIFICATION', pageNum, totalPages)}
     <div class="page-content">
       <div class="cert-header">ENGINEER OF RECORD CERTIFICATION</div>
       <div class="cert-subject">
-        <strong>PROJECT:</strong> ${project.projectName || '—'} | <strong>ADDRESS:</strong> ${address} | <strong>SYSTEM:</strong> ${panelCount} modules, ${sysSize} kW DC / ${sysAc} kW AC | <strong>INVERTER:</strong> ${invModel}
+        <strong>PROJECT:</strong> ${escapeH(project.projectName || '—')} | <strong>ADDRESS:</strong> ${address} | <strong>SYSTEM:</strong> ${panelCount} modules, ${sysSize} kW DC / ${sysAc} kW AC | <strong>INVERTER:</strong> ${invModel}
       </div>
       ${(() => {
         // The compliance statement must not contradict the package's own
@@ -474,8 +474,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
         </div>
         <div class="f-sm" style="text-align:right;color:#555;line-height:1.6;">
-          <div>RE: <strong style="color:#000;">${project.address || '—'}</strong></div>
-          <div>DATE: ${project.date || '—'}</div>
+          <div>RE: <strong style="color:#000;">${escapeH(project.address || '—')}</strong></div>
+          <div>DATE: ${escapeH(String(project.date || '—'))}</div>
         </div>
       </div>
 
@@ -528,7 +528,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
               <div class="f-xs" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the roof-mounted solar
-                photovoltaic array installation at <strong>${project.address || '—'}</strong> and determined that ${_allPass
+                photovoltaic array installation at <strong>${escapeH(project.address || '—')}</strong> and determined that ${_allPass
                   ? `the <strong>existing roof structure and lag bolt
                 attachment system are adequate to support the additional loads imposed by the proposed roof-mounted
                 PV array</strong>,`

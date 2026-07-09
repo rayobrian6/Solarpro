@@ -552,7 +552,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
   const F = { title:12, hdr:8.5, label:7.5, sub:7, seg:6.5, tiny:6.5, tb:7, tbTitle:10 };
 
   // ── SVG Primitives ────────────────────────────────────────────────────────
-  function esc(s: any): string { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function esc(s: any): string { return String(s??'').replace(/&(?![a-zA-Z0-9#]+;)/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
   function txt(x: number, y: number, s: any, o: any={}): string {
     const sz=o.sz??F.label, bld=o.bold?'font-weight="bold"':'', anc=`text-anchor="${o.anc??'start'}"`;

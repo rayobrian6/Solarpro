@@ -7,7 +7,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
-import { buildSchemSVG } from '../utils/drawing';
+import { buildSchemSVG, escapeH } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
 import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
 import { cropToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
@@ -31,7 +31,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const { project, system, compliance } = input;
   const aerial = input.aerialData;
 
-  const addr    = project.address || '—';
+  const addr    = escapeH(project.address || '—');
   const ahj     = compliance.jurisdiction?.ahj || '—';
   // FIX v47.341: Convert utility slug to display name
   const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
@@ -451,7 +451,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         }
         sx = Math.max(cropX + 60 * fk, Math.min(cropX + cropW - 60 * fk, sx));
         sy = Math.max(cropY + 26 * fk, Math.min(cropY + cropH - 20 * fk, sy));
-        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(13 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(3 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="${(3 * fk).toFixed(1)}" paint-order="stroke">${streetName}</text>`;
+        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(13 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(3 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="${(3 * fk).toFixed(1)}" paint-order="stroke">${escapeH(streetName)}</text>`;
       }
     }
 
