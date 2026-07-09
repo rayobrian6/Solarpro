@@ -1218,16 +1218,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   /* ── Warning label card ─────────────────────────────────────────────────── */
-  .lbl-card { border: var(--border-med); overflow: hidden; width: 100%; box-sizing: border-box; }
+  .lbl-card { border: 1.5px solid #111; border-radius: 3px; overflow: hidden; width: 100%; box-sizing: border-box; background: #fff; }
   .lbl-hdr {
-    background: #000; color: #fff;
-    padding: 3px 6px;
+    background: #1a1d24; color: #fff;
+    padding: 3px 7px;
     display: flex; justify-content: space-between; align-items: center;
     width: 100%; box-sizing: border-box;
   }
   .lbl-hdr-id  { font-weight: 900; font-size: 9px; font-family: var(--mono); letter-spacing: 1px; color: #fff; }
-  .lbl-hdr-ref { font-size: 7.5px; font-family: var(--mono); color: #ccc; }
-  .lbl-footer  { background: #f5f5f5; border-top: var(--border); padding: 3px 6px; font-size: 7.5px; color: #000; }
+  .lbl-hdr-ref { font-size: 7.5px; font-family: var(--mono); color: #b9c0cc; }
+  .lbl-body    { padding: 7px 9px; min-height: 58px; }
+  .lbl-signal  { display: flex; align-items: center; gap: 5px; font-weight: 900; font-size: 12.5px; letter-spacing: 1.2px; padding-bottom: 4px; margin-bottom: 5px; border-bottom: 1.4px solid currentColor; }
+  .lbl-footer  { background: #f2f4f7; border-top: 1px solid #111; padding: 3px 7px; font-size: 7.5px; color: #111; }
 
   /* ── Note / callout bar ──────────────────────────────────────────────────── */
   .note-bar {

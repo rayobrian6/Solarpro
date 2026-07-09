@@ -446,42 +446,58 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
       <div class="section-title">Grounding & Bonding Detail — NEC 690.43, 250.166</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
         <div style="text-align:center;">
-          <svg viewBox="0 0 280 180" width="200" height="130" style="display:block;margin:0 auto;">
-            <!-- Ground bus bar -->
-            <rect x="20" y="140" width="240" height="16" fill="#0a0" stroke="#000" stroke-width="1.5" rx="2"/>
-            <text x="140" y="152" text-anchor="middle" font-size="8" fill="#fff" font-weight="bold">EQUIPMENT GROUNDING BUS</text>
-            <!-- Module frames -->
-            <rect x="30" y="20" width="60" height="35" fill="#2255aa" stroke="#000" stroke-width="1" rx="2"/>
-            <text x="60" y="42" text-anchor="middle" font-size="7" fill="#fff">MODULE 1</text>
-            <rect x="110" y="20" width="60" height="35" fill="#2255aa" stroke="#000" stroke-width="1" rx="2"/>
-            <text x="140" y="42" text-anchor="middle" font-size="7" fill="#fff">MODULE 2</text>
-            <rect x="190" y="20" width="60" height="35" fill="#2255aa" stroke="#000" stroke-width="1" rx="2"/>
-            <text x="220" y="42" text-anchor="middle" font-size="7" fill="#fff">MODULE N</text>
-            <!-- Rail -->
-            <rect x="20" y="60" width="240" height="10" fill="#666" stroke="#000" stroke-width="1"/>
-            <text x="140" y="68" text-anchor="middle" font-size="6" fill="#fff">MOUNTING RAIL (BONDED)</text>
-            <!-- Bonding connections -->
-            <line x1="60" y1="55" x2="60" y2="60" stroke="#0a0" stroke-width="2"/>
-            <line x1="140" y1="55" x2="140" y2="60" stroke="#0a0" stroke-width="2"/>
-            <line x1="220" y1="55" x2="220" y2="60" stroke="#0a0" stroke-width="2"/>
-            <!-- WEEB/bonding clips -->
-            <circle cx="60" cy="58" r="3" fill="#0a0" stroke="#000" stroke-width="0.5"/>
-            <circle cx="140" cy="58" r="3" fill="#0a0" stroke="#000" stroke-width="0.5"/>
-            <circle cx="220" cy="58" r="3" fill="#0a0" stroke="#000" stroke-width="0.5"/>
-            <!-- EGC run from rail to ground bus -->
-            <line x1="140" y1="70" x2="140" y2="90" stroke="#0a0" stroke-width="2"/>
-            <text x="155" y="85" font-size="7" fill="#0a0" font-weight="bold">EGC</text>
-            <!-- Inverter box -->
-            <rect x="105" y="90" width="70" height="30" fill="#eee" stroke="#000" stroke-width="1.2" rx="2"/>
-            <text x="140" y="108" text-anchor="middle" font-size="7" fill="#000" font-weight="bold">INVERTER</text>
-            <!-- Inverter to ground bus -->
-            <line x1="140" y1="120" x2="140" y2="140" stroke="#0a0" stroke-width="2"/>
-            <!-- Ground rod -->
-            <line x1="250" y1="156" x2="250" y2="178" stroke="#0a0" stroke-width="3"/>
-            <polygon points="247,178 253,178 250,185" fill="#0a0"/>
-            <line x1="240" y1="148" x2="250" y2="156" stroke="#0a0" stroke-width="1.5"/>
-            <text x="235" y="175" font-size="6" fill="#0a0" text-anchor="end" font-weight="bold">GEC TO</text>
-            <text x="235" y="182" font-size="6" fill="#0a0" text-anchor="end" font-weight="bold">ELECTRODE</text>
+          <svg viewBox="0 0 300 198" width="238" height="157" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
+            <!-- PV module frames (aluminum, white with inner frame line) -->
+            <g stroke="#1a2230" stroke-width="1.1" fill="#ffffff">
+              <rect x="22" y="14" width="66" height="34" rx="1"/>
+              <rect x="117" y="14" width="66" height="34" rx="1"/>
+              <rect x="212" y="14" width="66" height="34" rx="1"/>
+            </g>
+            <g stroke="#9aa4b2" stroke-width="0.6" fill="none">
+              <rect x="26" y="18" width="58" height="26"/>
+              <rect x="121" y="18" width="58" height="26"/>
+              <rect x="216" y="18" width="58" height="26"/>
+            </g>
+            <g font-size="7" fill="#1a2230" text-anchor="middle" font-weight="bold">
+              <text x="55" y="34">MODULE 1</text>
+              <text x="150" y="34">MODULE 2</text>
+              <text x="245" y="34">MODULE N</text>
+            </g>
+            <!-- bonding jumpers module frame -> rail, with WEEB clip nodes -->
+            <g stroke="#127a3e" stroke-width="1.6">
+              <line x1="55" y1="48" x2="55" y2="61"/>
+              <line x1="150" y1="48" x2="150" y2="61"/>
+              <line x1="245" y1="48" x2="245" y2="61"/>
+            </g>
+            <g fill="#127a3e" stroke="#0f5c30" stroke-width="0.5">
+              <rect x="51" y="53" width="8" height="8" transform="rotate(45 55 57)"/>
+              <rect x="146" y="53" width="8" height="8" transform="rotate(45 150 57)"/>
+              <rect x="241" y="53" width="8" height="8" transform="rotate(45 245 57)"/>
+            </g>
+            <!-- module rail -->
+            <rect x="18" y="61" width="264" height="10" fill="#dfe4ec" stroke="#1a2230" stroke-width="1.1"/>
+            <text x="150" y="69" text-anchor="middle" font-size="6.5" fill="#1a2230" font-weight="bold">MODULE RAIL — BONDED (UL 2703)</text>
+            <!-- EGC rail -> inverter -->
+            <line x1="150" y1="71" x2="150" y2="94" stroke="#127a3e" stroke-width="1.8"/>
+            <text x="156" y="86" font-size="7" fill="#0f5c30" font-weight="bold">EGC</text>
+            <text x="156" y="94" font-size="6" fill="#0f5c30">#12 Cu · 250.122</text>
+            <!-- inverter / combiner -->
+            <rect x="108" y="94" width="84" height="26" fill="#f4f6f9" stroke="#1a2230" stroke-width="1.2" rx="1"/>
+            <text x="150" y="110" text-anchor="middle" font-size="7" fill="#1a2230" font-weight="bold">INVERTER / AC COMBINER</text>
+            <!-- inverter -> equipment ground bus -->
+            <line x1="150" y1="120" x2="150" y2="142" stroke="#127a3e" stroke-width="1.8"/>
+            <!-- equipment grounding bus -->
+            <rect x="24" y="142" width="252" height="14" fill="#eef2f7" stroke="#1a2230" stroke-width="1.2"/>
+            <text x="150" y="151" text-anchor="middle" font-size="7" fill="#1a2230" font-weight="bold">EQUIPMENT GROUNDING BUS</text>
+            <g fill="#1a2230"><circle cx="60" cy="149" r="1.4"/><circle cx="150" cy="149" r="1.4"/><circle cx="240" cy="149" r="1.4"/></g>
+            <!-- GEC -> grounding electrode (IEEE symbol) -->
+            <line x1="252" y1="156" x2="252" y2="174" stroke="#127a3e" stroke-width="1.8"/>
+            <text x="246" y="167" font-size="6" fill="#0f5c30" text-anchor="end" font-weight="bold">GEC</text>
+            <line x1="240" y1="176" x2="264" y2="176" stroke="#127a3e" stroke-width="1.6"/>
+            <line x1="244" y1="180" x2="260" y2="180" stroke="#127a3e" stroke-width="1.4"/>
+            <line x1="247" y1="184" x2="257" y2="184" stroke="#127a3e" stroke-width="1.2"/>
+            <text x="232" y="182" font-size="5.6" fill="#0f5c30" text-anchor="end">GROUNDING</text>
+            <text x="232" y="189" font-size="5.6" fill="#0f5c30" text-anchor="end">ELECTRODE · 250.166</text>
           </svg>
         </div>
         <div style="font-size:var(--f-sm);line-height:1.6;">

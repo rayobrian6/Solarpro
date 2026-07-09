@@ -258,21 +258,29 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   const requiredLabels = labels.filter(l => l.required);
 
   function renderLabel(lbl: LabelSpec): string {
-    const lineHtml = lbl.lines.map((line, i) =>
-      `<div style="font-size:${i === 0 ? '10.5px' : '8.5px'};font-weight:${i === 0 ? '900' : '700'};` +
-      `letter-spacing:${i === 0 ? '0.8px' : '0.2px'};line-height:1.45;` +
-      `white-space:normal;word-break:break-word;">${escapeH(line)}</div>`
-    ).join('');
+    // ANSI Z535 signal word as a proper banner (safety-alert triangle + rule)
+    // when the first line is a signal word; the rest is the message.
+    const SIGNALS = ['DANGER', 'WARNING', 'CAUTION', 'NOTICE'];
+    const isSignal = SIGNALS.includes((lbl.lines[0] || '').trim().toUpperCase());
+    const tri = `<svg width="13" height="12" viewBox="0 0 13 12" aria-hidden="true" style="vertical-align:-1px;flex:0 0 auto;"><path d="M6.5 1 L12 11 L1 11 Z" fill="none" stroke="${lbl.fg}" stroke-width="1.3" stroke-linejoin="round"/><rect x="5.9" y="3.6" width="1.2" height="3.6" fill="${lbl.fg}"/><rect x="5.9" y="8.3" width="1.2" height="1.2" fill="${lbl.fg}"/></svg>`;
+    const lineHtml = lbl.lines.map((line, i) => {
+      if (i === 0 && isSignal) {
+        return `<div class="lbl-signal">${tri}<span>${escapeH(line)}</span></div>`;
+      }
+      return `<div style="font-size:${i === 0 ? '10.5px' : '8.5px'};font-weight:${i === 0 ? '900' : '700'};` +
+        `letter-spacing:${i === 0 ? '0.6px' : '0.2px'};line-height:1.45;` +
+        `white-space:normal;word-break:break-word;">${escapeH(line)}</div>`;
+    }).join('');
     return `<div class=\"lbl-card\">` +
       `<div class=\"lbl-hdr\">` +
-      `<span class=\"lbl-hdr-id\">${lbl.id}</span>` +
-      `<span class=\"lbl-hdr-ref\">${lbl.necRef}</span>` +
+      `<span class=\"lbl-hdr-id\">${escapeH(lbl.id)}</span>` +
+      `<span class=\"lbl-hdr-ref\">${escapeH(lbl.necRef)}</span>` +
       `</div>` +
-      `<div style=\"background:${lbl.bg};color:${lbl.fg};padding:6px 8px;min-height:58px;\">` +
+      `<div class=\"lbl-body\" style=\"background:${lbl.bg};color:${lbl.fg};\">` +
       `${lineHtml}` +
       `</div>` +
       `<div class=\"lbl-footer\">` +
-      `<strong>LOCATION:</strong> ${lbl.placement}` +
+      `<strong>LOCATION:</strong> ${escapeH(lbl.placement)}` +
       `</div>` +
       `</div>`;
   }

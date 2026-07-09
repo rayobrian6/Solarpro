@@ -794,45 +794,53 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <div class="section-title">Standard Detail — Roof Attachment (Lag Bolt w/ Flashing, Typical)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
         <div style="text-align:center;">
-          <svg viewBox="0 0 300 240" width="210" height="168" style="display:block;margin:0 auto;">
-            <!-- Rafter -->
-            <rect x="20" y="130" width="260" height="55" fill="#d4a76a" stroke="#000" stroke-width="1.5"/>
-            <text x="150" y="162" text-anchor="middle" font-size="10" font-weight="bold" fill="#000">RAFTER (${rafterSize})</text>
-            <!-- Sheathing -->
-            <rect x="20" y="115" width="260" height="15" fill="#c8b898" stroke="#000" stroke-width="1"/>
-            <text x="150" y="125" text-anchor="middle" font-size="7" fill="#333">ROOF SHEATHING (3/4" PLY)</text>
-            <!-- Roofing material -->
-            <rect x="20" y="104" width="260" height="11" fill="#888" stroke="#000" stroke-width="0.8"/>
-            <text x="150" y="112" text-anchor="middle" font-size="6.5" fill="#fff">ROOFING MATERIAL</text>
-            <!-- Flashing -->
-            <path d="M 100,86 L 100,106 L 200,106 L 200,86 L 188,86 L 188,98 L 112,98 L 112,86 Z" fill="#bbb" stroke="#000" stroke-width="1.2"/>
-            <text x="150" y="94" text-anchor="middle" font-size="7" fill="#000" font-weight="bold">FLASHING</text>
-            <!-- L-Foot -->
-            <rect x="133" y="62" width="34" height="24" fill="#555" stroke="#000" stroke-width="1.5" rx="2"/>
-            <text x="150" y="77" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold">L-FOOT</text>
-            <!-- Rail -->
-            <rect x="110" y="48" width="80" height="14" fill="#333" stroke="#000" stroke-width="1.2" rx="1"/>
-            <text x="150" y="58" text-anchor="middle" font-size="7" fill="#fff">RAIL</text>
-            <!-- Module -->
-            <rect x="75" y="30" width="150" height="18" fill="#2255aa" stroke="#000" stroke-width="1" rx="1"/>
-            <text x="150" y="43" text-anchor="middle" font-size="7.5" fill="#fff" font-weight="bold">PV MODULE</text>
-            <!-- Lag bolt -->
-            <line x1="150" y1="86" x2="150" y2="175" stroke="#000" stroke-width="3"/>
-            <polygon points="145,175 155,175 150,185" fill="#000"/>
-            <text x="158" y="132" font-size="6.5" fill="#000">LAG BOLT</text>
-            <text x="158" y="140" font-size="6.5" fill="#000">${lagDia}" DIA.</text>
-            <!-- Embedment dimension -->
-            <line x1="163" y1="130" x2="205" y2="130" stroke="#c00" stroke-width="0.6" stroke-dasharray="2,1"/>
-            <line x1="163" y1="175" x2="205" y2="175" stroke="#c00" stroke-width="0.6" stroke-dasharray="2,1"/>
-            <line x1="200" y1="130" x2="200" y2="175" stroke="#c00" stroke-width="1"/>
-            <polygon points="196,130 204,130 200,124" fill="#c00"/>
-            <polygon points="196,175 204,175 200,181" fill="#c00"/>
-            <text x="208" y="155" font-size="7" fill="#c00" font-weight="bold">${lagEmbed}"</text>
-            <text x="208" y="163" font-size="6.5" fill="#c00">MIN</text>
-            <!-- Uplift arrow -->
-            <line x1="150" y1="20" x2="150" y2="5" stroke="#c00" stroke-width="2"/>
-            <polygon points="146,5 154,5 150,-2" fill="#c00"/>
-            <text x="158" y="14" font-size="7" fill="#c00" font-weight="bold">UPLIFT</text>
+          <svg viewBox="0 0 300 240" width="212" height="170" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
+            <defs><pattern id="rt-woodhatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#c8a56f" stroke-width="0.6"/></pattern></defs>
+            <!-- rafter (wood, hatched) -->
+            <rect x="20" y="134" width="260" height="60" fill="#efe0c4" stroke="#7a5a2e" stroke-width="1.4"/>
+            <rect x="20" y="134" width="260" height="60" fill="url(#rt-woodhatch)"/>
+            <text x="40" y="178" font-size="8.5" font-weight="bold" fill="#5a4322">RAFTER (${rafterSize})</text>
+            <!-- sheathing -->
+            <rect x="20" y="119" width="260" height="15" fill="#f2ead8" stroke="#8a7a58" stroke-width="1"/>
+            <text x="40" y="130" font-size="6.5" fill="#5a5340">ROOF SHEATHING (5/8" OSB)</text>
+            <!-- roofing (asphalt shingle courses) -->
+            <rect x="20" y="107" width="260" height="12" fill="#c4c9d2" stroke="#5b6472" stroke-width="0.8"/>
+            <g stroke="#94a0af" stroke-width="0.5"><line x1="70" y1="107" x2="70" y2="119"/><line x1="120" y1="107" x2="120" y2="119"/><line x1="170" y1="107" x2="170" y2="119"/><line x1="220" y1="107" x2="220" y2="119"/></g>
+            <text x="40" y="116" font-size="6.5" fill="#3b4250">ASPHALT SHINGLE</text>
+            <!-- flashing (metal, under upslope course) -->
+            <path d="M 98,86 L 98,109 L 202,109 L 202,86 L 190,86 L 190,101 L 110,101 L 110,86 Z" fill="#e4e7ec" stroke="#5b6472" stroke-width="1.1"/>
+            <text x="150" y="96" text-anchor="middle" font-size="6.5" fill="#3b4250" font-weight="bold">FLASHING</text>
+            <!-- L-foot (aluminum) -->
+            <path d="M 138,68 L 138,88 L 162,88 L 162,80 L 148,80 L 148,68 Z" fill="#d4dae2" stroke="#3b4250" stroke-width="1.2"/>
+            <line x1="163" y1="81" x2="174" y2="81" stroke="#3b4250" stroke-width="0.5"/>
+            <text x="176" y="82" font-size="6.5" fill="#3b4250" font-weight="bold">L-FOOT</text>
+            <!-- rail (top-hat, edge on) -->
+            <rect x="112" y="54" width="76" height="14" fill="#d4dae2" stroke="#3b4250" stroke-width="1.1" rx="1"/>
+            <rect x="140" y="57" width="20" height="8" fill="none" stroke="#8a94a6" stroke-width="0.6"/>
+            <text x="150" y="64" text-anchor="middle" font-size="6.5" fill="#3b4250" font-weight="bold">RAIL</text>
+            <!-- PV module (edge on) + clamp -->
+            <rect x="70" y="40" width="160" height="13" fill="#2a3444" stroke="#1a2230" stroke-width="1"/>
+            <rect x="70" y="40" width="160" height="4" fill="#4a5568"/>
+            <rect x="145" y="49" width="10" height="6" fill="#8a94a6" stroke="#3b4250" stroke-width="0.6"/>
+            <text x="120" y="35" text-anchor="middle" font-size="7" fill="#1a2230" font-weight="bold">PV MODULE</text>
+            <!-- lag screw: hex head + shank + thread into rafter -->
+            <rect x="146" y="86" width="8" height="6" fill="#6b7280" stroke="#3b4250" stroke-width="0.8"/>
+            <line x1="150" y1="92" x2="150" y2="184" stroke="#6b7280" stroke-width="2.4"/>
+            <g stroke="#3b4250" stroke-width="0.5"><line x1="146" y1="152" x2="154" y2="152"/><line x1="146" y1="158" x2="154" y2="158"/><line x1="146" y1="164" x2="154" y2="164"/><line x1="146" y1="170" x2="154" y2="170"/><line x1="146" y1="176" x2="154" y2="176"/></g>
+            <text x="160" y="130" font-size="6.5" fill="#1a2230">LAG SCREW</text>
+            <text x="160" y="138" font-size="6.5" fill="#1a2230">${lagDia}" DIA. SS</text>
+            <!-- embedment dimension -->
+            <line x1="163" y1="134" x2="212" y2="134" stroke="#5b6472" stroke-width="0.5"/>
+            <line x1="163" y1="184" x2="212" y2="184" stroke="#5b6472" stroke-width="0.5"/>
+            <line x1="207" y1="134" x2="207" y2="184" stroke="#334155" stroke-width="0.9"/>
+            <polygon points="204,139 210,139 207,134" fill="#334155"/>
+            <polygon points="204,179 210,179 207,184" fill="#334155"/>
+            <text x="214" y="160" font-size="7" fill="#334155" font-weight="bold">${lagEmbed}"</text>
+            <text x="214" y="168" font-size="5.6" fill="#5b6472">MIN EMBED</text>
+            <!-- uplift arrow -->
+            <line x1="248" y1="38" x2="248" y2="20" stroke="#b23b2e" stroke-width="1.8"/>
+            <polygon points="244,22 252,22 248,15" fill="#b23b2e"/>
+            <text x="240" y="30" font-size="6.5" fill="#b23b2e" font-weight="bold" text-anchor="end">UPLIFT</text>
           </svg>
         </div>
         <div style="font-size:var(--f-sm);line-height:1.7;">
@@ -901,12 +909,14 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           </tr>`).join('')}
         </tbody>
       </table>` : ''}
-      ${rulesResult?.structuralAutoResolutions && rulesResult.structuralAutoResolutions.length > 0 ? `
-      <!-- Compact footnote form — the 5-column table version rendered AFTER
-           the page conclusion and fell entirely past the fixed 11" page
-           bottom (invisible in print) on real data. -->
+      ${(input.permitOptions as { includeInternalValidation?: boolean } | undefined)?.includeInternalValidation === true
+        && rulesResult?.structuralAutoResolutions && rulesResult.structuralAutoResolutions.length > 0 ? `
+      <!-- Engine-proposed resolutions are internal-review provenance only and are
+           NOT printed on the issued construction sheet (Ray, 2026-07-09). The full
+           record is retained in the engineering file. Shown only when internal
+           validation is explicitly requested. -->
       <div style="padding:3px 6px;margin-top:2px;font-size:7px;line-height:1.4;border:var(--border);background:#fafafa;color:#333;">
-        <strong>ENGINE-PROPOSED RESOLUTIONS (provenance only — NOT applied to this design; the analysis above evaluates the as-modeled framing and governs):</strong>
+        <strong>ENGINE-PROPOSED RESOLUTIONS (INTERNAL REVIEW — provenance only, NOT applied to this design):</strong>
         ${rulesResult.structuralAutoResolutions.slice(0, 4).map(r =>
           `${r.field}: ${r.originalValue} → <strong>${r.resolvedValue}</strong> (${r.reason}${r.necReference ? ` — ${r.necReference}` : ''})`,
         ).join(' &nbsp;·&nbsp; ')}${rulesResult.structuralAutoResolutions.length > 4 ? ` &nbsp;·&nbsp; + ${rulesResult.structuralAutoResolutions.length - 4} more — full record retained in the engineering file` : ''}
