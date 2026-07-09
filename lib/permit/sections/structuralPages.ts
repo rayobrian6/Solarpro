@@ -12,9 +12,10 @@ import {
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
-import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension } from '../utils/drawing';
+import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import {  isFence, isGround, isRoof } from '@/lib/system';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import {
   extractStructuralInputFromCAD,
   deriveStructuralBOM,
@@ -31,10 +32,38 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
     throw new Error(`[pageRoofStructural] getPrimaryView(${comp.primaryView}) returned empty SVG`);
   }
 
+  // ── Manufacturer attachment detail (real published cross-section) ───────────
+  // When the job's selected racking has a manufacturer detail on file
+  // (manufacturer_assets library), render the REAL published attachment
+  // cross-section as the primary detail — PE sets embed the racking maker's own
+  // detail for permit submittal. The hand-drawn CAD line-art is the fallback
+  // when no manufacturer asset exists for the mounting system.
+  const mountId = (input.project as { mountingSystemId?: string }).mountingSystemId;
+  const rackAsset = getManufacturerAsset(mountId, 'racking_detail');
+  let primaryDetail = drawingSvg;
+  let detailCaption: string | null = null;
+  if (rackAsset?.imageUrl) {
+    comp.drawHeader = `ATTACHMENT DETAIL — ${rackAsset.brand} ${rackAsset.model} (MANUFACTURER PUBLISHED)`;
+    primaryDetail =
+      `<img src="${rackAsset.imageUrl}" alt="${escapeH(rackAsset.brand + ' ' + rackAsset.model + ' attachment detail')}" ` +
+      `style="max-width:100%;max-height:100%;object-fit:contain;display:block;" />`;
+    const src = rackAsset.docTitle || (rackAsset.sourceUrl ? new URL(rackAsset.sourceUrl).hostname : '');
+    detailCaption =
+      `Source: ${escapeH(src)}${rackAsset.pageRef ? ' · ' + escapeH(rackAsset.pageRef) : ''}` +
+      ` · Manufacturer-published detail — field-verify against current revision.`;
+  }
+
+  // Provenance caption strip (secondary zone) when a manufacturer asset is used.
+  let captionStrip: string | null = null;
+  if (detailCaption) {
+    comp.secondaryHeader = 'DETAIL SOURCE / PROVENANCE';
+    captionStrip = `<div style="font-size:8px;line-height:1.3;color:#334;padding:2px 8px;text-align:center;width:100%;">${detailCaption}</div>`;
+  }
+
   return `
   <div class="page">
     ${titleBlock(input, 'PV-3', 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION', pageNum, totalPages)}
-    ${composeDrawPage(comp, drawingSvg)}
+    ${composeDrawPage(comp, primaryDetail, captionStrip)}
   </div>`;
 }
 

@@ -2629,7 +2629,9 @@ export const BATTERIES: BatterySystem[] = [
   },
   {
     id: 'franklin-apower-15',
-    manufacturer: 'Franklin Electric', model: 'aPower 15.0',
+    // Corrected 2026-07-08: maker is FranklinWH (not Franklin Electric, a water-pump company);
+    // the 15 kWh unit is the aPower 2 (original aPower is 13.6 kWh).
+    manufacturer: 'FranklinWH', model: 'aPower 2',
     category: 'battery', subcategory: 'ac_coupled',
     usableCapacityKwh: 15.0, peakPowerKw: 10.0, continuousPowerKw: 10.0,
     roundTripEfficiencyPct: 97.0, chemistry: 'LFP', voltageNominalV: 51.2,

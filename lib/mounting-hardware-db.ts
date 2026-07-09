@@ -2204,13 +2204,14 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     id: 'sollega-fc350',
     manufacturer: 'Sollega',
     productLine: 'FastRack',
-    model: 'FastRack FC350',
+    // Corrected 2026-07-08: 'FC350' was not a real Sollega SKU; the flat-roof product is the FastRack FR510.
+    model: 'FastRack FR510',
     category: 'roof_commercial',
     systemType: 'ballasted_flat',
     compatibleRoofTypes: ['flat_tpo', 'flat_epdm', 'flat_pvc'],
     description: 'Lightweight injection-molded ballasted flat-roof system — 10-minute module installation',
     mount: {
-      model: 'FC350 Base',
+      model: 'FR510 Base',
       attachmentMethod: 'ballasted',
       upliftCapacityLbs: 0,
       downwardCapacityLbs: 0,
@@ -2589,14 +2590,16 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
   {
     id: 'pvhardware-titan',
     manufacturer: 'PV Hardware',
-    productLine: 'Titan',
-    model: 'Titan Single Axis Tracker',
+    // Corrected 2026-07-08: 'Titan' is not a PV Hardware product (Titan trackers are Axial/APA).
+    // PV Hardware's single-axis tracker line is Axone / AxoneDuo.
+    productLine: 'Axone',
+    model: 'AxoneDuo Single Axis Tracker',
     category: 'ground_mount',
     systemType: 'tracker_single_axis',
     compatibleRoofTypes: ['any'],
     description: 'Heavy-duty single-axis tracker for high-wind regions — 150 mph wind rating',
     mount: {
-      model: 'Titan Driven Pile',
+      model: 'AxoneDuo Driven Pile',
       attachmentMethod: 'driven_pile',
       upliftCapacityLbs: 20000,
       downwardCapacityLbs: 26000,

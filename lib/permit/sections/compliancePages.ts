@@ -11,7 +11,8 @@ import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, to
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { SOLAR_PANELS, MICROINVERTERS } from '@/lib/equipment-db';
+import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
+import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
@@ -605,16 +606,45 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
           </table>`;
           })()}
 
-          <!-- Spec Sheet Links Note -->
+          <!-- Spec Sheet Links Note — real manufacturer documents on file (manufacturer_assets library) -->
+          ${(() => {
+            // Resolve the actual sourced manufacturer datasheet/detail per selected
+            // equipment id, and cite the real document (title · page · source). Falls
+            // back to a generic "see manufacturer website" line when none on file.
+            const _fuzz = <T extends { model: string; id: string }>(list: T[], model?: string): T | undefined => {
+              const m = (model || '').toLowerCase().trim(); if (!m) return undefined;
+              return list.find(e => e.model.toLowerCase() === m)
+                ?? list.find(e => e.model.toLowerCase().includes(m) || m.includes(e.model.toLowerCase()));
+            };
+            const _inv0 = system.inverters?.[0];
+            const _invId = _dbMicro?.id
+              ?? _fuzz(STRING_INVERTERS, _inv0?.model)?.id
+              ?? _fuzz(MICROINVERTERS, _inv0?.model)?.id;
+            const _batId = _fuzz(BATTERIES, (project._canonical as { battery?: { model?: string } })?.battery?.model
+              || (project as { batteryModel?: string }).batteryModel)?.id;
+            const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>): string => {
+              if (!a || (!a.sourceUrl && !a.imageUrl)) return '';
+              const host = a.sourceUrl ? (() => { try { return new URL(a.sourceUrl!).hostname.replace(/^www\./, ''); } catch { return ''; } })() : '';
+              const bits = [a.docTitle, a.pageRef, host].filter(Boolean).join(' · ');
+              const mark = a.verified ? '✓ on file' : 'on file';
+              return `<li><strong>${label}:</strong> ${a.brand} ${a.model} — ${bits || 'manufacturer datasheet'} <span style="color:#0a7a2f;font-weight:700;">(${mark})</span></li>`;
+            };
+            const rows = [
+              _cite('Module', getManufacturerAsset(_dbPanel?.id, 'module_spec')),
+              _cite('Inverter', getManufacturerAsset(_invId, 'inverter_spec') || getManufacturerAsset(_invId, 'microinverter_spec') || getManufacturerAsset(_invId, 'optimizer_spec')),
+              _cite('Battery', getManufacturerAsset(_batId, 'battery_spec')),
+              _cite('Racking', getManufacturerAsset(project.mountingSystemId, 'racking_detail')),
+            ].filter(Boolean);
+            const fallback = `• <strong>Module:</strong> ${modMfr} — see manufacturer website<br>• <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>`;
+            return `
           <div style="background:#fff;border:1px solid #000;padding:6px;margin-top:6px;font-size:8.5px;color:#000;line-height:1.5;">
-            <strong>Manufacturer Data Sheets</strong><br>
-            Full manufacturer specification sheets and installation manuals are available at:<br>
-            • <strong>Module:</strong> ${modMfr} — see manufacturer website<br>
-            • <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>
-            • <strong>Racking:</strong> ${project._canonical?.mountSystem || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100'} — STRUCTURAL CALCULATIONS — SEE PV-4C<br><br>
+            <strong>Manufacturer Data Sheets — On File</strong><br>
+            The following manufacturer specification sheets / installation details are on file for this project and available upon AHJ request:
+            ${rows.length ? `<ul style="margin:3px 0 4px 0;padding-left:16px;">${rows.join('')}</ul>` : `<br>${fallback}`}
+            <strong>Racking structural calculations — SEE PV-4C.</strong><br>
             All equipment is CEC Listed, UL Listed, and approved for grid interconnection.
-            Copies available upon AHJ request.
-          </div>
+          </div>`;
+          })()}
         </div>
       </div>
     </div>
