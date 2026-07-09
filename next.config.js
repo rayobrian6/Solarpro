@@ -140,6 +140,13 @@ const nextConfig = {
       'puppeteer-core',        // Puppeteer PDF generation
       '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
     ],
+    // Ship the manufacturer-asset PNGs into the permit serverless functions so
+    // generatePermitHTML can read + base64-inline them at render time on Vercel
+    // (public/ is CDN-served, not in the function fs by default). Enables the
+    // self-contained HTML/PDF export.
+    outputFileTracingIncludes: {
+      '/api/engineering/**': ['./public/manufacturer-assets/**'],
+    },
   },
   images: {
     remotePatterns: [

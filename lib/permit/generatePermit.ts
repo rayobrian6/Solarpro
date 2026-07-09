@@ -36,6 +36,7 @@ import { pageEngineerCert, pagePELetter } from './sections/certPages';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
 import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
+import { inlineManufacturerAssets } from './utils/inlineManufacturerAssets';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
 
@@ -869,7 +870,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     }
   }
 
-  return `<!DOCTYPE html>
+  const __permitHtml = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -1891,4 +1892,9 @@ ${pages.join('\
 </script>
 </body>
 </html>`;
+
+  // Self-contained export: inline manufacturer-asset images as base64 data URIs
+  // so the downloaded HTML and the server-rendered PDF render offline/off-server
+  // (root-relative /manufacturer-assets/* otherwise resolve against about:blank).
+  return inlineManufacturerAssets(__permitHtml).html;
 }
