@@ -36,10 +36,17 @@ class NodeCanvasFactory {
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
+const PAGE_OVERRIDE = getArg('--page') ? parseInt(getArg('--page')) : null;
 function parsePage(pageRef) {
   if (!pageRef) return 1;
   const m = String(pageRef).match(/\d+/);
   return m ? Math.max(1, parseInt(m[0])) : 1;
+}
+// Precedence: CLI --page > manifest render_page (curated exact page) > parsed page_ref.
+function targetPage(a) {
+  if (PAGE_OVERRIDE) return PAGE_OVERRIDE;
+  if (a.render_page) return Math.max(1, parseInt(a.render_page));
+  return parsePage(a.page_ref);
 }
 
 async function fetchPdf(url) {
@@ -47,7 +54,7 @@ async function fetchPdf(url) {
   const cp = path.join(PDFCACHE, sha + '.pdf');
   if (fs.existsSync(cp) && fs.statSync(cp).size > 1000) return fs.readFileSync(cp);
   const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 45000);
+  const to = setTimeout(() => ctrl.abort(), 120000);
   try {
     const res = await fetch(url, { redirect: 'follow', signal: ctrl.signal,
       headers: { 'User-Agent': UA, 'Accept': 'application/pdf,*/*', 'Accept-Language': 'en-US,en;q=0.9' } });
@@ -92,7 +99,7 @@ for (const a of assets) {
   const id = `${a.category}:${a.equipment_id}`.toLowerCase().replace(/[^a-z0-9:_-]+/g,'-');
   const fname = id.replace(/:/g,'_') + '.png';
   const outPath = path.join(OUT, fname);
-  const pageNum = parsePage(a.page_ref);
+  const pageNum = targetPage(a);
   try {
     const buf = await fetchPdf(a.source_url);
     const { png, actualPage, numPages } = await renderPage(buf, pageNum);

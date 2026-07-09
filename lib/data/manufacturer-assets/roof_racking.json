@@ -10,7 +10,8 @@
     "image_url": "/manufacturer-assets/racking_detail_rooftech-mini.png",
     "verified": true,
     "notes": "Fetched from official design.roof-tech.us and text-extracted (40 pp). Rail-less direct-attach cross-section: MINI base over shingle, RT-Butyl/EPDM butyl flashing, 5.0x60mm SS wood screws into rafter center (or 5x deck screws). RT-MINI is superseded by RT-MINI II; this is the current manufacturer install doc. Legacy standalone RT-MINI manual (Jan 2021, 33 pp, also verified): https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 9
   },
   {
     "equipment_id": "rooftech-mini-s",
@@ -23,7 +24,8 @@
     "image_url": "/manufacturer-assets/racking_detail_rooftech-mini-s.png",
     "verified": true,
     "notes": "No distinct 'RT-MINI-S' SKU exists in Roof Tech's catalog (verified against roof-tech.us product/manual index). Treated as an RT-MINI variant; the same verified RT-MINI II manual is the correct source. Standard asphalt-shingle attachment cross-section (rafter/deck, RT-Butyl flashing).",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 9
   },
   {
     "equipment_id": "rooftech-mini-t",
@@ -36,7 +38,8 @@
     "image_url": "/manufacturer-assets/racking_detail_rooftech-mini-t.png",
     "verified": true,
     "notes": "No distinct 'RT-MINI-T' SKU in Roof Tech's catalog (verified). If 'T' denotes tile/composite-slate, the RT-MINI II manual includes a Composite Slate addendum (pilot hole + sealant + deck-screw cross-section) plus the standard base attachment. Same verified manufacturer manual.",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 9
   },
   {
     "equipment_id": "rooftech-hook",
@@ -62,7 +65,8 @@
     "image_url": "/manufacturer-assets/racking_detail_rooftech-mini-m.png",
     "verified": true,
     "notes": "No standalone 'RT-MINI-M' SKU; metal-roof variant is documented as the Metal Roofing addendum inside the verified RT-MINI II manual, showing the metal-roof cross-section (butyl spacer between rib flats, SS wood screws to deck, sealant slope). Dedicated legacy alt doc also verified (18 pp, 'RT-MINI Double/Metal Flashing Option'): https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI-Metal-Flashing-Option.pdf",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 22
   },
   {
     "equipment_id": "ironridge-xr100",
@@ -75,7 +79,8 @@
     "image_url": "/manufacturer-assets/racking_detail_ironridge-xr100.png",
     "verified": true,
     "notes": "Fetched from official files.ironridge.com (7.3MB, ~32 pp) and text-extracted. Single XR Flush Mount manual covers all XR rails (XR10/XR100/XR1000). Composition attachment method (locate rafter, pilot hole, FlashFoot2, lag bolt into rafter, rail to FlashFoot2 cap, torque 300 in-lbs) is the XR100 asphalt-shingle flush-mount cross-section: 'For composition roof attachments installation instructions refer to page 10.' FlashFoot2 detail explicitly referenced; full standalone FlashFoot2 manual: https://files.ironridge.com/pitched-roof-mounting/resources/brochures/IronRidge_FlashFoot2_Installation_Manual.pdf",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 12
   },
   {
     "equipment_id": "ironridge-xr1000",
@@ -88,7 +93,8 @@
     "image_url": "/manufacturer-assets/racking_detail_ironridge-xr1000.png",
     "verified": true,
     "notes": "Same verified IronRidge XR Flush Mount manual (files.ironridge.com); it covers the entire XR rail family including the heavy-duty XR1000 (commercial / high wind-and-snow). Attachment cross-section is identical method (rafter, pilot hole, FlashFoot2 lag, rail-to-cap). Rail selection (XR10/XR100/XR1000) is a spacing/load choice; the attachment detail is shared. Data sheet: https://files.ironridge.com/pitched-roof-mounting/resources/brochures/Flush_Mount_Data_Sheet.pdf",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 12
   },
   {
     "equipment_id": "unirac-solarmount",
@@ -101,7 +107,8 @@
     "image_url": "/manufacturer-assets/racking_detail_unirac-solarmount.png",
     "verified": true,
     "notes": "Fetched (21.4MB, ~53 pp) and text-extracted; cover 'SM SOLAR MOUNT INSTALLATION GUIDE - UNIRAC Code-Compliant Installation Manual (c) 2022'. TOC includes 'ROOF ATTACHMENT & L-FEET', 'ATTACH RAIL TO L-FEET', and flashing appendices (FlashKit Pro, FlashLoc Comp/Duo, SM Butyl) - the L-foot/lag-into-rafter + flashing cross-section. This ressupply mirror resolves reliably; Unirac's own product page (unirac.com/products/pitched-roof/solarmount/) links the current guide but individual PDF links are gated behind their bsk-pdf-manager. LA County copy also verified: https://pw.lacounty.gov/bsd/lib/fp/Small%20Residential%20Rooftop%20Solar%20Energy%20Systems/LA%20County%20Recognized%20UL%202703%20Racking%20Systems/Unirac%20SM%20SolarMount%20Installation%20Guide.pdf",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 9
   },
   {
     "equipment_id": "unirac-sme",
@@ -114,7 +121,8 @@
     "image_url": "/manufacturer-assets/racking_detail_unirac-sme.png",
     "verified": true,
     "notes": "Fetched (9.5MB, ~31 pp, made in Autodesk Inventor) and text-extracted; cover 'SM SOLAR MOUNT ... PUB2020JAN07', TOC section 'D - ROOF ATTACHMENT & L-FEET', 'E - SPLICE & THERMAL BREAK', 'F - ATTACH RAIL TO L-FEET', 'APPENDIX B: FLASHKIT PRO INSTALLATION'. SolarMount Evolution (SME) is Unirac's Pro Series line; this is the matching pre-assembled Pro Series install guide with the L-foot/FlashKit Pro attachment cross-section. Reliable ressupply mirror (Unirac's own bsk-pdf-manager links are gated).",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 5
   },
   {
     "equipment_id": "snapnrack-100",
@@ -127,7 +135,8 @@
     "image_url": "/manufacturer-assets/racking_detail_snapnrack-100.png",
     "verified": true,
     "notes": "40-page genuine SnapNrack Series 100 install manual, text-extracted (cover 'SerieS 100 Roof Mount SySteM Code Compliant Installation Manual, SnapNrack Residential PV Mounting Systems'; 4.94MB). Roof-attachment cross-sections: flashed standoff and flashed L-foot (flashing + lag into rafter). NOTE: manufacturer-native URL snapnrack.com/wp-content/uploads/2019/05/S100-UL-Install-Manual_v2.0_web.pdf now serves the site search HTML instead of the PDF, so this GridAlternatives-hosted copy is the resolving source. Reseller mirrors: solarelectricsupply.com, ressupply.com. Tile-replacement variant manual: https://snapnrack.com/wp-content/uploads/2019/05/Series-100-Tile-Replacement-Install-Manual_v.1.2.pdf",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 17
   },
   {
     "equipment_id": "quickmount-classic",
@@ -140,7 +149,8 @@
     "image_url": "/manufacturer-assets/racking_detail_quickmount-classic.png",
     "verified": true,
     "notes": "Official Quick Mount PV doc now hosted on files.ironridge.com (IronRidge/Esdec owns Quick Mount PV, so this is effectively first-party). Text-extracted: lag-bolt withdrawal table + note 'thread must be embedded in a rafter', pilot-hole drilling detail, Elevated Water Seal flashing; (c) 2019 Quick Mount PV, 2.25MB. Datasheet/instruction sheet (cross-section on p.1-2), not a long manual. Manufacturer-native quickmountpv.com fails TLS (expired cert). Fuller successor-product doc: QBase Composition Mount Installation Manual - https://files.ironridge.com/qmpv/resources/brochures/QMPV_QBase_Composition_Mount_Installation_Manual.pdf",
-    "asset_type": "image"
+    "asset_type": "image",
+    "render_page": 2
   },
   {
     "equipment_id": "quickmount-tile",
