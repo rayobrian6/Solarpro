@@ -17,41 +17,36 @@ describe('integrated BOS device resolver', () => {
     expect(enphaseGeneration('SE7600H')).toBeNull();
   });
 
-  it('auto-configures the integrated Gen-4 combiner (one box: combiner + gateway + disconnect)', () => {
+  it('auto-configures the current-gen IQ Combiner 6C (one box: combiner + gateway + integral disconnect)', () => {
     const plan = ctx({ branchCount: 3 });
     expect(plan.source).toBe('auto');
-    expect(plan.brains?.model).toBe('IQ Combiner 4C');   // ≤4 branches → 4C
+    expect(plan.brains?.model).toBe('IQ Combiner 6C');     // best / easiest install
+    expect(plan.brains?.partNumber).toBe('X-IQ-AM1-240-6C');
     expect(plan.hasIntegratedGateway).toBe(true);          // no separate Envoy
-    expect(plan.providesAcDisconnect).toBe(true);          // no separate AC disconnect
+    expect(plan.providesAcDisconnect).toBe(true);          // its aggregate breaker is the PV disconnect
     expect(plan.brains?.roleSummary).toContain('Combiner');
     expect(plan.brains?.roleSummary).toContain('Gateway');
     expect(plan.brains?.roleSummary).toContain('Disconnect');
-  });
-
-  it('scales to the 6C when branches exceed the 4C slot count', () => {
-    const plan = ctx({ branchCount: 5 });
-    expect(plan.brains?.model).toBe('IQ Combiner 6C');
-    expect(plan.branchSlots).toBe(6);
     expect(plan.branchSlotWarning).toBeUndefined();
   });
 
-  it('warns when the branch count exceeds even the 6C slot capacity', () => {
+  it('defaults to the 6C regardless of micro model (generation is an ecosystem line)', () => {
+    expect(ctx({ inverterModel: 'IQ7+' }).brains?.model).toBe('IQ Combiner 6C');
+    expect(ctx({ inverterModel: 'IQ8H' }).brains?.model).toBe('IQ Combiner 6C');
+  });
+
+  it('warns when AC branches exceed the 6C PV busbar (4, or 5 with a quadplex)', () => {
     const plan = ctx({ branchCount: 8 });
     expect(plan.brains?.model).toBe('IQ Combiner 6C');
-    expect(plan.branchSlotWarning).toMatch(/exceed the IQ Combiner 6C 6-position limit/);
+    expect(plan.branchSlotWarning).toMatch(/exceed the IQ Combiner 6C PV busbar/);
   });
 
-  it('falls back to a standalone Envoy for Gen-3 (more boxes on the wall)', () => {
-    const plan = ctx({ inverterModel: 'IQ7+' });
-    expect(plan.brains?.model).toBe('IQ Gateway (Envoy)');
-    expect(plan.hasIntegratedGateway).toBe(false);   // separate box
-    expect(plan.providesAcDisconnect).toBe(false);   // separate AC disconnect required
-  });
-
-  it('honors an explicit user override', () => {
-    const plan = ctx({ overrideDeviceIds: ['enphase-iq-combiner-6c'] });
+  it('honors an explicit user override (e.g. the older main-lug 4C — no integral disconnect)', () => {
+    const plan = ctx({ overrideDeviceIds: ['enphase-iq-combiner-4c'] });
     expect(plan.source).toBe('override');
-    expect(plan.brains?.model).toBe('IQ Combiner 6C');
+    expect(plan.brains?.model).toBe('IQ Combiner 4C');
+    expect(plan.providesAcDisconnect).toBe(false);   // 4C is main-lug only → needs external AC disconnect
+    expect(plan.hasIntegratedGateway).toBe(true);
   });
 
   it('returns an empty plan for non-Enphase / string systems', () => {
@@ -67,7 +62,8 @@ describe('integrated BOS device resolver', () => {
   });
 
   it('exposes catalog lookup by id', () => {
-    expect(getBosDevice('enphase-iq-combiner-6c')?.branchSlots).toBe(6);
+    expect(getBosDevice('enphase-iq-combiner-6c')?.branchSlots).toBe(4);   // "6C" is a gen name, not a slot count
+    expect(getBosDevice('tesla-backup-switch')?.partNumber).toBe('1624171');
     expect(getBosDevice('nope')).toBeUndefined();
   });
 });

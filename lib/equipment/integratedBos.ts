@@ -40,20 +40,22 @@ export interface BosDevice {
   id: string;
   brand: string;             // 'Enphase' | 'Tesla' | 'SolarEdge' | ...
   model: string;
-  partNumber?: string;       // ⚠ FIELD-VERIFY
+  partNumber?: string;       // real ordering SKU (sourced)
   kind: BosKind;
-  generation?: 'gen3' | 'gen4';
+  generation?: 'gen1' | 'gen2' | 'gen3' | 'gen4';  // Enphase ecosystem generation (6C=gen4, 5C=gen3, 4C=gen2, 3C=gen1)
   /** The roles this one device performs. */
   integrated: IntegratedFunctions;
   /** True when this device is the system controller / "brains". */
   isBrains?: boolean;
-  branchSlots?: number;      // AC branch breaker positions (IQ Combiner 4C=4, 6C=6)
-  maxContinuousA?: number;   // combiner continuous output current
+  /** AC branch (2-pole PV) breaker positions. IQ Combiner 3C/4C/5C/6C all take 4 (6C: 5 with a quadplex). */
+  branchSlots?: number;
+  maxContinuousA?: number;   // total PV continuous output current
+  mainBreakerA?: number;     // aggregate/main breaker (only the 6C has one — it IS the PV disconnect)
   maxDevices?: number;       // microinverters supported
-  mounting?: 'wall' | 'exterior' | 'meter_socket';
+  mounting?: 'wall' | 'indoor' | 'outdoor' | 'meter_socket';
   outputWireGaugeMin?: string;
   necRefs?: string[];
-  /** Which inverter ecosystem this belongs to, e.g. 'enphase-iq8'. */
+  /** Which inverter ecosystem this belongs to, e.g. 'enphase-iq'. */
   ecosystem?: string;
   /** Lower = easier install / fewer separate boxes on the wall (used to pick the default). */
   installComplexity?: number;
@@ -62,65 +64,115 @@ export interface BosDevice {
   active?: boolean;
 }
 
-// ── Enphase Gen 4 (IQ8) integrated devices ──────────────────────────────────
-// The IQ Combiner line integrates the IQ Gateway; the 6C adds slots and is the
-// current easiest-install choice (one box replaces gateway + AC disconnect).
+// ── Catalog (specs SOURCED — lib/data/equipment/bos-devices-research.json) ───
+// Correction of earlier assumptions: "6C" is a GENERATION name, not a 6-branch
+// cap — every IQ Combiner (3C/4C/5C/6C) takes 4 two-pole PV branches (6C: 5 with
+// a quadplex). And ONLY the 6C's aggregate PV breaker (UL 489) legally serves as
+// the PV AC disconnecting means (outdoors) — the 4C/5C are main-lug only and need
+// a separate external AC disconnect. The 6C is the current, easiest-install pick
+// (one box = combiner + IQ Gateway + integral disconnect + RSD initiator).
 export const BOS_DEVICES: BosDevice[] = [
   {
     id: 'enphase-iq-combiner-6c',
     brand: 'Enphase',
     model: 'IQ Combiner 6C',
-    partNumber: 'X-IQ-AM1-240-6C', // ⚠ FIELD-VERIFY
+    partNumber: 'X-IQ-AM1-240-6C',
     kind: 'integrated_combiner',
     generation: 'gen4',
     integrated: { aggregation: true, disconnect: true, monitoring: true, metering: true, rapidShutdown: true },
     isBrains: true,
-    branchSlots: 6,
-    maxContinuousA: 80,
-    maxDevices: 80,
-    mounting: 'wall',
+    branchSlots: 4,          // 4 two-pole 20A PV branches (5 with a quadplex breaker); + 200A DER busbar
+    maxContinuousA: 80,      // total PV continuous
+    mainBreakerA: 100,       // aggregate PV breaker (ships 60A, up to 100A) — the PV disconnect
+    mounting: 'outdoor',     // NEMA 3R
     outputWireGaugeMin: '#4 AWG',
-    necRefs: ['NEC 690.4', 'NEC 705.10', 'NEC 690.13'],
-    ecosystem: 'enphase-iq8',
-    installComplexity: 1,
+    necRefs: ['NEC 690.4', 'NEC 705.10', 'NEC 690.13', 'NEC 690.12'],
+    ecosystem: 'enphase-iq',
+    installComplexity: 1,    // one box replaces gateway + AC disconnect
     replacesSeparate: ['gateway', 'ac_disconnect'],
+    active: true,
+  },
+  {
+    id: 'enphase-iq-combiner-5c',
+    brand: 'Enphase',
+    model: 'IQ Combiner 5C',
+    partNumber: 'X-IQ-AM1-240-5C',
+    kind: 'integrated_combiner',
+    generation: 'gen3',
+    integrated: { aggregation: true, monitoring: true, metering: true },  // main-lug only → NO integral PV disconnect
+    isBrains: true,
+    branchSlots: 4,
+    maxContinuousA: 64,      // 80A PV total on a 125A busbar
+    mounting: 'outdoor',
+    necRefs: ['NEC 690.4', 'NEC 705.10'],
+    ecosystem: 'enphase-iq',
+    installComplexity: 2,    // integrates the gateway but still needs an external AC disconnect
+    replacesSeparate: ['gateway'],
     active: true,
   },
   {
     id: 'enphase-iq-combiner-4c',
     brand: 'Enphase',
     model: 'IQ Combiner 4C',
-    partNumber: 'X-IQ-AM1-240-4C', // ⚠ FIELD-VERIFY (registry legacy: ENV-IQ-C4C-240)
+    partNumber: 'X-IQ-AM1-240-4C',  // registry's ENV-IQ-C4C-240 was fabricated
     kind: 'integrated_combiner',
-    generation: 'gen4',
-    integrated: { aggregation: true, disconnect: true, monitoring: true, metering: true, rapidShutdown: true },
+    generation: 'gen2',
+    integrated: { aggregation: true, monitoring: true, metering: true },
     isBrains: true,
     branchSlots: 4,
     maxContinuousA: 64,
-    maxDevices: 64,
-    mounting: 'wall',
-    outputWireGaugeMin: '#6 AWG',
-    necRefs: ['NEC 690.4', 'NEC 705.10', 'NEC 690.13'],
-    ecosystem: 'enphase-iq8',
-    installComplexity: 1,
-    replacesSeparate: ['gateway', 'ac_disconnect'],
+    mounting: 'outdoor',
+    necRefs: ['NEC 690.4', 'NEC 705.10'],
+    ecosystem: 'enphase-iq',
+    installComplexity: 2,
+    replacesSeparate: ['gateway'],
     active: true,
   },
   {
     id: 'enphase-iq-gateway',
     brand: 'Enphase',
-    model: 'IQ Gateway (Envoy)',
-    partNumber: 'ENV-IQ-AM1-240',
+    model: 'IQ Gateway',
+    partNumber: 'ENV-IQ-AM1-240',   // ENV2-IQ-AM1-240 = current (IEEE 2030.5). Formerly IQ Envoy / Envoy-S Metered
     kind: 'gateway',
-    generation: 'gen3',
+    generation: undefined,
     integrated: { monitoring: true, metering: true, rapidShutdown: true },
     isBrains: true,
-    mounting: 'wall',
+    mounting: 'indoor',      // DIN-rail, IP30
     necRefs: ['NEC 690.4'],
-    ecosystem: 'enphase-iq8',
-    // Standalone gateway needs a SEPARATE combiner + AC disconnect on the wall —
-    // more boxes, so a higher complexity than the integrated combiner.
+    ecosystem: 'enphase-iq',
+    // Standalone gateway needs a SEPARATE combiner + AC disconnect — most boxes.
     installComplexity: 3,
+    active: true,
+  },
+  {
+    id: 'enphase-iq-meter-collar',
+    brand: 'Enphase',
+    model: 'IQ Meter Collar',
+    partNumber: 'MC-200-011-V01',
+    kind: 'meter_socket',
+    generation: 'gen4',
+    integrated: { metering: true, disconnect: true },  // meter-socket adapter with integrated MID (grid isolation)
+    branchSlots: 0,
+    maxContinuousA: 200,
+    mounting: 'meter_socket',
+    necRefs: ['NEC 705.20'],
+    ecosystem: 'enphase-iq',
+    installComplexity: 1,
+    active: true,
+  },
+  {
+    id: 'tesla-backup-switch',
+    brand: 'Tesla',
+    model: 'Backup Switch',
+    partNumber: '1624171',
+    kind: 'meter_socket',
+    integrated: { metering: true, disconnect: true, backup: true },  // ANSI Type 2S meter socket + grid-isolation contactor + ±0.5% metering
+    branchSlots: 0,
+    maxContinuousA: 200,
+    mounting: 'meter_socket',
+    necRefs: ['NEC 705.20', 'NEC 710'],
+    ecosystem: 'tesla',
+    installComplexity: 1,
     active: true,
   },
 ];
@@ -227,38 +279,25 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
   const isEnphase = /enphase/i.test(ctx.inverterManufacturer);
   if (!isEnphase || !ctx.isMicro) return emptyPlan(isEnphase ? 'Enphase' : null);
 
-  const gen = enphaseGeneration(ctx.inverterModel) ?? 'gen4'; // default to modern
-
-  if (gen === 'gen4') {
-    // Integrated combiner (one box = combiner + gateway + disconnect). Best-fit
-    // by branch slots: 4C for ≤4 branches, else the 6C (also the default when
-    // the branch plan is unknown). This is the "least on the wall" choice.
-    const use6c = ctx.branchCount > 4 || ctx.branchCount === 0;
-    const combiner = getBosDevice(use6c ? 'enphase-iq-combiner-6c' : 'enphase-iq-combiner-4c')!;
-    return {
-      brand: 'Enphase',
-      devices: [resolved(combiner)],
-      brains: resolved(combiner),
-      hasIntegratedGateway: true,
-      providesAcDisconnect: !!combiner.integrated.disconnect,
-      branchSlots: combiner.branchSlots,
-      branchSlotWarning: combiner.branchSlots && ctx.branchCount > combiner.branchSlots
-        ? `${ctx.branchCount} AC branches exceed the ${combiner.model} ${combiner.branchSlots}-position limit — a second combiner or subpanel is required.`
-        : undefined,
-      source: 'auto',
-    };
-  }
-
-  // Gen 3: standalone Envoy/IQ Gateway on the wall + a separate combiner + AC
-  // disconnect (more boxes). We model the gateway as the brains; the discrete
-  // combiner/disconnect are represented by the generic sheet logic.
-  const gateway = getBosDevice('enphase-iq-gateway')!;
+  // Auto-config the BEST / easiest-install device: the current-gen IQ Combiner
+  // 6C — one box that IS the combiner + IQ Gateway + integral PV disconnect + RSD
+  // initiator (fewest boxes on the wall). The 4C/5C and standalone Gateway remain
+  // available as user overrides. (Enphase generation is an ecosystem line, not a
+  // property of the micro model, so we don't branch on the micro here.)
+  const combiner = getBosDevice('enphase-iq-combiner-6c')!;
+  // The 6C PV busbar takes 4 two-pole branches (5 with a quadplex); beyond that
+  // the branches spill onto the 200A DER busbar or a subpanel.
+  const pvBranchMax = 5;
   return {
     brand: 'Enphase',
-    devices: [resolved(gateway)],
-    brains: resolved(gateway),
-    hasIntegratedGateway: false,   // separate Envoy box
-    providesAcDisconnect: false,   // separate AC disconnect required
+    devices: [resolved(combiner)],
+    brains: resolved(combiner),
+    hasIntegratedGateway: true,
+    providesAcDisconnect: !!combiner.integrated.disconnect,
+    branchSlots: combiner.branchSlots,
+    branchSlotWarning: ctx.branchCount > pvBranchMax
+      ? `${ctx.branchCount} AC branches exceed the ${combiner.model} PV busbar (4 breakers, 5 with a quadplex) — route the balance onto the DER busbar or a subpanel.`
+      : undefined,
     source: 'auto',
   };
 }

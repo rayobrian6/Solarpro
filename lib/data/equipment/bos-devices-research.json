@@ -1,0 +1,293 @@
+{
+  "_meta": {
+    "description": "Authoritative part numbers and electrical specs for solar balance-of-system 'integrated' devices (combiner/gateway/backup-interface boxes). Every field sourced from manufacturer datasheets or reputable distributors; unconfirmed fields are null.",
+    "researchedAt": "2026-07-10",
+    "researcher": "BOS-device research worker",
+    "primarySources": [
+      "Enphase IQ Combiner 6C data sheet DSH-00585-3.0 (2025-04-21)",
+      "Enphase IQ Combiner 5/5C data sheet IQC-5-5C-DSH-00007-1.0 (2023-05-22)",
+      "Enphase IQ Combiner 4/4C data sheet (2022-02-14)",
+      "Enphase IQ Gateway data sheet DSH-00111-6.0 (2025-06-06)",
+      "Tesla Backup Switch data sheet (Tesla Energy Library) + distributor listings"
+    ]
+  },
+
+  "devices": [
+    {
+      "id": "enphase-iq-combiner-6c",
+      "brand": "Enphase",
+      "model": "IQ Combiner 6C",
+      "partNumber": "X-IQ-AM1-240-6C",
+      "generation": "gen4",
+      "branchBreakerPositions": 4,
+      "branchBreakerPositionsNote": "4 x 2-pole 20A PV branch breakers on a 100A internal PV busbar (can be 5 x 20A PV branches using 3 double-pole + 1 quadplex breaker). Separate 200A DER busbar carries 4 more double-pole positions: 2x battery (80A), 1x EV charger (60A), 1x aggregate PV breaker. NOT a single 6-branch bank; the '6C' name is the product generation, not a branch count.",
+      "maxContinuousOutputA": 80,
+      "maxContinuousOutputANote": "80A max continuous PV current. Max continuous DER current (PV+battery+EV+loads) 160A; max continuous backfeed current 100A.",
+      "mainBreakerA": 100,
+      "mainBreakerANote": "Aggregate PV breaker: ships with 60A pre-installed, upsizable to 80/100A (100A internal PV busbar). This aggregate PV breaker can serve as the PV disconnecting means AND as the Rapid Shutdown initiator if the combiner is installed at a readily accessible outdoor location. Max backfeed breaker (located in backfed panel) 125A.",
+      "integratesGateway": true,
+      "integratesDisconnect": true,
+      "integratesDisconnectNote": "Aggregate PV breaker (UL 489 certified) usable as PV disconnecting means / RSD initiator when outdoor & readily accessible.",
+      "integratedMeteringCT": true,
+      "integratedMeteringCTNote": "Fully integrated, pre-wired solid-core CTs: production metering ANSI C12.20 class 0.5 (+/-0.5%), 2x battery CTs (+/-0.5%), 2x backfeed CTs (+/-2.5%), 2x load-controller CTs (+/-0.5%). No field CT wiring for PV/battery.",
+      "mounting": "outdoor",
+      "dimensionsIn": "26.77 x 18.11 x 8.66 (H x W x D)",
+      "weightLb": 40,
+      "moduleOrMicroCapacity": 96,
+      "moduleOrMicroCapacityNote": "Integrated cell modem rated for systems up to 96 microinverters; IQ Gateway itself polls up to 300. Compatible with IQ6, IQ7, IQ8 series.",
+      "enclosureRating": "NEMA 3R",
+      "busbarRatingA": 100,
+      "datasheetUrl": "https://enphase.com/download/iq-combiner-6c-data-sheet",
+      "sourceUrls": [
+        "https://enphase.com/download/iq-combiner-6c-data-sheet",
+        "https://sunwatts.com/content/specs/Enphase_IQ-Combiner_6C_DataSheet.pdf",
+        "https://enphase.com/store/communication/iq-gateway-and-combiner/iq-combiner-6c"
+      ],
+      "notes": "Current-generation (gen4) combiner for IQ8 / IQ Battery 10C ecosystem. Integrates IQ Gateway + combiner controller board (CCB) + DER relay + integrated load controller + CELLMODEM-07-NA. NOT service-entrance rated; does not support generator or fully off-grid. A 3-breaker variant exists: X-IQ-AM1-240-6C-3BRK (ships with 2x20A PV + 1x40A battery pre-installed). Compatible IQ Meter Collar SKU MC-200-011-V01.",
+      "confidence": "high"
+    },
+
+    {
+      "id": "enphase-iq-combiner-5c",
+      "brand": "Enphase",
+      "model": "IQ Combiner 5C (and 5)",
+      "partNumber": "X-IQ-AM1-240-5C",
+      "partNumberVariants": [
+        "X-IQ-AM1-240-5 (no cell modem)",
+        "X-IQ-AM1-240-5C (includes CELLMODEM-M1-06-SP-05)",
+        "X-IQ-AM1-240-5C-HDK / EN-X-IQ-AM1-240-5C-HDK (with hold-down kit)"
+      ],
+      "generation": "gen3",
+      "generationNote": "Enphase describes the IQ Combiner 5C as its third-generation combiner. Pairs with IQ System Controller 3/3G + IQ Battery 5P via wired CTRL board.",
+      "branchBreakerPositions": 4,
+      "branchBreakerPositionsNote": "Up to four 2-pole Eaton BR-series DG breakers (not included) on a 125A busbar; the busbar also carries 1x IQ Gateway breaker. 80A total PV branch circuits.",
+      "maxContinuousOutputA": 64,
+      "maxContinuousOutputANote": "Max continuous current rating (input from PV/storage) 64A. Overall rating 80A; busbar 125A; 10kAIC fault rating.",
+      "mainBreakerA": null,
+      "mainBreakerANote": "No aggregate/main PV breaker in this combiner; it uses a main-lug combined output (10-2/0 AWG). Max total branch breaker rating 80A DG / 95A incl. gateway breaker. Does NOT provide an internal PV disconnecting means the way the 6C aggregate breaker does.",
+      "integratesGateway": true,
+      "integratesGatewayNote": "Includes IQ Gateway printed circuit board (revenue-grade production metering).",
+      "integratesDisconnect": false,
+      "integratesDisconnectNote": "No internal load-break main/aggregate breaker sized as PV disconnect; disconnecting means must be external.",
+      "integratedMeteringCT": true,
+      "integratedMeteringCTNote": "Pre-wired solid-core production CT (ANSI C12.20 +/-0.5%). Two consumption clamp CTs + one IQ Battery clamp CT shipped in box (+/-2.5%).",
+      "mounting": "outdoor",
+      "dimensionsIn": "14.75 x 19.5 x 6.63 (W x H x D); 21.06 tall with mounting brackets",
+      "weightLb": 16.5,
+      "moduleOrMicroCapacity": 60,
+      "moduleOrMicroCapacityNote": "Cell modem CELLMODEM-M1-06-SP-05 rated for systems up to 60 microinverters. Compatible with IQ6, IQ7, IQ8.",
+      "enclosureRating": "NEMA 3R",
+      "busbarRatingA": 125,
+      "datasheetUrl": "https://enphase.com/download/iq-combiner-5-data-sheet",
+      "sourceUrls": [
+        "https://enphase.com/download/iq-combiner-5-data-sheet",
+        "https://www.solar-electric.com/lib/wind-sun/enphase-IQ-Combiner-5-5C-2023-05-22-DS.pdf",
+        "https://solar-store-us.baywa-re.com/EN-X-IQ-AM1-240-5C-HDK"
+      ],
+      "notes": "'5' vs '5C': the 5C bundles the LTE-M1 cell modem, the plain 5 does not; otherwise identical PCB/metering. Grid-agnostic system with IQ System Controller 3/3G + IQ Battery 5P. 5-year warranty.",
+      "confidence": "high"
+    },
+
+    {
+      "id": "enphase-iq-combiner-4c",
+      "brand": "Enphase",
+      "model": "IQ Combiner 4C (and 4)",
+      "partNumber": "X-IQ-AM1-240-4C",
+      "partNumberVariants": [
+        "X-IQ-AM1-240-4 (no cell modem)",
+        "X-IQ-AM1-240-4C (includes CELLMODEM-M1-06-SP-05)",
+        "X2-IQ-AM1-240-4C (distributor-listed IQ8-system variant)"
+      ],
+      "generation": "gen2",
+      "generationNote": "Legacy/older-generation combiner (Enphase store lists it under 'gen2'). Still sold for IQ8 systems by distributors.",
+      "branchBreakerPositions": 4,
+      "branchBreakerPositionsNote": "Up to four 2-pole Eaton BR-series DG breakers (not included) on a 125A busbar. 80A total PV/storage branch circuits.",
+      "maxContinuousOutputA": 64,
+      "maxContinuousOutputANote": "Max continuous current (input from PV/storage) 64A; overall max continuous 65A; max fuse/circuit output rating 90A; busbar 125A.",
+      "mainBreakerA": null,
+      "mainBreakerANote": "No aggregate/main PV breaker; main-lug combined output (10-2/0 AWG). Max total branch breaker rating 80A DG / 95A incl. gateway breaker.",
+      "integratesGateway": true,
+      "integratesGatewayNote": "Includes IQ Gateway (formerly Envoy) PCB.",
+      "integratesDisconnect": false,
+      "integratedMeteringCT": true,
+      "integratedMeteringCTNote": "Pre-wired 200A solid-core production CT (ANSI C12.20 +/-0.5%); consumption via CT-200-SPLIT pair (+/-2.5%).",
+      "mounting": "outdoor",
+      "dimensionsIn": "14.75 x 19.5 x 6.63 (W x H x D); 21.06 tall with brackets",
+      "weightLb": 16.5,
+      "moduleOrMicroCapacity": 60,
+      "moduleOrMicroCapacityNote": "Cell modem rated for systems up to 60 microinverters. Compatible IQ6/IQ7/IQ8.",
+      "enclosureRating": "NEMA 3R",
+      "busbarRatingA": 125,
+      "datasheetUrl": "https://enphase.com/download/iq-combiner-44c-data-sheet",
+      "sourceUrls": [
+        "https://enphase.com/download/iq-combiner-44c-data-sheet",
+        "https://enphase.com/sites/default/files/2021-10/IQ-Combiner-4-4C-DS-EN-US-10-21-2021.pdf",
+        "https://www.solar-electric.com/enphase-x-iq-am1-240-4c-iq-combiner.html"
+      ],
+      "notes": "REGISTRY CORRECTION: the SolarPro equipment registry value 'ENV-IQ-C4C-240' is NOT a real Enphase SKU and should be replaced. The correct ordering SKU for the IQ Combiner 4C is X-IQ-AM1-240-4C (or X2-IQ-AM1-240-4C for the IQ8-system distributor variant). '4' vs '4C' = cell modem bundled only in 4C.",
+      "confidence": "high"
+    },
+
+    {
+      "id": "enphase-iq-combiner-3c",
+      "brand": "Enphase",
+      "model": "IQ Combiner 3C (and 3 / 3-ES / 3C-ES)",
+      "partNumber": "X-IQ-AM1-240-3C",
+      "partNumberVariants": [
+        "X-IQ-AM1-240-3 (with IQ Envoy)",
+        "X-IQ-AM1-240-3C (with cell modem)",
+        "X-IQ-AM1-240-3-ES / X-IQ-AM1-240-3C-ES (Ensemble/storage-ready variants)"
+      ],
+      "generation": "gen1",
+      "generationNote": "Oldest IQ-branded combiner line, uses the original IQ Envoy. Discontinued by Enphase (replaced by the 4/4C); may still appear at distributors.",
+      "branchBreakerPositions": 4,
+      "branchBreakerPositionsNote": "Up to four 2-pole 240VAC branch circuits; 80A total PV/storage. Same Eaton BR busbar architecture as the 4/4C.",
+      "maxContinuousOutputA": 64,
+      "maxContinuousOutputANote": "Not re-verified against the 3-series datasheet this session; carried from the near-identical 4/4C. Treat as approximate.",
+      "mainBreakerA": null,
+      "integratesGateway": true,
+      "integratesGatewayNote": "Integrated IQ Envoy (the pre-'IQ Gateway' name).",
+      "integratesDisconnect": false,
+      "integratedMeteringCT": true,
+      "integratedMeteringCTNote": "Revenue-grade production metering (ANSI C12.20 +/-0.5%) + optional consumption (+/-2.5%).",
+      "mounting": "outdoor",
+      "dimensionsIn": "14.75 x 19.5 x 6.63 (W x H x D) (assumed same chassis as 4/4C; not re-verified)",
+      "weightLb": 16.5,
+      "moduleOrMicroCapacity": 60,
+      "enclosureRating": "NEMA 3R",
+      "busbarRatingA": 125,
+      "datasheetUrl": "https://enphase.com/download/iq-combiner-3-data-sheet",
+      "sourceUrls": [
+        "https://enphase.com/download/iq-combiner-3-data-sheet",
+        "https://enphase.com/download/iq-combiner-3-es3c-es-data-sheet",
+        "https://www.solaris-shop.com/content/X-IQ-AM1-240-3C%20Specs.pdf"
+      ],
+      "notes": "DISCONTINUED. Include only for legacy/retrofit lookups. Dimensions/current figures marked medium confidence because the 3-series datasheet was not re-parsed this session (values inferred from the identical-chassis 4/4C).",
+      "confidence": "medium"
+    },
+
+    {
+      "id": "enphase-iq-gateway",
+      "brand": "Enphase",
+      "model": "IQ Gateway (standalone) — formerly IQ Envoy / Envoy-S Metered",
+      "partNumber": "ENV-IQ-AM1-240",
+      "partNumberVariants": [
+        "ENV-IQ-AM1-240 (original)",
+        "ENV2-IQ-AM1-240 (current, IEEE 2030.5 / IEEE 1547:2018 certified)",
+        "Distributor 'M'/'-M' suffix denotes the metered configuration (e.g. ENV-IQ-AM1-240 M)"
+      ],
+      "generation": null,
+      "generationNote": "The IQ Gateway is the monitoring/control brain, not a combiner generation. Same gateway PCB is embedded in the IQ Combiner 4C/5C. Enphase renamed 'Envoy' -> 'IQ Envoy' -> 'IQ Gateway'.",
+      "branchBreakerPositions": 0,
+      "branchBreakerPositionsNote": "Standalone gateway has NO breakers/busbar; it is a communications + metering device requiring its own 2-pole, max 20A upstream OCPD. Mounts on a DIN rail inside a panel/enclosure.",
+      "maxContinuousOutputA": null,
+      "mainBreakerA": null,
+      "integratesGateway": true,
+      "integratesGatewayNote": "It IS the gateway.",
+      "integratesDisconnect": false,
+      "integratedMeteringCT": true,
+      "integratedMeteringCTNote": "Integrated revenue-grade production metering (ANSI C12.20 +/-0.5%); ships with one CT-200-SOLID production CT. Consumption (+/-2.5%) and IQ Battery 5P metering (+/-2.5%) optional via CT-200-SPLIT / CT-200-CLAMP (order separately). 'Metered' distributor variants bundle the CTs; non-metered do not.",
+      "mounting": "indoor",
+      "mountingNote": "IP30; install indoors or in a NEMA 3R (or better) enclosure if outdoors. DIN-rail mount.",
+      "dimensionsIn": "8.4 x 5 x 1.8 (W x H x D)",
+      "weightLb": 1.09,
+      "moduleOrMicroCapacity": 300,
+      "moduleOrMicroCapacityNote": "Polls up to 300 microinverters. Compatible IQ6/IQ7/IQ8.",
+      "enclosureRating": "IP30 (indoor / NEMA 3R if outdoors)",
+      "busbarRatingA": null,
+      "datasheetUrl": "https://enphase.com/download/iq-gateway-data-sheet",
+      "sourceUrls": [
+        "https://enphase.com/download/iq-gateway-data-sheet",
+        "https://www.solar-electric.com/enphase-env2-iq-am1-240-iq-envoy.html",
+        "https://solartown.com/solar-products/accessories/enphase-env2-iq-am1-240-envoy-single-phase-metered/"
+      ],
+      "notes": "Use ENV2-IQ-AM1-240 for new installs (IEEE 2030.5 / grid-support compliant). ENV-IQ-AM1-240 is the older revision. Both are the 'metered' single-phase 240V gateway (integrated production metering standard). This is what standalone IQ7-and-earlier systems used before the all-in-one combiner; today the same gateway lives inside the IQ Combiner 4C/5C/6C.",
+      "confidence": "high"
+    },
+
+    {
+      "id": "enphase-iq-meter-collar",
+      "brand": "Enphase",
+      "model": "IQ Meter Collar",
+      "partNumber": "MC-200-011-V01",
+      "partNumberVariants": ["EN-MC-200-011-V01 (some distributor prefix)"],
+      "generation": "gen4",
+      "generationNote": "Part of the gen4 IQ8 / IQ Battery 10C / IQ Combiner 6C whole-home-backup ecosystem.",
+      "branchBreakerPositions": 0,
+      "branchBreakerPositionsNote": "Not a combiner; a meter-socket adapter that installs behind the utility meter.",
+      "maxContinuousOutputA": 200,
+      "maxContinuousOutputANote": "200A-class meter-socket device (per SKU '200').",
+      "mainBreakerA": null,
+      "integratesGateway": false,
+      "integratesDisconnect": true,
+      "integratesDisconnectNote": "Contains an integrated Microgrid Interconnection Device (MID) — the grid-isolation relay — enabling whole-home backup without a backup subpanel. Functions as the grid-disconnect for islanding.",
+      "integratedMeteringCT": true,
+      "integratedMeteringCTNote": "Integrated consumption metering.",
+      "mounting": "outdoor",
+      "mountingNote": "Meter-socket adapter ('collar') — sits between the utility meter base and the meter.",
+      "dimensionsIn": null,
+      "weightLb": null,
+      "moduleOrMicroCapacity": null,
+      "enclosureRating": null,
+      "busbarRatingA": null,
+      "datasheetUrl": "https://enphase.com/store/storage/gen4/iq-meter-collar",
+      "sourceUrls": [
+        "https://enphase.com/store/storage/gen4/iq-meter-collar",
+        "https://enphase.com/download/iq-meter-collar-quick-install-guide",
+        "https://www.platt.com/p/2222746/enphase/iq-meter-collar-socket-adapter/ephmc200011v01",
+        "https://solartown.com/inverter-accessories/enphase-en-mc-200-011-v01-iq-meter-collar-is-a-meter-socket-adapter-with-integrated-mid/"
+      ],
+      "notes": "Enphase's answer to the meter-socket-adapter trend (alongside Tesla Backup Switch and ConnectDER). Enables full-home backup with IQ Battery 10C + IQ Combiner 6C. Detailed mechanical dims/weight not captured this session (marked null).",
+      "confidence": "medium"
+    },
+
+    {
+      "id": "tesla-backup-switch",
+      "brand": "Tesla",
+      "model": "Backup Switch",
+      "partNumber": "1624171",
+      "partNumberVariants": [
+        "1624171 (base)",
+        "1624171-00-E (full TPN seen on units)"
+      ],
+      "generation": null,
+      "branchBreakerPositions": 0,
+      "branchBreakerPositionsNote": "Not a combiner. Meter-socket-mounted grid-connection controller (contactor) for Powerwall backup.",
+      "maxContinuousOutputA": 200,
+      "maxContinuousOutputANote": "200A continuous, 120/240V split-phase.",
+      "mainBreakerA": null,
+      "mainBreakerANote": "No breaker of its own; SCCR is 10kA standalone, 22kA when used with a <=200A upstream breaker.",
+      "integratesGateway": false,
+      "integratesGatewayNote": "Provides the grid-interface/islanding contactor + metering that a Backup Gateway would; communicates via CAN to Powerwall. Not a solar monitoring gateway.",
+      "integratesDisconnect": true,
+      "integratesDisconnectNote": "Houses the contactor that connects/disconnects the whole home from the grid (islanding), plugging into the existing meter socket — replaces a separate backup gateway/subpanel.",
+      "integratedMeteringCT": true,
+      "integratedMeteringCTNote": "Built-in AC consumption meter, +/-0.5% accuracy.",
+      "mounting": "outdoor",
+      "mountingNote": "Plugs into the utility meter socket (ANSI Type 2S, ringless or ring type); meter plugs into it. 1/2-inch NPT conduit. Can also mount in a separate meter panel.",
+      "dimensionsIn": "8.1 x 6.9 x 2.9 (H x W x D)  [205 x 176 x 74 mm]",
+      "weightLb": 2.8,
+      "moduleOrMicroCapacity": null,
+      "enclosureRating": null,
+      "busbarRatingA": null,
+      "datasheetUrl": "https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/General/Datasheet/BackupSwitch/1/en-us/BackupSwitch-Datasheet.pdf",
+      "sourceUrls": [
+        "https://www.tesla.com/support/energy/powerwall/learn/tesla-backup-switch",
+        "https://ussolarsupplier.com/products/tesla-energy-backup-switch-120-240vac-4lb",
+        "https://www.solarelectricsupply.com/tesla-backup-switch-grid-connection-controller",
+        "https://allthingssurplus.com/tesla-backup-switch-tpn-1624171-00-e-tsn-tg121195001zf7-48-3/"
+      ],
+      "notes": "Compatible with Powerwall 2 (w/ Backup Gateway 2), Powerwall+, and Powerwall 3. Cuts Powerwall install time ~6 hrs by integrating meter-socket + backup interface + metering. 10-yr warranty, ~21-yr service life. NOTE: the part number '1707000' given in the research prompt was NOT confirmed anywhere; the confirmed Tesla ordering/TPN is 1624171 (full 1624171-00-E) — flagged as a prompt discrepancy.",
+      "confidence": "high"
+    }
+  ],
+
+  "notes": [
+    "ENPHASE GENERATION -> COMBINER MAPPING: 'Gen 3 vs Gen 4' in Enphase language refers to the ECOSYSTEM/product generation, NOT the microinverter model. (a) IQ7-and-earlier / early IQ8 systems used a STANDALONE IQ Gateway/Envoy (ENV-IQ-AM1-240 / ENV2-IQ-AM1-240) OR the older combiners: IQ Combiner 3/3C (gen1, Envoy) then 4/4C (gen2). (b) The gen3 line is the IQ Combiner 5/5C, paired with IQ System Controller 3/3G + IQ Battery 5P. (c) The current gen4 line is the IQ Combiner 6C, paired with IQ Battery 10C + IQ Meter Collar. All three combiner generations (4C/5C/6C) still list IQ6/IQ7/IQ8 microinverter compatibility, so 'which combiner pairs with IQ8' = any of them; the 6C is the current-generation choice for new IQ8 + storage designs.",
+    "PV AC DISCONNECT (NEC 690.13 / 705.20): Only the IQ Combiner 6C has an internal breaker that legally serves as the PV AC disconnecting means — its aggregate PV breaker is UL 489 rated and Enphase explicitly states it 'can be used as a PV disconnecting means' and as the Rapid Shutdown initiator, but ONLY when the combiner is installed outdoors at a readily accessible location. The 3C/4C/5C combiners have NO aggregate/main breaker (main-lug output only), so those systems need an EXTERNAL AC disconnect. The Tesla Backup Switch and Enphase IQ Meter Collar both contain a grid-isolation contactor/MID (islanding disconnect) but that is the utility/backup disconnect, not the PV-source disconnect.",
+    "BRANCH-POSITION LIMITS: The IQ Combiner 6C does NOT cap PV at 6 branches — the '6C' is a generation name. Its PV busbar takes 4 x 2-pole 20A breakers (up to 5 x 20A PV branches with a quadplex breaker); a separate 200A DER busbar adds 4 more positions for battery/EV/aggregate-PV. The 3C/4C/5C each take up to FOUR 2-pole branch circuits (80A total PV). None of these is a high-count commercial combiner.",
+    "REGIONAL SKU VARIANCE: All SKUs above are 240V split-phase US/North-America parts (X-IQ-AM1-240-*, ENV*-IQ-AM1-240 where 'AM1-240' = Americas, 240V). Enphase sells different regional gateways/combiners (e.g. AU/EU/international part suffixes) not covered here. Cell-modem SKUs are region/carrier-specific (CELLMODEM-M1-06-SP-05 Sprint, -AT-05 AT&T, CELLMODEM-07-NA AT&T/T-Mobile). The IQ Combiner 5C ships modem availability limited to US/Canada/Mexico/PR/USVI.",
+    "REGISTRY FIX: The SolarPro equipment registry's 'ENV-IQ-C4C-240' for the IQ Combiner 4C is a fabricated/non-existent SKU. Replace with X-IQ-AM1-240-4C.",
+    "LOW/UNCONFIRMED: IQ Combiner 3C current/dimension figures were inferred from the identical-chassis 4/4C (medium confidence). IQ Meter Collar mechanical dims/weight not captured (null). Tesla Backup Switch enclosure NEMA rating not captured (null). The prompt's Tesla PN '1707000' could not be confirmed; confirmed PN is 1624171."
+  ]
+}
