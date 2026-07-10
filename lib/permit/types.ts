@@ -186,6 +186,11 @@ export interface PermitInput {
     generatorKw?: number;
     interconnectionMethod?: string;
     panelBusRating?: number;
+    // User-selected brand-integrated BOS device(s) — combiner/gateway/"brains"
+    // (ids from lib/equipment/integratedBos). When set, overrides the auto-config
+    // (the design-studio picker will write this). Read by buildIntegratedEquipment.
+    bosDeviceIds?: string[];
+    combinerId?: string;
     // AHJ data (auto-populated server-side from ahj-national.ts)
     ahjName?: string;
     ahjWindSpeedMph?: number;

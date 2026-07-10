@@ -38,9 +38,10 @@ export function buildIntegratedEquipment(input: PermitInput, cad?: CADModel | nu
     ? (positions.length ? planMicroBranches(positions, inverterModel).count : microBranchCount(totalDevices, inverterModel))
     : 0;
 
-  // Future design-studio override hook (no UI yet — read defensively).
-  const overrideDeviceIds = (project as any).bosDeviceIds as string[] | undefined
-    ?? ((project as any).combinerId ? [(project as any).combinerId] : undefined);
+  // User override (typed on PermitInput.project) — the design-studio picker
+  // writes bosDeviceIds; falls back to a single combinerId.
+  const overrideDeviceIds = project.bosDeviceIds
+    ?? (project.combinerId ? [project.combinerId] : undefined);
 
   const ctx: SystemBosContext = {
     inverterManufacturer,
