@@ -22,7 +22,7 @@ describe('PV-6 disconnect directory & emergency placard', () => {
     expect(html).toContain('DISCONNECT DIRECTORY');
     expect(html).toContain('EMERGENCY PLACARD');
     expect(html).toContain('CAUTION — MULTIPLE SOURCES OF POWER');
-    expect(html).toContain('LOCATION OF DISCONNECTS');
+    expect(html).toContain('DISCONNECTING MEANS &amp; PV EQUIPMENT DIRECTORY');
     expect(html).toContain('SYSTEM RATINGS');
     expect(html).toContain('EMERGENCY SHUTDOWN PROCEDURE');
     expect(html).toContain('RAPID SHUTDOWN');

@@ -504,15 +504,18 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
     ? 'SUPPLY-SIDE TAP — NEC 705.11'
     : `LOAD-SIDE BACK-FED BREAKER${acOcpd ? ` (${acOcpd}A)` : ''} — NEC 705.12`;
 
-  // ── Disconnect directory (numbered, keyed to the diagram) ─────
-  interface Disco { name: string; loc: string; }
+  // ── Disconnecting-means & equipment directory (NEC 690.56(B) / 705.10) ──
+  // A real numbered directory: every disconnect + PV equipment, its rating/ID,
+  // and where it is. No invented building drawing — locations reference PV-1.
+  interface Disco { name: string; rating: string; loc: string; }
+  const battKwh = hasBattery ? (project.batteryCount || 1) * (project.batteryKwh ?? 5.0) : 0;
   const discos: Disco[] = [];
-  discos.push({ name: 'MAIN SERVICE DISCONNECT', loc: `${mainA}A${project.mainPanelBrand ? ` ${project.mainPanelBrand}` : ''} — exterior at meter/service` });
-  if (project.acDisconnect !== false) discos.push({ name: 'PV AC DISCONNECT', loc: 'Exterior, lockable — adjacent to utility meter' });
-  if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', loc: 'At the inverter' });
-  discos.push({ name: `INVERTER${invCount > 1 ? `S (×${invCount})` : ''}`, loc: `${invMfr} ${invModel}`.trim() });
-  if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN SWITCH', loc: 'Adjacent to the PV AC disconnect' });
-  if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', loc: `${project.batteryBrand || 'ESS'} — at battery enclosure` });
+  discos.push({ name: 'MAIN SERVICE DISCONNECT', rating: `${mainA} A${project.mainPanelBrand ? ` · ${project.mainPanelBrand}` : ''}`, loc: 'Exterior — at utility meter / service entrance' });
+  if (project.acDisconnect !== false) discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A${isSupply ? ' fused' : ''}` : 'PER PLAN', loc: 'Exterior, lockable — adjacent to utility meter' });
+  if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', rating: `${maxDcV}`, loc: 'At the inverter' });
+  discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
+  if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: 'Adjacent to the PV AC disconnect' });
+  if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
 
   // ── Emergency shutdown steps (adapt to what's present) ────────
   const steps: string[] = ['OPEN MAIN SERVICE / UTILITY DISCONNECT'];
@@ -530,39 +533,14 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   // Source list for the CAUTION header.
   const sources = `UTILITY GRID + SOLAR PV${hasBattery ? ' + ENERGY STORAGE' : ''}`;
 
-  // ── Building directory diagram (front elevation, numbered callouts) ──
-  const _boxes = discos.slice(0, 6);
-  const _bw = 46, _gap = 6;
-  const _startX = 20;
-  const _diagram = `
-    <svg viewBox="0 0 360 226" width="100%" style="display:block;font-family:Arial,Helvetica,sans-serif;">
-      <!-- ground -->
-      <line x1="6" y1="200" x2="354" y2="200" stroke="#1a2230" stroke-width="1.4"/>
-      <!-- house body -->
-      <rect x="40" y="96" width="280" height="104" fill="#f7f8fa" stroke="#1a2230" stroke-width="1.4"/>
-      <!-- gable roof -->
-      <path d="M28 96 L180 40 L332 96 Z" fill="#eef1f5" stroke="#1a2230" stroke-width="1.4"/>
-      <!-- shaded PV array boundary on roof -->
-      <path d="M96 84 L180 53 L264 84 L180 84 Z" fill="#c9d6e8" stroke="#3a4a63" stroke-width="1" stroke-dasharray="3 2"/>
-      <text x="180" y="76" text-anchor="middle" font-size="7" fill="#2b3a52" font-weight="bold">PV ARRAY (BOUNDARY)</text>
-      <!-- equipment run along the wall -->
-      ${_boxes.map((d, i) => {
-        const x = _startX + 40 + i * (_bw + _gap);
-        return `<g>
-          <rect x="${x}" y="150" width="${_bw}" height="30" fill="#ffffff" stroke="#1a2230" stroke-width="1.1"/>
-          <circle cx="${x + _bw / 2}" cy="140" r="8" fill="#111" stroke="#111"/>
-          <text x="${x + _bw / 2}" y="143" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">${i + 1}</text>
-          <text x="${x + _bw / 2}" y="169" text-anchor="middle" font-size="5.6" fill="#1a2230" font-weight="bold">DISC ${i + 1}</text>
-        </g>`;
-      }).join('')}
-      <text x="180" y="216" text-anchor="middle" font-size="6.5" fill="#555" font-style="italic">Building directory — schematic; verify locations in field. Keyed to the list at right.</text>
-    </svg>`;
-
-  const _legend = _boxes.map((d, i) =>
-    `<div style="display:flex;gap:5px;align-items:baseline;margin-bottom:2px;">` +
-    `<span style="flex:0 0 auto;display:inline-block;width:13px;height:13px;background:#111;color:#fff;border-radius:50%;text-align:center;font-size:8px;font-weight:900;line-height:13px;">${i + 1}</span>` +
-    `<span style="font-size:7.5px;line-height:1.35;"><strong>${escapeH(d.name)}</strong> — ${escapeH(d.loc)}</span>` +
-    `</div>`).join('');
+  // Directory rows — the numbered list of every disconnect + PV equipment.
+  const _dirRows = discos.map((d, i) =>
+    `<tr>` +
+    `<td class="fw9 mono" style="text-align:center;">${i + 1}</td>` +
+    `<td class="fw7">${escapeH(d.name)}</td>` +
+    `<td class="mono" style="font-size:7.5px;">${escapeH(d.rating)}</td>` +
+    `<td style="font-size:8px;">${escapeH(d.loc)}</td>` +
+    `</tr>`).join('');
 
   return `
   <div class="page">
@@ -583,32 +561,36 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
           <div style="font-size:9px;font-weight:800;letter-spacing:0.4px;margin-top:1px;">THIS BUILDING IS SERVED BY: ${sources}</div>
         </div>
 
-        <!-- body: directory diagram | ratings + emergency steps -->
-        <div style="display:grid;grid-template-columns:1.12fr 1fr;">
-          <!-- LEFT: directory diagram + numbered legend -->
-          <div style="padding:8px;border-right:2px solid #000;">
-            <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:4px;">LOCATION OF DISCONNECTS &amp; PV EQUIPMENT</div>
-            ${_diagram}
-            <div style="margin-top:5px;">${_legend}</div>
-          </div>
+        <!-- body row 1: the disconnecting-means & equipment directory -->
+        <div style="padding:8px 10px;border-bottom:3px solid #000;">
+          <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:4px;">DISCONNECTING MEANS &amp; PV EQUIPMENT DIRECTORY <span style="font-weight:600;color:#333;">— locations shown on PV-1 site plan</span></div>
+          <table class="equip-table" style="margin:0;">
+            <thead><tr>
+              <th style="width:6%;text-align:center;">#</th>
+              <th style="width:30%;">DISCONNECT / EQUIPMENT</th>
+              <th style="width:28%;">RATING / ID</th>
+              <th>LOCATION</th>
+            </tr></thead>
+            <tbody>${_dirRows}</tbody>
+          </table>
+        </div>
 
-          <!-- RIGHT: ratings + emergency shutdown -->
-          <div style="padding:8px;display:flex;flex-direction:column;gap:7px;">
-            <div>
-              <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1.5px solid #000;padding-bottom:2px;">SYSTEM RATINGS</div>
-              <table style="width:100%;border-collapse:collapse;font-size:8px;">
-                <tr><td style="padding:1.5px 0;">RATED AC OUTPUT CURRENT</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">${acOutA > 0 ? acOutA.toFixed(1) + ' A' : '____ A'}</td></tr>
-                <tr><td style="padding:1.5px 0;">NOMINAL OPERATING AC VOLTAGE</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">240 V</td></tr>
-                <tr><td style="padding:1.5px 0;">MAX DC SYSTEM VOLTAGE</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">${maxDcV}</td></tr>
-                <tr><td style="padding:1.5px 0;">INTERCONNECTION</td><td style="text-align:right;font-family:var(--mono);font-weight:800;font-size:7px;">${interType}</td></tr>
-              </table>
-            </div>
-            <div>
-              <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1.5px solid #000;padding-bottom:2px;">EMERGENCY SHUTDOWN PROCEDURE</div>
-              <ol style="margin:0;padding-left:15px;font-size:7.8px;line-height:1.5;font-weight:700;">
-                ${steps.map(s => `<li>${escapeH(s)}</li>`).join('')}
-              </ol>
-            </div>
+        <!-- body row 2: ratings | emergency shutdown -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;">
+          <div style="padding:8px 10px;border-right:2px solid #000;">
+            <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1.5px solid #000;padding-bottom:2px;">SYSTEM RATINGS</div>
+            <table style="width:100%;border-collapse:collapse;font-size:8.5px;">
+              <tr><td style="padding:2px 0;">RATED AC OUTPUT CURRENT</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">${acOutA > 0 ? acOutA.toFixed(1) + ' A' : '____ A'}</td></tr>
+              <tr><td style="padding:2px 0;">NOMINAL OPERATING AC VOLTAGE</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">240 V</td></tr>
+              <tr><td style="padding:2px 0;">MAX DC SYSTEM VOLTAGE</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">${maxDcV}</td></tr>
+              <tr><td style="padding:2px 0;">INTERCONNECTION</td><td style="text-align:right;font-family:var(--mono);font-weight:800;font-size:7.5px;">${interType}</td></tr>
+            </table>
+          </div>
+          <div style="padding:8px 10px;">
+            <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1.5px solid #000;padding-bottom:2px;">EMERGENCY SHUTDOWN PROCEDURE</div>
+            <ol style="margin:0;padding-left:16px;font-size:8.2px;line-height:1.55;font-weight:700;">
+              ${steps.map(s => `<li>${escapeH(s)}</li>`).join('')}
+            </ol>
           </div>
         </div>
 
