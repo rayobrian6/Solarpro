@@ -9,6 +9,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
+import { selectFieldLabels, type FieldLabel } from '../utils/fieldLabels';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
@@ -17,245 +18,16 @@ import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
-  const { project, system, compliance } = input;
+  const { compliance } = input;
   const necVer = compliance.jurisdiction?.necVersion || '2020';
-  const hasBattery = hasRealBattery(project);
-  const hasGenerator = (project.generatorKw || 0) > 0;
-  const _isRoof = isRoof(cad.systemType);   // FIX v47.295: system-aware warning labels
+  const _isRoof = isRoof(cad.systemType);
   const _isFence = isFence(cad.systemType);
   const _isGround = isGround(cad.systemType);
 
-  const eq_labels = getEquipmentContext(input, cad);
-  const panelIsc = eq_labels.panelIsc || 0;
-  const panelVoc = eq_labels.panelVoc || 0;
-  // v47.350: Use accessor layer (prefers SystemDefinition, falls back to legacy)
-  const _labelTopo = topologyToLegacy(getInverterTopology(input, cad));
-  const isMicro = _labelTopo === 'MICRO';
-
-  // Label current must describe the CIRCUIT the label is on. For a micro/AC
-  // system the point-of-interconnection current is the aggregate rated AC
-  // output — printing one module's DC Isc×1.25 (8.2A) on a ~77A system was a
-  // plan-check red flag. String systems keep the DC source-circuit value.
-  const _acOutA = ((system.totalAcKw || 0) * 1000) / 240;
-  const maxCircuitCurrent = (isMicro && _acOutA > 0 ? _acOutA : panelIsc * 1.25).toFixed(1);
-  const maxSystemVoltage = isMicro ? '240V AC' : `${(panelVoc * 1.25).toFixed(0)}V DC`;
-
-  interface LabelSpec {
-    id: string;
-    necRef: string;
-    placement: string;
-    lines: string[];
-    bg: string;
-    fg: string;
-    required: boolean;
-  }
-
-  const labels: LabelSpec[] = [
-    {
-      id: 'L-1',
-      necRef: `NEC 690.54 / NEC ${necVer}`,
-      placement: isMicro
-        ? 'At the point of interconnection / AC disconnect'
-        : 'On combiner box and at DC disconnect',
-      lines: isMicro ? [
-        // NEC 690.54 point-of-interconnection label — rated AC values
-        'SOLAR ELECTRIC SYSTEM CONNECTED',
-        `RATED AC OUTPUT CURRENT: ${maxCircuitCurrent}A`,
-        'NOMINAL OPERATING AC VOLTAGE: 240V',
-      ] : [
-        'WARNING',
-        'SOLAR ELECTRIC SYSTEM CONNECTED',
-        `MAXIMUM SYSTEM VOLTAGE: ${maxSystemVoltage}`,
-        `MAXIMUM CIRCUIT CURRENT: ${maxCircuitCurrent}A`,
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: true,
-    },
-    {
-      id: 'L-2',
-      // NEC 2023 renumbered 690.56(B) → 690.12(D)(2)
-      // Code-mandated placard text per NEC 690.56(C) \u2014 the previous
-      // checkbox-style wording was invented and matched no code language.
-      necRef: necVer === '2023' ? 'NEC 690.12(D) / 690.56(C)' : 'NEC 690.56(C)',
-      placement: 'At rapid shutdown initiation device (service entrance)',
-      lines: [
-        'SOLAR PV SYSTEM IS EQUIPPED WITH',
-        'RAPID SHUTDOWN',
-        'TURN RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION',
-        'TO SHUT DOWN PV SYSTEM AND REDUCE',
-        'SHOCK HAZARD IN THE ARRAY',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: project.rapidShutdown,
-    },
-    {
-      id: 'L-3',
-      // NEC 2023 renumbered 690.56(C)(1) → 690.12(D)
-      necRef: necVer === '2023' ? 'NEC 690.12(D)' : 'NEC 690.56(C)(1)',
-      placement: `At the array \u2014 each ${_isRoof ? 'roof elevation' : _isFence ? 'fence section' : 'array section'} with PV`,
-      lines: [
-        'WARNING',
-        'PHOTOVOLTAIC POWER SOURCE',
-        'DO NOT REMOVE OR COVER THIS LABEL',
-        necVer === '2023'
-          ? 'RAPID SHUTDOWN SYSTEM INSTALLED \u2014 SEE NEC 690.12(D)'
-          : 'INSTALLATION SHUTDOWN INFORMATION INSIDE',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: project.rapidShutdown,
-    },
-    {
-      id: 'L-4',
-      necRef: 'NEC 705.12 / 705.10',
-      placement: 'On the main service panel — inside door',
-      lines: [
-        'WARNING',
-        'DUAL POWER SOURCES',
-        'PHOTOVOLTAIC SYSTEM CONNECTED',
-        'SHUT OFF PV DISCONNECT BEFORE SERVICING',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: true,
-    },
-    {
-      id: 'L-5',
-      necRef: 'IFC \u00a71204 / NEC 690.56(A)',
-      placement: 'Adjacent to or on the utility meter',
-      lines: [
-        'SOLAR PV SYSTEM CONNECTED',
-        project.address || '—',
-        `System Size: ${system.totalDcKw?.toFixed(2) || '—'} kW DC`,
-        `Interconnection: ${interconnectionLabel(project.interconnectionMethod)}`,
-      ],
-      bg: '#000',
-      fg: '#ffffff',
-      required: true,
-    },
-    // FIX v47.341: Conditional L-6 placement text based on topology
-    {
-      id: 'L-6',
-      necRef: 'NEC 690.53',
-      placement: isMicro
-        ? 'On AC disconnect or combiner panel (microinverter system)'
-        : 'On PV system DC disconnect',
-      lines: [
-        'PHOTOVOLTAIC SYSTEM DISCONNECT',
-        `MAXIMUM INPUT VOLTAGE: ${maxSystemVoltage}`,
-        `MAXIMUM CIRCUIT CURRENT: ${maxCircuitCurrent}A`,
-        'DO NOT TOUCH — LIVE CONDUCTORS',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: true,  // Always show — placement text adapts to topology
-    },
-    {
-      id: 'L-7',
-      necRef: 'NFPA 855 \u00a74.3 / NEC 706',
-      placement: 'On battery storage enclosure — exterior',
-      lines: [
-        'WARNING',
-        'ENERGY STORAGE SYSTEM',
-        'LITHIUM-ION BATTERY',
-        'FIRE AND EXPLOSION HAZARD',
-        'DO NOT OPEN — CALL 911 IF DAMAGED',
-      ],
-      bg: '#cc4400',
-      fg: '#ffffff',
-      required: hasBattery,
-    },
-    {
-      id: 'L-8',
-      necRef: 'NFPA 855 \u00a74.3.3',
-      placement: 'On battery storage enclosure — near electrical terminals',
-      lines: [
-        'BATTERY ENERGY STORAGE SYSTEM',
-        `Manufacturer: ${project.batteryBrand || '—'}`,
-        `Model: ${project.batteryModel || '—'}`,
-        'Nominal Voltage: 48V DC',
-        `Capacity: ${hasBattery ? ((project.batteryCount || 1) * (project.batteryKwh ?? 5.0)).toFixed(1) : '0.0'} kWh TOTAL`,
-      ],
-      bg: '#000',
-      fg: '#ffffff',
-      required: hasBattery,
-    },
-    {
-      id: 'L-9',
-      necRef: 'NEC 702 / NEC 705.12',
-      placement: 'On ATS/transfer switch enclosure',
-      lines: [
-        'WARNING',
-        'TRANSFER SWITCH',
-        'BOTH UTILITY AND GENERATOR POWER PRESENT',
-        'ISOLATE BEFORE SERVICING',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: hasGenerator,
-    },
-    // ── NEC 2023 additions ──────────────────────────────────────────────────
-    {
-      id: 'L-10',
-      // NEC 2023 §690.7(D) — new max DC voltage label requirement
-      necRef: 'NEC 690.7(D)',
-      placement: 'On DC combiner box and at DC disconnect',
-      lines: [
-        'WARNING',
-        'MAXIMUM DC SYSTEM VOLTAGE',
-        `${isMicro ? '240V AC (MICROINVERTER)' : `${(panelVoc * 1.25).toFixed(0)}V DC`}`,
-        'SHOCK HAZARD — CIRCUITS REMAIN ENERGIZED IN DAYLIGHT',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: necVer === '2023' && !isMicro,
-    },
-    {
-      id: 'L-11',
-      // NEC 2023 §705.10 — expanded multiple power source directory
-      necRef: 'NEC 705.10',
-      placement: 'On main service panel — inside cover, next to L-4',
-      lines: [
-        'MULTIPLE POWER SOURCES PRESENT',
-        'SOLAR PV + ' + (hasBattery ? 'BATTERY STORAGE' : 'UTILITY GRID'),
-        'SEE DIRECTORY FOR ALL DISCONNECT LOCATIONS',
-        'ISOLATE ALL SOURCES BEFORE SERVICING',
-      ],
-      bg: '#000',
-      fg: '#ffffff',
-      // NEC 705.10 has required a power-source directory plaque since well
-      // before the 2023 cycle — gating it to 2023 left it off most sets.
-      required: true,
-    },
-    {
-      id: 'L-12',
-      necRef: 'NEC 690.13(B)',
-      placement: 'On each PV system disconnecting means',
-      lines: [
-        'PHOTOVOLTAIC SYSTEM DISCONNECT',
-        'LINE AND LOAD TERMINALS',
-        'MAY BE ENERGIZED IN THE OPEN POSITION',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: true,
-    },
-    {
-      id: 'L-13',
-      necRef: necVer === '2023' ? 'NEC 690.12(D)' : 'NEC 690.56(C)(3)',
-      placement: 'At the rapid shutdown switch',
-      lines: [
-        'RAPID SHUTDOWN SWITCH',
-        'FOR SOLAR PV SYSTEM',
-      ],
-      bg: '#cc0000',
-      fg: '#ffffff',
-      required: project.rapidShutdown,
-    },
-  ];
-
+  // The required field-label (sticker/decal) set is standard PER JOB — derive
+  // it from the field-label dataset (lib/data/placards) gated by topology,
+  // interconnection, battery and rapid-shutdown, resolved to this NEC edition.
+  const labels = selectFieldLabels(input, cad);
   const requiredLabels = labels.filter(l => l.required);
 
   // Render each item as what it physically IS — a peel-and-stick field DECAL
@@ -265,7 +37,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   // two dominant formats — ANSI Z535 two-tone (colored signal header + white
   // message body) and solid reflective (white on red, NEC-mandated) — and each
   // one calls out the equipment it's affixed to.
-  function renderLabel(lbl: LabelSpec): string {
+  function renderLabel(lbl: FieldLabel): string {
     const SIGNALS = ['DANGER', 'WARNING', 'CAUTION', 'NOTICE'];
     const first = (lbl.lines[0] || '').trim().toUpperCase();
     const signal = SIGNALS.includes(first) ? first : '';
@@ -355,7 +127,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     `</div>`;
   }
 
-  function buildLabelRows(lblList: LabelSpec[]): string {
+  function buildLabelRows(lblList: FieldLabel[]): string {
     let html = '';
     for (let i = 0; i < lblList.length; i += 3) {
       const row = lblList.slice(i, i + 3);
