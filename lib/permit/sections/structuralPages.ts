@@ -15,6 +15,7 @@ import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
+import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import {
@@ -1303,6 +1304,28 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           </tr>`).join('')}
         </tbody>
       </table>
+      ${(() => {
+        // AC aggregation / monitoring device (the brand-integrated "brains" —
+        // e.g. Enphase IQ Combiner 6C). Single-sourced with PV-6 / E-1 / BOM.
+        const _bos = buildIntegratedEquipment(input, cad);
+        if (!_bos.devices.length) return '';
+        return `
+      <div class="section-title">AC Aggregation &amp; Monitoring</div>
+      <table class="equip-table">
+        <thead><tr><th>Qty</th><th>Manufacturer</th><th>Model</th><th>Integrated Functions</th><th>Branches</th><th>Mounting</th></tr></thead>
+        <tbody>
+          ${_bos.devices.map(d => `
+          <tr>
+            <td class="tr fw7">${d.quantity}</td>
+            <td>${d.brand}</td><td>${d.model}</td>
+            <td style="font-size:8px;">${d.roleSummary}</td>
+            <td class="tr">${d.branchSlots ? `${d.branchSlots}-pos` : '—'}</td>
+            <td>${d.mounting === 'wall' ? 'Wall-mounted' : d.mounting || '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      ${_bos.branchSlotWarning ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#fff8e1;"><strong>NOTE:</strong> ${_bos.branchSlotWarning}</div>` : ''}`;
+      })()}
       <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string) -->
       ${_schedIsMicro ? _schedAcBranchBlock : `
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>

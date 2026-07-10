@@ -6,6 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
+import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { escapeH } from '../utils/drawing';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, hasRealBattery, type SysType } from '../utils/helpers';
 import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
@@ -213,6 +214,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     inverterDisplay
       ? tagRow('N', `${resolveInverterCount(input, _resolvedTopo)} × ${inverterDisplay} — ${topologyLabel}`)
       : '',
+    // Brand-integrated AC aggregation / monitoring device (the "brains").
+    ...buildIntegratedEquipment(input, cad).devices.map(d =>
+      tagRow('N', `${d.quantity} × ${d.brand.toUpperCase()} ${d.model.toUpperCase()} — ${d.roleSummary.toUpperCase()}`)),
     hasBattery && batteryDisplay
       ? tagRow('N', `${project.batteryCount} × ${batteryDisplay} — BATTERY STORAGE`)
       : '',
