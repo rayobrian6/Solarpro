@@ -199,6 +199,10 @@ export interface SLDProfessionalInput {
   mpptAllocation?:         string;
   combinerType?:           string;
   combinerLabel?:          string;
+  // Brand-integrated combiner ("the brains" — e.g. Enphase IQ Combiner 6C).
+  combinerModel?:          string;
+  combinerHasIntegratedGateway?: boolean;  // gateway lives inside the combiner (no separate Envoy)
+  combinerProvidesAcDisconnect?: boolean;  // combiner has an integral load-break disconnect
   ocpdPerString?:          number;
   dcAcRatio?:              number;
   stringConfigWarnings?:   string[];
@@ -1190,7 +1194,8 @@ function runLines(run: RunSegment|undefined, fallback: string[]): {lines:string[
 function renderCombiner(
   cx: number, cy: number,
   nBranches: number, branchOcpd: number,
-  label: string, calloutN: number
+  label: string, calloutN: number,
+  opts?: {integratedGateway?: boolean; providesDisconnect?: boolean}
 ): {svg:string; lx:number; rx:number; ty:number; by:number;
     feederOutX:number; feederOutY:number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['ac-combiner'] = 180×160
@@ -1235,10 +1240,23 @@ function renderCombiner(
   // Output wire stub
   p.push(ln(bx+W2, busY, bx+W2+10, busY, {sw:SW_MED}));
 
+  // Integrated IQ Gateway glyph (the "brains") drawn inside the enclosure when
+  // the combiner integrates the monitoring gateway — so the SLD shows it's one
+  // device, not a separate wall-mounted Envoy.
+  if (opts?.integratedGateway) {
+    const gw = by2 + H2 - 30;
+    p.push(rect(bx+W2-58, gw, 50, 20, {fill:'#eef4fb', stroke:'#2b5c9c', sw:SW_THIN}));
+    p.push(txt(bx+W2-33, gw+8, 'IQ GATEWAY', {sz:4.4, bold:true, anc:'middle', fill:'#2b5c9c'}));
+    p.push(txt(bx+W2-33, gw+15, 'MONITOR/METER', {sz:3.6, anc:'middle', fill:'#2b5c9c'}));
+  }
+
   // Labels below box
-  p.push(txt(cx, by2+H2+10, esc(label), {sz:F.tiny, anc:'middle', italic:true}));
-  p.push(txt(cx, by2+H2+19, `${nBranches} branch inputs`, {sz:F.tiny, anc:'middle'}));
-  p.push(txt(cx, by2+H2+28, 'NEC 690.9', {sz:F.tiny, anc:'middle', italic:true}));
+  let _lblY = by2+H2+10;
+  p.push(txt(cx, _lblY, esc(label), {sz:F.tiny, anc:'middle', italic:true})); _lblY += 9;
+  p.push(txt(cx, _lblY, `${nBranches} branch inputs`, {sz:F.tiny, anc:'middle'})); _lblY += 9;
+  if (opts?.integratedGateway) { p.push(txt(cx, _lblY, 'INTEGRATED GATEWAY / MONITORING', {sz:F.tiny, anc:'middle', fill:'#2b5c9c'})); _lblY += 9; }
+  if (opts?.providesDisconnect) { p.push(txt(cx, _lblY, 'INTEGRAL AC DISCONNECT (LOAD-BREAK)', {sz:F.tiny, anc:'middle'})); _lblY += 9; }
+  p.push(txt(cx, _lblY, 'NEC 690.9, 705.10', {sz:F.tiny, anc:'middle', italic:true}));
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
@@ -1787,8 +1805,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const md = input.deviceCount ?? input.totalModules;
     const nb = input.microBranches?.length ?? microBranchCount(md, input.inverterModel);
     const bocpd = input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20;
-    const clabel = input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
-    const cr = renderCombiner(xComb, BUS_Y, nb, bocpd, clabel, 3);
+    const clabel = input.combinerModel ?? input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
+    const cr = renderCombiner(xComb, BUS_Y, nb, bocpd, clabel, 3,
+      {integratedGateway: input.combinerHasIntegratedGateway, providesDisconnect: input.combinerProvidesAcDisconnect});
     parts.push(cr.svg);
     node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));

@@ -10,6 +10,7 @@ import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealB
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority } from './conductorAuthority';
+import { buildIntegratedEquipment } from './integratedEquipment';
 
 /**
  * Build a live SLDProfessionalInput from PermitInput canonical data.
@@ -22,6 +23,9 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // Shared conductor authority — E-1's branch conductors and system EGC MUST
   // match PV-4A/PV-4B/BOM; they all read this same function.
   const _auth = buildConductorAuthority(input, cad);
+  // Brand-integrated combiner/gateway — same device PV-6/SCHED/PV-0 print.
+  const _bos = buildIntegratedEquipment(input, cad);
+  const _bosBrains = _bos.brains ?? _bos.devices[0];
 
   // ── Equipment resolution (same 4-source priority as all planset pages) ──
   const eq = getEquipmentContext(input, cad);
@@ -186,7 +190,12 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     mpptChannels:            isMicro ? totalPanels : inv0?.mpptChannels ?? 2,
     mpptAllocation:          isMicro ? `${totalPanels} microinverters` : undefined,
     combinerType:            isMicro ? 'DIRECT' : undefined,
-    combinerLabel:           isMicro ? 'AC Trunk Cable' : undefined,
+    // Real brand-integrated combiner ("the brains") — same device PV-6/SCHED
+    // print — not the old hardcoded 'AC Trunk Cable' label.
+    combinerLabel:           isMicro ? (_bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : 'IQ Combiner') : undefined,
+    combinerModel:           _bosBrains ? `${_bosBrains.brand} ${_bosBrains.model}` : undefined,
+    combinerHasIntegratedGateway: _bos.hasIntegratedGateway,
+    combinerProvidesAcDisconnect: _bos.providesAcDisconnect,
     ocpdPerString:           isMicro ? 0 : dcOCPD,
     dcAcRatio:               totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined,
 
