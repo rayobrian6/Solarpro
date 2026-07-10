@@ -40,6 +40,7 @@ import {
 } from '@/lib/equipment-registry-v4';
 import { necNextStandardOcpd } from './helpers';
 import { buildConductorAuthority } from './conductorAuthority';
+import { buildIntegratedEquipment } from './integratedEquipment';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -459,7 +460,34 @@ export function generateBOMForPermit(
   );
   log.push(`[bomForPermit] structural after dedup: ${mergedStructural.length} items`);
 
-  const merged = [...v4Items, ...mergedStructural];
+  let merged = [...v4Items, ...mergedStructural];
+
+  // ── 5b. Reconcile the integrated combiner/gateway ("the brains") ──
+  // The resolver is the single source of truth for this device (same one PV-6 /
+  // SCHED / E-1 print). Drop any registry-derived combiner/gateway line (which
+  // could be a stale 4C, or MISSING entirely for IQ8H/IQ8A/IQ8AC) and emit the
+  // resolved device, so the BOM can never disagree with the sheets.
+  const bosPlan = buildIntegratedEquipment(input, cad);
+  if (bosPlan.devices.length) {
+    merged = merged.filter(it => it.category !== 'combiner' && it.category !== 'gateway');
+    for (const d of bosPlan.devices) {
+      const isGw = d.kind === 'gateway';
+      merged.push({
+        stageId: isGw ? 'monitoring' : 'inverter',
+        stageLabel: STAGE_LABELS[isGw ? 'monitoring' : 'inverter'],
+        category: isGw ? 'gateway' : 'combiner',
+        manufacturer: d.brand,
+        model: d.model,
+        partNumber: d.partNumber || '—',
+        quantity: d.quantity,
+        unit: 'ea',
+        description: `Integrated ${d.roleSummary}${d.branchSlots ? ` — ${d.branchSlots} branch positions` : ''}`,
+        necReference: (d.necRefs && d.necRefs[0]) || 'NEC 690.4',
+        derivedFrom: 'integrated-bos resolver',
+        required: true,
+      });
+    }
+  }
 
   // ── 6. Sort by stageId ordinal ───────────────────────────
   const STAGE_ORDER: Record<string, number> = {
