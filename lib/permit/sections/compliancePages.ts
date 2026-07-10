@@ -258,32 +258,101 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
 
   const requiredLabels = labels.filter(l => l.required);
 
+  // Render each item as what it physically IS — a peel-and-stick field DECAL
+  // (adhesive vinyl / reflective label) that gets applied to a specific piece
+  // of equipment (conduit, inverter, disconnect, service panel), NOT a
+  // monument placard. Real solar labels are die-cut (rounded corners), come in
+  // two dominant formats — ANSI Z535 two-tone (colored signal header + white
+  // message body) and solid reflective (white on red, NEC-mandated) — and each
+  // one calls out the equipment it's affixed to.
   function renderLabel(lbl: LabelSpec): string {
-    // ANSI Z535 signal word as a proper banner (safety-alert triangle + rule)
-    // when the first line is a signal word; the rest is the message.
     const SIGNALS = ['DANGER', 'WARNING', 'CAUTION', 'NOTICE'];
-    const isSignal = SIGNALS.includes((lbl.lines[0] || '').trim().toUpperCase());
-    const tri = `<svg width="13" height="12" viewBox="0 0 13 12" aria-hidden="true" style="vertical-align:-1px;flex:0 0 auto;"><path d="M6.5 1 L12 11 L1 11 Z" fill="none" stroke="${lbl.fg}" stroke-width="1.3" stroke-linejoin="round"/><rect x="5.9" y="3.6" width="1.2" height="3.6" fill="${lbl.fg}"/><rect x="5.9" y="8.3" width="1.2" height="1.2" fill="${lbl.fg}"/></svg>`;
-    const lineHtml = lbl.lines.map((line, i) => {
-      if (i === 0 && isSignal) {
-        return `<div class="lbl-signal">${tri}<span>${escapeH(line)}</span></div>`;
-      }
-      return `<div style="font-size:${i === 0 ? '10.5px' : '8.5px'};font-weight:${i === 0 ? '900' : '700'};` +
-        `letter-spacing:${i === 0 ? '0.6px' : '0.2px'};line-height:1.45;` +
-        `white-space:normal;word-break:break-word;">${escapeH(line)}</div>`;
-    }).join('');
-    return `<div class=\"lbl-card\">` +
-      `<div class=\"lbl-hdr\">` +
-      `<span class=\"lbl-hdr-id\">${escapeH(lbl.id)}</span>` +
-      `<span class=\"lbl-hdr-ref\">${escapeH(lbl.necRef)}</span>` +
-      `</div>` +
-      `<div class=\"lbl-body\" style=\"background:${lbl.bg};color:${lbl.fg};\">` +
-      `${lineHtml}` +
-      `</div>` +
-      `<div class=\"lbl-footer\">` +
-      `<strong>LOCATION:</strong> ${escapeH(lbl.placement)}` +
-      `</div>` +
+    const first = (lbl.lines[0] || '').trim().toUpperCase();
+    const signal = SIGNALS.includes(first) ? first : '';
+    const title = signal ? '' : (lbl.lines[0] || '');
+    const rest = lbl.lines.slice(1);
+
+    // NEC-mandated white-on-red decals: rapid shutdown, PV power source,
+    // disconnect + shock labels. These are solid reflective red by code.
+    const necRed = /690\.56\((B|C)\)|690\.12\(D\)|690\.31|690\.13|690\.53|690\.7\(D\)/.test(lbl.necRef);
+
+    // ANSI Z535 signal-panel colors (the recognizable vinyl-label look).
+    const ANSI: Record<string, { band: string; ink: string }> = {
+      DANGER: { band: '#c8102e', ink: '#ffffff' },
+      WARNING: { band: '#f07c00', ink: '#0a0a0a' },
+      CAUTION: { band: '#f4c400', ink: '#0a0a0a' },
+      NOTICE: { band: '#0b5da8', ink: '#ffffff' },
+    };
+
+    // ISO 3864 / ANSI Z535 safety-alert symbol — yellow triangle, black "!".
+    const alert = (h = 17) => {
+      const w = Math.round(h * 1.17);
+      return `<svg width="${w}" height="${h}" viewBox="0 0 21 18" aria-hidden="true" style="flex:0 0 auto;display:block;">` +
+        `<path d="M10.5 1.4 L19.6 16.6 L1.4 16.6 Z" fill="#f5c400" stroke="#0a0a0a" stroke-width="1.4" stroke-linejoin="round"/>` +
+        `<rect x="9.45" y="6.2" width="2.1" height="5.9" rx="0.4" fill="#0a0a0a"/>` +
+        `<rect x="9.45" y="13.1" width="2.1" height="2.1" rx="0.4" fill="#0a0a0a"/></svg>`;
+    };
+
+    // Where does this decal get stuck? (drives the "AFFIX TO" tag)
+    const p = lbl.placement.toLowerCase();
+    const affix =
+      /rapid shutdown|initiation/.test(p) ? 'RSD SWITCH' :
+      /transfer switch|ats/.test(p) ? 'TRANSFER SWITCH' :
+      /disconnect/.test(p) ? 'DISCONNECT' :
+      /inverter/.test(p) ? 'INVERTER' :
+      /battery|storage|ess/.test(p) ? 'ESS ENCLOSURE' :
+      /service panel|main panel|main service|msp|load center/.test(p) ? 'SERVICE PANEL' :
+      /combiner|raceway|conduit/.test(p) ? 'CONDUIT / RACEWAY' :
+      /meter/.test(p) ? 'UTILITY METER' :
+      /array|roof|elevation/.test(p) ? 'ARRAY' :
+      'EQUIPMENT';
+
+    const sheen = `<div style="position:absolute;top:0;left:0;right:0;height:42%;background:linear-gradient(180deg,rgba(255,255,255,0.20),rgba(255,255,255,0));pointer-events:none;"></div>`;
+    const body = (ink: string, lines: string[], leadTitle = '') =>
+      (leadTitle ? `<div style="font-size:10.5px;font-weight:900;letter-spacing:0.3px;line-height:1.2;color:${ink};margin-bottom:2px;">${escapeH(leadTitle)}</div>` : '') +
+      lines.map((l, i) => `<div style="font-size:${i === 0 && !leadTitle ? '8.8' : '8'}px;font-weight:${i === 0 && !leadTitle ? '800' : '700'};letter-spacing:0.15px;line-height:1.4;color:${ink};">${escapeH(l)}</div>`).join('');
+
+    let decal: string;
+    if (necRed) {
+      // Solid reflective red decal (white text, thin white keyline, sheen).
+      decal = `<div style="position:relative;border-radius:6px;overflow:hidden;background:#c1121f;` +
+        `border:1.5px solid #7d0b12;box-shadow:0 1.5px 3px rgba(0,0,0,0.4);padding:8px 9px;text-align:center;min-height:80px;box-sizing:border-box;">` +
+        sheen +
+        `<div style="position:absolute;top:3px;left:3px;right:3px;bottom:3px;border:1px solid rgba(255,255,255,0.55);border-radius:4px;pointer-events:none;"></div>` +
+        (signal
+          ? `<div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px;">${alert(16)}<span style="font-size:14px;font-weight:900;letter-spacing:1.5px;color:#fff;">${escapeH(signal)}</span></div>`
+          : '') +
+        body('#ffffff', rest, title) +
       `</div>`;
+    } else if (signal) {
+      // ANSI Z535 two-tone decal: colored signal header + white message body.
+      const a = ANSI[signal];
+      decal = `<div style="position:relative;border-radius:6px;overflow:hidden;background:#fff;border:1.5px solid #0a0a0a;box-shadow:0 1.5px 3px rgba(0,0,0,0.35);min-height:80px;box-sizing:border-box;">` +
+        `<div style="position:relative;background:${a.band};color:${a.ink};display:flex;align-items:center;justify-content:center;gap:7px;padding:4px 6px;border-bottom:1.5px solid #0a0a0a;">` +
+          alert(16) + `<span style="font-size:14.5px;font-weight:900;letter-spacing:1.5px;">${escapeH(signal)}</span>` +
+        `</div>` +
+        `<div style="padding:7px 9px;text-align:center;">${body('#0a0a0a', rest)}</div>` +
+      `</div>`;
+    } else {
+      // Printed info/rating decal: dark title bar + white body (engraved look).
+      decal = `<div style="position:relative;border-radius:6px;overflow:hidden;background:#fff;border:1.5px solid #0a0a0a;box-shadow:0 1.5px 3px rgba(0,0,0,0.35);min-height:80px;box-sizing:border-box;">` +
+        `<div style="background:#111;color:#fff;padding:4px 7px;text-align:center;font-size:9.5px;font-weight:900;letter-spacing:0.5px;">${escapeH(title)}</div>` +
+        `<div style="padding:7px 9px;text-align:center;">${body('#111', rest)}</div>` +
+      `</div>`;
+    }
+
+    return `<div style="page-break-inside:avoid;">` +
+      // spec caption (id + code) — annotation above the decal
+      `<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:6.8px;color:#666;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;padding:0 1px;">` +
+        `<span>${escapeH(lbl.id)}</span><span style="font-family:var(--mono);">${escapeH(lbl.necRef)}</span>` +
+      `</div>` +
+      decal +
+      // AFFIX-TO tag (this decal sticks to a specific piece of equipment) + full location
+      `<div style="display:flex;align-items:center;gap:5px;margin-top:3px;padding:0 1px;">` +
+        `<span style="flex:0 0 auto;background:#111;color:#fff;font-size:6.4px;font-weight:800;letter-spacing:0.5px;padding:1.5px 5px;border-radius:8px;">AFFIX TO: ${escapeH(affix)}</span>` +
+        `<span style="font-size:6.6px;color:#444;line-height:1.3;">${escapeH(lbl.placement)}</span>` +
+      `</div>` +
+    `</div>`;
   }
 
   function buildLabelRows(lblList: LabelSpec[]): string {
@@ -292,10 +361,10 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       const row = lblList.slice(i, i + 3);
       html += '<tr>';
       for (const lbl of row) {
-        html += `<td style="width:33.33%;padding:3px 4px;vertical-align:top;">${renderLabel(lbl)}</td>`;
+        html += `<td style="width:33.33%;padding:5px 7px 10px;vertical-align:top;">${renderLabel(lbl)}</td>`;
       }
       for (let p = row.length; p < 3; p++) {
-        html += '<td style="width:33.33%;padding:3px 4px;"></td>';
+        html += '<td style="width:33.33%;padding:5px 7px 10px;"></td>';
       }
       html += '</tr>';
     }
