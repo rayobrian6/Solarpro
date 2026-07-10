@@ -7835,7 +7835,7 @@ function EngineeringPageInner() {
                   </div>
 
                   {/* KPI row */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
                     <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-4 py-3 text-center">
                       <div className="text-2xl font-black text-amber-400 tabular-nums">{totalKw}</div>
                       <div className="text-xs text-slate-500 mt-0.5">kW DC</div>
@@ -7859,6 +7859,19 @@ function EngineeringPageInner() {
                           : '—'}
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">BOM Cost</div>
+                    </div>
+                    {/* Hardware $/W — DC watts basis (before labor) */}
+                    <div className={`rounded-xl border px-4 py-3 text-center ${
+                      bomPricing?.pricingApplied
+                        ? 'bg-emerald-500/10 border-emerald-500/30'
+                        : 'bg-slate-900/60 border-slate-700/50'
+                    }`}>
+                      <div className={`text-2xl font-black tabular-nums ${bomPricing?.pricingApplied ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {bomPricing?.pricingApplied && Number(totalKw) > 0
+                          ? `$${(bomPricing.totalBomCost / (Number(totalKw) * 1000)).toFixed(2)}`
+                          : '—'}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-0.5">$/W hardware</div>
                     </div>
                   </div>
 
