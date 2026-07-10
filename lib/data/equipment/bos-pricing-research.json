@@ -1,0 +1,250 @@
+{
+  "_meta": {
+    "description": "Real 2025 US solar-installer distributor prices for balance-of-system (BOS) parts. Researched via distributor listings (CED/Greentech Renewables, Soligent, altE, Solaris, RES Supply, SunWatts, EcoDirect, Circuit Solar, InverterSupply, Solartap, Stellavolta, etc.). Prices are the publicly-listed distributor/reseller unit prices (most solar distributors list a public price that is at/near installer wholesale; true dealer net after volume/account discount is typically 5-20% below list). Where a distributor is quote-only, that is noted. Do NOT treat these as retail markup prices unless priceType says 'retail'.",
+    "asOf": "2025-Q3",
+    "researchedOn": "2026-07-10",
+    "currency": "USD",
+    "keyCorrections": {
+      "iq_combiner_6c": "App showed $145 -- WRONG. Real distributor list is ~$1,667-$2,000 (typical ~$1,800). The 6C is an all-in-one smart load center WITH gateway + CTs + breaker spaces, not a bare combiner.",
+      "rec_alpha_pure_r_405": "App showed generic $136 -- LOW. Real dealer/reseller price ~$385-$486/panel (~$0.95-$1.25/W). Typical ~$430."
+    }
+  },
+  "benchmarks": {
+    "tier1_mono_module_dealer_per_watt": {
+      "low": 0.28,
+      "typical": 0.42,
+      "high": 0.60,
+      "notes": "Commodity tier-1 mono PERC/TOPCon modules (Qcells, JA, Longi, Trina) at distributor/pallet quantities, 2025. Premium HJT panels (REC Alpha Pure, Maxeon, Panasonic) run $0.90-$1.25/W. NOTE: EnergySage '$2.51-$3.76/W' figures are INSTALLED system cost per watt, not panel-only dealer cost -- do not use those to price a module.",
+      "confidence": "medium"
+    },
+    "premium_hjt_module_dealer_per_watt": {
+      "low": 0.90,
+      "typical": 1.06,
+      "high": 1.25,
+      "notes": "REC Alpha Pure-R, Maxeon, Panasonic-class panels. REC405AA reseller listings landed $385-$486/panel = $0.95-$1.20/W.",
+      "confidence": "medium"
+    },
+    "enphase_iq8_microinverter_per_unit": {
+      "low": 155.0,
+      "typical": 185.0,
+      "high": 215.0,
+      "notes": "IQ8+ ~$156-$185, IQ8M ~$200-$215, IQ8A ~$215-$240 at distributor list, 2025. Installer net after account discount typically a bit lower.",
+      "confidence": "high"
+    }
+  },
+  "prices": [
+    {
+      "id": "enphase-iq-combiner-6c",
+      "brand": "Enphase",
+      "model": "IQ Combiner 6C",
+      "partNumber": "X-IQ-AM1-240-6C",
+      "category": "combiner",
+      "unitCostLow": 1667.0,
+      "unitCostTypical": 1800.0,
+      "unitCostHigh": 2000.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://ressupply.com/monitoring-equipment/enphase-x-iq-am1-240-6c-iq-combiner",
+        "https://sunwatts.com/enphase-iq-combiner-6c/",
+        "https://www.altestore.com/products/enphase-iq-combiner-6cx-iq-am1-240-6c"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "high",
+      "notes": "RES Supply $1,667; SunWatts $1,900 sale ($2,000 reg); altE $1,989. APP WAS SHOWING $145 -- OFF BY ~12x. This is an all-in-one smart load center: enclosure + IQ Gateway + pre-wired PV/battery CTs + breaker spaces for PV/battery/EV + load controller + Mobile Connect cellular modem. Dealer net likely $1,500-$1,700."
+    },
+    {
+      "id": "enphase-iq-combiner-5c",
+      "brand": "Enphase",
+      "model": "IQ Combiner 5C",
+      "partNumber": "X-IQ-AM1-240-5C",
+      "category": "combiner",
+      "unitCostLow": 1239.0,
+      "unitCostTypical": 1350.0,
+      "unitCostHigh": 1520.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://www.solar-electric.com/enphase-x-iq-am1-240-5c-iq-combiner-5-box-with-iq-gateway.html",
+        "https://www.circuitsolar.com/product/enphase-iq-combiner-5c/"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "medium",
+      "notes": "NAZ Solar Electric (solar-electric.com) $1,239.47 USD. Circuit Solar listed $2,072 CAD (~$1,510 USD, Canadian). Typical USD distributor ~$1,300-$1,400."
+    },
+    {
+      "id": "enphase-iq-combiner-4c",
+      "brand": "Enphase",
+      "model": "IQ Combiner 4C",
+      "partNumber": "X-IQ-AM1-240-4C",
+      "category": "combiner",
+      "unitCostLow": 640.0,
+      "unitCostTypical": 709.0,
+      "unitCostHigh": 886.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://shopsolarkits.com/products/enphase-iq-combiner-4-en-x-iq-am1-240-4",
+        "https://www.ecodirect.com/Enphase-X-IQ-AM1-240-4C-IQ-AC-Combiner-Cell-Plan-p/enphase-x-iq-am1-240-4c.htm"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "medium",
+      "notes": "ShopSolarKits $708.59 (was $885.99). NOTE: 4C is being phased out / discontinued in favor of the 5C. Older/cheaper generation combiner (no battery-ready CTs of the 6C)."
+    },
+    {
+      "id": "enphase-iq-gateway-standalone",
+      "brand": "Enphase",
+      "model": "IQ Gateway (standalone)",
+      "partNumber": "ENV2-IQ-AM1-240",
+      "category": "gateway",
+      "unitCostLow": 649.0,
+      "unitCostTypical": 690.0,
+      "unitCostHigh": 844.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://www.invertersupply.com/index.php?main_page=product_info&products_id=204450",
+        "https://unboundsolar.com/2977240/enphase-energy/inverter-accessories/iq-gateway"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "medium",
+      "notes": "InverterSupply $649.12 sale (reg $843.86) for ENV2-IQ-AM1-240. Unbound Solar $714.68 for ENV-IQ-AM1-240M. Standalone gateway (not inside a combiner). Older/simpler ENV-IQ-AM1-240 variants can be cheaper."
+    },
+    {
+      "id": "enphase-iq-meter-collar",
+      "brand": "Enphase",
+      "model": "IQ Meter Collar (Microgrid Interconnect Device)",
+      "partNumber": "MC-200-011-V01",
+      "category": "meter_socket",
+      "unitCostLow": 596.0,
+      "unitCostTypical": 630.0,
+      "unitCostHigh": 655.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://solarparley.com/mc-200-011-v01",
+        "https://electricalparts.com/products/enphase-mc-200-011-v01"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "medium",
+      "notes": "Solar Parley $655; Electrical Parts $596.25. Meter-socket adapter that provides microgrid interconnect / whole-home backup without a main-panel replacement. Pairs with IQ System Controller / 6C."
+    },
+    {
+      "id": "tesla-backup-switch",
+      "brand": "Tesla",
+      "model": "Backup Switch (200A Grid Connection Controller)",
+      "partNumber": "1624171 (1624171-00-X)",
+      "category": "meter_socket",
+      "unitCostLow": 350.0,
+      "unitCostTypical": 450.0,
+      "unitCostHigh": 550.0,
+      "currency": "USD",
+      "priceType": "unknown",
+      "sourceUrls": [
+        "https://www.greentechrenewables.com/product/tesla-back-switch-kit-1624171-00-x",
+        "https://www.solarelectricsupply.com/tesla-backup-switch-grid-connection-controller",
+        "https://www.solar.com/learn/why-the-tesla-backup-switch-is-a-game-changer-for-home-backup-power/"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "low",
+      "notes": "MAJOR distributors (Greentech Renewables/CED, Solar Electric Supply, Soligent, BayWa) are ALL quote-only / 'contact for price' -- Tesla restricts open listing. Reseller/eBay 'new' listings and solar.com references cluster ~$400-$500. Typical ~$450 used as placeholder. LOW confidence; verify via a Tesla-authorized distributor account. Meter-behind mounted grid disconnect for Powerwall whole-home backup."
+    },
+    {
+      "id": "enphase-iq8plus-micro",
+      "brand": "Enphase",
+      "model": "IQ8+ Microinverter",
+      "partNumber": "IQ8PLUS-72-2-US",
+      "category": "microinverter",
+      "unitCostLow": 156.0,
+      "unitCostTypical": 168.0,
+      "unitCostHigh": 185.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://www.solaris-shop.com/enphase-iq8plus-72-2-us-300w-microinverter/",
+        "https://www.capitalelectricsupply.com/product/detail/1870660/enphase-energy-iq8plus-72-m-us"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "high",
+      "notes": "Solaris $167.99; Capital Electric Supply $185.05. App's $156 is REASONABLE (near dealer net, low end of list). 300VA peak, 235-440W module pairing. Volume dealer net can dip to ~$150."
+    },
+    {
+      "id": "enphase-iq8m-micro",
+      "brand": "Enphase",
+      "model": "IQ8M Microinverter",
+      "partNumber": "IQ8M-72-2-US",
+      "category": "microinverter",
+      "unitCostLow": 195.0,
+      "unitCostTypical": 210.0,
+      "unitCostHigh": 220.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://www.solaris-shop.com/enphase-iq8m-72-2-us-330w-microinverter/",
+        "https://www.solarelectricsupply.com/enphase-iq8m-72-2-us-microinverter"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "high",
+      "notes": "Solaris $214.99. 330VA, for higher-wattage modules. Sits between IQ8+ and IQ8A."
+    },
+    {
+      "id": "rec-alpha-pure-r-405",
+      "brand": "REC",
+      "model": "Alpha Pure-R 405W",
+      "partNumber": "REC405AA",
+      "category": "panel",
+      "unitCostLow": 385.0,
+      "unitCostTypical": 430.0,
+      "unitCostHigh": 486.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://www.solartap.com/products/rec-alpha-pure-405w-rec405aa-solar-panel",
+        "https://www.ohmsnap.com/solar-panels/rec-alpha-pure-r-405",
+        "https://www.solarelectricsupply.com/rec-alpha-pure-rec405aa-pure-405w-solar-panel"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "medium",
+      "notes": "Solartap $486/panel; OhmSnap cites $0.95-$1.25/W ($385-$506). APP SHOWED GENERIC $136 -- far too low for this PREMIUM HJT black-on-black 405W panel. Real ~$385-$486/panel = ~$0.95-$1.20/W. This is a premium module; not commodity-tier. Pallet qty (33) lowers per-panel cost somewhat."
+    },
+    {
+      "id": "enphase-q-cable-portrait",
+      "brand": "Enphase",
+      "model": "Q Cable Portrait (per drop, ~1m spacing, 60/72-cell)",
+      "partNumber": "Q-12-10-240",
+      "category": "trunk_cable",
+      "unitCostLow": 3.5,
+      "unitCostTypical": 5.0,
+      "unitCostHigh": 7.0,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://ressupply.com/inverters/enphase-q-12-10-240-portrait-q-cable",
+        "https://www.solaris-shop.com/enphase-q-12-10-240-portrait-trunk-cable/",
+        "https://www.ecodirect.com/Enphase-Q-12-10-240-1-Drop-Q-Cable-PORTRAIT-p/enphase-q-cable-q-12-10-240.htm"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "low",
+      "notes": "PRICE-PER-DROP estimate; distributor pages did not expose a clean unit price in scrape (403/blocked). Q-12-10-240 is single-connector portrait trunk for 60/72-cell modules, sold per-drop and also in bulk rolls (240 = spacing code). Typical ~$4-6/drop; often sold as a bulk roll (e.g. ~$300-400 for a full roll). VERIFY exact unit vs roll pricing before use."
+    },
+    {
+      "id": "enphase-q-cable-terminator",
+      "brand": "Enphase",
+      "model": "Q Cable Terminator Cap",
+      "partNumber": "Q-TERM-10-240 (Q-TERM-10)",
+      "category": "terminator",
+      "unitCostLow": 12.0,
+      "unitCostTypical": 15.0,
+      "unitCostHigh": 18.45,
+      "currency": "USD",
+      "priceType": "retail",
+      "sourceUrls": [
+        "https://www.stellavolta.com/enphase-q-term-10-terminator-cap/",
+        "https://sunsuppv.com/product/enphase-q-term-10-terminator-cap/"
+      ],
+      "asOf": "2025-Q3",
+      "confidence": "medium",
+      "notes": "Stellavolta $18.45 (incl. sales tax) => ~$16-17 pre-tax. Seals the end of a Q Cable branch; center-feed needs 2 per branch. Typical distributor ~$12-16."
+    }
+  ]
+}

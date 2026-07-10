@@ -92,11 +92,23 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     source: 'CED', asOf: '2025-01-15',
   },
   {
+    // REC Alpha Pure-R is a PREMIUM HJT black-on-black module — dealer ~$0.95–1.0/W
+    // (~$385–486/panel), NOT the ~$0.37/W commodity rate previously assumed.
     partNumber: 'REC405AA-PURE-R',
-    description: 'REC Alpha Pure 405W Black Frame',
+    description: 'REC Alpha Pure-R 405W (HJT, black)',
     category: 'solar_panel', unit: 'ea',
-    listPrice: 0.46, netPrice: 0.37,
-    source: 'CED', asOf: '2025-01-15',
+    listPrice: 1.10, netPrice: 0.98,
+    source: 'CED', asOf: '2025-Q3',
+  },
+  {
+    // Alias for the equipment-db id ('rec-alpha-pure-405' → uppercased) the BOM
+    // engine emits, so the resolved panel matches this SKU instead of the
+    // generic $/W fallback.
+    partNumber: 'REC-ALPHA-PURE-405',
+    description: 'REC Alpha Pure-R 405W (HJT, black)',
+    category: 'solar_panel', unit: 'ea',
+    listPrice: 1.10, netPrice: 0.98,
+    source: 'CED', asOf: '2025-Q3',
   },
   {
     partNumber: 'SIL-380-BK',
@@ -197,8 +209,62 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     partNumber: 'IQ8M-72-2-US',
     description: 'Enphase IQ8M Microinverter',
     category: 'microinverter', unit: 'ea',
-    listPrice: 215.00, netPrice: 172.00,
-    source: 'CED', asOf: '2025-01-15',
+    listPrice: 230.00, netPrice: 185.00,
+    source: 'CED', asOf: '2025-Q3',
+  },
+
+  // ─── Integrated combiners / gateways (SOURCED — bos-pricing-research.json) ───
+  // The app previously priced ALL of these off the generic $145 "combiner"
+  // category fallback. Real distributor prices are 5–12× that (a 6C is an
+  // all-in-one smart load center: enclosure + IQ Gateway + CTs + breakers).
+  {
+    partNumber: 'X-IQ-AM1-240-6C',
+    description: 'Enphase IQ Combiner 6C (combiner + IQ Gateway + integral disconnect)',
+    category: 'combiner', unit: 'ea',
+    listPrice: 2000.00, netPrice: 1800.00,
+    source: 'CED', asOf: '2025-Q3',
+  },
+  {
+    partNumber: 'X-IQ-AM1-240-5C',
+    description: 'Enphase IQ Combiner 5C',
+    category: 'combiner', unit: 'ea',
+    listPrice: 1520.00, netPrice: 1350.00,
+    source: 'CED', asOf: '2025-Q3',
+  },
+  {
+    partNumber: 'X-IQ-AM1-240-4C',
+    description: 'Enphase IQ Combiner 4C',
+    category: 'combiner', unit: 'ea',
+    listPrice: 800.00, netPrice: 709.00,
+    source: 'CED', asOf: '2025-Q3',
+  },
+  {
+    partNumber: 'ENV-IQ-AM1-240',
+    description: 'Enphase IQ Gateway (standalone)',
+    category: 'gateway', unit: 'ea',
+    listPrice: 780.00, netPrice: 690.00,
+    source: 'CED', asOf: '2025-Q3',
+  },
+  {
+    partNumber: 'ENV2-IQ-AM1-240',
+    description: 'Enphase IQ Gateway (IEEE 2030.5)',
+    category: 'gateway', unit: 'ea',
+    listPrice: 780.00, netPrice: 690.00,
+    source: 'CED', asOf: '2025-Q3',
+  },
+  {
+    partNumber: 'MC-200-011-V01',
+    description: 'Enphase IQ Meter Collar (meter-socket adapter + MID)',
+    category: 'meter_socket', unit: 'ea',
+    listPrice: 700.00, netPrice: 630.00,
+    source: 'Soligent', asOf: '2025-Q3',
+  },
+  {
+    partNumber: '1624171',
+    description: 'Tesla Backup Switch (meter-socket + grid isolation)',
+    category: 'meter_socket', unit: 'ea',
+    listPrice: 550.00, netPrice: 450.00,   // ⚠ LOW confidence — Tesla is quote-only via distributors
+    source: 'Internal', asOf: '2025-Q3',
   },
 
   // ─── Power Optimizers ──────────────────────────────────────────────────────
@@ -421,8 +487,8 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
 
 export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: string; source: DistributorSource }> = {
   // Equipment
-  solar_panel:       { unitCost: 0.34 * 400,  unit: 'ea',   source: 'CED' },      // ~$136/panel at 400W avg
-  microinverter:     { unitCost: 160.00,        unit: 'ea',   source: 'CED' },
+  solar_panel:       { unitCost: 0.50 * 400,  unit: 'ea',   source: 'CED' },      // fallback only — resolvePriceForItem prices resolved panels $/W × actual watts
+  microinverter:     { unitCost: 175.00,        unit: 'ea',   source: 'CED' },
   string_inverter:   { unitCost: 1500.00,       unit: 'ea',   source: 'CED' },
   hybrid_inverter:   { unitCost: 2400.00,       unit: 'ea',   source: 'Soligent' },
   optimizer:         { unitCost: 52.00,         unit: 'ea',   source: 'CED' },
@@ -436,11 +502,12 @@ export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: 
   breaker:           { unitCost: 24.00,         unit: 'ea',   source: 'KWh' },
   disconnect:        { unitCost: 185.00,        unit: 'ea',   source: 'KWh' },
   rapid_shutdown:    { unitCost: 95.00,         unit: 'ea',   source: 'CED' },
-  combiner:          { unitCost: 145.00,        unit: 'ea',   source: 'CED' },
+  combiner:          { unitCost: 900.00,        unit: 'ea',   source: 'CED' },      // integrated smart combiner (4C ~$700 → 6C ~$1800); real SKUs priced above
+  meter_socket:      { unitCost: 550.00,        unit: 'ea',   source: 'Soligent' },
   junction_box:      { unitCost: 18.00,         unit: 'ea',   source: 'KWh' },
   meter:             { unitCost: 320.00,        unit: 'ea',   source: 'KWh' },
   // Monitoring
-  gateway:           { unitCost: 175.00,        unit: 'ea',   source: 'CED' },
+  gateway:           { unitCost: 690.00,        unit: 'ea',   source: 'CED' },      // standalone IQ Gateway ~$690
   monitoring:        { unitCost: 95.00,         unit: 'ea',   source: 'CED' },
   // Structural (fence/ground)
   post:              { unitCost: 95.00,         unit: 'ea',   source: 'Internal' },
@@ -460,6 +527,7 @@ export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: 
 const PANEL_WATTAGE_BY_PART: Record<string, number> = {
   'Q.PEAK DUO BLK ML-G10+400': 400,
   'REC405AA-PURE-R':            405,
+  'REC-ALPHA-PURE-405':        405,
   'SIL-380-BK':                 380,
   'PS-MNB108-HCBF-440W':       440,
 };
@@ -521,6 +589,12 @@ function resolvePriceForItem(
   // 4. Category fallback
   const fallback = CATEGORY_FALLBACK_PRICES[item.category];
   if (fallback) {
+    // Panels: price the actual wattage ($/W) rather than a flat 400W, so a 440W
+    // module isn't undercharged like a 400W one.
+    if (item.category === 'solar_panel') {
+      const w = Number((`${item.model} ${item.description ?? ''}`.match(/(\d{3,4})\s*W/) ?? [])[1]);
+      if (w >= 200 && w <= 800) return { unitCost: Math.round(0.50 * w * 100) / 100, source: 'fallback' };
+    }
     return { unitCost: fallback.unitCost, source: 'fallback' };
   }
 

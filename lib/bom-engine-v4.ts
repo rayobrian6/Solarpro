@@ -21,6 +21,7 @@ import {
   BOMStageDefinition,
 } from './topology-manager';
 import { resolveIntegratedEquipment } from './equipment/integratedBos';
+import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
 
 import type { RunSegment } from './computed-system';
 import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
@@ -279,10 +280,19 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   // Get equipment entries
   const inverterEntry = getRegistryEntryV4(input.inverterId);
+  // Same equipment-db fallback for the inverter when the V4 registry misses.
+  const microDb = (!inverterEntry && input.inverterId) ? getMicroinverterById(input.inverterId) : undefined;
+  const invDb = (!inverterEntry && !microDb && input.inverterId) ? getInverterById(input.inverterId) : undefined;
   const optimizerEntry = input.optimizerId ? getRegistryEntryV4(input.optimizerId) : undefined;
   const rackingEntry = input.rackingId ? getRegistryEntryV4(input.rackingId) : undefined;
   const batteryEntry = input.batteryId ? getRegistryEntryV4(input.batteryId) : undefined;
   const panelEntry = input.panelId ? getRegistryEntryV4(input.panelId) : undefined;
+  // Fallback to the MAIN equipment catalog when the sparse V4 registry misses
+  // (the design and the BOM registry use different id namespaces — e.g.
+  // 'rec-alpha-pure-405' vs 'rec-alpha-pure-r-405' — which silently produced a
+  // generic "specify model" panel). Resolve the REAL selected equipment so the
+  // BOM shows the actual make/model instead of TBD.
+  const panelDb = (!panelEntry && input.panelId) ? getPanelById(input.panelId) : undefined;
 
   // ── STAGE 1: ARRAY ──────────────────────────────────────────────────────────
 
@@ -294,6 +304,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       input.moduleCount, 'ea', 'NEC 690', 'moduleCount', 'modules', true));
     log.push({ stageId: 'array', category: 'solar_panel', item: 'Solar Panels',
       quantity: input.moduleCount, derivedFrom: 'moduleCount', formula: 'modules', necReference: 'NEC 690' });
+  } else if (panelDb) {
+    items.push(addItem('array', 'solar_panel', panelDb.manufacturer, panelDb.model,
+      (panelDb as { partNumber?: string }).partNumber ?? panelDb.id.toUpperCase(),
+      `${panelDb.watts}W Solar Panel`,
+      input.moduleCount, 'ea', 'NEC 690', 'moduleCount', 'modules (equipment-db)', true));
+    log.push({ stageId: 'array', category: 'solar_panel', item: `${panelDb.manufacturer} ${panelDb.model}`,
+      quantity: input.moduleCount, derivedFrom: 'equipment-db fallback', formula: 'modules', necReference: 'NEC 690' });
   } else {
     items.push(addItem('array', 'solar_panel', 'TBD', 'Solar Panel (specify model)',
       'PANEL-TBD', 'Solar Panel', input.moduleCount, 'ea', 'NEC 690', 'moduleCount', 'modules', true));
@@ -310,6 +327,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         microQty, 'ea', 'NEC 690', 'deviceCount', 'ceil(panels/modulesPerDevice)', true));
       log.push({ stageId: 'array', category: 'microinverter', item: inverterEntry.model,
         quantity: microQty, derivedFrom: 'deviceCount', formula: 'ceil(panels/modulesPerDevice)', necReference: 'NEC 690' });
+    } else if (microDb) {
+      items.push(addItem('array', 'microinverter', microDb.manufacturer, microDb.model,
+        (microDb as { partNumber?: string }).partNumber ?? microDb.id.toUpperCase(),
+        `Microinverter — ${(microDb.acOutputW / 1000).toFixed(3)}kW AC output`,
+        microQty, 'ea', 'NEC 690', 'deviceCount', 'equipment-db fallback', true));
+      log.push({ stageId: 'array', category: 'microinverter', item: `${microDb.manufacturer} ${microDb.model}`,
+        quantity: microQty, derivedFrom: 'equipment-db fallback', formula: 'ceil(panels/modulesPerDevice)', necReference: 'NEC 690' });
     }
   }
 
@@ -453,6 +477,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       input.inverterCount, 'ea', 'NEC 690', 'inverterCount', 'inverters', true));
     log.push({ stageId: 'inverter', category: inverterEntry.category, item: inverterEntry.model,
       quantity: input.inverterCount, derivedFrom: 'inverterCount', formula: 'inverters', necReference: 'NEC 690' });
+  } else if (!isMicro && invDb) {
+    items.push(addItem('inverter', 'string_inverter', invDb.manufacturer, invDb.model,
+      (invDb as { partNumber?: string }).partNumber ?? invDb.id.toUpperCase(),
+      `${invDb.acOutputKw ?? ''}kW String Inverter`,
+      input.inverterCount, 'ea', 'NEC 690', 'inverterCount', 'equipment-db fallback', true));
+    log.push({ stageId: 'inverter', category: 'string_inverter', item: `${invDb.manufacturer} ${invDb.model}`,
+      quantity: input.inverterCount, derivedFrom: 'equipment-db fallback', formula: 'inverters', necReference: 'NEC 690' });
   }
 
   // Battery
@@ -567,6 +598,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     hasBattery: !!input.batteryId || (input.batteryCount ?? 0) > 0,
   });
   const _bosEmitted = new Set<string>();
+  // An integrated combiner (e.g. IQ Combiner 6C) HOUSES the gateway — don't also
+  // emit a separate standalone gateway line (double-count).
+  if (_bosPlan.hasIntegratedGateway) _bosEmitted.add('gateway');
   for (const d of _bosPlan.devices) {
     const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
     _bosEmitted.add(cat);
