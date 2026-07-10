@@ -667,6 +667,12 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               _cite('Inverter', getManufacturerAsset(_invId, 'inverter_spec') || getManufacturerAsset(_invId, 'microinverter_spec') || getManufacturerAsset(_invId, 'optimizer_spec')),
               _cite('Battery', getManufacturerAsset(_batId, 'battery_spec')),
               _cite('Racking', getManufacturerAsset(project.mountingSystemId, 'racking_detail')),
+              // Brand-integrated AC combiner / gateway ("the brains") — datasheet
+              // required for plan review; cited by device name (no image on file).
+              (() => {
+                const _d = buildIntegratedEquipment(input, cad).brains;
+                return _d ? `<li><strong>AC Combiner / Gateway:</strong> ${_d.brand} ${_d.model} — integrated ${_d.roleSummary.toLowerCase()} · manufacturer datasheet <span style="color:#555;font-weight:700;">(upon request)</span></li>` : '';
+              })(),
             ].filter(Boolean);
             const fallback = `• <strong>Module:</strong> ${modMfr} — see manufacturer website<br>• <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>`;
             return `

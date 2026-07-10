@@ -11,6 +11,7 @@ import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, to
 import { generateLiveSLD } from '../utils/sldAdapter';
 import { microBranchCount, planMicroBranches } from '../utils/branching';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
+import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 
 // ─── (Existing pages reused with minor upgrades) ─────────────────────────────
 
@@ -133,12 +134,24 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
             `<td>${i < 4 ? 'IQ Combiner' : 'AC Subpanel (see E-1)'}</td>` +
             `</tr>`;
         }).join('');
+        const _pv4aBos = buildIntegratedEquipment(input, cad);
+        const _bosNote = _pv4aBos.brains
+          ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">` +
+            `<strong>AC AGGREGATION — ${_pv4aBos.brains.brand.toUpperCase()} ${_pv4aBos.brains.model.toUpperCase()}:</strong> ` +
+            `The AC branch circuits terminate at the ${_pv4aBos.brains.model}, a single integrated device providing ${_pv4aBos.brains.roleSummary.toLowerCase()}` +
+            `${_pv4aBos.branchSlots ? ` (${_pv4aBos.branchSlots}-position)` : ''}. ` +
+            `${_pv4aBos.providesAcDisconnect ? 'Its integral load-break serves as the PV-system AC disconnecting means per NEC 690.13; a separate exterior AC disconnect is provided only where required by the AHJ/utility. ' : ''}` +
+            `${_pv4aBos.hasIntegratedGateway ? 'The integrated gateway provides production/consumption metering and monitoring per NEC 690.4. ' : ''}` +
+            `Output feeds the point of interconnection per NEC 705.10.` +
+            `${_pv4aBos.branchSlotWarning ? ` <span style="color:#cc6600;font-weight:700;">${_pv4aBos.branchSlotWarning}</span>` : ''}` +
+            `</div>`
+          : '';
         return `
       <div class="section-title">AC Branch Circuit Schedule — NEC 690.8(A)</div>
       <table class="equip-table">
         <thead><tr><th style="width:8%">Branch</th><th style="width:20%">Devices</th><th style="width:12%">Output</th><th style="width:14%">× 1.25 Cont.</th><th style="width:10%">OCPD</th><th style="width:20%">Conductor</th><th>Terminates</th></tr></thead>
         <tbody>${_rows}</tbody>
-      </table>`;
+      </table>${_bosNote}`;
       })()}
 
       <div class="section-title">Interconnection Summary — ${isSupplySideInterconnection(input) ? 'NEC 705.11 (Supply-Side Tap)' : 'NEC 705.12 (Load-Side)'}</div>
