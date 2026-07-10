@@ -44,6 +44,7 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
     // ── labels ────────────────────────────────────────────────────────────
     { id: 'PV-5',  title: 'WARNING LABELS & PLACARDS — NEC REQUIRED SIGNAGE' },
+    { id: 'PV-6',  title: 'DISCONNECT DIRECTORY & EMERGENCY PLACARD — NEC 705.10 / 690.56(B)' },
     // ── schedules · specs · datasheets ────────────────────────────────────
     { id: 'SCHED', title: 'EQUIPMENT SCHEDULE — MODULES, INVERTERS & BOM' },
     ...(o.includeSchedCont ? [{ id: 'SCHED-2', title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' }] : []),

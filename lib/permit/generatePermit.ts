@@ -31,7 +31,7 @@ import { pageCoverSheet } from './sections/coverSheet';
 import { pageArrayPrimary, pageArrayGeometry } from './sections/arrayPages';
 import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
-import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
+import { pageWarningLabels, pageDisconnectDirectory, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter } from './sections/certPages';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
@@ -852,6 +852,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Attachment detail (structural group)
     (n, t) => pageStructural(input, cad, n, t),                        // PV-4C: Structural calcs (system-aware)
     (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
+    (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (all)
     ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
     (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)

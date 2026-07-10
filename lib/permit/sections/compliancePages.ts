@@ -7,7 +7,8 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
-import { interconnectionLabel, hasRealBattery } from '../utils/helpers';
+import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
+import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
@@ -393,6 +394,194 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
 }
 
 
+// ═══════════════════════════════════════════════════════════════
+// PV-6: DISCONNECT DIRECTORY & EMERGENCY PLACARD
+// The permanent plaque installed at the service disconnect. One sheet
+// satisfies three code requirements at once:
+//   • NEC 705.10  — power-source directory (all sources + disconnect map)
+//   • NEC 690.56(B) — plaque giving the location of every PV disconnect
+//   • NEC 690.12(D)/690.56(C) — rapid-shutdown building placard
+// Ratings are pulled from the shared conductor authority so the plaque
+// can never disagree with E-1 / PV-4B. Content adapts to topology,
+// interconnection method, rapid-shutdown and battery presence.
+// ═══════════════════════════════════════════════════════════════
+
+export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+  const { project, system, compliance } = input;
+  const necVerRaw = compliance.jurisdiction?.necVersion || '2020';
+  const is2023 = String(necVerRaw).includes('2023');
+  const hasBattery = hasRealBattery(project);
+  const isMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
+  const isSupply = isSupplySideInterconnection(input);
+  const auth = buildConductorAuthority(input, cad);
+
+  const eq = getEquipmentContext(input, cad);
+  const invModel = eq.inverterModel !== '—' ? eq.inverterModel : (system.inverters?.[0]?.model || 'Inverter');
+  const invMfr = eq.inverterManufacturer !== '—' ? eq.inverterManufacturer : (system.inverters?.[0]?.manufacturer || '');
+  const invCount = isMicro ? (system.totalPanels || 0) : (system.inverters?.length || 1);
+
+  // ── Ratings (single-sourced) ──────────────────────────────────
+  const acOutA = ((system.totalAcKw || 0) * 1000) / 240;
+  const acOcpd = auth.acFeeder.ocpdAmps;
+  const mainA = project.mainPanelAmps || 200;
+  const _str0 = system.inverters?.[0]?.strings?.[0];
+  const _panelVoc = eq.panelVoc || project.panelVoc || _str0?.panelVoc || 0;
+  const maxDcV = isMicro
+    ? 'N/A — MICROINVERTER (MODULE-LEVEL DC ONLY)'
+    : (_str0?.panelCount && _panelVoc
+        ? `${Math.round(_panelVoc * 1.25 * _str0.panelCount)} V DC`
+        : (_panelVoc ? `${Math.round(_panelVoc * 1.25)} V DC` : '____ V DC'));
+  const interType = isSupply
+    ? 'SUPPLY-SIDE TAP — NEC 705.11'
+    : `LOAD-SIDE BACK-FED BREAKER${acOcpd ? ` (${acOcpd}A)` : ''} — NEC 705.12`;
+
+  // ── Disconnect directory (numbered, keyed to the diagram) ─────
+  interface Disco { name: string; loc: string; }
+  const discos: Disco[] = [];
+  discos.push({ name: 'MAIN SERVICE DISCONNECT', loc: `${mainA}A${project.mainPanelBrand ? ` ${project.mainPanelBrand}` : ''} — exterior at meter/service` });
+  if (project.acDisconnect !== false) discos.push({ name: 'PV AC DISCONNECT', loc: 'Exterior, lockable — adjacent to utility meter' });
+  if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', loc: 'At the inverter' });
+  discos.push({ name: `INVERTER${invCount > 1 ? `S (×${invCount})` : ''}`, loc: `${invMfr} ${invModel}`.trim() });
+  if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN SWITCH', loc: 'Adjacent to the PV AC disconnect' });
+  if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', loc: `${project.batteryBrand || 'ESS'} — at battery enclosure` });
+
+  // ── Emergency shutdown steps (adapt to what's present) ────────
+  const steps: string[] = ['OPEN MAIN SERVICE / UTILITY DISCONNECT'];
+  if (project.acDisconnect !== false) steps.push('OPEN PV AC DISCONNECT');
+  if (project.rapidShutdown) steps.push('TURN RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION');
+  if (!isMicro && project.dcDisconnect !== false) steps.push('OPEN PV DC / SYSTEM DISCONNECT');
+  if (hasBattery) steps.push('OPEN ENERGY STORAGE (ESS) / BATTERY DISCONNECT');
+  steps.push('ARRAY CONDUCTORS REMAIN ENERGIZED IN DAYLIGHT — TREAT AS LIVE');
+
+  const rsdText = is2023
+    ? 'SOLAR PV SYSTEM IS EQUIPPED WITH RAPID SHUTDOWN. TURN THE RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION TO SHUT DOWN THE PV SYSTEM AND REDUCE SHOCK HAZARD IN THE ARRAY.'
+    : 'SOLAR PV SYSTEM EQUIPPED WITH RAPID SHUTDOWN. TURN RAPID SHUTDOWN SWITCH TO THE "OFF" POSITION TO SHUT DOWN PV SYSTEM AND REDUCE SHOCK HAZARD IN THE ARRAY.';
+  const rsdRef = is2023 ? 'NEC 690.12(D)' : 'NEC 690.56(C)';
+
+  // Source list for the CAUTION header.
+  const sources = `UTILITY GRID + SOLAR PV${hasBattery ? ' + ENERGY STORAGE' : ''}`;
+
+  // ── Building directory diagram (front elevation, numbered callouts) ──
+  const _boxes = discos.slice(0, 6);
+  const _bw = 46, _gap = 6;
+  const _startX = 20;
+  const _diagram = `
+    <svg viewBox="0 0 360 226" width="100%" style="display:block;font-family:Arial,Helvetica,sans-serif;">
+      <!-- ground -->
+      <line x1="6" y1="200" x2="354" y2="200" stroke="#1a2230" stroke-width="1.4"/>
+      <!-- house body -->
+      <rect x="40" y="96" width="280" height="104" fill="#f7f8fa" stroke="#1a2230" stroke-width="1.4"/>
+      <!-- gable roof -->
+      <path d="M28 96 L180 40 L332 96 Z" fill="#eef1f5" stroke="#1a2230" stroke-width="1.4"/>
+      <!-- shaded PV array boundary on roof -->
+      <path d="M96 84 L180 53 L264 84 L180 84 Z" fill="#c9d6e8" stroke="#3a4a63" stroke-width="1" stroke-dasharray="3 2"/>
+      <text x="180" y="76" text-anchor="middle" font-size="7" fill="#2b3a52" font-weight="bold">PV ARRAY (BOUNDARY)</text>
+      <!-- equipment run along the wall -->
+      ${_boxes.map((d, i) => {
+        const x = _startX + 40 + i * (_bw + _gap);
+        return `<g>
+          <rect x="${x}" y="150" width="${_bw}" height="30" fill="#ffffff" stroke="#1a2230" stroke-width="1.1"/>
+          <circle cx="${x + _bw / 2}" cy="140" r="8" fill="#111" stroke="#111"/>
+          <text x="${x + _bw / 2}" y="143" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">${i + 1}</text>
+          <text x="${x + _bw / 2}" y="169" text-anchor="middle" font-size="5.6" fill="#1a2230" font-weight="bold">DISC ${i + 1}</text>
+        </g>`;
+      }).join('')}
+      <text x="180" y="216" text-anchor="middle" font-size="6.5" fill="#555" font-style="italic">Building directory — schematic; verify locations in field. Keyed to the list at right.</text>
+    </svg>`;
+
+  const _legend = _boxes.map((d, i) =>
+    `<div style="display:flex;gap:5px;align-items:baseline;margin-bottom:2px;">` +
+    `<span style="flex:0 0 auto;display:inline-block;width:13px;height:13px;background:#111;color:#fff;border-radius:50%;text-align:center;font-size:8px;font-weight:900;line-height:13px;">${i + 1}</span>` +
+    `<span style="font-size:7.5px;line-height:1.35;"><strong>${escapeH(d.name)}</strong> — ${escapeH(d.loc)}</span>` +
+    `</div>`).join('');
+
+  return `
+  <div class="page">
+    ${titleBlock(input, 'PV-6', 'DISCONNECT DIRECTORY & EMERGENCY PLACARD', pageNum, totalPages)}
+    <div class="page-content">
+
+      <div class="note-bar" style="margin-bottom:7px;">
+        THE PLACARD BELOW SHALL BE PERMANENTLY INSTALLED AT THE MAIN SERVICE DISCONNECT (ENGRAVED PHENOLIC OR UV-STABLE PRINTED ALUMINUM, HIGH-CONTRAST, READABLE AT EYE LEVEL).
+        IT SATISFIES THE POWER-SOURCE DIRECTORY (NEC 705.10), THE PV DISCONNECT-LOCATION PLAQUE (NEC 690.56(B)), AND THE RAPID-SHUTDOWN BUILDING PLACARD (${rsdRef}).
+        GROUP WITH ANY OTHER ON-SITE POWER-SOURCE DIRECTORIES SO ALL APPEAR TOGETHER.
+      </div>
+
+      <!-- ══ THE PERMANENT PLAQUE ══ -->
+      <div style="border:3px solid #000;background:#fff;">
+        <!-- CAUTION banner (ANSI Z535 CAUTION: yellow field, black text) -->
+        <div style="background:#f2c200;color:#000;padding:6px 10px;border-bottom:3px solid #000;text-align:center;">
+          <div style="font-size:16px;font-weight:900;letter-spacing:1.5px;">&#9888; CAUTION — MULTIPLE SOURCES OF POWER</div>
+          <div style="font-size:9px;font-weight:800;letter-spacing:0.4px;margin-top:1px;">THIS BUILDING IS SERVED BY: ${sources}</div>
+        </div>
+
+        <!-- body: directory diagram | ratings + emergency steps -->
+        <div style="display:grid;grid-template-columns:1.12fr 1fr;">
+          <!-- LEFT: directory diagram + numbered legend -->
+          <div style="padding:8px;border-right:2px solid #000;">
+            <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:4px;">LOCATION OF DISCONNECTS &amp; PV EQUIPMENT</div>
+            ${_diagram}
+            <div style="margin-top:5px;">${_legend}</div>
+          </div>
+
+          <!-- RIGHT: ratings + emergency shutdown -->
+          <div style="padding:8px;display:flex;flex-direction:column;gap:7px;">
+            <div>
+              <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1.5px solid #000;padding-bottom:2px;">SYSTEM RATINGS</div>
+              <table style="width:100%;border-collapse:collapse;font-size:8px;">
+                <tr><td style="padding:1.5px 0;">RATED AC OUTPUT CURRENT</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">${acOutA > 0 ? acOutA.toFixed(1) + ' A' : '____ A'}</td></tr>
+                <tr><td style="padding:1.5px 0;">NOMINAL OPERATING AC VOLTAGE</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">240 V</td></tr>
+                <tr><td style="padding:1.5px 0;">MAX DC SYSTEM VOLTAGE</td><td style="text-align:right;font-family:var(--mono);font-weight:800;">${maxDcV}</td></tr>
+                <tr><td style="padding:1.5px 0;">INTERCONNECTION</td><td style="text-align:right;font-family:var(--mono);font-weight:800;font-size:7px;">${interType}</td></tr>
+              </table>
+            </div>
+            <div>
+              <div style="font-size:9px;font-weight:900;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1.5px solid #000;padding-bottom:2px;">EMERGENCY SHUTDOWN PROCEDURE</div>
+              <ol style="margin:0;padding-left:15px;font-size:7.8px;line-height:1.5;font-weight:700;">
+                ${steps.map(s => `<li>${escapeH(s)}</li>`).join('')}
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <!-- rapid-shutdown band (red field — NEC-mandated color for PV RSD placard) -->
+        <div style="background:#cc0000;color:#fff;padding:6px 10px;border-top:3px solid #000;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;">
+          <div>
+            <div style="font-size:10px;font-weight:900;letter-spacing:0.5px;">RAPID SHUTDOWN</div>
+            <div style="font-size:7.6px;font-weight:700;line-height:1.4;margin-top:1px;">${escapeH(rsdText)}</div>
+            <div style="font-size:7px;font-weight:800;margin-top:2px;">TYPE: ${isMicro ? 'MODULE-LEVEL — CONDUCTORS OUTSIDE THE ARRAY BOUNDARY REDUCE TO A SAFE LEVEL' : 'ARRAY-LEVEL — CONTROLLED CONDUCTORS PER ' + rsdRef} &nbsp;·&nbsp; ${escapeH(rsdRef)}</div>
+          </div>
+          <svg viewBox="0 0 96 60" width="96" style="flex:0 0 auto;">
+            <path d="M8 44 L48 18 L88 44 Z" fill="none" stroke="#fff" stroke-width="1.4"/>
+            <path d="M26 38 L48 24 L70 38 L48 38 Z" fill="#ffffff" fill-opacity="0.35" stroke="#fff" stroke-width="0.9" stroke-dasharray="3 2"/>
+            <line x1="8" y1="44" x2="88" y2="44" stroke="#fff" stroke-width="1.4"/>
+            <text x="48" y="55" text-anchor="middle" font-size="6" fill="#fff" font-weight="bold">ARRAY BOUNDARY</text>
+          </svg>
+        </div>
+
+        <!-- footer: installer / contact / date -->
+        <div style="border-top:3px solid #000;padding:5px 10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:7.5px;">
+          <div><strong>INSTALLED BY:</strong> ${escapeH(project.designer || '____________________')}</div>
+          <div><strong>EMERGENCY / MONITORING CONTACT:</strong> ____________________</div>
+          <div><strong>INSTALL DATE:</strong> ${escapeH(project.date || '______________')}</div>
+        </div>
+      </div>
+
+      <!-- placard specification -->
+      <div class="sec-hdr-dark" style="margin:8px 0 4px;">PLACARD SPECIFICATION &amp; CODE BASIS</div>
+      <table class="equip-table" style="margin:0;">
+        <thead><tr><th style="width:20%;">Attribute</th><th>Requirement</th></tr></thead>
+        <tbody>
+          <tr><td class="fw7">Material</td><td>Engraved phenolic, UV-stable printed aluminum, or fire-marshal-accepted metal placard — permanently affixed per NEC 110.21(B).</td></tr>
+          <tr class="bg-lt"><td class="fw7">Letter Height</td><td>Title / signal words min. 3/8" (9.5 mm); body text min. 3/16" (4.8 mm); high-contrast, non-handwritten.</td></tr>
+          <tr><td class="fw7">Location</td><td>At the main service disconnect (readily visible, eye level). Group with all on-site power-source directories.</td></tr>
+          <tr class="bg-lt"><td class="fw7">Color</td><td>CAUTION header per ANSI Z535 (black on safety yellow); the rapid-shutdown band is white on red as mandated by ${rsdRef}.</td></tr>
+          <tr><td class="fw7">Code Basis</td><td class="mono" style="font-size:8px;">NEC ${is2023 ? '2023' : necVerRaw} — 705.10 (power-source directory) · 690.56(B) (PV disconnect-location plaque) · ${rsdRef} (rapid-shutdown building placard)${hasBattery ? ' · 706 / IFC 1207 (ESS)' : ''}</td></tr>
+        </tbody>
+      </table>
+
+    </div>
+  </div>`;
+}
 
 
 // ─── Spec Sheet Reference Page ─────────────────────────────────────────────
