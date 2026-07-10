@@ -49,7 +49,7 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff, Bug, Download
+  Info, ChevronRight, Eye, EyeOff, Bug, Download, MapPin, Pencil
 } from 'lucide-react';
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
@@ -58,6 +58,8 @@ import { useRouter } from 'next/navigation';
 import RoofEditPanel from '@/components/design/RoofEditPanel';
 // P1: Aurora-style header metrics pill (Size · Energy · Savings)
 import DesignHeaderMetrics from '@/components/design/DesignHeader';
+// P3b+P3d: Aurora-style View options dropdown (collapses 4 view toggles + tile provider)
+import ViewOptionsMenu from '@/components/design/ViewOptionsMenu';
 
 interface Props {
   project: Project;
@@ -833,6 +835,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   // design-page-simplify (P0/P1): right sidebar hidden by default for the clean Aurora look.
   // A header gear button toggles it on demand so Bill/Equipment/Battery workflows remain reachable.
   const [rightSidebarOpen, setRightSidebarOpen] = useState<boolean>(false);
+  // P3a: address chip collapsed by default; clicking the chip (or its pencil icon) expands
+  // it inline to the full search input. Submit / pick-from-dropdown auto-collapses.
+  const [addressExpanded, setAddressExpanded] = useState<boolean>(false);
 
   // Calculation state
   const [calculating, setCalculating] = useState(false);
@@ -3517,71 +3522,126 @@ export default function DesignStudio({ project, onSave }: Props) {
           <span className="text-xs text-slate-500 truncate hidden md:block">— {project.client.name}</span>
         ) : null}
 
-        {/* Address search with autocomplete */}
-        <div className="flex items-center gap-2 ml-2 flex-1 max-w-sm">
-          <div className="relative flex-1">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 z-10" />
-            <input
-              ref={addrInputRef}
-              type="text"
-              value={addressSearch}
-              onChange={e => handleAddressSearchInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') { setShowAddressSuggestions(false); geocodeAddress(addressSearch); }
-                if (e.key === 'Escape') setShowAddressSuggestions(false);
-              }}
-              onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 150)}
-              onFocus={() => addressSuggestions.length > 0 && setShowAddressSuggestions(true)}
-              placeholder="Search any address..."
-              autoComplete="off"
-              className={`w-full bg-slate-800 border rounded-lg pl-7 pr-7 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none transition-colors ${
-                locationStatus === 'found' ? 'border-emerald-500/50' :
-                locationStatus === 'failed' ? 'border-red-500/50' :
-                locationStatus === 'locating' ? 'border-amber-500/50' :
-                'border-slate-600 focus:border-amber-500'
-              }`}
-            />
-            <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
-              {addressSuggestionsLoading || searchLoading ? (
-                <Loader size={11} className="animate-spin text-slate-400" />
-              ) : locationStatus === 'found' ? (
-                <CheckCircle size={11} className="text-emerald-400" />
+        {/* design-page-simplify P3a: Address chip + collapsible expansion.
+            Default = small 📍 chip (~150px max) with a pencil change-icon.
+            Click the chip (or pencil) -> expand inline to the full search input
+            with the same autocomplete + Go behavior as before. */}
+        {addressExpanded ? (
+          <div className="flex items-center gap-2 ml-2 flex-1 max-w-sm">
+            <div className="relative flex-1">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 z-10" />
+              <input
+                ref={addrInputRef}
+                type="text"
+                value={addressSearch}
+                onChange={e => handleAddressSearchInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    setShowAddressSuggestions(false);
+                    geocodeAddress(addressSearch);
+                    setAddressExpanded(false);
+                  }
+                  if (e.key === 'Escape') {
+                    setShowAddressSuggestions(false);
+                    setAddressExpanded(false);
+                  }
+                }}
+                onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 150)}
+                onFocus={() => addressSuggestions.length > 0 && setShowAddressSuggestions(true)}
+                placeholder="Search any address..."
+                autoComplete="off"
+                className={`w-full bg-slate-800 border rounded-lg pl-7 pr-7 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none transition-colors ${
+                  locationStatus === 'found' ? 'border-emerald-500/50' :
+                  locationStatus === 'failed' ? 'border-red-500/50' :
+                  locationStatus === 'locating' ? 'border-amber-500/50' :
+                  'border-slate-600 focus:border-amber-500'
+                }`}
+                autoFocus
+              />
+              <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                {addressSuggestionsLoading || searchLoading ? (
+                  <Loader size={11} className="animate-spin text-slate-400" />
+                ) : locationStatus === 'found' ? (
+                  <CheckCircle size={11} className="text-emerald-400" />
+                ) : null}
+              </div>
+
+              {/* Autocomplete dropdown — position:fixed so it escapes the header's
+                  overflow clipping and renders above the 3D canvas (z-[100]). */}
+              {showAddressSuggestions && addressSuggestions.length > 0 && addrDropdownPos ? (
+                <div
+                  className="fixed bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-[100] overflow-hidden"
+                  style={{ top: addrDropdownPos.top, left: addrDropdownPos.left, width: addrDropdownPos.width }}
+                >
+                  {addressSuggestions.map((s, i) => (
+                    <button
+                      key={i}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors border-b border-slate-700/50 last:border-0"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        handleSelectAddressSuggestion(s);
+                        setAddressExpanded(false);
+                      }}
+                    >
+                      <div className="flex items-start gap-1.5">
+                        <Search size={10} className="text-amber-400 mt-0.5 shrink-0" />
+                        <div>
+                          <div className="text-xs text-white font-medium">{s.short_name}</div>
+                          <div className="text-xs text-slate-500 truncate max-w-xs">{s.display_name}</div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
               ) : null}
             </div>
-
-            {/* Autocomplete dropdown — position:fixed so it escapes the header's
-                overflow clipping and renders above the 3D canvas (z-[100]). */}
-            {showAddressSuggestions && addressSuggestions.length > 0 && addrDropdownPos ? (
-              <div
-                className="fixed bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-[100] overflow-hidden"
-                style={{ top: addrDropdownPos.top, left: addrDropdownPos.left, width: addrDropdownPos.width }}
-              >
-                {addressSuggestions.map((s, i) => (
-                  <button
-                    key={i}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors border-b border-slate-700/50 last:border-0"
-                    onMouseDown={e => { e.preventDefault(); handleSelectAddressSuggestion(s); }}
-                  >
-                    <div className="flex items-start gap-1.5">
-                      <Search size={10} className="text-amber-400 mt-0.5 shrink-0" />
-                      <div>
-                        <div className="text-xs text-white font-medium">{s.short_name}</div>
-                        <div className="text-xs text-slate-500 truncate max-w-xs">{s.display_name}</div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <button
+              onClick={() => {
+                setShowAddressSuggestions(false);
+                geocodeAddress(addressSearch);
+                setAddressExpanded(false);
+              }}
+              disabled={searchLoading || locationStatus === 'locating'}
+              className="btn-secondary btn-sm px-2.5 flex-shrink-0"
+            >
+              {searchLoading || locationStatus === 'locating' ? <Loader size={12} className="animate-spin" /> : 'Go'}
+            </button>
+            <button
+              onClick={() => { setShowAddressSuggestions(false); setAddressExpanded(false); }}
+              title="Close address search"
+              aria-label="Close address search"
+              className="btn-ghost btn-sm px-2 flex-shrink-0"
+            >
+              <X size={12} />
+            </button>
           </div>
-          <button
-            onClick={() => { setShowAddressSuggestions(false); geocodeAddress(addressSearch); }}
-            disabled={searchLoading || locationStatus === 'locating'}
-            className="btn-secondary btn-sm px-2.5 flex-shrink-0"
-          >
-            {searchLoading || locationStatus === 'locating' ? <Loader size={12} className="animate-spin" /> : 'Go'}
-          </button>
-        </div>
+        ) : (
+          <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+            <button
+              onClick={() => setAddressExpanded(true)}
+              title={addressSearch || 'Click to change address'}
+              className={`flex items-center gap-1.5 max-w-[180px] px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                locationStatus === 'found' ? 'bg-slate-800 border-slate-700 text-slate-200 hover:border-slate-600' :
+                locationStatus === 'failed' ? 'bg-red-500/10 border-red-500/30 text-red-300 hover:border-red-500/50' :
+                locationStatus === 'locating' ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' :
+                'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+              }`}
+            >
+              <MapPin size={11} className="text-amber-400 flex-shrink-0" />
+              <span className="truncate">
+                {addressSearch || project.address || 'Set address'}
+              </span>
+            </button>
+            <button
+              onClick={() => setAddressExpanded(true)}
+              title="Change address"
+              aria-label="Change address"
+              className="btn-ghost btn-sm px-2 flex-shrink-0"
+            >
+              <Pencil size={11} />
+            </button>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 ml-auto flex-shrink-0">
           {/* Automation buttons */}
@@ -3622,80 +3682,28 @@ export default function DesignStudio({ project, onSave }: Props) {
               <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
             </div>
           ) : null}
-          <span className="ml-2 hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-            <span aria-hidden>🖱️</span>
-            Left click drag and scroll wheel rotates
-          </span>
-          <button
-            onClick={() => setShowPanels(!showPanels)}
-            className={`btn-sm ${showPanels ? 'btn-secondary' : 'btn-ghost'}`}
-            title="Toggle panel visibility"
-          >
-            {showPanels ? <Eye size={13} /> : <EyeOff size={13} />}
-          </button>
-          <button
-            onClick={() => setShowShade3D(!showShade3D)}
-            className={`btn-sm ${showShade3D ? 'btn-primary' : 'btn-secondary'}`}
-            title="Toggle shade analysis"
-          >
-            🌡️ Shade
-          </button>
-          <button
-            onClick={() => setShow3D(!show3D)}
-            className={`btn-sm ${show3D ? 'btn-primary' : 'btn-secondary'}`}
-            title="Toggle 3D Digital Twin"
-          >
-            {show3D ? '🌐 3D View' : '🗺️ 2D Map'}
-          </button>
-          {/* Tile provider toggle — only shown in 2D mode */}
-          {!show3D ? (
-            <div className="flex items-center gap-0.5 bg-slate-800 border border-slate-600 rounded-lg overflow-hidden">
-              {(['auto', 'google', 'esri'] as const).map(p => (
-                <button
-                  key={p}
-                  onClick={() => {
-                    setTileProvider(p);
-                    TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map());
-                  }}
-                  className={`px-2 py-1 text-[10px] font-semibold transition-colors ${
-                    tileProvider === p
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-400 hover:bg-slate-700 hover:text-white'
-                  }`}
-                  title={
-                    p === 'auto'   ? 'Auto: Google primary, ESRI fallback on blank tile' :
-                    p === 'google' ? 'Force Google Maps satellite (zoom 21)' :
-                                     'Force ESRI World Imagery (zoom 19 max)'
-                  }
-                >
-                  {p === 'auto' ? '🔍 Auto' : p === 'google' ? 'Google' : 'ESRI'}
-                </button>
-              ))}
-              <span className={`px-1.5 py-1 text-[9px] font-bold border-l border-slate-600 ${
-                activeTileSource === 'google' ? 'text-blue-400' : 'text-amber-400'
-              }`}>
-                {activeTileSource === 'google' ? '✓G' : '✓E'}
-              </span>
-            </div>
-          ) : null}
-          {/* HD imagery — Google Solar RGB (~10cm) for tagging vents/obstructions; covered addresses only */}
-          {!show3D ? (
-            <button
-              onClick={() => setHdImagery(v => !v)}
-              className={`px-2 py-1 text-[10px] font-semibold rounded-lg border transition-colors ${
-                hdImagery
-                  ? (hdStatus === 'unavailable'
-                      ? 'bg-slate-800 text-amber-400 border-amber-500/40'
-                      : 'bg-emerald-600 text-white border-emerald-500')
-                  : 'bg-slate-800 text-slate-400 border-slate-600 hover:text-white'
-              }`}
-              title="High-res Solar aerial (~10cm) — sharp enough to tag vents/obstructions. Covered addresses only."
-            >
-              {hdImagery && hdStatus === 'loading' ? '⏳ HD'
-                : hdImagery && hdStatus === 'unavailable' ? '🛰 HD n/a here'
-                : '🛰 HD'}
-            </button>
-          ) : null}
+          {/* design-page-simplify P3b + P3d: Single View gear dropdown consolidates the
+              previous 4 standalone header toggles (Show panels / Shade / 3D / HD) plus
+              the tile provider segmented control. P3c also drops the permanent
+              "Left click drag..." tip pill that used to live here. */}
+          <ViewOptionsMenu
+            showPanels={showPanels}
+            setShowPanels={setShowPanels}
+            showShade3D={showShade3D}
+            setShowShade3D={setShowShade3D}
+            show3D={show3D}
+            setShow3D={setShow3D}
+            hdImagery={hdImagery}
+            setHdImagery={setHdImagery}
+            hdStatus={hdStatus}
+            tileProvider={tileProvider}
+            setTileProvider={setTileProvider}
+            activeTileSource={activeTileSource}
+            onTileProviderChange={(p) => {
+              setTileProvider(p);
+              TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map());
+            }}
+          />
           <button onClick={clearAll} className="btn-secondary btn-sm">
             <RotateCcw size={13} /> Clear
           </button>
