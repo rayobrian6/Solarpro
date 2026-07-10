@@ -10,6 +10,7 @@ import { escapeH } from '../utils/drawing';
 import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { selectFieldLabels, type FieldLabel } from '../utils/fieldLabels';
+import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
@@ -281,12 +282,23 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   // and where it is. No invented building drawing — locations reference PV-1.
   interface Disco { name: string; rating: string; loc: string; }
   const battKwh = hasBattery ? (project.batteryCount || 1) * (project.batteryKwh ?? 5.0) : 0;
+  // Brand-integrated BOS device ("the brains" — e.g. Enphase IQ Combiner 6C:
+  // combiner + gateway + AC disconnect in one box). Single-sourced.
+  const bos = buildIntegratedEquipment(input, cad);
   const discos: Disco[] = [];
   discos.push({ name: 'MAIN SERVICE DISCONNECT', rating: `${mainA} A${project.mainPanelBrand ? ` · ${project.mainPanelBrand}` : ''}`, loc: 'Exterior — at utility meter / service entrance' });
-  if (project.acDisconnect !== false) discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A${isSupply ? ' fused' : ''}` : 'PER PLAN', loc: 'Exterior, lockable — adjacent to utility meter' });
+  if (project.acDisconnect !== false) discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A${isSupply ? ' fused' : ''}` : 'PER PLAN', loc: bos.providesAcDisconnect ? 'Integral to the combiner (load-break) — exterior AC disconnect only if required by AHJ/utility' : 'Exterior, lockable — adjacent to utility meter' });
   if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', rating: `${maxDcV}`, loc: 'At the inverter' });
+  // Integrated combiner / gateway — the AC aggregation + monitoring device.
+  for (const d of bos.devices) {
+    discos.push({
+      name: `${d.brand.toUpperCase()} ${d.model.toUpperCase()}`,
+      rating: `${d.roleSummary}${d.branchSlots ? ` · ${d.branchSlots}-branch` : ''}`,
+      loc: d.mounting === 'wall' ? 'Wall-mounted — AC aggregation / monitoring / disconnect' : 'At the point of interconnection',
+    });
+  }
   discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
-  if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: 'Adjacent to the PV AC disconnect' });
+  if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: bos.brains ? `Hosted by the ${bos.brains.model}` : 'Adjacent to the PV AC disconnect' });
   if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
 
   // ── Emergency shutdown steps (adapt to what's present) ────────
