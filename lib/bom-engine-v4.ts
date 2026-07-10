@@ -20,6 +20,7 @@ import {
   TopologyManagerContext,
   BOMStageDefinition,
 } from './topology-manager';
+import { resolveIntegratedEquipment } from './equipment/integratedBos';
 
 import type { RunSegment } from './computed-system';
 import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
@@ -552,10 +553,34 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       quantity: ft, derivedFrom: 'generatorWireLength', formula: `${input.generatorWireLength} × 1.15`, necReference: 'NEC 702.4, NEC 215' });
   }
 
+  // Brand-integrated combiner/gateway ("the brains") — single-sourced from
+  // lib/equipment/integratedBos so the BOM matches the SLD + permit sheets and
+  // gets the real SKU (the registry accessory strings had a fabricated 4C and
+  // no combiner at all for IQ8H/IQ8A/IQ8AC). Falls back to the legacy
+  // requiredAccessories for non-integrated ecosystems (e.g. SolarEdge gateway).
+  const _bosPlan = resolveIntegratedEquipment({
+    inverterManufacturer: inverterEntry?.manufacturer ?? '',
+    inverterModel: inverterEntry?.model ?? '',
+    isMicro,
+    totalDevices: isMicro ? (input.deviceCount ?? input.moduleCount ?? 0) : 0,
+    branchCount: 0,
+    hasBattery: !!input.batteryId || (input.batteryCount ?? 0) > 0,
+  });
+  const _bosEmitted = new Set<string>();
+  for (const d of _bosPlan.devices) {
+    const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
+    _bosEmitted.add(cat);
+    items.push(addItem(cat === 'gateway' ? 'monitoring' : 'inverter', cat, d.brand, d.model,
+      d.partNumber ?? '—', `Integrated ${d.roleSummary}`, 1, 'ea',
+      (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos', '1', true));
+    log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
+      quantity: 1, derivedFrom: 'integrated-bos resolver', formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
+  }
+
   // Gateway (optimizer or microinverter topology)
   const needsGateway = norm === 'STRING_WITH_OPTIMIZER' || norm === 'MICROINVERTER' ||
     norm === 'HYBRID_INVERTER' || norm === 'DC_COUPLED_BATTERY' || norm === 'AC_COUPLED_BATTERY';
-  if (needsGateway) {
+  if (needsGateway && !_bosEmitted.has('gateway')) {
     // Find gateway from inverter accessories
     const gatewayAcc = inverterEntry?.requiredAccessories.find(a => a.category === 'gateway');
     if (gatewayAcc) {
@@ -569,7 +594,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   }
 
   // Combiner (microinverter topology)
-  if (isMicro) {
+  if (isMicro && !_bosEmitted.has('combiner')) {
     const combinerAcc = inverterEntry?.requiredAccessories.find(a => a.category === 'combiner');
     if (combinerAcc) {
       items.push(addItem('inverter', 'combiner', combinerAcc.defaultManufacturer ?? 'TBD',
