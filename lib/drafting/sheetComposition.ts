@@ -613,9 +613,14 @@ function roofComposition(
 ): SheetComposition {
   const d = getRoofData(cad, input);
   const isPlan = viewType === 'plan';
-  // RT-Mini (rail-less) runs 48" O.C. STAGGERED, not one foot per module and not
-  // the rafter spacing (Ray 2026-07-08). Keep the railed L-foot value as-is.
-  const _railless = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys);
+  // Roof Tech RT-MINI is an L-FOOT + RAIL base (rail_based), NOT rail-less — so
+  // its attach spacing is the ENGINE-resolved value (structural.attachment
+  // .maxAllowedSpacing), the SAME single source PV-4C/PE-1/CERT/APP-A print. The
+  // old regex wrongly matched RT-MINI + the brand name "ROOF TECH" and hardcoded
+  // 48" STAGGERED, contradicting the structural authority. Only genuinely
+  // rail-less products (RT-APEX / E Mount AIR / explicit "rail-less") get the
+  // direct-attach treatment. (RT-MINI research 2026-07-09, sourced.)
+  const _railless = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(d.mountSys);
   const _attachDisplay = _railless ? '48" O.C. STAGGERED' : `${d.attachSpacing}" O.C. MAX`;
   const _attachInto = _railless ? 'direct-attach mounts @ 48" O.C. staggered' : `L-foot @ ${d.attachSpacing}" O.C.`;
   // Framing term matches the structural authority (PV-4C/PE-1/CERT) so the set
