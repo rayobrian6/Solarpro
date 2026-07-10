@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveIntegratedEquipment, enphaseGeneration, getBosDevice } from '@/lib/equipment/integratedBos';
 import { buildIntegratedEquipment } from '@/lib/permit/utils/integratedEquipment';
+import { generatePermitHTML } from '@/lib/permit';
 import { roofProject } from '../../test-fixtures/roofProject';
 import type { CADModel } from '@/lib/cad/types';
 
@@ -59,6 +60,18 @@ describe('integrated BOS device resolver', () => {
     expect(plan.brand).toBe('Enphase');
     expect(plan.brains?.kind).toBe('integrated_combiner');
     expect(plan.hasIntegratedGateway).toBe(true);
+  });
+
+  it('a user override flows end-to-end through the rendered planset', () => {
+    // Phase-5 hook: setting project.bosDeviceIds (what the design-studio picker
+    // will write) makes every sheet render the chosen device instead of the
+    // auto-configured 6C — proving the selection plumbing is wired.
+    const p = JSON.parse(JSON.stringify(roofProject));
+    p.project.bosDeviceIds = ['enphase-iq-combiner-5c'];
+    const html = generatePermitHTML(p);
+    expect(html).toContain('IQ Combiner 5C');   // the overridden device renders
+    // the auto-config default (6C) must not leak onto the disconnect directory
+    expect(html).not.toContain('ENPHASE IQ COMBINER 6C');
   });
 
   it('exposes catalog lookup by id', () => {
