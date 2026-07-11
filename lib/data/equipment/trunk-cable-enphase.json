@@ -1,0 +1,230 @@
+{
+  "brand": "Enphase",
+  "ecosystem": "IQ",
+  "system": "IQ Cable (Q-Cable) AC trunk-cable system, US single-phase 240 VAC split-phase",
+  "datasheet": "Enphase IQ Cable accessories Data Sheet, DSH-00247-1.0-EN-US-2024-07-03",
+  "conductorSpec": {
+    "conductorType": "THHN/THWN-2 dry/wet",
+    "wetRated": true,
+    "gaugeAwg": 12,
+    "conductors": 2,
+    "insulation": "two-wire, double-insulated",
+    "maxNominalVoltageAcV": 277,
+    "flameRating": "FT4",
+    "certification": "UL 3003 (raw cable), UL 9703 (cable assemblies); RoHS, OIL RES I, CE, UV resistant; UL for Canada and US",
+    "disconnectingMeans": "AC and DC bulkhead connectors evaluated and UL-approved as the load-break disconnect required by NEC 690",
+    "source": "Enphase IQ Cable accessories Data Sheet DSH-00247-1.0 (2024-07-03)"
+  },
+  "cables": [
+    {
+      "orientation": "portrait",
+      "sku": "Q-12-10-240",
+      "connectorSpacingFt": 4.25,
+      "connectorSpacingIn": 51,
+      "connectorSpacingMeters": 1.3,
+      "gaugeAwg": 12,
+      "conductors": 2,
+      "voltageAcV": 277,
+      "ampRating": 20,
+      "connectorCountPerBox": 240,
+      "forCells": "60/72-cell modules, portrait orientation",
+      "priceUsdPerFt": 5.24,
+      "priceUsdPerDrop": 22.29,
+      "source": "Datasheet lists 1.3 m (4.2 ft) spacing, 240/box; distributor 51\" on-center (RES Supply / Greentech). Price $22.29 per inverter-connection (drop) at solar-electric.com (retrieved 2026-07-10); per-ft is derived $22.29 / 4.25 ft."
+    },
+    {
+      "orientation": "portrait",
+      "sku": "Q-12-12-240",
+      "connectorSpacingFt": 4.9,
+      "connectorSpacingIn": 59.1,
+      "connectorSpacingMeters": 1.5,
+      "gaugeAwg": 12,
+      "conductors": 2,
+      "voltageAcV": 277,
+      "ampRating": 20,
+      "connectorCountPerBox": 240,
+      "forCells": "wider portrait / larger modules",
+      "priceUsdPerFt": null,
+      "priceUsdPerDrop": null,
+      "source": "Datasheet DSH-00247-1.0: 1.5 m (4.9 ft) spacing, 240/box"
+    },
+    {
+      "orientation": "landscape",
+      "sku": "Q-12-17-240",
+      "connectorSpacingFt": 6.56,
+      "connectorSpacingIn": 78.7,
+      "connectorSpacingMeters": 2.0,
+      "gaugeAwg": 12,
+      "conductors": 2,
+      "voltageAcV": 277,
+      "ampRating": 20,
+      "connectorCountPerBox": 240,
+      "forCells": "60/72-cell modules, landscape orientation",
+      "priceUsdPerFt": null,
+      "priceUsdPerDrop": null,
+      "source": "Datasheet DSH-00247-1.0: 2.0 m (6.5 ft) spacing, 240/box; distributor 78.7\" on-center (RES Supply)"
+    },
+    {
+      "orientation": "landscape",
+      "sku": "Q-12-18-240",
+      "connectorSpacingFt": 6.9,
+      "connectorSpacingIn": 82.7,
+      "connectorSpacingMeters": 2.1,
+      "gaugeAwg": 12,
+      "conductors": 2,
+      "voltageAcV": 277,
+      "ampRating": 20,
+      "connectorCountPerBox": 240,
+      "forCells": "wider landscape / larger modules",
+      "priceUsdPerFt": null,
+      "priceUsdPerDrop": null,
+      "source": "Datasheet DSH-00247-1.0: 2.1 m (6.9 ft) spacing, 240/box"
+    },
+    {
+      "orientation": "landscape",
+      "sku": "Q-12-20-200",
+      "connectorSpacingFt": 7.5,
+      "connectorSpacingIn": 90.6,
+      "connectorSpacingMeters": 2.3,
+      "gaugeAwg": 12,
+      "conductors": 2,
+      "voltageAcV": 277,
+      "ampRating": 20,
+      "connectorCountPerBox": 200,
+      "forCells": "large-format landscape modules",
+      "priceUsdPerFt": null,
+      "priceUsdPerDrop": null,
+      "source": "Datasheet DSH-00247-1.0: 2.3 m (7.5 ft) spacing, 200/box"
+    },
+    {
+      "orientation": "landscape",
+      "sku": "Q-12-22-200",
+      "connectorSpacingFt": 8.2,
+      "connectorSpacingIn": 98.4,
+      "connectorSpacingMeters": 2.5,
+      "gaugeAwg": 12,
+      "conductors": 2,
+      "voltageAcV": 277,
+      "ampRating": 20,
+      "connectorCountPerBox": 200,
+      "forCells": "large-format landscape modules",
+      "priceUsdPerFt": null,
+      "priceUsdPerDrop": null,
+      "source": "Datasheet DSH-00247-1.0: 2.5 m (8.2 ft) spacing, 200/box"
+    },
+    {
+      "orientation": "landscape",
+      "sku": "Q-12-25-200",
+      "connectorSpacingFt": 9.1,
+      "connectorSpacingIn": 110.2,
+      "connectorSpacingMeters": 2.8,
+      "gaugeAwg": 12,
+      "conductors": 2,
+      "voltageAcV": 277,
+      "ampRating": 20,
+      "connectorCountPerBox": 200,
+      "forCells": "large-format landscape modules",
+      "priceUsdPerFt": null,
+      "priceUsdPerDrop": null,
+      "source": "Datasheet DSH-00247-1.0: 2.8 m (9.1 ft) spacing, 200/box"
+    }
+  ],
+  "rawCable": {
+    "sku": "Q-12-RAW-300",
+    "description": "300 meters of 12 AWG cable with NO connectors; used to fabricate custom-length jumpers with field-wireable connectors",
+    "gaugeAwg": 12,
+    "lengthMeters": 300,
+    "priceUsd": null,
+    "source": "Datasheet DSH-00247-1.0"
+  },
+  "connectors": {
+    "male": {
+      "sku": "Q-CONN-10M",
+      "description": "IQ Field Wireable Connector (male) - make connections from any open connector; center-feed within branch limits",
+      "packQty": 10,
+      "rating": "12 AWG Q-Cable, 277 VAC max nominal / 20 A branch OCPD (UL 9703; UL-approved as NEC 690 load-break disconnect)",
+      "priceUsd": 13.86,
+      "priceUsdPack": 138.57,
+      "source": "Datasheet DSH-00247-1.0 (SKU + role). Price $138.57/pack of 10 = $13.86 each at solar-electric.com (retrieved 2026-07-10)"
+    },
+    "female": {
+      "sku": "Q-CONN-10F",
+      "description": "IQ Field Wireable Connector (female) - make connections from any IQ Cable open connector",
+      "packQty": 10,
+      "rating": "12 AWG Q-Cable, 277 VAC max nominal / 20 A branch OCPD (UL 9703; UL-approved as NEC 690 load-break disconnect)",
+      "priceUsd": null,
+      "priceUsdPack": null,
+      "source": "Datasheet DSH-00247-1.0; price not captured (comparable to Q-CONN-10M ~$13-14 ea)"
+    },
+    "terminator": {
+      "sku": "Q-TERM-10",
+      "description": "IQ Terminator for unused cable ends; sold in packs of 10. Install on any cut cable end not terminated with a field-wireable connector. Single-use (latch destroyed if reopened). Center-feed requires two per branch.",
+      "packQty": 10,
+      "rating": "Watertight cable-end terminator for 12 AWG Q-Cable",
+      "priceUsd": null,
+      "priceUsdPack": null,
+      "source": "Datasheet DSH-00247-1.0 + Enphase Q Cable Terminator Quick Install Guide"
+    },
+    "sealingCap": {
+      "sku": "Q-SEAL-10",
+      "description": "IQ Sealing Caps (female); ONE needed to cover EACH unused connector on the cabling. Sold in packs of 10. Related: Q-BA-CAP-10 for unused aggregator/branch-aggregator connections.",
+      "packQty": 10,
+      "rating": "Watertight sealing cap for unused AC connectors on Q-Cable",
+      "priceUsd": null,
+      "priceUsdPack": null,
+      "source": "Datasheet DSH-00247-1.0: 'One needed to cover each unused connector on the cabling'"
+    },
+    "disconnectTool": {
+      "sku": "Q-DISC-10",
+      "description": "IQ Disconnect Tool for IQ Cable connectors, MC4/Amphenol DC connectors, and AC module mount. Plan to use at least one per installation. Sold in packs of 10.",
+      "packQty": 10,
+      "rating": "n/a (tool)",
+      "priceUsd": null,
+      "priceUsdPack": null,
+      "source": "Datasheet DSH-00247-1.0"
+    }
+  },
+  "cableClip": {
+    "sku": "Q-CLIP-100",
+    "description": "IQ Cable Clip - fastens cabling to racking or secures looped/service-loop cabling. Packs of 100.",
+    "source": "Datasheet DSH-00247-1.0"
+  },
+  "maxDevicesPerBranch": 13,
+  "maxDevicesPerBranchByModel": {
+    "IQ8": 13,
+    "IQ8Plus": 13,
+    "IQ8M": 12,
+    "IQ8A": 10,
+    "IQ8H": 10,
+    "note": "Values at 20 A / 240 VAC. 13 (IQ8/IQ8+) is well-sourced; IQ8M/IQ8A/IQ8H numbers are from per-model datasheets and should be field-verified against the exact model datasheet. Local AHJ may further limit."
+  },
+  "branchOcpdA": 20,
+  "branchOcpdNote": "Each microinverter AC branch circuit must be protected by a 20 A maximum breaker or fuse (NEC). Branch OCPD is the limiting factor on devices per branch, not the cable ampacity.",
+  "spliceInstallRule": {
+    "realRule": "The IQ Q-Cable is one continuous, factory-connectorized reel with an integrated AC drop at fixed spacing (one connector per module). For a single contiguous array/plane you run ONE unbroken length of cable along the row(s); each microinverter plugs into its nearest integrated connector. You do NOT field-splice at row transitions - you route the continuous cable up/over to the next row with a SERVICE LOOP (secured with Q-CLIP), and any integrated connector that lands in a gap and is not used gets capped with a Q-SEAL-10 sealing cap. Field-wireable connectors (Q-CONN-10M + Q-CONN-10F) are used ONLY to: (a) rejoin the cable after an intentional CUT, (b) splice / center-feed two separate cable pieces or two reels together, or (c) fabricate a custom-length JUMPER from Q-12-RAW-300 raw cable to bridge a gap LARGER than the fixed connector spacing - e.g., between sub-arrays or across separate roof planes. Cut cable ends that are not joined with a field-wireable connector are closed with a Q-TERM-10 terminator (single-use), not spliced. Datasheet: 'Link connectors eliminate cable waste' and connectors 'make connections from any open connector and center-feed any section of cable within branch limits.'",
+    "splicesPerRowTransition": 0,
+    "splicesPerRoofPlaneBridge": 1,
+    "typicalResidentialSinglePlaneSplices": 0,
+    "continuousCableWithServiceLoop": true,
+    "sealingCapPerUnusedConnector": true,
+    "splicePairDefinition": "One 'splice' = one male (Q-CONN-10M) + one female (Q-CONN-10F) field-wireable connector joined together (a jumper across a gap uses one pair per join; a raw-cable jumper needs a connector on each cut end).",
+    "source": "Enphase IQ Cable accessories Data Sheet DSH-00247-1.0; Enphase Q Cable Terminator Quick Install Guide; Enphase Planning-for-IQ-System tech brief"
+  },
+  "caveats": [
+    "SPLICE-RULE CORRECTION (the key finding): the consuming code's assumption of ~1 field-splice pair per (row - 1) is WRONG / far too high. A single contiguous roof plane needs ZERO field splices - the continuous connectorized cable snakes across rows via service loops, with unused connectors capped (Q-SEAL-10). Field splices (Q-CONN male+female pair) occur PER roof-plane / sub-array BRIDGE that exceeds connector spacing, or per intentional cable cut / reel-to-reel join - typically 0-1 per branch, NOT per row. Budget sealing caps (Q-SEAL-10) per unused connector and a Q-TERM-10 per open cable end instead.",
+    "Voltage: datasheet lists 277 VAC MAX NOMINAL for the 12 AWG cable/connectors; some distributor listings label the portrait cable '250 VAC'. In US residential the application is 240 VAC split-phase. The '240' in the SKU denotes the 240 V application, not the connector spacing.",
+    "ampRating=20 in the cable entries is the 20 A BRANCH OCPD limit (the practical current cap), not a separately published connector ampacity. Enphase does not publish a discrete connector amp rating on this datasheet; the connectors are UL 9703 assemblies approved as the NEC 690 load-break disconnect.",
+    "Connector spacing is given two ways: datasheet feet (rounded, e.g. portrait 4.2 ft / landscape 6.5 ft) vs. distributor inches (portrait 51\" = 4.25 ft, landscape 78.7\" = 6.56 ft). The inch/meter values are exact; the datasheet foot values are rounded.",
+    "Prices: portrait Q-12-10-240 $22.29 per inverter-connection (drop) and Q-CONN-10M $138.57/10 ($13.86 ea) from solar-electric.com, retrieved 2026-07-10 - single-distributor retail, not verified against wholesale/other distributors. Landscape cable per-ft, female connector, terminator, sealing-cap, and raw-cable prices were not captured (null). Cable is generally sold PER DROP (per inverter connection), not per foot; per-ft figures are derived (per-drop / spacing-ft).",
+    "maxDevicesPerBranch=13 assumes IQ8 / IQ8+ at 240 V. IQ8M (12), IQ8A (10), IQ8H (10) differ - verify against the specific microinverter model datasheet and local AHJ before sizing a branch.",
+    "Q-12-RAW-300 (raw 12 AWG, no connectors) is the source stock for field-fabricated jumpers used with Q-CONN-10M/10F to bridge gaps; the datasheet lists it but no length-based price was found.",
+    "Also on the accessories datasheet but out of scope here: EN4-to-MC4 DC adapters (ECA-EN4-* / Q-DCC-2 / Q-DCC-2-P for IQ8P) - these are DC-side module leads, not part of the AC trunk."
+  ],
+  "sources": [
+    "Enphase IQ Cable accessories Data Sheet, DSH-00247-1.0-EN-US-2024-07-03 (enphase.com/download/iq-cable-and-accessories-data-sheet)",
+    "Enphase Q Cable Terminator Quick Install Guide (enphase.com/download/iq-terminator-cap-installation-guide)",
+    "Enphase Planning for an IQ Microinverter System tech brief (enphase.com/sites/default/files/2021-06/TechBrief-Planning-for-IQ-System.pdf)",
+    "Enphase IQ8/IQ8+ Microinverter Data Sheet (max 13 per 20A/240V branch)",
+    "Distributor listings: RES Supply, Greentech Renewables, solar-electric.com (prices retrieved 2026-07-10)"
+  ]
+}

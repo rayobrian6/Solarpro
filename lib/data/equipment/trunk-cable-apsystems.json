@@ -1,0 +1,72 @@
+{
+  "brand": "APsystems",
+  "ecosystem": "AC Bus",
+  "architectureNote": "APsystems uses a factory-molded 'AC Bus' (a.k.a. Y3/trunk) cable with ONE connector drop per microinverter at a FIXED interval, not a portrait/landscape pair like Enphase Q-Cable and not a separate Y-cable wired per inverter. Two families exist: the current DS3 AC Bus (10AWG, 3-wire w/ internal ground, U-1000-RO2V TC-ER, one molded connector every ~2.4m, sold MODULARLY 'per connector' so the installer sets each drop's position), and the legacy Y3 bus for YC600/QS1 (12AWG, one pre-molded connector every 2m, sold as fixed 2m/4m pieces = 1 or 2 connectors). The microinverter's own AC cable plugs into the bus drop with an audible 'click'; unused drops get a Y-CONN cap and the cut end gets a Bus End Cap. The trunk is built by chaining molded connector segments/extension cables; only the branch END is field-wired into a junction box using a field connector. Because each DS3 drop carries ~2.4m (~7.9ft) of slack, normal module spacing AND ordinary row-to-row jumps are absorbed by the drop + service loop rather than by a field splice.",
+  "cables": [
+    {
+      "orientation": "fixed",
+      "sku": "APS-221-115 (Solacity distributor SKU; APsystems DS3 AC Bus, mfr PN not definitively captured)",
+      "connectorSpacingFt": 7.9,
+      "gaugeAwg": 10,
+      "conductors": 3,
+      "voltageAcV": 240,
+      "ampRating": 30,
+      "priceUsdPerFt": 6.23,
+      "source": "https://www.solacity.com/product/apsystems-ac-bus-trunk-cable-2/ and https://solaronline.ca/product/apsystems-ds3-series-ac-trunk-cable/ (2026-07): DS3 AC Bus, 10AWG 3-wire w/ internal ground, U-1000-RO2V(TC-ER), CSA/TUV, 2.4m drop, 240V split-phase, sold per connector (~$49/connector CAD/USD -> ~$6.23/ft derived)"
+    },
+    {
+      "orientation": "fixed",
+      "sku": "2322401303 (Y3 Bus Cable, 4m / 2-connector)",
+      "connectorSpacingFt": 6.56,
+      "gaugeAwg": 12,
+      "conductors": 3,
+      "voltageAcV": 240,
+      "ampRating": 20,
+      "priceUsdPerFt": 2.9,
+      "source": "https://ussolarsupplier.com/products/apsystems-2322401303-bus-trunk-cable and https://csesolarusa.com/product/apsystems-2322401303-bus-trunk-cable/ (2026-07): legacy YC600/QS1 Y3 bus, 12AWG/2.5mm2, UV-resistant, pre-molded connector every 2m, $37.99 for 4m -> ~$2.90/ft derived. Legacy; US DS3 systems use the 10AWG bus above."
+    }
+  ],
+  "connectors": {
+    "male": {
+      "sku": "2300931202",
+      "rating": "600V AC / 40A, IP67 (mated), 10AWG screw-clamp, -40C to +85C, field-wireable",
+      "priceUsd": 18.64
+    },
+    "female": {
+      "sku": "2300932202",
+      "rating": "32A, 10AWG, field-wireable AC female connector (Platt listing)",
+      "priceUsd": null
+    },
+    "terminator": {
+      "sku": "2060700017",
+      "rating": "AC Bus End Cap - waterproofs/seals the cut END of the AC Bus trunk (DS3/QS1/QT2)",
+      "priceUsd": 9.88
+    },
+    "sealingCap": {
+      "sku": "2060700007",
+      "rating": "Y-CONN / Conn Cap - protects & seals an UNUSED connector drop on the AC Bus (DS3/QS1/QT2)",
+      "priceUsd": 3.7
+    },
+    "extensionCable": {
+      "sku": "AC-EXT-2 (also AC-EXT-1 = 1m, AC-EXT-4 = 4m)",
+      "rating": "2m, male-to-female MOLDED (plug-in, no field wiring), 12AWG, 600V, Type TC-ER, 90C/-40C. Used to bridge gaps between microinverters greater than ~6ft (large row-to-row jumps/obstructions)",
+      "priceUsd": 35.4
+    }
+  },
+  "maxDevicesPerBranch": 4,
+  "branchOcpdA": 20,
+  "spliceInstallRule": {
+    "realRule": "The AC Bus is a factory-molded continuous trunk with one connector drop per microinverter at a fixed interval (DS3 ~2.4m/7.9ft, Y3 2m/6.6ft). Microinverters plug into molded drops (audible click) - NO field wiring. The generous ~2.4m per-connector DS3 drop plus service loop absorbs both module spacing and ordinary row-to-row jumps, so a row transition does NOT require a field splice. Field-wired connections occur ONLY where the bus terminates into a junction box / grid connection - typically ONE field connector (male 2300931202) per branch circuit. Larger gaps are bridged with plug-in molded AC extension cables (AC-EXT-1/2/4), which are also NOT field-wired. Therefore 'field splices' do NOT equal 'row transitions' and counting 1 per row transition overcounts.",
+    "typicalResidentialSinglePlaneSplices": 0,
+    "source": "APsystems DS3 Series Installation/User Manual (global.apsystems.com, Rev1.5 2025-03) + DS3 Quick Install Guide Rev4.0 2024-01 + distributor listings, retrieved 2026-07. Field-wired connection count is ~1 per branch (junction-box termination), not per row; the only field-wireable part is the end connector."
+  },
+  "caveats": [
+    "SKU CONFLICT / FIELD-VERIFY: distributors report the End Cap and the Y-CONN/Conn Cap part numbers inconsistently (2060700017 vs 2060700007 appear swapped across powerstore/hdmsolar/stellavolta/shopsolarkits). Confirm exact PNs against an APsystems price list before ordering.",
+    "DS3 AC Bus 'APS-221-115' is a Solacity distributor SKU; the APsystems manufacturer part number for the 10AWG DS3 AC Bus was not definitively captured (BayWa/SolarOnline list it generically as 'DS3/DS3-L AC Trunk Cable'). FIELD-VERIFY mfr PN and per-connector length option.",
+    "Female field connector 2300932202 is listed at 32A and the male 2300931202 at 40A/600V; verify current derating for a 20A branch and that both are field-wireable for the US 10AWG split-phase bus.",
+    "Prices are distributor listings (2026, mixed USD/CAD); cable priceUsdPerFt values are DERIVED from per-connector / per-length listings (DS3 ~$49 per 2.4m connector; Y3 ~$38 per 4m).",
+    "maxDevicesPerBranch is MODEL-SPECIFIC on a 20A/240V split-phase branch: DS3 = 4, DS3-S = 5, DS3-L = 6 (value 4 = flagship DS3). A 30A branch permits up to 6 DS3. Legacy QS1/YC600 counts differ - confirm per the active microinverter's datasheet appendix.",
+    "APsystems has NO portrait-vs-landscape cable variants like Enphase Q-Cable; spacing is fixed per cable family. The DS3 bus is modular 'per connector' so the installer positions each drop, which is the closest analog to Enphase's spacing choice.",
+    "The Y3 12AWG cable is the legacy YC600/QS1 bus and appears in older docs referenced even for DS3 install steps ('Y3 AC trunk cable'); current US DS3 installs use the 10AWG bus. Treat the two cable entries as generation variants, not simultaneous options."
+  ]
+}

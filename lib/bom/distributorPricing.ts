@@ -98,7 +98,7 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     description: 'REC Alpha Pure-R 405W (HJT, black)',
     category: 'solar_panel', unit: 'ea',
     listPrice: 1.10, netPrice: 0.98,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     // Alias for the equipment-db id ('rec-alpha-pure-405' → uppercased) the BOM
@@ -108,7 +108,7 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     description: 'REC Alpha Pure-R 405W (HJT, black)',
     category: 'solar_panel', unit: 'ea',
     listPrice: 1.10, netPrice: 0.98,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     partNumber: 'SIL-380-BK',
@@ -197,6 +197,68 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     source: 'Soligent', asOf: '2025-01-15',
   },
 
+  // ─── Trunk / AC bus cable (sold per connector-DROP, not per foot) ──────────
+  // Sourced 2026-07-10 — research JSONs in lib/data/equipment/trunk-cable-*.json.
+  {
+    partNumber: 'Q-12-10-240',
+    description: 'Enphase Q Cable, portrait (1.3 m drops) — per connector-drop',
+    category: 'trunk_cable', unit: 'ea',
+    listPrice: 22.29, netPrice: 22.29,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    // Landscape per-drop price not published — set = portrait as a FLOOR
+    // (longer cable per drop, so real price ≥ this). FIELD-VERIFY.
+    partNumber: 'Q-12-17-240',
+    description: 'Enphase Q Cable, landscape (2.0 m drops) — per connector-drop (≈portrait, verify)',
+    category: 'trunk_cable', unit: 'ea',
+    listPrice: 22.29, netPrice: 22.29,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: 'Q-CONN-10M',
+    description: 'Enphase IQ Field-Wireable Connector, male ($138.57 / 10-pack)',
+    category: 'connector', unit: 'ea',
+    listPrice: 13.86, netPrice: 13.86,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    // Female price not published — assume ≈ male. FIELD-VERIFY.
+    partNumber: 'Q-CONN-10F',
+    description: 'Enphase IQ Field-Wireable Connector, female (≈male price, verify)',
+    category: 'connector', unit: 'ea',
+    listPrice: 13.86, netPrice: 13.86,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: 'DS3-AC-BUS',
+    description: 'APsystems DS3 AC Bus trunk (2.4 m drops) — per connector-drop',
+    category: 'trunk_cable', unit: 'ea',
+    listPrice: 49.00, netPrice: 49.00,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: '2300931202',
+    description: 'APsystems AC Bus field-wireable connector, male (IP67)',
+    category: 'connector', unit: 'ea',
+    listPrice: 18.64, netPrice: 18.64,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: '1531038',
+    description: 'NEP BDM trunk end cap',
+    category: 'terminator', unit: 'ea',
+    listPrice: 4.55, netPrice: 4.55,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: '1531022',
+    description: 'NEP BDM male splice adaptor',
+    category: 'connector', unit: 'ea',
+    listPrice: 2.00, netPrice: 2.00,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+
   // ─── Microinverters ────────────────────────────────────────────────────────
   {
     partNumber: 'IQ8PLUS-72-2-US',
@@ -210,7 +272,7 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     description: 'Enphase IQ8M Microinverter',
     category: 'microinverter', unit: 'ea',
     listPrice: 230.00, netPrice: 185.00,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
 
   // ─── Integrated combiners / gateways (SOURCED — bos-pricing-research.json) ───
@@ -222,49 +284,49 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     description: 'Enphase IQ Combiner 6C (combiner + IQ Gateway + integral disconnect)',
     category: 'combiner', unit: 'ea',
     listPrice: 2000.00, netPrice: 1800.00,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     partNumber: 'X-IQ-AM1-240-5C',
     description: 'Enphase IQ Combiner 5C',
     category: 'combiner', unit: 'ea',
     listPrice: 1520.00, netPrice: 1350.00,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     partNumber: 'X-IQ-AM1-240-4C',
     description: 'Enphase IQ Combiner 4C',
     category: 'combiner', unit: 'ea',
     listPrice: 800.00, netPrice: 709.00,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     partNumber: 'ENV-IQ-AM1-240',
     description: 'Enphase IQ Gateway (standalone)',
     category: 'gateway', unit: 'ea',
     listPrice: 780.00, netPrice: 690.00,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     partNumber: 'ENV2-IQ-AM1-240',
     description: 'Enphase IQ Gateway (IEEE 2030.5)',
     category: 'gateway', unit: 'ea',
     listPrice: 780.00, netPrice: 690.00,
-    source: 'CED', asOf: '2025-Q3',
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     partNumber: 'MC-200-011-V01',
     description: 'Enphase IQ Meter Collar (meter-socket adapter + MID)',
     category: 'meter_socket', unit: 'ea',
     listPrice: 700.00, netPrice: 630.00,
-    source: 'Soligent', asOf: '2025-Q3',
+    source: 'Soligent', asOf: '2025-09-15',
   },
   {
     partNumber: '1624171',
     description: 'Tesla Backup Switch (meter-socket + grid isolation)',
     category: 'meter_socket', unit: 'ea',
     listPrice: 550.00, netPrice: 450.00,   // ⚠ LOW confidence — Tesla is quote-only via distributors
-    source: 'Internal', asOf: '2025-Q3',
+    source: 'Internal', asOf: '2025-09-15',
   },
 
   // ─── Power Optimizers ──────────────────────────────────────────────────────
@@ -497,7 +559,11 @@ export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: 
   racking:           { unitCost: 18.00,         unit: 'ea',   source: 'CED' },
   // Electrical BOS
   wire:              { unitCost: 0.85,          unit: 'ft',   source: 'KWh' },      // $/ft — #10 AWG THWN avg
-  trunk_cable:       { unitCost: 2.40,          unit: 'ft',   source: 'Soligent' },
+  // Trunk cable is sold PER CONNECTOR-DROP (1 drop per micro), not per foot —
+  // Enphase ≈ $22/drop, APsystems ≈ $49/drop; real SKUs priced above.
+  trunk_cable:       { unitCost: 25.00,         unit: 'ea',   source: 'Soligent' },
+  connector:         { unitCost: 14.00,         unit: 'ea',   source: 'Soligent' }, // field-wireable splice avg
+  sealing_cap:       { unitCost: 4.50,          unit: 'ea',   source: 'Soligent' },
   conduit:           { unitCost: 0.75,          unit: 'ft',   source: 'KWh' },      // 3/4" EMT avg
   breaker:           { unitCost: 24.00,         unit: 'ea',   source: 'KWh' },
   disconnect:        { unitCost: 185.00,        unit: 'ea',   source: 'KWh' },
