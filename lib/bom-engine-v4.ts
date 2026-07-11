@@ -101,6 +101,11 @@ export interface BOMGenerationInputV4 {
    * = (rows-1) - (branches-1), since branch boundaries absorb transitions.
    */
   spliceAtRows?: boolean;
+  /**
+   * Emit the "Truck Stock — Recommended Extras" stage (default true). The
+   * permit BOM passes false — the SCHED shows installed materials only.
+   */
+  includeTruckStock?: boolean;
 
   // Electrical
   mainPanelAmps: number;
@@ -237,10 +242,12 @@ const STAGE_LABELS: Record<BOMStageId, string> = {
   structural: 'Stage 5 — Structural',
   monitoring: 'Stage 6 — Monitoring',
   labels:     'Stage 7 — Labels',
+  truck_stock: 'Truck Stock — Recommended Extras',
 };
 
 const STAGE_ORDER: Record<BOMStageId, number> = {
   array: 1, dc: 2, inverter: 3, ac: 4, structural: 5, monitoring: 6, labels: 7,
+  truck_stock: 8,
 };
 
 // ─── Main BOM Generation Function ────────────────────────────────────────────
@@ -1393,6 +1400,73 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
     log.push({ stageId: 'labels', category: 'label', item: 'Warning Label Set',
       quantity: 5, derivedFrom: 'NEC 690.31, 690.54, 690.56, 705.12, 690.13', formula: 'perSystem', necReference: 'NEC 690' });
+  }
+
+  // ── TRUCK STOCK — recommended extras / consumables (Ray, 2026-07-11) ─────────
+  // NOT installed quantities: what the crew should carry beyond the exact BOM.
+  // Data-driven off job size (conduit feet, attachments, devices); gated by
+  // topology/interconnection; every line required:false and stage 'truck_stock'
+  // so consumers subtotal it separately ($/W stays on required materials) and
+  // the permit SCHED can exclude it. Quantity rules are DEFAULTS — tune with
+  // Ray's real truck list (see TRUCK_STOCK_RULES).
+  if (input.includeTruckStock !== false) {
+    const _tsConduitFt = Math.ceil((input.acWireLength ?? 60) * 1.15)
+      + (isMicro ? 0 : Math.ceil((input.dcWireLength ?? 50) * 1.15));
+    const _tsAttach = input.attachmentCount ?? 0;
+    const _tsDevices = input.deviceCount ?? input.moduleCount;
+    const _tsTrunkSections = isMicro ? Math.ceil(_tsDevices / 13) : 0;
+    const ts = (category: string, mfr: string, model: string, pn: string, desc: string, qty: number, basis: string) => {
+      if (qty <= 0) return;
+      items.push(addItem('truck_stock', category, mfr, model, pn,
+        `${desc} — recommended truck stock (not installed qty)`,
+        Math.ceil(qty), 'ea', 'BEST PRACTICE', `truck stock: ${basis}`, basis, false));
+      log.push({ stageId: 'truck_stock', category, item: model, quantity: Math.ceil(qty),
+        derivedFrom: `truck stock: ${basis}`, formula: basis, necReference: 'BEST PRACTICE' });
+    };
+
+    // Conduit routing extras — bodies for the bends you find in the field.
+    ts('conduit_body', 'Generic', `${input.conduitSizeInch ?? '3/4'}" ${input.conduitType ?? 'EMT'} LB Conduit Body`, `LB-${(input.conduitSizeInch ?? '3/4').replace('/', '-')}`,
+      'LB pull elbow (back access)', 2, '2 per job');
+    ts('conduit_body', 'Generic', `${input.conduitSizeInch ?? '3/4'}" ${input.conduitType ?? 'EMT'} LR Conduit Body`, `LR-${(input.conduitSizeInch ?? '3/4').replace('/', '-')}`,
+      'LR pull elbow (right access)', 2, '2 per job');
+    ts('conduit_fitting', 'Raco/Allied', `${input.conduitSizeInch ?? '3/4'}" ${input.conduitType ?? 'EMT'} Coupling (extra)`, `EMT-COUP-X-${(input.conduitSizeInch ?? '3/4').replace('/', '-')}`,
+      'Spare couplings', Math.max(3, _tsConduitFt * 0.10 / 10), 'max(3, 10% of couplings)');
+    ts('conduit_fitting', 'Raco/Allied', `${input.conduitSizeInch ?? '3/4'}" ${input.conduitType ?? 'EMT'} Connector (extra)`, `EMT-CONN-X-${(input.conduitSizeInch ?? '3/4').replace('/', '-')}`,
+      'Spare box connectors', Math.max(4, _tsConduitFt * 0.10 / 10), 'max(4, 10% of connectors)');
+    ts('conduit_fitting', 'Raco/Allied', `${input.conduitSizeInch ?? '3/4'}" One-Hole Straps (extra)`, `EMT-STRAP-X-${(input.conduitSizeInch ?? '3/4').replace('/', '-')}`,
+      'Spare straps', Math.max(5, _tsConduitFt * 0.15 / 10), 'max(5, 15% of straps)');
+
+    // Terminations & connections.
+    ts('consumable', 'Ideal/Wago', 'Wire Connector Assortment (winged + lever)', 'WIRENUT-ASST',
+      'Wire nuts / Wago levers, assorted', 1, '1 assortment per job');
+    if (isSupplySideTap) {
+      ts('connector', 'NSI Polaris', 'Insulated Multi-Tap Connector (spare)', 'IPLD350-3',
+        'Spare Polaris tap (drop/strip mistakes are one-way)', 1, 'supply-side: 1 spare');
+    }
+
+    // Micro trunk spares — cut ends and damaged drops are field realities.
+    if (isMicro && _tsTrunkSections > 0) {
+      ts('connector', 'Enphase', 'Q Field-Wireable Connector, Male (spare)', 'Q-CONN-10M',
+        'Spare trunk field splice, male', 1, 'micro: 1 spare');
+      ts('connector', 'Enphase', 'Q Field-Wireable Connector, Female (spare)', 'Q-CONN-10F',
+        'Spare trunk field splice, female', 1, 'micro: 1 spare');
+      ts('sealing_cap', 'Enphase', 'Q Cable Sealing Cap (spares)', 'Q-SEAL-10',
+        'Spare sealing caps for unused/opened drops', Math.max(2, _tsTrunkSections), 'max(2, 1 per branch)');
+      ts('terminator', 'Enphase', 'Q Cable Terminator (spare)', 'Q-TERM-10',
+        'Spare branch terminator (single-use part)', 1, 'micro: 1 spare');
+    }
+
+    // Roof attachment extras.
+    if (_tsAttach > 0) {
+      ts('lag_bolt', 'Generic', 'Structural Lag/Screw (extras)', 'LAG-X',
+        'Spare lags for split rafters / misses', Math.max(6, _tsAttach * 0.05), 'max(6, 5% of lags)');
+      ts('consumable', 'Chemlink/Geocel', 'Roof Sealant Tube', 'SEALANT-TUBE',
+        'Roof-rated sealant', Math.max(2, _tsAttach / 20), '1 tube per ~20 penetrations (min 2)');
+    }
+
+    // Electrical spares.
+    ts('breaker', 'Square D', `${input.acOCPD || 20}A 2-Pole Breaker (spare)`, `QO${input.acOCPD || 20}-SPARE`,
+      'Spare OCPD matching the PV breaker', 1, '1 spare');
   }
 
   // ── Build Stage Results ───────────────────────────────────────────────────────

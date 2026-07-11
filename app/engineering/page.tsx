@@ -13836,7 +13836,7 @@ function EngineeringPageInner() {
                   const totalCost = bomPricing?.totalBomCost ?? pricedItems.reduce((s: number, i: any) => s + (i.totalCost ?? 0), 0);
 
                   // ── stage grouping ──
-                  const stageOrder = ['array', 'dc', 'inverter', 'ac', 'structural', 'monitoring', 'labels'];
+                  const stageOrder = ['array', 'dc', 'inverter', 'ac', 'structural', 'monitoring', 'labels', 'truck_stock'];
                   const stageLabels: Record<string, string> = {
                     array:      'Stage 1 — Array',
                     dc:         'Stage 2 — DC Wiring',
@@ -13845,6 +13845,7 @@ function EngineeringPageInner() {
                     structural: 'Stage 5 — Structural',
                     monitoring: 'Stage 6 — Monitoring',
                     labels:     'Stage 7 — Labels',
+                    truck_stock:'Truck Stock — Recommended Extras (not in $/W)',
                   };
                   const stageColors: Record<string, string> = {
                     array:      'text-amber-400  bg-amber-500/10  border-amber-500/25',
@@ -13854,6 +13855,7 @@ function EngineeringPageInner() {
                     structural: 'text-orange-400 bg-orange-500/10 border-orange-500/25',
                     monitoring: 'text-sky-400    bg-sky-500/10    border-sky-500/25',
                     labels:     'text-slate-400  bg-slate-500/10  border-slate-500/25',
+                    truck_stock:'text-yellow-400 bg-yellow-500/10 border-yellow-500/25',
                   };
                   const stageIconColors: Record<string, string> = {
                     array:      'bg-amber-500/15 text-amber-400',
@@ -13863,6 +13865,7 @@ function EngineeringPageInner() {
                     structural: 'bg-orange-500/15 text-orange-400',
                     monitoring: 'bg-sky-500/15 text-sky-400',
                     labels:     'bg-slate-500/15 text-slate-400',
+                    truck_stock:'bg-yellow-500/15 text-yellow-400',
                   };
 
                   // Build stage groups from bom array

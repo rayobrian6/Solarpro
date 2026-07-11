@@ -472,6 +472,9 @@ export function generateBOMForPermit(
         layoutOrientation:   _arrayLayout.orientation,
         subArrayCount:       _arrayLayout.subArrayCount,
         spliceAtRows:        project.spliceAtRows,
+        // Permit SCHED lists INSTALLED materials only — truck-stock extras are
+        // an engineering/crew view, not a permit submittal line.
+        includeTruckStock:   false,
         // Sized per-segment runs from the wire-sizing engine (computeSystem)
         // fed with REAL deriveRunLengths(cad) geometry — switches generateBOMV4
         // to its per-segment wire/conduit path (qty = Σ length × conductors ×

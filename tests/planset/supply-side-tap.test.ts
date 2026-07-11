@@ -12,7 +12,9 @@ describe('supply-side tap hardware', () => {
     attachmentCount: 104, railSections: 32, mainPanelAmps: 200, backfeedAmps: 80, acOCPD: 80, dcOCPD: 20,
     systemType: 'roof', interconnectionMethod: ic, panelBusRating: 200,
   });
-  const taps = (bom: any) => (bom.items || []).filter((i: any) => i.partNumber === 'IPLD350-3');
+  // Installed tap hardware only — the truck-stock stage adds a SPARE with the
+  // same SKU (required:false), which is asserted separately in truck-stock.test.
+  const taps = (bom: any) => (bom.items || []).filter((i: any) => i.partNumber === 'IPLD350-3' && i.stageId !== 'truck_stock');
 
   it('emits 3 insulated multi-tap connectors (L1/L2/N) for SUPPLY_SIDE_TAP only', () => {
     const ss = taps(generateBOMV4(mk('SUPPLY_SIDE_TAP')));

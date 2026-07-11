@@ -8,7 +8,11 @@ export type BOMStageId =
   | 'ac'
   | 'structural'
   | 'monitoring'
-  | 'labels';
+  | 'labels'
+  // Recommended extra/consumable materials crews carry per job — NOT installed
+  // quantities. Kept as a distinct stage so consumers can subtotal it separately
+  // ($/W stays on required materials) and the permit SCHED can exclude it.
+  | 'truck_stock';
 
 export type BOMSystemType = 'roof' | 'ground' | 'fence';
 

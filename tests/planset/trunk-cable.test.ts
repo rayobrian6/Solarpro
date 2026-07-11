@@ -59,7 +59,9 @@ describe('BOM consumes the trunk resolver', () => {
     acOCPD: 60, dcOCPD: 20, systemType: 'roof', interconnectionMethod: 'LOAD_SIDE', panelBusRating: 200,
     layoutOrientation: o,
   });
-  const find = (bom: any, cat: string) => (bom.items || []).filter((i: any) => i.category === cat);
+  // Installed items only — truck-stock spares (same categories, required:false)
+  // are covered by truck-stock.test.
+  const find = (bom: any, cat: string) => (bom.items || []).filter((i: any) => i.category === cat && i.stageId !== 'truck_stock');
 
   it('emits the orientation-correct trunk SKU as drops + per-branch terminators/seals', () => {
     const p: any = generateBOMV4(mk('portrait'));

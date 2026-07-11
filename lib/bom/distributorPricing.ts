@@ -62,6 +62,8 @@ export interface DistributorPriceOverride {
 
 export interface PricingApplyResult {
   items: BOMLineItemV4[];
+  /** Recommended truck-stock extras subtotal — EXCLUDED from totalBomCost/$-per-W. */
+  truckStockCost?: number;
   /** Count of items priced from static catalog. */
   catalogMatches: number;
   /** Count of items priced from DB overrides. */
@@ -572,6 +574,9 @@ export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: 
   // Enphase ≈ $22/drop, APsystems ≈ $49/drop; real SKUs priced above.
   trunk_cable:       { unitCost: 25.00,         unit: 'ea',   source: 'Soligent' },
   connector:         { unitCost: 14.00,         unit: 'ea',   source: 'Soligent' }, // field-wireable splice avg
+  conduit_body:      { unitCost: 10.50,         unit: 'ea',   source: 'KWh' },      // LB/LR/LL 3/4" die-cast avg
+  conduit_fitting:   { unitCost: 1.80,          unit: 'ea',   source: 'KWh' },      // EMT coupling/connector/strap avg
+  consumable:        { unitCost: 9.00,          unit: 'ea',   source: 'KWh' },      // sealant tube / wire-nut assortment avg
   sealing_cap:       { unitCost: 4.50,          unit: 'ea',   source: 'Soligent' },
   conduit:           { unitCost: 0.75,          unit: 'ft',   source: 'KWh' },      // 3/4" EMT avg
   breaker:           { unitCost: 24.00,         unit: 'ea',   source: 'KWh' },
@@ -709,11 +714,18 @@ export function applyDistributorPricing(
   let fallbackMatches = 0;
   let unpriced = 0;
   let totalBomCost = 0;
+  // Truck-stock (recommended extras) is priced but summed SEPARATELY so the
+  // hardware total / $-per-W stays on REQUIRED materials only.
+  let truckStockCost = 0;
+  const _addCost = (item: BOMLineItemV4, cost: number) => {
+    if (item.stageId === 'truck_stock') truckStockCost += cost;
+    else totalBomCost += cost;
+  };
 
   const pricedItems: BOMLineItemV4[] = items.map(item => {
     // Skip items already priced (e.g. if called twice)
     if (item.unitCost !== undefined && item.unitCost > 0) {
-      totalBomCost += item.totalCost ?? item.unitCost * item.quantity;
+      _addCost(item, item.totalCost ?? item.unitCost * item.quantity);
       catalogMatches++;
       return item;
     }
@@ -726,7 +738,7 @@ export function applyDistributorPricing(
     else if (source === 'fallback') fallbackMatches++;
     else                            unpriced++;
 
-    if (unitCost > 0) totalBomCost += totalCost;
+    if (unitCost > 0) _addCost(item, totalCost);
 
     return {
       ...item,
@@ -736,6 +748,7 @@ export function applyDistributorPricing(
   });
 
   totalBomCost = Math.round(totalBomCost * 100) / 100;
+  truckStockCost = Math.round(truckStockCost * 100) / 100;
 
   return {
     items: pricedItems,
@@ -744,6 +757,7 @@ export function applyDistributorPricing(
     fallbackMatches,
     unpriced,
     totalBomCost,
+    truckStockCost,
   };
 }
 
