@@ -24,6 +24,7 @@ import { necNextStandardOcpd } from './utils/helpers';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
+import { resolveArrayStructuralLayout } from './utils/arrayLayout';
 import type { ElectricalCompliance } from './types';
 
 // Section imports
@@ -331,7 +332,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         return Math.round((_effFraming === 'truss' ? depthFt : depthFt / 2) * 10) / 10;
       })();
       const rafterSpFt   = input.project.rafterSpan || _geomSpanFt || 12;
-      const totalPanels  = input.system?.totalPanels || cad.totalPanels || 1;
+      // Single source for the array layout: read the design's real placed
+      // modules (orientation + row/col grid + panel dims) instead of hardcoding
+      // 'portrait' and letting the engine guess the grid via autoLayout().
+      const arrayLayout  = resolveArrayStructuralLayout(input, cad);
+      const totalPanels  = arrayLayout.panelCount || input.system?.totalPanels || cad.totalPanels || 1;
       const structInput = {
         // 'residential_pitched' was never a valid InstallationType — the old
         // untyped require() hid it; the engine fell through to its default.
@@ -361,10 +366,14 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
           return 'Douglas Fir-Larch';
         })(),
         panelCount: totalPanels,
-        panelLengthIn: input.project.panelLengthIn || 65,
-        panelWidthIn: input.project.panelWidthIn || 40,
-        panelWeightLbs: input.project.panelWeightLbs || 50,
-        panelOrientation: 'portrait' as const,
+        panelLengthIn: arrayLayout.panelLengthIn,
+        panelWidthIn: arrayLayout.panelWidthIn,
+        panelWeightLbs: arrayLayout.panelWeightLbs,
+        panelOrientation: arrayLayout.orientation,
+        // Real design grid — drives railCount (2 × rowCount) and rail length so
+        // the attachment count reflects the actual array, not autoLayout's guess.
+        rowCount: arrayLayout.rowCount,
+        colCount: arrayLayout.colCount,
         mountingSystemId: input.project.mountingSystemId || 'ironridge-xr100',
         rackingWeightPerPanelLbs: 4,
       };

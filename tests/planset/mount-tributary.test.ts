@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runStructuralCalcV4 } from '../../lib/structural-engine-v4';
+import { resolveArrayStructuralLayout } from '../../lib/permit/utils/arrayLayout';
 
 // Regression guard for the structural mount-tributary double-count bug.
 // v4 lays out feet on 2 rails per row (mountCount = mountsPerRail × railCount,
@@ -7,41 +8,92 @@ import { runStructuralCalcV4 } from '../../lib/structural-engine-v4';
 // tributary depth, so the per-mount tributary width must be panelShort / 2.
 // A prior regression used the FULL panelShort → Σ(tributary) = 2× the real
 // array area → every mount charged 2× uplift → SF≥2.0 loop floored spacing
-// 48"→24" and doubled the feet (~5.85/panel for a 52-module RT-MINI array).
+// 48"→24" and doubled the feet (304 / 5.85 per panel for a 52-module array).
 describe('mount tributary (2-rail) does not double-count array area', () => {
-  const base: any = {
+  const mk = (orientation: 'portrait' | 'landscape'): any => ({
     installationType: 'roof_mount',
     windSpeed: 110, windExposure: 'C', groundSnowLoad: 20, meanRoofHeight: 15, roofPitch: 26,
     framingType: 'rafter', rafterSize: '2x6', rafterSpanFt: 12, rafterSpacingIn: 24, woodSpecies: 'df_larch',
-    panelCount: 52, panelLengthIn: 66.9, panelWidthIn: 40.9, panelWeightLbs: 46, panelOrientation: 'portrait',
+    panelCount: 52, panelLengthIn: 66.9, panelWidthIn: 40.9, panelWeightLbs: 46, orientation, panelOrientation: orientation,
     mountingSystemId: 'rooftech-mini',
-  };
+  });
 
-  it('sits at the mount rated spacing when SF≥2.0 (not floored) for a 52-module RT-MINI array', () => {
-    const r: any = runStructuralCalcV4(base);
+  it('roughly halves the feet vs the double-counted model, preserving SF≥2.0', () => {
+    const r: any = runStructuralCalcV4(mk('landscape'));
     const m = r.mountLayout;
-    // Should hold the RT-MINI rated 48" O.C., not floor to 24".
-    expect(m.mountSpacingIn).toBe(48);
-    expect(m.maxAllowedSpacingIn).toBe(48);
-    expect(m.spacingWasReduced).toBe(false);
-    // Feet count roughly halved vs the double-counted model (was 304 / 5.85 per panel).
+    // Was 304 (5.85/panel) under the double-count; now ~160 (3.08/panel).
     expect(m.mountCount).toBeLessThan(200);
     expect(m.mountCount / 52).toBeLessThan(3.5);
-    // Safety margin preserved — still ≥ 2.0.
+    // Safety margin preserved.
     expect(m.safetyFactor).toBeGreaterThanOrEqual(2.0);
+    // Landscape (short-dim across slope) holds the RT-MINI rated 48" span.
+    expect(m.mountSpacingIn).toBe(48);
+    expect(m.maxAllowedSpacingIn).toBe(48);
+  });
+
+  it('feet count is orientation-invariant (governed by uplift ÷ mount capacity)', () => {
+    // Total uplift and mount capacity do not depend on how modules are turned,
+    // so the attachment COUNT must match across orientations (only the spacing
+    // and rail geometry differ). This locks the invariance the fix relies on.
+    const p: any = runStructuralCalcV4(mk('portrait')).mountLayout;
+    const l: any = runStructuralCalcV4(mk('landscape')).mountLayout;
+    expect(p.mountCount).toBe(l.mountCount);
+    expect(p.safetyFactor).toBeGreaterThanOrEqual(2.0);
+    expect(l.safetyFactor).toBeGreaterThanOrEqual(2.0);
   });
 
   it('Σ(tributary areas) equals the real array footprint (area-conservation)', () => {
-    const r: any = runStructuralCalcV4(base);
+    const r: any = runStructuralCalcV4(mk('landscape'));
     const m = r.mountLayout;
+    const g = r.arrayGeometry;
     const totalTributary = m.tributaryAreaPerMountFt2 * m.mountCount;
-    // Real array footprint from geometry the engine used.
-    const g = r.geometry ?? r.arrayGeometry;
-    if (g?.arrayWidthIn && g?.arrayHeightIn) {
-      const footprintFt2 = (g.arrayWidthIn / 12) * (g.arrayHeightIn / 12);
-      // Within ~25% (overhang + end-mount +1 per rail inflate the sum slightly);
-      // the OLD bug produced ~2× the footprint, which this bounds out.
-      expect(totalTributary).toBeLessThan(footprintFt2 * 1.5);
-    }
+    const footprintFt2 = (g.arrayWidthIn / 12) * (g.arrayHeightIn / 12);
+    // Within ~50% (overhang + the +1 end mount per rail inflate the sum
+    // slightly); the OLD bug produced ~2× the footprint, which this bounds out.
+    expect(totalTributary).toBeLessThan(footprintFt2 * 1.5);
+  });
+});
+
+// The single-source layout selector: derive orientation + row/col grid from the
+// design's real placed modules (project.panelPositions), not autoLayout's guess.
+describe('resolveArrayStructuralLayout single-sources the design layout', () => {
+  const cad = { panelWidthM: 40.9 / 39.3701, panelHeightM: 66.9 / 39.3701, totalPanels: 6 };
+
+  const mkInput = (positions: any[]): any => ({
+    project: { panelPositions: positions, panelWeightLbs: 46 },
+    system: { totalPanels: positions.length },
+  });
+
+  it('reads orientation + distinct courses from panelPositions', () => {
+    // 6 modules, 2 courses (rows 0,1) × 3 cols, all portrait.
+    const positions = [0, 1].flatMap(row =>
+      [0, 1, 2].map(col => ({ row, col, orientation: 'portrait', arrayId: 'A' })));
+    const out = resolveArrayStructuralLayout(mkInput(positions), cad as any);
+    expect(out.isFallback).toBe(false);
+    expect(out.panelCount).toBe(6);
+    expect(out.rowCount).toBe(2);
+    expect(out.colCount).toBe(3);
+    expect(out.orientation).toBe('portrait');
+    expect(out.panelLengthIn).toBeGreaterThan(out.panelWidthIn); // long ≥ short
+  });
+
+  it('counts courses per sub-array (multi-plane) and majority-votes orientation', () => {
+    const positions = [
+      { row: 0, col: 0, orientation: 'landscape', arrayId: 'A' },
+      { row: 0, col: 1, orientation: 'landscape', arrayId: 'A' },
+      { row: 0, col: 0, orientation: 'landscape', arrayId: 'B' }, // different plane, same row idx
+      { row: 1, col: 0, orientation: 'portrait',  arrayId: 'B' },
+    ];
+    const out = resolveArrayStructuralLayout(mkInput(positions), cad as any);
+    // Distinct (arrayId,row): A:0, B:0, B:1 = 3 courses.
+    expect(out.rowCount).toBe(3);
+    expect(out.orientation).toBe('landscape'); // 3 landscape vs 1 portrait
+  });
+
+  it('falls back honestly (flagged) when the design has no placed panels', () => {
+    const out = resolveArrayStructuralLayout({ project: {}, system: { totalPanels: 24 } } as any, cad as any);
+    expect(out.isFallback).toBe(true);
+    expect(out.source).toMatch(/FALLBACK/);
+    expect(out.panelCount).toBe(24);
   });
 });

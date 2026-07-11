@@ -77,11 +77,18 @@ export function computeArrayGeometry(input: ArrayLayoutInput): ArrayGeometry {
     railsPerRow = 2,
   } = input;
 
-  // Panel dimensions in chosen orientation
-  // Portrait: long dimension is vertical (across slope), short is horizontal (along rail)
-  // Landscape: long dimension is horizontal (along rail), short is vertical (across slope)
-  const panelLongIn  = orientation === 'portrait' ? panel.lengthIn : panel.widthIn;
-  const panelShortIn = orientation === 'portrait' ? panel.widthIn  : panel.lengthIn;
+  // Panel dimensions resolved to ARRAY DIRECTIONS (not raw long/short):
+  //   panelLongIn  = dimension ALONG the rail  (sets array width / rail length)
+  //   panelShortIn = dimension ACROSS the slope (sets array height / rail spacing)
+  // Portrait: module stands tall — LONG dim is up-slope (across), SHORT dim runs
+  //           horizontally along the rail.
+  // Landscape: module lies wide — LONG dim runs along the rail, SHORT dim up-slope.
+  // (Prior code had this ternary inverted vs. these comments — it placed the LONG
+  // dimension along the rail for portrait, overstating rail length / feet and
+  // understating the across-slope tributary depth. Fixed to match the physics so
+  // the design's real orientation drives the geometry.)
+  const panelLongIn  = orientation === 'portrait' ? panel.widthIn  : panel.lengthIn;
+  const panelShortIn = orientation === 'portrait' ? panel.lengthIn : panel.widthIn;
 
   // Columns = ceil(panelCount / rowCount)
   const colCount = input.colCount ?? Math.ceil(panelCount / rowCount);
@@ -101,8 +108,10 @@ export function computeArrayGeometry(input: ArrayLayoutInput): ArrayGeometry {
   // Total rails = railsPerRow × rowCount
   const railCount = railsPerRow * rowCount;
 
-  // Rail spacing within a row = panelShortIn (rails run at top and bottom of panel)
-  // For 2-rail system: rails are at ~1/4 and 3/4 of panel height
+  // Across-slope panel depth the 2 rails span (rails sit inboard, ~1/4 and 3/4).
+  // NOTE: this is the FULL across-slope depth; the structural engine takes HALF
+  // of it as the per-mount tributary width (each of the 2 rails carries half the
+  // row by symmetry) — see structural-engine-v4 calcMountLayout.
   const railSpacingIn = panelShortIn;
 
   // Clamp positions along each rail
