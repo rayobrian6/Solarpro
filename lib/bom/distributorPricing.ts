@@ -245,6 +245,15 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     source: 'Soligent', asOf: '2026-07-10',
   },
   {
+    // Polaris/NSI IPLD-class insulated multi-tap, 350 kcmil range — typical
+    // distributor ~$25-40 ea depending on range. FIELD-VERIFY exact SKU/price.
+    partNumber: 'IPLD350-3',
+    description: 'NSI Polaris insulated multi-tap connector (350 kcmil-#6)',
+    category: 'connector', unit: 'ea',
+    listPrice: 32.00, netPrice: 32.00,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
     partNumber: '1531038',
     description: 'NEP BDM trunk end cap',
     category: 'terminator', unit: 'ea',

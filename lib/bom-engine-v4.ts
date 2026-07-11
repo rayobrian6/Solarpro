@@ -1108,10 +1108,21 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       `NEC 705.12(B): Backfeed breaker ${backfeedAmps}A — 120% rule: (${busRating}A × 1.2) − ${mainAmps}A = ${maxPVBreaker}A max`
     );
   } else if (isSupplySideTap) {
-    // NEC 705.11 — supply-side tap, no backfed breaker in load center
+    // NEC 705.11 — supply-side tap, no backfed breaker in load center.
+    // The tap itself needs PHYSICAL connectors (was a compliance note only —
+    // the BOM shipped a supply-side job with a fused disco but nothing to make
+    // the tap): insulation-piercing / Polaris-style insulated multi-tap
+    // connectors on the service-entrance conductors — L1 + L2 + N = 3.
+    items.push(addItem('ac', 'connector', 'NSI Polaris',
+      'Insulated Multi-Tap Connector (350 kcmil–#6)',
+      'IPLD350-3', 'Polaris-style insulated tap connector — supply-side tap of service-entrance conductor (1 per conductor: L1/L2/N). Verify lug range against actual service conductor size.',
+      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true));
+    log.push({ stageId: 'ac', category: 'connector', item: 'Polaris Insulated Multi-Tap',
+      quantity: 3, derivedFrom: 'supply-side tap (L1/L2/N)', formula: '3', necReference: 'NEC 705.11(C)' });
     complianceNotes.push(
       `NEC 705.11: Supply-side tap — no backfed breaker in load center. ` +
-      `Connection is utility-side (before main breaker). OCPD is at utility service.`
+      `Connection is utility-side (before main breaker) via insulated multi-tap connectors; ` +
+      `tap conductors terminate in the fused disconnect (OCPD) per 705.11(C).`
     );
   } else if (isMainBreakerDerate) {
     // NEC 705.12(B)(3) — main breaker derated, no separate backfed breaker
