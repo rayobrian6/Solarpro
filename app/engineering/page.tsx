@@ -13863,10 +13863,18 @@ function EngineeringPageInner() {
                           {/* Total cost */}
                           <div className="flex-1 min-w-[160px]">
                             <div className="text-xs text-slate-500 mb-0.5 uppercase tracking-widest font-semibold">Est. Hardware Cost</div>
-                            <div className="text-3xl font-black text-white tabular-nums tracking-tight">{fmtK(totalCost)}</div>
+                            <div className="flex items-baseline gap-2 flex-wrap">
+                              <div className="text-3xl font-black text-white tabular-nums tracking-tight">{fmtK(totalCost)}</div>
+                              {Number(totalKw) > 0 ? (
+                                <div className="text-lg font-black text-emerald-400 tabular-nums">
+                                  ${(totalCost / (Number(totalKw) * 1000)).toFixed(2)}<span className="text-xs text-slate-500 font-semibold">/W</span>
+                                </div>
+                              ) : null}
+                            </div>
                             <div className="text-xs text-slate-500 mt-0.5">
                               {bomPricing?.pricingApplied ? 'CED · Soligent · KWh Q1 2025' : 'Category estimates'}
                               {unpricedCount > 0 ? <span className="text-amber-400 ml-2">· {unpricedCount} unpriced</span> : null}
+                              <span className="text-slate-600 ml-2">· hardware only, before labor</span>
                             </div>
                           </div>
 
