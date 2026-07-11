@@ -63,9 +63,12 @@ import { writeAuditLog, AuditCategory, AuditAction } from '@/lib/auditLog';
  *    actor type (MIGRATION-GOV-08).
  *
  * 3. `schema_migration_runs` — The append-only attempt history. One row per
- *    event (started/applied/failed/denied/skipped). INSERT-only — never
+ *    event (started/applied/failed/denied/skipped/dry_run/conflict/
+ *    lock_timeout/baseline_blocked). INSERT-only — never
  *    UPDATE or DELETE. Preserves the full history of every attempt
- *    (MIGRATION-GOV-03).
+ *    (MIGRATION-GOV-03). Status vocabulary expanded in Phase 1A.2
+ *    (MIGRATION-GOV-14) to record exact outcomes for all denied/blocked
+ *    paths (MIGRATION-GOV-18).
  */
 export const BOOTSTRAP_LEDGER_DDL = `
 CREATE TABLE IF NOT EXISTS governance_lifecycle (
@@ -130,7 +133,8 @@ CREATE TABLE IF NOT EXISTS schema_migration_runs (
     CHECK (checksum_sha256 ~ '^[0-9a-f]{64}$'),
   environment             TEXT NOT NULL,
   status                  TEXT NOT NULL
-    CHECK (status IN ('started', 'applied', 'failed', 'denied', 'skipped')),
+    CHECK (status IN ('started', 'applied', 'failed', 'denied', 'skipped',
+                     'dry_run', 'conflict', 'lock_timeout', 'baseline_blocked')),
   actor_type              TEXT
     CHECK (actor_type IS NULL OR actor_type IN ('human', 'migration-actor')),
   actor_id                TEXT,
@@ -294,6 +298,13 @@ async function persistMigrationAuditEvent(event: MigrationAuditEvent): Promise<s
  *
  * This function is the single audit emission point for the migration governance
  * subsystem. All migration.* events flow through here.
+ *
+ * MIGRATION-GOV-10 (Phase 1A.2): For MUTATION paths (schema changes,
+ * lifecycle transitions, execution activation), use emitAuditEventAsync()
+ * instead. That function awaits the durable persistence and returns whether
+ * it succeeded, allowing the caller to fail-closed if the audit record
+ * cannot be written. This fire-and-forget variant is for read-only/inspection
+ * events where losing the audit record is acceptable.
  */
 export function emitAuditEvent(event: Omit<MigrationAuditEvent, 'timestamp'>): void {
   const fullEvent: MigrationAuditEvent = {
@@ -309,6 +320,49 @@ export function emitAuditEvent(event: Omit<MigrationAuditEvent, 'timestamp'>): v
     // writeAuditLog already falls back to console on failure; this catch is a
     // safety net for any unexpected error in the promise chain itself.
   });
+}
+
+/**
+ * Emit a structured audit event AND await durable persistence (fail-closed).
+ *
+ * MIGRATION-GOV-10 (Phase 1A.2): For MUTATION paths (schema changes,
+ * lifecycle transitions, execution activation/deactivation), the audit
+ * record MUST be durably persisted. If the persistence fails, the caller
+ * must be informed so it can fail-closed — the mutation should be treated
+ * as failed (or blocked) rather than proceeding with a lost audit record.
+ *
+ * This function:
+ * 1. Emits the structured JSON log line (synchronous, never throws).
+ * 2. Awaits the durable persistence to the audit_log table.
+ * 3. Returns { persisted: boolean, entryHash: string | null }.
+ *
+ * If persisted is false, the caller MUST treat the operation as failed
+ * and record an AUDIT_PERSISTENCE_FAILED error.
+ *
+ * @param event The audit event (without timestamp — added automatically).
+ * @returns { persisted: boolean, entryHash: string | null }
+ */
+export async function emitAuditEventAsync(
+  event: Omit<MigrationAuditEvent, 'timestamp'>,
+): Promise<{ persisted: boolean; entryHash: string | null }> {
+  const fullEvent: MigrationAuditEvent = {
+    ...event,
+    timestamp: new Date().toISOString(),
+  };
+  // Structured JSON log line — parseable by log aggregators. Synchronous.
+  console.log(JSON.stringify({ level: 'audit', ...fullEvent }));
+
+  try {
+    const entryHash = await persistMigrationAuditEvent(fullEvent);
+    return {
+      persisted: entryHash !== null,
+      entryHash,
+    };
+  } catch {
+    // persistMigrationAuditEvent should never throw (writeAuditLog catches
+    // internally), but we catch here as a safety net.
+    return { persisted: false, entryHash: null };
+  }
 }
 
 /**

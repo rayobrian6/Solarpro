@@ -59,6 +59,7 @@ import {
   recordMigrationRunEvent,
   getCurrentEnvironment,
   emitAuditEvent,
+  emitAuditEventAsync,
   getGovernanceLifecycleState,
   setGovernanceLifecycleState,
   assertExecutionPermitted,
@@ -785,8 +786,34 @@ export async function runSinglePendingMigration(
   const executionId = `migrate-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const startTime = Date.now();
 
+  // Discover the manifest early so that file metadata (filename, checksum) is
+  // available for run-history recording at all denial/block paths
+  // (MIGRATION-GOV-18, Phase 1A.2). This is a filesystem-only operation and
+  // does not touch the database.
+  const manifest = discoverMigrationFiles();
+  const file = findMigrationByIdentifier(manifest, identifier);
+
   // Verify authorization.
   if (!authorization.allowed) {
+    // Record the denial in the append-only run history (MIGRATION-GOV-18).
+    // Best-effort: if the ledger table does not exist yet, the record is
+    // silently dropped (recordMigrationRunEvent catches and returns null).
+    if (file) {
+      await recordMigrationRunEvent({
+        executionId,
+        identifier,
+        filename: file.filename,
+        checksumSha256: file.checksumSha256,
+        status: 'denied',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        startedAt: new Date(startTime),
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime,
+        errorCode: 'AUTHORIZATION_DENIED',
+        errorSummary: authorization.reason ?? 'Authorization denied',
+      });
+    }
     return {
       identifier,
       filename: '',
@@ -813,12 +840,30 @@ export async function runSinglePendingMigration(
         environment,
         executionId,
         migrationIdentifier: identifier,
-        filename: '',
+        filename: file?.filename ?? '',
         details: {
           lifecycleState: gate.lifecycleState,
           reason: 'MIGRATION_BASELINE_REQUIRED',
         },
       });
+      // Record the baseline-blocked denial in the append-only run history
+      // (MIGRATION-GOV-18, Phase 1A.2).
+      if (file) {
+        await recordMigrationRunEvent({
+          executionId,
+          identifier,
+          filename: file.filename,
+          checksumSha256: file.checksumSha256,
+          status: 'baseline_blocked',
+          actorType: authorization.actorType,
+          actorId: authorization.actorId,
+          startedAt: new Date(startTime),
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime,
+          errorCode: 'MIGRATION_BASELINE_REQUIRED',
+          errorSummary: `Lifecycle state '${gate.lifecycleState}' does not permit execution. Required: EXECUTION_ENABLED.`,
+        });
+      }
       return {
         identifier,
         filename: '',
@@ -856,9 +901,8 @@ export async function runSinglePendingMigration(
     }
   }
 
-  // Discover the manifest and find the file.
-  const manifest = discoverMigrationFiles();
-  const file = findMigrationByIdentifier(manifest, identifier);
+  // Discover the manifest and find the file (already discovered above for
+  // run-history recording at denial paths; here we handle the not-found case).
   if (!file) {
     return {
       identifier,
@@ -892,6 +936,22 @@ export async function runSinglePendingMigration(
               fileChecksum: file.checksumSha256,
             },
           });
+          // Record the checksum conflict in the append-only run history
+          // (MIGRATION-GOV-18, Phase 1A.2).
+          await recordMigrationRunEvent({
+            executionId,
+            identifier,
+            filename: file.filename,
+            checksumSha256: file.checksumSha256,
+            status: 'conflict',
+            actorType: authorization.actorType,
+            actorId: authorization.actorId,
+            startedAt: new Date(startTime),
+            completedAt: new Date(),
+            durationMs: Date.now() - startTime,
+            errorCode: 'CHECKSUM_CONFLICT',
+            errorSummary: `Checksum conflict: ledger ${existingRow.checksum_sha256} vs file ${file.checksumSha256}.`,
+          });
           return {
             identifier,
             filename: file.filename,
@@ -916,6 +976,21 @@ export async function runSinglePendingMigration(
           filename: file.filename,
           details: { reason: 'already_applied' },
         });
+        // Record the skip in the append-only run history (MIGRATION-GOV-18).
+        await recordMigrationRunEvent({
+          executionId,
+          identifier,
+          filename: file.filename,
+          checksumSha256: file.checksumSha256,
+          status: 'skipped',
+          actorType: authorization.actorType,
+          actorId: authorization.actorId,
+          startedAt: new Date(startTime),
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime,
+          errorCode: null,
+          errorSummary: 'Already applied; checksum matched (idempotent skip).',
+        });
         return {
           identifier,
           filename: file.filename,
@@ -928,6 +1003,22 @@ export async function runSinglePendingMigration(
         };
       }
       if (existingRow.status === 'running') {
+        // Record the concurrent-execution block in the append-only run history
+        // (MIGRATION-GOV-18, Phase 1A.2).
+        await recordMigrationRunEvent({
+          executionId,
+          identifier,
+          filename: file.filename,
+          checksumSha256: file.checksumSha256,
+          status: 'lock_timeout',
+          actorType: authorization.actorType,
+          actorId: authorization.actorId,
+          startedAt: new Date(startTime),
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime,
+          errorCode: 'ALREADY_RUNNING',
+          errorSummary: `Migration '${identifier}' is currently running. Concurrent execution refused.`,
+        });
         return {
           identifier,
           filename: file.filename,
@@ -985,17 +1076,77 @@ export async function runSinglePendingMigration(
         actorType: authorization.actorType,
         actorId: authorization.actorId,
       });
+      // GOV-10: fail-closed audit for mutation success. The durable audit
+      // record MUST persist — if it fails, the migration is treated as failed
+      // to avoid a silent gap in the tamper-evident audit trail.
+      const auditResult = await emitAuditEventAsync({
+        type: 'migration.migration.applied',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        environment,
+        executionId,
+        migrationIdentifier: identifier,
+        filename: file.filename,
+        details: { durationMs, dryRun },
+      });
+      if (!auditResult.persisted) {
+        // The migration was applied but the audit record could not be durably
+        // persisted. Record the failure and return an AUDIT_PERSISTENCE_FAILED
+        // error so the operator is aware of the audit-trail gap.
+        await recordMigrationRunEvent({
+          executionId,
+          identifier,
+          filename: file.filename,
+          checksumSha256: file.checksumSha256,
+          status: 'failed',
+          actorType: authorization.actorType,
+          actorId: authorization.actorId,
+          startedAt: new Date(startTime),
+          completedAt: new Date(),
+          durationMs,
+          errorCode: 'AUDIT_PERSISTENCE_FAILED',
+          errorSummary: 'Migration applied but durable audit persistence failed (fail-closed).',
+        });
+        return {
+          identifier,
+          filename: file.filename,
+          status: 'failed',
+          durationMs,
+          errorCode: 'AUDIT_PERSISTENCE_FAILED',
+          errorSummary: `Migration '${identifier}' was applied but the durable audit record could not be persisted. ` +
+            `The audit trail is incomplete. Treat this as a governance incident and investigate.`,
+          dryRun,
+          executionId,
+        };
+      }
+    } else {
+      // Dry-run: no mutation occurred, fire-and-forget audit is acceptable.
+      // Record a dry_run event in the run history (MIGRATION-GOV-18).
+      emitAuditEvent({
+        type: 'migration.migration.applied',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        environment,
+        executionId,
+        migrationIdentifier: identifier,
+        filename: file.filename,
+        details: { durationMs, dryRun },
+      });
+      await recordMigrationRunEvent({
+        executionId,
+        identifier,
+        filename: file.filename,
+        checksumSha256: file.checksumSha256,
+        status: 'dry_run',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        startedAt: new Date(startTime),
+        completedAt: new Date(),
+        durationMs,
+        errorCode: null,
+        errorSummary: 'Dry-run validation succeeded (no mutation).',
+      });
     }
-    emitAuditEvent({
-      type: 'migration.migration.applied',
-      actorType: authorization.actorType,
-      actorId: authorization.actorId,
-      environment,
-      executionId,
-      migrationIdentifier: identifier,
-      filename: file.filename,
-      details: { durationMs, dryRun },
-    });
     return {
       identifier,
       filename: file.filename,
@@ -1023,17 +1174,60 @@ export async function runSinglePendingMigration(
         actorType: authorization.actorType,
         actorId: authorization.actorId,
       });
+      // GOV-10: fail-closed audit for mutation failure. The durable audit
+      // record MUST persist — if it fails, escalate the error code.
+      const auditResult = await emitAuditEventAsync({
+        type: 'migration.migration.failed',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        environment,
+        executionId,
+        migrationIdentifier: identifier,
+        filename: file.filename,
+        details: { durationMs, error: result.error, errorCode: result.errorCode ?? 'EXECUTION_ERROR', dryRun },
+      });
+      if (!auditResult.persisted) {
+        // The migration failed AND the audit record could not be persisted.
+        // Record the combined failure.
+        await recordMigrationRunEvent({
+          executionId,
+          identifier,
+          filename: file.filename,
+          checksumSha256: file.checksumSha256,
+          status: 'failed',
+          actorType: authorization.actorType,
+          actorId: authorization.actorId,
+          startedAt: new Date(startTime),
+          completedAt: new Date(),
+          durationMs,
+          errorCode: 'AUDIT_PERSISTENCE_FAILED',
+          errorSummary: `Migration failed (${result.errorCode ?? 'EXECUTION_ERROR'}) AND durable audit persistence failed (fail-closed).`,
+        });
+        return {
+          identifier,
+          filename: file.filename,
+          status: 'failed',
+          durationMs,
+          errorCode: 'AUDIT_PERSISTENCE_FAILED',
+          errorSummary: `Migration '${identifier}' failed (${result.error ?? 'Unknown error'}) and the durable audit record could not be persisted. ` +
+            `The audit trail is incomplete. Treat this as a governance incident.`,
+          dryRun,
+          executionId,
+        };
+      }
+    } else {
+      // Dry-run failure: fire-and-forget audit is acceptable (no mutation).
+      emitAuditEvent({
+        type: 'migration.migration.failed',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        environment,
+        executionId,
+        migrationIdentifier: identifier,
+        filename: file.filename,
+        details: { durationMs, error: result.error, errorCode: result.errorCode ?? 'EXECUTION_ERROR', dryRun },
+      });
     }
-    emitAuditEvent({
-      type: 'migration.migration.failed',
-      actorType: authorization.actorType,
-      actorId: authorization.actorId,
-      environment,
-      executionId,
-      migrationIdentifier: identifier,
-      filename: file.filename,
-      details: { durationMs, error: result.error, errorCode: result.errorCode ?? 'EXECUTION_ERROR', dryRun },
-    });
     return {
       identifier,
       filename: file.filename,
@@ -1240,7 +1434,7 @@ export async function runPendingMigrations(
 
 export { discoverMigrationFiles, validateMigrationManifest, findMigrationByIdentifier } from './manifest';
 export { calculateChecksumOfString, checksumsMatch, detectTransactionMode, detectTransactionModeFromFile } from './validation';
-export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, disableExecution, assertExecutionPermitted, recordTotpUse, isTotpTimeStepUsed } from './ledger';
+export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, emitAuditEventAsync, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, disableExecution, assertExecutionPermitted, recordTotpUse, isTotpTimeStepUsed } from './ledger';
 export {
   MIGRATION_LOCK_KEY,
   MIGRATION_ENV_VARS,

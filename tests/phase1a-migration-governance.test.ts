@@ -1651,7 +1651,9 @@ describe('Phase 1A.2: Lifecycle activation gate (MIGRATION-GOV-09)', () => {
   it('runner execution gate error message references EXECUTION_ENABLED only', () => {
     // Both runSinglePendingMigration and runPendingMigrations should have
     // error messages that reference EXECUTION_ENABLED as the required state.
-    const singleSection = runnerSrc.split('errorCode: \'MIGRATION_BASELINE_REQUIRED\'')[1] ?? '';
+    // Split on the unique errorSummary text (the runner uses template literals
+    // with backticks, so we split on the text content without quotes).
+    const singleSection = runnerSrc.split('Migration execution is blocked.')[1] ?? '';
     expect(singleSection).toContain('EXECUTION_ENABLED');
     expect(singleSection).toContain('enable-execution');
     // Must NOT contain the old "Required states: BASELINE_VERIFIED or"
@@ -1755,5 +1757,211 @@ describe('Phase 1A.2: Baseline control plane API (MIGRATION-GOV-11)', () => {
     expect(routeSrc).toContain('isBaselineMutation');
     const actionMapSection = routeSrc.split('migrationAction: MigrationAction')[1]?.split('const actorType')[0] ?? '';
     expect(actionMapSection).toContain("'bootstrap'");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 21. Phase 1A.2: Fail-Closed Persistent Audit (MIGRATION-GOV-10)
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.2: Fail-closed persistent audit (MIGRATION-GOV-10)', () => {
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+
+  it('emitAuditEventAsync is exported from ledger', () => {
+    expect(ledgerSrc).toContain('export async function emitAuditEventAsync');
+  });
+
+  it('emitAuditEventAsync awaits persistence and returns { persisted, entryHash }', () => {
+    const fnSection = ledgerSrc.split('export async function emitAuditEventAsync')[1]?.split('export function')[0] ?? '';
+    expect(fnSection).toContain('persistMigrationAuditEvent');
+    expect(fnSection).toContain('persisted');
+    expect(fnSection).toContain('entryHash');
+    expect(fnSection).toContain('return {');
+  });
+
+  it('emitAuditEventAsync is imported into runner', () => {
+    expect(runnerSrc).toContain('emitAuditEventAsync');
+  });
+
+  it('emitAuditEventAsync is re-exported from runner', () => {
+    const reExportLine = runnerSrc.split('export { bootstrapMigrationLedger')[1] ?? '';
+    expect(reExportLine).toContain('emitAuditEventAsync');
+  });
+
+  it('runner uses emitAuditEventAsync for mutation success (applied)', () => {
+    // The success path should use emitAuditEventAsync for fail-closed audit
+    const successSection = runnerSrc.split('// GOV-10: fail-closed audit for mutation success')[1]
+      ?.split('// GOV-10: fail-closed audit for mutation failure')[0] ?? '';
+    expect(successSection).toContain('emitAuditEventAsync');
+    expect(successSection).toContain('migration.migration.applied');
+    expect(successSection).toContain('auditResult.persisted');
+  });
+
+  it('runner uses emitAuditEventAsync for mutation failure (failed)', () => {
+    const failureSection = runnerSrc.split('// GOV-10: fail-closed audit for mutation failure')[1]
+      ?.split('} else {')?.[0] ?? '';
+    expect(failureSection).toContain('emitAuditEventAsync');
+    expect(failureSection).toContain('migration.migration.failed');
+    expect(failureSection).toContain('auditResult.persisted');
+  });
+
+  it('runner returns AUDIT_PERSISTENCE_FAILED on success path if audit not persisted', () => {
+    expect(runnerSrc).toContain('AUDIT_PERSISTENCE_FAILED');
+    // Verify the fail-closed pattern: if not persisted, record and return error
+    const successSection = runnerSrc.split('// GOV-10: fail-closed audit for mutation success')[1]
+      ?.split('// GOV-10: fail-closed audit for mutation failure')[0] ?? '';
+    expect(successSection).toContain('AUDIT_PERSISTENCE_FAILED');
+    expect(successSection).toContain("status: 'failed'");
+  });
+
+  it('runner returns AUDIT_PERSISTENCE_FAILED on failure path if audit not persisted', () => {
+    const failureSection = runnerSrc.split('// GOV-10: fail-closed audit for mutation failure')[1]
+      ?.split('} else {')?.[0] ?? '';
+    expect(failureSection).toContain('AUDIT_PERSISTENCE_FAILED');
+  });
+
+  it('emitAuditEvent (fire-and-forget) remains for read-only events', () => {
+    // The read-only/inspection audit events should still use emitAuditEvent
+    expect(runnerSrc).toContain('emitAuditEvent({');
+    // The governance execution_denied event is read-only (no mutation happened)
+    expect(runnerSrc).toContain("'migration.governance.execution_denied'");
+  });
+
+  it('dry-run paths use emitAuditEvent (fire-and-forget) not async', () => {
+    // Dry-run never mutates the database, so fire-and-forget audit is acceptable
+    const dryRunSuccessSection = runnerSrc.split('} else {')[1]?.split('return {')[0] ?? '';
+    // This section should contain emitAuditEvent for the dry-run applied case
+    expect(runnerSrc).toContain('// Dry-run: no mutation occurred, fire-and-forget audit is acceptable.');
+  });
+
+  it('emitAuditEventAsync returns persisted=false on exception (fail-closed)', () => {
+    const fnSection = ledgerSrc.split('export async function emitAuditEventAsync')[1]?.split('export function')[0] ?? '';
+    expect(fnSection).toContain('persisted: false');
+  });
+
+  it('JSDoc documents fail-closed semantics for emitAuditEventAsync', () => {
+    const jsdocSection = ledgerSrc.split('Emits a structured audit event AND awaits durable persistence')[0] ?? '';
+    // The JSDoc should be before the function
+    const fullFnArea = ledgerSrc.split('export async function emitAuditEventAsync')[0] ?? '';
+    expect(fullFnArea).toContain('fail-closed');
+    expect(fullFnArea).toContain('MUST be durably persisted');
+  });
+
+  it('MIGRATION-GOV-10 reference documented in ledger', () => {
+    expect(ledgerSrc).toContain('MIGRATION-GOV-10');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 22. Phase 1A.2: Run-History for Denied/Blocked Paths (MIGRATION-GOV-18)
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.2: Run-history for denied/blocked paths (MIGRATION-GOV-18)', () => {
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const typesSrc = readSrc('lib/migrations/types.ts');
+
+  it('MigrationRunStatus type includes all 9 statuses', () => {
+    expect(typesSrc).toContain("'started'");
+    expect(typesSrc).toContain("'applied'");
+    expect(typesSrc).toContain("'failed'");
+    expect(typesSrc).toContain("'denied'");
+    expect(typesSrc).toContain("'skipped'");
+    expect(typesSrc).toContain("'dry_run'");
+    expect(typesSrc).toContain("'conflict'");
+    expect(typesSrc).toContain("'lock_timeout'");
+    expect(typesSrc).toContain("'baseline_blocked'");
+  });
+
+  it('DDL CHECK constraint on schema_migration_runs.status includes all 9 statuses', () => {
+    // The DDL must have the expanded CHECK constraint
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1]
+      ?.split('CREATE INDEX')[0] ?? '';
+    expect(ddlSection).toContain("'started'");
+    expect(ddlSection).toContain("'applied'");
+    expect(ddlSection).toContain("'failed'");
+    expect(ddlSection).toContain("'denied'");
+    expect(ddlSection).toContain("'skipped'");
+    expect(ddlSection).toContain("'dry_run'");
+    expect(ddlSection).toContain("'conflict'");
+    expect(ddlSection).toContain("'lock_timeout'");
+    expect(ddlSection).toContain("'baseline_blocked'");
+  });
+
+  it('runner records denied status for authorization denial', () => {
+    // The authorization denial path should record a 'denied' run event
+    const deniedSection = runnerSrc.split("status: 'denied',")[1]
+      ?.split('return {')[0] ?? '';
+    expect(deniedSection).toContain('AUTHORIZATION_DENIED');
+  });
+
+  it('runner records baseline_blocked status for governance gate denial', () => {
+    expect(runnerSrc).toContain("status: 'baseline_blocked'");
+    // Verify it is in the governance gate denial path
+    const blockedSection = runnerSrc.split("status: 'baseline_blocked',")[1]
+      ?.split('return {')[0] ?? '';
+    expect(blockedSection).toContain('MIGRATION_BASELINE_REQUIRED');
+  });
+
+  it('runner records conflict status for checksum conflict', () => {
+    expect(runnerSrc).toContain("status: 'conflict'");
+    const conflictSection = runnerSrc.split("status: 'conflict',")[1]
+      ?.split('return {')[0] ?? '';
+    expect(conflictSection).toContain('CHECKSUM_CONFLICT');
+  });
+
+  it('runner records lock_timeout status for already-running', () => {
+    expect(runnerSrc).toContain("status: 'lock_timeout'");
+    const lockSection = runnerSrc.split("status: 'lock_timeout',")[1]
+      ?.split('return {')[0] ?? '';
+    expect(lockSection).toContain('ALREADY_RUNNING');
+  });
+
+  it('runner records skipped status for already-applied idempotent skip', () => {
+    expect(runnerSrc).toContain("status: 'skipped'");
+    const skipSection = runnerSrc.split("status: 'skipped',")[1]
+      ?.split('return {')[0] ?? '';
+    expect(skipSection).toContain('idempotent skip');
+  });
+
+  it('runner records dry_run status for successful dry-run execution', () => {
+    expect(runnerSrc).toContain("status: 'dry_run'");
+    const dryRunSection = runnerSrc.split("status: 'dry_run',")[1]
+      ?.split('return {')[0] ?? '';
+    expect(dryRunSection).toContain('Dry-run validation succeeded');
+  });
+
+  it('recordMigrationRunEvent is imported and used in runner', () => {
+    expect(runnerSrc).toContain('recordMigrationRunEvent');
+    // Verify multiple call sites exist (at least 5 new denial/block paths)
+    const callCount = (runnerSrc.match(/recordMigrationRunEvent\(/g) || []).length;
+    expect(callCount).toBeGreaterThanOrEqual(5);
+  });
+
+  it('manifest is discovered before authorization check for run-history metadata', () => {
+    // The manifest discovery must happen before the authorization check so
+    // that file metadata (filename, checksum) is available for run-history
+    // recording at the denial path.
+    const manifestPos = runnerSrc.indexOf('const manifest = discoverMigrationFiles();');
+    const authPos = runnerSrc.indexOf('if (!authorization.allowed)');
+    expect(manifestPos).toBeGreaterThan(0);
+    expect(authPos).toBeGreaterThan(0);
+    expect(manifestPos).toBeLessThan(authPos);
+  });
+
+  it('recordMigrationRunEvent accepts the expanded status vocabulary', () => {
+    // The function signature should accept MigrationRunStatus type
+    const fnSection = ledgerSrc.split('export async function recordMigrationRunEvent')[1]
+      ?.split('export async function recordMigrationResult')[0] ?? '';
+    expect(fnSection).toContain('status: MigrationRunStatus');
+  });
+
+  it('MIGRATION-GOV-18 reference documented in runner', () => {
+    expect(runnerSrc).toContain('MIGRATION-GOV-18');
+  });
+
+  it('MIGRATION-GOV-14 reference documented in types (status expansion rationale)', () => {
+    expect(typesSrc).toContain('MIGRATION-GOV-14');
   });
 });

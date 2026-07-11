@@ -32,19 +32,28 @@ Starting HEAD: 100114c2
 - [x] GOV-17: TOTP replay-step selection requires exact verification — ALREADY CORRECT (runner.ts:295-316 records exact matched step)
 - [x] GOV-18: Failure and denial run-history semantics require exact verification — CONFIRMED (denied paths return 'failed', no 'denied' run event recorded)
 
-## Section 3 — Commit 1: Exact-State Audit Doc
-- [ ] Create PHASE1A2-CORRECTNESS-AUDIT.md
+## Section 3 — Commit 1: Exact-State Audit Doc — COMPLETE
+- [x] Create PHASE1A2-CORRECTNESS-AUDIT.md (commit ed85cdeb)
 
-## Section 4 — Commit 2: Lifecycle Activation & Baseline Control Plane
-- [ ] Fix BASELINE_VERIFIED execution gate (GOV-09)
-- [ ] Add enable-execution separation
-- [ ] Create baseline control plane API (GOV-11)
-- [ ] Tests for lifecycle/baseline control plane
+## Section 4 — Commit 2: Lifecycle Activation & Baseline Control Plane — COMPLETE
+- [x] Fix BASELINE_VERIFIED execution gate (GOV-09)
+- [x] Add enable-execution separation (reason required)
+- [x] Add disableExecution function
+- [x] Create baseline control plane API (GOV-11) — 5 actions
+- [x] Tests for lifecycle/baseline control plane (21 new, 206 total)
 
-## Section 5 — Commit 3: Fail-Closed Persistent Audit & Run-History (GOV-10, GOV-18)
-- [ ] Make audit persistence fail-closed for mutation
-- [ ] Fix denial/failure run-history semantics
-- [ ] Tests for audit fail-closed
+## Section 5 — Commit 3: Fail-Closed Persistent Audit & Run-History (GOV-10, GOV-18) — COMPLETE
+- [x] Fix duplicate JSDoc fragment in types.ts
+- [x] Expand MigrationRunStatus type to 9 statuses (GOV-14 prerequisite)
+- [x] Update DDL CHECK constraint on schema_migration_runs.status to 9 statuses
+- [x] Add emitAuditEventAsync to ledger.ts (fail-closed durable audit)
+- [x] Add emitAuditEventAsync to runner.ts import and re-export
+- [x] Wire emitAuditEventAsync into mutation success/failure paths in runner.ts
+- [x] Add AUDIT_PERSISTENCE_FAILED fail-closed return on audit persistence failure
+- [x] Add recordMigrationRunEvent calls for denied/blocked/conflict/skip/dry-run paths
+- [x] Move manifest discovery before authorization check (run-history metadata)
+- [x] Add tests for GOV-10 (12 tests) and GOV-18 (14 tests) — 26 new, 232 total
+- [x] tsc clean, 232/232 focused tests pass
 
 ## Section 6 — Commit 4: Non-Transactional Blocking & Legacy Closure (GOV-12, GOV-13)
 - [ ] Block FORBIDDEN + MANUAL_REVIEW automatic execution

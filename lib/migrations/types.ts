@@ -43,21 +43,38 @@ export type MigrationStatus =
  * Each row in `schema_migration_runs` represents a single event in a migration
  * attempt's lifecycle. A single attempt (identified by `execution_id`) may
  * produce multiple rows: typically a `started` row followed by an `applied`,
- * `failed`, `denied`, or `skipped` row. Rows are INSERT-only — never updated
- * or deleted.
+ * `failed`, `denied`, `skipped`, or other terminal row. Rows are INSERT-only —
+ * never updated or deleted.
  *
- * - `started` — The attempt has begun (recorded before the transaction).
- * - `applied` — The attempt succeeded (the migration was applied).
- * - `failed`  — The attempt failed (the transaction was rolled back).
- * - `denied`  — The attempt was denied by authorization or governance.
- * - `skipped` — The attempt was skipped (already applied, checksum matched).
+ * - `started`          — The attempt was started (execution began; recorded
+ *                        before the transaction).
+ * - `applied`          — The attempt succeeded (the migration was applied).
+ * - `failed`           — The attempt failed (the transaction was rolled back).
+ * - `denied`           — The attempt was denied by authorization.
+ * - `skipped`          — The attempt was skipped (already applied, checksum
+ *                        matched).
+ * - `dry_run`          — The attempt was a dry-run (no mutation, simulated
+ *                        only).
+ * - `conflict`         — The attempt was blocked due to a checksum conflict.
+ * - `lock_timeout`     — The attempt was blocked because another migration was
+ *                        already running (concurrent execution prevented).
+ * - `baseline_blocked` — The attempt was blocked by the governance lifecycle
+ *                        gate (execution not enabled).
+ *
+ * MIGRATION-GOV-14 (Phase 1A.2): Added dry_run, conflict, lock_timeout,
+ * baseline_blocked to enable exact run-history recording for all denied/
+ * blocked paths (MIGRATION-GOV-18).
  */
 export type MigrationRunStatus =
   | 'started'
   | 'applied'
   | 'failed'
   | 'denied'
-  | 'skipped';
+  | 'skipped'
+  | 'dry_run'
+  | 'conflict'
+  | 'lock_timeout'
+  | 'baseline_blocked';
 
 /**
  * The governance lifecycle state of the migration system for a given
