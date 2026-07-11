@@ -15,6 +15,7 @@ import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
+import { classifyPanel } from '../utils/subSystems';
 import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
@@ -562,8 +563,19 @@ export function pageArrayPrimary(input: PermitInput, cad: CADModel, pageNum: num
   // composition/validation and the drawing agree.
   const _hybRoof = cad.hybrid?.sections.find(sec => sec.key === 'roof');
   if (cad.hybrid && cad.roof && _hybRoof) {
-    const roofView = { ...cad, systemType: 'roof' as const, originLat: _hybRoof.originLat, originLng: _hybRoof.originLng };
-    return pageRoofPlan(input, roofView, pageNum, totalPages, ctx);
+    // Roof-subset totals + roof-only panelPositions: this sheet documents the
+    // ROOF; ground/fence draw as labeled overlays. Project-wide data here made
+    // the sheet claim all 94 modules on IronRidge and render ground/fence
+    // panels as floating roof modules with phantom setback violations.
+    const roofView = { ...cad, systemType: 'roof' as const,
+      originLat: _hybRoof.originLat, originLng: _hybRoof.originLng,
+      totalPanels: _hybRoof.totalPanels, totalDcKw: _hybRoof.dcKw };
+    const roofInput = { ...input,
+      project: { ...(input.project ?? {}),
+        panelPositions: ((input.project?.panelPositions ?? []) as any[]).filter(p => classifyPanel(p) === 'roof') },
+      system: { ...(input.system ?? {}), totalPanels: _hybRoof.totalPanels, totalDcKw: _hybRoof.dcKw },
+    } as PermitInput;
+    return pageRoofPlan(roofInput, roofView, pageNum, totalPages, ctx);
   }
   // Use cad.systemType — single source of truth
   if (isFence(cad.systemType))  return pageFencePlan(input, cad, pageNum, totalPages, ctx);

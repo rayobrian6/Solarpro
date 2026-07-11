@@ -36,6 +36,7 @@ import type { PermitInputShape } from '../permitInputShape';
 import { resolveSystemType } from '../resolver';
 import { drawRoofPlan, drawRoofStructural } from '../templates/roof';
 import { buildSiteContext, type SiteContext } from '../templates/roofSiteContext';
+import { classifyPanel } from '@/lib/permit/utils/subSystems';
 import { drawGroundArray, drawGroundStructural } from '../templates/ground';
 import { drawFencePlan, drawFenceElevation } from '../templates/fence';
 import { safeBuildIntent } from '../designIntent';
@@ -259,12 +260,28 @@ export function getArrayPlanFromCAD(
   // planes/panels from dInput, and adapting the fence-typed base produced
   // "planes=0 panels=0" (caught in harness).
   const _hybRoofSec = cad.hybrid?.sections.find(sec => sec.key === 'roof');
+  // The VIEW scopes totals to the ROOF subset — the roof sheet documents the
+  // roof; ground/fence appear as overlays with their own labels. Project-wide
+  // totals here made the sheet claim "94 MOD" on IronRidge (Stowell v2).
   const _hybridPlanCad = (cad.hybrid && cad.roof && _hybRoofSec)
-    ? { ...cad, systemType: 'roof' as const, originLat: _hybRoofSec.originLat, originLng: _hybRoofSec.originLng }
+    ? { ...cad, systemType: 'roof' as const,
+        originLat: _hybRoofSec.originLat, originLng: _hybRoofSec.originLng,
+        totalPanels: _hybRoofSec.totalPanels, totalDcKw: _hybRoofSec.dcKw }
+    : null;
+  // Scope the INPUT's panel positions to roof panels too — drawRoofPlan draws
+  // module rectangles from panelPositions; unscoped, the ground+fence panels
+  // rendered as floating "roof" modules on the lawn and tripped phantom
+  // fire-setback encroachments (25 on Stowell v2).
+  const _hybridInput = _hybridPlanCad
+    ? ({ ...input,
+        project: { ...(input.project ?? {}),
+          panelPositions: ((input.project?.panelPositions ?? []) as any[]).filter(p => classifyPanel(p) === 'roof') },
+        system: { ...(input.system ?? {}), totalPanels: _hybRoofSec!.totalPanels, totalDcKw: _hybRoofSec!.dcKw },
+      } as typeof input)
     : null;
 
   // Convert pre-solved CADModel → DraftingInput (roof-origin view for hybrids)
-  const dInput = adaptCADToDrafting(_hybridPlanCad ?? cad, input);
+  const dInput = adaptCADToDrafting(_hybridPlanCad ?? cad, _hybridInput ?? input);
   const intent = safeBuildIntent(dInput);
 
   // Site context (county-GIS parcel + street) projected into the roof's own
@@ -273,7 +290,7 @@ export function getArrayPlanFromCAD(
   // roof plan renders exactly as before.
   try {
     (dInput as unknown as { _siteContext?: SiteContext | null })._siteContext =
-      buildSiteContext(_hybridPlanCad ?? cad, input);
+      buildSiteContext(_hybridPlanCad ?? cad, _hybridInput ?? input);
   } catch { /* non-fatal — roof-only render */ }
 
   // Route to template using cad.systemType (authoritative), passing cad directly

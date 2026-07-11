@@ -60,4 +60,14 @@ describe('hybrid CAD composition', () => {
     expect(html).toContain('pv2-hybrid');                       // overlay layer rendered
     expect(html).toContain('HYBRID DESIGN — THIS SET IS NOT PERMIT-READY'); // P0 banner stays until P2/P3
   });
+
+  it('the roof sheet documents ONLY the roof subset (counts + drawn modules)', () => {
+    // Stowell v2: the roof sheet claimed all modules on IronRidge and drew
+    // ground/fence panels as floating roof modules with phantom setback
+    // violations. The roof view + input are now scoped to the roof subset
+    // (fixture: 4 roof of 12 total).
+    const html = generatePermitHTML(mkInput());
+    expect(html).toContain('(N) 4 PV MODULES');       // roof callout = subset
+    expect(html).not.toContain('(N) 12 PV MODULES');  // never the project total
+  });
 });
