@@ -747,20 +747,44 @@ export async function advanceToBaselineVerified(
  * Advance the governance lifecycle to EXECUTION_ENABLED.
  *
  * This transitions from BASELINE_VERIFIED to EXECUTION_ENABLED, recording
- * who enabled execution and when. Once in EXECUTION_ENABLED, migrations can
- * be applied via the canonical runner.
+ * who enabled execution, when, and the reason provided. Once in
+ * EXECUTION_ENABLED, migrations can be applied via the canonical runner.
+ *
+ * MIGRATION-GOV-09 (Phase 1A.2): The transition requires a reason string.
+ * The reason is recorded in the audit event for traceability. The caller
+ * (API route) is responsible for TOTP verification before calling this
+ * function.
  *
  * @param enabledBy The actor who enabled execution.
- * @returns true on success, false on failure.
+ * @param reason A human-readable reason for enabling execution (required,
+ *               non-empty).
+ * @returns true on success, false on failure or invalid reason.
  */
 export async function enableExecution(
   enabledBy: string | null,
+  reason?: string,
 ): Promise<boolean> {
+  if (!reason || reason.trim().length === 0) {
+    emitAuditEvent({
+      type: 'migration.governance.execution_denied',
+      actorType: null,
+      actorId: enabledBy,
+      environment: getCurrentEnvironment(),
+      executionId: null,
+      migrationIdentifier: null,
+      filename: null,
+      details: { reason: 'ENABLE_EXECUTION_REASON_REQUIRED' },
+    });
+    return false;
+  }
+
   const sql = getRawSql();
   const environment = getCurrentEnvironment();
 
   try {
-    // Update the execution_enabled_by/at columns.
+    // Update the execution_enabled_by/at columns and transition to
+    // EXECUTION_ENABLED. The WHERE clause ensures we can only transition
+    // from BASELINE_VERIFIED — not from any other state.
     await sql`
       UPDATE governance_lifecycle
       SET execution_enabled_by = ${enabledBy},
@@ -779,7 +803,81 @@ export async function enableExecution(
       executionId: null,
       migrationIdentifier: null,
       filename: null,
-      details: { newState: 'EXECUTION_ENABLED', changedBy: enabledBy },
+      details: {
+        newState: 'EXECUTION_ENABLED',
+        changedBy: enabledBy,
+        reason: reason.trim(),
+      },
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Disable execution and return the governance lifecycle to BASELINE_VERIFIED.
+ *
+ * This transitions from EXECUTION_ENABLED back to BASELINE_VERIFIED, blocking
+ * all further migration execution until execution is re-enabled. The
+ * transition requires a reason string for audit traceability.
+ *
+ * MIGRATION-GOV-09 (Phase 1A.2): This is the inverse of enableExecution().
+ * The caller (API route) is responsible for TOTP verification before calling
+ * this function.
+ *
+ * @param disabledBy The actor who disabled execution.
+ * @param reason A human-readable reason for disabling execution (required,
+ *               non-empty).
+ * @returns true on success, false on failure or invalid reason.
+ */
+export async function disableExecution(
+  disabledBy: string | null,
+  reason?: string,
+): Promise<boolean> {
+  if (!reason || reason.trim().length === 0) {
+    emitAuditEvent({
+      type: 'migration.governance.execution_denied',
+      actorType: null,
+      actorId: disabledBy,
+      environment: getCurrentEnvironment(),
+      executionId: null,
+      migrationIdentifier: null,
+      filename: null,
+      details: { reason: 'DISABLE_EXECUTION_REASON_REQUIRED' },
+    });
+    return false;
+  }
+
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+
+  try {
+    await sql`
+      UPDATE governance_lifecycle
+      SET lifecycle_state = 'BASELINE_VERIFIED',
+          execution_enabled_by = null,
+          execution_enabled_at = null,
+          last_state_change_at = now()
+      WHERE environment = ${environment}
+        AND lifecycle_state = 'EXECUTION_ENABLED'
+    `;
+
+    emitAuditEvent({
+      type: 'migration.governance.state_change',
+      actorType: null,
+      actorId: disabledBy,
+      environment,
+      executionId: null,
+      migrationIdentifier: null,
+      filename: null,
+      details: {
+        newState: 'BASELINE_VERIFIED',
+        changedBy: disabledBy,
+        reason: reason.trim(),
+        action: 'disable_execution',
+      },
     });
 
     return true;
@@ -790,7 +888,10 @@ export async function enableExecution(
 
 /**
  * Assert that the current environment is in a state that permits migration
- * execution (BASELINE_VERIFIED or EXECUTION_ENABLED).
+ * execution.
+ *
+ * MIGRATION-GOV-09 (Phase 1A.2): Only EXECUTION_ENABLED permits schema
+ * mutation. BASELINE_VERIFIED is NOT an execution-permitting state.
  *
  * This is the execution gate called by the runner before applying any
  * migration. If the lifecycle is not in an execution-permitting state, the
@@ -799,13 +900,19 @@ export async function enableExecution(
  * Dry-run is exempt: dry-runs never mutate the database and are always
  * allowed for inspection/planning purposes.
  *
- * Behavior by lifecycle state:
- * - UNBOOTSTRAPPED:     not permitted (no ledger exists)
- * - LEDGER_BOOTSTRAPPED: not permitted (baseline not started)
- * - BASELINE_REQUIRED:  not permitted (baseline reconciliation required)
+ * Behavior by lifecycle state (MIGRATION-GOV-09, Phase 1A.2):
+ * - UNBOOTSTRAPPED:       not permitted (no ledger exists)
+ * - LEDGER_BOOTSTRAPPED:  not permitted (baseline not started)
+ * - BASELINE_REQUIRED:    not permitted (baseline reconciliation required)
  * - BASELINE_IN_PROGRESS: not permitted (baseline reconciliation in progress)
- * - BASELINE_VERIFIED:  permitted (baseline complete, ready to execute)
- * - EXECUTION_ENABLED:  permitted (execution explicitly enabled)
+ * - BASELINE_VERIFIED:    NOT permitted (baseline complete but execution not
+ *                          yet explicitly activated — operator must call
+ *                          enable-execution to transition to EXECUTION_ENABLED)
+ * - EXECUTION_ENABLED:    permitted (execution explicitly activated)
+ *
+ * Only EXECUTION_ENABLED permits schema mutation. BASELINE_VERIFIED is a
+ * distinct state meaning "reconciliation is complete and ready for
+ * activation" — it is NOT an execution-permitting state.
  *
  * @param dryRun If true, always returns permitted=true (dry-run exempt).
  * @returns permitted (boolean) and the current lifecycle state.
@@ -835,8 +942,11 @@ export async function assertExecutionPermitted(
     };
   }
 
-  const permitted =
-    lifecycle === 'BASELINE_VERIFIED' || lifecycle === 'EXECUTION_ENABLED';
+  // MIGRATION-GOV-09 (Phase 1A.2): Only EXECUTION_ENABLED permits schema
+  // mutation. BASELINE_VERIFIED is a readiness state, not an execution state.
+  // The operator must explicitly activate execution via enable-execution
+  // (with TOTP + reason) before any migration can be applied.
+  const permitted = lifecycle === 'EXECUTION_ENABLED';
 
   if (!permitted) {
     emitAuditEvent({

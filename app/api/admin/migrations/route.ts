@@ -43,13 +43,27 @@ import {
   getCurrentEnvironment,
 } from '@/lib/migrations/runner';
 import { validateMigrationManifest, discoverMigrationFiles } from '@/lib/migrations/manifest';
-import { emitAuditEvent } from '@/lib/migrations/ledger';
+import {
+  emitAuditEvent,
+  getGovernanceLifecycleState,
+  recordBaselineReconciliation,
+  readBaselineReconciliation,
+  readAllBaselineReconciliations,
+  verifyBaselineComplete,
+  advanceToBaselineVerified,
+  enableExecution,
+  disableExecution,
+} from '@/lib/migrations/ledger';
 import type {
   MigrationAction,
   MigrationActorType,
   RunPendingMigrationsOptions,
   RunSingleMigrationOptions,
 } from '@/lib/migrations/runner';
+import type {
+  BaselineReconciliationStatus,
+  BaselineEvidenceType,
+} from '@/lib/migrations/types';
 
 /**
  * GET /api/admin/migrations — inspect migration state (read-only).
@@ -142,7 +156,19 @@ export async function POST(req: NextRequest) {
   const limit = body?.limit as number | undefined;
 
   // Validate action.
-  const validActions = ['inspect', 'run-pending', 'run-single', 'dry-run-pending', 'dry-run-single'];
+  const validActions = [
+    'inspect',
+    'run-pending',
+    'run-single',
+    'dry-run-pending',
+    'dry-run-single',
+    // Baseline control plane (MIGRATION-GOV-11, Phase 1A.2):
+    'inspect-baseline',
+    'record-baseline-entry',
+    'verify-baseline',
+    'enable-execution',
+    'disable-execution',
+  ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
       { success: false, error: `Invalid action. Must be one of: ${validActions.join(', ')}` },
@@ -165,16 +191,45 @@ export async function POST(req: NextRequest) {
 
   const isDryRun = action.startsWith('dry-run');
   const isExecute = action.startsWith('run') && !isDryRun;
-  const migrationAction: MigrationAction = isExecute ? 'execute' : 'inspect';
+  const isBaselineControl = [
+    'inspect-baseline',
+    'record-baseline-entry',
+    'verify-baseline',
+    'enable-execution',
+    'disable-execution',
+  ].includes(action);
+
+  // MIGRATION-GOV-11 (Phase 1A.2): Baseline control plane actions.
+  // - inspect-baseline: read-only (inspect action).
+  // - record-baseline-entry, verify-baseline: baseline governance (bootstrap
+  //   action — super_admin required, no TOTP needed for reconciliation
+  //   recording, but env checks apply to verify-baseline since it advances
+  //   the lifecycle).
+  // - enable-execution, disable-execution: critical governance mutations
+  //   (execute action — super_admin + TOTP + env checks required).
+  const isBaselineReadonly = action === 'inspect-baseline';
+  const isBaselineMutation = ['record-baseline-entry', 'verify-baseline'].includes(action);
+  const isExecutionActivation = ['enable-execution', 'disable-execution'].includes(action);
+
+  // Determine the migration action type for authorization.
+  let migrationAction: MigrationAction;
+  if (isExecute || isExecutionActivation) {
+    migrationAction = 'execute';
+  } else if (isBaselineMutation) {
+    migrationAction = 'bootstrap';
+  } else {
+    migrationAction = 'inspect';
+  }
   const actorType: MigrationActorType = 'human';
 
-  // Verify fresh TOTP for non-dry-run execution (MIGRATION-GOV-05).
+  // Verify fresh TOTP for non-dry-run execution AND execution activation/
+  // deactivation (MIGRATION-GOV-05, MIGRATION-GOV-11 Phase 1A.2).
   // verifyFreshTotp now returns a result object with fail-closed semantics:
   // - MFA_NOT_ENABLED: user has no MFA secret → DENIED (not waived)
   // - TOTP_INVALID: code doesn't match → retry allowed
   // - TOTP_REPLAY: time-step already consumed → must wait for next step
   let totpVerified = false;
-  if (isExecute) {
+  if (isExecute || isExecutionActivation) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
         { success: false, error: 'A fresh TOTP code is required for migration execution. Provide it in the "totpCode" field.' },
@@ -248,6 +303,165 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // ── Baseline control plane (MIGRATION-GOV-11, Phase 1A.2) ──────────────
+
+    if (action === 'inspect-baseline') {
+      // Read-only: return all baseline reconciliation entries for this env.
+      const baselines = await readAllBaselineReconciliations();
+      const lifecycle = await getGovernanceLifecycleState();
+      const manifest = discoverMigrationFiles();
+      const manifestIds = manifest.files.map((f) => f.identifier);
+      return NextResponse.json({
+        success: true,
+        action: 'inspect-baseline',
+        environment: getCurrentEnvironment(),
+        lifecycleState: lifecycle ?? 'UNBOOTSTRAPPED',
+        manifestCount: manifestIds.length,
+        baselines: Object.values(baselines).map((b) => ({
+          identifier: b.migration_identifier,
+          reconciliationStatus: b.reconciliation_status,
+          evidenceType: b.evidence_type,
+          evidenceSummary: b.evidence_summary,
+          reconciledBy: b.reconciled_by,
+          reconciledAt: b.reconciled_at,
+        })),
+        unreconciled: manifestIds.filter((id) => !baselines[id]),
+      });
+    }
+
+    if (action === 'record-baseline-entry') {
+      // Record a single baseline reconciliation entry.
+      const baselineIdentifier = body?.identifier as string | undefined;
+      const reconciliationStatus = body?.reconciliationStatus as string | undefined;
+      const evidenceType = body?.evidenceType as string | undefined;
+      const evidenceSummary = body?.evidenceSummary as string | undefined;
+
+      if (!baselineIdentifier) {
+        return NextResponse.json(
+          { success: false, error: 'identifier is required for record-baseline-entry' },
+          { status: 400 },
+        );
+      }
+      const validStatuses: BaselineReconciliationStatus[] = [
+        'CONFIRMED_APPLIED', 'CONFIRMED_NOT_APPLIED', 'PARTIALLY_APPLIED',
+        'NOT_APPLICABLE', 'UNKNOWN',
+      ];
+      if (!reconciliationStatus || !validStatuses.includes(reconciliationStatus as BaselineReconciliationStatus)) {
+        return NextResponse.json(
+          { success: false, error: `reconciliationStatus is required and must be one of: ${validStatuses.join(', ')}` },
+          { status: 400 },
+        );
+      }
+      const validEvidenceTypes: BaselineEvidenceType[] = [
+        'SCHEMA_INTROSPECTION', 'LEDGER_RECORD', 'MANUAL_VERIFICATION',
+        'CHECKSUM_MATCH', 'OBJECT_EXISTENCE', 'NONE',
+      ];
+      if (!evidenceType || !validEvidenceTypes.includes(evidenceType as BaselineEvidenceType)) {
+        return NextResponse.json(
+          { success: false, error: `evidenceType is required and must be one of: ${validEvidenceTypes.join(', ')}` },
+          { status: 400 },
+        );
+      }
+
+      const ok = await recordBaselineReconciliation({
+        identifier: baselineIdentifier,
+        status: reconciliationStatus as BaselineReconciliationStatus,
+        evidenceType: evidenceType as BaselineEvidenceType,
+        evidenceSummary: evidenceSummary ?? null,
+        reconciledBy: adminUser.id,
+      });
+      return NextResponse.json({
+        success: ok,
+        action: 'record-baseline-entry',
+        identifier: baselineIdentifier,
+        reconciliationStatus,
+        evidenceType,
+      });
+    }
+
+    if (action === 'verify-baseline') {
+      // Verify that all manifest migrations have been reconciled and advance
+      // to BASELINE_VERIFIED if complete.
+      const manifest = discoverMigrationFiles();
+      const manifestIds = manifest.files.map((f) => f.identifier);
+      const result = await verifyBaselineComplete(manifestIds);
+      if (!result.ok) {
+        return NextResponse.json({
+          success: false,
+          action: 'verify-baseline',
+          ok: false,
+          unreconciled: result.unreconciled,
+          blocking: result.blocking,
+          error: 'Baseline reconciliation is not complete. All migrations must be reconciled with a non-blocking status (CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, or NOT_APPLICABLE).',
+        }, { status: 409 });
+      }
+      const advanced = await advanceToBaselineVerified(adminUser.id);
+      return NextResponse.json({
+        success: advanced,
+        action: 'verify-baseline',
+        ok: true,
+        advancedToBaselineVerified: advanced,
+        lifecycleState: advanced ? 'BASELINE_VERIFIED' : null,
+      });
+    }
+
+    if (action === 'enable-execution') {
+      // Transition from BASELINE_VERIFIED to EXECUTION_ENABLED.
+      // Requires TOTP (already verified above) and a reason.
+      const reason = body?.reason as string | undefined;
+      if (!reason || reason.trim().length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'A non-empty "reason" field is required for enable-execution.' },
+          { status: 400 },
+        );
+      }
+      const lifecycle = await getGovernanceLifecycleState();
+      if (lifecycle !== 'BASELINE_VERIFIED') {
+        return NextResponse.json({
+          success: false,
+          error: `Cannot enable execution. The lifecycle must be in state BASELINE_VERIFIED. Current state: ${lifecycle ?? 'UNBOOTSTRAPPED'}.`,
+          lifecycleState: lifecycle ?? 'UNBOOTSTRAPPED',
+        }, { status: 409 });
+      }
+      const ok = await enableExecution(adminUser.id, reason);
+      return NextResponse.json({
+        success: ok,
+        action: 'enable-execution',
+        enabled: ok,
+        lifecycleState: ok ? 'EXECUTION_ENABLED' : (lifecycle ?? 'UNBOOTSTRAPPED'),
+        reason: reason.trim(),
+      });
+    }
+
+    if (action === 'disable-execution') {
+      // Transition from EXECUTION_ENABLED back to BASELINE_VERIFIED.
+      // Requires TOTP (already verified above) and a reason.
+      const reason = body?.reason as string | undefined;
+      if (!reason || reason.trim().length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'A non-empty "reason" field is required for disable-execution.' },
+          { status: 400 },
+        );
+      }
+      const lifecycle = await getGovernanceLifecycleState();
+      if (lifecycle !== 'EXECUTION_ENABLED') {
+        return NextResponse.json({
+          success: false,
+          error: `Cannot disable execution. The lifecycle must be in state EXECUTION_ENABLED. Current state: ${lifecycle ?? 'UNBOOTSTRAPPED'}.`,
+          lifecycleState: lifecycle ?? 'UNBOOTSTRAPPED',
+        }, { status: 409 });
+      }
+      const ok = await disableExecution(adminUser.id, reason);
+      return NextResponse.json({
+        success: ok,
+        action: 'disable-execution',
+        disabled: ok,
+        lifecycleState: ok ? 'BASELINE_VERIFIED' : (lifecycle ?? 'UNBOOTSTRAPPED'),
+        reason: reason.trim(),
+      });
+    }
+
+    // ── Existing migration actions ─────────────────────────────────────────
     // Handle each action.
     if (action === 'inspect' || action === 'dry-run-pending') {
       // For inspect and dry-run-pending, return the inspection state.

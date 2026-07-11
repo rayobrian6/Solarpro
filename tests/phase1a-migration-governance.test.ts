@@ -1326,6 +1326,20 @@ describe('Phase 1A.1: Governance lifecycle & historical baseline', () => {
     expect(ledgerSrc).toContain('export async function enableExecution');
   });
 
+  it('enableExecution requires a reason parameter (MIGRATION-GOV-09, Phase 1A.2)', () => {
+    const fnSection = ledgerSrc.split('export async function enableExecution')[1]?.split('export async function')[0] ?? '';
+    expect(fnSection).toContain('reason');
+    expect(fnSection).toContain('ENABLE_EXECUTION_REASON_REQUIRED');
+  });
+
+  it('disableExecution is exported and emits state_change event (MIGRATION-GOV-09, Phase 1A.2)', () => {
+    expect(ledgerSrc).toContain('export async function disableExecution');
+    const fnSection = ledgerSrc.split('export async function disableExecution')[1]?.split('export async function')[0] ?? '';
+    expect(fnSection).toContain('reason');
+    expect(fnSection).toContain('DISABLE_EXECUTION_REASON_REQUIRED');
+    expect(fnSection).toContain('BASELINE_VERIFIED');
+  });
+
   it('assertExecutionPermitted is exported with fail-closed semantics', () => {
     expect(ledgerSrc).toContain('export async function assertExecutionPermitted');
     // The function should have fail-closed behavior (deny on unreadable state).
@@ -1337,12 +1351,15 @@ describe('Phase 1A.1: Governance lifecycle & historical baseline', () => {
     expect(ledgerSrc).toContain('migration.governance.execution_denied');
   });
 
-  it('execution gate only permits BASELINE_VERIFIED and EXECUTION_ENABLED', () => {
-    // The assertExecutionPermitted function should check that the lifecycle
-    // state is one of the execution-permitting states.
+  it('execution gate only permits EXECUTION_ENABLED (MIGRATION-GOV-09, Phase 1A.2)', () => {
+    // MIGRATION-GOV-09 fix: only EXECUTION_ENABLED permits schema mutation.
+    // BASELINE_VERIFIED is a readiness state, NOT an execution-permitting state.
+    // The operator must explicitly activate execution via enable-execution.
     const gateSection = ledgerSrc.split('async function assertExecutionPermitted')[1] ?? '';
-    expect(gateSection).toContain('BASELINE_VERIFIED');
-    expect(gateSection).toContain('EXECUTION_ENABLED');
+    // The permitted check must reference EXECUTION_ENABLED
+    expect(gateSection).toContain("lifecycle === 'EXECUTION_ENABLED'");
+    // The gate must NOT use the old two-state OR pattern
+    expect(gateSection).not.toContain("BASELINE_VERIFIED' || lifecycle === 'EXECUTION_ENABLED'");
   });
 });
 
@@ -1568,5 +1585,175 @@ describe('Phase 1A.1: Append-only run history & ledger constraints', () => {
     // before execution is permitted.
     const bootstrapFnSection = ledgerSrc.split('export async function bootstrapMigrationLedger')[1] ?? '';
     expect(bootstrapFnSection).toContain('BASELINE_REQUIRED');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19. Phase 1A.2: Lifecycle Activation Gate (MIGRATION-GOV-09)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.2: Lifecycle activation gate (MIGRATION-GOV-09)', () => {
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+
+  it('assertExecutionPermitted only permits EXECUTION_ENABLED, not BASELINE_VERIFIED', () => {
+    // The core GOV-09 fix: the gate must check for EXECUTION_ENABLED only.
+    // BASELINE_VERIFIED is a readiness state, not an execution state.
+    const gateSection = ledgerSrc.split('async function assertExecutionPermitted')[1]?.split('\n\n\n')[0] ?? '';
+    expect(gateSection).toContain("lifecycle === 'EXECUTION_ENABLED'");
+    // Must NOT contain the old two-state OR condition
+    expect(gateSection).not.toMatch(/lifecycle === 'BASELINE_VERIFIED'\s*\|\|\s*lifecycle === 'EXECUTION_ENABLED'/);
+  });
+
+  it('assertExecutionPermitted JSDoc documents that BASELINE_VERIFIED is NOT permitted', () => {
+    const docSection = ledgerSrc.split('Behavior by lifecycle state')[1]?.split('@param')[0] ?? '';
+    expect(docSection).toContain('BASELINE_VERIFIED');
+    expect(docSection).toContain('NOT permitted');
+    expect(docSection).toContain('Only EXECUTION_ENABLED permits schema mutation');
+  });
+
+  it('enableExecution transitions from BASELINE_VERIFIED to EXECUTION_ENABLED', () => {
+    const fnSection = ledgerSrc.split('export async function enableExecution')[1]?.split('export async function')[0] ?? '';
+    expect(fnSection).toContain("'EXECUTION_ENABLED'");
+    expect(fnSection).toContain("'BASELINE_VERIFIED'");
+    // The UPDATE must check lifecycle_state = 'BASELINE_VERIFIED' in WHERE
+    expect(fnSection).toContain("lifecycle_state = 'BASELINE_VERIFIED'");
+  });
+
+  it('enableExecution records the reason in audit event details', () => {
+    const fnSection = ledgerSrc.split('export async function enableExecution')[1]?.split('export async function')[0] ?? '';
+    expect(fnSection).toContain('reason');
+    expect(fnSection).toContain('reason.trim()');
+  });
+
+  it('disableExecution transitions from EXECUTION_ENABLED to BASELINE_VERIFIED', () => {
+    const fnSection = ledgerSrc.split('export async function disableExecution')[1]?.split('export async function')[0] ?? '';
+    expect(fnSection).toContain("'BASELINE_VERIFIED'");
+    expect(fnSection).toContain("'EXECUTION_ENABLED'");
+    expect(fnSection).toContain("lifecycle_state = 'EXECUTION_ENABLED'");
+    // Should clear execution_enabled_by/at
+    expect(fnSection).toContain('execution_enabled_by = null');
+    expect(fnSection).toContain('execution_enabled_at = null');
+  });
+
+  it('disableExecution records the reason in audit event details', () => {
+    const fnSection = ledgerSrc.split('export async function disableExecution')[1]?.split('export async function')[0] ?? '';
+    expect(fnSection).toContain('reason');
+    expect(fnSection).toContain('reason.trim()');
+    expect(fnSection).toContain('action: \'disable_execution\'');
+  });
+
+  it('enableExecution and disableExecution are re-exported from runner', () => {
+    expect(runnerSrc).toContain('enableExecution');
+    expect(runnerSrc).toContain('disableExecution');
+  });
+
+  it('runner execution gate error message references EXECUTION_ENABLED only', () => {
+    // Both runSinglePendingMigration and runPendingMigrations should have
+    // error messages that reference EXECUTION_ENABLED as the required state.
+    const singleSection = runnerSrc.split('errorCode: \'MIGRATION_BASELINE_REQUIRED\'')[1] ?? '';
+    expect(singleSection).toContain('EXECUTION_ENABLED');
+    expect(singleSection).toContain('enable-execution');
+    // Must NOT contain the old "Required states: BASELINE_VERIFIED or"
+    expect(singleSection).not.toContain('Required states: BASELINE_VERIFIED or');
+  });
+
+  it('runner runPendingMigrations gate error message references EXECUTION_ENABLED only', () => {
+    const pendingSection = runnerSrc.split('fatalErrors:')[1]?.split('emitAuditEvent')[0] ?? '';
+    // Check the fatalErrors array contains the new message
+    expect(runnerSrc).toContain('Required state: EXECUTION_ENABLED');
+    expect(runnerSrc).not.toContain('Required states: BASELINE_VERIFIED or');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 20. Phase 1A.2: Baseline Control Plane API (MIGRATION-GOV-11)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.2: Baseline control plane API (MIGRATION-GOV-11)', () => {
+  const routeSrc = readSrc('app/api/admin/migrations/route.ts');
+
+  it('route includes all 5 baseline control plane actions in validActions', () => {
+    expect(routeSrc).toContain('inspect-baseline');
+    expect(routeSrc).toContain('record-baseline-entry');
+    expect(routeSrc).toContain('verify-baseline');
+    expect(routeSrc).toContain('enable-execution');
+    expect(routeSrc).toContain('disable-execution');
+  });
+
+  it('route imports baseline control plane functions from ledger', () => {
+    expect(routeSrc).toContain('getGovernanceLifecycleState');
+    expect(routeSrc).toContain('recordBaselineReconciliation');
+    expect(routeSrc).toContain('readAllBaselineReconciliations');
+    expect(routeSrc).toContain('verifyBaselineComplete');
+    expect(routeSrc).toContain('advanceToBaselineVerified');
+    expect(routeSrc).toContain('enableExecution');
+    expect(routeSrc).toContain('disableExecution');
+  });
+
+  it('inspect-baseline returns all baseline entries and lifecycle state', () => {
+    expect(routeSrc).toContain("if (action === 'inspect-baseline')");
+    const section = routeSrc.split("if (action === 'inspect-baseline')")[1]?.split("if (action === '")[0] ?? '';
+    expect(section).toContain('readAllBaselineReconciliations');
+    expect(section).toContain('getGovernanceLifecycleState');
+    expect(section).toContain('unreconciled');
+  });
+
+  it('record-baseline-entry validates identifier, status, and evidenceType', () => {
+    expect(routeSrc).toContain("if (action === 'record-baseline-entry')");
+    const section = routeSrc.split("if (action === 'record-baseline-entry')")[1]?.split("if (action === '")[0] ?? '';
+    expect(section).toContain('identifier');
+    expect(section).toContain('reconciliationStatus');
+    expect(section).toContain('evidenceType');
+    expect(section).toContain('CONFIRMED_APPLIED');
+    expect(section).toContain('SCHEMA_INTROSPECTION');
+    expect(section).toContain('recordBaselineReconciliation');
+  });
+
+  it('verify-baseline checks completeness and advances to BASELINE_VERIFIED', () => {
+    expect(routeSrc).toContain("if (action === 'verify-baseline')");
+    const section = routeSrc.split("if (action === 'verify-baseline')")[1]?.split("if (action === '")[0] ?? '';
+    expect(section).toContain('verifyBaselineComplete');
+    expect(section).toContain('advanceToBaselineVerified');
+    expect(section).toContain('unreconciled');
+    expect(section).toContain('blocking');
+  });
+
+  it('enable-execution requires TOTP, reason, and BASELINE_VERIFIED state', () => {
+    expect(routeSrc).toContain("if (action === 'enable-execution')");
+    const section = routeSrc.split("if (action === 'enable-execution')")[1]?.split("if (action === '")[0] ?? '';
+    expect(section).toContain('reason');
+    expect(section).toContain('BASELINE_VERIFIED');
+    expect(section).toContain('enableExecution');
+  });
+
+  it('disable-execution requires TOTP, reason, and EXECUTION_ENABLED state', () => {
+    expect(routeSrc).toContain("if (action === 'disable-execution')");
+    const section = routeSrc.split("if (action === 'disable-execution')")[1]?.split("if (action === '")[0] ?? '';
+    expect(section).toContain('reason');
+    expect(section).toContain('EXECUTION_ENABLED');
+    expect(section).toContain('disableExecution');
+  });
+
+  it('enable-execution and disable-execution require TOTP verification', () => {
+    // The isExecutionActivation flag must include both actions, and the TOTP
+    // verification block must cover isExecutionActivation.
+    expect(routeSrc).toContain('isExecutionActivation');
+    expect(routeSrc).toMatch(/isExecute \|\| isExecutionActivation/);
+    // TOTP verification block condition should include isExecutionActivation
+    const totpSection = routeSrc.split('Verify fresh TOTP')[1]?.split('Authorize')[0] ?? '';
+    expect(totpSection).toContain('isExecutionActivation');
+  });
+
+  it('execution activation maps to execute action for authorization', () => {
+    expect(routeSrc).toMatch(/isExecute \|\| isExecutionActivation/);
+    const actionMapSection = routeSrc.split('migrationAction: MigrationAction')[1]?.split('const actorType')[0] ?? '';
+    expect(actionMapSection).toContain("'execute'");
+  });
+
+  it('baseline mutation actions map to bootstrap action for authorization', () => {
+    expect(routeSrc).toContain('isBaselineMutation');
+    const actionMapSection = routeSrc.split('migrationAction: MigrationAction')[1]?.split('const actorType')[0] ?? '';
+    expect(actionMapSection).toContain("'bootstrap'");
   });
 });

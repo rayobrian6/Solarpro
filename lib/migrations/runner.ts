@@ -800,8 +800,9 @@ export async function runSinglePendingMigration(
   }
 
   // Execution gate: block mutations unless the governance lifecycle is in an
-  // execution-permitting state (BASELINE_VERIFIED or EXECUTION_ENABLED).
-  // Dry-run is exempt \u2014 it never mutates the database (MIGRATION-GOV-02).
+  // execution-permitting state (EXECUTION_ENABLED only).
+  // Dry-run is exempt \u2014 it never mutates the database (MIGRATION-GOV-02,
+  // MIGRATION-GOV-09 Phase 1A.2).
   if (!dryRun) {
     const gate = await assertExecutionPermitted(false);
     if (!gate.permitted) {
@@ -827,9 +828,11 @@ export async function runSinglePendingMigration(
         errorSummary:
           `Migration execution is blocked. The governance lifecycle for ` +
           `environment '${environment}' is in state '${gate.lifecycleState}'. ` +
-          `Baseline reconciliation must be completed and verified before ` +
-          `migrations can be executed. Required states: BASELINE_VERIFIED or ` +
-          `EXECUTION_ENABLED.`,
+          `Baseline reconciliation must be completed, verified, and execution ` +
+          `explicitly activated before migrations can be executed. ` +
+          `Required state: EXECUTION_ENABLED. ` +
+          `If the lifecycle is BASELINE_VERIFIED, call enable-execution (with ` +
+          `TOTP and reason) to activate execution.`,
         dryRun,
         executionId,
       };
@@ -1075,8 +1078,9 @@ export async function runPendingMigrations(
   }
 
   // Execution gate: block mutations unless the governance lifecycle is in an
-  // execution-permitting state (BASELINE_VERIFIED or EXECUTION_ENABLED).
-  // Dry-run is exempt \u2014 it never mutates the database (MIGRATION-GOV-02).
+  // execution-permitting state (EXECUTION_ENABLED only).
+  // Dry-run is exempt \u2014 it never mutates the database (MIGRATION-GOV-02,
+  // MIGRATION-GOV-09 Phase 1A.2).
   if (!dryRun) {
     const gate = await assertExecutionPermitted(false);
     if (!gate.permitted) {
@@ -1104,9 +1108,11 @@ export async function runPendingMigrations(
         fatalErrors: [
           `Migration execution is blocked. The governance lifecycle for ` +
           `environment '${environment}' is in state '${gate.lifecycleState}'. ` +
-          `Baseline reconciliation must be completed and verified before ` +
-          `migrations can be executed. Required states: BASELINE_VERIFIED or ` +
-          `EXECUTION_ENABLED.`,
+          `Baseline reconciliation must be completed, verified, and execution ` +
+          `explicitly activated before migrations can be executed. ` +
+          `Required state: EXECUTION_ENABLED. ` +
+          `If the lifecycle is BASELINE_VERIFIED, call enable-execution (with ` +
+          `TOTP and reason) to activate execution.`,
         ],
       };
     }
@@ -1234,7 +1240,7 @@ export async function runPendingMigrations(
 
 export { discoverMigrationFiles, validateMigrationManifest, findMigrationByIdentifier } from './manifest';
 export { calculateChecksumOfString, checksumsMatch, detectTransactionMode, detectTransactionModeFromFile } from './validation';
-export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, assertExecutionPermitted, recordTotpUse, isTotpTimeStepUsed } from './ledger';
+export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, disableExecution, assertExecutionPermitted, recordTotpUse, isTotpTimeStepUsed } from './ledger';
 export {
   MIGRATION_LOCK_KEY,
   MIGRATION_ENV_VARS,
