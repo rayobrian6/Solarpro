@@ -377,6 +377,19 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
           </div>
         </div>` : ''}
 
+        ${_c?.hybridSystemTypes ? `
+        <!-- HYBRID DESIGN — NOT PERMIT-READY (Phase 0 guard; see canonical.ts) -->
+        <div class="sec" style="border:3px solid #cc0000;">
+          <div class="sec-hdr" style="background:#cc0000;color:#fff;">&#9888; HYBRID DESIGN — THIS SET IS NOT PERMIT-READY</div>
+          <div class="sec-body" style="font-weight:bold;color:#cc0000;line-height:1.5;">
+            This design contains panels of ${_c.hybridSystemTypes.length} system types
+            (${escapeH(_c.hybridSystemTypes.join(', '))}). The current engineering pipeline documents ONLY the
+            "${escapeH(String(_c.systemType))}" portion &mdash; structural, racking, wiring and rapid-shutdown items for the
+            other sub-systems are MISSING from this set and its bill of materials. DO NOT SUBMIT. Split the design
+            into single-system projects, or wait for multi-system support.
+          </div>
+        </div>` : ''}
+
         <!-- SCOPE OF WORK -->
         <div class="sec">
           <div class="sec-hdr">SCOPE OF WORK</div>

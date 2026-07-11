@@ -110,15 +110,40 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   // Priority 1: Panel-based detection (placementType/systemType on each panel)
   let fromPanels: CanonicalSysType | null = null;
   const panels_raw = layout.panels || [];
-  let fenceCount = 0, groundCount = 0;
+  let fenceCount = 0, groundCount = 0, roofCount = 0;
   for (const p of panels_raw) {
     const pt = (p.placementType || '').toUpperCase();
     const st = (p.systemType   || '').toLowerCase();
     if (pt === 'FENCE'  || st === 'fence'  || st === 'solar_fence')  fenceCount++;
-    if (pt === 'GROUND' || st === 'ground' || st === 'ground_mount') groundCount++;
+    else if (pt === 'GROUND' || st === 'ground' || st === 'ground_mount') groundCount++;
+    else if (pt === 'ROOF' || st === 'roof') roofCount++;
   }
   if (fenceCount  > 0) fromPanels = 'solar_fence';
   else if (groundCount > 0) fromPanels = 'ground_mount';
+
+  // ── HYBRID DETECTION (Phase 0 — Stowell finding, 2026-07-11) ──────────────
+  // A design can contain roof + ground + fence sub-arrays simultaneously. The
+  // single-winner vote below then papers over 2/3 of the system: the Stowell
+  // hybrid (fence+ground+roof) rendered as an 80-module "SOLAR FENCE SYSTEM",
+  // billed fence posts for every panel, and — because the fence/ground RSD
+  // exemption went project-wide — dropped NEC 690.12 module-level rapid
+  // shutdown for the ON-ROOF panels. Until sub-system support lands
+  // (SubSystem[] partition threaded through CAD→structural→BOM→sheets), a
+  // hybrid must NEVER pass silently.
+  const _typesPresent = [
+    roofCount > 0 ? `roof:${roofCount}` : null,
+    groundCount > 0 ? `ground:${groundCount}` : null,
+    fenceCount > 0 ? `fence:${fenceCount}` : null,
+  ].filter(Boolean) as string[];
+  const isHybridDesign = _typesPresent.length > 1;
+  if (isHybridDesign) {
+    console.warn(
+      `[CANONICAL RESOLVE] ⚠ HYBRID DESIGN DETECTED — panels of ${_typesPresent.length} system types ` +
+      `(${_typesPresent.join(', ')}). The pipeline currently supports ONE system type per project; ` +
+      `this planset/BOM will document ONLY the winning type and is NOT PERMIT-READY for the others ` +
+      `(missing racking/structural for the losing types; NEC 690.12 RSD may be wrongly exempted for roof panels).`
+    );
+  }
 
   // Priority 2: Project name keyword scan
   let fromName: CanonicalSysType | null = null;
@@ -292,6 +317,7 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
 
   return {
     systemType:       rawType,
+    hybridSystemTypes: isHybridDesign ? _typesPresent : undefined,
     panels,
     geometry:         layout.geometry ?? undefined,
     layout,

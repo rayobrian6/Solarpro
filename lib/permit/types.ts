@@ -605,6 +605,10 @@ export interface CanonicalLayoutDimensions {
 
 export interface CanonicalInput {
   systemType:       CanonicalSysType;
+  /** Set when the design contains panels of MORE THAN ONE system type (e.g.
+   *  roof+ground+fence hybrid). The pipeline currently documents only
+   *  `systemType` — consumers must surface this as NOT-PERMIT-READY. */
+  hybridSystemTypes?: string[];
   panels:           NonNullable<NonNullable<PermitInput['layout']>['panels']>;
   geometry:         NonNullable<PermitInput['layout']>['geometry'];
   layout:           NonNullable<PermitInput['layout']>;
