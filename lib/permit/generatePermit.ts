@@ -24,7 +24,7 @@ import { necNextStandardOcpd } from './utils/helpers';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
-import { resolveArrayStructuralLayout } from './utils/arrayLayout';
+import { buildStructuralInputForPermit } from './utils/structuralInput';
 import type { ElectricalCompliance } from './types';
 
 // Section imports
@@ -301,82 +301,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0)
       || _framingStale;
     if (needsCalc && sysType === 'roof') {
-      // (static import — the old lazy require('@/…') silently failed outside
-      // webpack, so test/render harnesses got '—' structural values)
-      const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? input.project.roofPitch ?? 20;
-      const windSpeed    = canonical.site.windSpeed || 115;
-      const groundSnow   = canonical.site.groundSnowLoad || 0;
-      const rafterSize   = input.project.rafterSize || '2x6';
-      const rafterSpIn   = input.project.rafterSpacing || 24;
-      // Framing: pass 'unknown' THROUGH so the V4 engine's auto-detect runs
-      // (24" O.C. → truss, with a provenance note). The old || 'rafter'
-      // coercion made auto-detect unreachable and printed DO-NOT-ISSUE
-      // letters built on worst-case stick framing for trussed houses.
-      const framingType: 'truss' | 'rafter' | 'unknown' =
-        (input.project.framingType === 'truss' || input.project.framingType === 'rafter')
-          ? (input.project.framingType as 'truss' | 'rafter') : 'unknown';
-      const _effFraming: 'truss' | 'rafter' = framingType === 'unknown'
-        ? (rafterSpIn >= 24 ? 'truss' : 'rafter')   // mirror of the engine's own auto-detect
-        : framingType;
-      // Span: derive from the ROOF GEOMETRY when the project field is empty
-      // instead of a flat 12 ft guess. Trusses span the building's short
-      // dimension (bearing wall to bearing wall); stick rafters run roughly
-      // half of it (eave to ridge, horizontal projection).
-      const _geomSpanFt = (() => {
-        const polys = (cad.roof?.planes ?? []).flatMap((pl: any) => pl.polygon ?? []);
-        if (polys.length < 3) return undefined;
-        const xs = polys.map((p: any) => p.x), ys = polys.map((p: any) => p.y);
-        const depthM = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-        if (!isFinite(depthM) || depthM <= 0) return undefined;
-        const depthFt = depthM * 3.28084;
-        return Math.round((_effFraming === 'truss' ? depthFt : depthFt / 2) * 10) / 10;
-      })();
-      const rafterSpFt   = input.project.rafterSpan || _geomSpanFt || 12;
-      // Single source for the array layout: read the design's real placed
-      // modules (orientation + row/col grid + panel dims) instead of hardcoding
-      // 'portrait' and letting the engine guess the grid via autoLayout().
-      const arrayLayout  = resolveArrayStructuralLayout(input, cad);
-      const totalPanels  = arrayLayout.panelCount || input.system?.totalPanels || cad.totalPanels || 1;
-      const structInput = {
-        // 'residential_pitched' was never a valid InstallationType — the old
-        // untyped require() hid it; the engine fell through to its default.
-        installationType: 'roof_residential' as const,
-        windSpeed,
-        windExposure: ((): 'B' | 'C' | 'D' => {
-          const e = String(canonical.site.exposureCategory || 'C').toUpperCase();
-          return e === 'B' || e === 'D' ? e : 'C';
-        })(),
-        groundSnowLoad: groundSnow,
-        meanRoofHeight: 15,
-        roofPitch: roofPitchDeg,
-        framingType,
-        rafterSize,
-        rafterSpacingIn: rafterSpIn,
-        rafterSpanFt: rafterSpFt,
-        // Normalize to the WoodSpecies enum ('Douglas Fir-Larch' | 'Southern Pine'
-        // | 'Hem-Fir' | 'Spruce-Pine-Fir'). The old default 'douglas_fir_larch'
-        // (and any lowercase/underscored UI value) matched no NDS_FB/FV/E key, so
-        // the engine silently used generic Fb 1000 psi for EVERY project. (Audit
-        // structural finding 3.)
-        woodSpecies: ((): 'Douglas Fir-Larch' | 'Southern Pine' | 'Hem-Fir' | 'Spruce-Pine-Fir' => {
-          const k = (input.project.rafterSpecies ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
-          if (k.startsWith('southern')) return 'Southern Pine';
-          if (k.startsWith('hem')) return 'Hem-Fir';
-          if (k.startsWith('spruce') || k === 'spf') return 'Spruce-Pine-Fir';
-          return 'Douglas Fir-Larch';
-        })(),
-        panelCount: totalPanels,
-        panelLengthIn: arrayLayout.panelLengthIn,
-        panelWidthIn: arrayLayout.panelWidthIn,
-        panelWeightLbs: arrayLayout.panelWeightLbs,
-        panelOrientation: arrayLayout.orientation,
-        // Real design grid — drives railCount (2 × rowCount) and rail length so
-        // the attachment count reflects the actual array, not autoLayout's guess.
-        rowCount: arrayLayout.rowCount,
-        colCount: arrayLayout.colCount,
-        mountingSystemId: input.project.mountingSystemId || 'ironridge-xr100',
-        rackingWeightPerPanelLbs: 4,
-      };
+      // Single source (shared with the BOM): the V4 structural input, built
+      // deterministically from input + CAD + canonical site data. See
+      // buildStructuralInputForPermit — bomForPermit calls the SAME builder so
+      // the BOM's rail/clamp/bolt counts match these structural sheets.
+      const structInput = buildStructuralInputForPermit(input, cad, canonical);
       const structResult = runStructuralCalcV4(structInput);
       const ra = structResult.rafterAnalysis;
       const wa = structResult.wind;

@@ -239,6 +239,9 @@ export interface RackingBOM {
   endClamps: { qty: number; unit: string; description: string; partNumber: string };
   groundLugs: { qty: number; unit: string; description: string; partNumber: string };
   lagBolts: { qty: number; unit: string; description: string; partNumber: string };
+  // Rail-attachment (T-/carriage) bolts joining each mount/L-foot to the rail —
+  // distinct from lag bolts (mount→rafter). 0 for rail-less systems.
+  mountingBolts: { qty: number; unit: string; description: string; partNumber: string };
   flashingKits: { qty: number; unit: string; description: string; partNumber: string };
   bondingClips: { qty: number; unit: string; description: string; partNumber: string };
   ballastBlocks?: { qty: number; weightLbs: number; unit: string; description: string };
@@ -920,6 +923,10 @@ function calcRackingBOM(
   const lagBoltsPerMount = system.mount.fastenersPerMount;
   const lagBoltQty = mountQty * lagBoltsPerMount;
 
+  // ── Rail-attachment (T-/carriage) Bolts ───────────────────────────────
+  // One bolt joins each mount/L-foot to the rail. Rail-less/ballasted have none.
+  const mountingBoltQty = isRailBased ? mountQty : 0;
+
   // ── Flashing Kits ─────────────────────────────────────────────────────
   // Self-flashing pad standoffs (RT-MINI) carry integrated EPDM/butyl on the base
   // and take NO separate flashing kit — adding one double-bills the same seal.
@@ -937,9 +944,9 @@ function calcRackingBOM(
       lengthFt: railLengthFt,
       unit: 'ea',
       description: isRailBased
-        ? `${system.manufacturer} ${system.rail?.model} Rail — ${railLengthFt.toFixed(1)} ft each`
+        ? `${system.manufacturer} ${system.rail?.model ?? 'Compatible Rail'} — ${railLengthFt.toFixed(1)} ft each`
         : 'N/A — Rail-less or ballasted system',
-      partNumber: system.rail?.model ?? 'N/A',
+      partNumber: system.rail?.model ?? 'RAIL-COMPAT',
     },
     railSplices: {
       qty: totalSplices,
@@ -984,6 +991,14 @@ function calcRackingBOM(
         ? `${hw.lagBolt} (${lagBoltsPerMount} per mount × ${mountQty} mounts)`
         : 'N/A — No penetrations',
       partNumber: hw.lagBolt,
+    },
+    mountingBolts: {
+      qty: mountingBoltQty,
+      unit: 'ea',
+      description: mountingBoltQty > 0
+        ? `Rail T-bolt / mount-to-rail bolt (1 per mount × ${mountQty} mounts)`
+        : 'N/A — rail-less / ballasted',
+      partNumber: 'T-BOLT-38',
     },
     flashingKits: {
       qty: flashingQty,
@@ -1037,7 +1052,8 @@ function naRackingBOM(): RackingBOM {
     rails: { qty: 0, lengthFt: 0, unit: 'ea', description: 'N/A — SolFence sections (see fence BOM)', partNumber: 'N/A' },
     railSplices: z('N/A — fence'), mounts: z('N/A — fence'), lFeet: z('N/A — fence'),
     midClamps: z('N/A — fence'), endClamps: z('N/A — fence'), groundLugs: z('N/A — fence'),
-    lagBolts: z('N/A — fence'), flashingKits: z('N/A — fence'), bondingClips: z('N/A — fence'),
+    lagBolts: z('N/A — fence'), mountingBolts: z('N/A — fence'),
+    flashingKits: z('N/A — fence'), bondingClips: z('N/A — fence'),
   };
 }
 

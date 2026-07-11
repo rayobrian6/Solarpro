@@ -41,6 +41,9 @@ import {
 import { necNextStandardOcpd } from './helpers';
 import { buildConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
+import { buildCanonical } from './canonical';
+import { buildStructuralInputForPermit } from './structuralInput';
+import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -389,6 +392,27 @@ export function generateBOMForPermit(
   );
   log.push(`[bomForPermit] structural: ${structItems.length} items (${bomSystemType})`);
 
+  // Roof racking SINGLE SOURCE: re-derive the structural engine's real
+  // rackingBOM (rail count from real length, splices, clamps, lag + rail bolts)
+  // via the SAME builder generatePermit uses — so the BOM matches the structural
+  // sheets instead of guessing attachmentCount/railSections. Deterministic:
+  // buildCanonical + buildStructuralInputForPermit are pure functions of `input`.
+  let roofRackingBOM: import('@/lib/structural-engine-v4').RackingBOM | undefined;
+  let roofMountCount = 0;
+  let roofRowCount   = 0;
+  if (bomSystemType === 'roof') {
+    try {
+      const _canonical = buildCanonical(input);
+      const _sr = runStructuralCalcV4(buildStructuralInputForPermit(input, cad, _canonical));
+      roofRackingBOM = _sr.rackingBOM;
+      roofMountCount = _sr.mountLayout?.mountCount ?? 0;
+      roofRowCount   = _sr.arrayGeometry?.rowCount ?? 0;
+      log.push(`[bomForPermit] roof racking: ${roofMountCount} mounts, ${roofRackingBOM?.rails.qty ?? 0} rails, ${roofRackingBOM?.mountingBolts.qty ?? 0} rail bolts`);
+    } catch (e) {
+      log.push(`[bomForPermit] roof racking calc failed (using registry fallback): ${(e as Error).message}`);
+    }
+  }
+
   // ── 4. V4 BOM (electrical) ───────────────────────────────
   let v4Items: PermitBOMItem[] = [];
 
@@ -412,8 +436,12 @@ export function generateBOMForPermit(
         conduitType,
         conduitSizeInch:     conduitSize,
         roofType:            project.roofType || 'shingle',
-        attachmentCount:     project.attachmentCount || Math.ceil(totalPanels * 1.2),
-        railSections:        project.railSections   || Math.ceil(totalPanels / 2),
+        // Real structural-engine values (single source) with the old guesses as
+        // fallback only when the roof racking calc is unavailable.
+        attachmentCount:     roofMountCount || project.attachmentCount || Math.ceil(totalPanels * 1.2),
+        railSections:        roofRackingBOM?.rails.qty || project.railSections || Math.ceil(totalPanels / 2),
+        rowCount:            roofRowCount || undefined,
+        rackingBOM:          roofRackingBOM,
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,

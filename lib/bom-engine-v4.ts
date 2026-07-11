@@ -24,6 +24,7 @@ import { resolveIntegratedEquipment } from './equipment/integratedBos';
 import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
 
 import type { RunSegment } from './computed-system';
+import type { RackingBOM } from './structural-engine-v4';
 import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 // MASTER TASK: deriveStructuralBOM removed from V4 — now called in API route merge layer
 import type { BOMLineItemV4, BOMStageId, BOMSystemType } from './bom-types-v4';
@@ -77,6 +78,11 @@ export interface BOMGenerationInputV4 {
   roofType: string;
   attachmentCount: number;    // computed from layout
   railSections: number;       // computed from layout
+  // Real racking quantities from the structural engine (calcRackingBOM). When
+  // present (roof), Stage 5 emits rails/splices/mounts/clamps/lag+rail bolts
+  // FROM this single source instead of the registry accessory formulas — so the
+  // BOM matches the structural sheets. Absent (design-studio) → registry fallback.
+  rackingBOM?: RackingBOM;
 
   // Layout (Phase 3 - Future Layout Engine)
   rowCount?: number;          // number of rows in array layout
@@ -1078,49 +1084,79 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
       quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: rackingEntry.iccEsReport });
 
-    // Resolve all racking accessories
-    for (const acc of rackingEntry.requiredAccessories) {
-      // Check conditional
-      if (acc.conditional) {
-        const conditionMet = evaluateConditionBOM(acc.conditional, input.roofType);
-        if (!conditionMet) continue;
-      }
+    // Racking accessories — SINGLE SOURCE. When the structural engine's real
+    // rackingBOM is provided (roof), emit rails/splices/L-feet/clamps/lag+rail
+    // bolts/grounding from it so the BOM's rail COUNT + rail BOLTS match the
+    // structural sheets (calcRackingBOM derives them from real ArrayGeometry).
+    // Otherwise fall back to the registry accessory formulas (design-studio path).
+    if (input.rackingBOM && input.systemType === 'roof') {
+      const rb = input.rackingBOM;
+      const emitRB = (category: string, r: { qty: number; unit?: string; description: string; partNumber: string } | undefined, nec: string) => {
+        if (!r || r.qty <= 0) return;
+        items.push(addItem('structural', category, rackingEntry.manufacturer,
+          r.description, r.partNumber ?? 'TBD', r.description,
+          Math.ceil(r.qty), 'ea', nec, 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
+        log.push({ stageId: 'structural', category, item: r.partNumber,
+          quantity: Math.ceil(r.qty), derivedFrom: 'structuralEngine.rackingBOM',
+          formula: 'calcRackingBOM', necReference: nec });
+      };
+      // NB: rb.mounts (the pad/standoff) is covered by the racking "1 lot" line
+      // above, and rb.groundLugs is subsumed by the per-module bonding clips —
+      // both omitted here to avoid double-counting.
+      emitRB('rail', rb.rails, 'IBC 2021');
+      emitRB('splice', rb.railSplices, 'IBC 2021');
+      emitRB('l_foot', rb.lFeet, 'ASCE 7-22');
+      emitRB('lag_bolt', rb.lagBolts, 'ASCE 7-22');
+      emitRB('mount_hardware', rb.mountingBolts, 'IBC 2021');
+      emitRB('mid_clamp', rb.midClamps, 'IBC 2021');
+      emitRB('end_clamp', rb.endClamps, 'IBC 2021');
+      emitRB('flashing', rb.flashingKits, 'IBC 2021');
+      emitRB('grounding', rb.bondingClips, 'UL 2703');
+    } else {
+      // Resolve all racking accessories (registry formulas — design-studio fallback)
+      for (const acc of rackingEntry.requiredAccessories) {
+        // Check conditional
+        if (acc.conditional) {
+          const conditionMet = evaluateConditionBOM(acc.conditional, input.roofType);
+          if (!conditionMet) continue;
+        }
 
-      let qty = 1;
-      if (acc.quantityRule === 'formula' && acc.quantityFormula) {
-        qty = evaluateQuantityFormulaV4(acc.quantityFormula, {
-          ...formulaCtx,
-          attachments: input.attachmentCount,
-          railSections: input.railSections,
-        });
-      } else if (acc.quantityRule === 'perModule') {
-        qty = input.moduleCount;
-      } else if (acc.quantityRule === 'perString') {
-        qty = input.stringCount;
-      } else if (acc.quantityRule === 'perAttachment') {
-        qty = input.attachmentCount;
-      } else if (acc.quantityRule === 'perSystem') {
-        qty = 1;
-      }
+        let qty = 1;
+        if (acc.quantityRule === 'formula' && acc.quantityFormula) {
+          qty = evaluateQuantityFormulaV4(acc.quantityFormula, {
+            ...formulaCtx,
+            attachments: input.attachmentCount,
+            railSections: input.railSections,
+          });
+        } else if (acc.quantityRule === 'perModule') {
+          qty = input.moduleCount;
+        } else if (acc.quantityRule === 'perString') {
+          qty = input.stringCount;
+        } else if (acc.quantityRule === 'perAttachment') {
+          qty = input.attachmentCount;
+        } else if (acc.quantityRule === 'perSystem') {
+          qty = 1;
+        }
 
-      if (acc.quantityMultiplier) qty *= acc.quantityMultiplier;
-      qty = Math.ceil(qty);
+        if (acc.quantityMultiplier) qty *= acc.quantityMultiplier;
+        qty = Math.ceil(qty);
 
-      if (qty > 0) {
-        items.push(addItem('structural', acc.category,
-          acc.defaultManufacturer ?? rackingEntry.manufacturer,
-          acc.defaultModel ?? acc.description,
-          acc.defaultPartNumber ?? 'TBD',
-          acc.description,
-          qty, 'ea', acc.necReference ?? 'IBC 2021',
-          acc.quantityFormula ?? acc.quantityRule,
-          acc.quantityFormula ?? acc.quantityRule,
-          acc.required));
-        log.push({ stageId: 'structural', category: acc.category,
-          item: acc.defaultModel ?? acc.description, quantity: qty,
-          derivedFrom: acc.quantityFormula ?? acc.quantityRule,
-          formula: acc.quantityFormula ?? acc.quantityRule,
-          necReference: acc.necReference });
+        if (qty > 0) {
+          items.push(addItem('structural', acc.category,
+            acc.defaultManufacturer ?? rackingEntry.manufacturer,
+            acc.defaultModel ?? acc.description,
+            acc.defaultPartNumber ?? 'TBD',
+            acc.description,
+            qty, 'ea', acc.necReference ?? 'IBC 2021',
+            acc.quantityFormula ?? acc.quantityRule,
+            acc.quantityFormula ?? acc.quantityRule,
+            acc.required));
+          log.push({ stageId: 'structural', category: acc.category,
+            item: acc.defaultModel ?? acc.description, quantity: qty,
+            derivedFrom: acc.quantityFormula ?? acc.quantityRule,
+            formula: acc.quantityFormula ?? acc.quantityRule,
+            necReference: acc.necReference });
+        }
       }
     }
   }
