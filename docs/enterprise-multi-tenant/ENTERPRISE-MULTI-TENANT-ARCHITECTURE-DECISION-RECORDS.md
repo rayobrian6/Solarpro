@@ -2,17 +2,24 @@
 
 **Document Type:** Architecture Decision Records (ADR-001 through ADR-014)
 **Phase:** 0.5 — Architecture Decision Gate (Read-Only)
-**Date:** 2025-07-11
-**Branch:** `dev` @ `7b344aa1`
-**Status:** Complete — All 14 ADRs documented
+**Date:** 2026-07-11
+**Date Classification:** Document creation date (2026-07-11). Per-ADR dates (2026-07-11) are architecture decision dates. Evidence baseline commit `7b344aa1` is dated 2026-07-11 (commit date). Phase 0 predecessor commit `39a1f718` is dated 2026-07-11 (commit date). This reconciliation commit is dated 2026-07-11 (document correction date). The previous incorrect value of 2025-07-11 has been corrected — no Phase 0.5 work occurred in 2025.
+**Branch:** `dev` @ `ef51acff`
+**Branch Reference Classification:** `ef51acff` is the Phase 0.5 documentation commit (this document and its companion Phase 0.5 deliverables). The codebase evidence baseline is `7b344aa1` (a code commit, not a documentation commit) — referenced where source evidence is cited.
+**Status:** Complete — All 14 ADRs documented (architecture analysis COMPLETE; documentation integrity reconciliation IN PROGRESS; stakeholder approval PENDING)
 **Predecessor:** Phase 0 Audit & Architecture Design (commit `39a1f718`)
+
+---
+
+> **Placeholder Definition — NEXT_ENTERPRISE_AUTHORITY_MIGRATION:** Throughout this document, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` is a placeholder for the next verified available migration identifier. It CANNOT be assigned a numeric value at this time because the migration directory (`lib/migrations/`) has a duplicate prefix (074 appears twice) and gaps in the numbering sequence (009, 012, 013, 014 missing). The highest existing migration prefix is 104. The numeric identifier must be determined by a migration sequence reconciliation process before any migration file is created. This placeholder refers to the first resource ownership schema migration (adding org-level columns to existing resource tables such as `projects.organization_id`), which is PROHIBITED until all 15 Phase 1 entry gates pass and Raymond approves. See `ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md` for the full migration directory state analysis.
 
 ---
 
 ## ADR-001: Membership Cardinality — Many-to-Many Organization Memberships
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -52,7 +59,7 @@ This single-membership model creates a hard ceiling on enterprise use cases: a c
 
 ### Decision
 
-**APPROVED: Option B — Many-to-many organization memberships via `organization_members` junction table.**
+**RECOMMENDED: Option B — Many-to-many organization memberships via `organization_members` junction table.**
 
 The junction table will have the following structure:
 
@@ -78,9 +85,9 @@ The existing `users.org_id` column will be retained during migration as a backwa
 
 ### Security Impact
 
-- **Mitigates:** F-10 (one-org limit), T-18 (member removal leaves resources accessible — junction table tracks `removed_at`/`removed_by`), T-12 (member removal has no audit trail — `removed_by` and `removed_at` provide the audit trail).
-- **Introduces:** Need for active-org validation on every request (mitigated by D-02); need for membership status enforcement (suspended members must be denied).
-- **Residual risk:** Race condition between membership removal and in-flight requests — mitigated by D-02's per-request server-side validation.
+- **Architecturally addresses:** F-10 (one-org limit), T-18 (member removal leaves resources accessible — junction table tracks `removed_at`/`removed_by`), T-12 (member removal has no audit trail — `removed_by` and `removed_at` provide the audit trail).
+- **Introduces:** Need for active-org validation on every request (addressed by D-02); need for membership status enforcement (suspended members must be denied).
+- **Residual risk:** Race condition between membership removal and in-flight requests — addressed by D-02's per-request server-side validation.
 
 ### Data Model Impact
 
@@ -112,7 +119,7 @@ The existing `users.org_id` column will be retained during migration as a backwa
 
 ### Migration Impact
 
-- Migration 101 (PROHIBITED until entry gates met) will create `organization_members`, `org_roles`, `org_role_permissions`.
+- NEXT_ENTERPRISE_AUTHORITY_MIGRATION (PROHIBITED until entry gates met) will create `organization_members`, `org_roles`, `org_role_permissions`.
 - Backfill: for each user with non-null `org_id`, insert a row into `organization_members` with the same org, role mapped from `org_role`, and `status = 'active'`.
 - `users.org_id` and `users.org_role` remain for backward compatibility during Phase 1 dual-read period.
 
@@ -145,8 +152,9 @@ No — evidence is sufficient. The default recommendation (many-to-many membersh
 
 ## ADR-002: Active Organization Context — Server-Side Resolution with Per-Request Validation
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -180,7 +188,7 @@ With many-to-many memberships (D-01), the system must know which org the user is
 **Option B: Server-Side Resolution from Persisted Preference**
 - Store active org in a `user_active_org` table (user_id, org_id, set_at); resolve on every request by querying the membership.
 - Pro: Always fresh; no stale token; membership validation is implicit; aligns with P3 (server is authoritative).
-- Con: One extra DB query per request (mitigated by connection pooling and caching).
+- Con: One extra DB query per request (addressed by connection pooling and caching).
 
 **Option C: Signed Token (Separate from JWT)**
 - Issue a short-lived signed token carrying `active_org_id`; store in a separate cookie.
@@ -194,7 +202,7 @@ With many-to-many memberships (D-01), the system must know which org the user is
 
 ### Decision
 
-**APPROVED: Option B — Server-side resolution from persisted `user_active_org` table with per-request membership validation.**
+**RECOMMENDED: Option B — Server-side resolution from persisted `user_active_org` table with per-request membership validation.**
 
 The active org is stored in a `user_active_org` table and resolved server-side on every request. The resolution function (`resolveActiveOrg(userId)`) queries the user's active org preference and validates it against `organization_members` (active membership). If the user is not an active member of the stored active org, the system falls back to the user's default org (the first active membership) or returns null if no active memberships exist.
 
@@ -206,9 +214,9 @@ Option B aligns with the existing security architecture: SolarPro already fetche
 
 ### Security Impact
 
-- **Mitigates:** T-04 (token replay across tenants — org is validated server-side, not from token), T-17 (no active company context — server resolves it), F-01 (JWT has no tenant context — org is resolved server-side), F-20 (no active company context — `user_active_org` provides it).
-- **Introduces:** Need to handle "no active org" state gracefully (user with no memberships). Mitigated by redirecting to org selection page.
-- **Residual risk:** TOCTOU between membership check and data access — mitigated by D-03's RLS defense-in-depth on critical tables.
+- **Architecturally addresses:** T-04 (token replay across tenants — org is validated server-side, not from token), T-17 (no active company context — server resolves it), F-01 (JWT has no tenant context — org is resolved server-side), F-20 (no active company context — `user_active_org` provides it).
+- **Introduces:** Need to handle "no active org" state gracefully (user with no memberships). Addressed by redirecting to org selection page.
+- **Residual risk:** TOCTOU between membership check and data access — addressed by D-03's RLS defense-in-depth on critical tables.
 
 ### Data Model Impact
 
@@ -235,7 +243,7 @@ Option B aligns with the existing security architecture: SolarPro already fetche
 
 ### Migration Impact
 
-- Migration 101 creates `user_active_org` table.
+- NEXT_ENTERPRISE_AUTHORITY_MIGRATION creates `user_active_org` table.
 - Backfill: for each user with non-null `org_id`, insert into `user_active_org` with the same org_id.
 - No change to JWT signing — the JWT remains identity-only.
 
@@ -268,8 +276,9 @@ No — evidence is sufficient. The existing pattern of server-side role resoluti
 
 ## ADR-003: Database Isolation Strategy — Hybrid Application Authorization + Selective Row-Level Security
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -319,7 +328,7 @@ The Neon serverless HTTP driver creates a complication for RLS: traditional RLS 
 
 ### Decision
 
-**APPROVED: Option C — Hybrid: application-level authorization as primary enforcement; selective RLS as defense-in-depth on highest-sensitivity tables via transaction-wrapped `SET LOCAL`.**
+**RECOMMENDED: Option C — Hybrid: application-level authorization as primary enforcement; selective RLS as defense-in-depth on highest-sensitivity tables via transaction-wrapped `SET LOCAL`.**
 
 ### Rationale
 
@@ -331,9 +340,9 @@ The selective RLS approach targets the tables where a missed filter has the high
 
 ### Security Impact
 
-- **Mitigates:** T-03 (no RLS — selective RLS provides defense-in-depth on critical tables), F-04 (zero RLS — RLS is introduced on critical tables).
+- **Architecturally addresses:** T-03 (no RLS — selective RLS provides defense-in-depth on critical tables), F-04 (zero RLS — RLS is introduced on critical tables).
 - **Introduces:** Need for transaction-wrapping on critical-table queries; need for a `BYPASSRLS` database role for admin/support routes; potential for RLS policy misconfiguration.
-- **Residual risk:** Non-critical tables without RLS still rely on app filtering — mitigated by FK cascades and the centralized authorization guard (D-14).
+- **Residual risk:** Non-critical tables without RLS still rely on app filtering — addressed by FK cascades and the centralized authorization guard (D-14).
 
 ### Data Model Impact
 
@@ -367,7 +376,7 @@ The selective RLS approach targets the tables where a missed filter has the high
 
 ### Migration Impact
 
-- Migration 101: Add `owner_organization_id` columns to critical tables; enable RLS; create policies; create `solarpro_bypass` role.
+- NEXT_ENTERPRISE_AUTHORITY_MIGRATION: Add `owner_organization_id` columns to critical tables; enable RLS; create policies; create `solarpro_bypass` role.
 - Migration is additive — no existing data is lost; RLS policies default to permissive during the dual-read period.
 
 ### Testing Requirements
@@ -400,8 +409,9 @@ No — evidence is sufficient. P7 explicitly calls for hybrid isolation, and the
 
 ## ADR-004: Platform Roles vs Organization Roles — Separate Namespaces
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -447,7 +457,7 @@ The collision is that `admin` is used both as a platform-level role (in `users.r
 
 ### Decision
 
-**APPROVED: Option B — Separate namespaces. Platform roles in `users.role` (super_admin, staff, user); organization roles in `org_roles` + `organization_members.role_id` (owner, admin, member, viewer).**
+**RECOMMENDED: Option B — Separate namespaces. Platform roles in `users.role` (super_admin, staff, user); organization roles in `org_roles` + `organization_members.role_id` (owner, admin, member, viewer).**
 
 ### Rationale
 
@@ -457,9 +467,9 @@ The existing `admin` role in `users.role` is actually a platform-level role (it 
 
 ### Security Impact
 
-- **Mitigates:** T-10 (role constraint conflict — separate namespaces eliminate collision), F-17 (role constraint conflict — platform roles and org roles are clearly distinguished), F-11 (only two org roles — four system org roles introduced).
+- **Architecturally addresses:** T-10 (role constraint conflict — separate namespaces architecturally address the collision; IMPLEMENTATION PENDING in Phase 1 Gate 3), F-17 (role constraint conflict — platform roles and org roles are clearly distinguished), F-11 (only two org roles — four system org roles introduced).
 - **Introduces:** Authorization logic must check both platform role and org role (e.g., `isPlatformStaff(user.role) || hasOrgPermission(activeOrgId, user.id, 'projects:write')`).
-- **Residual risk:** Complexity of dual-role checks — mitigated by centralized authorization guard (D-14).
+- **Residual risk:** Complexity of dual-role checks — addressed by centralized authorization guard (D-14).
 
 ### Data Model Impact
 
@@ -490,7 +500,7 @@ The existing `admin` role in `users.role` is actually a platform-level role (it 
 
 ### Migration Impact
 
-- Migration 101: Create `org_roles`, `org_role_permissions` tables; add CHECK constraint on `users.role`; backfill four system org roles.
+- NEXT_ENTERPRISE_AUTHORITY_MIGRATION: Create `org_roles`, `org_role_permissions` tables; add CHECK constraint on `users.role`; backfill four system org roles.
 - Map existing `users.role = 'admin'` → `super_admin` (if `is_free_pass = true`) or `staff` (if not).
 - Map existing `users.org_role = 'owner'` → org_roles 'owner'; `'member'` → org_roles 'member'.
 
@@ -522,8 +532,9 @@ No — evidence is sufficient. P5 mandates separate namespaces, and the codebase
 
 ## ADR-005: Project Collaboration Model — Owning Org + Explicit Participants + Permission Envelope
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -571,9 +582,9 @@ Option A was rejected because it violates P1 and does not scale. Option B was re
 
 ### Security Impact
 
-- **Threats mitigated:** T-01 (IDOR) — org-scoped queries replace user-scoped queries, reducing the attack surface from per-user to per-org with explicit participant grants. T-02 (admin global exposure) — admin routes must add org filtering unless the actor is a platform super_admin. T-18 (member removal leaves resources) — resources remain owned by the org even after a member departs; no orphaned user-owned data.
+- **Threats architecturally addressed:** T-01 (IDOR) — org-scoped queries replace user-scoped queries, reducing the attack surface from per-user to per-org with explicit participant grants. T-02 (admin global exposure) — admin routes must add org filtering unless the actor is a platform super_admin. T-18 (member removal leaves resources) — resources remain owned by the org even after a member departs; no orphaned user-owned data.
 - **Threats introduced:** None directly. The participant model introduces a new access path, but it is explicit and permission-gated.
-- **Residual risk:** If a participant org is invited with edit permission, a malicious member of that org could modify the owning org's project data. Mitigated by the permission envelope (minimum necessary access) and audit logging (D-013).
+- **Residual risk:** If a participant org is invited with edit permission, a malicious member of that org could modify the owning org's project data. Addressed by the permission envelope (minimum necessary access) and audit logging (D-013).
 
 ### Data Model Impact
 
@@ -601,7 +612,7 @@ Projects and their resources are attributed to the owning org for billing purpos
 
 ### Migration Impact
 
-This is a Phase 1+ migration (NOT Migration 101). The `organization_id` column and `project_participants` table are additive. Backfill is required to assign existing projects to an org (per D-009). The backfill must handle users with no org (legacy single-user accounts) — these are assigned to an auto-provisioned personal org.
+This is a Phase 1+ migration (NOT NEXT_ENTERPRISE_AUTHORITY_MIGRATION). The `organization_id` column and `project_participants` table are additive. Backfill is required to assign existing projects to an org (per D-009). The backfill must handle users with no org (legacy single-user accounts) — these are assigned to an auto-provisioned personal org.
 
 ### Testing Requirements
 
@@ -635,8 +646,9 @@ No — evidence is sufficient. The current user-scoped model is verified in `lib
 
 ## ADR-006: Resource Share Grants — Revision-Pinned, No Reshare, No Future Revisions
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -678,9 +690,9 @@ This aligns with P4 (Permission-First Authorization) — every access requires a
 
 ### Security Impact
 
-- **Threats mitigated:** T-07 (public blob URLs) — share grants require server-side access resolution; blob URLs are no longer public (per D-007). T-01 (IDOR) — share grants are explicit and revision-pinned, reducing the blast radius of any single grant. Privilege escalation — no reshare prevents a low-privilege grantee from creating broader access.
-- **Threats introduced:** If revision pinning is implemented incorrectly (e.g., the revision_id is not enforced at access time), a grantee could access unintended revisions. Mitigated by mandatory access-resolution tests.
-- **Residual risk:** A grant with no expiry persists indefinitely. Mitigated by requiring an expiry for external (non-org) grantees and by the revocation mechanism.
+- **Threats architecturally addressed:** T-07 (public blob URLs) — share grants require server-side access resolution; blob URLs are no longer public (per D-007). T-01 (IDOR) — share grants are explicit and revision-pinned, reducing the blast radius of any single grant. Privilege escalation — no reshare prevents a low-privilege grantee from creating broader access.
+- **Threats introduced:** If revision pinning is implemented incorrectly (e.g., the revision_id is not enforced at access time), a grantee could access unintended revisions. Addressed by mandatory access-resolution tests.
+- **Residual risk:** A grant with no expiry persists indefinitely. Addressed by requiring an expiry for external (non-org) grantees and by the revocation mechanism.
 
 ### Data Model Impact
 
@@ -741,8 +753,9 @@ No — evidence is sufficient. The absence of any share mechanism and the public
 
 ## ADR-007: Files and Revisions — Private Tenant-Prefixed Storage, DB-Backed Records, Immutable Revisions, Signed URLs
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -784,9 +797,9 @@ Option A was rejected because it leaves the blob publicly accessible — defense
 
 ### Security Impact
 
-- **Threats mitigated:** T-07 (public blob URLs) — ELIMINATED. Files are private; access requires authorization + signed URL. T-15 (cache leaks) — signed URLs have short TTLs, reducing cache-leak exposure. T-03 (no RLS) — storage isolation complements DB isolation; even if a DB query leaks, the file requires a separate authorization check.
-- **Threats introduced:** Signed URL infrastructure must be implemented correctly — a broken signing mechanism could either deny legitimate access or grant access to unauthorized users. Mitigated by mandatory signing tests and key rotation procedures.
-- **Residual risk:** Signed URLs, once generated, are valid for their TTL regardless of subsequent authorization changes (e.g., if a user's org membership is revoked mid-TTL, the signed URL remains valid until expiry). Mitigated by short TTLs (5 minutes) and by requiring re-authorization for subsequent access.
+- **Threats architecturally addressed:** T-07 (public blob URLs) — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). The architecture specifies private storage with org-prefixed paths and signed URLs; current code uses `access: 'public'` — the migration to private storage is Phase 2 implementation work. T-15 (cache leaks) — NOT CURRENTLY APPLICABLE. Upstash Redis is used for rate-limiting only; no tenant-sensitive data is cached in Redis. The signed URL TTL concern is a storage-access concern, not a cache concern. T-03 (no RLS) — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). Storage isolation complements DB isolation; even if a DB query leaks, the file requires a separate authorization check — but this requires Phase 2 storage migration to implement.
+- **Threats introduced:** Signed URL infrastructure must be implemented correctly — a broken signing mechanism could either deny legitimate access or grant access to unauthorized users. Addressed by mandatory signing tests and key rotation procedures.
+- **Residual risk:** Signed URLs, once generated, are valid for their TTL regardless of subsequent authorization changes (e.g., if a user's org membership is revoked mid-TTL, the signed URL remains valid until expiry). Addressed by short TTLs (5 minutes) and by requiring re-authorization for subsequent access.
 
 ### Data Model Impact
 
@@ -847,8 +860,9 @@ No — evidence is sufficient. The public blob URLs and lack of revision trackin
 
 ## ADR-008: Billing Attribution — Server-Authoritative, Organization-Level Billing
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Date:** 2026-07-11
 
 ### Context
 
@@ -885,15 +899,15 @@ Billing is attributed to the organization, not to individual users. A `stripe_cu
 
 ### Rationale
 
-Org-level billing aligns with P1 (the org owns its business data, including its billing relationship) and P5 (billing is a tenant concern). It eliminates the owner-departure billing disruption: the subscription lives on the org, not on a user. Server-authoritative attribution satisfies P3 (Default Deny) — no client can charge a different org's Stripe customer.
+Org-level billing aligns with P1 (the org owns its business data, including its billing relationship) and P5 (billing is a tenant concern). It architecturally addresses the owner-departure billing disruption: the subscription lives on the org, not on a user (IMPLEMENTATION PENDING — the migration from per-user to per-org Stripe customers is Phase 2 work requiring Raymond's approval per ADR-008). Server-authoritative attribution satisfies P3 (Default Deny) — no client can charge a different org's Stripe customer.
 
 Option A was rejected because it creates operational fragility (subscription transfers) and does not establish org-level billing identity. Option C was rejected for initial implementation complexity — metered usage can be added in a future phase.
 
 ### Security Impact
 
-- **Threats mitigated:** T-08 (audit log no org context) — billing events are now org-attributed, improving audit traceability. Cross-tenant billing confusion — server-authoritative attribution prevents a user from charging another org's customer.
-- **Threats introduced:** If the active org context (D-002) is compromised or spoofed, billing could be misattributed. Mitigated by D-002's server-side validation and P3 (no client-supplied org IDs for billing).
-- **Residual risk:** Legacy per-user subscriptions (existing users with `stripe_subscription_id` on their `users` row) must be migrated to org-level customers. This migration has a window of risk (double-billing or billing gaps). Mitigated by a carefully sequenced migration (D-014) and Stripe-side coordination.
+- **Threats architecturally addressed:** T-08 (audit log no org context) — billing events are now org-attributed, improving audit traceability. Cross-tenant billing confusion — server-authoritative attribution prevents a user from charging another org's customer.
+- **Threats introduced:** If the active org context (D-002) is compromised or spoofed, billing could be misattributed. Addressed by D-002's server-side validation and P3 (no client-supplied org IDs for billing).
+- **Residual risk:** Legacy per-user subscriptions (existing users with `stripe_subscription_id` on their `users` row) must be migrated to org-level customers. This migration has a window of risk (double-billing or billing gaps). Addressed by a carefully sequenced migration (D-014) and Stripe-side coordination.
 
 ### Data Model Impact
 
@@ -955,8 +969,9 @@ Yes — the subscription migration from per-user to per-org Stripe customers inv
 
 ## ADR-009: Legacy Ownership Migration — No Free-Text Auto-Merging, Ambiguity Queue
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Date:** 2026-07-11
 
 ### Context
 
@@ -998,9 +1013,9 @@ This aligns with P3 (Default Deny) — no automatic ownership change without ver
 
 ### Security Impact
 
-- **Threats mitigated:** Data corruption from incorrect merging — ELIMINATED. Cross-tenant data leakage from auto-merging unrelated companies — ELIMINATED. T-13 (ON DELETE SET NULL orphans) — every resource gets an owner (personal org fallback), so no orphaned data even for users who never joined an org.
+- **Threats architecturally addressed:** Data corruption from incorrect merging — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). The architecture prohibits auto-merging; the no-merge strategy must be implemented in the backfill script (Gate 13). Cross-tenant data leakage from auto-merging unrelated companies — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). The ambiguity queue and personal org fallback prevent auto-merging; implementation is Phase 1 Gate 13/14. T-13 (ON DELETE SET NULL orphans) — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). Every resource gets an owner (personal org fallback), so no orphaned data even for users who never joined an org — but this requires the backfill script execution (Gate 13).
 - **Threats introduced:** None. The ambiguity queue is a manual review tool, not an automated action.
-- **Residual risk:** Personal orgs for users who actually belong to a shared company will exist until the ambiguity queue is processed. This is a data hygiene issue, not a security issue. Mitigated by prompt review of the ambiguity queue.
+- **Residual risk:** Personal orgs for users who actually belong to a shared company will exist until the ambiguity queue is processed. This is a data hygiene issue, not a security issue. Addressed by prompt review of the ambiguity queue.
 
 ### Data Model Impact
 
@@ -1026,7 +1041,7 @@ Personal orgs created by the fallback will need a billing setup (per D-008). If 
 
 ### Migration Impact
 
-This IS a migration decision. It defines the backfill strategy for Phase 1. The backfill is executed as part of the Phase 1 migration sequence (D-014). It is NOT Migration 101 (which is prohibited until entry gates are met per D-014).
+This IS a migration decision. It defines the backfill strategy for Phase 1. The backfill is executed as part of the Phase 1 migration sequence (D-014). It is NOT NEXT_ENTERPRISE_AUTHORITY_MIGRATION (which is prohibited until entry gates are met per D-014).
 
 ### Testing Requirements
 
@@ -1060,8 +1075,9 @@ Yes — the backfill strategy affects every existing user's data ownership. Raym
 
 ## ADR-010: Ownership Transfer — Formal, Audited, Both Sides Approve
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Date:** 2026-07-11
 
 ### Context
 
@@ -1104,9 +1120,9 @@ This aligns with P1 (Organizations Own Business Data — ownership changes are e
 
 ### Security Impact
 
-- **Threats mitigated:** T-12 (member removal no audit) — transfers are fully audited. T-18 (member removal leaves resources) — formal transfer ensures resources have a clear new owner. Unauthorized transfers — bilateral approval prevents a single compromised account from transferring ownership.
-- **Threats introduced:** If the transfer request/acceptance flow is not properly secured (e.g., the acceptance endpoint does not verify the receiving org's admin), a malicious actor could accept transfers on behalf of an org. Mitigated by requiring the receiving org's admin authorization (D-004) and by audit logging.
-- **Residual risk:** A transfer request that is never accepted or rejected leaves resources in a pending state. Mitigated by request expiry (auto-reject after N days) and by allowing the initiating org to cancel.
+- **Threats architecturally addressed:** T-12 (member removal no audit) — transfers are fully audited. T-18 (member removal leaves resources) — formal transfer ensures resources have a clear new owner. Unauthorized transfers — bilateral approval prevents a single compromised account from transferring ownership.
+- **Threats introduced:** If the transfer request/acceptance flow is not properly secured (e.g., the acceptance endpoint does not verify the receiving org's admin), a malicious actor could accept transfers on behalf of an org. Addressed by requiring the receiving org's admin authorization (D-004) and by audit logging.
+- **Residual risk:** A transfer request that is never accepted or rejected leaves resources in a pending state. Addressed by request expiry (auto-reject after N days) and by allowing the initiating org to cancel.
 
 ### Data Model Impact
 
@@ -1172,8 +1188,9 @@ Yes — ownership transfer affects data custody and billing. Raymond must approv
 
 ## ADR-011: Parent/Subsidiary Organizations — Design for Future, No Auto-Inheritance
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -1214,9 +1231,9 @@ Option A was rejected because automatic inheritance adds significant complexity 
 
 ### Security Impact
 
-- **Threats mitigated:** None directly — this is a metadata-only addition. However, by explicitly NOT implementing automatic inheritance, we avoid the threat of unintended access cascading from a parent to a subsidiary (which would be a new cross-tenant access path).
+- **Threats architecturally addressed:** None directly — this is a metadata-only addition. However, by explicitly NOT implementing automatic inheritance, we avoid the threat of unintended access cascading from a parent to a subsidiary (which would be a new cross-tenant access path).
 - **Threats introduced:** None — `parent_org_id` is metadata only; no access, billing, or storage logic uses it.
-- **Residual risk:** If a future phase implements inheritance incorrectly, it could create unintended cross-tenant access. Mitigated by requiring a separate ADR for any inheritance feature and by the explicit no-inheritance default in Phase 1.
+- **Residual risk:** If a future phase implements inheritance incorrectly, it could create unintended cross-tenant access. Addressed by requiring a separate ADR for any inheritance feature and by the explicit no-inheritance default in Phase 1.
 
 ### Data Model Impact
 
@@ -1278,8 +1295,9 @@ No — evidence is sufficient. The flat org model is verified. The decision (met
 
 ## ADR-012: Support Access and Impersonation — Time-Limited, Break-Glass, Tenant-Aware
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Date:** 2026-07-11
 
 ### Context
 
@@ -1305,7 +1323,7 @@ The Phase 0 Threat Model rates T-05 (impersonation cross-tenant) as CRITICAL: "I
 
 **Option A: Keep current impersonation, add same-org validation.** Require that the admin's org matches the target user's org before allowing impersonation. This fixes T-05 for org-scoped admins but does not address platform-level support (a platform super_admin needs to support any org). It also does not address the 1-hour unbounded session or the lack of break-glass revocation.
 
-**Option B: Time-limited impersonation with tenant-aware scoping and break-glass revocation.** Impersonation is a break-glass operation: (1) the admin must specify a reason and a duration (max 30 minutes); (2) the admin must be authorized to support the target user's org (platform super_admin can support any org; org-scoped admins can only impersonate within their org); (3) the impersonation session is time-limited and can be revoked at any time; (4) every impersonation action is fully audited with the admin's identity, the target's identity, the reason, and the duration; (5) the target user is notified (email) that their account was accessed by support. This satisfies P5 (platform authority and tenant authority are separate — platform super_admin can support any org, but the action is audited and notified) and P4 (permission-first — impersonation is an explicit, reason-coded, time-limited grant).
+**Option B: Time-limited impersonation with tenant-aware scoping and break-glass revocation.** Impersonation is a break-glass operation with a tiered duration model: (1) the admin must specify a reason and a duration — Normal sessions: default 30 minutes, maximum 4 hours; Break-glass sessions: default 15 minutes, maximum 30 minutes; Extended sessions (>30 minutes) require customer approval; (2) the admin must be authorized to support the target user's org (platform super_admin can support any org; org-scoped admins can only impersonate within their org); (3) the impersonation session is time-limited and can be revoked at any time; (4) every impersonation action is fully audited with the admin's identity, the target's identity, the reason, and the duration; (5) the target user is notified (email) that their account was accessed by support. This satisfies P5 (platform authority and tenant authority are separate — platform super_admin can support any org, but the action is audited and notified) and P4 (permission-first — impersonation is an explicit, reason-coded, time-limited grant).
 
 **Option C: Remove impersonation entirely, use read-only support dashboard.** Instead of impersonating users, support staff use a read-only dashboard that displays the user's data without creating a session. This is the most restrictive option but severely limits support's ability to reproduce user-reported issues (which often require interacting with the UI as the user).
 
@@ -1313,19 +1331,19 @@ The Phase 0 Threat Model rates T-05 (impersonation cross-tenant) as CRITICAL: "I
 
 **Option B — Time-limited, tenant-aware, break-glass impersonation with revocation and notification.**
 
-Impersonation is restructured as a formal break-glass operation. The admin specifies a reason and a maximum duration (default 15 minutes, max 30 minutes). The session JWT includes `_impersonated: true`, `_adminId`, `_impersonationReason`, `_impersonationExpiresAt` (a hard expiry timestamp). The middleware checks `_impersonationExpiresAt` on every request and terminates the session if expired. The admin (or another platform admin) can revoke an active impersonation session at any time. The target user receives an email notification. Every impersonation session and every action within it is fully audited (D-013). The dev auth bypass (T-06) is additionally constrained: it is disabled in production (already verified in `lib/dev-auth.ts`), and Phase 0.5 recommends adding an explicit audit event when dev bypass is used in non-production environments.
+Impersonation is restructured as a formal break-glass operation with a tiered duration model. The admin specifies a reason and a duration according to the session type: Normal sessions have a default of 30 minutes and a maximum of 4 hours; Break-glass (emergency) sessions have a default of 15 minutes and a maximum of 30 minutes; Extended sessions exceeding 30 minutes require explicit customer approval. The session JWT includes `_impersonated: true`, `_adminId`, `_impersonationReason`, `_impersonationExpiresAt` (a hard expiry timestamp). The middleware checks `_impersonationExpiresAt` on every request and terminates the session if expired. The admin (or another platform admin) can revoke an active impersonation session at any time. The target user receives an email notification. Every impersonation session and every action within it is fully audited (D-013). The dev auth bypass (T-06) is additionally constrained: it is disabled in production (already verified in `lib/dev-auth.ts`), and Phase 0.5 recommends adding an explicit audit event when dev bypass is used in non-production environments.
 
 ### Rationale
 
-Break-glass impersonation balances support effectiveness with security. The time limit (max 30 minutes) ensures that impersonation sessions do not persist indefinitely. The reason requirement creates an auditable record of why support accessed the account. The email notification provides transparency to the affected user. The revocation mechanism allows immediate termination if misuse is detected. The tenant-aware scoping ensures that org-scoped admins cannot impersonate cross-tenant, while platform super_admins retain the ability to support any org (with full auditing).
+Break-glass impersonation balances support effectiveness with security. The tiered duration model (Normal: 30 min default, 4 hr max; Break-glass: 15 min default, 30 min max; Extended >30 min requires customer approval) ensures that impersonation sessions do not persist indefinitely and that emergency access is short-lived. The reason requirement creates an auditable record of why support accessed the account. The email notification provides transparency to the affected user. The revocation mechanism allows immediate termination if misuse is detected. The tenant-aware scoping ensures that org-scoped admins cannot impersonate cross-tenant, while platform super_admins retain the ability to support any org (with full auditing).
 
 This aligns with P5 (platform authority and tenant authority are separate — the scoping rules distinguish platform super_admin from org admin), P4 (permission-first — impersonation is an explicit, reason-coded grant), and P3 (default deny — no impersonation without explicit authorization and reason).
 
 ### Security Impact
 
-- **Threats mitigated:** T-05 (impersonation cross-tenant) — org-scoped admins are restricted to their own org; platform super_admin impersonation is time-limited, reason-coded, notified, and audited. T-06 (dev auth bypass) — already disabled in production; Phase 0.5 recommends audit logging for dev bypass usage in non-production. T-08 (audit log no org context) — impersonation events are fully audited with org context (D-013).
-- **Threats introduced:** The email notification system must be reliable — if notifications fail silently, users would not be informed of support access. Mitigated by requiring notification delivery confirmation (or at minimum, logging the notification attempt). The revocation mechanism must be real-time — if revocation is delayed, a revoked session could continue operating. Mitigated by middleware checking a revocation flag on every request.
-- **Residual risk:** A platform super_admin with malicious intent could impersonate any user for up to 30 minutes per session. Mitigated by: (1) the reason requirement and audit trail, (2) the email notification (deterrence and detection), (3) the 30-minute max duration, (4) the revocation mechanism, and (5) regular review of impersonation audit logs by Raymond or a security officer.
+- **Threats architecturally addressed:** T-05 (impersonation cross-tenant) — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). The architecture specifies that org-scoped admins are restricted to their own org; platform super_admin impersonation is time-limited, reason-coded, notified, and audited — implementation is Phase 1 Gate 12. T-06 (dev auth bypass) — ARCHITECTURALLY ADDRESSED (PARTIALLY IMPLEMENTED). Dev auth bypass is already disabled in production; Phase 0.5 recommends audit logging for dev bypass usage in non-production — the audit logging recommendation is IMPLEMENTATION PENDING. T-08 (audit log no org context) — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). Impersonation events are specified to be fully audited with org context (D-013) — requires the audit log schema extension (Gate 9).
+- **Threats introduced:** The email notification system must be reliable — if notifications fail silently, users would not be informed of support access. Addressed by requiring notification delivery confirmation (or at minimum, logging the notification attempt). The revocation mechanism must be real-time — if revocation is delayed, a revoked session could continue operating. Addressed by middleware checking a revocation flag on every request.
+- **Residual risk:** A platform super_admin with malicious intent could impersonate any user. The risk varies by session type: Normal sessions allow up to 4 hours; Break-glass sessions allow up to 30 minutes; Extended sessions exceeding 30 minutes require explicit customer approval. Addressed by: (1) the reason requirement and audit trail, (2) the email notification (deterrence and detection), (3) the tiered duration limits, (4) the revocation mechanism, and (5) regular review of impersonation audit logs by Raymond or a security officer.
 
 ### Data Model Impact
 
@@ -1333,7 +1351,7 @@ The `admin_impersonation_tokens` table is extended (or a new `impersonation_sess
 
 ### API Impact
 
-- `POST /api/admin/impersonate`: requires `reason` and `duration_minutes` (max 30) in the request body. Validates tenant scoping: org-scoped admins can only impersonate users in their org; platform super_admin can impersonate any user. Creates the session with a hard expiry.
+- `POST /api/admin/impersonate`: requires `reason`, `duration_minutes`, and `session_type` (normal or break-glass) in the request body. Duration limits: Normal — default 30 min, max 240 min (4 hr); Break-glass — default 15 min, max 30 min; Extended (>30 min) requires a customer approval token. Validates tenant scoping: org-scoped admins can only impersonate users in their org; platform super_admin can impersonate any user. Creates the session with a hard expiry.
 - New API: `POST /api/admin/impersonate/revoke` — revokes an active impersonation session (platform admin only).
 - Middleware: checks `_impersonationExpiresAt` on every request; terminates session if expired. Checks a revocation flag (e.g., a Redis key or a DB lookup) on every request.
 - Email notification: sent to the target user upon impersonation start.
@@ -1359,7 +1377,7 @@ This is a Phase 2 migration (after orgs and roles exist). The `impersonation_ses
 - Verify that an org-scoped admin CANNOT impersonate a user in a different org.
 - Verify that a platform super_admin CAN impersonate a user in any org (with reason and duration).
 - Verify that impersonation without a reason is rejected.
-- Verify that impersonation with duration > 30 minutes is rejected.
+- Verify that impersonation with duration exceeding the session-type limit is rejected (Normal: >240 min rejected; Break-glass: >30 min rejected).
 - Verify that the session expires at `_impersonationExpiresAt` even if the cookie is still valid.
 - Verify that revocation terminates the session immediately (next request is denied).
 - Verify that an email notification is sent to the target user.
@@ -1384,14 +1402,15 @@ If rolled back, the `impersonation_sessions` table can be dropped and the middle
 
 ### Raymond Approval Required
 
-Yes — impersonation is a high-risk operation that affects tenant trust. Raymond must approve: (1) the maximum duration (30 minutes), (2) the notification policy (email to target user), (3) the revocation mechanism, (4) the audit log review cadence, and (5) the handling of the dev auth bypass in non-production environments (specifically, whether dev bypass should be further restricted or audit-logged).
+Yes — impersonation is a high-risk operation that affects tenant trust. Raymond must approve: (1) the tiered duration model (Normal: 30 min default, 4 hr max; Break-glass: 15 min default, 30 min max; Extended >30 min requires customer approval), (2) the notification policy (email to target user), (3) the revocation mechanism, (4) the audit log review cadence, and (5) the handling of the dev auth bypass in non-production environments (specifically, whether dev bypass should be further restricted or audit-logged).
 
 ---
 
 ## ADR-013: Audit Ledger Architecture — Tenant-Aware, Immutable, Per-Org Hash Chains
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** NOT REQUIRED
+**Date:** 2026-07-11
 
 ### Context
 
@@ -1438,9 +1457,9 @@ Option A was rejected because the global chain creates a cross-tenant integrity 
 
 ### Security Impact
 
-- **Threats mitigated:** T-08 (audit log no org context) — ELIMINATED. Audit events now carry org context, enabling tenant-scoped queries and per-org chain verification. T-02 (admin global exposure) — admin audit events are now org-attributed, making cross-tenant admin activity visible and auditable per org.
-- **Threats introduced:** If the per-org chain partitioning is implemented incorrectly (e.g., `prev_hash` is computed across orgs instead of within an org), the chain integrity guarantee is weakened. Mitigated by mandatory chain verification tests per org.
-- **Residual risk:** Platform-level events (no org context) share a single platform chain. If the platform chain is tampered with, platform-level audit integrity is compromised. Mitigated by the existing SHA-256 hash chain and by restricting platform-level events to platform admin actions (which are themselves audited and monitored).
+- **Threats architecturally addressed:** T-08 (audit log no org context) — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). The architecture specifies that audit events carry org context, enabling tenant-scoped queries and per-org chain verification — the `actor_organization_id` and `resource_owner_organization_id` columns must be added in Phase 1 Gate 9. T-02 (admin global exposure) — ARCHITECTURALLY ADDRESSED (IMPLEMENTATION PENDING). Admin audit events are specified to be org-attributed, making cross-tenant admin activity visible and auditable per org — implementation requires the audit log schema extension (Gate 9) and org-scoped admin routes (Phase 2).
+- **Threats introduced:** If the per-org chain partitioning is implemented incorrectly (e.g., `prev_hash` is computed across orgs instead of within an org), the chain integrity guarantee is weakened. Addressed by mandatory chain verification tests per org.
+- **Residual risk:** Platform-level events (no org context) share a single platform chain. If the platform chain is tampered with, platform-level audit integrity is compromised. Addressed by the existing SHA-256 hash chain and by restricting platform-level events to platform admin actions (which are themselves audited and monitored).
 
 ### Data Model Impact
 
@@ -1502,14 +1521,15 @@ No — evidence is sufficient. The absence of org context in the audit log is ve
 
 ---
 
-## ADR-014: Minimum Safe Implementation Sequence — 15 Entry Gates Before Migration 101
+## ADR-014: Minimum Safe Implementation Sequence — 15 Entry Gates Before NEXT_ENTERPRISE_AUTHORITY_MIGRATION
 
-**Status:** APPROVED
-**Date:** 2025-07-11
+**Status:** RECOMMENDED
+**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Date:** 2026-07-11
 
 ### Context
 
-The Phase 0.5 Architecture Decision Gate resolves 14 architecture decisions (D-01 through D-14, documented as ADR-001 through ADR-013 plus this ADR). Before any schema migration (Migration 101) or production code implementation can begin, a minimum safe implementation sequence must be established to ensure that the foundational pieces are in place before dependent features are built.
+The Phase 0.5 Architecture Decision Gate resolves 14 architecture decisions (D-01 through D-14, documented as ADR-001 through ADR-013 plus this ADR). Before any schema migration (NEXT_ENTERPRISE_AUTHORITY_MIGRATION) or production code implementation can begin, a minimum safe implementation sequence must be established to ensure that the foundational pieces are in place before dependent features are built.
 
 The SolarPro codebase has 280 API routes, 136 files using `getUserFromRequest()`, 70 files using `requireAdminApi()`, 55 database tables across 101 migration files, and ZERO server actions. The migration from user-scoped to org-scoped access touches nearly every route. A phased, gated approach is essential to avoid introducing security regressions during the migration.
 
@@ -1532,13 +1552,13 @@ The Phase 0 Migration Plan and Implementation Roadmap outline a 6-phase strategy
 
 **Option B: Minimal viable multi-tenancy — implement only orgs and memberships, defer everything else.** Implement only D-01 (memberships) and D-02 (active org context). Defer all other decisions to future phases. This is the lowest-risk option but leaves the system in a half-migrated state where orgs exist but resources are still user-scoped, roles are still in a single namespace, and audit logs have no org context. This creates a window of inconsistency.
 
-**Option C: Gated sequential implementation — 15 entry gates, each with explicit pass/fail criteria.** Define a sequence of 15 gates, each of which must pass its criteria before the next gate begins. The gates are ordered by dependency: foundational pieces (orgs, memberships, active org context) come first, followed by role namespaces, authorization interfaces, audit context, and finally the first resource ownership migration. Migration 101 (the first schema migration that adds org-level columns) is PROHIBITED until all 15 gates are passed. This balances risk (each gate is small and verifiable) with progress (the sequence reaches a consistent multi-tenant foundation).
+**Option C: Gated sequential implementation — 15 entry gates, each with explicit pass/fail criteria.** Define a sequence of 15 gates, each of which must pass its criteria before the next gate begins. The gates are ordered by dependency: foundational pieces (orgs, memberships, active org context) come first, followed by role namespaces, authorization interfaces, audit context, and finally the first resource ownership migration. NEXT_ENTERPRISE_AUTHORITY_MIGRATION (the first schema migration that adds org-level columns) is PROHIBITED until all 15 gates are passed. This balances risk (each gate is small and verifiable) with progress (the sequence reaches a consistent multi-tenant foundation).
 
 ### Decision
 
 **Option C — Gated sequential implementation with 15 entry gates.**
 
-Phase 1 implementation proceeds through 15 gates, each with explicit pass/fail criteria. No gate begins until the previous gate passes. Migration 101 is PROHIBITED until all 15 gates are passed and Raymond approves. The gates are:
+Phase 1 implementation proceeds through 15 gates, each with explicit pass/fail criteria. No gate begins until the previous gate passes. NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED until all 15 gates are passed and Raymond approves. The gates are:
 
 **Gate 1: Canonical Organization Table.** Verify that the `organizations` table (Migration 016) is the canonical org table. No new org table is created. The `parent_org_id` column (D-011) is added. Pass criteria: `organizations` table exists with `parent_org_id` column; no duplicate org tables.
 
@@ -1568,23 +1588,23 @@ Phase 1 implementation proceeds through 15 gates, each with explicit pass/fail c
 
 **Gate 14: Ambiguity Queue Admin API.** Implement `GET /api/admin/migration/ambiguity-queue` and `POST /api/admin/migration/merge-orgs` (D-009). Pass criteria: APIs exist; merge is platform-admin only; merge is audited; merge correctly reassigns resources.
 
-**Gate 15: Phase 1 Entry Gate Verification.** Run the full Phase 1 test suite (from the Authorization Test Matrix). Verify all 121 test cases pass. Verify no production routes are broken (all 280 routes respond correctly). Verify MFA code, tests, evidence, and acceptance artifacts are untouched. Pass criteria: all tests pass; no regressions; Raymond approves Migration 101.
+**Gate 15: Phase 1 Entry Gate Verification.** Run the full Phase 1 test suite (from the Authorization Test Matrix). Verify all 121 test cases pass. Verify no production routes are broken (all 280 routes respond correctly). Verify MFA code, tests, evidence, and acceptance artifacts are untouched. Pass criteria: all tests pass; no regressions; Raymond approves NEXT_ENTERPRISE_AUTHORITY_MIGRATION.
 
 ### Rationale
 
-The 15-gate sequence ensures that each foundational piece is in place and verified before the next piece is built. This prevents the "big-bang" failure mode where a single bug propagates across all 280 routes. Each gate has explicit pass/fail criteria, enabling rollback at the gate level rather than at the phase level. The prohibition on Migration 101 until all gates pass ensures that no schema changes (org-level columns on resource tables) are made until the authorization infrastructure is ready to enforce them.
+The 15-gate sequence ensures that each foundational piece is in place and verified before the next piece is built. This prevents the "big-bang" failure mode where a single bug propagates across all 280 routes. Each gate has explicit pass/fail criteria, enabling rollback at the gate level rather than at the phase level. The prohibition on NEXT_ENTERPRISE_AUTHORITY_MIGRATION until all gates pass ensures that no schema changes (org-level columns on resource tables) are made until the authorization infrastructure is ready to enforce them.
 
 This aligns with P3 (Default Deny — no migration proceeds without verification), P4 (Permission-First Authorization — the authorization interface is built before resource migrations), and P7 (Hybrid Isolation — the isolation infrastructure is built before it is relied upon).
 
 ### Security Impact
 
-- **Threats mitigated:** All T-01 through T-20 — the gated sequence ensures that each threat is addressed in the appropriate gate, with verification before proceeding. The sequence prevents the introduction of new threats during migration (e.g., if resource ownership migration proceeded before the authorization interface was ready, resources would be org-owned but access checks would still be user-scoped, creating a window of vulnerability).
+- **Threats architecturally addressed:** D-14 is a **sequencing decision, not a mitigation decision**. It does not itself address any threat. It sequences the implementation of D-01 through D-13 across 15 gates, ensuring that each architecturally-addressed threat is implemented and verified in the appropriate gate before the next gate proceeds. The sequence prevents the introduction of new threats during migration (e.g., if resource ownership migration proceeded before the authorization interface was ready, resources would be org-owned but access checks would still be user-scoped, creating a window of vulnerability). Of the 20 threats: T-14 (SSO), T-19 (soft-delete consistency), and T-20 (per-org pricing) are DEFERRED and are NOT addressed by any gate. The remaining 17 threats (T-01 through T-13, T-15 through T-18) are ARCHITECTURALLY ADDRESSED by D-01 through D-13 and sequenced across the gates.
 - **Threats introduced:** None — the gates are designed to be additive and non-breaking. Each gate's pass criteria include "no regressions" verification.
-- **Residual risk:** The backfill script (Gate 13) and the ambiguity queue (Gate 14) involve data ownership changes. Even with dry-run verification, the live backfill carries a small risk of incorrect assignment. Mitigated by the `org_id`-first strategy (D-009) and by Raymond's approval before execution.
+- **Residual risk:** The backfill script (Gate 13) and the ambiguity queue (Gate 14) involve data ownership changes. Even with dry-run verification, the live backfill carries a small risk of incorrect assignment. Addressed by the `org_id`-first strategy (D-009) and by Raymond's approval before execution.
 
 ### Data Model Impact
 
-The 15 gates collectively define the Phase 1 schema additions: `organization_members` (Gate 2), `org_roles` + `org_role_permissions` (Gate 3), `user_active_org` (Gate 4), `audit_log` column additions (Gate 9), `impersonation_sessions` or `admin_impersonation_tokens` extension (Gate 12), `org_merge_suggestions` (Gate 14). The `organizations.parent_org_id` column (Gate 1) and the first resource ownership columns (`projects.organization_id`, etc.) are NOT added until after Gate 15 — they are Migration 101, which is prohibited until all gates pass.
+The 15 gates collectively define the Phase 1 schema additions: `organization_members` (Gate 2), `org_roles` + `org_role_permissions` (Gate 3), `user_active_org` (Gate 4), `audit_log` column additions (Gate 9), `impersonation_sessions` or `admin_impersonation_tokens` extension (Gate 12), `org_merge_suggestions` (Gate 14). The `organizations.parent_org_id` column (Gate 1) and the first resource ownership columns (`projects.organization_id`, etc.) are NOT added until after Gate 15 — they are NEXT_ENTERPRISE_AUTHORITY_MIGRATION, which is prohibited until all gates pass.
 
 ### API Impact
 
@@ -1604,7 +1624,7 @@ No billing changes in Phase 1. Org-level billing (D-008) is a Phase 2 migration.
 
 ### Migration Impact
 
-This ADR IS the migration impact decision. It defines the sequence and the prohibition on Migration 101. The schema migrations for Gates 1–14 are additive (new tables, new nullable columns) and do not modify existing tables destructively. Migration 101 (the first resource ownership migration) is the first migration that modifies existing resource tables, and it is prohibited until all 15 gates pass and Raymond approves.
+This ADR IS the migration impact decision. It defines the sequence and the prohibition on NEXT_ENTERPRISE_AUTHORITY_MIGRATION. The schema migrations for Gates 1–14 are additive (new tables, new nullable columns) and do not modify existing tables destructively. NEXT_ENTERPRISE_AUTHORITY_MIGRATION (the first resource ownership migration) is the first migration that modifies existing resource tables, and it is prohibited until all 15 gates pass and Raymond approves.
 
 ### Testing Requirements
 
@@ -1625,20 +1645,22 @@ This ADR IS the migration impact decision. It defines the sequence and the prohi
 
 ### Rollback Considerations
 
-Each gate is independently rollable. If a gate fails, the schema additions and code changes for that gate can be reverted. The prohibition on Migration 101 ensures that no resource ownership changes have occurred during Phase 1, so a rollback of Phase 1 does not affect existing resource ownership — resources remain user-scoped until Migration 101 (which is post-Phase-1).
+Each gate is independently rollable. If a gate fails, the schema additions and code changes for that gate can be reverted. The prohibition on NEXT_ENTERPRISE_AUTHORITY_MIGRATION ensures that no resource ownership changes have occurred during Phase 1, so a rollback of Phase 1 does not affect existing resource ownership — resources remain user-scoped until NEXT_ENTERPRISE_AUTHORITY_MIGRATION (which is post-Phase-1).
 
 ### Raymond Approval Required
 
-Yes — Raymond must approve: (1) the 15-gate sequence, (2) the pass/fail criteria for each gate, (3) the prohibition on Migration 101 until all gates pass, (4) the execution of the backfill script (Gate 13, live mode), and (5) the transition from Phase 1 to Phase 2 (Migration 101). Without Raymond's approval at Gate 15, Migration 101 is PROHIBITED and Phase 2 cannot begin.
+Yes — Raymond must approve: (1) the 15-gate sequence, (2) the pass/fail criteria for each gate, (3) the prohibition on NEXT_ENTERPRISE_AUTHORITY_MIGRATION until all gates pass, (4) the execution of the backfill script (Gate 13, live mode), and (5) the transition from Phase 1 to Phase 2 (NEXT_ENTERPRISE_AUTHORITY_MIGRATION). Without Raymond's approval at Gate 15, NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED and Phase 2 cannot begin.
 
 ---
 
 ## Document Footer
 
 **ADR Count:** 14 (ADR-001 through ADR-014)
-**All ADRs Status:** APPROVED
-**Raymond Approval Required:** ADR-008 (billing migration), ADR-009 (backfill strategy), ADR-010 (ownership transfer), ADR-012 (impersonation), ADR-014 (implementation sequence and Migration 101 prohibition)
-**Raymond Approval Not Required:** ADR-001, ADR-002, ADR-003, ADR-004, ADR-005, ADR-006, ADR-007, ADR-011, ADR-013
+**All ADRs Architecture Status:** RECOMMENDED — all 14 ADRs have complete architecture analysis with verified codebase evidence; the recommended option for each is documented with options analysis, rationale, and impact assessment.
+**Raymond Approval Required (Stakeholder Approval: PENDING RAYMOND APPROVAL):** ADR-008 (billing migration), ADR-009 (backfill strategy), ADR-010 (ownership transfer), ADR-012 (impersonation), ADR-014 (implementation sequence and NEXT_ENTERPRISE_AUTHORITY_MIGRATION prohibition)
+**Raymond Approval Not Required (Stakeholder Approval: NOT REQUIRED):** ADR-001, ADR-002, ADR-003, ADR-004, ADR-005, ADR-006, ADR-007, ADR-011, ADR-013
+
+> **Status Model Clarification:** Architecture Status (RECOMMENDED) means the architecture analysis is complete and a recommendation has been made based on sufficient codebase evidence and governing principles. Stakeholder Approval Status is separate: PENDING RAYMOND APPROVAL means Raymond must explicitly approve the decision before implementation proceeds; NOT REQUIRED means the decision is settled by evidence and principles without requiring stakeholder sign-off. No ADR has a status of APPROVED (by stakeholder) at this time — all are RECOMMENDED pending Raymond's review for the 5 decisions that require it. See `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-PACKET.md` for the formal approval packet.
 
 **Evidence Base:** All ADRs cite verified current-state evidence from the SolarPro codebase (source files, migrations, Phase 0 documents). No assumptions or hallucinated data.
 

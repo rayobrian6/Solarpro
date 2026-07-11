@@ -2,9 +2,11 @@
 
 **Document Type:** Canonical Authority Model with Mermaid Diagrams
 **Phase:** 0.5 — Architecture Decision Gate (Read-Only)
-**Date:** 2025-07-11
-**Branch:** `dev` @ `7b344aa1`
-**Status:** Complete — 10 canonical diagrams
+**Date:** 2026-07-11
+**Date Classification:** Document creation date (2026-07-11). Evidence baseline commit `7b344aa1` is dated 2026-07-11 (commit date). Phase 0 predecessor commit `39a1f718` is dated 2026-07-11 (commit date). This reconciliation commit is dated 2026-07-11 (document correction date). The previous incorrect value of 2025-07-11 has been corrected — no Phase 0.5 work occurred in 2025.
+**Branch:** `dev` @ `ef51acff`
+**Branch Reference Classification:** `ef51acff` is the Phase 0.5 documentation commit (this document and its companion Phase 0.5 deliverables). The codebase evidence baseline is `7b344aa1` (a code commit, not a documentation commit) — referenced where source evidence is cited.
+**Status:** Complete — 10 canonical diagrams (architecture analysis COMPLETE; documentation integrity reconciliation IN PROGRESS; stakeholder approval PENDING for 5 decisions)
 **Predecessor:** Phase 0 Audit & Architecture Design (commit `39a1f718`)
 **Depends on:** ADR-001 through ADR-014
 
@@ -344,7 +346,7 @@ flowchart TD
 
 **Key points:**
 - Storage paths are org-prefixed: `orgs/{orgId}/...` — tenant isolation at the storage layer (P7).
-- Blob access is private, not public — eliminates T-07 (verified: current code uses `access: 'public'`).
+- Blob access is private, not public — architecturally addresses T-07 (IMPLEMENTATION PENDING; verified: current code uses `access: 'public'`, migration to private storage is Phase 2).
 - Revisions are immutable — old revisions are retained, marked `superseded_by` (P6).
 - Signed URLs have a 5-minute TTL — minimizes exposure if a URL leaks.
 - Content hashes enable future deduplication and integrity verification.
@@ -357,17 +359,17 @@ flowchart TD
 **Depends on:** ADR-012 (Support Access and Impersonation)
 **Illustrates:** P3, P4, P5
 
-This diagram shows the break-glass impersonation flow. Impersonation is time-limited (max 30 minutes), reason-coded, tenant-aware (org-scoped admins cannot impersonate cross-tenant), revocable, and notified. Every action is audited with org context.
+This diagram shows the break-glass impersonation flow. Impersonation is time-limited with a tiered duration model (Normal: 30 min default, 4 hr max; Break-glass: 15 min default, 30 min max; Extended >30 min requires customer approval), reason-coded, tenant-aware (org-scoped admins cannot impersonate cross-tenant), revocable, and notified. Every action is audited with org context.
 
 ```mermaid
 flowchart TD
-    ADMIN[Platform Admin or\nOrg-Scoped Admin] --> INIT[POST /api/admin/impersonate\nbody: target_user_id, reason, duration_minutes]
-    INIT --> V1{duration <= 30 min\nAND reason provided?}
-    V1 -->|No| REJECT_INIT[Reject — 400\nreason and duration required]
+    ADMIN[Platform Admin or\nOrg-Scoped Admin] --> INIT[POST /api/admin/impersonate\nbody: target_user_id, reason,\nduration_minutes, session_type]
+    INIT --> V1{session_type + duration valid?\nNormal: <=240 min\nBreak-glass: <=30 min\nExtended >30 min: customer\napproval token required?\nAND reason provided?}
+    V1 -->|No| REJECT_INIT[Reject — 400\nreason, valid duration,\nand session_type required]
     V1 -->|Yes| V2{Is admin org-scoped\nnot super_admin?}
     
     V2 -->|Yes, org-scoped| V3{Is target user in\nsame org as admin?}
-    V3 -->|No| REJECT_CROSS[DENY — cross-tenant\nimpersonation prohibited\nT-05 mitigation]
+    V3 -->|No| REJECT_CROSS[DENY — cross-tenant\nimpersonation prohibited\nT-05 architectural control]
     V3 -->|Yes| CREATE_SESSION
     
     V2 -->|No, platform super_admin| CREATE_SESSION[Create impersonation session:\nreason, duration, expires_at,\ntarget_id, admin_id, target_org_id]
@@ -397,7 +399,7 @@ flowchart TD
 - The session has a HARD expiry (`_impersonationExpiresAt`) checked on every request — even if the cookie is still valid.
 - Revocation is real-time — the middleware checks a revocation flag on every request.
 - The target user is notified by email — transparency and deterrence.
-- The current mechanism (`app/api/admin/impersonate/route.ts`) has NO same-org validation — this is the critical gap being closed.
+- The current mechanism (`app/api/admin/impersonate/route.ts`) has NO same-org validation — this is the critical gap to be architecturally addressed (IMPLEMENTATION PENDING in Phase 1 Gate 12).
 
 ---
 
@@ -440,7 +442,7 @@ flowchart TD
 - `syncSeatsForOrg()` operates on the org-level subscription, not the user-level subscription.
 - Stripe webhooks are mapped to org-level customers, not user-level.
 - Legacy per-user subscriptions (`users.stripe_subscription_id` from Migration 006) are migrated to org-level in Phase 2.
-- The current model has billing on the owner's individual Stripe customer — this is the gap being closed.
+- The current model has billing on the owner's individual Stripe customer — this is the gap to be architecturally addressed (IMPLEMENTATION PENDING in Phase 2, requires Raymond's approval per ADR-008).
 
 ---
 
@@ -525,7 +527,7 @@ flowchart TD
 - Per-org chain verification is independent — tampering in Org A's chain does not affect Org B's chain (P5).
 - Platform-level events (NULL org) form a separate platform chain.
 - Org-scoped audit queries return only that org's events — cross-tenant audit access is denied for org-scoped admins.
-- The current `audit_log` table (Migration 100) has NO org columns and a global chain — this is the gap being closed.
+- The current `audit_log` table (Migration 100) has NO org columns and a global chain — this is the gap to be architecturally addressed (IMPLEMENTATION PENDING in Phase 1 Gate 9).
 
 ---
 

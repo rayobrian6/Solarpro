@@ -2,9 +2,11 @@
 
 **Document Type:** Phase 1 Implementation Specification
 **Phase:** 0.5 — Architecture Decision Gate (Read-Only)
-**Date:** 2025-07-11
-**Branch:** `dev` @ `7b344aa1`
-**Status:** Complete — Phase 1 scope only
+**Date:** 2026-07-11
+**Date Classification:** Document creation date (2026-07-11). Evidence baseline commit `7b344aa1` is dated 2026-07-11 (commit date). Phase 0 predecessor commit `39a1f718` is dated 2026-07-11 (commit date). This reconciliation commit is dated 2026-07-11 (document correction date). The previous incorrect value of 2025-07-11 has been corrected — no Phase 0.5 work occurred in 2025.
+**Branch:** `dev` @ `ef51acff`
+**Branch Reference Classification:** `ef51acff` is the Phase 0.5 documentation commit (this document and its companion Phase 0.5 deliverables). The codebase evidence baseline is `7b344aa1` (a code commit, not a documentation commit) — referenced where source evidence is cited.
+**Status:** Complete — Phase 1 scope only (architecture analysis COMPLETE; documentation integrity reconciliation IN PROGRESS; stakeholder approval PENDING; implementation BLOCKED pending entry gates)
 **Predecessor:** Phase 0 Audit & Architecture Design (commit `39a1f718`)
 **Depends on:** ADR-001 through ADR-014, Canonical Authority Model, Phase 1 Entry Gates
 
@@ -12,9 +14,11 @@
 
 ## Purpose
 
-This document specifies the implementation work for Phase 1 of the enterprise multi-tenant migration. Phase 1 is the foundational phase: it establishes canonical organizations, many-to-many memberships, server-validated active org context, separate role namespaces, centralized authorization interfaces, and tenant-aware audit logging. **Phase 1 does NOT migrate resource ownership (that is Migration 101 / Phase 2), does NOT migrate file storage (Phase 2), and does NOT migrate billing (Phase 2).**
+This document specifies the implementation work for Phase 1 of the enterprise multi-tenant migration. Phase 1 is the foundational phase: it establishes canonical organizations, many-to-many memberships, server-validated active org context, separate role namespaces, centralized authorization interfaces, and tenant-aware audit logging. **Phase 1 does NOT migrate resource ownership (that is NEXT_ENTERPRISE_AUTHORITY_MIGRATION / Phase 2), does NOT migrate file storage (Phase 2), and does NOT migrate billing (Phase 2).**
 
 This specification is implementation-ready: each section defines the exact schema, code, and tests that must be produced. The 15 implementation gates from ADR-014 define the execution order, and each gate's pass/fail criteria are restated here.
+
+> **Placeholder Definition — NEXT_ENTERPRISE_AUTHORITY_MIGRATION:** Throughout this document, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` is a placeholder for the next verified available migration identifier. It CANNOT be assigned a numeric value at this time because the migration directory (`lib/migrations/`) has a duplicate prefix (074 appears twice) and gaps in the numbering sequence (009, 012, 013, 014 missing). The highest existing migration prefix is 104. The numeric identifier must be determined by a migration sequence reconciliation process before any migration file is created. This placeholder refers to the first resource ownership schema migration (adding org-level columns to existing resource tables such as `projects.organization_id`), which is PROHIBITED until all 15 Phase 1 entry gates pass and Raymond approves. See `ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md` for the full migration directory state analysis.
 
 ---
 
@@ -39,7 +43,7 @@ This specification is implementation-ready: each section defines the exact schem
 
 ### Out of Scope (Phase 2+)
 
-- Resource ownership migration (`projects.organization_id`, `clients.organization_id`, etc.) — **Migration 101, PROHIBITED until Phase 1 gates pass**
+- Resource ownership migration (`projects.organization_id`, `clients.organization_id`, etc.) — **NEXT_ENTERPRISE_AUTHORITY_MIGRATION, PROHIBITED until Phase 1 gates pass**
 - File storage migration (private storage, org prefixes, signed URLs, ADR-007) — Phase 2
 - Billing migration (org-level Stripe customers, ADR-008) — Phase 2
 - Project participant grants (ADR-005) — Phase 2 (requires resource ownership)
@@ -51,7 +55,7 @@ This specification is implementation-ready: each section defines the exact schem
 
 ## Implementation Gate Sequence
 
-The 15 gates from ADR-014, restated with implementation-level detail.
+The 15 gates from ADR-014, restated with implementation-level detail. The gates are divided into two phases within Phase 1: the **Phase 1 Foundation** (Gates 1-12) establishes the multi-tenant authority infrastructure (authorization framework, org context, RLS, role model, collaboration, audit, support access), and the **Phase 1 Completion** (Gates 13-15) executes the data ownership backfill, ambiguity queue processing, and adversarial validation. All 15 gates must pass before NEXT_ENTERPRISE_AUTHORITY_MIGRATION (Phase 2 resource ownership migration) may begin. None of the 15 gates extend into Phase 2 — Phase 2 has its own separate entry gates and implementation sequence (defined after Phase 1 completion).
 
 ### Gate 1: Canonical Organization Table
 
@@ -338,7 +342,7 @@ export async function canAccessResource(
 }
 ```
 
-**Note:** In Phase 1, the participant and share grant checks are stubbed (not implemented) because they depend on resource ownership (Phase 2 / Migration 101). The function structure is in place, and the org-role check is functional. The stubs will be activated in Phase 2.
+**Note:** In Phase 1, the participant and share grant checks are stubbed (not implemented) because they depend on resource ownership (Phase 2 / NEXT_ENTERPRISE_AUTHORITY_MIGRATION). The function structure is in place, and the org-role check is functional. The stubs will be activated in Phase 2.
 
 **Pass criteria:**
 - `canAccessResource()` function exists and returns boolean.
@@ -507,23 +511,25 @@ export async function GET(req: Request, { params }: { params: { orgId: string } 
 -- Migration: Impersonation session hardening (ADR-012)
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS reason TEXT;
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS duration_minutes INT;
+ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS session_type TEXT DEFAULT 'normal'; -- normal | break_glass
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS session_expires_at TIMESTAMPTZ;
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS revoked_by UUID;
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS target_org_id UUID;
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS notification_sent BOOLEAN DEFAULT false;
 ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMPTZ;
+ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS customer_approval_token TEXT; -- required for extended sessions >30 min
 ```
 
 **Code changes:**
-- Modify `app/api/admin/impersonate/route.ts` POST: require `reason` and `duration_minutes` (max 30); validate tenant scoping (org-scoped admins can only impersonate users in their org); set `session_expires_at`; send email notification to target.
+- Modify `app/api/admin/impersonate/route.ts` POST: require `reason`, `duration_minutes`, and `session_type` (normal or break_glass); enforce tiered duration limits (Normal: default 30 min, max 240 min/4 hr; Break-glass: default 15 min, max 30 min; Extended >30 min requires `customer_approval_token`); validate tenant scoping (org-scoped admins can only impersonate users in their org); set `session_expires_at`; send email notification to target.
 - Modify session JWT creation: include `_impersonationExpiresAt` and `_impersonationReason` claims.
 - Modify `middleware.ts`: check `_impersonationExpiresAt` on every request; check revocation flag.
 - New API: `POST /api/admin/impersonate/revoke` — revokes an active session.
 
 **Pass criteria:**
 - Org-scoped admins cannot impersonate users in a different org (403).
-- Platform super_admin can impersonate any user with reason + duration (max 30 min).
+- Platform super_admin can impersonate any user with reason + duration per tiered model (Normal max 4 hr; Break-glass max 30 min).
 - Sessions expire at `_impersonationExpiresAt` even if the cookie is still valid.
 - Revocation terminates the session on the next request.
 - Email notification is sent to the target user.
@@ -533,7 +539,7 @@ ALTER TABLE admin_impersonation_tokens ADD COLUMN IF NOT EXISTS notification_sen
 - Verify org-scoped admin CANNOT impersonate a cross-tenant user (403).
 - Verify platform super_admin CAN impersonate any user with reason + duration.
 - Verify impersonation without reason is rejected (400).
-- Verify impersonation with duration > 30 minutes is rejected (400).
+- Verify impersonation with duration exceeding the session-type limit is rejected (400) (Normal: >240 min; Break-glass: >30 min).
 - Verify session expires at `_impersonationExpiresAt`.
 - Verify revocation terminates the session on next request.
 - Verify email notification is sent.
@@ -629,7 +635,7 @@ CREATE TABLE IF NOT EXISTS org_merge_suggestions (
 2. Verify all 280 API routes respond correctly (no 500 errors, no broken endpoints).
 3. Verify MFA code, tests, evidence, and acceptance artifacts are untouched (checksum comparison).
 4. Verify Phase 0 documents are unchanged.
-5. Obtain Raymond's approval for the transition to Phase 2 (Migration 101).
+5. Obtain Raymond's approval for the transition to Phase 2 (NEXT_ENTERPRISE_AUTHORITY_MIGRATION).
 
 **Pass criteria:**
 - All 121 test cases pass.
@@ -638,7 +644,7 @@ CREATE TABLE IF NOT EXISTS org_merge_suggestions (
 - Phase 0 documents verified unchanged.
 - Raymond has explicitly approved the transition to Phase 2.
 
-**If any criterion fails:** The failing gate is reworked. Migration 101 remains PROHIBITED until all criteria pass and Raymond approves.
+**If any criterion fails:** The failing gate is reworked. NEXT_ENTERPRISE_AUTHORITY_MIGRATION remains PROHIBITED until all criteria pass and Raymond approves.
 
 ---
 
@@ -646,7 +652,7 @@ CREATE TABLE IF NOT EXISTS org_merge_suggestions (
 
 Once all 15 gates pass and Raymond approves, Phase 2 may begin. Phase 2 includes:
 
-1. **Migration 101:** Add `organization_id` to resource tables (`projects`, `clients`, `productions`, `proposals`, `layouts`, `permits`, `surveys`, `geometry`). Execute the backfill script (Gate 13, live mode).
+1. **NEXT_ENTERPRISE_AUTHORITY_MIGRATION:** Add `organization_id` to resource tables (`projects`, `clients`, `productions`, `proposals`, `layouts`, `permits`, `surveys`, `geometry`). Execute the backfill script (Gate 13, live mode).
 2. **File storage migration (ADR-007):** Migrate public blob URLs to private, org-prefixed storage with signed URLs.
 3. **Billing migration (ADR-008):** Migrate per-user Stripe subscriptions to org-level customers.
 4. **Project participant grants (ADR-005):** Implement the `project_participants` table and participant-based access.
@@ -680,5 +686,5 @@ The following artifacts are FROZEN and must not be modified during Phase 1 imple
 **Phase 1 Gates:** 15 (ADR-014)
 **Phase 1 Scope:** Foundational only — canonical orgs, memberships, active org context, role namespaces, authorization interfaces, audit context
 **Phase 2 Scope (NOT in this spec):** Resource ownership migration, file storage migration, billing migration, participant grants, share grants
-**Migration 101 Status:** PROHIBITED until all 15 gates pass and Raymond approves
+**NEXT_ENTERPRISE_AUTHORITY_MIGRATION Status:** PROHIBITED until all 15 gates pass and Raymond approves
 **Frozen Artifacts:** 10 categories listed above

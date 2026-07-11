@@ -2,9 +2,11 @@
 
 **Document Type:** Phase 1 Entry Gate Conditions
 **Phase:** 0.5 — Architecture Decision Gate (Read-Only)
-**Date:** 2025-07-11
-**Branch:** `dev` @ `7b344aa1`
-**Status:** Complete
+**Date:** 2026-07-11
+**Date Classification:** Document creation date (2026-07-11). Evidence baseline commit `7b344aa1` is dated 2026-07-11 (commit date). Phase 0 predecessor commit `39a1f718` is dated 2026-07-11 (commit date). This reconciliation commit is dated 2026-07-11 (document correction date). The previous incorrect value of 2025-07-11 has been corrected — no Phase 0.5 work occurred in 2025.
+**Branch:** `dev` @ `ef51acff`
+**Branch Reference Classification:** `ef51acff` is the Phase 0.5 documentation commit (this document and its companion Phase 0.5 deliverables). The codebase evidence baseline is `7b344aa1` (a code commit, not a documentation commit) — referenced where source evidence is cited.
+**Status:** Complete (architecture analysis COMPLETE; documentation integrity reconciliation IN PROGRESS; stakeholder approval PENDING; Phase 1 implementation BLOCKED pending Gate G)
 **Predecessor:** Phase 0 Audit & Architecture Design (commit `39a1f718`)
 **Depends on:** ADR-001 through ADR-014, Decision Register
 
@@ -12,9 +14,11 @@
 
 ## Purpose
 
-This document defines the exact conditions that must be met before Phase 1 implementation can begin. It is the authoritative gate-keeping document: **Migration 101 is PROHIBITED until every BLOCKING condition in this document is satisfied and Raymond has explicitly approved.**
+This document defines the exact conditions that must be met before Phase 1 implementation can begin. It is the authoritative gate-keeping document: **NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED until every BLOCKING condition in this document is satisfied and Raymond has explicitly approved.**
 
-Phase 1 is the foundational implementation phase that establishes canonical organizations, many-to-many memberships, server-validated active org context, separate role namespaces, centralized authorization interfaces, and tenant-aware audit logging. Phase 1 does NOT migrate resource ownership (that is Phase 2 / Migration 101), does NOT migrate file storage (Phase 2), and does NOT migrate billing (Phase 2).
+Phase 1 is the foundational implementation phase that establishes canonical organizations, many-to-many memberships, server-validated active org context, separate role namespaces, centralized authorization interfaces, and tenant-aware audit logging. Phase 1 does NOT migrate resource ownership (that is Phase 2 / NEXT_ENTERPRISE_AUTHORITY_MIGRATION), does NOT migrate file storage (Phase 2), and does NOT migrate billing (Phase 2).
+
+> **Placeholder Definition — NEXT_ENTERPRISE_AUTHORITY_MIGRATION:** Throughout this document, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` is a placeholder for the next verified available migration identifier. It CANNOT be assigned a numeric value at this time because the migration directory (`lib/migrations/`) has a duplicate prefix (074 appears twice) and gaps in the numbering sequence (009, 012, 013, 014 missing). The highest existing migration prefix is 104. The numeric identifier must be determined by a migration sequence reconciliation process before any migration file is created. This placeholder refers to the first resource ownership schema migration (adding org-level columns to existing resource tables such as `projects.organization_id`), which is PROHIBITED until all 15 Phase 1 entry gates pass and Raymond approves. See `ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md` for the full migration directory state analysis.
 
 ---
 
@@ -26,9 +30,9 @@ The following are ABSOLUTE PROHIBITIONS. Violation of any prohibition invalidate
 
 Phase 0.5 is a read-only architecture decision phase. No production code may be modified, created, or deleted. This includes all files under `app/`, `lib/`, `worker/`, `middleware.ts`, and any other source directory.
 
-### PROHIBITION 2: No Schema Migrations (Migration 101) Until Entry Gates Met
+### PROHIBITION 2: No Schema Migrations (NEXT_ENTERPRISE_AUTHORITY_MIGRATION) Until Entry Gates Met
 
-**Migration 101 is PROHIBITED until every BLOCKING entry gate condition is satisfied and Raymond has explicitly approved in writing.** Migration 101 is defined as the first schema migration that modifies existing resource tables to add org-level ownership columns (e.g., `projects.organization_id`). The 15 implementation gates (ADR-014) define the work that must be completed before Migration 101 is even considered.
+**NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED until every BLOCKING entry gate condition is satisfied and Raymond has explicitly approved in writing.** NEXT_ENTERPRISE_AUTHORITY_MIGRATION is defined as the first schema migration that modifies existing resource tables to add org-level ownership columns (e.g., `projects.organization_id`). The 15 implementation gates (ADR-014) define the work that must be completed before NEXT_ENTERPRISE_AUTHORITY_MIGRATION is even considered.
 
 ### PROHIBITION 3: No MFA Modifications
 
@@ -61,7 +65,7 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 **Condition:** All 14 architecture decisions (D-01 through D-14) must be resolved and documented as approved ADRs.
 
 **Evidence of satisfaction:**
-- [x] Decision Register (`ENTERPRISE-MULTI-TENANT-PHASE0.5-DECISION-REGISTER.md`) exists with all 14 decisions marked APPROVED.
+- [x] Decision Register (`ENTERPRISE-MULTI-TENANT-PHASE0.5-DECISION-REGISTER.md`) exists with all 14 decisions marked RECOMMENDED (Architecture Status), with Stakeholder Approval Status of PENDING RAYMOND APPROVAL for D-08, D-09, D-10, D-12, D-14 and NOT REQUIRED for the remaining 9 decisions.
 - [x] ADR document (`ENTERPRISE-MULTI-TENANT-ARCHITECTURE-DECISION-RECORDS.md`) exists with ADR-001 through ADR-014, each containing the full required structure (Context, Current-State Evidence, Options Considered, Decision, Rationale, Security Impact, Data Model Impact, API Impact, Worker Impact, Storage Impact, Billing Impact, Migration Impact, Testing Requirements, Rejected Alternatives, Deferred Work, Rollback Considerations, Raymond Approval Required).
 - [x] Every ADR cites verified current-state evidence from the SolarPro codebase.
 - [x] ADRs requiring Raymond approval are clearly marked: ADR-008, ADR-009, ADR-010, ADR-012, ADR-014.
@@ -97,7 +101,7 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 - [x] Phase 1 Implementation Spec (`ENTERPRISE-MULTI-TENANT-PHASE1-IMPLEMENTATION-SPEC.md`) exists.
 - [x] Spec covers only Phase 1 scope — no Phase 2+ work (resource ownership migration, file storage migration, billing migration) is included as implementation tasks.
 - [x] Spec defines the 15 implementation gates from ADR-014 with pass/fail criteria.
-- [x] Spec explicitly states that Migration 101 is prohibited until all 15 gates pass and Raymond approves.
+- [x] Spec explicitly states that NEXT_ENTERPRISE_AUTHORITY_MIGRATION is prohibited until all 15 gates pass and Raymond approves.
 
 **Status:** SATISFIED — see accompanying Implementation Spec document.
 
@@ -152,8 +156,8 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 - ADR-008 (Billing Attribution): Raymond must approve the subscription migration from per-user to per-org Stripe customers.
 - ADR-009 (Legacy Ownership Migration): Raymond must approve the backfill strategy, personal org fallback, ambiguity queue review process, and merge verification criteria.
 - ADR-010 (Ownership Transfer): Raymond must approve the bilateral approval flow, billing responsibility transfer, request expiry duration, and admin reassignment deprecation timeline.
-- ADR-012 (Support Access and Impersonation): Raymond must approve the maximum duration (30 minutes), notification policy, revocation mechanism, audit log review cadence, and dev auth bypass handling.
-- ADR-014 (Minimum Safe Implementation Sequence): Raymond must approve the 15-gate sequence, pass/fail criteria, and the Migration 101 prohibition.
+- ADR-012 (Support Access and Impersonation): Raymond must approve the tiered duration model (Normal: 30 min default, 4 hr max; Break-glass: 15 min default, 30 min max; Extended >30 min requires customer approval), notification policy, revocation mechanism, audit log review cadence, and dev auth bypass handling.
+- ADR-014 (Minimum Safe Implementation Sequence): Raymond must approve the 15-gate sequence, pass/fail criteria, and the NEXT_ENTERPRISE_AUTHORITY_MIGRATION prohibition.
 
 **Status:** PENDING — Raymond approval required. Phase 1 implementation CANNOT begin until Raymond approves these 5 ADRs. The Phase 0.5 documents are submitted for Raymond's review.
 
@@ -165,7 +169,7 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 - [x] Phase 0.5 produced documentation only — no source code modified.
 - [x] No MFA files modified.
 - [x] No test files modified.
-- [x] No migration files modified (no Migration 101 created).
+- [x] No migration files modified (no NEXT_ENTERPRISE_AUTHORITY_MIGRATION created).
 - [x] No Phase 0 documents modified (additive documents only).
 - [x] Git diff will show only new files in `docs/enterprise-multi-tenant/`.
 
@@ -202,9 +206,9 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 
 ---
 
-## Migration 101 Prohibition Statement
+## NEXT_ENTERPRISE_AUTHORITY_MIGRATION Prohibition Statement
 
-**Migration 101 is PROHIBITED until:**
+**NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED until:**
 
 1. All 15 implementation gates (ADR-014 Gates 1 through 15) have passed their pass/fail criteria.
 2. The full Authorization Test Matrix (121 test cases) has passed.
@@ -213,7 +217,7 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 5. Phase 0 documents are verified unchanged.
 6. Raymond has explicitly approved the transition from Phase 1 to Phase 2 in writing.
 
-**Until ALL of the above conditions are met, Migration 101 MUST NOT be created, executed, or merged. Any attempt to create Migration 101 before these conditions are met is a critical error that invalidates the phase.**
+**Until ALL of the above conditions are met, NEXT_ENTERPRISE_AUTHORITY_MIGRATION MUST NOT be created, executed, or merged. Any attempt to create NEXT_ENTERPRISE_AUTHORITY_MIGRATION before these conditions are met is a critical error that invalidates the phase.**
 
 ---
 
@@ -222,4 +226,4 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 **Entry Gate Count:** 9 (8 BLOCKING, 1 INFORMATIONAL)
 **BLOCKING Gates Satisfied:** 7 of 8
 **BLOCKING Gates Pending:** 1 (Gate G: Raymond Approval)
-**Migration 101 Status:** PROHIBITED until all conditions met
+**NEXT_ENTERPRISE_AUTHORITY_MIGRATION Status:** PROHIBITED until all conditions met
