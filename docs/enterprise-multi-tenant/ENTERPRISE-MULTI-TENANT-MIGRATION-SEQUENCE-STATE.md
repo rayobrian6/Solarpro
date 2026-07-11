@@ -3,8 +3,8 @@
 **Date:** 2026-07-11
 **Branch:** `dev`
 **Commit:** `ef51acff` (pre-correction Phase 0.5 documentation commit)
-**Status:** Complete — migration directory analysis and next-identifier determination
-**Classification:** Phase 0.5A Integrity Reconciliation deliverable
+**Status:** Updated — migration directory analysis complete; MIGRATION-GOV-01 RESOLVED (Phase 1A); migration governance foundation implemented
+**Classification:** Phase 0.5A Integrity Reconciliation deliverable (updated for Phase 1A)
 
 > **Date classification:** All git commit dates in this repository are 2026-07-11. The date "2025-07-11" that appeared in earlier Phase 0.5 documents was incorrect and has been corrected to 2026-07-11 throughout the Phase 0.5 documentation set. The date 2026-07-11 is classified as a FACTUAL git commit date (verified via `git log --format=%ci`).
 
@@ -227,9 +227,9 @@ Before any new migration (including `NEXT_ENTERPRISE_AUTHORITY_MIGRATION`) can b
 | Failure state | If failed, the error details and partial application state |
 | Rollback reference | Reference to the rollback migration or procedure (if any) |
 
-**Status:** MIGRATION-GOV-01 is a BLOCKING governance risk. It must be resolved before `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` can be assigned a numeric identifier and executed. This document records the risk and the required ledger fields. **The governance system itself is NOT implemented** — it is documented as a prerequisite for future migration work. No production code, migrations, or tests were created or modified to address this risk.
+**Status:** MIGRATION-GOV-01 is RESOLVED. Phase 1A Migration Governance Foundation has been implemented. A `schema_migrations` tracking ledger now exists (created by `bootstrapMigrationLedger()` in `lib/migrations/ledger.ts`). A single canonical migration execution service (`lib/migrations/runner.ts`) is the ONLY module permitted to apply schema migrations. Both legacy runners are restricted via feature flags (`MIGRATION_LEGACY_INLINE_ENABLED`, `MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED`, both default to `false`). SHA-256 checksum validation is mandatory. Advisory locking (`pg_advisory_xact_lock`) prevents concurrent execution. Transactional execution ensures all-or-nothing per migration. Environment-aware authorization disables production execution by default (two-key requirement). Fresh TOTP is required for human-initiated execution. See `docs/phase1a/PHASE1A-MIGRATION-GOVERNANCE-IMPLEMENTATION.md` for the full implementation report and `docs/phase1a/ARCHITECTURE-DECISION-MIGRATION-MODEL.md` for the architecture decision.
 
-> **Note:** This risk was identified and documented during the Phase 0.5B documentation correction pass. It is recorded here as a blocking governance risk. Implementation of the governance system is deferred to a future phase and requires Raymond's approval.
+> **Note:** This risk was identified and documented during the Phase 0.5B documentation correction pass. It was RESOLVED during Phase 1A implementation (production code, authorized). The governance system is now implemented and tested (114 tests, 0 failures). The ledger table DDL is ready but has NOT yet been applied to any database — applying it to production is an operational task requiring database access, separate from the code implementation.
 
 ---
 
@@ -393,6 +393,6 @@ git log --format=%ci -1            # Expected: 2026-07-11...
 **Duplicates:** 074 (2 files)
 **Gaps:** 009, 012, 013, 014 (reserved — not candidates for reuse)
 **Next identifier:** `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` (placeholder — repository-sequential candidate 105 is informational only; authoritative executable identifier NOT VERIFIED)
-**Governance risk:** MIGRATION-GOV-01 (blocking — multiple non-authoritative migration execution paths; no schema_migrations ledger)
-**Confidence:** HIGH (all findings verified via direct inspection)
-**Warning:** Do NOT assign a numeric value until reconciliation is complete
+**Governance risk:** MIGRATION-GOV-01 — RESOLVED (Phase 1A implementation). schema_migrations ledger implemented, canonical migration runner established, legacy runners restricted, SHA-256 checksums mandatory, advisory locking and transactional execution in place.
+**Confidence:** HIGH (all findings verified via direct inspection; Phase 1A implementation verified via 114 passing tests + tsc --noEmit)
+**Warning:** Do NOT assign a numeric value to NEXT_ENTERPRISE_AUTHORITY_MIGRATION until all 15 program gates pass and Raymond approves the Phase 1 to Phase 2 transition. MIGRATION-GOV-01 (governance) is resolved; the remaining prerequisites are the Phase 1 foundation implementation (Gates 1-12), later program phases (Gates 13-15), and Raymond's transition approval.
