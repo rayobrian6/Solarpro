@@ -62,9 +62,10 @@ import {
   getGovernanceLifecycleState,
   setGovernanceLifecycleState,
   assertExecutionPermitted,
+  recordTotpUse,
 } from './ledger';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { verifyTOTPCode, decryptTOTPSecret } from '@/lib/mfa';
+import { generateTOTPCode, decryptTOTPSecret } from '@/lib/mfa';
 import { AdminUser } from '@/lib/adminAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -220,25 +221,130 @@ export function authorizeMigration(params: {
 }
 
 /**
- * Verify a fresh TOTP code for a human admin user.
- *
- * Fetches the user's TOTP secret from the database, decrypts it, and verifies
- * the code. Returns true if MFA is not enabled for the user (no secret) — in
- * that case, the TOTP requirement is waived (the user has no MFA to verify).
- * If MFA IS enabled, the code must be valid.
+ * TOTP time-step period (seconds per step, RFC 6238). Must match lib/mfa.ts.
  */
-export async function verifyFreshTotp(adminUserId: string, code: string): Promise<boolean> {
+const TOTP_PERIOD_SECONDS = 30;
+/**
+ * Clock-skew window (steps before/after). Must match lib/mfa.ts TOTP_WINDOW.
+ */
+const TOTP_WINDOW_STEPS = 1;
+
+/**
+ * Result of verifying a fresh TOTP code for migration authorization.
+ *
+ * - `verified`       — true only if the code is valid, MFA is enabled, AND the
+ *                     time-step has not been replayed (consumed by a prior
+ *                     migration mutation in the same 30-second window).
+ * - `deniedReason`   — a machine-readable denial code when verified is false.
+ * - `timeStep`       — the matched TOTP time-step (for audit / correlation),
+ *                     or null if not verified.
+ */
+export interface VerifyFreshTotpResult {
+  verified: boolean;
+  deniedReason: 'MFA_NOT_ENABLED' | 'TOTP_INVALID' | 'TOTP_REPLAY' | null;
+  timeStep: number | null;
+}
+
+/**
+ * Verify a fresh TOTP code for a human admin user — FAIL-CLOSED.
+ *
+ * MIGRATION-GOV-05: This function implements fail-closed MFA for migration
+ * execution. The prior implementation waived the TOTP requirement when a user
+ * had no MFA secret configured, which allowed migration execution without
+ * multi-factor authentication. This is now DENIED: a human operator who has
+ * not enrolled in MFA cannot execute schema migrations, period.
+ *
+ * TOTP REPLAY PREVENTION (MIGRATION-GOV-05): Once a TOTP code is accepted for
+ * a migration mutation, the (user_id, time_step) pair is recorded in the
+ * `migration_totp_uses` table. A second mutation attempt using the same
+ * time-step (i.e., the same 30-second window, or the same code) is rejected
+ * as a replay. The user must wait for the next time-step to produce a fresh
+ * code. The actual TOTP code is never stored — only a SHA-256 hash of the
+ * (user_id, time_step) pair.
+ *
+ * IMPORTANT — "failed auth does not consume a valid code": if the TOTP code
+ * is invalid (wrong code, clock skew beyond window), we return TOTP_INVALID
+ * WITHOUT recording the time-step. Only a valid, first-use code is recorded.
+ * This means a failed attempt does not "burn" the current time-step window;
+ * the user can retry with the same (still-fresh) code.
+ *
+ * @param adminUserId   The admin user ID who provided the TOTP code.
+ * @param code          The 6-digit TOTP code to verify.
+ * @param executionId   The execution ID of the migration run (for audit
+ *                      correlation in the migration_totp_uses table).
+ * @returns A VerifyFreshTotpResult indicating whether the code was verified.
+ */
+export async function verifyFreshTotp(
+  adminUserId: string,
+  code: string,
+  executionId: string | null = null,
+): Promise<VerifyFreshTotpResult> {
   const sql = neon(process.env.DATABASE_URL!);
   const rows = await sql`
     SELECT totp_secret_encrypted FROM admin_users WHERE id = ${adminUserId} LIMIT 1
   `;
   const row = rows[0];
+
+  // FAIL-CLOSED: If the user has no MFA secret, DENY migration execution.
+  // A human operator who has not enrolled in MFA cannot execute schema
+  // migrations. This was previously a fail-open waiver (return true), which
+  // allowed migrations without MFA — a security regression (MIGRATION-GOV-05).
   if (!row || !row.totp_secret_encrypted) {
-    // MFA not enabled for this user — requirement waived.
-    return true;
+    return {
+      verified: false,
+      deniedReason: 'MFA_NOT_ENABLED',
+      timeStep: null,
+    };
   }
+
   const secret = decryptTOTPSecret(row.totp_secret_encrypted);
-  return verifyTOTPCode(secret, code);
+  const now = Date.now();
+
+  // Find the matching time-step by checking the ±1 window (same logic as
+  // verifyTOTPCode, but we also need the matched step for replay tracking).
+  // We iterate from the current step outward to prefer the freshest match.
+  let matchedStep: number | null = null;
+  for (let delta = 0; delta <= TOTP_WINDOW_STEPS; delta++) {
+    for (const sign of delta === 0 ? [1] : [-1, 1]) {
+      const stepTime = now + sign * delta * TOTP_PERIOD_SECONDS * 1000;
+      const expectedCode = generateTOTPCode(secret, stepTime);
+      if (code === expectedCode) {
+        matchedStep = Math.floor(stepTime / 1000 / TOTP_PERIOD_SECONDS);
+        break;
+      }
+    }
+    if (matchedStep !== null) break;
+  }
+
+  // If no matching code in the window, the code is invalid.
+  // We do NOT record the time-step — a failed auth must not consume a valid
+  // code. The user can retry.
+  if (matchedStep === null) {
+    return {
+      verified: false,
+      deniedReason: 'TOTP_INVALID',
+      timeStep: null,
+    };
+  }
+
+  // TOTP REPLAY PREVENTION: Record this (user_id, time_step) pair. If it was
+  // already used (ON CONFLICT DO NOTHING returns no rows), this is a replay
+  // — the same 30-second code was already consumed for a prior migration
+  // mutation. Reject it. The user must wait for the next time-step.
+  const firstUse = await recordTotpUse(adminUserId, matchedStep, executionId);
+  if (!firstUse) {
+    return {
+      verified: false,
+      deniedReason: 'TOTP_REPLAY',
+      timeStep: matchedStep,
+    };
+  }
+
+  return {
+    verified: true,
+    deniedReason: null,
+    timeStep: matchedStep,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1126,7 +1232,7 @@ export async function runPendingMigrations(
 
 export { discoverMigrationFiles, validateMigrationManifest, findMigrationByIdentifier } from './manifest';
 export { calculateChecksumOfString, checksumsMatch, detectTransactionMode, detectTransactionModeFromFile } from './validation';
-export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, assertExecutionPermitted } from './ledger';
+export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, assertExecutionPermitted, recordTotpUse, isTotpTimeStepUsed } from './ledger';
 export {
   MIGRATION_LOCK_KEY,
   MIGRATION_ENV_VARS,

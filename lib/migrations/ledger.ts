@@ -179,6 +179,29 @@ CREATE TABLE IF NOT EXISTS migration_baseline (
 
 CREATE INDEX IF NOT EXISTS migration_baseline_status_idx
   ON migration_baseline (reconciliation_status);
+
+-- TOTP replay prevention table (MIGRATION-GOV-05, Phase 1A.1 Issue 6).
+-- Records which TOTP time-steps have been used for migration mutations.
+-- A (user_id, time_step) pair can only be used once for a mutation. This
+-- prevents replay of the same TOTP code for a second mutation within the
+-- same 30-second window. The code itself is NOT stored — only a hash of
+-- the (user_id, time_step) pair, to avoid storing any sensitive value.
+CREATE TABLE IF NOT EXISTS migration_totp_uses (
+  id              SERIAL PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  time_step       BIGINT NOT NULL,
+  use_hash        TEXT NOT NULL
+    CHECK (use_hash ~ '^[0-9a-f]{64}$'),
+  used_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  execution_id    TEXT,
+  CONSTRAINT migration_totp_uses_user_step_unique
+    UNIQUE (user_id, time_step)
+);
+
+CREATE INDEX IF NOT EXISTS migration_totp_uses_user_idx
+  ON migration_totp_uses (user_id);
+CREATE INDEX IF NOT EXISTS migration_totp_uses_used_at_idx
+  ON migration_totp_uses (used_at);
 `;
 
 /**
@@ -739,6 +762,92 @@ export async function assertExecutionPermitted(
   }
 
   return { permitted, lifecycleState: lifecycle };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOTP replay prevention (MIGRATION-GOV-05, Phase 1A.1 Issue 6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Record a TOTP time-step as used for a migration mutation.
+ *
+ * This prevents replay of the same TOTP code for a second mutation within the
+ * same 30-second time window. The (user_id, time_step) pair is unique — if a
+ * row already exists for this user and time-step, the INSERT fails (via the
+ * unique constraint), and the caller should deny the mutation.
+ *
+ * The TOTP code itself is NOT stored. We store only a SHA-256 hash of the
+ * (user_id, time_step) pair as a secondary integrity check. No sensitive value
+ * (the actual TOTP code, the MFA secret, or any derived value) is persisted.
+ *
+ * @param userId       The admin user ID who provided the TOTP code.
+ * @param timeStep     The TOTP time-step (floor(timestamp / 30)) that was used.
+ * @param executionId  The execution ID of the migration run (for audit
+ *                     correlation).
+ * @returns true if the time-step was successfully recorded (first use),
+ *          false if it was already used (replay detected).
+ */
+export async function recordTotpUse(
+  userId: string,
+  timeStep: number,
+  executionId: string | null,
+): Promise<boolean> {
+  const sql = getRawSql();
+
+  // Hash the (user_id, time_step) pair for integrity. We do NOT store the
+  // TOTP code or any value derived from the secret.
+  const { createHash } = await import('node:crypto');
+  const useHash = createHash('sha256')
+    .update(`${userId}:${timeStep}`)
+    .digest('hex');
+
+  try {
+    // ON CONFLICT DO NOTHING: if the (user_id, time_step) pair already exists,
+    // no row is inserted and RETURNING returns no rows. If it's a new pair,
+    // a row is inserted and RETURNING returns its id.
+    const rows = await sql`
+      INSERT INTO migration_totp_uses (user_id, time_step, use_hash, execution_id)
+      VALUES (${userId}, ${timeStep}, ${useHash}, ${executionId})
+      ON CONFLICT (user_id, time_step) DO NOTHING
+      RETURNING id
+    `;
+    // If we got a row back, it was a new insert (first use — not a replay).
+    // If no row, the pair already existed (replay detected).
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check whether a TOTP time-step has already been used for a migration
+ * mutation by this user.
+ *
+ * This is a read-only check that can be used before recording to detect
+ * replay attempts. However, the authoritative check is the INSERT in
+ * recordTotpUse() — there is a race window between this check and the INSERT.
+ * For true replay prevention, use recordTotpUse() and check its return value.
+ *
+ * @param userId   The admin user ID.
+ * @param timeStep The TOTP time-step to check.
+ * @returns true if the time-step has already been used (replay), false if not.
+ */
+export async function isTotpTimeStepUsed(
+  userId: string,
+  timeStep: number,
+): Promise<boolean> {
+  const sql = getRawSql();
+
+  try {
+    const rows = await sql`
+      SELECT id FROM migration_totp_uses
+      WHERE user_id = ${userId} AND time_step = ${timeStep}
+      LIMIT 1
+    `;
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

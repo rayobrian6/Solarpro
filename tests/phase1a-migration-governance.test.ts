@@ -778,13 +778,39 @@ describe('Phase 1A: Runner execution model', () => {
     }
   });
 
-  it('verifyFreshTotp uses decryptTOTPSecret and verifyTOTPCode from lib/mfa', () => {
+  it('verifyFreshTotp uses decryptTOTPSecret and generateTOTPCode from lib/mfa', () => {
     expect(runnerSrc).toContain('decryptTOTPSecret');
-    expect(runnerSrc).toContain('verifyTOTPCode');
+    expect(runnerSrc).toContain('generateTOTPCode');
   });
 
-  it('verifyFreshTotp waives requirement when MFA not enabled (no secret)', () => {
-    expect(runnerSrc).toContain('MFA not enabled for this user');
+  it('verifyFreshTotp FAILS CLOSED when MFA not enabled (no secret) \u2014 denies, not waives (MIGRATION-GOV-05)', () => {
+    // The prior implementation returned true (waived) when no MFA secret.
+    // The hardened implementation returns false (denied) with MFA_NOT_ENABLED.
+    expect(runnerSrc).toContain('MFA_NOT_ENABLED');
+    expect(runnerSrc).toContain('FAIL-CLOSED');
+    // Ensure the old fail-open waiver comment is gone.
+    expect(runnerSrc).not.toContain('requirement waived');
+    expect(runnerSrc).not.toContain('MFA not enabled for this user \u2014 requirement waived');
+  });
+
+  it('verifyFreshTotp returns a result object with verified, deniedReason, and timeStep', () => {
+    expect(runnerSrc).toContain('VerifyFreshTotpResult');
+    expect(runnerSrc).toContain('deniedReason');
+    expect(runnerSrc).toContain('timeStep');
+  });
+
+  it('verifyFreshTotp implements TOTP replay prevention via recordTotpUse (MIGRATION-GOV-05)', () => {
+    expect(runnerSrc).toContain('recordTotpUse');
+    expect(runnerSrc).toContain('TOTP_REPLAY');
+    // Failed auth must NOT consume a valid code \u2014 only record on success.
+    expect(runnerSrc).toContain('does not consume a valid code');
+  });
+
+  it('verifyFreshTotp does not persist the TOTP code itself (only hashed time-step)', () => {
+    // The recordTotpUse function hashes (user_id, time_step), not the code.
+    expect(runnerSrc).toContain('matchedStep');
+    // The code is compared in-memory only; it should not be passed to recordTotpUse.
+    expect(runnerSrc).toMatch(/recordTotpUse\(adminUserId,\s*matchedStep/);
   });
 });
 
@@ -842,6 +868,27 @@ describe('Phase 1A: Canonical API route', () => {
     expect(routeSrc).toContain('runPendingMigrations');
     expect(routeSrc).toContain('runSinglePendingMigration');
     expect(routeSrc).toContain('authorizeMigration');
+  });
+
+  it('route does NOT allow client-supplied actorType \u2014 migration-actor is server-side only (MIGRATION-GOV-05)', () => {
+    // The route must hardcode actorType to 'human' and reject any client attempt
+    // to set it to 'migration-actor' (automated service token).
+    expect(routeSrc).toContain("const actorType: MigrationActorType = 'human'");
+    expect(routeSrc).toContain('clientActorType');
+    expect(routeSrc).toContain('Client-supplied actorType is not permitted');
+  });
+
+  it('route handles VerifyFreshTotpResult with specific denial reasons (MIGRATION-GOV-05)', () => {
+    expect(routeSrc).toContain('MFA_NOT_ENABLED');
+    expect(routeSrc).toContain('TOTP_INVALID');
+    expect(routeSrc).toContain('TOTP_REPLAY');
+    expect(routeSrc).toContain('deniedReason');
+  });
+
+  it('route emits MFA audit events on denial (MIGRATION-GOV-05)', () => {
+    expect(routeSrc).toContain('migration.mfa.denied');
+    expect(routeSrc).toContain('migration.mfa.replay_detected');
+    expect(routeSrc).toContain('emitAuditEvent');
   });
 });
 

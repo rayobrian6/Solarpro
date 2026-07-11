@@ -150,12 +150,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // MIGRATION-GOV-05: The actor type is ALWAYS 'human' for API-route
+  // requests. The 'migration-actor' type (automated service token) is a
+  // server-side-only concept and CANNOT be client-selected. We explicitly
+  // ignore any client-supplied actorType field to prevent privilege
+  // escalation.
+  const clientActorType = body?.actorType as string | undefined;
+  if (clientActorType && clientActorType !== 'human') {
+    return NextResponse.json(
+      { success: false, error: "Client-supplied actorType is not permitted. Actor type is determined server-side." },
+      { status: 403 },
+    );
+  }
+
   const isDryRun = action.startsWith('dry-run');
   const isExecute = action.startsWith('run') && !isDryRun;
   const migrationAction: MigrationAction = isExecute ? 'execute' : 'inspect';
   const actorType: MigrationActorType = 'human';
 
-  // Verify fresh TOTP for non-dry-run execution.
+  // Verify fresh TOTP for non-dry-run execution (MIGRATION-GOV-05).
+  // verifyFreshTotp now returns a result object with fail-closed semantics:
+  // - MFA_NOT_ENABLED: user has no MFA secret → DENIED (not waived)
+  // - TOTP_INVALID: code doesn't match → retry allowed
+  // - TOTP_REPLAY: time-step already consumed → must wait for next step
   let totpVerified = false;
   if (isExecute) {
     if (!totpCode || typeof totpCode !== 'string') {
@@ -165,13 +182,53 @@ export async function POST(req: NextRequest) {
       );
     }
     try {
-      totpVerified = await verifyFreshTotp(adminUser.id, totpCode);
+      const totpResult = await verifyFreshTotp(adminUser.id, totpCode);
+      totpVerified = totpResult.verified;
+      if (!totpVerified) {
+        const reasonMessages: Record<string, string> = {
+          MFA_NOT_ENABLED: 'MFA is not enabled for this account. Migration execution requires MFA enrollment. Enable MFA in your account settings and retry.',
+          TOTP_INVALID: 'TOTP verification failed. The code is invalid or expired. Generate a fresh code and retry.',
+          TOTP_REPLAY: 'This TOTP code has already been used for a migration mutation. Wait for the next 30-second time-step and generate a new code.',
+        };
+        const message = totpResult.deniedReason
+          ? (reasonMessages[totpResult.deniedReason] ?? 'TOTP verification failed.')
+          : 'TOTP verification failed.';
+        // Emit audit event for MFA denial (MIGRATION-GOV-05).
+        emitAuditEvent({
+          type: totpResult.deniedReason === 'TOTP_REPLAY'
+            ? 'migration.mfa.replay_detected'
+            : 'migration.mfa.denied',
+          actorType: 'human',
+          actorId: adminUser.id,
+          environment: getCurrentEnvironment(),
+          executionId: null,
+          migrationIdentifier: identifier ?? null,
+          filename: null,
+          details: {
+            deniedReason: totpResult.deniedReason,
+            timeStep: totpResult.timeStep,
+          },
+        });
+        return NextResponse.json(
+          { success: false, error: message, deniedReason: totpResult.deniedReason },
+          { status: 403 },
+        );
+      }
     } catch {
       totpVerified = false;
-    }
-    if (!totpVerified) {
+      // Emit audit event for MFA error (MIGRATION-GOV-05).
+      emitAuditEvent({
+        type: 'migration.mfa.denied',
+        actorType: 'human',
+        actorId: adminUser.id,
+        environment: getCurrentEnvironment(),
+        executionId: null,
+        migrationIdentifier: identifier ?? null,
+        filename: null,
+        details: { deniedReason: 'MFA_ERROR' },
+      });
       return NextResponse.json(
-        { success: false, error: 'TOTP verification failed. Provide a valid fresh code.' },
+        { success: false, error: 'TOTP verification encountered an error. Retry with a fresh code.' },
         { status: 403 },
       );
     }
