@@ -3796,17 +3796,21 @@ export default function DesignStudio({ project, onSave }: Props) {
 
       <div className="flex flex-1 min-h-0">
         {/* ── Left Toolbar ── */}
-        {/* design-page-simplify P4: Toolbar hidden by default. The wrapper uses
-            translate-x to slide the toolbar off-canvas when collapsed (overflow-hidden
-            clips the inner content). The chevron handle lives in the canvas below
-            and toggles `leftToolbarOpen` via the `T` key or a click. */}
+        {/* design-page-simplify P5: Toolbar wrapper is now a true overlay (out of flow).
+            `absolute left-0 top-0 bottom-0 z-30` anchors the toolbar to the map's
+            left edge while letting `flex-1` sibling fill the full width. P4's
+            `flex-shrink-0` + `overflow-hidden` clipped visually but kept the box in
+            flow, leaving a 56px left inset on the map even when closed. The chevron
+            handle (already absolute at left-0) stays put; the toolbar now slides
+            over the map's edge instead of pushing it. Map's parent (flex-1 relative
+            min-w-0) provides the relative anchor for the absolute toolbar. */}
         <div
-          className={`flex-shrink-0 transition-transform duration-200 ease-in-out overflow-hidden ${
+          className={`absolute left-0 top-0 bottom-0 z-30 transition-transform duration-200 ease-in-out ${
             leftToolbarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
           aria-hidden={!leftToolbarOpen}
         >
-          <div className="w-14 bg-slate-900 border-r border-slate-700/50 flex flex-col items-center py-3 gap-1 h-full">
+          <div className="w-14 h-full bg-slate-900 border-r border-slate-700/50 flex flex-col items-center py-3 gap-1 shadow-2xl shadow-black/50">
           {/* design-page-simplify P2a: Segmented zone control — replaces the previous zone-type
               badge + 3 separate draw buttons. Sets both `drawingMode` and `activeZoneType`
               in a single click, mirroring the original onClick behavior (incl. the multi-row
