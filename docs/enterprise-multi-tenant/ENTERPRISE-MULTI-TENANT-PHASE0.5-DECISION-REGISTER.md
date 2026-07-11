@@ -6,7 +6,7 @@
 **Date Classification:** Document creation date (2026-07-11). Architecture decision dates (D-01 through D-14) are 2026-07-11. Evidence baseline commit `7b344aa1` is dated 2026-07-11 (commit date). Phase 0 predecessor commit `39a1f718` is dated 2026-07-11 (commit date). This reconciliation commit is dated 2026-07-11 (document correction date). The previous incorrect value of 2025-07-11 has been corrected — no Phase 0.5 work occurred in 2025.
 **Branch:** `dev` @ `ef51acff`
 **Branch Reference Classification:** `ef51acff` is the Phase 0.5 documentation commit (this document and its companion Phase 0.5 deliverables). The codebase evidence baseline is `7b344aa1` (a code commit, not a documentation commit) — referenced where source evidence is cited.
-**Status:** Complete — All 14 decisions analyzed (architecture analysis COMPLETE; documentation integrity reconciliation IN PROGRESS; stakeholder approval PENDING for 5 decisions)
+**Status:** Complete — All 14 decisions analyzed (architecture analysis COMPLETE; documentation integrity reconciliation IN PROGRESS; stakeholder approval APPROVED BY RAYMOND for 5 decisions)
 **Predecessor:** Phase 0 Audit & Architecture Design (commit `39a1f718`)
 **Successor:** Phase 1 Implementation (BLOCKED — see Entry Gates document)
 
@@ -17,9 +17,9 @@
 This document is the single source of truth for the 14 architecture decisions (D-01 through D-14) that must be settled before any schema migrations or implementation work begin on the Enterprise Multi-Tenant Authority initiative. Each decision is recorded with a dual status model:
 
 - **Architecture Status:** RECOMMENDED — the architecture analysis is complete and a recommendation has been made based on sufficient codebase evidence and governing principles. Other possible values: REJECTED, DEFERRED, UNRESOLVED.
-- **Stakeholder Approval Status:** PENDING RAYMOND APPROVAL — Raymond must explicitly approve the decision before implementation proceeds (applies to D-08, D-09, D-10, D-12, D-14). NOT REQUIRED — the decision is settled by evidence and principles without requiring stakeholder sign-off (applies to D-01 through D-07, D-11, D-13).
+- **Stakeholder Approval Status:** APPROVED BY RAYMOND — Raymond has explicitly approved the decision in writing with conditions (applies to D-08, D-09, D-10, D-12, D-14). NOT REQUIRED — the decision is settled by evidence and principles without requiring stakeholder sign-off (applies to D-01 through D-07, D-11, D-13).
 
-No decision has a stakeholder approval status of APPROVED BY RAYMOND at this time. All 14 decisions have an architecture status of RECOMMENDED.
+All five decisions requiring Raymond approval have been APPROVED BY RAYMOND as of 2026-07-11, with conditions documented in `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-RECORD.md`. All 14 decisions have an architecture status of RECOMMENDED.
 
 The full Architecture Decision Records (ADR-001 through ADR-014) with complete evidence, options analysis, and impact assessment are in the companion document `ENTERPRISE-MULTI-TENANT-ARCHITECTURE-DECISION-RECORDS.md`.
 
@@ -54,13 +54,13 @@ All 14 decisions are evaluated against the seven governing principles establishe
 | **D-05** | Project Collaboration Model | **RECOMMENDED** | NOT REQUIRED | One canonical owning org per durable resource; cross-org collaboration via explicit `project_participants` table with permission envelope | `projects.user_id` is individual, not org; `getProjectsByUser(user.id)` is user-scoped; no collaboration model exists |
 | **D-06** | Resource Share Grants | **RECOMMENDED** | NOT REQUIRED | Explicit `resource_share_grants` table; revision-pinned; no reshare by default; no future revisions by default | No sharing model exists; all data is user-scoped; admin has global access (F-06) |
 | **D-07** | Files and Revisions | **RECOMMENDED** | NOT REQUIRED | Private tenant-prefixed storage (`{org_id}/...`); DB-backed `file_revisions` table; immutable revisions; access via signed URLs from auth-gated endpoint | F-08: storage paths have no org prefix; survey photos use `access: 'public'`; utility bills use `access: "public"`; T-07: public blob URLs leaked |
-| **D-08** | Billing Attribution | **RECOMMENDED** | PENDING RAYMOND APPROVAL | Organization-level billing; org owns Stripe subscription; seats metered server-side from `organization_members`; server-authoritative attribution | F-18: billing is per-user; `syncSeatsForOrg()` bills seats on owner's subscription; F-23: pricing is global; T-20: no per-org billing isolation |
-| **D-09** | Legacy Ownership Migration | **RECOMMENDED** | PENDING RAYMOND APPROVAL | No free-text company-name auto-merging; solo org per unaffiliated user; ambiguity queue for manual review | F-02: two parallel company concepts; `users.company` is free-text TEXT with no FK to `organizations`; F-03: organizations barely wired |
-| **D-10** | Ownership Transfer | **RECOMMENDED** | PENDING RAYMOND APPROVAL | Formal `ownership_transfer_requests` table; both sides must approve; fully audited with before/after state; cooldown period | Admin can reassign projects with `UPDATE projects SET user_id` and no audit trail; no transfer concept exists |
+| **D-08** | Billing Attribution | **RECOMMENDED** | APPROVED BY RAYMOND | Organization-level billing; org owns Stripe subscription; seats metered server-side from `organization_members`; server-authoritative attribution | F-18: billing is per-user; `syncSeatsForOrg()` bills seats on owner's subscription; F-23: pricing is global; T-20: no per-org billing isolation |
+| **D-09** | Legacy Ownership Migration | **RECOMMENDED** | APPROVED BY RAYMOND | No free-text company-name auto-merging; solo org per unaffiliated user; ambiguity queue for manual review | F-02: two parallel company concepts; `users.company` is free-text TEXT with no FK to `organizations`; F-03: organizations barely wired |
+| **D-10** | Ownership Transfer | **RECOMMENDED** | APPROVED BY RAYMOND | Formal `ownership_transfer_requests` table; both sides must approve; fully audited with before/after state; cooldown period | Admin can reassign projects with `UPDATE projects SET user_id` and no audit trail; no transfer concept exists |
 | **D-11** | Parent/Subsidiary Organizations | **RECOMMENDED** | NOT REQUIRED | Design for future via optional `parent_org_id` column; no automatic inheritance in initial release; cross-subsidiary access via explicit share grants | Migration 016: flat organizations, no hierarchy; no parent/subsidiary concept exists |
-| **D-12** | Support Access and Impersonation | **RECOMMENDED** | PENDING RAYMOND APPROVAL | Time-limited support elevation with tiered duration model: Normal default 30 min, max 4 hr; Break-glass default 15 min, max 30 min; Extended (>30 min) requires customer approval. No standing access; break-glass for emergencies with post-hoc review; same-org validation required | F-15: impersonation has no tenant boundary; T-05: impersonation cross-tenant access; `admin_impersonation_tokens` has 5-min TTL, no same-org check |
+| **D-12** | Support Access and Impersonation | **RECOMMENDED** | APPROVED BY RAYMOND | Time-limited support elevation with tiered duration model: Normal default 30 min, max 4 hr; Break-glass default 15 min, max 30 min; Extended (>30 min) requires customer approval. No standing access; break-glass for emergencies with post-hoc review; same-org validation required | F-15: impersonation has no tenant boundary; T-05: impersonation cross-tenant access; `admin_impersonation_tokens` has 5-min TTL, no same-org check |
 | **D-13** | Audit Ledger Architecture | **RECOMMENDED** | NOT REQUIRED | Tenant-aware audit ledger; `audit_log` gets `actor_organization_id` and `resource_owner_organization_id`; per-org hash chains within single table | F-09: audit log has no org context; T-08: compliance gap; `audit_log` table has actor_id/email/role but no org columns |
-| **D-14** | Minimum Safe Implementation Sequence | **RECOMMENDED** | PENDING RAYMOND APPROVAL | 15-gate sequence describing the FULL program (not Phase 1 alone). Phase 1 is foundation-only: Gates 1-12 establish canonical orgs, memberships, active org context, role separation, permission definitions, central authorization interfaces, tenant-aware audit context, feature flags, backward-compatible behavior, foundational tests, and migration-governance prerequisites. Gates 13-15 (legacy backfill, ambiguity queue, adversarial validation) belong to later program phases — they are NOT "Phase 1 Completion." Centralized authorization built BEFORE route-by-route migration; adversarial validation as final gate | 280 API routes, 136 files with `getUserFromRequest()`, 70 files with `requireAdminApi()`; all user-scoped |
+| **D-14** | Minimum Safe Implementation Sequence | **RECOMMENDED** | APPROVED BY RAYMOND | 15-gate sequence describing the FULL program (not Phase 1 alone). Phase 1 is foundation-only: Gates 1-12 establish canonical orgs, memberships, active org context, role separation, permission definitions, central authorization interfaces, tenant-aware audit context, feature flags, backward-compatible behavior, foundational tests, and migration-governance prerequisites. Gates 13-15 (legacy backfill, ambiguity queue, adversarial validation) belong to later program phases — they are NOT "Phase 1 Completion." Centralized authorization built BEFORE route-by-route migration; adversarial validation as final gate | 280 API routes, 136 files with `getUserFromRequest()`, 70 files with `requireAdminApi()`; all user-scoped |
 
 ---
 
@@ -82,10 +82,10 @@ This register uses a dual status model that separates architecture analysis from
 | Stakeholder Approval Status | Meaning |
 |-----------------------------|---------|
 | **APPROVED BY RAYMOND** | Raymond has explicitly approved the decision in writing. Implementation may proceed once Phase 1 entry gates are met. |
-| **PENDING RAYMOND APPROVAL** | Raymond must explicitly approve the decision before implementation proceeds. The decision is architecturally recommended but has not received stakeholder sign-off. Applies to D-08, D-09, D-10, D-12, D-14. |
+| **PENDING RAYMOND APPROVAL** | Raymond must explicitly approve the decision before implementation proceeds. The decision is architecturally recommended but has not received stakeholder sign-off. (Historical state for D-08, D-09, D-10, D-12, D-14 — now APPROVED BY RAYMOND as of 2026-07-11.) |
 | **NOT REQUIRED** | The decision is settled by sufficient codebase evidence and governing principles without requiring stakeholder sign-off. Applies to D-01 through D-07, D-11, D-13. |
 
-**Current state:** All 14 decisions have Architecture Status RECOMMENDED. Five decisions (D-08, D-09, D-10, D-12, D-14) have Stakeholder Approval Status PENDING RAYMOND APPROVAL. Nine decisions (D-01 through D-07, D-11, D-13) have Stakeholder Approval Status NOT REQUIRED. No decision has Stakeholder Approval Status APPROVED BY RAYMOND at this time.
+**Current state:** All 14 decisions have Architecture Status RECOMMENDED. Five decisions (D-08, D-09, D-10, D-12, D-14) have Stakeholder Approval Status APPROVED BY RAYMOND (approved 2026-07-11, with conditions — see `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-RECORD.md`). Nine decisions (D-01 through D-07, D-11, D-13) have Stakeholder Approval Status NOT REQUIRED.
 
 ---
 
@@ -106,9 +106,9 @@ The following sub-components are deferred within approved decisions:
 
 ## 5. Raymond Approval Summary
 
-All 14 decisions have sufficient codebase evidence for the architecture analysis to be complete (Architecture Status: RECOMMENDED). Five decisions require explicit Raymond approval before implementation can proceed (Stakeholder Approval Status: PENDING RAYMOND APPROVAL). The remaining nine decisions do not require Raymond approval (Stakeholder Approval Status: NOT REQUIRED).
+All 14 decisions have sufficient codebase evidence for the architecture analysis to be complete (Architecture Status: RECOMMENDED). Five decisions required explicit Raymond approval before implementation can proceed (Stakeholder Approval Status: APPROVED BY RAYMOND, approved 2026-07-11 with conditions). The remaining nine decisions do not require Raymond approval (Stakeholder Approval Status: NOT REQUIRED).
 
-### Decisions Requiring Raymond Approval (PENDING RAYMOND APPROVAL)
+### Decisions Requiring Raymond Approval (APPROVED BY RAYMOND)
 
 | Decision | ADR | What Raymond Must Approve |
 |----------|-----|---------------------------|

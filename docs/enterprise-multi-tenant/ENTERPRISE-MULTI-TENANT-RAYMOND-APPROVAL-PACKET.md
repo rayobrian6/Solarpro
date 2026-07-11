@@ -35,7 +35,7 @@ The five decisions requiring Raymond's approval are:
 
 The remaining nine decisions (D-01 through D-07, D-11, D-13) do not require Raymond's approval — they are settled by sufficient codebase evidence and governing principles. See `ENTERPRISE-MULTI-TENANT-PHASE0.5-DECISION-REGISTER.md` for the full decision register.
 
-> **Architecture Status vs. Stakeholder Approval Status:** All 14 decisions have Architecture Status RECOMMENDED — the architecture analysis is complete and a recommendation has been made based on codebase evidence and governing principles. The five decisions in this packet additionally have Stakeholder Approval Status PENDING RAYMOND APPROVAL — Raymond must explicitly approve each before implementation proceeds. No decision has Stakeholder Approval Status APPROVED BY RAYMOND at this time.
+> **Architecture Status vs. Stakeholder Approval Status:** All 14 decisions have Architecture Status RECOMMENDED — the architecture analysis is complete and a recommendation has been made based on codebase evidence and governing principles. The five decisions in this packet have Stakeholder Approval Status APPROVED BY RAYMOND — Raymond approved all five on 2026-07-11 with conditions (see `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-RECORD.md`). The remaining nine decisions have Stakeholder Approval Status NOT REQUIRED.
 
 ---
 
@@ -89,11 +89,11 @@ The following work is BLOCKED pending Raymond's approval of this decision:
 | Decision ID | D-08 |
 | ADR | ADR-008 |
 | Architecture Status | RECOMMENDED |
-| Stakeholder Approval Status | PENDING RAYMOND APPROVAL |
-| Raymond Approval | ☐ APPROVED ☐ REJECTED ☐ DEFERRED |
-| Approval Date | _________________ |
-| Raymond Signature | _________________ |
-| Conditions / Notes | _________________ |
+| Stakeholder Approval Status | APPROVED BY RAYMOND |
+| Raymond Approval | ☑ APPROVED ☐ REJECTED ☐ DEFERRED |
+| Approval Date | 2026-07-11 |
+| Raymond Signature | Raymond (written approval received) |
+| Conditions / Notes | Approved with conditions: (1) Do not migrate existing Stripe subscriptions during initial foundation work; (2) Preserve current billing behavior behind compatibility layer; (3) No billing cutover until org ownership, memberships, Stripe customer mapping, webhook attribution, and billing-event attribution are verified; (4) Require dry-run migration report before any real Stripe subscription migration; (5) Server, not client, determines authoritative billing organization. See RAYMOND-APPROVAL-RECORD.md. |
 
 ---
 
@@ -146,11 +146,11 @@ The following work is BLOCKED pending Raymond's approval of this decision:
 | Decision ID | D-09 |
 | ADR | ADR-009 |
 | Architecture Status | RECOMMENDED |
-| Stakeholder Approval Status | PENDING RAYMOND APPROVAL |
-| Raymond Approval | ☐ APPROVED ☐ REJECTED ☐ DEFERRED |
-| Approval Date | _________________ |
-| Raymond Signature | _________________ |
-| Conditions / Notes | _________________ |
+| Stakeholder Approval Status | APPROVED BY RAYMOND |
+| Raymond Approval | ☑ APPROVED ☐ REJECTED ☐ DEFERRED |
+| Approval Date | 2026-07-11 |
+| Raymond Signature | Raymond (written approval received) |
+| Conditions / Notes | Approved with conditions: (1) Never merge using free-text company names alone; (2) Preserve historical user_id attribution as creator/legacy owner metadata; (3) Create personal/default org only when no reliable shared-company relationship exists; (4) Send all ambiguous ownership assignments to a review queue; (5) Initial ambiguity-queue ownership belongs to authorized platform migration-review role; Raymond retains final escalation authority; (6) No ownership backfill may write changes until dry-run report is reviewed and approved. See RAYMOND-APPROVAL-RECORD.md. |
 
 ---
 
@@ -203,11 +203,11 @@ The following work is BLOCKED pending Raymond's approval of this decision:
 | Decision ID | D-10 |
 | ADR | ADR-010 |
 | Architecture Status | RECOMMENDED |
-| Stakeholder Approval Status | PENDING RAYMOND APPROVAL |
-| Raymond Approval | ☐ APPROVED ☐ REJECTED ☐ DEFERRED |
-| Approval Date | _________________ |
-| Raymond Signature | _________________ |
-| Conditions / Notes | _________________ |
+| Stakeholder Approval Status | APPROVED BY RAYMOND |
+| Raymond Approval | ☑ APPROVED ☐ REJECTED ☐ DEFERRED |
+| Approval Date | 2026-07-11 |
+| Raymond Signature | Raymond (written approval received) |
+| Conditions / Notes | Approved with conditions: (1) No ordinary API may directly edit owning_organization_id; (2) Receiving org must explicitly accept transfer; (3) Both initiation and acceptance require elevated permission and recent MFA; (4) Historical audit attribution must remain immutable; (5) Ownership transfers remain disabled until org ownership migration and centralized authorization are proven stable; (6) Billing obligations, open approvals, active shares, files, and revisions must be evaluated before a transfer completes. See RAYMOND-APPROVAL-RECORD.md. |
 
 ---
 
@@ -272,11 +272,11 @@ The following work is BLOCKED pending Raymond's approval of this decision:
 | Decision ID | D-12 |
 | ADR | ADR-012 |
 | Architecture Status | RECOMMENDED |
-| Stakeholder Approval Status | PENDING RAYMOND APPROVAL |
-| Raymond Approval | ☐ APPROVED ☐ REJECTED ☐ DEFERRED |
-| Approval Date | _________________ |
-| Raymond Signature | _________________ |
-| Conditions / Notes | _________________ |
+| Stakeholder Approval Status | APPROVED BY RAYMOND |
+| Raymond Approval | ☑ APPROVED ☐ REJECTED ☐ DEFERRED |
+| Approval Date | 2026-07-11 |
+| Raymond Signature | Raymond (written approval received) |
+| Conditions / Notes | Approved with conditions: Normal default 30 min, max 4 hr; Break-glass default 15 min, max 30 min; Sessions >30 min require customer approval and justification; Read-only default; Downloads disabled by default; Every session requires reason, tenant scope, automatic expiration, audit events, tenant notification; Break-glass cannot change billing, ownership, org membership, or credentials unless separately approved emergency policy permits. See RAYMOND-APPROVAL-RECORD.md. |
 
 ---
 
@@ -352,11 +352,11 @@ The following work is BLOCKED pending Raymond's approval of this decision:
 | Decision ID | D-14 |
 | ADR | ADR-014 |
 | Architecture Status | RECOMMENDED |
-| Stakeholder Approval Status | PENDING RAYMOND APPROVAL |
-| Raymond Approval | ☐ APPROVED ☐ REJECTED ☐ DEFERRED |
-| Approval Date | _________________ |
-| Raymond Signature | _________________ |
-| Conditions / Notes | _________________ |
+| Stakeholder Approval Status | APPROVED BY RAYMOND |
+| Raymond Approval | ☑ APPROVED ☐ REJECTED ☐ DEFERRED |
+| Approval Date | 2026-07-11 |
+| Raymond Signature | Raymond (written approval received) |
+| Conditions / Notes | Approved with conditions: (1) 15 gates must not all be classified as Phase 1; (2) Phase 1 is foundation-only; (3) Gates involving resource backfill, ambiguity processing, final cutover, and adversarial validation belong to later program phases; (4) Every gate requires acceptance evidence before next dependent gate begins; (5) No migration may be created or executed until migration governance is resolved; (6) Historical migration gaps remain reserved; (7) Migration 105 is informational only and not authorized; (8) NEXT_ENTERPRISE_AUTHORITY_MIGRATION remains authoritative placeholder until deployed DB state and migration governance are verified. See RAYMOND-APPROVAL-RECORD.md. |
 
 ---
 
@@ -391,7 +391,7 @@ The following work is BLOCKED pending Raymond's approval of this decision:
 
 **Decisions requiring Raymond approval:** 5 (D-08, D-09, D-10, D-12, D-14)
 **Architecture Status (all 5):** RECOMMENDED
-**Stakeholder Approval Status (all 5):** PENDING RAYMOND APPROVAL
-**Decisions approved by Raymond:** 0 (none at this time)
+**Stakeholder Approval Status (all 5):** APPROVED BY RAYMOND (approved 2026-07-11, with conditions)
+**Decisions approved by Raymond:** 5 (D-08, D-09, D-10, D-12, D-14)
 **Blocked work:** All Phase 1 implementation, Phase 2 migration, Phase 3+ ownership transfer
 **NEXT_ENTERPRISE_AUTHORITY_MIGRATION:** PROHIBITED until all 15 gates pass AND Raymond approves

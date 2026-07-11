@@ -861,7 +861,7 @@ No — evidence is sufficient. The public blob URLs and lack of revision trackin
 ## ADR-008: Billing Attribution — Server-Authoritative, Organization-Level Billing
 
 **Status:** RECOMMENDED
-**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Stakeholder Approval:** APPROVED BY RAYMOND (approved 2026-07-11, with conditions — see RAYMOND-APPROVAL-RECORD.md)
 **Date:** 2026-07-11
 
 ### Context
@@ -970,7 +970,7 @@ Yes — the subscription migration from per-user to per-org Stripe customers inv
 ## ADR-009: Legacy Ownership Migration — No Free-Text Auto-Merging, Ambiguity Queue
 
 **Status:** RECOMMENDED
-**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Stakeholder Approval:** APPROVED BY RAYMOND (approved 2026-07-11, with conditions — see RAYMOND-APPROVAL-RECORD.md)
 **Date:** 2026-07-11
 
 ### Context
@@ -1076,7 +1076,7 @@ Yes — the backfill strategy affects every existing user's data ownership. Raym
 ## ADR-010: Ownership Transfer — Formal, Audited, Both Sides Approve
 
 **Status:** RECOMMENDED
-**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Stakeholder Approval:** APPROVED BY RAYMOND (approved 2026-07-11, with conditions — see RAYMOND-APPROVAL-RECORD.md)
 **Date:** 2026-07-11
 
 ### Context
@@ -1296,7 +1296,7 @@ No — evidence is sufficient. The flat org model is verified. The decision (met
 ## ADR-012: Support Access and Impersonation — Time-Limited, Break-Glass, Tenant-Aware
 
 **Status:** RECOMMENDED
-**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Stakeholder Approval:** APPROVED BY RAYMOND (approved 2026-07-11, with conditions — see RAYMOND-APPROVAL-RECORD.md)
 **Date:** 2026-07-11
 
 ### Context
@@ -1524,7 +1524,7 @@ No — evidence is sufficient. The absence of org context in the audit log is ve
 ## ADR-014: Minimum Safe Implementation Sequence — 15 Entry Gates Before NEXT_ENTERPRISE_AUTHORITY_MIGRATION
 
 **Status:** RECOMMENDED
-**Stakeholder Approval:** PENDING RAYMOND APPROVAL
+**Stakeholder Approval:** APPROVED BY RAYMOND (approved 2026-07-11, with conditions — see RAYMOND-APPROVAL-RECORD.md)
 **Date:** 2026-07-11
 
 ### Context
@@ -1680,10 +1680,10 @@ Yes — Raymond must approve: (1) the 15-gate sequence, (2) the pass/fail criter
 
 **ADR Count:** 14 (ADR-001 through ADR-014)
 **All ADRs Architecture Status:** RECOMMENDED — all 14 ADRs have complete architecture analysis with verified codebase evidence; the recommended option for each is documented with options analysis, rationale, and impact assessment.
-**Raymond Approval Required (Stakeholder Approval: PENDING RAYMOND APPROVAL):** ADR-008 (billing migration), ADR-009 (backfill strategy), ADR-010 (ownership transfer), ADR-012 (impersonation), ADR-014 (implementation sequence and NEXT_ENTERPRISE_AUTHORITY_MIGRATION prohibition)
+**Raymond Approval Required (Stakeholder Approval: APPROVED BY RAYMOND):** ADR-008 (billing migration), ADR-009 (backfill strategy), ADR-010 (ownership transfer), ADR-012 (impersonation), ADR-014 (implementation sequence and NEXT_ENTERPRISE_AUTHORITY_MIGRATION prohibition) — all five approved by Raymond on 2026-07-11 with conditions (see `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-RECORD.md`)
 **Raymond Approval Not Required (Stakeholder Approval: NOT REQUIRED):** ADR-001, ADR-002, ADR-003, ADR-004, ADR-005, ADR-006, ADR-007, ADR-011, ADR-013
 
-> **Status Model Clarification:** Architecture Status (RECOMMENDED) means the architecture analysis is complete and a recommendation has been made based on sufficient codebase evidence and governing principles. Stakeholder Approval Status is separate: PENDING RAYMOND APPROVAL means Raymond must explicitly approve the decision before implementation proceeds; NOT REQUIRED means the decision is settled by evidence and principles without requiring stakeholder sign-off. No ADR has a status of APPROVED (by stakeholder) at this time — all are RECOMMENDED pending Raymond's review for the 5 decisions that require it. See `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-PACKET.md` for the formal approval packet.
+> **Status Model Clarification:** Architecture Status (RECOMMENDED) means the architecture analysis is complete and a recommendation has been made based on sufficient codebase evidence and governing principles. Stakeholder Approval Status is separate: APPROVED BY RAYMOND means Raymond has explicitly approved the decision in writing with conditions; NOT REQUIRED means the decision is settled by evidence and principles without requiring stakeholder sign-off. All five decisions that required Raymond approval (ADR-008, ADR-009, ADR-010, ADR-012, ADR-014) have been APPROVED BY RAYMOND as of 2026-07-11. See `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-PACKET.md` for the formal approval packet and `ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-RECORD.md` for the approval record with conditions.
 
 **Evidence Base:** All ADRs cite verified current-state evidence from the SolarPro codebase (source files, migrations, Phase 0 documents). No assumptions or hallucinated data.
 
