@@ -5,6 +5,7 @@
 
 import type { PermitInput, CanonicalInput, CanonicalSysType, CanonicalModule, CanonicalSite, CanonicalStructure, CanonicalElectrical, CanonicalLayoutDimensions } from '../types';
 import type { CADModel } from '@/lib/cad/types';
+import { partitionSubSystems } from './subSystems';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { resolveEquipment } from './helpers';
 
@@ -318,6 +319,7 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   return {
     systemType:       rawType,
     hybridSystemTypes: isHybridDesign ? _typesPresent : undefined,
+    subSystems:       partitionSubSystems(panels_raw as any[]),
     panels,
     geometry:         layout.geometry ?? undefined,
     layout,

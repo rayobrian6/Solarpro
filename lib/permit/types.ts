@@ -609,6 +609,10 @@ export interface CanonicalInput {
    *  roof+ground+fence hybrid). The pipeline currently documents only
    *  `systemType` — consumers must surface this as NOT-PERMIT-READY. */
   hybridSystemTypes?: string[];
+  /** Phase-1 hybrid support: the per-type partition of the design's panels
+   *  (roof→ground→fence). Always ≥1 entry. Consumers iterate this instead of
+   *  reading the single `systemType` scalar. */
+  subSystems?: import('./utils/subSystems').SubSystem[];
   panels:           NonNullable<NonNullable<PermitInput['layout']>['panels']>;
   geometry:         NonNullable<PermitInput['layout']>['geometry'];
   layout:           NonNullable<PermitInput['layout']>;
