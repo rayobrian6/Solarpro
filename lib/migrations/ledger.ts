@@ -33,6 +33,9 @@ import {
   MigrationAuditEvent,
   MigrationActorType,
   MigrationGovernanceLifecycle,
+  BaselineReconciliationStatus,
+  BaselineEvidenceType,
+  MigrationBaselineRow,
   MIGRATION_LOCK_KEY,
   MIGRATION_LOCK_KEY_DECIMAL,
 } from './types';
@@ -143,6 +146,39 @@ CREATE INDEX IF NOT EXISTS schema_migration_runs_identifier_env_idx
   ON schema_migration_runs (migration_identifier, environment);
 CREATE INDEX IF NOT EXISTS schema_migration_runs_status_idx
   ON schema_migration_runs (status);
+
+CREATE TABLE IF NOT EXISTS migration_baseline (
+  id                        SERIAL PRIMARY KEY,
+  migration_identifier      TEXT NOT NULL
+    CHECK (migration_identifier ~ '^[0-9]{3}[a-z]?$'),
+  environment               TEXT NOT NULL,
+  reconciliation_status     TEXT NOT NULL
+    CHECK (reconciliation_status IN (
+      'CONFIRMED_APPLIED',
+      'CONFIRMED_NOT_APPLIED',
+      'PARTIALLY_APPLIED',
+      'NOT_APPLICABLE',
+      'UNKNOWN'
+    )),
+  evidence_type             TEXT NOT NULL DEFAULT 'NONE'
+    CHECK (evidence_type IN (
+      'SCHEMA_INTROSPECTION',
+      'LEDGER_RECORD',
+      'MANUAL_VERIFICATION',
+      'CHECKSUM_MATCH',
+      'OBJECT_EXISTENCE',
+      'NONE'
+    )),
+  evidence_summary          TEXT,
+  reconciled_by             TEXT,
+  reconciled_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT migration_baseline_env_identifier_unique
+    UNIQUE (migration_identifier, environment)
+);
+
+CREATE INDEX IF NOT EXISTS migration_baseline_status_idx
+  ON migration_baseline (reconciliation_status);
 `;
 
 /**
@@ -386,6 +422,323 @@ export async function setGovernanceLifecycleState(
   } catch {
     return false;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Historical baseline reconciliation (MIGRATION-GOV-02, Phase 1A.1 Issue 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Record a single migration's baseline reconciliation status.
+ *
+ * This is called during the baseline reconciliation workflow. The operator
+ * (or automated introspection tool) classifies each migration's historical
+ * applied state for the current environment. There is NO bulk mark-all-applied
+ * function \u2014 each migration must be individually reconciled with evidence.
+ *
+ * The row is upserted (one row per migration+environment). If a row already
+ * exists for this migration in this environment, it is updated to reflect the
+ * latest reconciliation. The append-only run history is NOT affected \u2014
+ * baseline reconciliation records evidence about the PAST, not about a run.
+ *
+ * @param params.identifier     The migration identifier (NNN or NNNx grammar).
+ * @param params.status         The reconciliation status.
+ * @param params.evidenceType   The type of evidence supporting the status.
+ * @param params.evidenceSummary Optional human-readable evidence description.
+ * @param params.reconciledBy   The actor ID who performed the reconciliation.
+ * @returns true on success, false on failure.
+ */
+export async function recordBaselineReconciliation(params: {
+  identifier: string;
+  status: BaselineReconciliationStatus;
+  evidenceType: BaselineEvidenceType;
+  evidenceSummary?: string | null;
+  reconciledBy: string | null;
+}): Promise<boolean> {
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+
+  try {
+    await sql`
+      INSERT INTO migration_baseline (
+        migration_identifier, environment, reconciliation_status,
+        evidence_type, evidence_summary, reconciled_by
+      ) VALUES (
+        ${params.identifier}, ${environment}, ${params.status},
+        ${params.evidenceType}, ${params.evidenceSummary ?? null}, ${params.reconciledBy}
+      )
+      ON CONFLICT (migration_identifier, environment)
+      DO UPDATE SET
+        reconciliation_status = EXCLUDED.reconciliation_status,
+        evidence_type = EXCLUDED.evidence_type,
+        evidence_summary = EXCLUDED.evidence_summary,
+        reconciled_by = EXCLUDED.reconciled_by,
+        reconciled_at = now()
+    `;
+
+    emitAuditEvent({
+      type: 'migration.baseline.completed',
+      actorType: null,
+      actorId: params.reconciledBy,
+      environment,
+      executionId: null,
+      migrationIdentifier: params.identifier,
+      filename: null,
+      details: {
+        reconciliationStatus: params.status,
+        evidenceType: params.evidenceType,
+        evidenceSummary: params.evidenceSummary,
+        reconciledBy: params.reconciledBy,
+      },
+    });
+
+    return true;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    emitAuditEvent({
+      type: 'migration.baseline.failed',
+      actorType: null,
+      actorId: params.reconciledBy,
+      environment,
+      executionId: null,
+      migrationIdentifier: params.identifier,
+      filename: null,
+      details: { error: errorMsg, status: params.status },
+    });
+    return false;
+  }
+}
+
+/**
+ * Read the baseline reconciliation status for a single migration in the
+ * current environment.
+ *
+ * @param identifier The migration identifier.
+ * @returns The baseline row, or null if no reconciliation has been recorded.
+ */
+export async function readBaselineReconciliation(
+  identifier: string,
+): Promise<MigrationBaselineRow | null> {
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+
+  try {
+    const rows = await sql`
+      SELECT id, migration_identifier, environment, reconciliation_status,
+             evidence_type, evidence_summary, reconciled_by, reconciled_at,
+             created_at
+      FROM migration_baseline
+      WHERE migration_identifier = ${identifier}
+        AND environment = ${environment}
+    `;
+    return (rows[0] as MigrationBaselineRow) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read all baseline reconciliation rows for the current environment.
+ *
+ * @returns A map of migration identifier \u2192 baseline row.
+ */
+export async function readAllBaselineReconciliations(): Promise<
+  Record<string, MigrationBaselineRow>
+> {
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+
+  try {
+    const rows = await sql`
+      SELECT id, migration_identifier, environment, reconciliation_status,
+             evidence_type, evidence_summary, reconciled_by, reconciled_at,
+             created_at
+      FROM migration_baseline
+      WHERE environment = ${environment}
+    `;
+    const map: Record<string, MigrationBaselineRow> = {};
+    for (const row of rows as MigrationBaselineRow[]) {
+      map[row.migration_identifier] = row;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Verify that all migrations in the manifest have been reconciled and that
+ * none have a blocking status (UNKNOWN or PARTIALLY_APPLIED).
+ *
+ * This is the gate that must pass before the lifecycle can advance from
+ * BASELINE_IN_PROGRESS to BASELINE_VERIFIED. A migration is considered
+ * "reconciled" if it has a baseline row with a non-blocking status
+ * (CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, or NOT_APPLICABLE).
+ *
+ * UNKNOWN and PARTIALLY_APPLIED are blocking statuses: they indicate that the
+ * historical state of the migration could not be determined, and executing
+ * migrations on top of an unknown base is unsafe.
+ *
+ * @param manifestIdentifiers The full list of migration identifiers from the
+ *                             manifest.
+ * @returns An object with: ok (boolean), unreconciled (identifiers with no
+ *          baseline row), blocking (identifiers with UNKNOWN/PARTIALLY_APPLIED).
+ */
+export async function verifyBaselineComplete(
+  manifestIdentifiers: string[],
+): Promise<{
+  ok: boolean;
+  unreconciled: string[];
+  blocking: string[];
+}> {
+  const baselines = await readAllBaselineReconciliations();
+  const unreconciled: string[] = [];
+  const blocking: string[] = [];
+
+  for (const identifier of manifestIdentifiers) {
+    const baseline = baselines[identifier];
+    if (!baseline) {
+      unreconciled.push(identifier);
+    } else if (
+      baseline.reconciliation_status === 'UNKNOWN' ||
+      baseline.reconciliation_status === 'PARTIALLY_APPLIED'
+    ) {
+      blocking.push(identifier);
+    }
+  }
+
+  return {
+    ok: unreconciled.length === 0 && blocking.length === 0,
+    unreconciled,
+    blocking,
+  };
+}
+
+/**
+ * Advance the governance lifecycle to BASELINE_VERIFIED.
+ *
+ * This should only be called after verifyBaselineComplete() returns ok=true.
+ * The caller is responsible for verifying completeness; this function trusts
+ * the caller and records the state change. It sets baseline_reconciled_by/at.
+ *
+ * @param reconciledBy The actor who verified the baseline.
+ * @returns true on success, false on failure.
+ */
+export async function advanceToBaselineVerified(
+  reconciledBy: string | null,
+): Promise<boolean> {
+  return setGovernanceLifecycleState('BASELINE_VERIFIED', reconciledBy);
+}
+
+/**
+ * Advance the governance lifecycle to EXECUTION_ENABLED.
+ *
+ * This transitions from BASELINE_VERIFIED to EXECUTION_ENABLED, recording
+ * who enabled execution and when. Once in EXECUTION_ENABLED, migrations can
+ * be applied via the canonical runner.
+ *
+ * @param enabledBy The actor who enabled execution.
+ * @returns true on success, false on failure.
+ */
+export async function enableExecution(
+  enabledBy: string | null,
+): Promise<boolean> {
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+
+  try {
+    // Update the execution_enabled_by/at columns.
+    await sql`
+      UPDATE governance_lifecycle
+      SET execution_enabled_by = ${enabledBy},
+          execution_enabled_at = now(),
+          lifecycle_state = 'EXECUTION_ENABLED',
+          last_state_change_at = now()
+      WHERE environment = ${environment}
+        AND lifecycle_state = 'BASELINE_VERIFIED'
+    `;
+
+    emitAuditEvent({
+      type: 'migration.governance.state_change',
+      actorType: null,
+      actorId: enabledBy,
+      environment,
+      executionId: null,
+      migrationIdentifier: null,
+      filename: null,
+      details: { newState: 'EXECUTION_ENABLED', changedBy: enabledBy },
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Assert that the current environment is in a state that permits migration
+ * execution (BASELINE_VERIFIED or EXECUTION_ENABLED).
+ *
+ * This is the execution gate called by the runner before applying any
+ * migration. If the lifecycle is not in an execution-permitting state, the
+ * runner must return a MIGRATION_BASELINE_REQUIRED error and NOT execute.
+ *
+ * Dry-run is exempt: dry-runs never mutate the database and are always
+ * allowed for inspection/planning purposes.
+ *
+ * Behavior by lifecycle state:
+ * - UNBOOTSTRAPPED:     not permitted (no ledger exists)
+ * - LEDGER_BOOTSTRAPPED: not permitted (baseline not started)
+ * - BASELINE_REQUIRED:  not permitted (baseline reconciliation required)
+ * - BASELINE_IN_PROGRESS: not permitted (baseline reconciliation in progress)
+ * - BASELINE_VERIFIED:  permitted (baseline complete, ready to execute)
+ * - EXECUTION_ENABLED:  permitted (execution explicitly enabled)
+ *
+ * @param dryRun If true, always returns permitted=true (dry-run exempt).
+ * @returns permitted (boolean) and the current lifecycle state.
+ */
+export async function assertExecutionPermitted(
+  dryRun: boolean,
+): Promise<{
+  permitted: boolean;
+  lifecycleState: MigrationGovernanceLifecycle;
+}> {
+  // Dry-run is always permitted \u2014 it never mutates the database.
+  if (dryRun) {
+    const lifecycle = await getGovernanceLifecycleState().catch(() => null);
+    return {
+      permitted: true,
+      lifecycleState: lifecycle ?? 'UNBOOTSTRAPPED',
+    };
+  }
+
+  const lifecycle = await getGovernanceLifecycleState().catch(() => null);
+
+  // If we cannot read the lifecycle state, assume the worst (not bootstrapped).
+  if (!lifecycle) {
+    return {
+      permitted: false,
+      lifecycleState: 'UNBOOTSTRAPPED',
+    };
+  }
+
+  const permitted =
+    lifecycle === 'BASELINE_VERIFIED' || lifecycle === 'EXECUTION_ENABLED';
+
+  if (!permitted) {
+    emitAuditEvent({
+      type: 'migration.governance.execution_denied',
+      actorType: null,
+      actorId: null,
+      environment: getCurrentEnvironment(),
+      executionId: null,
+      migrationIdentifier: null,
+      filename: null,
+      details: { lifecycleState: lifecycle },
+    });
+  }
+
+  return { permitted, lifecycleState: lifecycle };
 }
 
 /**

@@ -61,6 +61,7 @@ import {
   emitAuditEvent,
   getGovernanceLifecycleState,
   setGovernanceLifecycleState,
+  assertExecutionPermitted,
 } from './ledger';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { verifyTOTPCode, decryptTOTPSecret } from '@/lib/mfa';
@@ -588,6 +589,43 @@ export async function runSinglePendingMigration(
     };
   }
 
+  // Execution gate: block mutations unless the governance lifecycle is in an
+  // execution-permitting state (BASELINE_VERIFIED or EXECUTION_ENABLED).
+  // Dry-run is exempt \u2014 it never mutates the database (MIGRATION-GOV-02).
+  if (!dryRun) {
+    const gate = await assertExecutionPermitted(false);
+    if (!gate.permitted) {
+      emitAuditEvent({
+        type: 'migration.governance.execution_denied',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        environment,
+        executionId,
+        migrationIdentifier: identifier,
+        filename: '',
+        details: {
+          lifecycleState: gate.lifecycleState,
+          reason: 'MIGRATION_BASELINE_REQUIRED',
+        },
+      });
+      return {
+        identifier,
+        filename: '',
+        status: 'failed',
+        durationMs: Date.now() - startTime,
+        errorCode: 'MIGRATION_BASELINE_REQUIRED',
+        errorSummary:
+          `Migration execution is blocked. The governance lifecycle for ` +
+          `environment '${environment}' is in state '${gate.lifecycleState}'. ` +
+          `Baseline reconciliation must be completed and verified before ` +
+          `migrations can be executed. Required states: BASELINE_VERIFIED or ` +
+          `EXECUTION_ENABLED.`,
+        dryRun,
+        executionId,
+      };
+    }
+  }
+
   // Bootstrap ledger if needed (for non-dry-run execute).
   if (!dryRun) {
     const bootstrap = await bootstrapMigrationLedger(authorization.actorType, authorization.actorId);
@@ -826,6 +864,44 @@ export async function runPendingMigrations(
     };
   }
 
+  // Execution gate: block mutations unless the governance lifecycle is in an
+  // execution-permitting state (BASELINE_VERIFIED or EXECUTION_ENABLED).
+  // Dry-run is exempt \u2014 it never mutates the database (MIGRATION-GOV-02).
+  if (!dryRun) {
+    const gate = await assertExecutionPermitted(false);
+    if (!gate.permitted) {
+      emitAuditEvent({
+        type: 'migration.governance.execution_denied',
+        actorType: authorization.actorType,
+        actorId: authorization.actorId,
+        environment,
+        executionId,
+        migrationIdentifier: null,
+        filename: null,
+        details: {
+          lifecycleState: gate.lifecycleState,
+          reason: 'MIGRATION_BASELINE_REQUIRED',
+        },
+      });
+      return {
+        results: [],
+        applied: 0,
+        failed: 0,
+        skipped: 0,
+        conflicted: 0,
+        dryRun,
+        executionId,
+        fatalErrors: [
+          `Migration execution is blocked. The governance lifecycle for ` +
+          `environment '${environment}' is in state '${gate.lifecycleState}'. ` +
+          `Baseline reconciliation must be completed and verified before ` +
+          `migrations can be executed. Required states: BASELINE_VERIFIED or ` +
+          `EXECUTION_ENABLED.`,
+        ],
+      };
+    }
+  }
+
   emitAuditEvent({
     type: 'migration.run.started',
     actorType: authorization.actorType,
@@ -948,7 +1024,7 @@ export async function runPendingMigrations(
 
 export { discoverMigrationFiles, validateMigrationManifest, findMigrationByIdentifier } from './manifest';
 export { calculateChecksumOfString, checksumsMatch } from './validation';
-export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent } from './ledger';
+export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, assertExecutionPermitted } from './ledger';
 export {
   MIGRATION_LOCK_KEY,
   MIGRATION_ENV_VARS,
@@ -966,4 +1042,9 @@ export type {
   RunPendingMigrationsOptions,
   RunSingleMigrationOptions,
   MigrationStatus,
+  MigrationGovernanceLifecycle,
+  BaselineReconciliationStatus,
+  BaselineEvidenceType,
+  MigrationBaselineRow,
+  MigrationRunRow,
 } from './types';
