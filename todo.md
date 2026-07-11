@@ -1,95 +1,83 @@
-# Phase 1A.1 — Migration Governance Operational Hardening & Historical Baseline
+# Phase 1A.2 — Migration Governance Activation and Correctness Closure
 
-Repository: rayobrian6/Solarpro, branch: dev
-Starting HEAD: 4d390683
+Repository: rayobrian6/Solarpro, branch: dev (work directly on dev)
+Starting HEAD: 100114c2
 
-## Section 1: Initial Checks — COMPLETE
-- [x] Confirm repo state, branch dev, HEAD at 4d390683
-- [x] Confirm prior Phase 1A code present (ledger.ts, runner.ts, validation.ts, manifest.ts, types.ts)
-- [x] tsc clean baseline, vitest 114/114 pass baseline
+## Section 0 — Initial Verification — COMPLETE
+- [x] Clone repo, checkout dev
+- [x] git status / branch / fetch / rev-parse / ls-remote / log
+- [x] tsc --noEmit baseline (exit 0)
+- [x] vitest focused baseline (185/185 pass)
+- [x] Document initial verification findings
 
-## Section 2: Operational Hardening Audit — COMPLETE (Commit 1: 75e62a0c)
-- [x] Write audit doc of exact-state findings for MIGRATION-GOV-02..08
-- [x] Commit 1: docs(migrations): Phase 1A.1 operational hardening audit
+## Section 1 — Read Documents and Source (Audit-First) — COMPLETE
+- [x] Read types.ts, manifest.ts, validation.ts, ledger.ts, runner.ts
+- [x] Read app/api/admin/migrations/route.ts
+- [x] Read app/api/migrate/route.ts (legacy)
+- [x] Read app/api/admin/system-tools/route.ts (legacy)
+- [x] Read app/api/admin/prospects/seed/route.ts (legacy)
+- [x] Read lib/auditLog.ts, lib/mfa.ts (frozen, read-only)
+- [x] Read tests/phase1a-migration-governance.test.ts
+- [x] Read Phase 1A/1A.1 docs (7 files)
 
-## Section 3: Ledger Lifecycle, Constraints, Append-Only History — COMPLETE (Commit 2: b8067767)
-- [x] Governance lifecycle states in types.ts
-- [x] setGovernanceLifecycleState / getGovernanceLifecycleState in ledger.ts
-- [x] Append-only schema_migration_runs table + recordMigrationRun
-- [x] Ledger constraints (unique per env, checksum, status enum)
-- [x] Commit 2: feat(migrations): ledger lifecycle, constraints, and append-only run history
+## Section 2 — Audit MIGRATION-GOV-09..18 Against Live Code — COMPLETE
+- [x] GOV-09: BASELINE_VERIFIED permits execution before activation — CONFIRMED (ledger.ts:833)
+- [x] GOV-10: Durable audit persistence may fail open — CONFIRMED (ledger.ts:298-313)
+- [x] GOV-11: No governed baseline reconciliation control plane — CONFIRMED (no baseline ops in route.ts)
+- [x] GOV-12: Non-transactional execution safety insufficient — CONFIRMED (runner.ts:685-740)
+- [x] GOV-13: Legacy mutation paths may remain reactivatable — CONFIRMED (3 feature flags)
+- [x] GOV-14: Ledger identifier and status contracts require exact enforcement — CONFIRMED (types.ts:55-60, ledger.ts:135)
+- [x] GOV-15: Governance behavior lacks real PostgreSQL integration proof — CONFIRMED (no DB integration tests)
+- [x] GOV-16: Documentation and commit metadata inconsistent — PENDING (will address in final report)
+- [x] GOV-17: TOTP replay-step selection requires exact verification — ALREADY CORRECT (runner.ts:295-316 records exact matched step)
+- [x] GOV-18: Failure and denial run-history semantics require exact verification — CONFIRMED (denied paths return 'failed', no 'denied' run event recorded)
 
-## Section 4: Historical Baseline Enforcement & Execution Blocking — COMPLETE (Commit 3: 0574dd1f)
-- [x] recordBaselineReconciliation / readBaselineReconciliation / readAllBaselineReconciliations
-- [x] verifyBaselineComplete / advanceToBaselineVerified / enableExecution
-- [x] assertExecutionPermitted gate in both runner entry points
-- [x] Dry-run exempt from gate; fail-closed when state unreadable
-- [x] No-bulk-mark-all-applied (single-migration API only)
-- [x] PHASE1A1-HISTORICAL-BASELINE-MODEL.md doc
-- [x] Commit 3: feat(migrations): historical baseline enforcement and execution blocking
+## Section 3 — Commit 1: Exact-State Audit Doc
+- [ ] Create PHASE1A2-CORRECTNESS-AUDIT.md
 
-## Section 5: Lock Exactness, Timeout, Transaction Compatibility — COMPLETE (Commit 4: 213ecd45)
-- [x] Lock key as decimal string + BIGINT cast (exactness)
-- [x] pg_try_advisory_xact_lock (bounded, not indefinite block)
-- [x] transactionMode field on MigrationFile (REQUIRED/FORBIDDEN/MANUAL_REVIEW)
-- [x] detectTransactionMode / detectTransactionModeFromFile in validation.ts
-- [x] manifest.ts computes transactionMode at discovery
-- [x] executeMigrationInTransaction: 3-mode handling (REQUIRED tx, FORBIDDEN stmt-by-stmt, MANUAL_REVIEW reject)
-- [x] PHASE1A1-SQL-COMPATIBILITY-REPORT.md doc
-- [x] Commit 4: feat(migrations): lock exactness, bounded timeout, and transaction compatibility
+## Section 4 — Commit 2: Lifecycle Activation & Baseline Control Plane
+- [ ] Fix BASELINE_VERIFIED execution gate (GOV-09)
+- [ ] Add enable-execution separation
+- [ ] Create baseline control plane API (GOV-11)
+- [ ] Tests for lifecycle/baseline control plane
 
-## Section 6: MFA Fail-Closed, Replay Prevention, Automated Actor — COMPLETE (Commit 5: 3bcd9fd0)
-- [x] migration_totp_uses table in BOOTSTRAP_LEDGER_DDL
-- [x] recordTotpUse() in ledger.ts
-- [x] isTotpTimeStepUsed() in ledger.ts
-- [x] Fix verifyFreshTotp() in runner.ts: fail-closed (DENY when no MFA secret, not waive)
-- [x] Integrate TOTP replay prevention in runner (recordTotpUse, reject same time-step reuse)
-- [x] Automated actor (migration-actor) cannot be client-selected; server-side only
-- [x] Update tests (was expecting fail-open behavior) + 6 new MFA/actor tests
-- [x] tsc clean + vitest 120/120 pass
-- [x] Commit 5: MFA fail-closed, replay prevention, and automated actor controls
+## Section 5 — Commit 3: Fail-Closed Persistent Audit & Run-History (GOV-10, GOV-18)
+- [ ] Make audit persistence fail-closed for mutation
+- [ ] Fix denial/failure run-history semantics
+- [ ] Tests for audit fail-closed
 
-## Section 7: Eliminate Non-Canonical Execution Paths — COMPLETE (Commit 6: 76322796)
-- [x] Audit for any path that bypasses authorizeMigration or the execution gate
-- [x] Ensure no direct SQL execution path outside executeMigrationInTransaction
-- [x] Ensure no path that writes to ledger outside the canonical functions
-- [x] Commit 6: eliminate non-canonical execution paths
+## Section 6 — Commit 4: Non-Transactional Blocking & Legacy Closure (GOV-12, GOV-13)
+- [ ] Block FORBIDDEN + MANUAL_REVIEW automatic execution
+- [ ] Permanently eliminate legacy DDL reactivation
+- [ ] Classify prospects/seed route
+- [ ] Tests for transaction mode & legacy paths
 
-## Section 8: Persistent Audit Integration — COMPLETE (Commit 7: 7aa62223)
-- [x] Integrate migration audit events with durable auditLog.ts (writeAuditLog hash-chain)
-- [x] Ensure all migration.* audit events are persisted, not just console
-- [x] Transaction failure recording (record failed run to append-only history)
-- [x] Transaction-incompatible statement audit (emit audit on FORBIDDEN/MANUAL_REVIEW)
-- [x] Commit 7: persistent audit integration and transaction failure recording
+## Section 7 — Commit 5: Identifier, Status, TOTP-Step, Actor Correctness (GOV-14, GOV-17)
+- [ ] Enforce exact identifier grammar in DDL
+- [ ] Enforce exact status vocabularies
+- [ ] Fix TOTP matched-step recording
+- [ ] Verify automated actor auth
+- [ ] Tests for identifier/status/TOTP/actor
 
-## Section 9: Expanded Tests — COMPLETE (Commit 8: a26adfaf)
-- [x] Tests for baseline reconciliation lifecycle (Section 14: 14 tests)
-- [x] Tests for execution gate (BASELINE_VERIFIED / EXECUTION_ENABLED / denied states)
-- [x] Tests for MFA fail-closed + replay prevention (Section 17: 13 tests)
-- [x] Tests for transaction mode detection + 3-mode execution (Section 15: 14 tests)
-- [x] Tests for automated actor controls
-- [x] Tests for non-canonical path elimination (Section 10b: 7 tests)
-- [x] Tests for persistent audit integration (Section 13: 10 tests)
-- [x] Tests for lock key exactness (Section 16: 7 tests)
-- [x] tsc clean + vitest 185/185 pass
-- [x] Commit 8: expanded tests for Phase 1A.1 governance hardening
+## Section 8 — Commit 6: PostgreSQL Integration Harness & Tests (GOV-15)
+- [ ] Determine if real PostgreSQL available
+- [ ] Build integration test harness
+- [ ] Run integration tests or report blocker
 
-## Section 10: Documentation & Final Report — COMPLETE (Commit 9)
-- [x] Update PHASE1A-MIGRATION-GOVERNANCE-IMPLEMENTATION.md with Phase 1A.1 section (Section 16, renumbered 17-19)
-- [x] Update PHASE1A-FINAL-REPORT.md with Phase 1A.1 status (Section 22, renumbered 23-24, updated cross-refs)
-- [x] Update AUDIT-MIGRATION-SYSTEM.md with Phase 1A.1 resolution (conclusion notes)
-- [x] Update ARCHITECTURE-DECISION-MIGRATION-MODEL.md with hardening details (lock, tx, MFA sections)
-- [x] Update ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md with governance status (risk, summary, footer, warning)
-- [x] Create PHASE1A1-FINAL-REPORT.md (400 lines)
-- [x] Commit 9: Phase 1A.1 documentation and final report
+## Section 9 — Commit 7: Expanded Unit and Integration Tests
+- [ ] Add all required tests per spec
+- [ ] Verify focused suite passes
 
-## Section 11: Final Verification — NOT STARTED
-- [ ] tsc --noEmit clean (exit 0)
-- [ ] vitest all pass
-- [ ] git log shows 9 commits on dev
-- [ ] Push dev
-- [ ] Final report to user
+## Section 10 — Commit 8: Documentation & Final Report (GOV-16)
+- [ ] Create PHASE1A2-BASELINE-CONTROL-PLANE.md
+- [ ] Create PHASE1A2-POSTGRES-INTEGRATION-VALIDATION.md
+- [ ] Create PHASE1A2-FINAL-REPORT.md
+- [ ] Update existing docs as required
 
-## STOP CONDITION
-Do NOT begin org/membership/ownership/collaboration/billing/cutover implementation.
-Stop after Phase 1A.1.
+## Section 11 — Final Verification
+- [ ] npx tsc --noEmit
+- [ ] npx vitest run tests/phase1a-migration-governance.test.ts
+- [ ] npx vitest run (full suite, honest report)
+- [ ] git status clean, dev aligned with origin/dev
+- [ ] Push all commits
+- [ ] Deliver final report
