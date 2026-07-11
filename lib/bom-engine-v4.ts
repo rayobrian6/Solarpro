@@ -392,13 +392,21 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const microPerBranch = 16;
     const trunkDeviceCount = input.deviceCount ?? input.moduleCount;
     const trunkSections = Math.ceil(trunkDeviceCount / microPerBranch);
+    // Q-Cable is bulk cable with connectors pre-spaced at the module pitch, so the
+    // CABLE is priced/consumed by the FOOT — one connector-drop per microinverter
+    // along the trunk. Real trunk footage = devices × connector spacing (Enphase
+    // IQ cable: 1.3 m ≈ 4.3 ft portrait drop, 2.0 m ≈ 6.6 ft landscape) × 1.15
+    // slack. (Was a bare section COUNT, which carried no cable length.) The
+    // connectors/terminators below stay per branch-section.
+    const trunkDropFt = input.layoutOrientation === 'landscape' ? 6.6 : 4.3;
+    const trunkFeet = Math.ceil(trunkDeviceCount * trunkDropFt * 1.15);
     items.push(addItem('dc', 'trunk_cable', 'Enphase', 'Q Cable 240V',
-      'Q-12-10-240', 'AC Trunk Cable — 1 section per 16 microinverters',
-      trunkSections, 'ea', 'NEC 690.31', 'ceil(deviceCount/16)', 'ceil(deviceCount / 16)', true));
+      'Q-12-10-240', `AC Trunk Cable — ${trunkDropFt} ft drop spacing × ${trunkDeviceCount} devices`,
+      trunkFeet, 'ft', 'NEC 690.31', 'devices × dropSpacing × 1.15', `${trunkDeviceCount} × ${trunkDropFt} × 1.15`, true));
     log.push({ stageId: 'dc', category: 'trunk_cable', item: 'Q Cable 240V',
-      quantity: trunkSections, derivedFrom: 'ceil(deviceCount/16)', formula: 'ceil(deviceCount / 16)', necReference: 'NEC 690.31' });
+      quantity: trunkFeet, derivedFrom: 'devices × dropSpacing × 1.15', formula: `${trunkDeviceCount} × ${trunkDropFt} × 1.15`, necReference: 'NEC 690.31' });
 
-    // Terminators
+    // Terminators (2 per branch-section — trunk start cap + end connector)
     const terminators = trunkSections * 2;
     items.push(addItem('dc', 'terminator', 'Enphase', 'Q Cable Terminator',
       'Q-TERM-10-240', 'Trunk cable terminator — 2 per trunk section',
