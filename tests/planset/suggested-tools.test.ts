@@ -32,6 +32,22 @@ describe('suggested tools', () => {
     expect(minimal.some(t => t.tool.includes('Torque screwdriver'))).toBe(true);
   });
 
+  it('bakes manual-sourced brand torque specs + the Roof Tech impact prohibition', () => {
+    // install-tools-racking.json (primary-source manuals, 2026-07-11).
+    const rt = resolveSuggestedTools({
+      isRailBased: true, rackingBrand: 'Roof Tech', isMicro: false,
+      isSupplySideTap: false, hasRoofAttachments: true, hasWirePull: false,
+    });
+    expect(rt.find(t => t.tool.includes('Torque wrench'))!.use).toContain('conical washer');
+    expect(rt.find(t => t.use.includes('rafters'))!.tool).toContain('NOT impact');
+    const ir = resolveSuggestedTools({
+      isRailBased: true, rackingBrand: 'IronRidge', isMicro: false,
+      isSupplySideTap: false, hasRoofAttachments: true, hasWirePull: false,
+    });
+    expect(ir.find(t => t.tool.includes('Torque wrench'))!.use).toContain('80 in-lbs');
+    expect(ir.find(t => t.use.includes('rafters'))!.tool).toContain('Impact driver');
+  });
+
   const mk = (over: any = {}): any => ({
     inverterId: 'enphase-iq8plus', panelId: 'rec-alpha-pure-r-405', moduleCount: 52, deviceCount: 52,
     stringCount: 0, inverterCount: 52, systemKw: 21, dcWireGauge: '#10 AWG', acWireGauge: '#8 AWG',

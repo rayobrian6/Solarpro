@@ -43,8 +43,36 @@ export interface ToolsContext {
   hasWirePull: boolean;
 }
 
+// Per-brand torque/tooling callouts — quoted from the actual install manuals
+// (lib/data/equipment/install-tools-racking.json, extracted 2026-07-11:
+// IronRidge XR Flush v5.2, Roof Tech RT-MINI II Jun/2025, Unirac SolarMount,
+// SnapNrack Ultra Rail v4.6.1). K2 values unverified — omitted.
+const BRAND_TORQUE_NOTES: Record<string, { torque: string; socket: string; special?: string }> = {
+  'ironridge': {
+    torque: 'UFO clamps 80 in-lbs; rail-to-attachment bonding nuts 300 in-lbs (XR Flush v5.2)',
+    socket: '7/16" socket; 0–300 in-lb torque wrench is in IronRidge\'s TOOLS REQUIRED list',
+  },
+  'roof tech': {
+    torque: 'M5 screws: NO numeric torque — tighten until the conical washer stops rotating; FBN25 L-foot bolt 140 in-lbs (RT-MINI II manual)',
+    socket: '8 mm hex bit socket',
+    special: '⚠ IMPACT DRIVER PROHIBITED on the M5 mounting screws — drill/driver only',
+  },
+  'unirac': {
+    torque: 'L-foot nut 30 ft-lbs; standard clamps 10 ft-lbs WITH anti-seize; Pro clamps 11 ft-lbs NO anti-seize (single-use)',
+    socket: '1/2" and 7/16" sockets; 3/16" pilot bit',
+  },
+  'snapnrack': {
+    torque: 'Ultra clamps 16 ft-lbs; splices & L-feet 12 ft-lbs (Ultra Rail v4.6.1)',
+    socket: 'everything on a 1/2" socket',
+  },
+};
+
 export function resolveSuggestedTools(ctx: ToolsContext): SuggestedTool[] {
   const tools: SuggestedTool[] = [];
+  const _brandNote = ctx.rackingBrand
+    ? BRAND_TORQUE_NOTES[Object.keys(BRAND_TORQUE_NOTES).find(k =>
+        ctx.rackingBrand!.toLowerCase().includes(k)) ?? '']
+    : undefined;
 
   // ── Racking / structural ──────────────────────────────────────
   if (ctx.isRailBased) {
@@ -58,8 +86,10 @@ export function resolveSuggestedTools(ctx: ToolsContext): SuggestedTool[] {
       use: 'Dress cut rail ends before splicing',
     });
     tools.push({
-      tool: 'Torque wrench (ft-lb, 3/8" drive) + sockets (7/16", 1/2")',
-      use: `Module clamps, splices and L-foot hardware${ctx.rackingBrand ? ` — torque per ${ctx.rackingBrand} install manual` : ''}`,
+      tool: `Torque wrench + sockets${_brandNote ? ` (${_brandNote.socket})` : ' (7/16", 1/2")'}`,
+      use: _brandNote
+        ? `Module clamps, splices and L-foot hardware — ${_brandNote.torque}`
+        : `Module clamps, splices and L-foot hardware${ctx.rackingBrand ? ` — torque per ${ctx.rackingBrand} install manual` : ''}`,
       why: 'Manufacturer torque specs are a UL 2703 listing condition; under/over-torque voids bonding',
     });
   }
@@ -69,8 +99,10 @@ export function resolveSuggestedTools(ctx: ToolsContext): SuggestedTool[] {
       use: 'Locating and striking rafter lines for attachment rows',
     });
     tools.push({
-      tool: 'Impact driver + pilot bits (per lag diameter)',
-      use: 'Pilot-drilling and driving structural lags into rafters',
+      tool: _brandNote?.special?.includes('IMPACT DRIVER PROHIBITED')
+        ? 'Drill/driver (NOT impact) + pilot bits'
+        : 'Impact driver + pilot bits (per lag diameter)',
+      use: `Pilot-drilling and driving structural fasteners into rafters${_brandNote?.special ? ` — ${_brandNote.special}` : ''}`,
       why: 'Pilot per manufacturer spec prevents rafter splitting — a split rafter is a failed attachment',
     });
     tools.push({

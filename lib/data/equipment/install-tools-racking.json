@@ -1,0 +1,326 @@
+{
+  "$meta": {
+    "purpose": "Manufacturer-recommended installation tools for residential solar RACKING/structural work (rail cutting, torque, roof attachment, safety, sealant). Drives the 'Suggested Tools' section of the job BOM.",
+    "researched": "2026-07-11",
+    "primarySources": [
+      "IronRidge XR Flush Mount Installation Manual v5.2, 2026 (files.ironridge.com/pitched-roof-mounting/resources/brochures/IronRidge_Flush_Mount_Installation_Manual.pdf) — TOOLS REQUIRED + BONDING HARDWARE TORQUE VALUES pages, full text extracted",
+      "Roof Tech RT-MINI II Installation Manual, Jun/2025 (design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI-II.pdf) — 'Tools Required for Assembly' p.3 + Technical Note, full text extracted",
+      "Unirac SolarMount Installation Guide (ressupply.com/documents/unirac/SolarMount_Installation_Manual.pdf, mirrors unirac.com) — 'Wrenches and Torque' tables + install steps, full text extracted",
+      "SnapNrack Ultra Rail Installation Manual v4.6.1 (ressupply.com/documents/snapnrack/Ultra_Rail_Installation_Manual.pdf) — per-section 'Required Tools' lists + Hardware Torque Specifications table + Rail Finishing section, full text extracted",
+      "K2 Systems CrossRail Assembly Instructions US (k2-systems.com/wp-content/uploads/2022/09/CrossRail-AI-US.pdf) — tools overview + clamp torques (via search excerpts, not full-text verified)",
+      "OSHA residential construction fall protection (osha.gov/construction/fall-protection-factsheet, osha.gov/green-jobs/solar/falls, 29 CFR 1926.502)"
+    ],
+    "extractionNote": "IronRidge, Roof Tech, Unirac, SnapNrack values quoted from full manual text extracted via pdftotext on 2026-07-11. K2 values from search excerpts of the official AI-US PDF — verify before printing on a customer-facing document."
+  },
+  "general": [
+    {
+      "tool": "Portable band saw (deep-cut, with non-ferrous/fine-tooth blade)",
+      "use": "Cutting aluminum rail to length, on the roof or at the cut station",
+      "why": "Preferred by installers for rail: cold cut, clean edge, minimal burr, no hot chips or sparks landing on shingles (unlike an abrasive saw). SnapNrack's Rail Finishing section explicitly lists 'Reciprocating Saw or Portable Band Saw' as the required cutting tool.",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Rail Finishing section ('Required Tools: Reciprocating Saw or Portable Band Saw'); installer best-practice guides (e.g. portaband.com pro tips, gogreensolar DIY installer tool list)"
+    },
+    {
+      "tool": "Miter/chop saw with non-ferrous carbide blade (triple-chip grind, negative rake)",
+      "use": "Ground-level rail cut station when many rails must be cut square and fast",
+      "why": "Acceptable alternative to a bandsaw for aluminum extrusion IF fitted with a blade rated for non-ferrous metal; clamp the rail. Keep it on the ground — it throws chips. Never use an abrasive metal-cutoff wheel on structural aluminum rail.",
+      "source": "SnapNrack Ultra Rail Manual Wire Management section lists 'Reciprocating Saw or Chop Saw' for cutting rail cover; blade guidance from The Fabricator, 'Tips to successfully saw and select blades for nonferrous materials'"
+    },
+    {
+      "tool": "Deburring tool and/or flat metal file",
+      "use": "Remove sharp edges from every field-cut rail end before installing end caps/end clamps",
+      "why": "SnapNrack rail-cut instructions: 'remove any sharp edges' after cutting. Burrs cut hands and wire insulation and can interfere with end-cap seating.",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Rail Finishing installation instructions steps 2-3"
+    },
+    {
+      "tool": "Torque wrench, 0-300 in-lbs (in-lb click type)",
+      "use": "Final torque on ALL racking structural + bonding hardware",
+      "why": "IronRidge lists 'Torque Wrench (0-300 in-lbs)' in TOOLS REQUIRED; every major racking manual (Unirac, SnapNrack, K2, Roof Tech) requires torqued fasteners because clamp bonding (UL 2703) is torque-dependent. Most racking specs are 60-300 in-lbs, so an inch-pound wrench is the right range; a 3/8-drive ft-lb wrench works for the 25-30 ft-lb items.",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED; Unirac SolarMount Installation Guide 'Wrenches and Torque'; SnapNrack Ultra Rail Manual required tools"
+    },
+    {
+      "tool": "Cordless drill (non-impact) + impact driver",
+      "use": "Drill: pilot holes and general fastening. Impact driver: driving structural lag bolts ONLY",
+      "why": "IronRidge's tool list is explicit: 'Cordless Drill (non-impact)' plus 'Impact Driver (for lag bolts)'. Do NOT use the impact on clamp/bonding hardware (over-torques, wrecks UL 2703 bond) and never on Roof Tech M5 screws (manual prohibits it).",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED; Roof Tech RT-MINI II Manual Technical Note ('avoid the use of an impact driver')"
+    },
+    {
+      "tool": "Stud finder (deep-scan) or hammer for sounding, + tape measure",
+      "use": "Locating rafters/trusses before drilling attachment pilot holes",
+      "why": "SnapNrack lists 'Hammer or Stud Finder' as a required tool in every roof-attachment section. Confirm spacing with a tape from a known rafter (eave/gable end); verify with the pilot hole — 'If the roof framing member is not found then seal the pilot hole immediately with roofing sealant.'",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Required Tools + Installation Note; IronRidge XR Flush Mount Manual ('locate a rafter, drill a pilot hole and install the attachment')"
+    },
+    {
+      "tool": "Chalk line + roof marking crayon/pencil",
+      "use": "Marking rafter lines and transferring rail/attachment layout onto the roof",
+      "why": "'Transfer rail locations using a chalk line' (SnapNrack); Roof Tech requires a chalk line to align RT-MINI II bases on the rafter; IronRidge HUG aligns to a chalk line.",
+      "source": "SnapNrack Ultra Rail Manual System Layout; Roof Tech RT-MINI II Manual Tools Required + Bracket Installation; IronRidge XR Flush Mount Manual (HUG install)"
+    },
+    {
+      "tool": "Pilot drill bits — size per attachment manufacturer (3/16\" SnapNrack & Unirac lags; 1/4\" IronRidge FlashFoot2; 7/32\" IronRidge QBase/GF-1)",
+      "use": "Pilot holes into rafters for 5/16\" lag screws / attachment hardware",
+      "why": "Each manual specifies its own pilot size — do not generalize across brands. Back-fill every pilot hole with roofing sealant before setting the lag (all manuals).",
+      "source": "SnapNrack Ultra Rail Manual ('Drill with 3/16\" Pilot Drill Bit'); Unirac SolarMount Guide (3/16\" pilot holes for SolarHook lags); IronRidge XR Flush Mount Manual v5.2 (FlashFoot2: 'Drill 1/4\" pilot holes'; QBase/GF-1: '7/32\" drill bit')"
+    },
+    {
+      "tool": "Caulk gun + manufacturer-approved roofing sealant",
+      "use": "Back-filling pilot holes, sealing missed/abandoned holes, optional UV top-coat on flashings",
+      "why": "Every attachment manual requires sealant in the pilot hole; SnapNrack: 'All missed pilot holes should be sealed immediately.' Roof Tech publishes an approved-sealant list (see byBrand).",
+      "source": "SnapNrack Ultra Rail Manual; IronRidge XR Flush Mount Manual ('back fill with roofing manufacturers' approved sealant'); Roof Tech RT-MINI II Manual"
+    },
+    {
+      "tool": "Flat pry bar",
+      "use": "Lifting shingle courses to slide flashings into place without tearing shingles",
+      "why": "Listed as a required tool in SnapNrack's comp-shingle attachment sections.",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Required Tools"
+    },
+    {
+      "tool": "Anti-seize compound",
+      "use": "Stainless racking hardware threads (where the manual says to apply)",
+      "why": "Stainless hardware galls. Unirac: 'Apply minimal lubricant to bolts... preferably Anti-Seize' (factory-applied on mid-clamp bolts; NOT used on Pro-series 11 ft-lb clamps or rail splices). Roof Tech 'recommends all stainless steel threads be lubricated.'",
+      "source": "Unirac SolarMount Installation Guide, Wrenches and Torque notes; Roof Tech RT-MINI II Manual Technical Note"
+    },
+    {
+      "tool": "Personal fall arrest system: full-body harness + roof anchor (5,000 lb rated) + SRL or rope grab/lifeline",
+      "use": "Fall protection for all roof work at 6 ft or more above lower level",
+      "why": "OSHA residential construction rule: guardrails, safety nets, or PFAS required at 6+ ft; anchorage must support 5,000 lbs per attached worker (29 CFR 1926.502). SnapNrack manual: 'Appropriate fall protection or prevention gear should be used.'",
+      "source": "OSHA Fall Protection in Residential Construction fact sheet; osha.gov/green-jobs/solar/falls; 29 CFR 1926.502; SnapNrack Ultra Rail Manual Safety Guidance"
+    },
+    {
+      "tool": "Ladder + ladder stabilizer/standoff (and ladder tie-off)",
+      "use": "Roof access",
+      "why": "'Use appropriate ladder safety equipment when accessing the roof from ground level' — SnapNrack Safety Guidance.",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Safety Guidance"
+    },
+    {
+      "tool": "Module handling: 2-person carry (standard); optional module hoist/ladder lift for getting panels to the roof",
+      "use": "Moving 60-75 lb modules to and across the roof",
+      "why": "Two-person handling is standard industry practice for residential modules; powered vacuum lifters are a commercial/large-crew option, not required by any residential racking manual. Panel manufacturers prohibit carrying modules by the junction box or cables.",
+      "source": "Industry best practice; no residential racking manual mandates a lifting device (verified against IronRidge/Roof Tech/Unirac/SnapNrack tool lists)"
+    },
+    {
+      "tool": "Foam staging pads / roof padding",
+      "use": "Staging modules and rail on the roof without scuffing shingles or module glass; kneeling pad on hot shingles",
+      "why": "Common installer practice to protect shingles and module edges during staging. Not a manufacturer requirement — quality-of-install item.",
+      "source": "Installer best practice (not in manufacturer tool lists)"
+    },
+    {
+      "tool": "Safety glasses + gloves",
+      "use": "All cutting, drilling, and hardware work",
+      "why": "'Always wear proper eye protection' — SnapNrack Safety Guidance. Cut aluminum edges are sharp until deburred.",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Safety Guidance"
+    }
+  ],
+  "torqueSpecs": [
+    {
+      "brand": "IronRidge",
+      "fastener": "UFO (Universal Fastening Object) module clamp",
+      "torque": "80 in-lbs (6.7 ft-lbs)",
+      "socket": "7/16\" socket",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2 (2026), Bonding Hardware Torque Values. NOTE: older manual revisions list 84 in-lbs — use the value in the manual revision shipped with the product."
+    },
+    {
+      "brand": "IronRidge",
+      "fastener": "EFO (End Fastening Object) / Stopper Sleeve end clamp",
+      "torque": "80 in-lbs",
+      "socket": "7/16\" socket",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, Bonding Hardware Torque Values"
+    },
+    {
+      "brand": "IronRidge",
+      "fastener": "3/8\" bonding hardware nuts (rail-to-attachment / L-foot / BOSS splice square bolts)",
+      "torque": "300 in-lbs (25 ft-lbs)",
+      "socket": "7/16\" socket (nut is flanged; 9/16\" for flat-roof attachment nuts at 250 in-lbs)",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, Bonding Hardware Torque Values + Attach Rails step ('torque to 300 in-lbs')"
+    },
+    {
+      "brand": "IronRidge",
+      "fastener": "FlashFoot2 5/16\" lag bolt into rafter",
+      "torque": "No published ft-lb value — manual says drive until 'fully seated' with 7/16\" socket after 1/4\" pilot hole",
+      "socket": "7/16\" socket (impact driver permitted for lag bolts)",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, FlashFoot2 composition shingle install"
+    },
+    {
+      "brand": "IronRidge",
+      "fastener": "HUG deck/rafter mount — RD Structural Screws",
+      "torque": "Drive until fully seated (no numeric spec); 2 screws into rafter center, all 6 for deck-mount",
+      "socket": "5/16\" socket",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, HUG install"
+    },
+    {
+      "brand": "IronRidge",
+      "fastener": "QM QBase standoff L-foot hardware",
+      "torque": "174 in-lbs (14.5 ft-lbs)",
+      "socket": "unknown (see QM Installation Manual)",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, QBase composition mount"
+    },
+    {
+      "brand": "IronRidge",
+      "fastener": "Rail grounding lug nut / microinverter kit nuts",
+      "torque": "80 in-lbs (lug terminal screw: 20 in-lbs; module grounding lug hex: 60 in-lbs w/ 1/2\" socket, terminal screws 20 in-lbs w/ 5/16\" socket)",
+      "socket": "7/16\" socket (lug nut)",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, Bonding Hardware Torque Values + Secure Lugs"
+    },
+    {
+      "brand": "IronRidge",
+      "fastener": "Tile hook carriage bolts",
+      "torque": "132 in-lbs (11 ft-lbs)",
+      "socket": "7/16\" socket",
+      "source": "IronRidge XR Flush Mount Installation Manual v5.2, Bonding Hardware Torque Values"
+    },
+    {
+      "brand": "Roof Tech",
+      "fastener": "RT-MINI II M5 (5.0x60mm / 5.0x90mm) stainless wood screws into rafter/deck",
+      "torque": "NO numeric torque by design — 'tighten until the conical washer stops rotating'; proper torque varies with wood hardness/age/moisture. Avoid impact driver (can over-torque or snap the head). Keep hand pressure on the base while driving.",
+      "socket": "8mm hex bit socket",
+      "source": "Roof Tech RT-MINI II Installation Manual (Jun/2025), Technical Note + Bracket Installation"
+    },
+    {
+      "brand": "Roof Tech",
+      "fastener": "FBN25 5/16\" hex flanged bolt + flanged nut (L-foot mounting option)",
+      "torque": "15.8 Nm (140 in-lbs)",
+      "socket": "unknown (standard 1/2\" hex for 5/16\" flanged bolt — not stated in manual; verify)",
+      "source": "Roof Tech RT-MINI II Installation Manual (Jun/2025), L-Foot mounting option torque table"
+    },
+    {
+      "brand": "Unirac",
+      "fastener": "SolarMount L-foot to rail (3/8\" T-bolt + serrated flange nut)",
+      "torque": "30 ft-lbs",
+      "socket": "1/2\" socket (9/16\" wrench per generic 3/8\"-hardware table in older revisions)",
+      "source": "Unirac SolarMount Installation Guide, 'TORQUE VALUE: 3/8\" nut to 30 ft-lbs' + Wrenches and Torque table"
+    },
+    {
+      "brand": "Unirac",
+      "fastener": "SolarMount standard mid clamp / end clamp (1/4\" hardware)",
+      "torque": "10 ft-lbs with anti-seize (factory-applied on mid-clamp bolts)",
+      "socket": "7/16\" wrench per 1/4\"-hardware table; current Pro-series clamps use 1/2\" socket",
+      "source": "Unirac SolarMount Installation Guide, module install steps ('TORQUE VALUE: 1/4\" nuts to 10 ft-lbs with Anti-Seize') + Wrenches and Torque table"
+    },
+    {
+      "brand": "Unirac",
+      "fastener": "SolarMount Pro-series / universal module clamps (single-use)",
+      "torque": "11 ft-lbs — NO anti-seize",
+      "socket": "1/2\" socket",
+      "source": "Unirac SolarMount Installation Guide, 'TORQUE VALUE: 11 ft-lbs. No anti-seize.' (Pro Series mid/end clamps noted single-use only)"
+    },
+    {
+      "brand": "Unirac",
+      "fastener": "SolarMount rail splice bar bolts",
+      "torque": "10 ft-lbs MAX ('Do not exceed 10 ft-lbs. Do not use Anti-Seize.')",
+      "socket": "1/2\" socket (hex head)",
+      "source": "Unirac SolarMount Installation Guide, splice install"
+    },
+    {
+      "brand": "Unirac",
+      "fastener": "SolarMount grounding lug (rail)",
+      "torque": "10 ft-lbs (WEEB/ILSCO lug conductor terminals vary by wire size — see lug datasheet; ILSCO GBL-4DBT lay-in to rail: 5 ft-lbs)",
+      "socket": "unknown",
+      "source": "Unirac SolarMount Installation Guide, grounding section"
+    },
+    {
+      "brand": "SnapNrack",
+      "fastener": "Ultra Rail end clamp / mid clamp",
+      "torque": "16 ft-lbs (192 in-lbs)",
+      "socket": "1/2\" socket ('All Ultra Rail hardware is attached using a standard 1/2\" socket')",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Hardware Torque Specifications table (row: 'Ultra Rail End Clamp, Ultra Rail Mid Clamp')"
+    },
+    {
+      "brand": "SnapNrack",
+      "fastener": "Rail splice, Flashed L-Foot to rail, Tile Hook to rail, Metal Roof Base to rail, Seam Clamp to rail",
+      "torque": "12 ft-lbs (144 in-lbs)",
+      "socket": "1/2\" socket",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Hardware Torque Specifications table"
+    },
+    {
+      "brand": "SnapNrack",
+      "fastener": "Adjustable end clamp, universal end clamp, umbrella nut (tile kits), MRB flange nut",
+      "torque": "10 ft-lbs (120 in-lbs)",
+      "socket": "1/2\" socket",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Hardware Torque Specifications table"
+    },
+    {
+      "brand": "SnapNrack",
+      "fastener": "5/16\" lag screw into rafter (SpeedSeal foot)",
+      "torque": "No ft-lb spec — drive for minimum 2.5\" embedment into framing; 3/16\" pilot; sealant ring must seep out to confirm seal",
+      "socket": "1/2\" socket",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, SpeedSeal foot install"
+    },
+    {
+      "brand": "SnapNrack",
+      "fastener": "Ground lug 242-02101 to GEC / MLPE rail+frame attachment kits / Enphase frame bracket / SolarEdge frame bracket",
+      "torque": "16 ft-lbs / 10 ft-lbs / 13 ft-lbs / 7 ft-lbs respectively",
+      "socket": "1/2\" socket (lug terminal per lug body)",
+      "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Hardware Torque Specifications table"
+    },
+    {
+      "brand": "K2 Systems",
+      "fastener": "CrossRail module clamps (MiniClamp/universal)",
+      "torque": "~14 Nm (10.3 ft-lbs) — VERIFY against current AI-US manual before printing",
+      "socket": "13mm deep socket or 7/16\" socket (per K2 tools overview)",
+      "source": "K2 Systems CrossRail Assembly Instructions US (CrossRail-AI-US.pdf) — via search excerpt, not full-text verified"
+    },
+    {
+      "brand": "K2 Systems",
+      "fastener": "CrossRail end clamp M8 Allen bolts / M10 T-bolts",
+      "torque": "16.3 Nm (12 ft-lbs) / 35 Nm (25.8 ft-lbs) — VERIFY against current AI-US manual",
+      "socket": "Allen (hex) key for M8; 13mm-range socket for M10 flange nuts; K2 specifies a torque wrench with 4-35 Nm range",
+      "source": "K2 Systems CrossRail Assembly Instructions US — via search excerpt, not full-text verified"
+    }
+  ],
+  "byBrand": {
+    "IronRidge": [
+      { "tool": "Cordless drill (non-impact)", "use": "Pilot holes, general fastening", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED" },
+      { "tool": "Impact driver", "use": "Lag bolts ONLY ('Impact Driver (for lag bolts)')", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED" },
+      { "tool": "Torque wrench 0-300 in-lbs", "use": "All bonding/structural hardware final torque", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED" },
+      { "tool": "7/16\", 1/2\", 9/16\" sockets", "use": "7/16\" = UFO/EFO/bonding nuts/lags; 1/2\" = flange nuts/grounding; 9/16\" = flat-roof attachment nuts", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED + torque values" },
+      { "tool": "Drill bits: 1/8\", 1/4\", 7/32\"", "use": "1/4\" pilot = FlashFoot2 lags; 7/32\" pilot = QBase/GF-1 lags; 1/8\" per specific components", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED + attachment installs" },
+      { "tool": "T30 Torx bit", "use": "Contour Clamp (80 in-lbs) and other Torx hardware", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED" },
+      { "tool": "3/16\" hex bit", "use": "Lynx set screws (150 in-lbs)", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED" },
+      { "tool": "5/16\" socket", "use": "HUG RD Structural Screws; grounding lug terminal screws (20 in-lbs)", "source": "XR Flush Mount Installation Manual v5.2, HUG install + Secure Lugs" },
+      { "tool": "#3 Phillips bit, channel-lock pliers, paddle bit", "use": "Misc per tool list (pliers for wire clips/caps)", "source": "XR Flush Mount Installation Manual v5.2, TOOLS REQUIRED" },
+      { "tool": "Cordless ratchet (recommended)", "use": "Module clamp production speed — 'IR Recommends using a cordless ratchet tool for optimal installation speed'; ratcheting crescent wrench also suggested", "source": "XR Flush Mount Installation Manual v5.2, Eclipse clamp install" }
+    ],
+    "Roof Tech": [
+      { "tool": "8mm hex bit socket", "use": "Driving M5x60/M5x90 stainless wood screws (with drill on low clutch — NOT an impact driver)", "source": "RT-MINI II Installation Manual Jun/2025, Tools Required for Assembly" },
+      { "tool": "Drill + 3mm drill bit or center punch", "use": "Metal-roof installations (pre-hole for sheet metal); also 3mm steel drill if a screw hits a hidden nail", "source": "RT-MINI II Installation Manual Jun/2025, Tools Required for Assembly + Bracket Installation" },
+      { "tool": "Measuring tape + chalk line", "use": "Locating rafters and aligning bracket rows per layout plan", "source": "RT-MINI II Installation Manual Jun/2025, Tools Required for Assembly" },
+      { "tool": "Torque wrench", "use": "FBN25 L-foot bolt (15.8 Nm / 140 in-lbs); module clamping hardware", "source": "RT-MINI II Installation Manual Jun/2025, Tools Required for Assembly" },
+      { "tool": "Caulk gun + approved sealant (OPTIONAL layer)", "use": "AlphaSeal butyl flashing is PRE-APPLIED — no sealant required for the seal itself. Manual lists an optional sealant top-coat for UV protection of exposed butyl edges. Approved (asphalt roofs): Henry 208R/209/925, Geocel S2/S4, Sashco Through the Roof, Boss 125, Top Industrial Rain Buster 850/900, ChemLink M1, NPC Solar Seal 900, GE All Purpose 100% Silicone", "source": "RT-MINI II Installation Manual Jun/2025, Roof sealant recommended-products list + '[OPTIONAL Sealant Layer]' step" },
+      { "tool": "Anti-seize / thread lubricant", "use": "All stainless threads — 'Roof Tech recommends all stainless steel threads be lubricated' (prevents galling)", "source": "RT-MINI II Installation Manual Jun/2025, Technical Note" }
+    ],
+    "Unirac": [
+      { "tool": "1/2\" socket + torque wrench", "use": "Mid/end clamps, MLPE mount, L-foot-to-rail, rail splice (per Wrenches and Torque table all use 1/2\")", "source": "Unirac SolarMount Installation Guide, Wrenches and Torque" },
+      { "tool": "7/16\", 9/16\", 5/16\" wrenches", "use": "Legacy hardware table: 1/4\" hardware = 7/16\" (10 ft-lbs), 3/8\" hardware = 9/16\" (30 ft-lbs), #12 hardware = 5/16\" (10 ft-lbs)", "source": "Unirac SolarMount Installation Guide, Wrenches and Torque (1/4\"/3/8\"/#12 hardware table)" },
+      { "tool": "Drill + 3/16\" pilot bit", "use": "Pilot holes into rafter centers for lag screws (SolarHook/tile); 'determine lag bolt size and embedment depth' per project engineering", "source": "Unirac SolarMount Installation Guide, roof attachment steps" },
+      { "tool": "Anti-seize", "use": "Where indicated (mid clamps yes, factory-applied; Pro clamps and splices NO)", "source": "Unirac SolarMount Installation Guide, galling note" },
+      { "tool": "Cutting tool / saw", "use": "Field-trim excess rail after final end clamp — 'Trim off any excess rail, being careful not to cut into the roof'; SM Trim can be cut by hand or with a cutting tool", "source": "Unirac SolarMount Installation Guide, Cut Rail + Trim installation steps" }
+    ],
+    "SnapNrack": [
+      { "tool": "1/2\" socket + socket wrench + torque wrench", "use": "ALL Ultra Rail hardware — 'All Ultra Rail hardware is attached using a standard 1/2\" socket'", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, p.2 + every Required Tools list" },
+      { "tool": "Hammer or stud finder", "use": "Rafter location before drilling", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Required Tools (all attachment sections)" },
+      { "tool": "Drill with 3/16\" pilot drill bit", "use": "Pilot holes for 5/16\" lag screws (2.5\" min embedment); 1/4\" self-drilling screws for steel framing", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Required Tools + SpeedSeal foot install" },
+      { "tool": "Roof marking crayon + chalk line + tape measure", "use": "Layout and transferring rail lines", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Required Tools + System Layout" },
+      { "tool": "Flat pry bar", "use": "Lifting shingles for flashing insertion", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Required Tools" },
+      { "tool": "Roof sealant", "use": "Pilot holes, missed holes, SpeedSeal ring", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Required Tools + Installation Notes" },
+      { "tool": "Reciprocating saw or portable band saw + SnapNrack Rail Cutting Tool", "use": "Field-cutting rail flush to module frame (Universal End Clamp finish); the Rail Cutting Tool is a saw guide that slips over the rail and shields the module edge; deburr and cap after cutting", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, Rail Finishing section" },
+      { "tool": "Drill + deburr bit (1/4\" hole)", "use": "ILSCO lay-in lug alternate grounding: 'Drill and deburr a 1/4\" hole' in rail", "source": "SnapNrack Ultra Rail Installation Manual v4.6.1, grounding section" }
+    ],
+    "K2 Systems": [
+      { "tool": "13mm deep socket + 7/16\" socket", "use": "CrossRail hardware (metric M8/M10 + SAE mix)", "source": "K2 CrossRail Assembly Instructions US, tools overview (via search excerpt — verify)" },
+      { "tool": "Torque wrench 4-35 Nm (2.9-25.8 ft-lbs)", "use": "All CrossRail fasteners; K2 specifies the wrench range explicitly", "source": "K2 CrossRail Assembly Instructions US, tools overview (via search excerpt — verify)" },
+      { "tool": "Allen/hex keys (M8 end-clamp bolts)", "use": "End clamps 16.3 Nm", "source": "K2 CrossRail Assembly Instructions US (via search excerpt — verify)" }
+    ]
+  },
+  "caveats": [
+    "Torque values are REVISION-SPECIFIC. Always use the manual revision shipped with the product: e.g. IronRidge UFO clamp = 80 in-lbs in XR Flush Mount Manual v5.2 (2026) but 84 in-lbs in older revisions. Do not print a torque on the BOM without the manual version note.",
+    "Roof Tech M5 wood screws deliberately have NO numeric torque — spec is 'tighten until the conical washer stops rotating'; torque varies with wood condition. Do not invent a ft-lb number for them, and flag that impact drivers are prohibited on these screws.",
+    "K2 Systems values here came from search excerpts of the official CrossRail AI-US PDF, not a full-text extraction — field-verify against the current manual (k2-systems.com) before relying on them.",
+    "SnapNrack torque table was extracted from a PDF whose column alignment shifts; the three headline rows (Ultra clamps 16 ft-lbs, splice/L-foot 12 ft-lbs, legacy clamps 10 ft-lbs) were cross-checked against SnapNrack training guide excerpts, but verify lug/MLPE rows against the live manual before printing.",
+    "Lag-bolt pilot bit sizes are per-manufacturer, NOT a universal rule: 3/16\" (SnapNrack, Unirac SolarHook), 1/4\" (IronRidge FlashFoot2), 7/32\" (IronRidge QBase/GF-1). Some manuals (Unirac) defer lag size/embedment to the project engineering — the BOM should show the attachment brand's number.",
+    "Lag bolts generally have NO published torque (IronRidge/SnapNrack say 'fully seat' / 'minimum 2.5\" embedment') because torque-to-clamp in wood varies; do not list a lag torque value.",
+    "Anti-seize is conditional: Unirac requires it on some hardware (mid clamps) and forbids it on others (Pro clamps 11 ft-lbs, splices) — torque specs change meaning with lubrication, so pair each torque with its anti-seize note.",
+    "No residential racking manufacturer requires a vacuum module lifter; 2-person carry plus optional ladder hoist is the standard. Vacuum lifters are listed as optional handling equipment only — no part numbers included by design.",
+    "Rail cutting: manufacturer manuals name the tool class (SnapNrack: 'Reciprocating Saw or Portable Band Saw') but the bandsaw-over-chopsaw preference (cold cut, no hot chips on shingles) is installer best practice, not a manual mandate. Abrasive cutoff wheels on structural rail are universally discouraged.",
+    "IronRidge tool list distinguishes 'Cordless Drill (non-impact)' from 'Impact Driver (for lag bolts)' — the impact is ONLY for lags; using it on clamp/bonding hardware can over-torque and void the UL 2703 bonding certification assumptions.",
+    "OSHA fall-protection items (harness, 5,000-lb anchor, SRL) are legal requirements at 6+ ft in residential construction (29 CFR 1926.501/502), not manufacturer suggestions — treat as mandatory on the BOM, not 'suggested'."
+  ]
+}
