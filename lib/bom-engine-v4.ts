@@ -387,32 +387,67 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   const isMicro = norm === 'MICROINVERTER' || norm === 'AC_COUPLED_BATTERY';
 
   if (isMicro) {
-    // ISSUE 4 FIX: AC Trunk Cable uses deviceCount (not moduleCount)
-    // branchCount = ceil(deviceCount / microPerBranch) where microPerBranch = 16
+    // ── Enphase IQ Q-Cable — real install modeling ──────────────────────────
+    // The Q-Cable is bulk trunk cable with connectors PRE-MOLDED at the module
+    // pitch; the micro plugs into each connector. It is orientation-specific and
+    // priced/consumed BY THE FOOT:
+    //   • Portrait  = Q-12-10-240, connectors @ 1.3 m (51"  ≈ 4.25 ft)  [60/72-cell portrait]
+    //   • Landscape = Q-12-17-240, connectors @ 2.0 m (78.7" ≈ 6.56 ft) [60-cell landscape]
+    // (Was a single portrait SKU + bare section COUNT with no length.)
     const microPerBranch = 16;
     const trunkDeviceCount = input.deviceCount ?? input.moduleCount;
     const trunkSections = Math.ceil(trunkDeviceCount / microPerBranch);
-    // Q-Cable is bulk cable with connectors pre-spaced at the module pitch, so the
-    // CABLE is priced/consumed by the FOOT — one connector-drop per microinverter
-    // along the trunk. Real trunk footage = devices × connector spacing (Enphase
-    // IQ cable: 1.3 m ≈ 4.3 ft portrait drop, 2.0 m ≈ 6.6 ft landscape) × 1.15
-    // slack. (Was a bare section COUNT, which carried no cable length.) The
-    // connectors/terminators below stay per branch-section.
-    const trunkDropFt = input.layoutOrientation === 'landscape' ? 6.6 : 4.3;
+    const isLandscape = input.layoutOrientation === 'landscape';
+    const trunkPn   = isLandscape ? 'Q-12-17-240' : 'Q-12-10-240';
+    const trunkKind = isLandscape ? 'Landscape' : 'Portrait';
+    const trunkDropFt = isLandscape ? 6.56 : 4.25;
     const trunkFeet = Math.ceil(trunkDeviceCount * trunkDropFt * 1.15);
-    items.push(addItem('dc', 'trunk_cable', 'Enphase', 'Q Cable 240V',
-      'Q-12-10-240', `AC Trunk Cable — ${trunkDropFt} ft drop spacing × ${trunkDeviceCount} devices`,
+    items.push(addItem('dc', 'trunk_cable', 'Enphase', `Q Cable 240V (${trunkKind})`,
+      trunkPn, `${trunkKind} AC trunk cable — connectors @ ${trunkDropFt} ft × ${trunkDeviceCount} devices`,
       trunkFeet, 'ft', 'NEC 690.31', 'devices × dropSpacing × 1.15', `${trunkDeviceCount} × ${trunkDropFt} × 1.15`, true));
-    log.push({ stageId: 'dc', category: 'trunk_cable', item: 'Q Cable 240V',
+    log.push({ stageId: 'dc', category: 'trunk_cable', item: `Q Cable 240V (${trunkKind})`,
       quantity: trunkFeet, derivedFrom: 'devices × dropSpacing × 1.15', formula: `${trunkDeviceCount} × ${trunkDropFt} × 1.15`, necReference: 'NEC 690.31' });
 
-    // Terminators (2 per branch-section — trunk start cap + end connector)
-    const terminators = trunkSections * 2;
+    // ── Field-wireable splices (male + female) for trunk JUMPS ──────────────
+    // Where the pre-molded connector spacing genuinely WON'T REACH, the cable is
+    // cut and field-terminated with a MALE (Q-CONN-10M) + FEMALE (Q-CONN-10F)
+    // field-wireable pair (single-phase, 250 VAC/20 A).
+    // ⚠ COUNT IS A CONSERVATIVE ESTIMATE — pending the trunk-cable install-rule
+    // research (lib/data/equipment/trunk-cable-*.json). Real installs route the
+    // CONTINUOUS cable with a SERVICE LOOP and cap the unused connector (Q-SEAL)
+    // for most row transitions, so field splices are the EXCEPTION (reel joins,
+    // sub-array / roof-plane bridges), NOT one-per-row. Landscape's wider molded
+    // spacing (6.56 ft) bridges the short row pitch → ~0; portrait (4.25 ft) may
+    // need the occasional jumper. This will be replaced by a brand-agnostic
+    // resolver driven by the real rule + panelPositions jump geometry.
+    const estRows = input.rowCount && input.rowCount > 0
+      ? input.rowCount
+      : Math.max(1, Math.round(trunkDeviceCount / 13)); // fallback ~13 modules/row
+    const trunkJumps = isLandscape ? 0 : Math.max(0, Math.ceil((estRows - 1) / 2));
+    if (trunkJumps > 0) {
+      items.push(addItem('dc', 'connector', 'Enphase', 'Q Field-Wireable Connector (Male)',
+        'Q-CONN-10M', 'Male field-wireable connector — trunk jump/splice (estimate, pending brand install rule)',
+        trunkJumps, 'ea', 'NEC 690.31', 'trunk jumps (estimate)', `ceil((${estRows}-1)/2)`, false));
+      items.push(addItem('dc', 'connector', 'Enphase', 'Q Field-Wireable Connector (Female)',
+        'Q-CONN-10F', 'Female field-wireable connector — trunk jump/splice (estimate, pending brand install rule)',
+        trunkJumps, 'ea', 'NEC 690.31', 'trunk jumps (estimate)', `ceil((${estRows}-1)/2)`, false));
+      log.push({ stageId: 'dc', category: 'connector', item: 'Q Field-Wireable Connector (M/F pair)',
+        quantity: trunkJumps, derivedFrom: 'trunk jumps (conservative estimate)', formula: `ceil((${estRows}-1)/2)`, necReference: 'NEC 690.31' });
+    }
+
+    // ── Terminators (Q-TERM-10) — one cap per branch far end ────────────────
+    const terminators = trunkSections;
     items.push(addItem('dc', 'terminator', 'Enphase', 'Q Cable Terminator',
-      'Q-TERM-10-240', 'Trunk cable terminator — 2 per trunk section',
-      terminators, 'ea', 'NEC 690.31', 'ceil(modules/16)*2', 'ceil(modules / 16) * 2', true));
+      'Q-TERM-10', 'Sealing terminator cap — 1 per trunk branch end',
+      terminators, 'ea', 'NEC 690.31', 'ceil(devices/16)', 'ceil(devices / 16)', true));
     log.push({ stageId: 'dc', category: 'terminator', item: 'Q Cable Terminator',
-      quantity: terminators, derivedFrom: 'trunkSections*2', formula: 'ceil(modules / 16) * 2', necReference: 'NEC 690.31' });
+      quantity: terminators, derivedFrom: 'trunkSections', formula: 'ceil(devices / 16)', necReference: 'NEC 690.31' });
+
+    // ── Sealing caps (Q-SEAL-10) — cover any unused molded connectors ───────
+    // A cut cable leaves spare open connectors near branch ends; cap 1 per branch.
+    items.push(addItem('dc', 'sealing_cap', 'Enphase', 'Q Cable Sealing Cap',
+      'Q-SEAL-10', 'Female sealing cap — covers unused Q-Cable connectors (NEC 690.31, wet-rated)',
+      trunkSections, 'ea', 'NEC 690.31', 'ceil(devices/16)', 'ceil(devices / 16)', false));
 
   } else {
     // DC Wire (string inverter topology) — defensive defaults for all wire/conduit fields
