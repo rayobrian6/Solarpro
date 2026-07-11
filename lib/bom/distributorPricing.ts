@@ -723,6 +723,9 @@ export function applyDistributorPricing(
   };
 
   const pricedItems: BOMLineItemV4[] = items.map(item => {
+    // Suggested TOOLS are advice, not materials — never priced, never counted
+    // in totals or the unpriced KPI.
+    if (item.stageId === 'tools') return item;
     // Skip items already priced (e.g. if called twice)
     if (item.unitCost !== undefined && item.unitCost > 0) {
       _addCost(item, item.totalCost ?? item.unitCost * item.quantity);

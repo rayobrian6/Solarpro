@@ -1,0 +1,247 @@
+{
+  "$meta": {
+    "purpose": "Manufacturer-recommended installation tools for residential solar ELECTRICAL work (microinverter trunk cable, conduit, wiring, interconnection). Drives the 'Suggested Tools' section of the job BOM.",
+    "researched": "2026-07-11",
+    "primarySources": [
+      "Enphase IQ8 Series Microinverter Installation and Operation Manual (enphase.com/download/iq8-series-microinverter-installation-and-operation-manual)",
+      "Enphase Q Field Wireable Connector Quick Install Guide (support.enphase.com/s/article/Enphase-Q-Field-Wireable-Connector-Quick-Install-Guide)",
+      "Enphase IQ Combiner 4/4C Quick Install Guide (enphase.com/sites/default/files/2021-10/IQ-Combiner-4-4C-QIG-EN-US-Rev03-10-23-2021_0.pdf)",
+      "NEC 110.14(D) / NEMA 'Using Torque Tools for Terminating Building Wire' (nema.org technical document library)",
+      "NFPA 70E standard electrician practice (PPE for energized/line-side work)"
+    ]
+  },
+  "enphase": [
+    {
+      "tool": "Enphase IQ Disconnect Tool (Q-DISC-10)",
+      "use": "Release locking AC connectors on IQ/Q Cable drops, remove Q-SEAL sealing caps, and disconnect MC4/Amphenol H4 DC connectors and AC module mounts without damaging the connector",
+      "why": "Enphase manual states a disconnect tool MUST be used to remove a sealing cap or AC connector; listed in the IQ8 manual's required-accessories list. Sold as a 10-pack; roughly one per crew member",
+      "sku": "Q-DISC-10",
+      "source": "Enphase IQ8 Series Installation and Operation Manual; enphase.com store 'Q Cable Disconnect Tool'"
+    },
+    {
+      "tool": "#2 and #3 screwdrivers (Phillips)",
+      "use": "Microinverter mounting hardware and enclosure terminations",
+      "source": "Enphase IQ8 Series Installation and Operation Manual, 'Required tools' (screwdrivers, wire cutters, voltmeter, torque wrench, sockets, wrenches)"
+    },
+    {
+      "tool": "Torque wrench + sockets/wrenches for racking hardware",
+      "use": "Torque microinverter mounting bolts to racking manufacturer spec",
+      "source": "Enphase IQ8 Series Installation and Operation Manual, 'Required tools'"
+    },
+    {
+      "tool": "Wire cutters",
+      "use": "Cut IQ Cable between drops; trim tie wraps",
+      "source": "Enphase IQ8 Series Installation and Operation Manual, 'Required tools'"
+    },
+    {
+      "tool": "Voltmeter / digital multimeter",
+      "use": "Verify AC branch voltage and absence of voltage before touching terminations; required by the Enphase manual",
+      "source": "Enphase IQ8 Series Installation and Operation Manual, 'Required tools'"
+    },
+    {
+      "tool": "Open-end/adjustable wrench for field-wireable connector gland nuts",
+      "use": "Tighten Q-CONN-10M/10F field-wireable connector gland nut to 7 N·m (single-phase Q connectors) — do not over-tighten; three-phase QD connectors: cable gland 4.5 N·m, contact-carrier screws 1 N·m",
+      "why": "Under-torqued glands lose the connector's ingress-protection rating; over-torque cracks the gland",
+      "source": "Enphase Q Field Wireable Connector Quick Install Guide; Enphase three-phase QD field-wireable QIG"
+    },
+    {
+      "tool": "Torque screwdriver (in-lb range) for IQ Combiner terminations",
+      "use": "IQ Combiner 4 DG breaker terminals: 20 lb-in (2.2 N·m) for 14-10 AWG, 25 lb-in (2.8 N·m) for 8 AWG; consumption-metering CT terminals ~5 lb-in",
+      "why": "Combiner QIG lists screwdriver, pliers, and torque wrench as required tools and tabulates torque per wire gauge",
+      "source": "Enphase IQ Combiner 4/4C Quick Install Guide"
+    },
+    {
+      "tool": "IQ Cable accessories on hand (not tools, but required consumables)",
+      "use": "Q-SEAL-10 sealing caps for every unused cable drop, Q-TERM-10 terminators (2 per branch typical), Q-CLIP-100 cable clips or UV-rated tie wraps for cable management, Q-CONN-10M/10F field-wireable connectors",
+      "source": "Enphase IQ8 Series Installation and Operation Manual, required accessories list"
+    },
+    {
+      "tool": "Connector seating check (click test + tug test)",
+      "use": "Push module DC leads and IQ Cable AC connectors together until they audibly click, then pull-test; visually confirm no gap at the connector collar",
+      "why": "Partially seated PV connectors are a leading cause of arc faults; Enphase connectors are designed to latch audibly",
+      "source": "Enphase IQ8 quick install guide practice; standard installer practice"
+    }
+  ],
+  "wireManagement": [
+    {
+      "tool": "Wire spool caddy / spool rack (multi-spool)",
+      "use": "Dispense THHN from 500 ft spools when pulling homerun conductors; holds L1/L2/N/EGC colors simultaneously so a 3-4 conductor pull pays out evenly",
+      "why": "THHN for #10 and #8 AWG is standardly sold on 500 ft spools (also 1000/2500 ft); a caddy prevents spool tangling and insulation scuffing during pulls",
+      "source": "Standard trade practice; 500 ft spool size verified at Southwire SIMpull / wireandcableyourway.com listings for #10 and #8 THHN"
+    },
+    {
+      "tool": "Fish tape (steel or fiberglass, 50-100 ft)",
+      "use": "Pull THHN through EMT/PVC conduit runs from roof junction box to combiner/POI; fiberglass preferred near energized equipment",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "Wire-pulling lubricant",
+      "use": "Reduce friction on longer conduit pulls or pulls with multiple bends (fill approaching 40%)",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "Wire-pulling grip / basket grip (small-conductor size)",
+      "use": "Attach conductor bundle to fish tape for multi-conductor pulls without stressing insulation",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "UV-rated cable ties and/or Q-CLIP-100 clips",
+      "use": "Secure IQ Cable to racking rails; keep cable off the roof surface and within bend radius",
+      "source": "Enphase IQ8 Series Installation and Operation Manual (tie wraps or IQ Cable Clips listed as required)"
+    }
+  ],
+  "conduit": [
+    {
+      "tool": "EMT hand bender — 1/2\" and 3/4\" heads",
+      "use": "Bend offsets, kicks, and 90s for the AC homerun raceway; 3/4\" EMT is the typical residential solar AC run, 1\" for larger backfeed or multi-circuit runs (separate bender head per trade size)",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "Conduit reamer / deburring tool",
+      "use": "Ream every field-cut EMT end before assembly so burrs cannot skin conductor insulation",
+      "why": "NEC 358.28(A) requires cut ends be reamed; nicked THHN in a hot rooftop raceway is a ground-fault seed",
+      "source": "NEC Article 358; standard electrician practice"
+    },
+    {
+      "tool": "Hacksaw (fine-tooth blade) or portable band saw",
+      "use": "Cut EMT to length; band saw gives squarer, faster cuts on repetitive work but a hacksaw is sufficient for residential jobs",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "Torpedo level (magnetic)",
+      "use": "Level/plumb conduit runs and equipment enclosures; magnetic face sits on EMT while strapping",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "Nut drivers / socket set for conduit straps and strut hardware",
+      "use": "Set-screw EMT fittings, one-hole/two-hole straps (strap within 3 ft of every box and every 10 ft per NEC 358.30), strut clamps at service equipment",
+      "source": "NEC Article 358; standard electrician practice"
+    },
+    {
+      "tool": "Strut/channel accessories: strut cutter or portaband + strut nuts",
+      "use": "Mount combiner/disconnect on strut where wall surface is uneven; cut strut cleanly and deburr",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "Drill/driver with masonry and wood bits, hole saws",
+      "use": "Penetrations for LB fittings, mounting enclosures, attaching straps to stucco/wood",
+      "source": "Standard electrician practice"
+    }
+  ],
+  "termination": [
+    {
+      "tool": "Calibrated torque screwdriver (in-lb) + small torque wrench (ft-lb)",
+      "use": "Every lug, breaker, and terminal termination: breakers, combiner lugs, disconnect lugs, meter-socket line/load lugs (only where permitted to work), neutral/ground bars",
+      "why": "NEC 110.14(D) REQUIRES terminations be tightened to the manufacturer's marked torque using a calibrated torque tool or other approved means (2020 NEC allows shear/breakaway indicators). Inspectors increasingly ask to see the torque tool and its calibration certificate",
+      "source": "NEC 110.14(D); NEMA 'Using Torque Tools for Terminating Building Wire'; IAEI/EC&M code commentary"
+    },
+    {
+      "tool": "Wire strippers covering #14 to #6 AWG",
+      "use": "Strip THHN homerun conductors (#10/#8 typical) and equipment whips to the strip length marked on the terminal or connector",
+      "source": "Standard electrician practice"
+    },
+    {
+      "tool": "Crimper for compression lugs/ferrules (with correct dies)",
+      "use": "Compression ring terminals or lugs where equipment requires crimped terminations; use the lug manufacturer's listed die and crimp cycle",
+      "why": "Listed lug + matched die is required for the termination to remain within its listing",
+      "source": "Standard electrician practice; UL 486A-486B listing requirements"
+    },
+    {
+      "tool": "1000 V insulated hand tools (screwdrivers, pliers, cutters)",
+      "use": "All work in or near equipment that may be energized — panelboards, meter sockets, supply-side taps",
+      "source": "NFPA 70E; standard electrician practice"
+    },
+    {
+      "tool": "Digital multimeter (CAT III/IV rated) + clamp meter",
+      "use": "Absence-of-voltage verification before touching terminations; measure per-branch AC current at commissioning to confirm production",
+      "source": "Enphase IQ8 manual (voltmeter in required tools); NFPA 70E verification practice"
+    },
+    {
+      "tool": "Insulation resistance tester (megger, 500/1000 V DC)",
+      "use": "Optional on Enphase AC-microinverter systems (no long HVDC strings), but useful to prove homerun conductor insulation after pull and required by some AHJs/commissioning checklists; NEVER megger through connected microinverters or the gateway — disconnect electronics first",
+      "source": "Standard commissioning practice; not listed in the Enphase IQ8 required-tools list"
+    },
+    {
+      "tool": "Torque-seal marker (inspection lacquer/paint pen)",
+      "use": "Stripe each torqued termination after tightening as visible evidence for the inspector and for QA re-checks",
+      "source": "Standard trade practice supporting NEC 110.14(D) documentation"
+    },
+    {
+      "tool": "Label printer / engraved placard kit",
+      "use": "Apply NEC 690/705 labels (rapid shutdown, backfeed, disconnect directory) at final; UV-rated labels",
+      "source": "NEC 690.56, 705.10; standard practice"
+    }
+  ],
+  "supplySide": [
+    {
+      "tool": "Class 0 rubber insulating gloves (1000 V) with leather protectors",
+      "use": "Any work on or near energized service conductors — supply-side (line-side) connections, meter-socket work where the utility has not dropped service",
+      "why": "Service conductors upstream of the main breaker have no overcurrent protection; NFPA 70E requires shock PPE for energized work. Gloves must be within their 6-month electrical retest date",
+      "source": "NFPA 70E Table 130.7; standard utility/solar interconnection practice"
+    },
+    {
+      "tool": "Arc-rated face shield + balaclava (or arc-flash suit per incident-energy analysis)",
+      "use": "Energized supply-side terminations and meter pulls; residential services are commonly PPE Category 1-2 but verify per NFPA 70E tables or an incident-energy study",
+      "source": "NFPA 70E; standard practice"
+    },
+    {
+      "tool": "1000 V insulated tool set (dedicated for energized work)",
+      "use": "Supply-side tap connections (e.g., insulation-piercing connectors, Polaris-style taps) and panel work; insulated tools are mandatory when de-energizing is infeasible",
+      "source": "NFPA 70E 130.7(D); standard practice"
+    },
+    {
+      "tool": "Voltage tester with proving unit (live-dead-live method)",
+      "use": "Verify absence of voltage on the load side before work; prove the tester before and after",
+      "source": "NFPA 70E 120.5 verification steps"
+    },
+    {
+      "tool": "Insulating blankets / meter-socket covers",
+      "use": "Cover exposed energized parts adjacent to the work area during supply-side connections",
+      "source": "NFPA 70E; standard practice"
+    }
+  ],
+  "commissioning": [
+    {
+      "tool": "Smartphone/tablet with Enphase Installer App (Enphase Installer Portal account)",
+      "use": "Scan microinverter serials (per-module map), provision the IQ Gateway/Envoy, set grid profile, verify per-device production and connectivity",
+      "why": "Enphase commissioning is app-driven; the array map ties each micro's serial to its roof position",
+      "source": "Enphase IQ Gateway/Envoy commissioning documentation; Enphase Installer App"
+    },
+    {
+      "tool": "Wi-Fi/Ethernet/cellular connectivity for the IQ Gateway",
+      "use": "Gateway needs internet (customer Wi-Fi, Ethernet, or Mobile Connect cellular kit) to report to Enphase App/Enlighten; verify signal at the combiner location during commissioning",
+      "source": "Enphase IQ Gateway documentation"
+    },
+    {
+      "tool": "Clamp meter",
+      "use": "Confirm per-branch AC amperage roughly matches expected output at current irradiance; sanity-check CT orientation for consumption metering",
+      "source": "Standard commissioning practice"
+    },
+    {
+      "tool": "Irradiance meter",
+      "use": "OPTIONAL for residential Enphase jobs — per-panel monitoring already reveals underperformers; an irradiance meter only matters for formal capacity-test commissioning (more common on commercial/PPA jobs)",
+      "source": "Standard commissioning practice; not an Enphase requirement"
+    },
+    {
+      "tool": "Torque-seal paint pen (final walk)",
+      "use": "Verify every marked termination still shows an unbroken torque stripe before inspection",
+      "source": "Standard QA practice"
+    },
+    {
+      "tool": "Camera/phone for as-built photos",
+      "use": "Photograph torque marks, label placement, connector seating, and open equipment before covers go on — many AHJs and financiers require photo documentation",
+      "source": "Standard practice"
+    }
+  ],
+  "caveats": [
+    "Torque values cited (Q field-wireable gland 7 N.m single-phase, QD gland 4.5 N.m / carrier screws 1 N.m three-phase; IQ Combiner 4 DG breaker 20 lb-in for 14-10 AWG, 25 lb-in for 8 AWG, CT terminals ~5 lb-in) come from Enphase quick-install guides found via web search on 2026-07-11 — FIELD-VERIFY against the exact revision of the manual shipped with the hardware before printing on customer-facing documents.",
+    "Q-DISC-10 SKU verified against Enphase store and multiple distributors; other Enphase accessory SKUs (Q-SEAL-10, Q-TERM-10, Q-CLIP-100, Q-CONN-10M/10F) are from the IQ8 manual accessory list — newer IQ8 'commercial'/QD product lines use different (QD-prefixed) part numbers, so match the SKU family to the microinverter generation on the BOM.",
+    "NEC 110.14(D): 2017 NEC required a 'calibrated torque tool'; 2020+ NEC says 'an approved means' (torque tool, or shear/breakaway indicator hardware). Which edition applies depends on the AHJ's adopted code cycle.",
+    "PPE category for supply-side work is site-specific: NFPA 70E table method or incident-energy analysis governs. Class 0 gloves (1000 V) are the common residential floor, but do not print PPE guidance as sufficient without a qualified-person determination.",
+    "Insulation-resistance (megger) testing is NOT in the Enphase required-tools list; if performed, all microinverters, the gateway, and any surge devices must be disconnected first or they can be damaged.",
+    "Irradiance meter marked optional — no manufacturer requirement found for residential Enphase commissioning.",
+    "EMT bender trade sizes listed (1/2\", 3/4\", 1\") reflect typical residential solar AC runs; actual size comes from the project's conduit fill/conductor schedule, not this list.",
+    "No pricing included intentionally — tool pricing varies too much by brand/vendor to hard-code.",
+    "This file is suggestion-level content for a BOM 'Suggested Tools' section, not an exhaustive safety program; it does not replace NFPA 70E training, manufacturer manuals, or AHJ requirements."
+  ]
+}

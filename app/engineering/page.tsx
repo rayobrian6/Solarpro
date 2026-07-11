@@ -13836,7 +13836,7 @@ function EngineeringPageInner() {
                   const totalCost = bomPricing?.totalBomCost ?? pricedItems.reduce((s: number, i: any) => s + (i.totalCost ?? 0), 0);
 
                   // ── stage grouping ──
-                  const stageOrder = ['array', 'dc', 'inverter', 'ac', 'structural', 'monitoring', 'labels', 'truck_stock'];
+                  const stageOrder = ['array', 'dc', 'inverter', 'ac', 'structural', 'monitoring', 'labels', 'truck_stock', 'tools'];
                   const stageLabels: Record<string, string> = {
                     array:      'Stage 1 — Array',
                     dc:         'Stage 2 — DC Wiring',
@@ -13846,6 +13846,7 @@ function EngineeringPageInner() {
                     monitoring: 'Stage 6 — Monitoring',
                     labels:     'Stage 7 — Labels',
                     truck_stock:'Truck Stock — Recommended Extras (not in $/W)',
+                    tools:      'Suggested Tools — This Job (advice, unpriced)',
                   };
                   const stageColors: Record<string, string> = {
                     array:      'text-amber-400  bg-amber-500/10  border-amber-500/25',
@@ -13856,6 +13857,7 @@ function EngineeringPageInner() {
                     monitoring: 'text-sky-400    bg-sky-500/10    border-sky-500/25',
                     labels:     'text-slate-400  bg-slate-500/10  border-slate-500/25',
                     truck_stock:'text-yellow-400 bg-yellow-500/10 border-yellow-500/25',
+                    tools:      'text-cyan-400   bg-cyan-500/10   border-cyan-500/25',
                   };
                   const stageIconColors: Record<string, string> = {
                     array:      'bg-amber-500/15 text-amber-400',
@@ -13866,6 +13868,7 @@ function EngineeringPageInner() {
                     monitoring: 'bg-sky-500/15 text-sky-400',
                     labels:     'bg-slate-500/15 text-slate-400',
                     truck_stock:'bg-yellow-500/15 text-yellow-400',
+                    tools:      'bg-cyan-500/15 text-cyan-400',
                   };
 
                   // Build stage groups from bom array

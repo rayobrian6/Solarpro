@@ -22,6 +22,7 @@ import {
 } from './topology-manager';
 import { resolveIntegratedEquipment } from './equipment/integratedBos';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
+import { resolveSuggestedTools } from './equipment/suggestedTools';
 import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
 
 import type { RunSegment } from './computed-system';
@@ -106,6 +107,11 @@ export interface BOMGenerationInputV4 {
    * permit BOM passes false — the SCHED shows installed materials only.
    */
   includeTruckStock?: boolean;
+  /**
+   * Emit the "Suggested Tools — This Job" stage (default true). Advice, not
+   * materials: never priced, excluded from the permit. Permit BOM passes false.
+   */
+  includeSuggestedTools?: boolean;
 
   // Electrical
   mainPanelAmps: number;
@@ -243,11 +249,12 @@ const STAGE_LABELS: Record<BOMStageId, string> = {
   monitoring: 'Stage 6 — Monitoring',
   labels:     'Stage 7 — Labels',
   truck_stock: 'Truck Stock — Recommended Extras',
+  tools:       'Suggested Tools — This Job',
 };
 
 const STAGE_ORDER: Record<BOMStageId, number> = {
   array: 1, dc: 2, inverter: 3, ac: 4, structural: 5, monitoring: 6, labels: 7,
-  truck_stock: 8,
+  truck_stock: 8, tools: 9,
 };
 
 // ─── Main BOM Generation Function ────────────────────────────────────────────
@@ -1467,6 +1474,39 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // Electrical spares.
     ts('breaker', 'Square D', `${input.acOCPD || 20}A 2-Pole Breaker (spare)`, `QO${input.acOCPD || 20}-SPARE`,
       'Spare OCPD matching the PV breaker', 1, '1 spare');
+  }
+
+  // ── SUGGESTED TOOLS — job-specific tooling advice (Ray, 2026-07-11) ──────────
+  // "Like a bandsaw for cutting rails, wire caddys, rolls of thhn" — resolved
+  // from what THIS job involves (lib/equipment/suggestedTools; manufacturer
+  // provenance in lib/data/equipment/install-tools-*.json). Advice, not
+  // materials: qty 1, required:false, never priced (pricing layer skips the
+  // 'tools' stage entirely), excluded from the permit SCHED.
+  if (input.includeSuggestedTools !== false) {
+    const _railBased = !!(rackingEntry?.structuralSpecs?.requiresRail
+      ?? ((input.rackingBOM?.rails?.qty ?? 0) > 0 || input.railSections > 0));
+    const _tools = resolveSuggestedTools({
+      isRailBased: _railBased,
+      rackingBrand: input.rackingBOM?.manufacturer ?? rackingEntry?.manufacturer,
+      isMicro,
+      microBrand: inverterEntry?.manufacturer ?? microDb?.manufacturer,
+      conduitType: input.conduitType,
+      isSupplySideTap,
+      hasRoofAttachments: (input.attachmentCount ?? 0) > 0 && input.systemType === 'roof',
+      hasWirePull: (input.acWireLength ?? 0) > 0,
+    });
+    for (const t of _tools) {
+      items.push(addItem('tools', 'tool', t.manufacturer ?? '—', t.tool,
+        t.partNumber ?? '—',
+        `${t.use}${t.why ? ` — ${t.why}` : ''}`,
+        1, 'ea', t.why?.includes('NEC') ? 'NEC 110.14(D)' : 'BEST PRACTICE',
+        'suggested tools (job-specific)', 'per job', false));
+    }
+    if (_tools.length > 0) {
+      log.push({ stageId: 'tools', category: 'tool', item: 'Suggested tool set',
+        quantity: _tools.length, derivedFrom: 'job context (racking/topology/conduit/interconnection)',
+        formula: 'resolveSuggestedTools', necReference: 'BEST PRACTICE' });
+    }
   }
 
   // ── Build Stage Results ───────────────────────────────────────────────────────
