@@ -31,6 +31,7 @@ import {
   MigrationRunStatus,
   MigrationStatus,
   MigrationAuditEvent,
+  MigrationAuditEventType,
   MigrationActorType,
   MigrationGovernanceLifecycle,
   BaselineReconciliationStatus,
@@ -40,6 +41,7 @@ import {
   MIGRATION_LOCK_KEY_DECIMAL,
 } from './types';
 import { getNodeEnv } from '@/lib/env';
+import { writeAuditLog, AuditCategory, AuditAction } from '@/lib/auditLog';
 
 /**
  * The fixed bootstrap DDL that creates the migration governance tables.
@@ -205,20 +207,108 @@ CREATE INDEX IF NOT EXISTS migration_totp_uses_used_at_idx
 `;
 
 /**
- * Emit a structured audit event to the console (supplemental telemetry).
+ * Map a MigrationAuditEventType to the corresponding durable AuditAction in
+ * lib/auditLog.ts. This allows migration governance events to be persisted to
+ * the tamper-evident audit_log table with hash-chain integrity (MIGRATION-GOV-08).
+ */
+const MIGRATION_EVENT_TO_AUDIT_ACTION: Record<MigrationAuditEventType, AuditAction> = {
+  'migration.inspect': 'data_read',
+  'migration.bootstrap.started': 'migration_bootstrap_started',
+  'migration.bootstrap.completed': 'migration_bootstrap_completed',
+  'migration.bootstrap.failed': 'migration_bootstrap_failed',
+  'migration.run.started': 'migration_run_started',
+  'migration.run.completed': 'migration_run_completed',
+  'migration.run.failed': 'migration_run_failed',
+  'migration.migration.applied': 'migration_applied',
+  'migration.migration.failed': 'migration_failed',
+  'migration.migration.skipped': 'migration_skipped',
+  'migration.migration.started': 'migration_started',
+  'migration.conflict.detected': 'migration_conflict_detected',
+  'migration.checksum_mismatch': 'migration_checksum_mismatch',
+  'migration.lock_denied': 'migration_lock_denied',
+  'migration.lock_acquired': 'migration_lock_acquired',
+  'migration.legacy.invoked': 'migration_legacy_invoked',
+  'migration.baseline.started': 'migration_baseline_started',
+  'migration.baseline.completed': 'migration_baseline_completed',
+  'migration.baseline.failed': 'migration_baseline_failed',
+  'migration.governance.state_change': 'migration_governance_state_change',
+  'migration.governance.execution_denied': 'migration_governance_execution_denied',
+  'migration.mfa.denied': 'migration_mfa_denied',
+  'migration.mfa.replay_detected': 'migration_mfa_replay_detected',
+  'migration.transaction_mode.review_required': 'migration_transaction_mode_review_required',
+  'manifest.duplicate_prefix': 'data_read',
+};
+
+/**
+ * Persist a migration audit event to the durable audit_log table via
+ * writeAuditLog (hash-chain integrity). This is the durable persistence path
+ * for migration governance events (MIGRATION-GOV-08).
+ *
+ * This function is fire-and-forget: it never throws. If the audit_log table is
+ * unavailable or the write fails, writeAuditLog itself falls back to console
+ * logging. The console emission in emitAuditEvent ensures observability even
+ * when the durable store is unreachable.
+ *
+ * @returns The entry hash on success, null on failure.
+ */
+async function persistMigrationAuditEvent(event: MigrationAuditEvent): Promise<string | null> {
+  const action = MIGRATION_EVENT_TO_AUDIT_ACTION[event.type] ?? 'data_read';
+  const description = `Migration governance event: ${event.type}`;
+  const targetType = event.migrationIdentifier ? 'migration' : 'migration_governance';
+  const targetId = event.migrationIdentifier ?? event.executionId ?? null;
+  const metadata: Record<string, unknown> = {
+    eventType: event.type,
+    executionId: event.executionId,
+    migrationIdentifier: event.migrationIdentifier,
+    filename: event.filename,
+    actorType: event.actorType,
+    environment: event.environment,
+    ...event.details,
+  };
+  return writeAuditLog({
+    category: 'migration' as AuditCategory,
+    action,
+    description,
+    actor_id: event.actorId,
+    actor_email: null,
+    actor_role: null,
+    target_type: targetType,
+    target_id: targetId,
+    metadata,
+    ip_address: null,
+    user_agent: null,
+    request_path: null,
+  });
+}
+
+/**
+ * Emit a structured audit event to the console (supplemental telemetry) AND
+ * persist it to the durable audit_log table (MIGRATION-GOV-08).
  *
  * Phase 1A.1 logs audit events as structured JSON to console as supplemental
- * telemetry. Durable persistence to the `audit_log` table (via lib/auditLog.ts)
- * is integrated in Phase 1A.1 Section 8 (Persistent Audit Integration).
- * This function is the single console emission point.
+ * telemetry AND persists them to the tamper-evident audit_log table via
+ * lib/auditLog.ts writeAuditLog (hash-chain integrity). The console emission
+ * is synchronous and never throws. The durable persistence is fire-and-forget
+ * (initiated but not awaited) so it does not block the calling code path;
+ * writeAuditLog itself handles failures gracefully (falls back to console).
+ *
+ * This function is the single audit emission point for the migration governance
+ * subsystem. All migration.* events flow through here.
  */
 export function emitAuditEvent(event: Omit<MigrationAuditEvent, 'timestamp'>): void {
   const fullEvent: MigrationAuditEvent = {
     ...event,
     timestamp: new Date().toISOString(),
   };
-  // Structured JSON log line — parseable by log aggregators.
+  // Structured JSON log line — parseable by log aggregators. Synchronous.
   console.log(JSON.stringify({ level: 'audit', ...fullEvent }));
+
+  // Durable persistence to audit_log table (fire-and-forget, never throws).
+  // The .catch() ensures no unhandled promise rejection propagates.
+  persistMigrationAuditEvent(fullEvent).catch(() => {
+    // writeAuditLog already falls back to console on failure; this catch is a
+    // safety net for any unexpected error in the promise chain itself.
+  });
 }
 
 /**

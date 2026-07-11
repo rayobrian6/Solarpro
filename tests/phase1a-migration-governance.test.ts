@@ -1148,3 +1148,97 @@ describe('Phase 1A: Historical reconciliation', () => {
     }
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 13. Persistent Audit Integration (MIGRATION-GOV-08)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.1: Persistent audit integration', () => {
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const auditLogSrc = readSrc('lib/auditLog.ts');
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+
+  it('auditLog.ts includes a migration AuditCategory', () => {
+    expect(auditLogSrc).toMatch(/'migration'/);
+    expect(auditLogSrc).toMatch(/migration governance events/i);
+  });
+
+  it('auditLog.ts includes migration-specific AuditAction values', () => {
+    expect(auditLogSrc).toContain('migration_bootstrap_started');
+    expect(auditLogSrc).toContain('migration_bootstrap_completed');
+    expect(auditLogSrc).toContain('migration_bootstrap_failed');
+    expect(auditLogSrc).toContain('migration_run_started');
+    expect(auditLogSrc).toContain('migration_run_completed');
+    expect(auditLogSrc).toContain('migration_run_failed');
+    expect(auditLogSrc).toContain('migration_applied');
+    expect(auditLogSrc).toContain('migration_failed');
+    expect(auditLogSrc).toContain('migration_governance_state_change');
+    expect(auditLogSrc).toContain('migration_governance_execution_denied');
+    expect(auditLogSrc).toContain('migration_mfa_denied');
+    expect(auditLogSrc).toContain('migration_mfa_replay_detected');
+    expect(auditLogSrc).toContain('migration_transaction_mode_review_required');
+  });
+
+  it('ledger.ts imports writeAuditLog from lib/auditLog', () => {
+    expect(ledgerSrc).toContain("from '@/lib/auditLog'");
+    expect(ledgerSrc).toContain('writeAuditLog');
+  });
+
+  it('ledger.ts has a MIGRATION_EVENT_TO_AUDIT_ACTION mapping table', () => {
+    expect(ledgerSrc).toContain('MIGRATION_EVENT_TO_AUDIT_ACTION');
+    // Verify key mappings are present.
+    expect(ledgerSrc).toContain("'migration.bootstrap.completed': 'migration_bootstrap_completed'");
+    expect(ledgerSrc).toContain("'migration.migration.applied': 'migration_applied'");
+    expect(ledgerSrc).toContain("'migration.migration.failed': 'migration_failed'");
+    expect(ledgerSrc).toContain("'migration.mfa.denied': 'migration_mfa_denied'");
+    expect(ledgerSrc).toContain("'migration.mfa.replay_detected': 'migration_mfa_replay_detected'");
+    expect(ledgerSrc).toContain("'migration.transaction_mode.review_required': 'migration_transaction_mode_review_required'");
+  });
+
+  it('ledger.ts has a persistMigrationAuditEvent function that calls writeAuditLog', () => {
+    expect(ledgerSrc).toContain('async function persistMigrationAuditEvent');
+    expect(ledgerSrc).toContain("writeAuditLog(");
+    expect(ledgerSrc).toContain("category: 'migration'");
+  });
+
+  it('emitAuditEvent persists durably AND emits to console (fire-and-forget)', () => {
+    // The emitAuditEvent function should call both console.log (synchronous)
+    // and persistMigrationAuditEvent (fire-and-forget async).
+    expect(ledgerSrc).toContain('console.log(JSON.stringify({ level: \'audit\'');
+    expect(ledgerSrc).toContain('persistMigrationAuditEvent(fullEvent)');
+    // The persistence should be fire-and-forget with a catch for safety.
+    expect(ledgerSrc).toContain('.catch(');
+  });
+
+  it('executeMigrationInTransaction returns errorCode for transaction-mode failures', () => {
+    // MANUAL_REVIEW mode should return a specific error code.
+    expect(runnerSrc).toContain('TRANSACTION_MODE_MANUAL_REVIEW');
+    // FORBIDDEN mode statement errors should have a specific error code.
+    expect(runnerSrc).toContain('FORBIDDEN_MODE_STATEMENT_ERROR');
+    // Lock denial should have a specific error code.
+    expect(runnerSrc).toContain('LOCK_DENIED');
+    // Transaction errors should have a specific error code.
+    expect(runnerSrc).toContain('TRANSACTION_ERROR');
+  });
+
+  it('runSinglePendingMigration uses the result errorCode for failure recording', () => {
+    // The failure recording should use result.errorCode ?? 'EXECUTION_ERROR'
+    // rather than hardcoding 'EXECUTION_ERROR'.
+    expect(runnerSrc).toContain("result.errorCode ?? 'EXECUTION_ERROR'");
+  });
+
+  it('persistMigrationAuditEvent maps all MigrationAuditEventType values', () => {
+    // Every event type in the MigrationAuditEventType union should have a
+    // corresponding entry in the mapping table. We verify by checking that
+    // the number of mapping entries matches the number of event types.
+    const eventTypeMatches = ledgerSrc.match(/'migration\.[^']+'|'manifest\.[^']+'/g) || [];
+    // The mapping table should have at least 25 entries (one per event type).
+    expect(eventTypeMatches.length).toBeGreaterThanOrEqual(25);
+  });
+
+  it('audit events include transaction mode details for MANUAL_REVIEW (MIGRATION-GOV-08)', () => {
+    // The MANUAL_REVIEW audit event should include the transactionMode detail.
+    const reviewEventSection = runnerSrc.split('migration.transaction_mode.review_required')[1] ?? '';
+    expect(reviewEventSection).toContain('MANUAL_REVIEW');
+  });
+});

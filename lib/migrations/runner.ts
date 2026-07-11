@@ -642,7 +642,7 @@ function getRawSql() {
 async function executeMigrationInTransaction(
   file: MigrationFile,
   dryRun: boolean,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; errorCode?: string }> {
   if (dryRun) {
     // Dry-run: validate that the file can be split, but don't execute.
     const sqlContent = readFileSync(file.fullPath, 'utf-8');
@@ -675,6 +675,7 @@ async function executeMigrationInTransaction(
     });
     return {
       success: false,
+      errorCode: 'TRANSACTION_MODE_MANUAL_REVIEW',
       error: `Migration '${file.identifier}' has transaction mode MANUAL_REVIEW. ` +
         `Its transaction compatibility cannot be automatically determined and ` +
         `requires manual review before execution.`,
@@ -704,6 +705,7 @@ async function executeMigrationInTransaction(
         });
         return {
           success: false,
+          errorCode: 'LOCK_DENIED',
           error: `Failed to acquire advisory lock for migration '${file.identifier}'. ` +
             `Another migration may be in progress.`,
         };
@@ -733,7 +735,7 @@ async function executeMigrationInTransaction(
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      return { success: false, error: errorMsg };
+      return { success: false, errorCode: 'FORBIDDEN_MODE_STATEMENT_ERROR', error: errorMsg };
     }
   }
 
@@ -757,7 +759,7 @@ async function executeMigrationInTransaction(
     return { success: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: errorMsg };
+    return { success: false, errorCode: 'TRANSACTION_ERROR', error: errorMsg };
   }
 }
 
@@ -1013,7 +1015,7 @@ export async function runSinglePendingMigration(
         executionId,
         startedAt: new Date(startTime),
         durationMs,
-        errorCode: 'EXECUTION_ERROR',
+        errorCode: result.errorCode ?? 'EXECUTION_ERROR',
         errorSummary: result.error ?? 'Unknown execution error',
         actorType: authorization.actorType,
         actorId: authorization.actorId,
@@ -1027,14 +1029,14 @@ export async function runSinglePendingMigration(
       executionId,
       migrationIdentifier: identifier,
       filename: file.filename,
-      details: { durationMs, error: result.error, dryRun },
+      details: { durationMs, error: result.error, errorCode: result.errorCode ?? 'EXECUTION_ERROR', dryRun },
     });
     return {
       identifier,
       filename: file.filename,
       status: 'failed',
       durationMs,
-      errorCode: 'EXECUTION_ERROR',
+      errorCode: result.errorCode ?? 'EXECUTION_ERROR',
       errorSummary: result.error ?? 'Unknown execution error',
       dryRun,
       executionId,

@@ -30,7 +30,8 @@ export type AuditCategory =
   | 'security'      // Security events (rate limit, blocked requests, suspicious activity)
   | 'admin'         // Admin actions (impersonation, bulk operations, overrides)
   | 'billing'       // Billing and payment events (Stripe webhooks, subscription changes)
-  | 'compliance';   // Compliance events (data export, deletion requests, consent changes)
+  | 'compliance'    // Compliance events (data export, deletion requests, consent changes)
+  | 'migration';    // Database migration governance events (Phase 1A.1)
 
 export type AuditAction =
   // Auth
@@ -96,7 +97,31 @@ export type AuditAction =
   | 'data_deletion_completed'
   | 'data_export_request'
   | 'data_export_completed'
-  | 'retention_policy_enforced';
+  | 'retention_policy_enforced'
+  // Migration governance (Phase 1A.1)
+  | 'migration_bootstrap_started'
+  | 'migration_bootstrap_completed'
+  | 'migration_bootstrap_failed'
+  | 'migration_run_started'
+  | 'migration_run_completed'
+  | 'migration_run_failed'
+  | 'migration_applied'
+  | 'migration_failed'
+  | 'migration_skipped'
+  | 'migration_started'
+  | 'migration_conflict_detected'
+  | 'migration_checksum_mismatch'
+  | 'migration_lock_denied'
+  | 'migration_lock_acquired'
+  | 'migration_legacy_invoked'
+  | 'migration_baseline_started'
+  | 'migration_baseline_completed'
+  | 'migration_baseline_failed'
+  | 'migration_governance_state_change'
+  | 'migration_governance_execution_denied'
+  | 'migration_mfa_denied'
+  | 'migration_mfa_replay_detected'
+  | 'migration_transaction_mode_review_required';
 
 export interface AuditLogEntry {
   id?: string;
