@@ -571,8 +571,22 @@ function calcMountLayout(
   const maxSpacingIn = mount.maxSpacingIn;
   const mountCapacityLbs = mount.upliftCapacityLbs;
 
-  // Rail span = distance between the 2 rails per row (across slope)
-  const railSpanIn = geometry.railSpacingIn;
+  // Tributary WIDTH perpendicular to the rail (across slope), per mount.
+  // A row is carried by 2 rails (geometry.railCount = 2 × rowCount), so each
+  // rail — and each mount on it — carries HALF the row's across-slope depth by
+  // symmetry (two symmetric supports each react half the module load). The
+  // across-slope module depth is geometry.railSpacingIn (= panelShortIn), so
+  // the per-mount tributary width is railSpacingIn / 2.
+  //
+  // This restores the /2 that structural-engine-v3 used (analyzeRail there:
+  // `railTribWidthIn = geometry.railSpacingIn / 2`). v4 introduced a 2-rail
+  // mount layout (mountCount = mountsPerRail × railCount) but kept the FULL
+  // panel width here, so Σ(tributary areas over all mounts) came to 2× the real
+  // array area — every mount was charged 2× the true uplift, halving SF and
+  // driving the SF≥2.0 loop to floor spacing (e.g. 48"→24"), doubling the feet.
+  // Area-conservation check now holds: Σ tributary = mountCount × spacing ×
+  // (panelShort/2) = arrayWidth × arrayHeight = actual array footprint.
+  const railTribWidthIn = geometry.railSpacingIn / 2;
 
   let spacingIn = maxSpacingIn;
   let iterations = 0;
@@ -582,7 +596,7 @@ function calcMountLayout(
   // was 1.5, which left attachments shipping a red "1.59 (min 2.0)" FAIL).
   while (spacingIn >= 12) {
     iterations++;
-    const tribAreaFt2 = (spacingIn * railSpanIn) / 144;
+    const tribAreaFt2 = (spacingIn * railTribWidthIn) / 144;
     const upliftPerMount = netUpliftPsf * tribAreaFt2;
     const sf = mountCapacityLbs / upliftPerMount;
     if (sf >= 2.0) break;
@@ -591,7 +605,7 @@ function calcMountLayout(
   }
   spacingIn = Math.max(12, spacingIn);
 
-  const tribAreaFt2 = (spacingIn * railSpanIn) / 144;
+  const tribAreaFt2 = (spacingIn * railTribWidthIn) / 144;
   const upliftPerMount = netUpliftPsf * tribAreaFt2;
   const safetyFactor = mountCapacityLbs / upliftPerMount;
 
@@ -632,8 +646,11 @@ function analyzeRail(
   const spanIn = mountLayout.mountSpacingIn;
   const cantileverIn = Math.min(spanIn / 3, rail.maxCantileverIn);
 
-  // Tributary width per rail (half the panel height across slope)
-  const tribWidthIn = geometry.railSpacingIn;
+  // Tributary width per rail = half the across-slope panel depth (2 rails share
+  // the row, each reacts half by symmetry). The comment here already said "half"
+  // but the code used the FULL railSpacingIn, designing the rail for 2× the real
+  // distributed load; matches v3 analyzeRail (`railSpacingIn / 2`).
+  const tribWidthIn = geometry.railSpacingIn / 2;
   const tribWidthFt = tribWidthIn / 12;
 
   // Distributed load on rail
