@@ -551,15 +551,18 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     mount: {
       model: 'RT-MINI',
       attachmentMethod: 'l_foot_lag',
-      // ULTIMATE basis (the engine checks capacity/demand >= 1.5 SF). Web-verified
-      // 2026-06-21 vs ESR-3575: the published ALLOWABLE for the weakest standard
-      // assembly (15/32" sheathing, 2x4 DF-L #2, 2 screws) is 613.2 lb. 900 ultimate
-      // ÷ 1.5 SF = 600 lb effective allowable ≈ the 613 ESR allowable (slightly
-      // conservative). So 900 reconciles and is safe — NOT an overstatement.
-      // Stronger framing (2x6+) has higher capacity per the ESR table; a per-assembly
-      // capacity lookup would be more precise than one number (future structural/PE).
-      upliftCapacityLbs: 900,       // ultimate, per pad — reconciles to ~600 allowable via SF (≈ ESR 613)
-      capacityBasis: 'ultimate', // ⚠ FIELD-VERIFY: stored value unverified (ESR-3575 is flashing-only). Treated as ultimate → /Ω=3.0. Confirm Roof Tech's stamped structural allowable.
+      // ALLOWABLE (ASD) basis — VERIFIED 2026-07-10 against Roof Tech's PE-stamped
+      // structural letter "RT-MINI II ASCE 7-10 (KY)"
+      // (design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_10/): the max
+      // ALLOWABLE uplift for the weakest standard assembly (15/32" sheathing, 2x4
+      // DF-L #2, 2× screws) = 613.2 lb (SF already applied by the PE). Stored 600 lb
+      // = conservative round-down; matches field practice (~2 feet/panel). This
+      // SUPERSEDES the prior unverified "900 ultimate" (ESR-3575 is a flashing/
+      // water-resistance report only — it carries NO structural value). Stronger
+      // framing (2x6+) / 90mm rafter screws rate higher per the PE table; a
+      // per-assembly capacity lookup would be more precise (future PE work).
+      upliftCapacityLbs: 600,       // ASD allowable per pad (PE letter: 613.2 lb weakest assembly)
+      capacityBasis: 'allowable',
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 600,         // ≈ ESR 613 lb shear allowable basis
       fastenersPerMount: 2,

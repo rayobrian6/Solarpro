@@ -627,7 +627,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     }
   }
 
-  // Combiner (microinverter topology)
+  // Combiner (microinverter topology) — only when no integrated BOS combiner
+  // (e.g. Enphase IQ Combiner) already covers the branch aggregation.
   if (isMicro && !_bosEmitted.has('combiner')) {
     const combinerAcc = inverterEntry?.requiredAccessories.find(a => a.category === 'combiner');
     if (combinerAcc) {
@@ -636,16 +637,24 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         'AC branch combiner — aggregates branch circuits', 1, 'ea',
         combinerAcc.necReference ?? 'NEC 690.4', 'perSystem', '1', true));
     }
-    
-    // BUG 3 FIX: Junction Box — derive from runSegments
-    // Count segments ending at 'JUNCTION BOX', 'AC COMBINER', or 'COMBINER'
+  }
+
+  // Rooftop junction / transition box (microinverter topology) — INDEPENDENT of
+  // the combiner. The AC trunk runs open-air across the array then transitions to
+  // conduit at a roof-flashed junction box before entering the building; this is
+  // required whether the branches aggregate at a separate AC combiner OR at an
+  // integrated BOS device (IQ Combiner) mounted downstream near the service.
+  // (Bug: this was nested under `!_bosEmitted.has('combiner')`, so every Enphase
+  // system with an IQ Combiner emitted NO rooftop transition box.)
+  if (isMicro) {
+    // Derive from run segments ending at a rooftop junction/transition, else
+    // fall back to ~1 box per AC trunk (16 devices).
     let junctionBoxQty = 0;
     if (input.runs && input.runs.length > 0) {
-      junctionBoxQty = input.runs.filter(r => 
+      junctionBoxQty = input.runs.filter(r =>
         r.to === 'JUNCTION BOX' || r.to === 'AC COMBINER' || r.to === 'COMBINER'
       ).length;
     }
-    // Fallback: at least 1 junction box per system if not derived from runs
     if (junctionBoxQty === 0) {
       junctionBoxQty = Math.ceil((input.deviceCount ?? input.moduleCount) / 16);
     }
