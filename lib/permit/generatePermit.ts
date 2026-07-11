@@ -24,7 +24,7 @@ import { necNextStandardOcpd } from './utils/helpers';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
-import { buildStructuralInputForPermit } from './utils/structuralInput';
+import { buildStructuralInputForPermit, buildSubSystemStructuralInputs } from './utils/structuralInput';
 import type { ElectricalCompliance } from './types';
 
 // Section imports
@@ -298,13 +298,35 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     // inputs the saved payload was built from — and costs milliseconds, so
     // regeneration always reflects the ENGINE OF RECORD, never a stale save.
     const needsCalc = true;
-    if (needsCalc && sysType === 'roof') {
+    // HYBRID (P2): loop EVERY sub-system's structural analysis — fence
+    // analyzeFenceSystem, ground analyzeGroundMount, roof rafter flow all
+    // exist in the engine; the legacy pipeline just never ran more than one.
+    // Results keyed under compliance.structural.subSystems for the BOM +
+    // per-system sheets; the legacy scalar fields map from the ROOF run so
+    // the existing sheets keep reading their single source.
+    if (needsCalc && (sysType === 'roof' || cad.hybrid)) {
       // Single source (shared with the BOM): the V4 structural input, built
       // deterministically from input + CAD + canonical site data. See
       // buildStructuralInputForPermit — bomForPermit calls the SAME builder so
       // the BOM's rail/clamp/bolt counts match these structural sheets.
-      const structInput = buildStructuralInputForPermit(input, cad, canonical);
-      const structResult = runStructuralCalcV4(structInput);
+      const _runs = buildSubSystemStructuralInputs(input, cad, canonical);
+      const _byKey: Record<string, ReturnType<typeof runStructuralCalcV4>> = {};
+      for (const r of _runs) {
+        try { _byKey[r.key] = runStructuralCalcV4(r.input); }
+        catch (e) { console.warn(`[PLANSET] structural '${r.key}' run failed:`, (e as Error)?.message); }
+      }
+      if (cad.hybrid) {
+        if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
+        const sh = (input.compliance.structural ?? {}) as Record<string, unknown>;
+        sh.subSystems = _byKey;
+        input.compliance.structural = sh as typeof input.compliance.structural;
+        console.log('[PLANSET] HYBRID structural runs:', Object.keys(_byKey).map(k =>
+          `${k}:${(_byKey[k] as { status?: string })?.status ?? '?'}`).join(' '));
+      }
+      // Legacy scalar mapping — the ROOF run (building attachment letter).
+      const structResult = _byKey['roof'] ?? _byKey[_runs[0]?.key ?? 'roof'];
+      const structInput = _runs.find(r => r.key === 'roof')?.input ?? _runs[0]?.input;
+      if (!structResult || !structInput) throw new Error('[PLANSET] no structural run produced a result');
       const ra = structResult.rafterAnalysis;
       const wa = structResult.wind;
       const sa = structResult.snow;

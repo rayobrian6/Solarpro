@@ -112,6 +112,13 @@ export interface BOMGenerationInputV4 {
    * materials: never priced, excluded from the permit. Permit BOM passes false.
    */
   includeSuggestedTools?: boolean;
+  /**
+   * Hybrid (P2): per-sub-system module counts. Drives quantities that are
+   * MOUNT-LOCATION-specific — NEC 690.12 module-level RSD applies to the ROOF
+   * subset even when the project's winning systemType is fence/ground (the
+   * project-wide exemption wrongly skipped RSD for on-roof panels — Stowell).
+   */
+  subSystemCounts?: { roof: number; ground: number; fence: number };
 
   // Electrical
   mainPanelAmps: number;
@@ -533,14 +540,25 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // shutdown is NOT required (NEC 690.12(B)(2)). Don't force per-module RSD there.
     const rsdIntegrated = inverterEntry?.electricalSpecs?.rapidShutdownCompliant ?? false;
     const isOptimizer = norm === 'STRING_WITH_OPTIMIZER';
-    const _rsdExemptMount = input.systemType === 'ground' || input.systemType === 'fence';
+    // NEC 690.12 is a MOUNT-LOCATION rule, not a project-tag rule: the roof
+    // subset of a hybrid needs module-level RSD even when the project's winning
+    // systemType is fence/ground (the old project-wide exemption skipped RSD for
+    // Stowell's ON-ROOF panels — a code violation).
+    const _roofModules = input.subSystemCounts
+      ? input.subSystemCounts.roof
+      : (input.systemType === 'ground' || input.systemType === 'fence' ? 0 : input.moduleCount);
+    const _offBuildingModules = input.moduleCount - _roofModules;
+    const _rsdExemptMount = _roofModules <= 0;
     if (input.requiresRapidShutdown !== false && !rsdIntegrated && !isOptimizer && !_rsdExemptMount) {
       items.push(addItem('dc', 'rapid_shutdown', 'Tigo', 'TS4-A-F Rapid Shutdown',
-        'TS4-A-F', 'Rapid shutdown device per NEC 690.12 — 1 per module',
-        input.moduleCount, 'ea', 'NEC 690.12', 'moduleCount', 'modules', true));
+        'TS4-A-F', 'Rapid shutdown device per NEC 690.12 — 1 per ON-BUILDING module',
+        _roofModules, 'ea', 'NEC 690.12', 'roof-mounted modules', `${_roofModules} on-building`, true));
       log.push({ stageId: 'dc', category: 'rapid_shutdown', item: 'TS4-A-F',
-        quantity: input.moduleCount, derivedFrom: 'moduleCount', formula: 'modules', necReference: 'NEC 690.12' });
-      complianceNotes.push('NEC 690.12: Rapid shutdown devices added — 1 per module (Tigo TS4-A-F)');
+        quantity: _roofModules, derivedFrom: 'roof-mounted modules', formula: `${_roofModules} on-building`, necReference: 'NEC 690.12' });
+      complianceNotes.push(`NEC 690.12: Rapid shutdown devices added — 1 per on-building module (${_roofModules})`);
+      if (_offBuildingModules > 0) {
+        complianceNotes.push(`NEC 690.12(B)(2): ${_offBuildingModules} ground/fence module(s) exempt — not on/in a building`);
+      }
     } else if (_rsdExemptMount) {
       complianceNotes.push(`NEC 690.12(B)(2): module-level rapid shutdown not required — ${input.systemType} array is not on/in a building`);
     } else if (rsdIntegrated || isOptimizer) {

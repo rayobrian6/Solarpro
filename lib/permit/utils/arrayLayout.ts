@@ -21,6 +21,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type { PermitInput } from '../types';
+import { classifyPanel } from './subSystems';
 import type { CADModel } from '@/lib/cad/types';
 
 export type ArrayOrientation = 'portrait' | 'landscape';
@@ -61,11 +62,17 @@ function normalizeOrientation(raw: unknown): ArrayOrientation | undefined {
 export function resolveArrayStructuralLayout(
   input: PermitInput,
   cad?: Pick<CADModel, 'panelWidthM' | 'panelHeightM' | 'totalPanels'>,
+  /** Hybrid (P2): scope the layout to ONE sub-system's panels. Unscoped, a
+   *  hybrid's roof structural run would size rails/feet for fence+ground
+   *  panels too. Uses the same classifyPanel as the partition. */
+  subSystemKey?: 'roof' | 'ground' | 'fence',
 ): ArrayStructuralLayout {
   const project = input.project ?? ({} as PermitInput['project']);
-  const positions = (project.panelPositions ?? []) as Array<{
+  let positions = (project.panelPositions ?? []) as Array<{
     row?: number; col?: number; orientation?: string; arrayId?: string; planeId?: string;
+    systemType?: string; placementType?: string;
   }>;
+  if (subSystemKey) positions = positions.filter(p => classifyPanel(p) === subSystemKey);
 
   // ── Panel physical dimensions (single-sourced: CAD panel dims from the
   //    selected equipment, else the project fallback). Long ≥ short always. ──

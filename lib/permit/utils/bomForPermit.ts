@@ -42,7 +42,7 @@ import { necNextStandardOcpd } from './helpers';
 import { buildConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
 import { buildCanonical } from './canonical';
-import { buildStructuralInputForPermit } from './structuralInput';
+import { buildStructuralInputForPermit, buildSubSystemStructuralInputs } from './structuralInput';
 import { resolveArrayStructuralLayout } from './arrayLayout';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
@@ -402,12 +402,29 @@ export function generateBOMForPermit(
 
   // ── 3. Structural ─────────────────────────────────────────
   const bomSystemType = cadTypeToBOMType(cad.systemType);
-  const structInput   = extractStructuralInputFromCAD(bomSystemType, totalPanels, cad);
-  const structResult  = deriveStructuralBOM(structInput);
-  const structItems   = structResult.items.map((item, idx) =>
-    structuralToPermit(item, idx),
-  );
-  log.push(`[bomForPermit] structural: ${structItems.length} items (${bomSystemType})`);
+  let structItems: PermitBOMItem[];
+  if (cad.hybrid) {
+    // HYBRID (P2): fence posts AND ground piles — each sub-system's structural
+    // BOM derives from ITS OWN panel subset + CAD section (the legacy single
+    // switch billed one type for every panel: Stowell got fence posts for all
+    // 80 modules and zero piles/rails). Roof racking comes from the V4
+    // rackingBOM path below, as for single-roof jobs.
+    structItems = [];
+    let _idx = 0;
+    for (const sec of cad.hybrid.sections) {
+      if (sec.key === 'roof') continue; // V4 rackingBOM path handles roof
+      const bomType = sec.key === 'fence' ? 'fence' : 'ground';
+      const secInput = extractStructuralInputFromCAD(bomType as BOMSystemType, sec.totalPanels, cad);
+      const secResult = deriveStructuralBOM(secInput);
+      for (const item of secResult.items) structItems.push(structuralToPermit(item, _idx++));
+      log.push(`[bomForPermit] hybrid ${sec.key} structural: ${secResult.items.length} items (${sec.totalPanels} panels)`);
+    }
+  } else {
+    const structInput  = extractStructuralInputFromCAD(bomSystemType, totalPanels, cad);
+    const structResult = deriveStructuralBOM(structInput);
+    structItems = structResult.items.map((item, idx) => structuralToPermit(item, idx));
+    log.push(`[bomForPermit] structural: ${structItems.length} items (${bomSystemType})`);
+  }
 
   // Roof racking SINGLE SOURCE: re-derive the structural engine's real
   // rackingBOM (rail count from real length, splices, clamps, lag + rail bolts)
@@ -420,16 +437,36 @@ export function generateBOMForPermit(
   let roofRackingBOM: import('@/lib/structural-engine-v4').RackingBOM | undefined;
   let roofMountCount = 0;
   let roofRowCount   = 0;
-  if (bomSystemType === 'roof') {
+  // HYBRID (P2): per-sub-system structural results — fence posts + ground piles
+  // come from THEIR analyzers, roof racking from ITS scoped run (unscoped, the
+  // roof run sized rails for fence+ground panels too).
+  let fenceStructural: import('@/lib/structural-engine-v4').StructuralResultV4 | undefined;
+  let groundStructural: import('@/lib/structural-engine-v4').StructuralResultV4 | undefined;
+  if (bomSystemType === 'roof' || cad.hybrid) {
     try {
       const _canonical = buildCanonical(input);
-      const _sr = runStructuralCalcV4(buildStructuralInputForPermit(input, cad, _canonical));
-      roofRackingBOM = _sr.rackingBOM;
-      roofMountCount = _sr.mountLayout?.mountCount ?? 0;
-      roofRowCount   = _sr.arrayGeometry?.rowCount ?? 0;
-      log.push(`[bomForPermit] roof racking: ${roofMountCount} mounts, ${roofRackingBOM?.rails.qty ?? 0} rails, ${roofRackingBOM?.mountingBolts.qty ?? 0} rail bolts`);
+      const _runs = buildSubSystemStructuralInputs(input, cad, _canonical);
+      for (const r of _runs) {
+        try {
+          const _sr = runStructuralCalcV4(r.input);
+          if (r.key === 'roof') {
+            roofRackingBOM = _sr.rackingBOM;
+            roofMountCount = _sr.mountLayout?.mountCount ?? 0;
+            roofRowCount   = _sr.arrayGeometry?.rowCount ?? 0;
+            log.push(`[bomForPermit] roof racking: ${roofMountCount} mounts, ${roofRackingBOM?.rails.qty ?? 0} rails, ${roofRackingBOM?.mountingBolts.qty ?? 0} rail bolts`);
+          } else if (r.key === 'fence') {
+            fenceStructural = _sr;
+            log.push(`[bomForPermit] fence structural: ${_sr.fenceMountAnalysis ? 'analyzed' : 'no analysis'} (${r.input.panelCount} panels)`);
+          } else if (r.key === 'ground') {
+            groundStructural = _sr;
+            log.push(`[bomForPermit] ground structural: ${_sr.groundMountAnalysis ? 'analyzed' : 'no analysis'} (${r.input.panelCount} panels)`);
+          }
+        } catch (e) {
+          log.push(`[bomForPermit] '${r.key}' structural run failed: ${(e as Error).message}`);
+        }
+      }
     } catch (e) {
-      log.push(`[bomForPermit] roof racking calc failed (using registry fallback): ${(e as Error).message}`);
+      log.push(`[bomForPermit] structural runs failed (using registry fallback): ${(e as Error).message}`);
     }
   }
 
@@ -471,6 +508,13 @@ export function generateBOMForPermit(
         // the installer's cut-at-rows preference.
         layoutOrientation:   _arrayLayout.orientation,
         subArrayCount:       _arrayLayout.subArrayCount,
+        // Hybrid (P2): per-sub-system module counts — NEC 690.12 RSD follows
+        // the ROOF subset regardless of the project's winning systemType.
+        subSystemCounts:     cad.hybrid ? {
+          roof:   cad.hybrid.sections.find(sec => sec.key === 'roof')?.totalPanels ?? 0,
+          ground: cad.hybrid.sections.find(sec => sec.key === 'ground')?.totalPanels ?? 0,
+          fence:  cad.hybrid.sections.find(sec => sec.key === 'fence')?.totalPanels ?? 0,
+        } : undefined,
         spliceAtRows:        project.spliceAtRows,
         // Permit SCHED lists INSTALLED materials only — truck-stock extras are
         // an engineering/crew view, not a permit submittal line.

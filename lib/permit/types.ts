@@ -144,6 +144,10 @@ export interface StructuralCompliance {
   totalDeadLoadPsf?: number;
   moduleLoadPsf?: number;
   rackingLoadPsf?: number;
+  /** Hybrid (P2): per-sub-system StructuralResultV4, keyed 'roof'|'ground'|'fence'.
+   *  The scalar fields above map from the ROOF run; fence/ground sheets + the
+   *  BOM read their own runs here. */
+  subSystems?: Record<string, unknown>;
   // Survey integration notes (set by permitIntegration.ts from site survey data)
   surveyNotes?: string[];
 }
