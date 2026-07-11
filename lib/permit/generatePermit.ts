@@ -93,7 +93,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Cross-contamination guard: strip stale fields from other system types.
   // The CAD engine may leave residual roof/ground/fence sub-models when
   // systemType changes between runs. validatePlanSet() (locked) throws on these.
-  if (cad.systemType === 'solar_fence') {
+  // HYBRID (Phase 1): when the CAD engine composed a multi-system model, every
+  // section is REAL (built scoped, per sub-system) — deleting them here was the
+  // second master chokepoint that erased 2/3 of the Stowell design. Skip.
+  if (cad.hybrid) {
+    console.log('[PLANSET] HYBRID CAD — keeping all sections:', cad.hybrid.sections.map(s => s.key).join('+'));
+  } else if (cad.systemType === 'solar_fence') {
     delete cad.roof;
     delete cad.ground;
   } else if (cad.systemType === 'ground_mount') {

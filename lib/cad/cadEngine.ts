@@ -25,6 +25,48 @@ import { roofCAD }   from './roof/roofCAD';
 import { groundCAD } from './ground/groundCAD';
 import { fenceCAD }  from './fence/fenceCAD';
 import { buildSystemDefinition } from '@/lib/system';
+import { partitionSubSystems, classifyPanel, type SubSystem } from '@/lib/permit/utils/subSystems';
+
+// ── Hybrid (multi-system) support — Phase 1 ─────────────────────────
+// A design may contain roof + ground + fence panels in ONE project.
+// Each solver historically consumed the UNSCOPED input (all panels /
+// project-wide totalPanels) — how the Stowell fence claimed all 80
+// modules. For hybrids we run EVERY present solver with an input scoped
+// to its own panel subset, then compose one CADModel carrying all
+// sections (types.ts already allows roof?/ground?/fence? together).
+
+const SUB_TO_CAD: Record<'roof' | 'ground' | 'fence', CADSystemType> = {
+  roof: 'roof', ground: 'ground_mount', fence: 'solar_fence',
+};
+const SUB_BUILDER: Record<'roof' | 'ground' | 'fence', (i: PermitInputShape) => CADModel> = {
+  roof: roofCAD, ground: groundCAD, fence: fenceCAD,
+};
+
+/** Scope the permit input to ONE sub-system: its panels, its counts, its type. */
+function scopeInputToSubSystem(input: PermitInputShape, sub: SubSystem): PermitInputShape {
+  const fullPanels = input.system?.totalPanels || 0;
+  const fullKw = input.system?.totalDcKw || 0;
+  const kwPerPanel = fullPanels > 0 ? fullKw / fullPanels : 0;
+  const filterByType = <T,>(list: T[] | undefined): T[] | undefined =>
+    list ? (list as any[]).filter(p => classifyPanel(p) === sub.key) as T[] : list;
+  return {
+    ...input,
+    system: {
+      ...(input.system ?? {}),
+      totalPanels: sub.panelCount,
+      totalDcKw: Math.round(sub.panelCount * kwPerPanel * 100) / 100,
+    },
+    project: {
+      ...(input.project ?? {}),
+      panelPositions: filterByType(input.project?.panelPositions),
+      systemType: sub.key,
+    },
+    layout: {
+      ...(input.layout ?? {}),
+      type: SUB_TO_CAD[sub.key],
+    },
+  } as PermitInputShape;
+}
 
 // Re-use the existing system type resolver logic
 // FIX v47.318: Priority order:
@@ -81,23 +123,73 @@ export function generateCADLayout(input: PermitInputShape): CADModel {
 
   let model: CADModel;
 
-  switch (systemType) {
-    case 'roof':
-      model = roofCAD(input);
-      break;
+  // ── HYBRID PATH (Phase 1): panels span >1 system type ─────────────
+  // Run EVERY present solver with a SCOPED input (its own panel subset —
+  // unscoped, the fence solver claimed all 80 Stowell modules), use the
+  // legacy winner's model as the base, graft the other sections onto it,
+  // and restore project-wide totals. Each grafted section's local XY is
+  // relative to ITS OWN origin — recorded in model.hybrid.sections so the
+  // site plan (top-down aerial with roof + ground + fence together) can
+  // re-project each section against the base origin.
+  const _allPanels = (input.project?.panelPositions ?? []) as any[];
+  const _subs = partitionSubSystems(_allPanels);
 
-    case 'ground_mount':
-      model = groundCAD(input);
-      break;
+  if (_subs.length > 1) {
+    const _cadToKey: Record<CADSystemType, 'roof' | 'ground' | 'fence'> =
+      { roof: 'roof', ground_mount: 'ground', solar_fence: 'fence' };
+    const primaryKey = _cadToKey[systemType];
+    const built = new Map<'roof' | 'ground' | 'fence', CADModel>();
+    for (const sub of _subs) {
+      try {
+        built.set(sub.key, SUB_BUILDER[sub.key](scopeInputToSubSystem(input, sub)));
+      } catch (e) {
+        console.warn(`[CAD ENGINE] hybrid sub-solver '${sub.key}' failed (section skipped):`,
+          e instanceof Error ? e.message : e);
+      }
+    }
+    // Base = the legacy winner's scoped model (falls back to first built).
+    const base = built.get(primaryKey) ?? built.values().next().value as CADModel;
+    model = base;
+    model.hybrid = { sections: [] };
+    for (const sub of _subs) {
+      const m = built.get(sub.key);
+      if (!m) continue;
+      // Graft the section (base already carries its own).
+      if (sub.key === 'roof' && m.roof) model.roof = m.roof;
+      if (sub.key === 'ground' && m.ground) model.ground = m.ground;
+      if (sub.key === 'fence' && m.fence) model.fence = m.fence;
+      model.hybrid.sections.push({
+        key: sub.key,
+        originLat: m.originLat, originLng: m.originLng,
+        totalPanels: m.totalPanels, dcKw: m.totalDcKw,
+      });
+    }
+    // Project-wide totals (consistency checks compare vs canonical.panels).
+    model.totalPanels = input.system?.totalPanels || _allPanels.length || model.totalPanels;
+    model.totalDcKw   = input.system?.totalDcKw   || model.totalDcKw;
+    model.warnings.push(
+      `HYBRID: ${_subs.map(s => `${s.key}:${s.panelCount}`).join(' + ')} — all sections populated; ` +
+      `grafted sections use their own origins (see model.hybrid.sections)`);
+    console.log('[CAD ENGINE] HYBRID composed:', model.hybrid.sections);
+  } else {
+    switch (systemType) {
+      case 'roof':
+        model = roofCAD(input);
+        break;
 
-    case 'solar_fence':
-      model = fenceCAD(input);
-      break;
+      case 'ground_mount':
+        model = groundCAD(input);
+        break;
 
-    default: {
-      // TypeScript exhaustive check
-      const _never: never = systemType;
-      throw new Error(`[CAD ENGINE] Unknown system type: ${String(_never)}`);
+      case 'solar_fence':
+        model = fenceCAD(input);
+        break;
+
+      default: {
+        // TypeScript exhaustive check
+        const _never: never = systemType;
+        throw new Error(`[CAD ENGINE] Unknown system type: ${String(_never)}`);
+      }
     }
   }
 

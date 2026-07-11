@@ -222,10 +222,23 @@ export interface CADModel {
   systemType:  CADSystemType;
   version:     string;
 
-  // System-specific geometry (only one will be populated)
+  // System-specific geometry. Single-system: only one populated.
+  // HYBRID (Phase 1): all present sections populated — see `hybrid` below.
   roof?:   CADRoofModel;
   ground?: CADGroundModel;
   fence?:  CADFenceModel;
+
+  /** Hybrid (multi-system) metadata — present ONLY when the design spans >1
+   *  system type. Each grafted section's local XY is relative to its OWN
+   *  origin (recorded here) — renderers drawing sections together (site plan)
+   *  must re-project using these origins vs the base originLat/originLng. */
+  hybrid?: {
+    sections: Array<{
+      key: 'roof' | 'ground' | 'fence';
+      originLat: number; originLng: number;
+      totalPanels: number; dcKw: number;
+    }>;
+  };
 
   // Aggregated metrics
   totalPanels:  number;
