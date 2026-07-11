@@ -328,7 +328,247 @@ None. No migration SQL files were created or modified. Migration 105 was NOT cre
 
 ---
 
-## 16. Remaining Blockers
+## 16. Phase 1A.1 Operational Hardening (MIGRATION-GOV-02 through MIGRATION-GOV-08)
+
+Phase 1A established the migration governance foundation and resolved
+MIGRATION-GOV-01. Phase 1A.1 makes that foundation operationally safe by
+resolving the 8 remaining governance risks (MIGRATION-GOV-02 through
+MIGRATION-GOV-08) identified in the Phase 1A implementation review. No
+organization schema, membership, ownership, collaboration, billing, or cutover
+work was performed. No numbered SQL migration files were created or modified.
+The MFA Phase 3 code remains frozen and untouched. Only the fixed bootstrap DDL
+inside migration-governance code was modified (the ledger has not been applied
+to any database yet, so the DDL is code, not a migration).
+
+### 16.1 Governance Risks Resolved
+
+| Risk | Description | Resolution |
+|------|-------------|------------|
+| MIGRATION-GOV-02 | Historical applied-state baseline is unknown | Historical baseline reconciliation model with 5 statuses; execution blocked until baseline verified |
+| MIGRATION-GOV-03 | Append-only run history with ledger constraints | `schema_migration_runs` append-only table with status/identifier/checksum CHECK constraints and INSERT-only invariant |
+| MIGRATION-GOV-04 | MFA fail-open: TOTP waived when user has no secret | Fixed `verifyFreshTotp()` to fail-closed (DENY when no MFA secret, not waive) |
+| MIGRATION-GOV-05 | TOTP replay: same code reusable within window | `migration_totp_uses` table tracking (user_id, time_step) pairs; reject same time-step reuse via ON CONFLICT DO NOTHING |
+| MIGRATION-GOV-06 | Lock key precision and indefinite blocking | Lock key as decimal string with BIGINT cast (exact 0x534f4c504d474452 = 6003100736085771346); `pg_try_advisory_xact_lock` with bounded timeout |
+| MIGRATION-GOV-06 | Transaction mode incompatibility | `TransactionMode` (REQUIRED/FORBIDDEN/MANUAL_REVIEW) with automatic detection of 7 incompatible patterns; 3-mode execution handling |
+| MIGRATION-GOV-07 | Non-canonical execution paths | `app/api/admin/prospects/seed/route.ts` gated behind `MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED` flag (default disabled) |
+| MIGRATION-GOV-08 | Audit not durable; no transaction failure recording | `emitAuditEvent` now persists to `audit_log` table via `writeAuditLog` (fire-and-forget); transaction-mode-specific error codes |
+
+### 16.2 Five-Table Ledger Architecture
+
+Phase 1A.1 expanded the ledger from a single `schema_migrations` table to a
+five-table architecture, all bootstrapped by the fixed `BOOTSTRAP_LEDGER_DDL`
+inside `ledger.ts`:
+
+| Table | Purpose |
+|-------|---------|
+| `governance_lifecycle` | Tracks the governance state per environment (UNBOOTSTRAPPED, LEDGER_BOOTSTRAPPED, BASELINE_REQUIRED, BASELINE_IN_PROGRESS, BASELINE_VERIFIED, EXECUTION_ENABLED) |
+| `schema_migrations` | The canonical ledger: one row per migration per environment, with checksum and applied status |
+| `schema_migration_runs` | Append-only run history: every execution attempt (success or failure) with actor identity, timestamps, and error details |
+| `migration_baseline` | Historical baseline reconciliation records: per-migration applied-state determination with 5 statuses and evidence metadata |
+| `migration_totp_uses` | TOTP replay prevention: SHA-256 hash of (user_id, time_step) pairs, never storing the TOTP code itself |
+
+### 16.3 Governance Lifecycle States
+
+The governance system enforces a lifecycle that prevents execution until the
+historical baseline has been reconciled:
+
+1. **UNBOOTSTRAPPED** — The ledger does not exist yet.
+2. **LEDGER_BOOTSTRAPPED** — The five tables have been created. The system
+   automatically advances to BASELINE_REQUIRED.
+3. **BASELINE_REQUIRED** — The historical baseline must be reconciled before any
+   migration execution is permitted. This is the state the system lands in after
+   bootstrap.
+4. **BASELINE_IN_PROGRESS** — An administrator is actively reconciling the
+   baseline (recording applied-state for each historical migration).
+5. **BASELINE_VERIFIED** — All historical migrations have been reconciled.
+   Single-migration execution is now permitted.
+6. **EXECUTION_ENABLED** — The system is fully operational. All gates are open.
+
+The `assertExecutionPermitted()` gate in `runner.ts` checks the lifecycle state
+at both execution entry points. Only BASELINE_VERIFIED and EXECUTION_ENABLED
+permit execution. All other states (including unreadable state, which fails
+closed) block execution with a `migration_governance_execution_denied` audit
+event. Dry-run/inspect operations are exempt from the gate.
+
+### 16.4 Historical Baseline Reconciliation
+
+The `migration_baseline` table records the applied-state determination for each
+historical migration. Five reconciliation statuses are supported:
+
+| Status | Meaning |
+|--------|---------|
+| `CONFIRMED_APPLIED` | The migration was verified as applied in the database (e.g., schema objects exist) |
+| `CONFIRMED_NOT_APPLIED` | The migration was verified as NOT applied |
+| `PARTIALLY_APPLIED` | The migration was partially applied (some objects exist, some do not) |
+| `NOT_APPLICABLE` | The migration is not applicable to this environment |
+| `UNKNOWN` | The applied state could not be determined |
+
+Reconciliation is performed one migration at a time (no bulk "mark all applied"
+operation) via `recordBaselineReconciliation()`. The `verifyBaselineComplete()`
+function checks whether all manifest migrations have a baseline record.
+`advanceToBaselineVerified()` transitions the lifecycle state. `enableExecution()`
+moves from BASELINE_VERIFIED to EXECUTION_ENABLED.
+
+See `docs/phase1a/PHASE1A1-HISTORICAL-BASELINE-MODEL.md` for the full model.
+
+### 16.5 Lock Key Exactness
+
+Phase 1A used `0x534f4c504d474452` as a JavaScript numeric literal. This value
+(6003100736085771346) exceeds `Number.MAX_SAFE_INTEGER` (2^53 - 1 =
+9007199254740991), meaning JavaScript silently rounds it to
+6003100736085771000. The PostgreSQL advisory lock was being acquired with a
+truncated key.
+
+Phase 1A.1 fixes this by storing the lock key as a decimal string
+`'6003100736085771346'` and casting it to BIGINT in the SQL:
+`pg_try_advisory_xact_lock($1::bigint)`. This guarantees the exact 64-bit value
+is used. The `pg_try_advisory_xact_lock` variant (with a bounded timeout) is used
+instead of `pg_advisory_xact_lock` (which blocks indefinitely), preventing
+permanent blocking if a lock holder crashes.
+
+See `docs/phase1a/PHASE1A1-SQL-COMPATIBILITY-REPORT.md` for the full analysis.
+
+### 16.6 Transaction Mode Detection and Compatibility
+
+Neon's `sql.transaction()` wraps all statements in a single transaction. Some
+SQL statements cannot run inside a transaction (e.g., `VACUUM`, `CREATE
+DATABASE`, `CREATE INDEX CONCURRENTLY`). Phase 1A.1 adds a `TransactionMode`
+field to every migration file manifest entry:
+
+| Mode | Behavior |
+|------|----------|
+| `REQUIRED` | Execute inside a transaction (the default and safe mode) |
+| `FORBIDDEN` | Execute outside a transaction, statement by statement |
+| `MANUAL_REVIEW` | Do not execute automatically; require manual intervention |
+
+The `detectTransactionMode()` function in `validation.ts` automatically detects
+7 incompatible patterns: `VACUUM`, `CREATE DATABASE`, `DROP DATABASE`,
+`CREATE TABLESPACE`, `CREATE INDEX CONCURRENTLY`, `REINDEX`, and `ALTER SYSTEM`.
+Migrations containing these patterns are assigned the appropriate mode (FORBIDDEN
+for `VACUUM`/`CREATE INDEX CONCURRENTLY`/`REINDEX`; MANUAL_REVIEW for
+`CREATE DATABASE`/`DROP DATABASE`/`ALTER SYSTEM`). The manifest computes the
+mode at discovery time.
+
+The `executeMigrationInTransaction()` function in `runner.ts` handles all three
+modes and returns a specific `errorCode` for transaction-mode failures:
+`TRANSACTION_MODE_MANUAL_REVIEW`, `FORBIDDEN_MODE_STATEMENT_ERROR`,
+`LOCK_DENIED`, or `TRANSACTION_ERROR`.
+
+### 16.7 MFA Fail-Closed and TOTP Replay Prevention
+
+**Fail-closed fix (MIGRATION-GOV-04):** The Phase 1A `verifyFreshTotp()`
+function returned `true` (waived) when a user had no MFA secret configured. This
+meant MFA was effectively disabled for any admin without MFA. Phase 1A.1 fixes
+this to fail-closed: when no MFA secret exists, the function returns `false`
+(DENY). Execution is blocked and the user must configure MFA first.
+
+**TOTP replay prevention (MIGRATION-GOV-05):** A TOTP code is valid for a
+30-second window (plus a ±1 step tolerance). Phase 1A did not prevent the same
+code from being used multiple times within that window. Phase 1A.1 adds the
+`migration_totp_uses` table. The `recordTotpUse()` function inserts a SHA-256
+hash of the `(user_id, time_step)` pair with `ON CONFLICT DO NOTHING RETURNING
+id`. If the insert returns no row (conflict), the time-step has already been
+used and the code is rejected as a replay. The TOTP code itself is NEVER stored —
+only the hash of the pair. `isTotpTimeStepUsed()` provides a read check.
+
+Failed authentication does NOT consume a valid code. The replay record is only
+inserted on successful verification, so a user can retry within the same window
+if they mistype.
+
+### 16.8 Non-Canonical Execution Path Elimination
+
+Phase 1A gated the two known legacy runners (`app/api/migrate/route.ts` and
+`app/api/admin/system-tools/route.ts`). Phase 1A.1 identified a third ungated
+path: `app/api/admin/prospects/seed/route.ts`, which executed direct SQL to seed
+prospect data, bypassing the governance framework entirely.
+
+This route is now gated behind the `MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED`
+feature flag (default: disabled). When disabled, the route emits a
+`migration.legacy.invoked` audit event and returns HTTP 423 Locked with a
+deprecation notice directing the user to the canonical path
+(`/api/admin/migrations`). The gate is placed AFTER `requireAdminApi` so the
+actor ID is available for the audit event. The file is NOT deleted (per the
+Phase 1A principle: restrict/wrap, don't delete unless demonstrably safe).
+
+A full audit of the codebase confirmed no other ungated migration execution
+paths exist and no non-canonical ledger writes occur outside the canonical
+functions.
+
+### 16.9 Persistent Audit Integration
+
+Phase 1A emitted migration audit events as console JSON only. Phase 1A.1
+enhances `emitAuditEvent()` to persist durably to the `audit_log` table via
+`writeAuditLog()` (the existing hash-chained audit logging system) in addition
+to the console JSON emission. The persistence is fire-and-forget (`.catch(() =>
+{})`) so a database failure does not break migration execution, but the durable
+record is attempted on every event.
+
+A `MIGRATION_EVENT_TO_AUDIT_ACTION` mapping table maps every
+`MigrationAuditEventType` to a corresponding `AuditAction` value. The
+`AuditCategory` union in `auditLog.ts` now includes `'migration'`, and 24
+migration-specific `AuditAction` values were added. The `persistMigrationAuditEvent()`
+function calls `writeAuditLog` with the mapped action, category `'migration'`,
+and structured metadata.
+
+### 16.10 Automated Actor Controls
+
+The `migration-actor` (automated execution identity) cannot be client-selected.
+The actor type is determined server-side: if the request includes a valid
+service token, the actor is `migration-actor`; otherwise, it is the
+authenticated human user. A client cannot spoof the actor type by submitting it
+in the request body. The automated actor is exempt from TOTP but still subject
+to the environment allowlist, production flag, and execution gate.
+
+### 16.11 Phase 1A.1 Test Expansion
+
+The test suite was expanded from 114 tests to 185 tests (71 new tests across 7
+new sections):
+
+| Test Section | Tests | Coverage |
+|--------------|-------|----------|
+| Section 10b: Non-Canonical Execution Path Elimination | 7 | prospects/seed gating, audit event, canonical path direction, auth-before-gate ordering, file existence, all-paths-gated, no-non-canonical-ledger-writes |
+| Section 13: Persistent Audit Integration | 10 | migration AuditCategory, AuditAction values, writeAuditLog import, mapping table, persistMigrationAuditEvent, fire-and-forget pattern, error codes, errorCode propagation, mapping completeness, transaction mode audit details |
+| Section 14: Governance Lifecycle & Historical Baseline | 14 | 6 lifecycle states, governance_lifecycle DDL, set/get functions, audit events, 5 baseline statuses, migration_baseline DDL, baseline functions, execution gate |
+| Section 15: Transaction Mode Detection | 14 | TransactionMode type, detect functions, all 7 incompatible patterns, manifest integration |
+| Section 16: Lock Key Exactness | 7 | decimal string constant, exact value, hex value, BIGINT cast, bounded lock, FORBIDDEN mode session lock |
+| Section 17: Append-Only Run History & Ledger Constraints | 13 | schema_migration_runs DDL, status CHECK, identifier CHECK, checksum CHECK, actor_type CHECK, indexes, INSERT-only invariant, schema_migrations constraints, migration_totp_uses table, use_hash (not code), recordTotpUse ON CONFLICT, isTotpTimeStepUsed, bootstrap→BASELINE_REQUIRED |
+
+### 16.12 Phase 1A.1 Verification
+
+**Command:** `npx tsc --noEmit`
+**Result:** exit 0, no errors
+
+**Command:** `npx vitest run tests/phase1a-migration-governance.test.ts`
+**Result:** 185 passed, 0 failed
+
+**Command:** `npx vitest run` (full test suite)
+**Result:** 6,863 passed, 1 failed (1 pre-existing failure in
+`tests/golden-path.test.ts` — SLD Pipeline combiner fields, confirmed
+pre-existing before any Phase 1A.1 changes, unrelated to migration governance)
+
+### 16.13 Phase 1A.1 Commits
+
+| Commit | Hash | Description |
+|--------|------|-------------|
+| 1 | `1fbd6fac` | docs: Phase 1A.1 operational hardening audit |
+| 2 | `4f8f4b0c` | feat: ledger lifecycle, constraints, append-only history |
+| 3 | `72ccbeb2` | feat: historical baseline enforcement and execution blocking |
+| 4 | `d218d6c8` | feat: lock exactness, bounded timeout, transaction compatibility |
+| 5 | `5af104af` | feat: MFA fail-closed, replay prevention, automated actor controls |
+| 6 | `bed382f4` | feat: eliminate non-canonical execution paths |
+| 7 | `5849cbde` | feat: persistent audit integration and transaction failure recording |
+| 8 | `c2648aec` | test: expanded tests for Phase 1A.1 governance hardening |
+| 9 | `75260e18` | docs: Phase 1A.1 documentation and final report |
+
+See `docs/phase1a/PHASE1A1-FINAL-REPORT.md` for the complete Phase 1A.1 final
+report, `docs/phase1a/PHASE1A1-OPERATIONAL-HARDENING-AUDIT.md` for the
+pre-implementation exact-state audit, `docs/phase1a/PHASE1A1-HISTORICAL-BASELINE-MODEL.md`
+for the historical baseline model, and `docs/phase1a/PHASE1A1-SQL-COMPATIBILITY-REPORT.md`
+for the SQL compatibility and lock key analysis.
+
+---
+
+## 17. Remaining Blockers
 
 MIGRATION-GOV-01 is resolved. The migration governance foundation is established. The remaining blockers for the enterprise authority initiative are:
 
@@ -342,7 +582,7 @@ MIGRATION-GOV-01 is resolved. The migration governance foundation is established
 
 ---
 
-## 17. Gate Language Correction
+## 18. Gate Language Correction
 
 A documentation correction was applied regarding the interpretation of the 15 implementation gates from ADR-014. The 15 gates are the FULL program sequence — they describe the complete work from Phase 1 foundation through final validation. They are NOT all prerequisites to beginning Phase 1.
 
@@ -352,7 +592,7 @@ The corrected language clarifies that Phase 1 implementation can begin (and has 
 
 ---
 
-## 18. Cross-References
+## 19. Cross-References
 
 | Reference | Document |
 |-----------|----------|

@@ -321,6 +321,18 @@ bootstrap is:
   drops mid-operation, the lock is automatically released (session-scoped), which
   is the safe failure mode (no permanent lock). A re-run will re-acquire.
 
+> **Phase 1A.1 Hardening (MIGRATION-GOV-06):** The lock key
+> `0x534f4c504d474452` (decimal 6003100736085771346) exceeds JavaScript's
+> `Number.MAX_SAFE_INTEGER`, causing silent truncation to 6003100736085771000
+> when stored as a JS number. Phase 1A.1 fixes this by storing the key as a
+> decimal string `'6003100736085771346'` and casting to BIGINT in the SQL
+> (`pg_try_advisory_xact_lock($1::bigint)`). Additionally,
+> `pg_try_advisory_xact_lock` (bounded, returns boolean) is used instead of
+> `pg_advisory_xact_lock` (indefinite block) to prevent permanent blocking if a
+> lock holder crashes. FORBIDDEN transaction mode uses `pg_advisory_xact_lock`
+> (session-level) for statement-by-statement execution outside a transaction.
+> See `docs/phase1a/PHASE1A1-SQL-COMPATIBILITY-REPORT.md` for the full analysis.
+
 ### 3.4 Transactional Execution (Neon Constraint)
 
 Neon's `sql.transaction(txn => [ ...queries ])` requires a synchronous callback
@@ -334,6 +346,16 @@ returning an array of query promises — no `await` inside. The runner therefore
 5. On success, records `applied` in the ledger (in the same transaction if
    possible, or immediately after). On failure, the transaction rolls back and
    the ledger records `failed`.
+
+> **Phase 1A.1 Hardening (MIGRATION-GOV-06):** Some SQL statements cannot run
+> inside a transaction (VACUUM, CREATE DATABASE, CREATE INDEX CONCURRENTLY, etc.).
+> Phase 1A.1 adds a `TransactionMode` field to every migration manifest entry:
+> REQUIRED (execute in transaction), FORBIDDEN (execute outside transaction,
+> statement by statement), MANUAL_REVIEW (do not execute automatically). The
+> `detectTransactionMode()` function automatically detects 7 incompatible
+> patterns. `executeMigrationInTransaction()` handles all three modes and
+> returns specific error codes (TRANSACTION_MODE_MANUAL_REVIEW,
+> FORBIDDEN_MODE_STATEMENT_ERROR, LOCK_DENIED, TRANSACTION_ERROR).
 
 ### 3.5 Authorization & MFA
 
@@ -356,6 +378,13 @@ returning an array of query promises — no `await` inside. The runner therefore
   is verified against the user's stored TOTP secret. A `migration-actor`
   (automated, identified by a dedicated service token) is exempt from TOTP but
   still subject to the environment allowlist and production flag.
+  > **Phase 1A.1 Hardening (MIGRATION-GOV-04, MIGRATION-GOV-05):** MFA is now
+  > fail-closed: if a user has no MFA secret configured, `verifyFreshTotp()`
+  > returns DENY (was: waived/true). TOTP replay prevention: the
+  > `migration_totp_uses` table records a SHA-256 hash of (user_id, time_step)
+  > pairs; the same time-step cannot be reused (ON CONFLICT DO NOTHING). The TOTP
+  > code itself is never stored. Failed authentication does not consume a valid
+  > code — the replay record is only inserted on successful verification.
 - **No client-supplied SQL:** The API never accepts raw SQL. It accepts only a
   migration identifier or "run all pending". SQL is always read from the
   canonical manifest files.

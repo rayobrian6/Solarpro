@@ -345,7 +345,47 @@ To roll back Phase 1A (if needed):
 
 ---
 
-## 22. Scope Compliance
+## 22. Phase 1A.1 Operational Hardening Status
+
+Phase 1A established the migration governance foundation (MIGRATION-GOV-01).
+Phase 1A.1 made that foundation operationally safe by resolving 8 additional
+governance risks (MIGRATION-GOV-02 through MIGRATION-GOV-08) identified in the
+Phase 1A implementation review.
+
+**Risks resolved in Phase 1A.1:**
+
+| Risk | Resolution Summary |
+|------|-------------------|
+| MIGRATION-GOV-02 | Historical baseline reconciliation model with 5 statuses; execution blocked until baseline verified |
+| MIGRATION-GOV-03 | Append-only `schema_migration_runs` table with CHECK constraints and INSERT-only invariant |
+| MIGRATION-GOV-04 | MFA fail-closed: `verifyFreshTotp()` now DENIES when no MFA secret (was: waived) |
+| MIGRATION-GOV-05 | TOTP replay prevention via `migration_totp_uses` table; SHA-256 hash of (user_id, time_step) |
+| MIGRATION-GOV-06 | Lock key as decimal string + BIGINT cast (exact 0x534f4c504d474452); bounded `pg_try_advisory_xact_lock` |
+| MIGRATION-GOV-06 | Transaction mode detection (REQUIRED/FORBIDDEN/MANUAL_REVIEW) with 7 incompatible patterns |
+| MIGRATION-GOV-07 | `app/api/admin/prospects/seed/route.ts` gated behind feature flag (third legacy path eliminated) |
+| MIGRATION-GOV-08 | Audit events persisted to `audit_log` table via `writeAuditLog`; transaction-mode-specific error codes |
+
+**Key changes:**
+- Five-table ledger architecture (governance_lifecycle, schema_migrations, schema_migration_runs, migration_baseline, migration_totp_uses)
+- Governance lifecycle: UNBOOTSTRAPPED → LEDGER_BOOTSTRAPPED → BASELINE_REQUIRED → BASELINE_IN_PROGRESS → BASELINE_VERIFIED → EXECUTION_ENABLED
+- Test suite expanded from 114 to 185 tests (71 new tests across 7 sections)
+- 9 commits on `dev`, starting from `4d390683`
+- tsc clean (exit 0), 185/185 migration governance tests pass
+
+**What was NOT done (not authorized):**
+- No organization schema/membership/active org context implementation
+- No resource ownership, legacy ownership backfill, cross-company collaboration
+- No resource sharing, org billing migration, ownership transfers, tenant cutover
+- No numbered SQL migration files created or modified
+- No MFA Phase 3 code changes (lib/mfa.ts remains frozen)
+- No changes to MFA Phase 3 tests, frozen evidence, or acceptance artifacts
+
+**Full report:** `docs/phase1a/PHASE1A1-FINAL-REPORT.md`
+**Pre-implementation audit:** `docs/phase1a/PHASE1A1-OPERATIONAL-HARDENING-AUDIT.md`
+
+---
+
+## 23. Scope Compliance
 
 **What was done (authorized):**
 - Resolved MIGRATION-GOV-01 (multiple non-authoritative migration execution paths)
@@ -365,7 +405,7 @@ To roll back Phase 1A (if needed):
 
 ---
 
-## 23. Cross-References
+## 24. Cross-References
 
 | Document | Path |
 |----------|------|
@@ -376,6 +416,10 @@ To roll back Phase 1A (if needed):
 | Phase 1 entry gates (updated) | `docs/enterprise-multi-tenant/ENTERPRISE-MULTI-TENANT-PHASE1-ENTRY-GATES.md` |
 | Phase 1 implementation spec (updated) | `docs/enterprise-multi-tenant/ENTERPRISE-MULTI-TENANT-PHASE1-IMPLEMENTATION-SPEC.md` |
 | Test suite | `tests/phase1a-migration-governance.test.ts` |
+| Phase 1A.1 final report | `docs/phase1a/PHASE1A1-FINAL-REPORT.md` |
+| Phase 1A.1 hardening audit | `docs/phase1a/PHASE1A1-OPERATIONAL-HARDENING-AUDIT.md` |
+| Phase 1A.1 baseline model | `docs/phase1a/PHASE1A1-HISTORICAL-BASELINE-MODEL.md` |
+| Phase 1A.1 SQL compatibility | `docs/phase1a/PHASE1A1-SQL-COMPATIBILITY-REPORT.md` |
 
 ---
 

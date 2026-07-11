@@ -219,3 +219,18 @@ migration files (from `lib/migrations/`) + `schema_migrations` database ledger +
 mandatory SHA-256 checksums + single execution service + transactional execution
 + PostgreSQL advisory locks + environment-aware authorization + append-only
 application history. Legacy runners will be restricted/wrapped, not deleted.
+
+> **Update (Phase 1A):** This audit's findings (MIGRATION-GOV-01) were resolved
+> in Phase 1A. See `docs/phase1a/PHASE1A-MIGRATION-GOVERNANCE-IMPLEMENTATION.md`
+> and `docs/phase1a/PHASE1A-FINAL-REPORT.md` for the full Phase 1A
+> implementation report.
+
+> **Update (Phase 1A.1):** The 8 remaining governance risks (MIGRATION-GOV-02
+> through MIGRATION-GOV-08) identified after the Phase 1A implementation were
+> resolved in Phase 1A.1. Key resolutions: the third ungated execution path
+> (`app/api/admin/prospects/seed/route.ts` — Entry Point 3 in Section 2 above)
+> is now gated behind a feature flag; the historical applied-state baseline
+> problem (Section 9 above) is now addressed by the baseline reconciliation model;
+> MFA fail-open and TOTP replay risks are closed; audit events are now persisted
+> durably. See `docs/phase1a/PHASE1A1-FINAL-REPORT.md` for the complete Phase 1A.1
+> report. The test suite now has 185 tests (up from 114 in Phase 1A).
