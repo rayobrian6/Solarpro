@@ -306,7 +306,10 @@ export function drawRoofPlan(
     };
   })();
   const _fit = (_site && _ctxPts.length > 0)
-    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.4 : 2.6 })
+    // v21 review: the subject roof rendered at ~38% of the window (1/2.6) with
+    // the neighbor's tree canopy dominating. Tighter caps keep the roof ≥ ~50%
+    // (≥ 80% on big lots); nearest context still shows, SVG clips the rest.
+    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.25 : 2.0 })
     : _arrayFit
     ?? { minLng, maxLng, minLat, maxLat };
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
