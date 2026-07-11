@@ -47,6 +47,24 @@ function readSrc(rel: string): string {
 }
 
 /**
+ * Recursively collect all .ts (and .tsx) files under a directory, excluding
+ * node_modules. Used for whole-codebase invariant checks.
+ */
+function collectTsFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === '.next' || entry.name === '.git') continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...collectTsFiles(full));
+    } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+/**
  * NODE_ENV is declared readonly in @types/node. For tests that need to mutate
  * the environment, cast through a mutable record so tsc --noEmit passes.
  */
@@ -133,6 +151,7 @@ describe('Phase 1A: Type definitions', () => {
     expect(typesSrc).toMatch(/ALLOW_PRODUCTION.*MIGRATION_ALLOW_PRODUCTION_EXECUTION/);
     expect(typesSrc).toMatch(/LEGACY_INLINE_ENABLED.*MIGRATION_LEGACY_INLINE_ENABLED/);
     expect(typesSrc).toMatch(/LEGACY_SYSTEM_TOOLS_RUN_ENABLED.*MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED/);
+    expect(typesSrc).toMatch(/LEGACY_PROSPECTS_SEED_ENABLED.*MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED/);
   });
 
   it('MIGRATION_PERMISSIONS includes execute and inspect', () => {
@@ -932,6 +951,91 @@ describe('Phase 1A: Legacy runner restriction', () => {
   it('legacy runners are NOT deleted (files still exist)', () => {
     expect(fs.existsSync(path.join(root, 'app/api/migrate/route.ts'))).toBe(true);
     expect(fs.existsSync(path.join(root, 'app/api/admin/system-tools/route.ts'))).toBe(true);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 10b. Non-Canonical Execution Path Elimination (MIGRATION-GOV-07)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.1: Non-canonical execution path elimination', () => {
+  const prospectsSeedSrc = readSrc('app/api/admin/prospects/seed/route.ts');
+  const migrateSrc = readSrc('app/api/migrate/route.ts');
+  const systemToolsSrc = readSrc('app/api/admin/system-tools/route.ts');
+
+  it('prospects/seed route is gated behind MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED flag (MIGRATION-GOV-07)', () => {
+    // The prospects/seed route reads migration SQL files (092, 093) directly
+    // and executes them without governance. It must be gated.
+    expect(prospectsSeedSrc).toContain('MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
+    expect(prospectsSeedSrc).toContain('423'); // Locked status
+  });
+
+  it('prospects/seed route emits migration.legacy.invoked deprecation audit event when disabled', () => {
+    expect(prospectsSeedSrc).toContain('migration.legacy.invoked');
+    expect(prospectsSeedSrc).toContain('deprecated');
+  });
+
+  it('prospects/seed route directs to canonical path /api/admin/migrations', () => {
+    expect(prospectsSeedSrc).toContain('/api/admin/migrations');
+    expect(prospectsSeedSrc).toContain('canonicalPath');
+  });
+
+  it('prospects/seed route checks the flag AFTER admin authentication (not before)', () => {
+    // The gate must come after requireAdminApi so we can record the actor in the
+    // audit event. Use the function-body occurrences (not import/comment refs).
+    const adminCallIdx = prospectsSeedSrc.indexOf('await requireAdminApi');
+    const flagCheckIdx = prospectsSeedSrc.indexOf('process.env.MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
+    expect(adminCallIdx).toBeGreaterThan(-1);
+    expect(flagCheckIdx).toBeGreaterThan(-1);
+    expect(flagCheckIdx).toBeGreaterThan(adminCallIdx);
+  });
+
+  it('prospects/seed route is NOT deleted (file still exists)', () => {
+    expect(fs.existsSync(path.join(root, 'app/api/admin/prospects/seed/route.ts'))).toBe(true);
+  });
+
+  it('all three non-canonical paths are gated behind feature flags', () => {
+    // Every path that executes migration SQL outside the canonical governance
+    // system must be gated behind a feature flag with 423 Locked.
+    expect(migrateSrc).toContain('MIGRATION_LEGACY_INLINE_ENABLED');
+    expect(migrateSrc).toContain('423');
+    expect(systemToolsSrc).toContain('MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED');
+    expect(systemToolsSrc).toContain('423');
+    expect(prospectsSeedSrc).toContain('MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
+    expect(prospectsSeedSrc).toContain('423');
+  });
+
+  it('no path writes to the migration ledger outside the canonical functions', () => {
+    // The schema_migrations ledger must only be written by the canonical
+    // governance functions in lib/migrations/. No API route or other module
+    // should perform INSERT/UPDATE/DELETE on the ledger tables directly.
+    const ledgerTables = ['schema_migrations', 'schema_migration_runs'];
+    const canonicalPaths = [
+      'lib/migrations/ledger.ts',
+      'lib/migrations/runner.ts',
+    ];
+    // Gather all .ts files that reference a ledger table name (not in tests).
+    const allTsFiles = collectTsFiles(root);
+    for (const file of allTsFiles) {
+      const relPath = path.relative(root, file).replace(/\\/g, '/');
+      if (relPath.startsWith('tests/') || relPath.startsWith('node_modules/')) continue;
+      if (canonicalPaths.includes(relPath)) continue;
+      const src = fs.readFileSync(file, 'utf-8');
+      for (const table of ledgerTables) {
+        // Look for INSERT/UPDATE/DELETE targeting the ledger tables.
+        const writePattern = new RegExp(
+          `(INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+${table}`,
+          'i',
+        );
+        // The migrate/route.ts contains inline DDL for application tables but
+        // should not write to schema_migrations. Check for the write pattern.
+        if (writePattern.test(src)) {
+          throw new Error(
+            `Non-canonical ledger write detected: ${relPath} writes to ${table}`,
+          );
+        }
+      }
+    }
   });
 });
 

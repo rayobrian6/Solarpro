@@ -524,6 +524,8 @@ export const MIGRATION_ENV_VARS = {
   LEGACY_INLINE_ENABLED: 'MIGRATION_LEGACY_INLINE_ENABLED',
   /** Feature flag for the legacy system-tools run_migration path. */
   LEGACY_SYSTEM_TOOLS_RUN_ENABLED: 'MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED',
+  /** Feature flag for the legacy prospects-seed direct SQL execution path. */
+  LEGACY_PROSPECTS_SEED_ENABLED: 'MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED',
 } as const;
 
 /**
