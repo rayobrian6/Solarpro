@@ -659,7 +659,8 @@ function roofComposition(
         { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
-        { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into ${_frameLabel.toLowerCase()}s` },
+        // 'truss'.toLowerCase()+'s' printed "trusss" on PV-1 — pluralize properly.
+        { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into ${_frameLabel === 'TRUSS' ? 'trusses' : 'rafters'}` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
