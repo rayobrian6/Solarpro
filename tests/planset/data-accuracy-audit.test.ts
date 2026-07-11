@@ -140,7 +140,12 @@ describe('Defect 5 — Structural prose guards against — values', () => {
     expect(pv4c).not.toContain('rafter utilization ratio of —%');
   });
 
-  it('roof conclusion shows "data incomplete" when both SF and utilization are absent', () => {
+  it('roof structural is ALWAYS recomputed — absent/stale saved data cannot render', () => {
+    // Roof generation now unconditionally re-runs the V4 engine (the old
+    // needsCalc gate let a stale saved attachment payload print "DO NOT ISSUE"
+    // with a pre-ASD 1.62-vs-2.0 safety factor while the current engine PASSES).
+    // Deleting every saved structural field must therefore yield REAL computed
+    // values on PV-4C — never dashes, never "data incomplete".
     const input = clone(roofProject);
     delete input.compliance.structural.rafter;
     delete input.compliance.structural.attachment;
@@ -149,19 +154,18 @@ describe('Defect 5 — Structural prose guards against — values', () => {
     delete input.compliance.structural.rackingLoadPsf;
     delete input.compliance.structural.wind;
     delete input.compliance.structural.snow;
-    // The server-side V4 engine now genuinely runs in the vitest env (the old
-    // lazy require('@/…') silently failed here) and would backfill everything
-    // deleted above. Pin a rafter stub so needsCalc stays false and the
-    // absent-data prose guard is actually exercised.
+    // A stale rafter stub must NOT suppress the recompute anymore.
     input.compliance.structural.rafter = { bendingMoment: 1 } as any;
 
     const html = generatePermitHTML(input);
     const pv4c = sheetPage(html, 'PV-4C');
     expect(pv4c).toBeTruthy();
 
-    // With null values, should show "data incomplete" or "verify" message
-    // rather than "Review flagged structural items" (which implies a failure)
-    expect(pv4c).toContain('data incomplete');
+    // Freshly computed: a real safety factor with the ASD threshold label,
+    // and no dash-placeholder prose.
+    expect(pv4c).toContain('ASD');
+    expect(pv4c).not.toContain('data incomplete');
+    expect(pv4c).not.toContain('safety factor of —');
   });
 
   it('ground structural prose shows data-not-available when safety factor is —', () => {

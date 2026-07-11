@@ -9,6 +9,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { roofTypeLabel, hasRealBattery } from '../utils/helpers';
 import { getEquipmentContext, isFence, isGround } from '@/lib/system';
+import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { BUILD_VERSION } from '@/lib/version';
 
@@ -359,7 +360,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
             ${_peSiteLoading(input)}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Pile/Pier Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift / Pile</td><td class="iv">${uplift} lbs</td><td class="il">Pile Lateral Capacity</td><td class="iv">Per geotechnical report</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 2.0 ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Pile Embedment Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= MIN_ATTACHMENT_SF ? '#000' : '#cc0000'};">${safetyFact} (ASD basis — min. ${MIN_ATTACHMENT_SF.toFixed(1)} req.)</td><td class="il">Pile Embedment Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.4 — ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §27</td></tr>
           </table>
@@ -420,7 +421,10 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const _sfRaw     = structural?.attachment?.safetyFactor;
   const _bendPass  = _bendRatio == null || _bendRatio <= 1.0;
   const _deflPass  = _deflRatio == null || _deflRatio <= 1.0;
-  const _lagPass   = _sfRaw == null || _sfRaw >= 2.0;
+  // ASD basis: demand (0.6W) and capacity (allowable) are BOTH ASD — the margin
+  // lives inside the allowable, so the pass bar is MIN_ATTACHMENT_SF (1.0), not
+  // a second 2.0 on top (that stale threshold printed DO-NOT-ISSUE on passing designs).
+  const _lagPass   = _sfRaw == null || _sfRaw >= MIN_ATTACHMENT_SF;
   const _allPass   = _bendPass && _deflPass && _lagPass;
   const bendUtil   = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : '—';
   const deflUtil   = _deflRatio != null ? (_deflRatio * 100).toFixed(0) : '—';
@@ -517,7 +521,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflPass ? '#000' : '#cc0000'};">${deflection} in (Δ_allow = ${allowableDefl} in — ${deflUtil}%)</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (min. 2.0 req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} — ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : '—'}</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis — min. ${MIN_ATTACHMENT_SF.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} — ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : '—'}</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.4 — ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §26/27</td></tr>
           </table>
@@ -553,7 +557,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 under the modeled assumptions (${rafterSize} ${_isTruss ? 'truss' : 'stick'} framing @ ${rafterSpace}" O.C., span ${rafterSpanFt} ft,
                 combined load ${totalLoadPsf} psf), the ${_governs} check exceeds its code limit
                 (bending ${bendUtil}% of allowable; deflection Δ = ${deflection} in vs Δ_allow = ${allowableDefl} in).
-                Lag bolt attachment safety factor is ${safetyFact}${_lagPass ? ' (adequate)' : ' (below the 2.0 minimum)'}.
+                Lag bolt attachment safety factor is ${safetyFact}${_lagPass ? ' (adequate)' : ` (below the ${MIN_ATTACHMENT_SF.toFixed(1)} ASD minimum)`}.
                 Field-verify the actual framing type, member size, and clear span (pre-engineered trusses frequently
                 resolve this check), correct the structural inputs, and re-run the analysis — or provide reinforcement
                 designed by the engineer of record — before this letter is signed or sealed.

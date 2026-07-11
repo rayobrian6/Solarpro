@@ -284,22 +284,15 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Run the V4 engine server-side so the structural page always shows real
   // calculated values instead of "0 ft-lbs".
   try {
-    const existingRafter = input.compliance?.structural?.rafter;
-    // Recompute when the saved result is missing/zero OR STALE — i.e. its framing
-    // type disagrees with what the current design would resolve. A saved
-    // worst-case STICK analysis (from before the truss auto-detect, or from a
-    // stale engineering report) otherwise sticks around and prints a false
-    // "DO NOT ISSUE" on a trussed house. Same stale-payload class as the 600W
-    // module drift: never trust a saved structural result the inputs contradict.
-    const _expectedFraming: 'truss' | 'rafter' =
-      (input.project.framingType === 'truss' || input.project.framingType === 'rafter')
-        ? input.project.framingType
-        : ((input.project.rafterSpacing ?? 24) >= 24 ? 'truss' : 'rafter');
-    const _framingStale = !!existingRafter && !!existingRafter.framingType
-      && existingRafter.framingType !== _expectedFraming;
-    const needsCalc = !existingRafter
-      || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0)
-      || _framingStale;
+    // ALWAYS recompute for roof. The old staleness gate (missing/zero bending
+    // moment or framing mismatch) let every OTHER saved field go stale — a
+    // pre-ASD-basis attachment payload (SF 1.62 vs the old 2.0 bar, strength-
+    // level uplift) printed a red "DO NOT ISSUE" on PE-1/PV-4C while the
+    // current engine PASSES the same design. runStructuralCalcV4 is a pure
+    // function of buildStructuralInputForPermit(input,cad,canonical) — same
+    // inputs the saved payload was built from — and costs milliseconds, so
+    // regeneration always reflects the ENGINE OF RECORD, never a stale save.
+    const needsCalc = true;
     if (needsCalc && sysType === 'roof') {
       // Single source (shared with the BOM): the V4 structural input, built
       // deterministically from input + CAD + canonical site data. See

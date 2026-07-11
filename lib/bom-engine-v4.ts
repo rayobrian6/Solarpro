@@ -1135,6 +1135,52 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   // ── STAGE 5: STRUCTURAL ──────────────────────────────────────────────────────
 
+  // Real structural quantities (roof) — usable with OR without a registry entry.
+  const _roofRB = (input.rackingBOM && input.systemType === 'roof') ? input.rackingBOM : undefined;
+
+  // Emit the real rackingBOM lines (single source: calcRackingBOM from real
+  // ArrayGeometry). NB: rb.mounts (pad/standoff) is covered by the racking "lot"
+  // line, and rb.groundLugs is subsumed by the per-module bonding clips — both
+  // omitted to avoid double-counting.
+  const emitRackingBOM = (rb: NonNullable<typeof _roofRB>, mfr: string) => {
+    const emitRB = (category: string, r: { qty: number; unit?: string; description: string; partNumber: string } | undefined, nec: string) => {
+      if (!r || r.qty <= 0) return;
+      items.push(addItem('structural', category, mfr,
+        r.description, r.partNumber ?? 'TBD', r.description,
+        Math.ceil(r.qty), 'ea', nec, 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
+      log.push({ stageId: 'structural', category, item: r.partNumber,
+        quantity: Math.ceil(r.qty), derivedFrom: 'structuralEngine.rackingBOM',
+        formula: 'calcRackingBOM', necReference: nec });
+    };
+    emitRB('rail', rb.rails, 'IBC 2021');
+    emitRB('splice', rb.railSplices, 'IBC 2021');
+    emitRB('l_foot', rb.lFeet, 'ASCE 7-22');
+    emitRB('lag_bolt', rb.lagBolts, 'ASCE 7-22');
+    emitRB('mount_hardware', rb.mountingBolts, 'IBC 2021');
+    emitRB('mid_clamp', rb.midClamps, 'IBC 2021');
+    emitRB('end_clamp', rb.endClamps, 'IBC 2021');
+    emitRB('flashing', rb.flashingKits, 'IBC 2021');
+    emitRB('grounding', rb.bondingClips, 'UL 2703');
+  };
+
+  if (!rackingEntry && _roofRB) {
+    // No equipment-registry entry resolved for the racking id — the OLD code
+    // skipped Stage 5 entirely here, silently shipping a BOM with NO pads, rails,
+    // splices, bolts or clamps (SCHED-2 showed grounding only). The structural
+    // engine's rackingBOM is self-sufficient (manufacturer + real quantities), so
+    // emit the racking system + hardware from it instead of vanishing.
+    items.push(addItem('structural', 'racking', _roofRB.manufacturer, _roofRB.systemModel,
+      _roofRB.mounts.partNumber ?? _roofRB.systemModel,
+      `${_roofRB.manufacturer} ${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`,
+      1, 'lot', 'IBC 2021', 'perSystem', '1', true));
+    items.push(addItem('structural', 'attachment', _roofRB.manufacturer,
+      _roofRB.mounts.description, _roofRB.mounts.partNumber ?? 'TBD', _roofRB.mounts.description,
+      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
+    log.push({ stageId: 'structural', category: 'racking', item: _roofRB.systemModel,
+      quantity: 1, derivedFrom: 'structuralEngine.rackingBOM (no registry entry)', formula: '1', necReference: 'IBC 2021' });
+    emitRackingBOM(_roofRB, _roofRB.manufacturer);
+  }
+
   if (rackingEntry) {
     // Primary racking system
     items.push(addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
@@ -1149,29 +1195,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // bolts/grounding from it so the BOM's rail COUNT + rail BOLTS match the
     // structural sheets (calcRackingBOM derives them from real ArrayGeometry).
     // Otherwise fall back to the registry accessory formulas (design-studio path).
-    if (input.rackingBOM && input.systemType === 'roof') {
-      const rb = input.rackingBOM;
-      const emitRB = (category: string, r: { qty: number; unit?: string; description: string; partNumber: string } | undefined, nec: string) => {
-        if (!r || r.qty <= 0) return;
-        items.push(addItem('structural', category, rackingEntry.manufacturer,
-          r.description, r.partNumber ?? 'TBD', r.description,
-          Math.ceil(r.qty), 'ea', nec, 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
-        log.push({ stageId: 'structural', category, item: r.partNumber,
-          quantity: Math.ceil(r.qty), derivedFrom: 'structuralEngine.rackingBOM',
-          formula: 'calcRackingBOM', necReference: nec });
-      };
-      // NB: rb.mounts (the pad/standoff) is covered by the racking "1 lot" line
-      // above, and rb.groundLugs is subsumed by the per-module bonding clips —
-      // both omitted here to avoid double-counting.
-      emitRB('rail', rb.rails, 'IBC 2021');
-      emitRB('splice', rb.railSplices, 'IBC 2021');
-      emitRB('l_foot', rb.lFeet, 'ASCE 7-22');
-      emitRB('lag_bolt', rb.lagBolts, 'ASCE 7-22');
-      emitRB('mount_hardware', rb.mountingBolts, 'IBC 2021');
-      emitRB('mid_clamp', rb.midClamps, 'IBC 2021');
-      emitRB('end_clamp', rb.endClamps, 'IBC 2021');
-      emitRB('flashing', rb.flashingKits, 'IBC 2021');
-      emitRB('grounding', rb.bondingClips, 'UL 2703');
+    if (_roofRB) {
+      emitRackingBOM(_roofRB, rackingEntry.manufacturer);
     } else {
       // Resolve all racking accessories (registry formulas — design-studio fallback)
       for (const acc of rackingEntry.requiredAccessories) {

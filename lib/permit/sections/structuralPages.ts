@@ -10,6 +10,7 @@ import {
   getSheetComposition, validateSheetComposition, validateSheet,
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
+import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
@@ -487,7 +488,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
             <tr><td>Foundation Type</td><td class="cv">${structType}</td></tr>
             <tr><td>Pile Embedment Depth</td><td class="cv">${pileDepth} ft min. (below frost)</td></tr>
             <tr><td>Pile Spacing</td><td class="cv">${pileSp} ft O.C.</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < MIN_ATTACHMENT_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${MIN_ATTACHMENT_SF.toFixed(1)})` : ''}</td></tr>
             <tr><td>Wind Code Reference</td><td class="cv">ASCE 7-22 §27</td></tr>
           </table>
         </div>
@@ -601,13 +602,13 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ASCE 7-22 §7.` : 'Snow loading is not a controlling factor at this location.'}
         Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ASCE 7-22 §7.
         Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ASCE 7-22 §27.
-        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= 2.0 ? 'above' : 'BELOW'} the required minimum of 2.0.` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= MIN_ATTACHMENT_SF ? 'above' : 'BELOW'} the required ASD minimum of ${MIN_ATTACHMENT_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ASCE 7-22 §2.4).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
         wind uplift, snow, dead load, and pile capacity per ASCE 7-22 §27 and ${ibcVer} IBC.
-        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
+        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= MIN_ATTACHMENT_SF
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
           : structural && structural.attachment?.safetyFactor == null
@@ -763,7 +764,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <table class="calc-table">
             <tr><td>Lag Bolt Capacity</td><td class="cv">${lagCap} lbs</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < MIN_ATTACHMENT_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${MIN_ATTACHMENT_SF.toFixed(1)})` : ''}</td></tr>
             <tr><td>Max Allowed Spacing</td><td class="cv">${maxSpacing}"</td></tr>
           </table>
         </div>
@@ -881,13 +882,13 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ASCE 7-22 §7).` : 'Snow loading is not a controlling factor at this location.'}
         ${_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.'}
-        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= 2.0 ? 'exceeds' : 'DOES NOT MEET'} the required minimum of 2.0.` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= MIN_ATTACHMENT_SF ? 'meets' : 'DOES NOT MEET'} the required ASD minimum of ${MIN_ATTACHMENT_SF.toFixed(1)} (ASD demand vs allowable capacity per ASCE 7-22 §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ASCE 7-22 §26/27 and ${ibcVer} IBC/IRC.
-        ${structural && structural.rafter?.utilizationRatio != null && structural.rafter.utilizationRatio <= 1.0 && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
+        ${structural && structural.rafter?.utilizationRatio != null && structural.rafter.utilizationRatio <= 1.0 && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= MIN_ATTACHMENT_SF
           ? `All structural parameters are within acceptable limits. The existing roof structure and lag bolt attachment
              system are adequate to support the proposed PV array without modification.`
           : structural && structural.rafter?.utilizationRatio == null && structural.attachment?.safetyFactor == null

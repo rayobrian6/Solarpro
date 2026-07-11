@@ -440,7 +440,10 @@ export function generateBOMForPermit(
       const v4Input: BOMGenerationInputV4 = {
         inverterId,
         panelId,
-        rackingId:           project.rackingId,
+        // Same id the STRUCTURAL path resolves (mountingSystemId) when the BOM-
+        // specific rackingId is unset — otherwise Stage 5 lost its registry entry
+        // and the planset BOM shipped with no racking hardware at all.
+        rackingId:           project.rackingId || project.mountingSystemId,
         batteryId:           project.batteryId,
         moduleCount:         totalPanels,
         deviceCount,

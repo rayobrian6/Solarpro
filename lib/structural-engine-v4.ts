@@ -231,6 +231,11 @@ export interface FenceMountAnalysis {
 }
 
 export interface RackingBOM {
+  /** Mounting-system manufacturer (from the hardware DB) — lets BOM consumers
+   *  emit real racking lines even when no equipment-registry entry resolves. */
+  manufacturer: string;
+  /** Mounting-system display model (e.g. 'RT-MINI Flush Mount'). */
+  systemModel: string;
   rails: { qty: number; lengthFt: number; unit: string; description: string; partNumber: string };
   railSplices: { qty: number; unit: string; description: string; partNumber: string };
   mounts: { qty: number; unit: string; description: string; partNumber: string };
@@ -939,6 +944,8 @@ function calcRackingBOM(
   const bondingClipQty = geometry.totalPanels;
 
   const bom: RackingBOM = {
+    manufacturer: system.manufacturer,
+    systemModel: system.model,
     rails: {
       qty: railQty,
       lengthFt: railLengthFt,
@@ -1049,6 +1056,8 @@ function calcRackingBOM(
 function naRackingBOM(): RackingBOM {
   const z = (description: string) => ({ qty: 0, unit: 'ea', description, partNumber: 'N/A' });
   return {
+    manufacturer: 'N/A',
+    systemModel: 'N/A — fence',
     rails: { qty: 0, lengthFt: 0, unit: 'ea', description: 'N/A — SolFence sections (see fence BOM)', partNumber: 'N/A' },
     railSplices: z('N/A — fence'), mounts: z('N/A — fence'), lFeet: z('N/A — fence'),
     midClamps: z('N/A — fence'), endClamps: z('N/A — fence'), groundLugs: z('N/A — fence'),
