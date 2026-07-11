@@ -1640,6 +1640,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── Schematic border ──────────────────────────────────────────────────────
   parts.push(rect(SCH_X, SCH_Y, SCH_W, SCH_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  // Everything pushed from here until the LEGEND is the schematic itself and is
+  // wrapped in a fit-to-area scale group (see AUTO-SCALE below) — the drawn
+  // chain historically used ~55% of the schematic box, leaving a dead band and
+  // small symbols/type on E-1.
+  const _schScaleStart = parts.length;
 
   // ── X positions ───────────────────────────────────────────────────────────
   // ─── GRID LAYOUT ENGINE ──────────────────────────────────────────────────
@@ -2335,6 +2340,34 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(txt((gx1+gx2)/2, GND_Y-5,
     'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43',
     {sz:F.tiny, anc:'middle', fill:GRN}));
+
+  // ── AUTO-SCALE the schematic to fill its area ─────────────────────────────
+  // The horizontal chain (PV → … → Utility) is laid out with fixed WIRE_GAPs
+  // from LEFT_MARGIN and historically used ~55-65% of the schematic box — small
+  // symbols, small type, dead band below the ground rail (the E-1 "thin strip").
+  // Wrap everything drawn since the schematic border in a scale group computed
+  // to FIT the real content bounds (chain right edge = xUtil; bottom = ground
+  // rail) into the box. Strokes/fonts scale with it — that is the point.
+  {
+    const _sx0 = SCH_X + 16;                 // content left (a hair before PV)
+    const _sx1 = xUtil + 96;                 // content right (utility + label margin)
+    const _sy0 = SCH_Y + 22;                 // content top (above symbols)
+    const _sy1 = GND_Y + 48;                 // content bottom (ground rail + labels)
+    const _k = Math.max(1, Math.min(
+      (SCH_W - 32) / Math.max(1, _sx1 - _sx0),
+      (SCH_H - 36) / Math.max(1, _sy1 - _sy0),
+      1.55,                                  // sanity cap — beyond this it reads cartoonish
+    ));
+    if (_k > 1.02) {
+      const _tx = SCH_X + (SCH_W - _k * (_sx1 - _sx0)) / 2 - _k * _sx0;
+      // Center VERTICALLY too — top-anchoring left the whole spare height as a
+      // dead band under the ground rail.
+      const _ty = SCH_Y + (SCH_H - _k * (_sy1 - _sy0)) / 2 - _k * _sy0;
+      parts.splice(_schScaleStart, 0,
+        `<g transform="translate(${_tx.toFixed(1)},${_ty.toFixed(1)}) scale(${_k.toFixed(3)})">`);
+      parts.push('</g>');
+    }
+  }
 
   // ── Rapid Shutdown ────────────────────────────────────────────────────────
   if (input.rapidShutdownIntegrated) {
