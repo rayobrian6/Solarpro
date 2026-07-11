@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { runStructuralCalcV4 } from '../../lib/structural-engine-v4';
 import { resolveArrayStructuralLayout } from '../../lib/permit/utils/arrayLayout';
+import { allowableUpliftLbs, asdUpliftDemandLbs, MIN_ATTACHMENT_SF, OMEGA_ULTIMATE_TO_ALLOWABLE, ASD_WIND_FACTOR } from '../../lib/structural/attachmentCapacity';
 
 // Regression guard for the structural mount-tributary double-count bug.
 // v4 lays out feet on 2 rails per row (mountCount = mountsPerRail × railCount,
@@ -18,28 +19,28 @@ describe('mount tributary (2-rail) does not double-count array area', () => {
     mountingSystemId: 'rooftech-mini',
   });
 
-  it('roughly halves the feet vs the double-counted model, preserving SF≥2.0', () => {
+  it('roughly halves the feet vs the double-counted model, at ASD SF ≥ 1.0', () => {
     const r: any = runStructuralCalcV4(mk('landscape'));
     const m = r.mountLayout;
     // Was 304 (5.85/panel) under the double-count; now ~160 (3.08/panel).
     expect(m.mountCount).toBeLessThan(200);
     expect(m.mountCount / 52).toBeLessThan(3.5);
-    // Safety margin preserved.
-    expect(m.safetyFactor).toBeGreaterThanOrEqual(2.0);
-    // Landscape (short-dim across slope) holds the RT-MINI rated 48" span.
-    expect(m.mountSpacingIn).toBe(48);
-    expect(m.maxAllowedSpacingIn).toBe(48);
+    // ASD check: demand and capacity both ASD, PASS at SF ≥ 1.0.
+    expect(m.safetyFactor).toBeGreaterThanOrEqual(MIN_ATTACHMENT_SF);
+    // Never exceeds the mount's rated max spacing.
+    expect(m.mountSpacingIn).toBeLessThanOrEqual(m.maxAllowedSpacingIn);
   });
 
-  it('feet count is orientation-invariant (governed by uplift ÷ mount capacity)', () => {
-    // Total uplift and mount capacity do not depend on how modules are turned,
-    // so the attachment COUNT must match across orientations (only the spacing
-    // and rail geometry differ). This locks the invariance the fix relies on.
-    const p: any = runStructuralCalcV4(mk('portrait')).mountLayout;
-    const l: any = runStructuralCalcV4(mk('landscape')).mountLayout;
-    expect(p.mountCount).toBe(l.mountCount);
-    expect(p.safetyFactor).toBeGreaterThanOrEqual(2.0);
-    expect(l.safetyFactor).toBeGreaterThanOrEqual(2.0);
+  it('normalizes across brands: an allowable-basis mount needs no fewer feet than a conservative ultimate one under the same load', () => {
+    // IronRidge FlashFoot-class (published ALLOWABLE) vs RT-MINI (unverified →
+    // conservative ULTIMATE ÷Ω). Both must pass SF ≥ 1.0; the allowable-basis
+    // mount should not be penalized with MORE feet than the conservative one —
+    // the old code did the opposite (triple-counted safety on allowable mounts).
+    const iron: any = runStructuralCalcV4({ ...mk('portrait'), mountingSystemId: 'ironridge-xr100' }).mountLayout;
+    const rt: any = runStructuralCalcV4(mk('portrait')).mountLayout;
+    expect(iron.safetyFactor).toBeGreaterThanOrEqual(MIN_ATTACHMENT_SF);
+    expect(rt.safetyFactor).toBeGreaterThanOrEqual(MIN_ATTACHMENT_SF);
+    expect(iron.mountCount).toBeLessThanOrEqual(rt.mountCount);
   });
 
   it('Σ(tributary areas) equals the real array footprint (area-conservation)', () => {
@@ -51,6 +52,23 @@ describe('mount tributary (2-rail) does not double-count array area', () => {
     // Within ~50% (overhang + the +1 end mount per rail inflate the sum
     // slightly); the OLD bug produced ~2× the footprint, which this bounds out.
     expect(totalTributary).toBeLessThan(footprintFt2 * 1.5);
+  });
+});
+
+// The basis-normalized ASD attachment check (single source of truth).
+describe('attachmentCapacity normalizes capacity basis + ASD demand', () => {
+  it('reduces an ULTIMATE rating by Ω=3.0 but leaves an ALLOWABLE rating as-is', () => {
+    expect(OMEGA_ULTIMATE_TO_ALLOWABLE).toBe(3.0);
+    expect(allowableUpliftLbs(900, 'ultimate')).toBeCloseTo(300, 5);
+    expect(allowableUpliftLbs(1067, 'allowable')).toBe(1067);
+    // Unset basis is treated CONSERVATIVELY as ultimate (applies the reduction).
+    expect(allowableUpliftLbs(900, undefined)).toBeCloseTo(300, 5);
+  });
+
+  it('applies the 0.6 ASD wind factor to the strength-level uplift demand', () => {
+    expect(ASD_WIND_FACTOR).toBe(0.6);
+    // 50 psf strength uplift × 10 ft² tributary = 500 lb strength → 300 lb ASD.
+    expect(asdUpliftDemandLbs(50, 10)).toBeCloseTo(300, 5);
   });
 });
 

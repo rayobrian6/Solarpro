@@ -6,6 +6,7 @@
 
 import { computeArrayGeometry, autoLayout, type ArrayGeometry, type ArrayLayoutInput } from './array-geometry';
 import { getMountingSystemById, resolveMountingSystemId, type MountingSystemSpec } from './mounting-hardware-db';
+import { allowableUpliftLbs, asdUpliftDemandLbs, MIN_ATTACHMENT_SF } from './structural/attachmentCapacity';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INPUT TYPES
@@ -569,7 +570,9 @@ function calcMountLayout(
 ): MountLayoutResult {
   const mount = system.mount;
   const maxSpacingIn = mount.maxSpacingIn;
-  const mountCapacityLbs = mount.upliftCapacityLbs;
+  // Basis-normalized ASD allowable (ultimate ratings reduced by Ω=3.0; unset
+  // basis treated conservatively as ultimate). ONE source: attachmentCapacity.
+  const allowableCapLbs = allowableUpliftLbs(mount.upliftCapacityLbs, mount.capacityBasis);
 
   // Tributary WIDTH perpendicular to the rail (across slope), per mount.
   // A row is carried by 2 rails (geometry.railCount = 2 × rowCount), so each
@@ -592,22 +595,26 @@ function calcMountLayout(
   let iterations = 0;
   let spacingWasReduced = false;
 
-  // Iterative: tighten spacing until SF ≥ 2.0 (the permit's required minimum —
-  // was 1.5, which left attachments shipping a red "1.59 (min 2.0)" FAIL).
+  // Iterative: tighten spacing until the ASD demand fits the allowable —
+  // SF = P_allow / T_asd ≥ MIN_ATTACHMENT_SF (1.0). Demand and capacity are BOTH
+  // ASD (0.6·W over tributary vs the basis-normalized allowable), so the safety
+  // margin lives inside the allowable, not in an extra multiplier. This replaces
+  // the old strength-demand-vs-capacity/2.0 check, which triple-counted safety on
+  // allowable-basis mounts (≈3.3× too many feet) and was ~right only for ultimate.
   while (spacingIn >= 12) {
     iterations++;
     const tribAreaFt2 = (spacingIn * railTribWidthIn) / 144;
-    const upliftPerMount = netUpliftPsf * tribAreaFt2;
-    const sf = mountCapacityLbs / upliftPerMount;
-    if (sf >= 2.0) break;
+    const upliftPerMount = asdUpliftDemandLbs(netUpliftPsf, tribAreaFt2);
+    const sf = allowableCapLbs / upliftPerMount;
+    if (sf >= MIN_ATTACHMENT_SF) break;
     spacingIn -= 6;
     spacingWasReduced = true;
   }
   spacingIn = Math.max(12, spacingIn);
 
   const tribAreaFt2 = (spacingIn * railTribWidthIn) / 144;
-  const upliftPerMount = netUpliftPsf * tribAreaFt2;
-  const safetyFactor = mountCapacityLbs / upliftPerMount;
+  const upliftPerMount = asdUpliftDemandLbs(netUpliftPsf, tribAreaFt2);
+  const safetyFactor = allowableCapLbs / upliftPerMount;
 
   // Downward load per mount
   const downwardPerMount = 0; // calculated separately if needed
@@ -623,7 +630,7 @@ function calcMountLayout(
     safetyFactor,
     upliftPerMountLbs: upliftPerMount,
     downwardPerMountLbs: downwardPerMount,
-    mountCapacityLbs,
+    mountCapacityLbs: allowableCapLbs,
     tributaryAreaPerMountFt2: tribAreaFt2,
     spacingWasReduced,
     maxAllowedSpacingIn: maxSpacingIn,
@@ -1265,13 +1272,13 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
                          system.systemType === 'ground_concrete' ||
                          system.systemType === 'tracker_single_axis' ||
                          system.systemType === 'tracker_dual_axis';
-  if (!skipMountCheck && mountLayout.safetyFactor < 1.5) {
+  if (!skipMountCheck && mountLayout.safetyFactor < MIN_ATTACHMENT_SF) {
     errors.push({
       code: 'MOUNT_INSUFFICIENT_CAPACITY',
-      message: `Mount safety factor ${mountLayout.safetyFactor.toFixed(2)} < 1.5 required`,
+      message: `Attachment ASD uplift demand exceeds allowable (SF ${mountLayout.safetyFactor.toFixed(2)} < ${MIN_ATTACHMENT_SF.toFixed(1)}) even at minimum spacing`,
       severity: 'error',
       suggestion: 'Upgrade to higher-capacity mount or reduce mount spacing',
-      reference: 'ASCE 7-22 §26.10',
+      reference: 'ASCE 7-22 §2.4 (0.6D+0.6W)',
     });
   }
 
