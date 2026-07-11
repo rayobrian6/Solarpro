@@ -40,8 +40,15 @@ export function titleBlock(
   const inverterMfr   = firstInv?.manufacturer   || project.inverterMfr  || '';
   const moduleDisplay   = [moduleMfr, moduleModel].filter(Boolean).join(' ') || '—';
   const inverterDisplay = [inverterMfr, inverterModel].filter(Boolean).join(' ') || '—';
-  const systemSizeKw    = system?.totalDcKw ? `${system.totalDcKw.toFixed(2)} kW DC` : '—';
-  const panelCount      = system?.totalPanels ? `${system.totalPanels} modules` : '';
+  // HYBRID: sheet-scoped inputs (e.g. the roof site plan documenting only the
+  // roof subset) stash the PROJECT totals — the title block is project-wide
+  // chrome and must never show subset numbers (PV-1 printed "20.40 kW / 51
+  // modules" on a 94-module hybrid while the cover said 37.60/94).
+  const _sysAny = system as (typeof system & { _projectTotalDcKw?: number; _projectTotalPanels?: number }) | undefined;
+  const _tbDcKw = _sysAny?._projectTotalDcKw ?? system?.totalDcKw;
+  const _tbPanels = _sysAny?._projectTotalPanels ?? system?.totalPanels;
+  const systemSizeKw    = _tbDcKw ? `${_tbDcKw.toFixed(2)} kW DC` : '—';
+  const panelCount      = _tbPanels ? `${_tbPanels} modules` : '';
 
   // Industry-standard VERTICAL title-block strip on the right edge of every
   // sheet — firm block, project block, meta, revisions, PE seal, sheet name,

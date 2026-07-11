@@ -4508,9 +4508,14 @@ function EngineeringPageInner() {
                   fenceLengthFt: Math.ceil(subSystemCounts.fence * _panelWidFt * 1.05) };
               }
               if (key === 'ground') {
+                const _gRows = new Set(
+                  ((projectLayout?.panels ?? []) as any[])
+                    .filter(pp => String(pp.systemType ?? pp.placementType ?? '').toLowerCase().startsWith('ground'))
+                    .map(pp => String(pp.layoutId ?? pp.arrayId ?? pp.arrayRow ?? pp.row ?? '0')));
                 return { key, panelCount: subSystemCounts.ground,
                   groundTiltDeg: (projectLayout as any)?.groundTilt ?? 25,
-                  groundAzimuth: (projectLayout as any)?.groundAzimuth ?? 180 };
+                  groundAzimuth: (projectLayout as any)?.groundAzimuth ?? 180,
+                  rowCount: _gRows.size > 1 ? _gRows.size : undefined };
               }
               return { key, panelCount: subSystemCounts.roof };
             }),
@@ -5513,8 +5518,16 @@ function EngineeringPageInner() {
             const gm = mountSys?.groundMount as any;
             const pileSpacingFt = gma?.pileSpacingFt ?? gm?.pileSpacingFt ?? 10;
             const pileEmbedFt = gma?.pileEmbedmentFt ?? gm?.pileEmbedmentFt ?? 4;
-            const rowCount = config.rowCount ?? 1;
             const _groundPanels = subSystemCounts.ground > 0 ? subSystemCounts.ground : totalPanels;
+            // Real row count from the designed layout (one layoutId per placed
+            // ground row) — config.rowCount defaulted to 1, which shaped the
+            // ground BOM as a single 26-panel row (22 piers / 14 rails) instead
+            // of the designed 2×13 (Stowell CSV, Ray 2026-07-11).
+            const _groundRowKeys = new Set(
+              ((projectLayout?.panels ?? []) as any[])
+                .filter(pp => String(pp.systemType ?? pp.placementType ?? '').toLowerCase().startsWith('ground'))
+                .map(pp => String(pp.layoutId ?? pp.arrayId ?? pp.arrayRow ?? pp.row ?? '0')));
+            const rowCount = _groundRowKeys.size > 1 ? _groundRowKeys.size : (config.rowCount ?? 1);
             const panelsPerRow = Math.ceil(_groundPanels / rowCount);
             const panelWidthIn = 41.7;  // default panel width in inches
             const arrayWidthFt = (panelsPerRow * panelWidthIn) / 12;

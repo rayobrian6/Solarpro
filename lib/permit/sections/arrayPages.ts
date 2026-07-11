@@ -573,7 +573,10 @@ export function pageArrayPrimary(input: PermitInput, cad: CADModel, pageNum: num
     const roofInput = { ...input,
       project: { ...(input.project ?? {}),
         panelPositions: ((input.project?.panelPositions ?? []) as any[]).filter(p => classifyPanel(p) === 'roof') },
-      system: { ...(input.system ?? {}), totalPanels: _hybRoof.totalPanels, totalDcKw: _hybRoof.dcKw },
+      system: { ...(input.system ?? {}), totalPanels: _hybRoof.totalPanels, totalDcKw: _hybRoof.dcKw,
+        // Project totals for project-wide chrome (title block) — the subset
+        // totals above are for the sheet header/drawing only.
+        _projectTotalDcKw: input.system?.totalDcKw, _projectTotalPanels: input.system?.totalPanels },
     } as PermitInput;
     return pageRoofPlan(roofInput, roofView, pageNum, totalPages, ctx);
   }

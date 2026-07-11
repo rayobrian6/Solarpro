@@ -119,6 +119,12 @@ export interface BOMGenerationInputV4 {
    * project-wide exemption wrongly skipped RSD for on-roof panels — Stowell).
    */
   subSystemCounts?: { roof: number; ground: number; fence: number };
+  /**
+   * Hybrid (P3): explicit roof-subset row/string count (from roofData.stringCount).
+   * When absent and subSystemCounts is present, Stage 5 pro-rates the project
+   * rows by the roof share: ceil(roofModules / (moduleCount / rows)).
+   */
+  roofStringCount?: number;
 
   // Electrical
   mainPanelAmps: number;
@@ -236,6 +242,20 @@ function nextStandardBreaker(amps: number): number {
 
 function conduitLength(wireLength: number, fittingAllowance = 1.15): number {
   return Math.ceil(wireLength * fittingAllowance);
+}
+
+// ─── Open-Air / Conduit-Less Run Detection ───────────────────────────────────
+// Micro ROOF_RUN / BRANCH_RUN segments carry conduitType 'NONE' + isOpenAir
+// (open-air PV wire / trunk cable per NEC 690.31 — no raceway until the roof
+// junction box). These runs must produce NO conduit line item and must NOT
+// feed the conduit-fitting counts: the Stowell hybrid CSV billed 58 ft of
+// '"N/A" NONE Conduit' (SKU NONE-N-A, $43.50) off the 50-ft branch run.
+// Wire line items from these runs still emit — the conductors are real.
+function runHasNoConduit(r: RunSegment): boolean {
+  if (r.isOpenAir === true) return true;
+  const t = String(r.conduitType ?? '').trim().toUpperCase();
+  return t === 'NONE' || t === 'N/A' || t === 'NA'
+    || t === 'FREE AIR' || t === 'FREE_AIR' || t === 'OPEN AIR' || t === 'OPEN_AIR';
 }
 
 // ─── ID Generator ─────────────────────────────────────────────────────────────
@@ -892,8 +912,10 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     }
 
     // ── Group ALL runs by conduit type+size → one conduit line item per type/size ──
+    // Open-air runs (conduitType 'NONE' / isOpenAir) carry no raceway — skip them.
     const conduitMap = new Map<string, { qty: number; type: string; size: string }>();
     for (const r of allBomRuns) {
+      if (runHasNoConduit(r)) continue;
       const cType: string = r.conduitType ?? input.conduitType ?? 'EMT';
       const cSize: string = (r.conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
       const key = `${cType}-${cSize}`;
@@ -946,7 +968,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const totalConduitFt = (() => {
       if (input.runs && input.runs.length > 0) {
         return input.runs
-          .filter(r => !r.isUtilityOwned)
+          // Utility-owned and open-air (no-conduit) runs carry no raceway —
+          // they must not inflate connector/coupling/bushing/strap counts.
+          .filter(r => !r.isUtilityOwned && !runHasNoConduit(r))
           .reduce((sum: number, r) =>
             sum + Math.ceil((r.onewayLengthFt ?? 30) * 1.15), 0);
       }
@@ -1224,11 +1248,58 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     emitRackingBOM(_roofRB, _roofRB.manufacturer);
   }
 
-  if (rackingEntry) {
+  // ── HYBRID (P3) roof-subset basis for the registry racking formulas ────────
+  // V4's Stage 5 registry path is the ROOF racking authority. In a hybrid
+  // project (subSystemCounts present) its per-module / per-string accessory
+  // formulas must scale to the ROOF SUBSET, not the project totals — the
+  // Stowell CSV billed WEEB lugs ×94 and UFO mid clamps (94−strings)×2 for a
+  // 51-module roof. attachments/railSections need no scaling here: the route
+  // already threads the roof-subset values from roofData.
+  const _hybridSubset = !!input.subSystemCounts;
+  const _roofBasisModules = _hybridSubset
+    ? Math.max(0, input.subSystemCounts!.roof)
+    : input.moduleCount;
+  // Roof-subset row/string basis: explicit input.roofStringCount wins; else
+  // pro-rate: ceil(roofModules / (moduleCount / rows)) — rows = stringCount
+  // when the topology has strings, else effectiveRows (micro row proxy).
+  const _roofBasisStrings = (() => {
+    if (!_hybridSubset) return effectiveRows;
+    if (input.roofStringCount && input.roofStringCount > 0) return Math.ceil(input.roofStringCount);
+    if (_roofBasisModules <= 0) return 0;
+    const _rows = input.stringCount > 0 ? input.stringCount : effectiveRows;
+    const _modulesPerRow = _rows > 0 ? input.moduleCount / _rows : 4;
+    return Math.max(1, Math.ceil(_roofBasisModules / Math.max(1, _modulesPerRow)));
+  })();
+
+  // Rail-less roof racking (Ray, 2026-07-11): the RT-MINI flashed pad IS the
+  // attachment — in a hybrid payload the generic rail-formula accessories that
+  // its registry entry defaults to (IronRidge XR rails / UFO clamps / L-feet)
+  // must NOT be billed alongside the pads: the Stowell CSV double-branded ONE
+  // roof (RT-MINI pads ×96 + a full IronRidge rail set scaled to all 94
+  // modules). Suppression is scoped to hybrid payloads so legacy single-system
+  // BOMs (no subSystemCounts) stay byte-identical; the permit path (rackingBOM
+  // from calcRackingBOM) is untouched either way — it bypasses these formulas.
+  const RAIL_LESS_ROOF_RACKING = new Set(['rooftech-mini']);
+  const RAIL_FORMULA_CATEGORIES = new Set(['rail', 'splice', 'mid_clamp', 'end_clamp', 'l_foot']);
+  // Scaling/suppression applies only to ROOF racking entries — a hybrid whose
+  // resolved rackingId is a ground/fence system keeps legacy behavior (its
+  // structural truth comes from bom-system-profiles, not this stage).
+  const _isRoofRackingEntry = !!rackingEntry
+    && String(rackingEntry.mountTopology ?? rackingEntry.topologyType ?? 'ROOF').toUpperCase().startsWith('ROOF');
+  const _scaleToRoofSubset = _hybridSubset && _isRoofRackingEntry;
+  const _suppressRailFormulas = _scaleToRoofSubset && !_roofRB
+    && RAIL_LESS_ROOF_RACKING.has(rackingEntry!.id);
+
+  if (rackingEntry && _scaleToRoofSubset && _roofBasisModules <= 0) {
+    // Hybrid with ZERO roof modules — no roof racking system at all.
+    log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
+      quantity: 0, derivedFrom: 'subSystemCounts.roof = 0 — roof racking suppressed',
+      formula: '0', necReference: rackingEntry.iccEsReport });
+  } else if (rackingEntry) {
     // Primary racking system
     items.push(addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
       rackingEntry.partNumber ?? rackingEntry.id,
-      `${rackingEntry.manufacturer} ${rackingEntry.model} — ${rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less'} mount`,
+      `${rackingEntry.manufacturer} ${rackingEntry.model} — ${_suppressRailFormulas ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`,
       1, 'lot', rackingEntry.iccEsReport ?? 'IBC 2021', 'perSystem', '1', true));
     log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
       quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: rackingEntry.iccEsReport });
@@ -1243,23 +1314,43 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     } else {
       // Resolve all racking accessories (registry formulas — design-studio fallback)
       for (const acc of rackingEntry.requiredAccessories) {
+        // Rail-less system in a hybrid payload: the generic rail-formula lines
+        // (rails/splices/clamps/L-feet — IronRidge-branded defaults on the
+        // RT-MINI entry) must not bill alongside the flashed pads.
+        if (_suppressRailFormulas && RAIL_FORMULA_CATEGORIES.has(acc.category)) {
+          log.push({ stageId: 'structural', category: acc.category,
+            item: acc.defaultModel ?? acc.description, quantity: 0,
+            derivedFrom: `suppressed — ${rackingEntry.id} is rail-less (pads include the attachment)`,
+            formula: '0', necReference: acc.necReference });
+          continue;
+        }
         // Check conditional
         if (acc.conditional) {
           const conditionMet = evaluateConditionBOM(acc.conditional, input.roofType);
           if (!conditionMet) continue;
         }
 
+        // HYBRID: module/string bases scale to the roof subset (51 of 94 —
+        // Stowell); legacy payloads keep the project-wide values verbatim.
+        const _accModules = _scaleToRoofSubset ? _roofBasisModules : input.moduleCount;
+        const _accStrings = _scaleToRoofSubset ? _roofBasisStrings : input.stringCount;
+
         let qty = 1;
         if (acc.quantityRule === 'formula' && acc.quantityFormula) {
           qty = evaluateQuantityFormulaV4(acc.quantityFormula, {
             ...formulaCtx,
+            ...(_scaleToRoofSubset ? {
+              modules: _roofBasisModules,
+              strings: _roofBasisStrings,
+              branches: _roofBasisStrings,
+            } : {}),
             attachments: input.attachmentCount,
             railSections: input.railSections,
           });
         } else if (acc.quantityRule === 'perModule') {
-          qty = input.moduleCount;
+          qty = _accModules;
         } else if (acc.quantityRule === 'perString') {
-          qty = input.stringCount;
+          qty = _accStrings;
         } else if (acc.quantityRule === 'perAttachment') {
           qty = input.attachmentCount;
         } else if (acc.quantityRule === 'perSystem') {

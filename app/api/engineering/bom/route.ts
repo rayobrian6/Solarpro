@@ -214,9 +214,15 @@ export async function POST(req: NextRequest) {
       // HYBRID: V4's racking stage is roof-only by design — when the client sends
       // a roof subset (roofData.mountingSystemId), that id is the roof racking
       // authority even if the project-level rackingId is a fence/ground system.
+      // Exactly ONE roof racking system per BOM. Precedence:
+      //   roofData.mountingSystemId > body.rackingId > body.mountingSystemId
+      // (a conflicting design_electrical rackingId like 'ironridge-xr100' must
+      // never coexist with the config mounting system 'rooftech-mini').
       rackingId:          (typeof _roofData?.mountingSystemId === 'string' && _roofData.mountingSystemId)
                             ? _roofData.mountingSystemId
-                            : body.rackingId,
+                            : (body.rackingId
+                                ?? ((typeof body.mountingSystemId === 'string' && body.mountingSystemId)
+                                      ? body.mountingSystemId : undefined)),
       batteryId:          body.batteryId,
       batteryCount:       Number(body.batteryCount) || undefined,  // C6 fix: was dropped → bom-engine forced battery qty to 1
       panelId:            body.panelId,
@@ -350,6 +356,9 @@ export async function POST(req: NextRequest) {
       // systemType is fence/ground (Stowell: 51 on-roof modules need module-level
       // RSD despite the fence project tag).
       subSystemCounts:          _ssc,
+      // HYBRID (P3): optional explicit roof-subset string/row count. When
+      // absent the engine pro-rates project rows by the roof module share.
+      roofStringCount:          _finiteOrUndef(_roofData?.stringCount),
       // fenceData/groundData still accepted for structural derivation (passed to merge layer)
       fenceData:                body.fenceData,
       groundData:               body.groundData,
