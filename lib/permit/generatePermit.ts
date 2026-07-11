@@ -71,8 +71,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // nothing to render and would only produce blank sheets.
   if (cad.roof?.planes) {
     const before = cad.roof.planes.length;
+    // designedEmpty facets are the user's stitched roofline with no modules on
+    // that side — they MUST survive as outline-only planes. Stripping them
+    // deleted half of Stowell's gable from every roof sheet.
     cad.roof.planes = cad.roof.planes.filter(
-      (p: any) => p.panels && p.panels.length > 0
+      (p: any) => (p.panels && p.panels.length > 0) || p.designedEmpty
     );
     const removed = before - cad.roof.planes.length;
     if (removed > 0) {

@@ -46,6 +46,11 @@ export interface CADRoofPlane {
     rakeM:   number;
   };
   panels:         CADPanel[];
+  /** True when the DESIGN carries real panels elsewhere but placed none on
+   *  this facet — the user stitched the full roofline and left it empty.
+   *  Such planes render as outline-only (never grid-filled, never stripped:
+   *  deleting them erased half of Stowell's gable from the site plan). */
+  designedEmpty?: boolean;
   dimensions: {
     widthM:     number;
     heightM:    number;
@@ -232,11 +237,20 @@ export interface CADModel {
    *  system type. Each grafted section's local XY is relative to its OWN
    *  origin (recorded here) — renderers drawing sections together (site plan)
    *  must re-project using these origins vs the base originLat/originLng. */
+  /* (see CADRoofPlane.designedEmpty for empty-facet semantics) */
   hybrid?: {
     sections: Array<{
       key: 'roof' | 'ground' | 'fence';
       originLat: number; originLng: number;
       totalPanels: number; dcKw: number;
+      /** REAL designed panel positions for this sub-system (lat/lng centers,
+       *  straight from the design studio). Site-plan overlays draw from THESE
+       *  — never from a solver's synthesized local geometry, which is not
+       *  registered to where the user actually placed the array (Stowell). */
+      panels?: Array<{
+        lat: number; lng: number;
+        azimuth?: number; row?: number; arrayId?: string;
+      }>;
     }>;
   };
 

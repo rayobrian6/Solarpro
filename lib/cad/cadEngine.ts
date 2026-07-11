@@ -173,6 +173,16 @@ export function generateCADLayout(input: PermitInputShape): CADModel {
         key: sub.key,
         originLat: _oLat, originLng: _oLng,
         totalPanels: m.totalPanels, dcKw: m.totalDcKw,
+        // Real designed positions — the site-plan overlay draws these, NOT the
+        // solver's synthesized geometry (which is not registered to the design).
+        panels: (sub.panels as any[])
+          .filter(p => isFinite(p?.lat) && isFinite(p?.lng) && Math.abs(p.lat) > 0.001)
+          .map(p => ({
+            lat: p.lat, lng: p.lng,
+            azimuth: typeof p.azimuth === 'number' ? p.azimuth : undefined,
+            row: typeof p.row === 'number' ? p.row : undefined,
+            arrayId: (p.arrayId ?? p.layoutId ?? undefined) as string | undefined,
+          })),
       });
     }
     // Project-wide totals (consistency checks compare vs canonical.panels).

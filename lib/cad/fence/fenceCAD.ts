@@ -83,7 +83,117 @@ export function fenceCAD(input: PermitInputShape): CADModel {
     tilt?:      number;
     bifacial?:  boolean;
     label?:     string;
+    // GPS-first path only: real panel offsets (m, from segment start, panel
+    // left edge along the axis) + the design's real panel ids, in axis order.
+    panelOffsetsM?: number[];
+    panelIds?:      string[];
   }>;
+
+  // ── GPS-first: real designed fence panel positions ───────────
+  // panelPositions is already SCOPED to fence panels by the hybrid engine.
+  // When the design carries real GPS modules, they are AUTHORITATIVE — build
+  // segments from them (principal axis per array group) instead of trusting
+  // layout.fenceSegments (fence_line is often NULL → old code fabricated a
+  // schematic segment at lat 0/0, azimuth 90, ignoring the real fence).
+  const rawGpsPanels = (input.project?.panelPositions || []).filter(
+    (p: any) => p && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) > 0.001
+  ) as any[];
+  let gpsOrigin: { lat: number; lng: number } | null = null;
+
+  if (rawGpsPanels.length > 0) {
+    rawSegs.length = 0; // GPS wins over fenceSegments input + schematic fallback
+
+    // Origin = centroid of the real fence panels
+    const cLat = rawGpsPanels.reduce((s, p) => s + p.lat, 0) / rawGpsPanels.length;
+    const cLng = rawGpsPanels.reduce((s, p) => s + p.lng, 0) / rawGpsPanels.length;
+    gpsOrigin = { lat: cLat, lng: cLng };
+
+    // Group panels by array/layout id → one fence segment per group
+    const groups = new Map<string, any[]>();
+    for (const p of rawGpsPanels) {
+      const key = String(p.arrayId ?? (p as any).layoutId ?? '__fence__');
+      const g = groups.get(key);
+      if (g) g.push(p); else groups.set(key, [p]);
+    }
+
+    const azOfVec  = (vx: number, vy: number) =>
+      (Math.atan2(vx, vy) * 180 / Math.PI + 360) % 360;
+    const angDiff  = (a: number, b: number) => {
+      const d = Math.abs(a - b) % 360;
+      return d > 180 ? 360 - d : d;
+    };
+
+    let segIdx = 0;
+    for (const [key, group] of groups) {
+      const pts = group.map(p => latLngToXY(p.lat, p.lng, cLat, cLng));
+      const mx = pts.reduce((s, pt) => s + pt.x, 0) / pts.length;
+      const my = pts.reduce((s, pt) => s + pt.y, 0) / pts.length;
+
+      // Median of the design panels' facing azimuths (when present)
+      const azs = group
+        .map(p => p.azimuth)
+        .filter((a: any) => typeof a === 'number' && isFinite(a))
+        .sort((a: number, b: number) => a - b);
+      const azMed: number | null = azs.length > 0 ? azs[Math.floor(azs.length / 2)] : null;
+
+      // Principal axis of the group's local points (covariance eigenvector)
+      let sxx = 0, sxy = 0, syy = 0;
+      for (const pt of pts) {
+        const dx = pt.x - mx, dy = pt.y - my;
+        sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+      }
+      let ux: number, uy: number;
+      if (group.length >= 2 && (sxx + syy) > 1e-9) {
+        const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+        ux = Math.cos(theta); uy = Math.sin(theta);
+      } else if (azMed != null) {
+        // Single panel (or degenerate cluster): axis ⟂ to the panel's facing
+        const azRad = azMed * Math.PI / 180;
+        ux = Math.cos(azRad); uy = -Math.sin(azRad);
+      } else {
+        ux = 1; uy = 0; // east-west default
+      }
+
+      // Project onto the axis: endpoints = extreme projections ± half a panel
+      const ts   = pts.map(pt => (pt.x - mx) * ux + (pt.y - my) * uy);
+      const tMin = Math.min(...ts);
+      const tMax = Math.max(...ts);
+      const halfW = panelWM / 2;
+      const startXY = { x: mx + ux * (tMin - halfW), y: my + uy * (tMin - halfW) };
+      const endXY   = { x: mx + ux * (tMax + halfW), y: my + uy * (tMax + halfW) };
+      const lengthM = (tMax - tMin) + panelWM;
+
+      // Segment azimuth = ⟂ to axis; pick the side matching the design's
+      // median panel azimuth, else the equatorward side.
+      const cand1 = azOfVec(uy, -ux);
+      const cand2 = azOfVec(-uy, ux);
+      const target = azMed != null ? azMed : (cLat >= 0 ? 180 : 0);
+      const segAz = angDiff(cand1, target) <= angDiff(cand2, target) ? cand1 : cand2;
+
+      // Real panel offsets along the axis (left-edge convention, sorted)
+      const order = ts.map((t, i) => i).sort((a, b) => ts[a] - ts[b]);
+      const offsets = order.map(i => ts[i] - tMin);
+      const ids     = order.map(i => String(group[i].id ?? `gps-p${i}`));
+
+      rawSegs.push({
+        id:         key === '__fence__' ? `gps-seg${segIdx}` : key,
+        startPoint: { lat: 0, lng: 0, x: startXY.x, y: startXY.y },
+        endPoint:   { lat: 0, lng: 0, x: endXY.x, y: endXY.y },
+        lengthFt:   metersToFt(lengthM),
+        azimuth:    segAz,
+        panelCount: group.length,
+        tilt:       90,
+        bifacial:   false,
+        label:      `SEG-${segIdx + 1}`,
+        panelOffsetsM: offsets,
+        panelIds:      ids,
+      });
+      segIdx++;
+    }
+
+    const gpsTotalLenFt = rawSegs.reduce((s, seg) => s + seg.lengthFt, 0);
+    console.log(`[fenceCAD] source=GPS segments=${rawSegs.length} panels=${rawGpsPanels.length} lengthFt=${gpsTotalLenFt.toFixed(1)}`);
+  }
 
   if (rawSegs.length === 0) {
     warnings.push('fenceCAD: no fenceSegments — generating schematic single-segment');
@@ -102,11 +212,12 @@ export function fenceCAD(input: PermitInputShape): CADModel {
     });
   }
 
-  // ── Global origin — first segment start ──────────────────────
+  // ── Global origin — GPS centroid (GPS path) or first segment start ──
   const firstSeg  = rawSegs[0];
-  const hasLatLng = firstSeg?.startPoint?.lat && Math.abs(firstSeg.startPoint.lat) > 0.001;
-  const originLat = hasLatLng ? firstSeg.startPoint.lat : 0;
-  const originLng = hasLatLng ? firstSeg.startPoint.lng : 0;
+  const hasLatLng = !gpsOrigin &&
+    firstSeg?.startPoint?.lat && Math.abs(firstSeg.startPoint.lat) > 0.001;
+  const originLat = gpsOrigin ? gpsOrigin.lat : hasLatLng ? firstSeg.startPoint.lat : 0;
+  const originLng = gpsOrigin ? gpsOrigin.lng : hasLatLng ? firstSeg.startPoint.lng : 0;
 
   // ── Convert segments to local XY ──────────────────────────────
   const cadSegments: CADFenceSegment[] = [];
@@ -134,17 +245,22 @@ export function fenceCAD(input: PermitInputShape): CADModel {
     // Snap to whole sections from the start — no centering, no auto-fill.
     // Small margin at end is acceptable (real install behavior).
     const sectionW = panelWM + PANEL_GAP_M;  // one panel per section slot
-    const panelCount = seg.panelCount || Math.floor(lengthM / sectionW);
+    // GPS path: real designed offsets drive placement (count = design count)
+    const gpsOffsets = seg.panelOffsetsM;
+    const panelCount = gpsOffsets
+      ? gpsOffsets.length
+      : (seg.panelCount || Math.floor(lengthM / sectionW));
     const panels: CADPanel[] = [];
     const segSections: CADFenceSection[] = [];
     let sectionIdx = 0;
 
     for (let pi = 0; pi < panelCount; pi++) {
-      const t = pi * sectionW;
+      const t = gpsOffsets ? gpsOffsets[pi] : pi * sectionW;
 
-      // Skip if panel falls within a gate opening
+      // Skip if panel falls within a gate opening.
+      // GPS path: designed positions are authoritative — never drop them.
       const panelAbsPos = cumulativeLengthM + t;
-      const inGate = gateOpeningsM.some(g =>
+      const inGate = !gpsOffsets && gateOpeningsM.some(g =>
         panelAbsPos + panelWM > g.positionM &&
         panelAbsPos < g.positionM + g.widthM
       );
@@ -170,7 +286,7 @@ export function fenceCAD(input: PermitInputShape): CADModel {
       const py = startXY.y + uy * t;
 
       panels.push({
-        id:          `${seg.id}-p${pi}`,
+        id:          seg.panelIds?.[pi] ?? `${seg.id}-p${pi}`,
         x:           px,
         y:           py,
         widthM:      panelWM,

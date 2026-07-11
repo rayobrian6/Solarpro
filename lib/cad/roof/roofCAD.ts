@@ -282,11 +282,14 @@ export function roofCAD(input: PermitInputShape): CADModel {
       );
 
       const _designedPlane = planeGpsPanels.length > 0;
-      if (planeGpsPanels.length === 0 && gpsPanels.length > 0) {
+      const _designedEmpty = planeGpsPanels.length === 0 && gpsPanels.length > 0;
+      if (_designedEmpty) {
         // The DESIGN has real panels, just none on THIS plane — the designer
         // left it empty. Grid-filling here fabricated modules (Stowell hybrid:
         // 24 phantom modules on the empty az-270 plane → 19 phantom fire-setback
         // encroachments + roof table claiming 75 modules where the design has 51).
+        // designedEmpty keeps the facet in the model as OUTLINE-ONLY — the
+        // stitched roofline must still draw (stripping it erased half the gable).
         console.log(`[PANEL GRID GENERATED] roofCAD plane=${rp.id} source=DESIGN-EMPTY count=0`);
       } else if (planeGpsPanels.length > 0) {
         // Use GPS panel positions directly
@@ -420,6 +423,7 @@ export function roofCAD(input: PermitInputShape): CADModel {
         areaSqM,
         setbacks:      planeSetbacks,
         panels:        filteredPanels,
+        designedEmpty: _designedEmpty || undefined,
         obstructions:  planeObstructions,
         dimensions: {
           widthM:      filteredBB.width,
@@ -653,9 +657,11 @@ function appendCADRoofPlaneFromLocal(args: {
   );
 
   let planePanels: CADPanel[];
-  if (planeGpsPanels.length === 0 && gpsPanels.length > 0) {
+  const _designedEmpty = planeGpsPanels.length === 0 && gpsPanels.length > 0;
+  if (_designedEmpty) {
     // Design has real panels elsewhere — this plane is intentionally empty.
     // Never fabricate a grid on a designed project (see rawPlanes branch).
+    // designedEmpty keeps the facet OUTLINE-ONLY in the model (never stripped).
     planePanels = [];
     console.log(`[PANEL GRID GENERATED] roofCAD canonical plane=${rp.id} source=DESIGN-EMPTY count=0`);
   } else if (planeGpsPanels.length > 0) {
@@ -753,6 +759,7 @@ function appendCADRoofPlaneFromLocal(args: {
     areaSqM:       rp.areaSqM,
     setbacks,
     panels:        filteredPanels,
+    designedEmpty: _designedEmpty || undefined,
     obstructions:  planeObstructions,
     dimensions: {
       widthM:      filteredBB.width,

@@ -280,7 +280,9 @@ function validateRoof(
           errors.push(`${label}: ${badPts.length} polygon vertices have non-finite coordinates`);
         }
       }
-      if (!plane.panels || plane.panels.length === 0) {
+      if ((!plane.panels || plane.panels.length === 0) && !plane.designedEmpty) {
+        // designedEmpty: the user's stitched roofline includes facets with no
+        // modules — they render outline-only and are valid by design.
         errors.push(`${label}: panels is empty — cannot render a plane with no panels`);
       }
       if (!isFinite(plane.pitch) || plane.pitch < 0 || plane.pitch > 90) {
