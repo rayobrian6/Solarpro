@@ -1,28 +1,32 @@
 // lib/migrations/types.ts
 //
 // Phase 1A — Migration Governance Foundation (MIGRATION-GOV-01)
+// Phase 1A.1 — Operational Hardening (MIGRATION-GOV-02..08)
 //
 // Type definitions for the canonical migration execution model.
 // This module defines ALL shared types used across the migration governance
 // subsystem (manifest, validation, ledger, runner, authorization, audit).
 //
-// Scope boundary: MIGRATION-GOV-01 ONLY. No org/membership/ownership changes.
+// Scope boundary: Migration governance ONLY. No org/membership/ownership changes.
 
 /**
- * The lifecycle status of a migration as recorded in the `schema_migrations`
- * ledger.
+ * The current-state status of a migration as recorded in the `schema_migrations`
+ * current-state table (one row per migration+environment).
+ *
+ * This table reflects the LATEST known state of each migration. It is NOT the
+ * attempt history — attempt history is recorded in `schema_migration_runs`
+ * (append-only, one row per event).
  *
  * - `pending`   — The migration has been discovered in the manifest but has not
  *                 yet been attempted in this environment.
  * - `running`   — The migration is currently executing (recorded at start;
  *                  updated to `applied` or `failed` on completion).
  * - `applied`   — The migration was successfully applied in this environment.
- *                  This is a terminal state for a given environment; the row is
- *                  never deleted or mutated (append-only history).
+ *                  Terminal state for the current-state row.
  * - `failed`    — The migration was attempted and failed. The transaction was
- *                  rolled back. May be retried (which creates a new `running`
- *                  → `applied`/`failed` cycle; the failed row is retained for
- *                  history).
+ *                  rolled back. May be retried (which creates a new attempt
+ *                  record in `schema_migration_runs`; the current-state row is
+ *                  updated to reflect the latest attempt).
  * - `superseded` — Explicitly deprecated by an administrative act. Terminal.
  */
 export type MigrationStatus =
@@ -31,6 +35,121 @@ export type MigrationStatus =
   | 'applied'
   | 'failed'
   | 'superseded';
+
+/**
+ * The status of an individual migration attempt event, recorded in the
+ * `schema_migration_runs` append-only history table.
+ *
+ * Each row in `schema_migration_runs` represents a single event in a migration
+ * attempt's lifecycle. A single attempt (identified by `execution_id`) may
+ * produce multiple rows: typically a `started` row followed by an `applied`,
+ * `failed`, `denied`, or `skipped` row. Rows are INSERT-only — never updated
+ * or deleted.
+ *
+ * - `started` — The attempt has begun (recorded before the transaction).
+ * - `applied` — The attempt succeeded (the migration was applied).
+ * - `failed`  — The attempt failed (the transaction was rolled back).
+ * - `denied`  — The attempt was denied by authorization or governance.
+ * - `skipped` — The attempt was skipped (already applied, checksum matched).
+ */
+export type MigrationRunStatus =
+  | 'started'
+  | 'applied'
+  | 'failed'
+  | 'denied'
+  | 'skipped';
+
+/**
+ * The governance lifecycle state of the migration system for a given
+ * environment.
+ *
+ * The lifecycle progresses through these states in order:
+ *
+ * UNBOOTSTRAPPED → LEDGER_BOOTSTRAPPED → BASELINE_REQUIRED →
+ * BASELINE_IN_PROGRESS → BASELINE_VERIFIED → EXECUTION_ENABLED
+ *
+ * - `UNBOOTSTRAPPED`       — No ledger tables exist yet. The system cannot
+ *                            record or execute migrations.
+ * - `LEDGER_BOOTSTRAPPED`  — The ledger tables have been created but the
+ *                            historical baseline has not been reconciled.
+ * - `BASELINE_REQUIRED`    — The system requires baseline reconciliation before
+ *                            any migration execution. This is the state
+ *                            immediately after bootstrap.
+ * - `BASELINE_IN_PROGRESS` — Baseline reconciliation is in progress. No
+ *                            migrations may be executed.
+ * - `BASELINE_VERIFIED`    — The historical baseline has been reconciled and
+ *                            verified. Migrations may be inspected but not yet
+ *                            executed.
+ * - `EXECUTION_ENABLED`    — Migrations may be executed. Requires
+ *                            BASELINE_VERIFIED and explicit administrative
+ *                            enablement.
+ *
+ * Mutations (execute, bootstrap) are denied unless the lifecycle state is
+ * BASELINE_VERIFIED or EXECUTION_ENABLED. Dry-run (inspect) is always allowed.
+ */
+export type MigrationGovernanceLifecycle =
+  | 'UNBOOTSTRAPPED'
+  | 'LEDGER_BOOTSTRAPPED'
+  | 'BASELINE_REQUIRED'
+  | 'BASELINE_IN_PROGRESS'
+  | 'BASELINE_VERIFIED'
+  | 'EXECUTION_ENABLED';
+
+/**
+ * The reconciliation status of a migration in the historical baseline.
+ *
+ * Used during baseline reconciliation (Phase 1A.1 Issue 2) to classify each
+ * migration's applied state in a database that may have had migrations applied
+ * outside the governance system.
+ *
+ * - `CONFIRMED_APPLIED`     — Verified as applied to this environment.
+ * - `CONFIRMED_NOT_APPLIED` — Verified as not applied to this environment.
+ * - `PARTIALLY_APPLIED`     — Some statements applied, others not. Blocks
+ *                              execution.
+ * - `NOT_APPLICABLE`        — Not relevant to this environment (e.g.,
+ *                              feature-specific migration not deployed here).
+ * - `UNKNOWN`               — Cannot be determined. Blocks execution.
+ */
+export type BaselineReconciliationStatus =
+  | 'CONFIRMED_APPLIED'
+  | 'CONFIRMED_NOT_APPLIED'
+  | 'PARTIALLY_APPLIED'
+  | 'NOT_APPLICABLE'
+  | 'UNKNOWN';
+
+/**
+ * The type of evidence used to determine a baseline reconciliation status.
+ *
+ * - `SCHEMA_INTROSPECTION`  — Determined by querying information_schema.
+ * - `LEDGER_RECORD`         — Determined by an existing ledger row.
+ * - `MANUAL_VERIFICATION`   — Determined by human inspection.
+ * - `CHECKSUM_MATCH`        — Determined by matching the file checksum.
+ * - `OBJECT_EXISTENCE`      — Determined by checking for specific schema objects.
+ * - `NONE`                  — No evidence available (status will be UNKNOWN).
+ */
+export type BaselineEvidenceType =
+  | 'SCHEMA_INTROSPECTION'
+  | 'LEDGER_RECORD'
+  | 'MANUAL_VERIFICATION'
+  | 'CHECKSUM_MATCH'
+  | 'OBJECT_EXISTENCE'
+  | 'NONE';
+
+/**
+ * The transaction mode for a migration file, determining how it should be
+ * executed relative to database transactions.
+ *
+ * - `REQUIRED`      — The migration must be executed inside a transaction.
+ *                     This is the default for most migrations.
+ * - `FORBIDDEN`     — The migration contains transaction-incompatible
+ *                     statements (e.g., CREATE INDEX CONCURRENTLY, VACUUM,
+ *                     REINDEX CONCURRENTLY) and must be executed outside a
+ *                     transaction.
+ * - `MANUAL_REVIEW` — The migration's transaction compatibility cannot be
+ *                     automatically determined and requires manual review
+ *                     before execution.
+ */
+export type TransactionMode = 'REQUIRED' | 'FORBIDDEN' | 'MANUAL_REVIEW';
 
 /**
  * A single migration file discovered from the canonical `lib/migrations/`
@@ -88,7 +207,10 @@ export interface ManifestValidationResult {
 }
 
 /**
- * A row in the `schema_migrations` ledger, as read from the database.
+ * A row in the `schema_migrations` current-state table, as read from the
+ * database. This table has one row per (migration_identifier, environment)
+ * pair and reflects the LATEST known state. Attempt history is in
+ * `schema_migration_runs`.
  */
 export interface MigrationLedgerRow {
   id: number;
@@ -101,13 +223,75 @@ export interface MigrationLedgerRow {
   applied_at: string | null;
   failed_at: string | null;
   execution_duration_ms: number | null;
-  environment: string | null;
+  environment: string;
   applied_by_actor_type: string | null;
   applied_by_actor_id: string | null;
   execution_id: string | null;
   error_code: string | null;
   error_summary: string | null;
   rollback_reference: string | null;
+  /** ID of the most recent run record in schema_migration_runs (if any). */
+  last_run_id: number | null;
+  created_at: string;
+}
+
+/**
+ * A row in the `schema_migration_runs` append-only attempt-history table.
+ *
+ * Each row represents a single event in a migration attempt's lifecycle.
+ * A single attempt (identified by `execution_id`) may produce multiple rows
+ * (e.g., `started` then `applied`). Rows are INSERT-only — never updated or
+ * deleted. This preserves the full history of every attempt, including
+ * failures that were later retried and succeeded.
+ */
+export interface MigrationRunRow {
+  id: number;
+  run_id: string;
+  execution_id: string;
+  migration_identifier: string;
+  filename: string;
+  checksum_sha256: string;
+  environment: string;
+  status: MigrationRunStatus;
+  actor_type: string | null;
+  actor_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  execution_duration_ms: number | null;
+  error_code: string | null;
+  error_summary: string | null;
+  created_at: string;
+}
+
+/**
+ * A row in the `governance_lifecycle` table, recording the governance state
+ * for a given environment.
+ */
+export interface GovernanceLifecycleRow {
+  id: number;
+  environment: string;
+  lifecycle_state: MigrationGovernanceLifecycle;
+  baseline_reconciled_by: string | null;
+  baseline_reconciled_at: string | null;
+  execution_enabled_by: string | null;
+  execution_enabled_at: string | null;
+  last_state_change_at: string;
+  created_at: string;
+}
+
+/**
+ * A row in the `migration_baseline` table, recording the historical baseline
+ * reconciliation status for each migration in each environment.
+ */
+export interface MigrationBaselineRow {
+  id: number;
+  migration_identifier: string;
+  environment: string;
+  reconciliation_status: BaselineReconciliationStatus;
+  evidence_type: BaselineEvidenceType;
+  evidence_summary: string | null;
+  reconciled_by: string | null;
+  reconciled_at: string;
   created_at: string;
 }
 
@@ -191,11 +375,14 @@ export interface MigrationRunResult {
 
 /**
  * The inspection state of the migration system — combines the manifest (files on
- * disk) with the ledger (applied state in the database).
+ * disk) with the ledger (applied state in the database) and the governance
+ * lifecycle state.
  */
 export interface MigrationInspectionState {
   /** Whether the schema_migrations ledger exists. */
   ledgerExists: boolean;
+  /** The current governance lifecycle state for this environment. */
+  lifecycleState: MigrationGovernanceLifecycle;
   /** The discovered manifest. */
   manifest: MigrationManifest;
   /** Ledger rows keyed by migration_identifier. */
@@ -226,10 +413,20 @@ export type MigrationAuditEventType =
   | 'migration.migration.applied'
   | 'migration.migration.failed'
   | 'migration.migration.skipped'
+  | 'migration.migration.started'
   | 'migration.conflict.detected'
   | 'migration.checksum_mismatch'
   | 'migration.lock_denied'
+  | 'migration.lock_acquired'
   | 'migration.legacy.invoked'
+  | 'migration.baseline.started'
+  | 'migration.baseline.completed'
+  | 'migration.baseline.failed'
+  | 'migration.governance.state_change'
+  | 'migration.governance.execution_denied'
+  | 'migration.mfa.denied'
+  | 'migration.mfa.replay_detected'
+  | 'migration.transaction_mode.review_required'
   | 'manifest.duplicate_prefix';
 
 /**
@@ -277,9 +474,23 @@ export interface RunSingleMigrationOptions {
  * A fixed 64-bit advisory lock key used to guard migration execution.
  *
  * This is the ASCII encoding of "SOLPMGDR" (SolarPro Migration Governance) as a
- * 64-bit big-endian integer, used with pg_advisory_xact_lock.
+ * 64-bit big-endian integer. The exact decimal value is 6003100736085771346.
+ *
+ * IMPORTANT: This value exceeds Number.MAX_SAFE_INTEGER (9007199254740991),
+ * so it CANNOT be stored as a plain JavaScript number without precision loss.
+ * A JS number renders it as 6003100736085771000 (rounded), which is a different
+ * key. Phase 1A.1 stores the lock key as a decimal string and casts it to
+ * BIGINT in PostgreSQL to preserve exactness. See MIGRATION-GOV-06.
+ *
+ * The lock is used with pg_try_advisory_xact_lock (transaction-scoped, bounded
+ * timeout) rather than pg_advisory_xact_lock (which blocks indefinitely).
  */
 export const MIGRATION_LOCK_KEY = 0x534f4c504d474452; // "SOLPMGDR"
+/**
+ * The exact decimal representation of MIGRATION_LOCK_KEY as a string.
+ * This is used in SQL to cast to BIGINT, preserving full 64-bit precision.
+ */
+export const MIGRATION_LOCK_KEY_DECIMAL = '6003100736085771346';
 
 /**
  * The canonical migrations directory (relative to project root).

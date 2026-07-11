@@ -638,8 +638,8 @@ describe('Phase 1A: Ledger bootstrap DDL', () => {
     expect(ledgerSrc).toContain('CREATE TABLE IF NOT EXISTS schema_migrations');
   });
 
-  it('bootstrap DDL includes unique index on (migration_identifier, environment)', () => {
-    expect(ledgerSrc).toContain('schema_migrations_identifier_env_idx');
+  it('bootstrap DDL includes unique constraint on (migration_identifier, environment)', () => {
+    expect(ledgerSrc).toContain('schema_migrations_env_identifier_unique');
     expect(ledgerSrc).toContain('migration_identifier, environment');
   });
 

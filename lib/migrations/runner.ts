@@ -1,6 +1,7 @@
 // lib/migrations/runner.ts
 //
 // Phase 1A — Migration Governance Foundation (MIGRATION-GOV-01)
+// Phase 1A.1 — Operational Hardening (MIGRATION-GOV-02..08)
 //
 // The canonical migration execution service. This is the ONLY module permitted
 // to apply schema migrations. Both legacy runners are restricted to delegate
@@ -11,13 +12,14 @@
 // - runPendingMigrations() — apply all pending migrations in order
 // - runSinglePendingMigration() — apply a single migration by identifier
 // - Dry-run mode — validate and report without mutation
-// - Advisory locking (pg_advisory_xact_lock) for concurrency safety
+// - Advisory locking (pg_try_advisory_xact_lock, bounded timeout) for concurrency safety
 // - Transactional execution (Neon sql.transaction) — all-or-nothing per migration
 // - Mandatory SHA-256 checksum verification
 // - Checksum conflict detection (modified applied files are refused)
 // - Authorization enforcement (permissions, environment allowlist, production flag)
-// - Fresh TOTP for human execution (via the MFA module)
-// - Audit event emission for every operation
+// - Fresh TOTP for human execution (via the MFA module) — fail-closed, replay-protected
+// - Audit event emission for every operation (durable via audit_log integration)
+// - Governance lifecycle enforcement (baseline required before execution)
 
 import { neon } from '@neondatabase/serverless';
 import { readFileSync } from 'node:fs';
@@ -35,7 +37,9 @@ import {
   RunSingleMigrationOptions,
   MigrationStatus,
   MigrationLedgerRow,
+  MigrationGovernanceLifecycle,
   MIGRATION_LOCK_KEY,
+  MIGRATION_LOCK_KEY_DECIMAL,
   MIGRATION_ENV_VARS,
   MIGRATION_PERMISSIONS,
 } from './types';
@@ -52,8 +56,11 @@ import {
   readLedgerRow,
   markMigrationRunning,
   recordMigrationResult,
+  recordMigrationRunEvent,
   getCurrentEnvironment,
   emitAuditEvent,
+  getGovernanceLifecycleState,
+  setGovernanceLifecycleState,
 } from './ledger';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { verifyTOTPCode, decryptTOTPSecret } from '@/lib/mfa';
@@ -387,6 +394,7 @@ export function splitSqlStatements(sql: string): string[] {
  *
  * Combines the manifest (files on disk) with the ledger (applied state) and
  * reports pending, applied, failed, conflicting, and running migrations.
+ * Also reports the current governance lifecycle state.
  *
  * @returns The complete inspection state.
  */
@@ -394,6 +402,19 @@ export async function inspectMigrationState(): Promise<MigrationInspectionState>
   const manifest = discoverMigrationFiles();
   const environment = getCurrentEnvironment();
   const exists = await ledgerExists().catch(() => false);
+
+  // Determine the governance lifecycle state.
+  let lifecycleState: MigrationGovernanceLifecycle = 'UNBOOTSTRAPPED';
+  if (exists) {
+    const lifecycle = await getGovernanceLifecycleState().catch(() => null);
+    if (lifecycle) {
+      lifecycleState = lifecycle;
+    } else {
+      // Ledger exists but no lifecycle row — treat as bootstrapped but
+      // baseline required (the state immediately after bootstrap).
+      lifecycleState = 'BASELINE_REQUIRED';
+    }
+  }
 
   let ledgerRows: Record<string, import('./types').MigrationLedgerRow> = {};
   if (exists) {
@@ -452,11 +473,13 @@ export async function inspectMigrationState(): Promise<MigrationInspectionState>
       conflicts: conflicts.length,
       running: running.length,
       ledgerExists: exists,
+      lifecycleState,
     },
   });
 
   return {
     ledgerExists: exists,
+    lifecycleState,
     manifest,
     ledgerRows,
     pending,
