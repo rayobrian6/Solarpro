@@ -49,7 +49,7 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff, Bug, Download, MapPin, Pencil
+  Info, ChevronRight, ChevronLeft, Eye, EyeOff, Bug, Download, MapPin, Pencil
 } from 'lucide-react';
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
@@ -838,6 +838,10 @@ export default function DesignStudio({ project, onSave }: Props) {
   // P3a: address chip collapsed by default; clicking the chip (or its pencil icon) expands
   // it inline to the full search input. Submit / pick-from-dropdown auto-collapses.
   const [addressExpanded, setAddressExpanded] = useState<boolean>(false);
+  // P4: left vertical toolbar hidden by default; small chevron handle on the canvas edge
+  // toggles it. Mirrors the right-sidebar pattern (P1) where the right sidebar is also
+  // hidden by default with a gear toggle.
+  const [leftToolbarOpen, setLeftToolbarOpen] = useState<boolean>(false);
 
   // Calculation state
   const [calculating, setCalculating] = useState(false);
@@ -2672,6 +2676,12 @@ export default function DesignStudio({ project, onSave }: Props) {
           setDrawingMode('measure');
           setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
           break;
+        case 't': case 'T':
+          // P4: Toggle the left vertical toolbar. Functional updater keeps the
+          // effect's dep array clean (we don't need leftToolbarOpen in deps).
+          e.preventDefault();
+          setLeftToolbarOpen(v => !v);
+          break;
         case 'Delete': case 'Backspace':
           if (selectedPanelIds.size > 0) {
             e.preventDefault();
@@ -3786,7 +3796,17 @@ export default function DesignStudio({ project, onSave }: Props) {
 
       <div className="flex flex-1 min-h-0">
         {/* ── Left Toolbar ── */}
-        <div className="w-14 bg-slate-900 border-r border-slate-700/50 flex flex-col items-center py-3 gap-1 flex-shrink-0">
+        {/* design-page-simplify P4: Toolbar hidden by default. The wrapper uses
+            translate-x to slide the toolbar off-canvas when collapsed (overflow-hidden
+            clips the inner content). The chevron handle lives in the canvas below
+            and toggles `leftToolbarOpen` via the `T` key or a click. */}
+        <div
+          className={`flex-shrink-0 transition-transform duration-200 ease-in-out overflow-hidden ${
+            leftToolbarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+          aria-hidden={!leftToolbarOpen}
+        >
+          <div className="w-14 bg-slate-900 border-r border-slate-700/50 flex flex-col items-center py-3 gap-1 h-full">
           {/* design-page-simplify P2a: Segmented zone control — replaces the previous zone-type
               badge + 3 separate draw buttons. Sets both `drawingMode` and `activeZoneType`
               in a single click, mirroring the original onClick behavior (incl. the multi-row
@@ -3905,14 +3925,29 @@ export default function DesignStudio({ project, onSave }: Props) {
           ) : null}
 
           {drawnPoints.length > 0 ? (
-            <div className="mt-auto mb-2 w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold">
+            <div className="mt-auto mb-2 w-8 h-8 rounded-full bg-amber-500/20 border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold">
               {drawnPoints.length}
             </div>
           ) : null}
+          </div>
         </div>
 
         {/* ── Map Canvas ── */}
         <div className="flex-1 relative min-w-0" ref={containerRef}>
+          {/* design-page-simplify P4: Tools handle on the left edge of the canvas.
+              Vertically centered, fixed to left: 0. Chevron direction mirrors state:
+              ChevronRight when closed (invite to open), ChevronLeft when open
+              (invite to close). Amber accent to stand out from the canvas. z-30
+              keeps it above the canvas surface but below any modals. */}
+          <button
+            onClick={() => setLeftToolbarOpen(v => !v)}
+            title={leftToolbarOpen ? 'Hide tools (T)' : 'Show tools (T)'}
+            aria-label={leftToolbarOpen ? 'Hide tools' : 'Show tools'}
+            aria-expanded={leftToolbarOpen}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-30 w-6 h-12 rounded-r-lg bg-amber-500/15 border border-l-0 border-amber-500/40 text-amber-400 hover:bg-amber-500/25 hover:text-amber-300 flex items-center justify-center transition-colors shadow-lg shadow-black/30"
+          >
+            {leftToolbarOpen ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+          </button>
           {show3D ? (
             <SolarEngine3D
               lat={mapCenter.lat}
