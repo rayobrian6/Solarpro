@@ -282,7 +282,13 @@ export function roofCAD(input: PermitInputShape): CADModel {
       );
 
       const _designedPlane = planeGpsPanels.length > 0;
-      if (planeGpsPanels.length > 0) {
+      if (planeGpsPanels.length === 0 && gpsPanels.length > 0) {
+        // The DESIGN has real panels, just none on THIS plane — the designer
+        // left it empty. Grid-filling here fabricated modules (Stowell hybrid:
+        // 24 phantom modules on the empty az-270 plane → 19 phantom fire-setback
+        // encroachments + roof table claiming 75 modules where the design has 51).
+        console.log(`[PANEL GRID GENERATED] roofCAD plane=${rp.id} source=DESIGN-EMPTY count=0`);
+      } else if (planeGpsPanels.length > 0) {
         // Use GPS panel positions directly
         for (const gp of planeGpsPanels) {
           const isPortrait = gp.orientation !== 'landscape';
@@ -647,7 +653,12 @@ function appendCADRoofPlaneFromLocal(args: {
   );
 
   let planePanels: CADPanel[];
-  if (planeGpsPanels.length > 0) {
+  if (planeGpsPanels.length === 0 && gpsPanels.length > 0) {
+    // Design has real panels elsewhere — this plane is intentionally empty.
+    // Never fabricate a grid on a designed project (see rawPlanes branch).
+    planePanels = [];
+    console.log(`[PANEL GRID GENERATED] roofCAD canonical plane=${rp.id} source=DESIGN-EMPTY count=0`);
+  } else if (planeGpsPanels.length > 0) {
     planePanels = planeGpsPanels.map(gp => {
       const isPortrait = gp.orientation !== 'landscape';
       const pw = isPortrait ? panelPortraitW : panelPortraitH;

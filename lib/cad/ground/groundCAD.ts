@@ -56,9 +56,15 @@ export function groundCAD(input: PermitInputShape): CADModel {
   let globalOriginY = 0;
 
   // If no arrays defined, generate default from system totals
+  // Synthesized grids must never emit MORE panels than the system actually
+  // has: ceil(sqrt(26))=6 × 5 rows tiled 30 slots for Stowell's 26 ground
+  // panels — the site-plan overlay label and the per-module BOM lines
+  // (bonding clips etc.) all inherited the phantom 4.
+  let panelBudget = Infinity;
   if (rawArrays.length === 0) {
     warnings.push('groundCAD: no groundArrays — generating from system totals');
     const totalPanels  = input.system?.totalPanels ?? 10;
+    panelBudget        = totalPanels;
     const panelsPerRow = Math.ceil(Math.sqrt(totalPanels));
     const rowCount     = Math.ceil(totalPanels / panelsPerRow);
 
@@ -113,6 +119,7 @@ export function groundCAD(input: PermitInputShape): CADModel {
       const rowPanels: CADPanel[] = [];
 
       for (let c = 0; c < panelsPerRow; c++) {
+        if (allPanels.length + rowPanels.length >= panelBudget) break;
         const px = rowX + c * (panelW + DEFAULT_GAP_M);
         const py = rowY;
         rowPanels.push({
@@ -128,6 +135,7 @@ export function groundCAD(input: PermitInputShape): CADModel {
         });
       }
 
+      if (rowPanels.length === 0) continue;   // panelBudget exhausted — no empty rows
       allPanels.push(...rowPanels);
       rows.push({
         id:       `${arr.id || ai}-row${r}`,
