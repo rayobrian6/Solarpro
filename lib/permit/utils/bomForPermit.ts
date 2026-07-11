@@ -44,6 +44,7 @@ import { buildIntegratedEquipment } from './integratedEquipment';
 import { buildCanonical } from './canonical';
 import { buildStructuralInputForPermit } from './structuralInput';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
+import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -378,8 +379,22 @@ export function generateBOMForPermit(
   // Plain gauge from the authority (e.g. '#8 AWG'), not the raw callout string
   // ('3#8 THWN-2 …') which V4 mis-parsed into an oversized conductor.
   const acWireGauge   = _auth.acFeeder.wireGauge;
-  const dcWireLength  = firstStr?.wireLength || project.wireLength || 50;
-  const acWireLength  = project.wireLength || 60;
+
+  // Wire lengths per stage — derive the FULL real run path from CAD geometry via
+  // the existing deriveRunLengths engine, instead of a single segment / flat
+  // default. Each `?? 0` only contributes a segment the engine could actually
+  // derive from geometry (undefined segments add nothing — no default padding).
+  const _rl = (() => {
+    try { return deriveRunLengths(cad).runLengths; } catch { return {} as Record<string, number>; }
+  })();
+  // DC path: string home run + roof run + array-to-inverter conduit (micro roof
+  // open-air is priced separately in the DC stage).
+  const _dcPathFt = (_rl.DC_STRING_RUN ?? 0) + (_rl.ROOF_RUN ?? 0) + (_rl.ARRAY_CONDUIT_RUN ?? 0);
+  // AC feeder path: inverter/combiner → disconnect → meter → main service panel.
+  const _acPathFt = (_rl.COMBINER_TO_DISCO_RUN ?? _rl.INV_TO_DISCO_RUN ?? 0)
+    + (_rl.DISCO_TO_METER_RUN ?? 0) + (_rl.METER_TO_MSP_RUN ?? 0);
+  const dcWireLength  = firstStr?.wireLength || (_dcPathFt > 0 ? _dcPathFt : 0) || project.wireLength || 50;
+  const acWireLength  = (_acPathFt > 0 ? _acPathFt : 0) || project.wireLength || 60;
   const conduitType   = (project.conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
   const conduitSize   = project.conduitSize || '3/4';
 
