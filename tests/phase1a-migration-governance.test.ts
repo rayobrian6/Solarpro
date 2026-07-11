@@ -673,15 +673,20 @@ describe('Phase 1A: Ledger bootstrap DDL', () => {
     }
   });
 
-  it('bootstrap uses pg_advisory_xact_lock (transaction-scoped, not session-scoped)', () => {
-    expect(ledgerSrc).toContain('pg_advisory_xact_lock');
-    // The actual SQL call must use the transaction-scoped variant. Check that
-    // pg_advisory_xact_lock appears in a SQL template/string context.
-    expect(ledgerSrc).toMatch(/pg_advisory_xact_lock\s*\(/);
+  it('bootstrap uses pg_try_advisory_xact_lock (bounded, transaction-scoped)', () => {
+    // Phase 1A.1: switched from pg_advisory_xact_lock (blocks indefinitely) to
+    // pg_try_advisory_xact_lock (bounded, returns boolean). The lock key is
+    // passed as a decimal string cast to BIGINT (MIGRATION-GOV-06).
+    expect(ledgerSrc).toContain('pg_try_advisory_xact_lock');
+    expect(ledgerSrc).toContain('MIGRATION_LOCK_KEY_DECIMAL');
+    expect(ledgerSrc).toContain('::bigint');
     // The session-scoped pg_advisory_lock( should NOT appear in any SQL execution
     // context (template literal or string). Remove comments to check real code only.
     const codeOnly = ledgerSrc.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    expect(codeOnly).not.toMatch(/pg_advisory_lock\s*\(/);
+    expect(codeOnly).not.toMatch(/\bpg_advisory_lock\s*\(/);
+    // The blocking variant pg_advisory_xact_lock( (without try_) must NOT appear
+    // in actual SQL execution contexts.
+    expect(codeOnly).not.toMatch(/\bpg_advisory_xact_lock\s*\(/);
   });
 
   it('MIGRATION_LOCK_KEY is a 64-bit integer constant', () => {
@@ -708,9 +713,17 @@ describe('Phase 1A: Ledger bootstrap DDL', () => {
 describe('Phase 1A: Runner execution model', () => {
   const runnerSrc = readSrc('lib/migrations/runner.ts');
 
-  it('runner uses pg_advisory_xact_lock within transaction', () => {
-    expect(runnerSrc).toContain('pg_advisory_xact_lock');
-    expect(runnerSrc).toContain('MIGRATION_LOCK_KEY');
+  it('runner uses pg_try_advisory_xact_lock (bounded) with decimal key cast', () => {
+    // Phase 1A.1: switched from pg_advisory_xact_lock (blocks indefinitely) to
+    // pg_try_advisory_xact_lock (bounded, returns boolean). The lock key is
+    // passed as a decimal string cast to BIGINT to avoid JS Number precision
+    // loss (MIGRATION-GOV-06).
+    expect(runnerSrc).toContain('pg_try_advisory_xact_lock');
+    expect(runnerSrc).toContain('MIGRATION_LOCK_KEY_DECIMAL');
+    expect(runnerSrc).toContain('::bigint');
+    // The blocking variant must NOT be used in execution paths.
+    const codeOnly = runnerSrc.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(codeOnly).not.toMatch(/pg_advisory_xact_lock\s*\(/);
   });
 
   it('runner uses Neon transaction for execution (all-or-nothing)', () => {

@@ -25,7 +25,7 @@ import {
   ManifestValidationResult,
   MIGRATIONS_DIR_RELATIVE,
 } from './types';
-import { calculateMigrationChecksum } from './validation';
+import { calculateMigrationChecksum, detectTransactionModeFromFile } from './validation';
 
 /**
  * Extract the numeric prefix from a migration filename.
@@ -191,6 +191,7 @@ function buildMigrationFile(
   isDuplicatePrefix: boolean,
 ): MigrationFile {
   const checksum = calculateMigrationChecksum(rf.fullPath);
+  const { mode: transactionMode } = detectTransactionModeFromFile(rf.fullPath);
   return {
     identifier,
     prefix: rf.prefix,
@@ -200,6 +201,7 @@ function buildMigrationFile(
     isDuplicatePrefix,
     checksumSha256: checksum,
     sizeBytes: rf.sizeBytes,
+    transactionMode,
   };
 }
 

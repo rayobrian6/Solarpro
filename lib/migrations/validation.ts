@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { MigrationFile } from './types';
+import { MigrationFile, TransactionMode } from './types';
 
 /**
  * Calculate the SHA-256 checksum over the exact bytes of a file.
@@ -88,4 +88,91 @@ export function areFilesIdentical(fileA: MigrationFile, fileB: MigrationFile): b
  */
 export function isValidChecksumFormat(checksum: string): boolean {
   return /^[0-9a-f]{64}$/i.test(checksum);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transaction compatibility detection (MIGRATION-GOV-06, Phase 1A.1 Issue 10/11)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * SQL statements that are incompatible with running inside a transaction block
+ * in PostgreSQL. These statements must be executed outside a transaction, one
+ * statement at a time.
+ *
+ * References:
+ * - PostgreSQL docs: "CREATE INDEX CONCURRENTLY ... cannot be run inside a
+ *   transaction block."
+ * - VACUUM (without concurrent flag) cannot run inside a transaction.
+ * - REINDEX CONCURRENTLY cannot run inside a transaction block.
+ * - ALTER TYPE ... ADD VALUE (for enum types) cannot run inside a transaction
+ *   block in PostgreSQL < 12.
+ */
+const TRANSACTION_INCOMPATIBLE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  // CREATE INDEX CONCURRENTLY (also CREATE UNIQUE INDEX CONCURRENTLY)
+  { pattern: /\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/i, label: 'CREATE INDEX CONCURRENTLY' },
+  // REINDEX CONCURRENTLY
+  { pattern: /\bREINDEX\s+(?:\w+\s+)*CONCURRENTLY\b/i, label: 'REINDEX CONCURRENTLY' },
+  // VACUUM (not inside a transaction; note: VACUUM FULL is also incompatible)
+  { pattern: /\bVACUUM\b/i, label: 'VACUUM' },
+  // ALTER TYPE ... ADD VALUE (enum value addition — incompatible in PG < 12)
+  { pattern: /\bALTER\s+TYPE\b[^;]*\bADD\s+VALUE\b/i, label: 'ALTER TYPE ADD VALUE' },
+  // CREATE DATABASE / CREATE TABLESPACE — cannot run in transaction
+  { pattern: /\bCREATE\s+DATABASE\b/i, label: 'CREATE DATABASE' },
+  { pattern: /\bCREATE\s+TABLESPACE\b/i, label: 'CREATE TABLESPACE' },
+  // DROP DATABASE — cannot run in transaction
+  { pattern: /\bDROP\s+DATABASE\b/i, label: 'DROP DATABASE' },
+];
+
+/**
+ * Detect the transaction compatibility mode for a migration file's SQL content.
+ *
+ * Scans the SQL content for known transaction-incompatible statements. If any
+ * are found, the file is classified as `FORBIDDEN` (must run outside a
+ * transaction). If none are found, the file is classified as `REQUIRED` (must
+ * run inside a transaction — the safe default).
+ *
+ * `MANUAL_REVIEW` is reserved for future use where automatic detection cannot
+ * make a confident determination. Currently, all files are classified as
+ * either `REQUIRED` or `FORBIDDEN`.
+ *
+ * @param sqlContent The raw SQL content of the migration file.
+ * @returns An object with the detected mode and a list of matched incompatible
+ *          statements (for audit and reporting).
+ */
+export function detectTransactionMode(
+  sqlContent: string,
+): {
+  mode: TransactionMode;
+  incompatibleStatements: string[];
+} {
+  const matched: string[] = [];
+
+  for (const { pattern, label } of TRANSACTION_INCOMPATIBLE_PATTERNS) {
+    if (pattern.test(sqlContent)) {
+      matched.push(label);
+    }
+  }
+
+  if (matched.length > 0) {
+    return { mode: 'FORBIDDEN', incompatibleStatements: matched };
+  }
+
+  return { mode: 'REQUIRED', incompatibleStatements: [] };
+}
+
+/**
+ * Detect the transaction compatibility mode for a migration file by reading
+ * it from disk.
+ *
+ * @param filePath Absolute path to the migration file.
+ * @returns The detected mode and any incompatible statements found.
+ */
+export function detectTransactionModeFromFile(
+  filePath: string,
+): {
+  mode: TransactionMode;
+  incompatibleStatements: string[];
+} {
+  const content = readFileSync(filePath, 'utf-8');
+  return detectTransactionMode(content);
 }

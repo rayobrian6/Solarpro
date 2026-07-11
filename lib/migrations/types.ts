@@ -177,6 +177,21 @@ export interface MigrationFile {
   checksumSha256: string;
   /** Size of the file in bytes. */
   sizeBytes: number;
+  /**
+   * Transaction compatibility mode for this file (MIGRATION-GOV-06).
+   *
+   * - `REQUIRED` \u2014 The file contains only transaction-compatible statements and
+   *   must be executed inside a transaction.
+   * - `FORBIDDEN` \u2014 The file contains transaction-incompatible statements
+   *   (CREATE INDEX CONCURRENTLY, VACUUM, REINDEX CONCURRENTLY, etc.) and must
+   *   be executed outside a transaction, statement by statement.
+   * - `MANUAL_REVIEW` \u2014 The file's compatibility cannot be automatically
+   *   determined and requires manual review.
+   *
+   * Determined at discovery time by scanning the SQL content for known
+   * transaction-incompatible statements.
+   */
+  transactionMode: TransactionMode;
 }
 
 /**

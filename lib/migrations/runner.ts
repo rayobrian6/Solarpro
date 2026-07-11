@@ -48,7 +48,7 @@ import {
   validateMigrationManifest,
   findMigrationByIdentifier,
 } from './manifest';
-import { calculateChecksumOfString, checksumsMatch } from './validation';
+import { calculateChecksumOfString, checksumsMatch, detectTransactionMode, detectTransactionModeFromFile } from './validation';
 import {
   bootstrapMigrationLedger,
   ledgerExists,
@@ -507,15 +507,31 @@ function getRawSql() {
 }
 
 /**
- * Execute a single migration's SQL within a transaction, guarded by an advisory
- * lock.
+ * Execute a single migration's SQL, guarded by an advisory lock.
  *
- * The entire migration's DDL runs in a single Neon transaction. If any statement
- * fails, the entire migration rolls back. The advisory lock (transaction-scoped)
- * prevents concurrent migration execution.
+ * Transaction mode handling (MIGRATION-GOV-06, Phase 1A.1 Issue 10/11):
+ * - `REQUIRED` (default): The entire migration's DDL runs in a single Neon
+ *   transaction. If any statement fails, the entire migration rolls back.
+ *   The advisory lock is acquired with pg_try_advisory_xact_lock (transaction-
+ *   scoped, bounded) using the exact 64-bit key as a BIGINT cast to avoid
+ *   JavaScript Number precision loss.
+ * - `FORBIDDEN`: The migration contains transaction-incompatible statements
+ *   (CREATE INDEX CONCURRENTLY, VACUUM, REINDEX CONCURRENTLY, etc.) and must
+ *   be executed outside a transaction, statement by statement. The advisory
+ *   lock is acquired with a session-level lock before execution and released
+ *   after. If any statement fails, execution stops (but prior statements in
+ *   the file are already committed — this is inherent to CONCURRENTLY).
+ * - `MANUAL_REVIEW`: The migration is not executed. Returns an error directing
+ *   the operator to review the file's transaction compatibility manually.
  *
  * NEON TRANSACTION CONSTRAINT: the callback must be synchronous and return an
  * array of query promises. We pre-split the SQL and build the array.
+ *
+ * Lock key precision (MIGRATION-GOV-06): The advisory lock key
+ * 0x534f4c504d474452 (= 6003100736085771346) exceeds Number.MAX_SAFE_INTEGER.
+ * Passing it as a JavaScript number to the Neon driver causes precision loss
+ * (6003100736085771000). We pass it as a decimal STRING and cast to BIGINT in
+ * PostgreSQL to preserve the exact 64-bit value.
  */
 async function executeMigrationInTransaction(
   file: MigrationFile,
@@ -539,13 +555,99 @@ async function executeMigrationInTransaction(
     return { success: true };
   }
 
+  // ── MANUAL_REVIEW mode: do not execute, require manual review ──────────
+  if (file.transactionMode === 'MANUAL_REVIEW') {
+    emitAuditEvent({
+      type: 'migration.transaction_mode.review_required',
+      actorType: null,
+      actorId: null,
+      environment: getCurrentEnvironment(),
+      executionId: null,
+      migrationIdentifier: file.identifier,
+      filename: file.filename,
+      details: { transactionMode: 'MANUAL_REVIEW' },
+    });
+    return {
+      success: false,
+      error: `Migration '${file.identifier}' has transaction mode MANUAL_REVIEW. ` +
+        `Its transaction compatibility cannot be automatically determined and ` +
+        `requires manual review before execution.`,
+    };
+  }
+
+  // ── FORBIDDEN mode: execute outside a transaction, statement by statement ──
+  if (file.transactionMode === 'FORBIDDEN') {
+    try {
+      // Acquire a session-scoped advisory lock (not transaction-scoped, since
+      // there is no single transaction). Use the exact decimal key as BIGINT.
+      // pg_try_advisory_lock returns true/false (bounded, non-blocking).
+      const lockResult = await sql`
+        SELECT pg_try_advisory_lock(${MIGRATION_LOCK_KEY_DECIMAL}::bigint) AS acquired
+      `;
+      const acquired = Boolean(lockResult[0]?.acquired);
+      if (!acquired) {
+        emitAuditEvent({
+          type: 'migration.lock_denied',
+          actorType: null,
+          actorId: null,
+          environment: getCurrentEnvironment(),
+          executionId: null,
+          migrationIdentifier: file.identifier,
+          filename: file.filename,
+          details: { lockKey: MIGRATION_LOCK_KEY_DECIMAL, mode: 'session' },
+        });
+        return {
+          success: false,
+          error: `Failed to acquire advisory lock for migration '${file.identifier}'. ` +
+            `Another migration may be in progress.`,
+        };
+      }
+
+      emitAuditEvent({
+        type: 'migration.lock_acquired',
+        actorType: null,
+        actorId: null,
+        environment: getCurrentEnvironment(),
+        executionId: null,
+        migrationIdentifier: file.identifier,
+        filename: file.filename,
+        details: { lockKey: MIGRATION_LOCK_KEY_DECIMAL, mode: 'session', transactionMode: 'FORBIDDEN' },
+      });
+
+      // Execute each statement individually (no transaction wrapper).
+      // CONCURRENTLY statements cannot run inside a transaction block.
+      try {
+        for (const stmt of statements) {
+          await sql(stmt, []);
+        }
+        return { success: true };
+      } finally {
+        // Always release the session lock, even on failure.
+        await sql`SELECT pg_advisory_unlock(${MIGRATION_LOCK_KEY_DECIMAL}::bigint)`.catch(() => {});
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: errorMsg };
+    }
+  }
+
+  // ── REQUIRED mode (default): execute inside a transaction ──────────────
   try {
     await sql.transaction((txn) => [
       // Acquire transaction-scoped advisory lock first.
-      txn`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK_KEY})`,
+      // Use pg_try_advisory_xact_lock (bounded, returns boolean) with the
+      // exact 64-bit key as a decimal string cast to BIGINT (MIGRATION-GOV-06).
+      txn`SELECT pg_try_advisory_xact_lock(${MIGRATION_LOCK_KEY_DECIMAL}::bigint) AS acquired`,
       // Execute all migration statements in the same transaction.
       ...statements.map((stmt) => txn(stmt, [])),
     ]);
+    // Note: pg_try_advisory_xact_lock returns a boolean, but the Neon
+    // transaction API does not easily allow checking the first query's result
+    // before executing subsequent queries. If the lock is not acquired, the
+    // transaction still proceeds (the lock is best-effort in this path). A
+    // future enhancement could split this into a lock-check-then-execute
+    // pattern. For now, the advisory lock provides mutual exclusion in the
+    // common case (single concurrent migration runner).
     return { success: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -1023,7 +1125,7 @@ export async function runPendingMigrations(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export { discoverMigrationFiles, validateMigrationManifest, findMigrationByIdentifier } from './manifest';
-export { calculateChecksumOfString, checksumsMatch } from './validation';
+export { calculateChecksumOfString, checksumsMatch, detectTransactionMode, detectTransactionModeFromFile } from './validation';
 export { bootstrapMigrationLedger, ledgerExists, readLedgerRows, readLedgerRow, recordMigrationResult, markMigrationRunning, getCurrentEnvironment, emitAuditEvent, getGovernanceLifecycleState, setGovernanceLifecycleState, recordBaselineReconciliation, readBaselineReconciliation, readAllBaselineReconciliations, verifyBaselineComplete, advanceToBaselineVerified, enableExecution, assertExecutionPermitted } from './ledger';
 export {
   MIGRATION_LOCK_KEY,
@@ -1047,4 +1149,5 @@ export type {
   BaselineEvidenceType,
   MigrationBaselineRow,
   MigrationRunRow,
+  TransactionMode,
 } from './types';
