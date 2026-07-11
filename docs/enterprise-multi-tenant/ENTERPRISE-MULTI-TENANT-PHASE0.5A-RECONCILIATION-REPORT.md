@@ -6,7 +6,7 @@
 **Phase 0 documentation commit:** `39a1f718` — "docs: Enterprise Multi-Tenant Authority — Phase 0 audit & architecture design (7 documents)"
 **Codebase evidence baseline:** `7b344aa1` — "Planset PV-1: fix pluralization" (CODE commit, shared by Phase 0 and Phase 0.5 — no production code was modified in either phase)
 **Commit date (all commits):** 2026-07-11 (verified via `git log --format=%ci`)
-**Origin/dev alignment:** Local HEAD == origin/dev HEAD == `d8bb36f8` — ALIGNED ✅
+**Origin/dev alignment:** Local and remote were aligned at reconciliation time. HEAD is not hard-coded in this report because it advances with each subsequent commit — this report's own publication commit (`657fe588`) postdates the reconciliation content commit (`d8bb36f8`). To obtain the current HEAD, run `git rev-parse HEAD`.
 **Worktree status:** Clean
 
 ---
@@ -15,11 +15,11 @@
 
 This reconciliation was a documentation-only task. No production code, no schema migrations, no MFA evidence, and no test artifacts were modified. The task corrected seven specific integrity issues across the five Phase 0.5 deliverable documents, created two new companion deliverables, validated the entire documentation set against ten prohibited-term searches, committed the changes, and pushed them to origin/dev.
 
-The reconciliation commit touched exactly 7 files: 5 modified (the original Phase 0.5 deliverables) and 2 newly created. The commit contains 1,037 insertions and 214 deletions, all within the `docs/enterprise-multi-tenant/` directory.
+The reconciliation commit (`d8bb36f8`) touched exactly 7 files: 5 modified (the original Phase 0.5 deliverables) and 2 newly created. This report itself was published in a subsequent commit (`657fe588`) and is the 8th document in the deliverable set. The reconciliation commit contains 1,037 insertions and 214 deletions, all within the `docs/enterprise-multi-tenant/` directory.
 
 ---
 
-## 2. Deliverables Inventory (7 files)
+## 2. Deliverables Inventory (8 files)
 
 ### 2.1 Original Phase 0.5 Documents (5 modified)
 
@@ -38,17 +38,25 @@ The reconciliation commit touched exactly 7 files: 5 modified (the original Phas
 | 6 | ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-PACKET.md | 397 | 4,125 | Created |
 | 7 | ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md | 352 | 2,739 | Created |
 
-### 2.3 Totals
+### 2.3 Reconciliation Report (1 created in subsequent commit)
+
+| # | Document | Lines | Words | Status |
+|---|----------|-------|-------|--------|
+| 8 | ENTERPRISE-MULTI-TENANT-PHASE0.5A-RECONCILIATION-REPORT.md | 297 | ~4,200 | Created (commit `657fe588`) |
+
+> **Note:** This report was created in a separate commit (`657fe588`, "docs: add Phase 0.5A reconciliation final report") after the reconciliation content commit (`d8bb36f8`). It is the 8th document in the deliverable set. The Phase 0.5A reconciliation commit (`d8bb36f8`) touched 7 files; the total deliverable set is 8 files.
+
+### 2.4 Totals
 
 | Metric | Value |
 |--------|-------|
-| Total files | 7 |
-| Total lines | 4,127 |
-| Total words | 42,060 |
+| Total files | 8 (7 in reconciliation commit `d8bb36f8` + 1 report in publication commit `657fe588`) |
+| Total lines | 4,127 (reconciliation commit) + 297 (report) = 4,424 |
+| Total words | 42,060 (reconciliation commit) + ~4,200 (report) = ~46,260 |
 | Files modified | 5 |
-| Files created | 2 |
-| Insertions | 1,037 |
-| Deletions | 214 |
+| Files created | 3 (2 in reconciliation commit + 1 report in publication commit) |
+| Insertions | 1,037 (reconciliation commit only) |
+| Deletions | 214 (reconciliation commit only) |
 
 ---
 
@@ -99,7 +107,9 @@ Updated the ADR document (7 replacements: Option B description, decision paragra
 
 **Issue:** Documents did not consistently distinguish between Phase 1 foundation work, Phase 1 completion, and the full 15-gate program. Some references implied the full program completes Phase 1, while others implied it extends into Phase 2.
 
-**Resolution:** Clarified the scope separation. The 15-gate program is divided into Phase 1 Foundation (Gates 1-12: establishes the multi-tenant authority infrastructure) and Phase 1 Completion (Gates 13-15: executes the data ownership backfill, ambiguity queue processing, and adversarial validation). None of the 15 gates extend into Phase 2 — Phase 2 has its own separate entry gates and implementation sequence. Applied to the Decision Register's D-14 row, the ADR document's ADR-014 section, and the Implementation Spec's gate sequence header.
+**Resolution:** Clarified the scope separation. **The 15 gates describe the FULL program, not Phase 1 alone.** Phase 1 is foundation-only: it establishes canonical orgs, memberships, active org context, role separation, permission definitions, central authorization interfaces, tenant-aware audit context, feature flags, backward-compatible behavior, foundational tests, and migration-governance prerequisites (Gates 1-12). Gates 13-15 (legacy backfill, ambiguity queue, adversarial validation) belong to later program phases — they are NOT "Phase 1 Completion." A gate-to-phase table has been created (see the Implementation Spec and ADR-014) assigning each gate to its correct phase with columns: Program Gate, Purpose, Assigned Phase, Entry Dependency, Exit Evidence, Rollback Boundary. Applied to the Decision Register's D-14 row, the ADR document's ADR-014 section, the Implementation Spec's gate sequence header, the Raymond Approval Packet, and the Entry Gates document.
+
+> **Phase 0.5B correction:** The original Phase 0.5A resolution incorrectly labeled Gates 13-15 as "Phase 1 Completion" and stated "None of the 15 gates extend into Phase 2." This was wrong — the 15 gates describe the full program, and Gates 13-15 belong to later phases, not Phase 1. Phase 1 is foundation-only (Gates 1-12). This has been corrected in Phase 0.5B.
 
 ---
 
@@ -137,7 +147,7 @@ The packet also includes a Summary of Blocked Work table showing all implementat
 - Secondary runner (`app/api/admin/system-tools/route.ts`): CAN read `lib/migrations/` files via the `run_migration` tool with SHA-256 checksum verification
 - No `schema_migrations` tracking table exists; idempotency is structural, not tracked
 
-**Determination:** The next migration identifier cannot be assigned unambiguously because of the duplicate prefix (074) and gaps (009, 012, 013, 014). Candidate identifiers include 105 (next sequential after highest), 009 (fill lowest gap), or 012. A migration sequence reconciliation process is required before any numeric value is assigned. Until then, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` remains a placeholder in all Phase 0.5 and Phase 1 documents.
+**Determination:** The next migration identifier cannot be assigned unambiguously because of the duplicate prefix (074) and gaps (009, 012, 013, 014). **Policy: gaps remain reserved — the numbering sequence stays monotonically increasing.** Gaps at 009, 012, 013, 014 are NOT candidates for reuse; they remain reserved (migrations that were planned but never created, renumbered, or deleted). The repository-sequential candidate is **105** (highest existing prefix 104 + 1) — this is **informational only and must NOT be created** until migration governance is resolved. The authoritative executable migration identifier is **NOT VERIFIED** — it cannot be determined until the duplicate 074 is resolved, a schema_migrations ledger exists, and production database state is verified. Until then, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` remains a placeholder in all Phase 0.5 and Phase 1 documents.
 
 The document includes nine bash evidence commands that allow any reviewer to independently verify every finding, plus a confidence assessment (all findings rated HIGH confidence based on direct filesystem and git inspection).
 
@@ -186,9 +196,10 @@ ef51acff  docs: resolve enterprise multi-tenant architecture decisions  ← PRE-
 | Phase 0.5 evidence baseline commit | `7b344aa1` (same codebase baseline — no code changes in Phase 0.5) |
 | Phase 0.5 documentation commit (pre-correction) | `ef51acff` ("docs: resolve enterprise multi-tenant architecture decisions") |
 | Phase 0.5A reconciliation commit | `d8bb36f8` ("docs: reconcile multi-tenant decisions and migration gate") |
-| Current local HEAD | `d8bb36f8` |
-| Current origin/dev HEAD | `d8bb36f8` |
-| Local/remote alignment | ALIGNED ✅ |
+| Phase 0.5A reconciliation report publication commit | `657fe588` ("docs: add Phase 0.5A reconciliation final report") |
+| Current local HEAD | Run `git rev-parse HEAD` (not hard-coded — HEAD advances with each commit) |
+| Current origin/dev HEAD | Run `git rev-parse origin/dev` (not hard-coded — verify against live state) |
+| Local/remote alignment | Run `git rev-parse HEAD` and `git rev-parse origin/dev` and compare. At report publication time, HEAD was `657fe588`, which postdates the reconciliation content commit `d8bb36f8`. Do not treat any single hash in this report as the current HEAD. |
 | Worktree status | Clean |
 | Branch | `dev` |
 | Commit date | 2026-07-11 (all commits) |
@@ -233,19 +244,21 @@ ENTERPRISE-MULTI-TENANT-RAYMOND-APPROVAL-PACKET.md        | 397 ++++++++++++++++
 
 ## 8. Stop Condition Assessment
 
-The task specification defined several stop conditions. None were triggered:
+The task specification defined several stop conditions. Migration-related stop conditions WERE triggered. However, no migration or implementation work proceeded — the documentation reconciliation continued because it did not require selecting or creating a migration. The placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` was used throughout. The triggered stop conditions are migration-governance blockers, not documentation blockers:
 
 | Stop Condition | Triggered? | Notes |
 |----------------|------------|-------|
-| Next migration identifier is ambiguous | No (documented, not stopped) | The ambiguity was documented in the Migration Sequence State deliverable; the placeholder was used throughout. This is a known state, not a blocking error. |
-| Duplicate migration numbers exist | No (documented, not stopped) | Duplicate 074 documented in Migration Sequence State; no migration was created or modified. |
-| Migration runner doesn't follow filename numbering | No (documented, not stopped) | Documented in Migration Sequence State; the inline runner's behavior was analyzed and recorded. |
+| Next migration identifier is ambiguous | Yes (triggered) | The next migration identifier cannot be assigned unambiguously due to duplicate prefix 074 and gaps 009/012/013/014. This is a migration-governance blocker. No migration was created or modified; the placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` was used throughout. |
+| Duplicate migration numbers exist | Yes (triggered) | Duplicate prefix 074 is a structural anomaly. This is a migration-governance blocker. No migration was created or modified. |
+| Migration runner doesn't follow filename numbering | Yes (triggered) | The primary migration runner (`app/api/migrate/route.ts`) does not read `lib/migrations/` files — it executes inline SQL. Filename numbering is advisory, not enforced. This is a migration-governance blocker. |
+| No schema_migrations tracking ledger | Yes (triggered) | Neither migration runner maintains a `schema_migrations` or equivalent tracking table. There is no authoritative record of which migrations have been applied. This is a migration-governance blocker (MIGRATION-GOV-01). |
+| Production database state not verified | Yes (triggered) | The production database was not inspected during this documentation-only task. The applied-migration state in production is unknown. This is a migration-governance blocker. |
 | Documents conflict beyond identified issues | No | All conflicts identified in the task spec were resolved. Validation found no remaining conflicts. |
 | Corrections require production code/migration changes | No | All corrections were documentation-only. No code or migration files were touched. |
 | MFA evidence modification needed | No | MFA evidence, tests, and acceptance artifacts were untouched (verified in Entry Gates document). |
 | Phase 0 factual evidence appears incorrect | No | All Phase 0 evidence (commit dates, commit hashes, file counts) was verified against git and filesystem state. |
 
-**Result: Zero stop conditions triggered. The reconciliation proceeded to completion.**
+**Result: Migration-related stop conditions WERE triggered (ambiguous next identifier, duplicate 074, runner not following filename numbering, no schema_migrations ledger, production DB state not verified). These are migration-governance blockers that prevent any migration from being created or executed. No migration or implementation work proceeded. The documentation reconciliation continued to completion because it did not require selecting or creating a migration — the placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` was used throughout all documents.**
 
 ---
 
@@ -257,10 +270,10 @@ The task specification defined several stop conditions. None were triggered:
 | No schema migrations created or modified | ✅ | `lib/migrations/` directory untouched; no migration files in commit |
 | No MFA evidence modified | ✅ | MFA evidence files not in commit; Entry Gates document verifies MFA untouched |
 | No test artifacts modified | ✅ | No test files in commit |
-| Documentation-only changes | ✅ | All 7 files in commit are `.md` files in `docs/enterprise-multi-tenant/` |
+| Documentation-only changes | ✅ | All 7 files in reconciliation commit `d8bb36f8` are `.md` files in `docs/enterprise-multi-tenant/`; the 8th file (this report) was published in commit `657fe588` |
 | Commit message matches specification | ✅ | "docs: reconcile multi-tenant decisions and migration gate" |
 | Pushed to origin/dev | ✅ | `3c70d9fc..d8bb36f8 dev -> dev` |
-| Local/remote aligned | ✅ | Both at `d8bb36f8` |
+| Local/remote aligned | ✅ | Aligned at reconciliation time. Run `git rev-parse HEAD` and `git rev-parse origin/dev` to verify current alignment. |
 
 ---
 
@@ -294,4 +307,64 @@ The task specification defined several stop conditions. None were triggered:
 
 ---
 
-*End of Phase 0.5A Reconciliation Report. This report documents a documentation-only reconciliation task. No production code, schema migrations, MFA evidence, or test artifacts were modified. All changes are committed at `d8bb36f8` on the `dev` branch and pushed to origin/dev.*
+---
+
+## 12. Phase 0.5B Documentation Corrections
+
+This section documents corrections applied during the Phase 0.5B documentation correction pass. This was a documentation-only task — no production code, schema migrations, tests, or MFA artifacts were modified. All changes are confined to files under `docs/enterprise-multi-tenant/`.
+
+### 12.1 Problem 1 — Stale Final Commit Metadata
+
+**Issue:** This report self-referentially hard-coded HEAD as `d8bb36f8` (the reconciliation content commit), but the report's own publication commit `657fe588` came later. A report cannot hard-code a single hash as the current HEAD because HEAD advances with each subsequent commit.
+
+**Resolution:** Replaced all hard-coded HEAD values with stable commit-role labels and documented commands for obtaining the current HEAD (`git rev-parse HEAD`, `git rev-parse origin/dev`). The reconciliation content commit (`d8bb36f8`) and the report publication commit (`657fe588`) are recorded as stable role labels, not as current HEAD. Applied to this report and to `ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md`.
+
+### 12.2 Problem 2 — Deliverable Count
+
+**Issue:** The report counted 7 deliverables (the files in reconciliation commit `d8bb36f8`) but the report itself is the 8th document, published in commit `657fe588`.
+
+**Resolution:** Updated the deliverable inventory to count 8 files (7 in the reconciliation commit + 1 report in the publication commit). Updated totals and scope compliance verification accordingly.
+
+### 12.3 Problem 3 — Stop Conditions Misreported
+
+**Issue:** The report stated "Zero stop conditions triggered." In fact, migration-related stop conditions WERE triggered: ambiguous migration identifier, duplicate prefix 074, runner not following filename numbering, no schema_migrations ledger, and production database state not verified.
+
+**Resolution:** Corrected the stop condition assessment to acknowledge that migration-related stop conditions were triggered. These are migration-governance blockers that prevent any migration from being created or executed. No migration or implementation work proceeded. The documentation reconciliation continued because it did not require selecting or creating a migration — the placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` was used throughout.
+
+### 12.4 Problem 4 — Historical Migration Gaps
+
+**Issue:** The report treated gap prefixes 009 and 012 as candidate identifiers for the next migration. This is incorrect — gaps should remain reserved.
+
+**Resolution:** Corrected the policy: gaps remain reserved, numbering stays monotonically increasing. The repository-sequential candidate is 105 (informational only, do not create). The authoritative executable migration identifier is NOT VERIFIED. The placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` continues to be used. Applied to this report and to `ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md`.
+
+### 12.5 Problem 5 — Migration Governance
+
+**Issue:** Two migration execution paths exist (`app/api/migrate/route.ts` inline SQL and `app/api/admin/system-tools/route.ts` file-based with SHA-256) with no shared governance framework and no schema_migrations ledger.
+
+**Resolution:** Recorded as blocking governance risk `MIGRATION-GOV-01` in `ENTERPRISE-MULTI-TENANT-MIGRATION-SEQUENCE-STATE.md`. Documented the required future ledger fields (identifier, filename, SHA-256, environment, timestamp, actor, result, failure state, rollback reference). The governance system is NOT implemented — it is documented as a prerequisite for future migration work. No production code, migrations, or tests were created or modified.
+
+### 12.6 Problem 6 — Phase 1 Scope
+
+**Issue:** The report stated "Phase 1 Foundation: Gates 1-12, Phase 1 Completion: Gates 13-15, None of the 15 gates extend into Phase 2." This is wrong — the 15 gates describe the FULL program, not Phase 1 alone. Phase 1 is foundation-only.
+
+**Resolution:** Corrected all references to remove the false "Phase 1 Completion (Gates 13-15)" label. Phase 1 is foundation-only (Gates 1-12). Gates 13-15 belong to later program phases. Created a gate-to-phase table with columns: Program Gate, Purpose, Assigned Phase, Entry Dependency, Exit Evidence, Rollback Boundary. Applied to the Decision Register (D-14 row), ADR-014 (Decision paragraph + gate-to-phase table), Implementation Spec (gate sequence header + gate-to-phase table + In/Out of Scope), Raymond Approval Packet (D-14 section), and Entry Gates document (prohibition statement).
+
+### 12.7 Problem 7 — Stakeholder Approval
+
+**Issue:** None — verified that all documents correctly maintain Architecture Status: RECOMMENDED and Stakeholder Approval: PENDING RAYMOND APPROVAL for ADR-008, ADR-009, ADR-010, ADR-012, ADR-014. Raymond's approval is NOT inferred.
+
+**Resolution:** No changes needed. Verified and confirmed across all documents.
+
+### 12.8 Phase 0.5B Scope Compliance
+
+| Constraint | Status |
+|------------|--------|
+| No production code modified | ✅ |
+| No schema migrations created or modified | ✅ |
+| No MFA evidence modified | ✅ |
+| No test artifacts modified | ✅ |
+| Documentation-only changes | ✅ |
+| All changes under `docs/enterprise-multi-tenant/` | ✅ |
+| Commit message | `docs: correct multi-tenant final state and phase boundaries` |
+
+*End of Phase 0.5A Reconciliation Report. This report documents a documentation-only reconciliation task. No production code, schema migrations, MFA evidence, or test artifacts were modified. The reconciliation content is committed at `d8bb36f8`; this report was published at `657fe588` on the `dev` branch and pushed to origin/dev. To verify current HEAD, run `git rev-parse HEAD`.*

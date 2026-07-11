@@ -37,9 +37,6 @@ This specification is implementation-ready: each section defines the exact schem
 - Tenant-aware audit query API
 - Dev auth bypass audit logging (ADR-012)
 - Impersonation hardening (time-limited, tenant-aware, revocable, ADR-012)
-- Legacy ownership backfill script (dry-run mode, ADR-009)
-- Ambiguity queue admin API (ADR-009)
-- Full test suite verification (121 test cases from Authorization Test Matrix)
 
 ### Out of Scope (Phase 2+)
 
@@ -48,6 +45,9 @@ This specification is implementation-ready: each section defines the exact schem
 - Billing migration (org-level Stripe customers, ADR-008) — Phase 2
 - Project participant grants (ADR-005) — Phase 2 (requires resource ownership)
 - Resource share grants (ADR-006) — Phase 2+ (requires file revisions)
+- Legacy ownership backfill script (dry-run mode, ADR-009) — Gate 13, later program phase
+- Ambiguity queue admin API (ADR-009) — Gate 14, later program phase
+- Full test suite verification (121 test cases from Authorization Test Matrix) — Gate 15, later program phase (adversarial validation)
 - Ownership transfer (ADR-010) — Phase 3+
 - Parent/subsidiary inheritance features (ADR-011) — Future phase (column is added in Phase 1, but inheritance logic is deferred)
 
@@ -55,7 +55,30 @@ This specification is implementation-ready: each section defines the exact schem
 
 ## Implementation Gate Sequence
 
-The 15 gates from ADR-014, restated with implementation-level detail. The gates are divided into two phases within Phase 1: the **Phase 1 Foundation** (Gates 1-12) establishes the multi-tenant authority infrastructure (authorization framework, org context, RLS, role model, collaboration, audit, support access), and the **Phase 1 Completion** (Gates 13-15) executes the data ownership backfill, ambiguity queue processing, and adversarial validation. All 15 gates must pass before NEXT_ENTERPRISE_AUTHORITY_MIGRATION (Phase 2 resource ownership migration) may begin. None of the 15 gates extend into Phase 2 — Phase 2 has its own separate entry gates and implementation sequence (defined after Phase 1 completion).
+The 15 gates from ADR-014, restated with implementation-level detail. **The 15 gates describe the FULL program, not Phase 1 alone.** Phase 1 is foundation-only: Gates 1-12 establish canonical orgs, memberships, active org context, role separation, permission definitions, central authorization interfaces, tenant-aware audit context, feature flags, backward-compatible behavior, foundational tests, and migration-governance prerequisites. Gates 13-15 (legacy backfill, ambiguity queue, adversarial validation) belong to later program phases — they are NOT "Phase 1 Completion." All 15 gates must pass before NEXT_ENTERPRISE_AUTHORITY_MIGRATION (resource ownership migration) may begin. A gate-to-phase table is provided below.
+
+### Gate-to-Phase Assignment
+
+The 15 gates describe the full program, not Phase 1 alone. Phase 1 is foundation-only (Gates 1-12). Gates 13-15 belong to later program phases. The table below assigns each gate to its correct phase.
+
+| Program Gate | Purpose | Assigned Phase | Entry Dependency | Exit Evidence | Rollback Boundary |
+|---|---|---|---|---|---|
+| Gate 1: Canonical Organization Table | Confirm `organizations` table is canonical; add `parent_org_id` metadata | Phase 1 — Foundation | Phase 0.5 ADRs complete; Raymond approval pending | `organizations` table exists with `parent_org_id`; no duplicate org tables | Drop `parent_org_id` column |
+| Gate 2: Organization Members Junction Table | Create `organization_members` junction for many-to-many memberships | Phase 1 — Foundation | Gate 1 passed | Table exists with correct columns and constraints | Drop `organization_members` table |
+| Gate 3: Organization Roles Namespace | Create `org_roles` and `org_role_permissions`; seed system roles | Phase 1 — Foundation | Gate 2 passed | Tables exist; four system roles seeded; separate from platform roles | Drop `org_roles` and `org_role_permissions` tables |
+| Gate 4: Active Organization Context Table | Create `user_active_org` table | Phase 1 — Foundation | Gate 3 passed | Table exists with correct columns and constraints | Drop `user_active_org` table |
+| Gate 5: Active Org Context Resolution Function | Implement `getActiveOrgId(userId)` | Phase 1 — Foundation | Gate 4 passed | Function returns valid org_id or NULL; does not trust client input | Revert function; callers fall back to user-scoped behavior |
+| Gate 6: Extended Session/User Object | Extend `getUserFromRequest()` to include org context | Phase 1 — Foundation | Gate 5 passed | `getUserFromRequest()` returns org context; JWT unchanged; 136 files still work | Revert `getUserFromRequest()` extension; backward compatible |
+| Gate 7: Authorization Interface | Implement `canAccessResource(actor, resource)` | Phase 1 — Foundation | Gate 6 passed | Function exists; returns boolean; unit tests pass | Revert function; no routes depend on it yet |
+| Gate 8: Org-Scoped Query Helper | Implement `getOrgScopedQuery(orgId, tableName)` | Phase 1 — Foundation | Gate 7 passed | Helper exists; unit tests pass; no bypass | Revert helper; no routes use it yet |
+| Gate 9: Audit Log Org Context | Add org context columns to `audit_log`; update `writeAuditLog()` | Phase 1 — Foundation | Gate 8 passed | Columns exist (nullable); new events include org context; per-org chain works | Drop added columns; revert `writeAuditLog()` |
+| Gate 10: Tenant-Aware Audit Query API | Implement `GET /api/audit/org/{orgId}` | Phase 1 — Foundation | Gate 9 passed | API exists; returns only specified org's events; cross-org denied | Remove API route; existing audit queries unchanged |
+| Gate 11: Dev Auth Bypass Audit | Add audit event for dev auth bypass in non-production | Phase 1 — Foundation | Gate 10 passed | Dev bypass in non-production writes audit event; production still disabled | Revert audit event addition; existing dev bypass behavior preserved |
+| Gate 12: Impersonation Hardening | Time-limited, tenant-aware impersonation with revocation | Phase 1 — Foundation | Gate 11 passed | Org-scoped admins cannot impersonate cross-tenant; super_admin can with reason + duration; expiry, revocation, notification, audit | Revert impersonation changes; existing impersonation behavior restored |
+| Gate 13: Legacy Ownership Backfill Script (Dry-Run) | Implement backfill script in dry-run mode | Later Phase — Data Migration | Gate 12 passed; Raymond approval of ADR-009 | Script runs in dry-run; reports assignments; does not execute changes | Remove script; no data changes in dry-run mode |
+| Gate 14: Ambiguity Queue Admin API | Implement ambiguity queue and merge APIs | Later Phase — Data Migration | Gate 13 passed; Raymond approval of ADR-009 | APIs exist; merge is platform-admin only; merge is audited | Remove APIs and `org_merge_suggestions` table; no data changes |
+| Gate 15: Program Entry Gate Verification | Run full test suite; verify no regressions; Raymond approves transition | Later Phase — Final Validation | Gates 1-14 passed; Raymond approval of ADR-014 | All 121 test cases pass; no regressions across 280 routes; MFA untouched; Raymond approves | No schema changes to roll back; verification gate only |
+
 
 ### Gate 1: Canonical Organization Table
 
@@ -683,7 +706,7 @@ The following artifacts are FROZEN and must not be modified during Phase 1 imple
 
 ## Document Footer
 
-**Phase 1 Gates:** 15 (ADR-014)
+**Program Gates:** 15 (ADR-014) — Phase 1 is foundation-only (Gates 1-12); Gates 13-15 belong to later program phases
 **Phase 1 Scope:** Foundational only — canonical orgs, memberships, active org context, role namespaces, authorization interfaces, audit context
 **Phase 2 Scope (NOT in this spec):** Resource ownership migration, file storage migration, billing migration, participant grants, share grants
 **NEXT_ENTERPRISE_AUTHORITY_MIGRATION Status:** PROHIBITED until all 15 gates pass and Raymond approves

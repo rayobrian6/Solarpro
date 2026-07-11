@@ -71,7 +71,7 @@ The following prefixes are **missing** (no file exists with these prefixes):
 | 013 | No file `013_*.sql` exists |
 | 014 | No file `014_*.sql` exists |
 
-These gaps may represent migrations that were planned but never created, migrations that were renumbered, or migrations that were deleted. The absence of these files does not cause errors in the current migration runner (see Section 4 below), but it creates ambiguity in determining the next available identifier.
+These gaps represent migrations that were planned but never created, renumbered, or deleted. **Policy: gaps remain reserved — the numbering sequence stays monotonically increasing.** Gaps are NOT candidates for reuse. The absence of these files does not cause errors in the current migration runner (see Section 4 below), but it means the next migration must continue the monotonically increasing sequence (not fill a gap).
 
 ### 2.7 Duplicate Migration Prefix
 
@@ -116,32 +116,36 @@ NEXT_ENTERPRISE_AUTHORITY_MIGRATION
 
 The next numeric migration identifier **cannot be assigned unambiguously** at this time due to the following structural anomalies:
 
-1. **Duplicate prefix (074):** Two files share the prefix `074`. If the next migration were assigned `105` (highest prefix + 1), this would be correct only if the numbering convention is "highest prefix + 1." However, the duplicate at `074` raises the question of whether the numbering convention is being followed reliably. If duplicates are acceptable, then `105` is the next identifier. If duplicates are an error that should be corrected, then the numbering convention is violated and a reconciliation process is needed.
+1. **Duplicate prefix (074):** Two files share the prefix `074`. This is a structural anomaly that means the numeric prefix alone is not a unique identifier. The duplicate must be resolved (accepted as intentional or renumbered) before the numbering convention can be considered reliable.
 
-2. **Gaps (009, 012, 013, 014):** Four prefixes are missing from the sequence. If the convention is "fill gaps before incrementing," then `009` would be the next identifier. If the convention is "highest prefix + 1," then `105` would be the next identifier. The convention is ambiguous because the gaps and the duplicate coexist — the directory does not consistently follow either convention.
+2. **Gaps (009, 012, 013, 014):** Four prefixes are missing from the sequence. **Policy: gaps remain reserved.** The numbering sequence stays monotonically increasing — gaps are NOT candidates for reuse. They represent migrations that were planned but never created, renumbered, or deleted. The next migration must not fill a gap; it must continue the monotonically increasing sequence.
 
-3. **Runner does not enforce filename numbering:** The primary migration runner (`app/api/migrate/route.ts`) does not read the `lib/migrations/` files at all (see Section 4.1). It contains inline SQL statements that are executed directly. The filename numbering is therefore advisory, not enforced — the runner does not care what number a file has, because it does not read files by number. This means the numbering convention is a human convention, not a machine-enforced one, and its interpretation depends on team practice.
+3. **Runner does not enforce filename numbering:** The primary migration runner (`app/api/migrate/route.ts`) does not read the `lib/migrations/` files at all (see Section 4.1). It contains inline SQL statements that are executed directly. The filename numbering is therefore advisory, not enforced — the runner does not care what number a file has, because it does not read files by number. This means the numbering convention is a human convention, not a machine-enforced one.
+
+4. **No schema_migrations tracking ledger:** Neither migration runner maintains a `schema_migrations` or equivalent tracking table (see Section 4.3). There is no authoritative record of which migrations have been applied. Without a ledger, the authoritative executable migration identifier cannot be verified.
+
+5. **Production database state not verified:** The production database was not inspected during this documentation-only task. The applied-migration state in production is unknown. Without verifying production state, no migration identifier can be considered authoritative.
 
 ### 3.3 Candidate Identifiers
 
-Given the anomalies, the candidate identifiers for the next migration are:
+| Identifier | Classification | Notes |
+|------------|----------------|-------|
+| `105` | Repository-sequential candidate (INFORMATIONAL ONLY — do not create) | Highest existing prefix (104) + 1. This is the next monotonically increasing prefix. It is informational only and MUST NOT be created until migration governance is resolved. |
+| `009`, `012`, `013`, `014` | NOT candidates — gaps remain reserved | These gaps are reserved. The numbering sequence stays monotonically increasing. Gaps are not reused. |
+| Authoritative executable identifier | NOT VERIFIED | Cannot be determined until: (1) duplicate 074 is resolved, (2) a schema_migrations ledger exists, (3) production database state is verified. |
 
-| Candidate | Rationale | Risk |
-|-----------|-----------|------|
-| `105` | Highest prefix (104) + 1 | Assumes "highest + 1" convention; ignores gaps and duplicate |
-| `009` | First gap in sequence | Assumes "fill gaps first" convention; may conflict if 009 was intentionally skipped |
-| `012` | Second gap in sequence | Same as above |
-
-**None of these candidates can be selected without a reconciliation decision.** The selection depends on the team's intended convention, which is not documented in the codebase.
+**The placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` must continue to be used** in all Phase 0.5 and Phase 1 documents. No numeric value should be substituted until the migration governance issues are resolved and the authoritative identifier is formally assigned.
 
 ### 3.4 Determination Process
 
 Before any new migration file is created, the following reconciliation process must be completed:
 
-1. **Confirm the numbering convention:** Is the convention "highest prefix + 1" or "fill gaps first"? This must be decided by the team (Raymond or a designated technical lead).
+1. **Confirm the numbering convention:** The convention is monotonically increasing — gaps remain reserved and are NOT reused. The next migration continues from the highest prefix (104 + 1 = 105), but 105 is informational only and must not be created until governance is resolved.
 2. **Resolve the duplicate at 074:** Either (a) accept the duplicate as intentional (both files are valid, the prefix is not a unique key), or (b) renumber one of the two `074_` files to a new prefix. If renumbering, the file content must be preserved and the runner must be updated if it references the file by name.
-3. **Resolve the gaps at 009, 012, 013, 014:** Either (a) confirm the gaps are intentional (migrations were never created for these numbers), or (b) determine whether files were deleted and should be restored.
-4. **Assign the next identifier** based on the confirmed convention.
+3. **Resolve the gaps at 009, 012, 013, 014:** Confirm the gaps are intentional (migrations were never created for these numbers). Gaps remain reserved — they are NOT candidates for reuse.
+4. **Establish a schema_migrations tracking ledger:** A tracking table must exist to record which migrations have been applied, with fields for identifier, filename, SHA-256 checksum, environment, timestamp, actor, result, failure state, and rollback reference (see MIGRATION-GOV-01 in Section 4.4).
+5. **Verify production database state:** Inspect the production database to determine which migrations have been applied.
+6. **Assign the authoritative executable identifier** based on the completed reconciliation.
 
 **Until this process is complete, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` remains a placeholder.** No numeric value should be substituted in any Phase 0.5 or Phase 1 document.
 
@@ -189,6 +193,44 @@ This means:
 - Running migrations is safe to repeat (idempotent), but there is no way to query "which migrations have been applied" without inspecting the database schema directly.
 - The order of migration application is not enforced by a tracking table — it depends on the order in which the inline SQL blocks appear in the runner (for the primary runner) or the order in which files are selected (for the secondary runner).
 
+### 4.4 Migration Governance Risk — MIGRATION-GOV-01
+
+**Risk Identifier:** MIGRATION-GOV-01 — Blocking governance risk: multiple non-authoritative migration execution paths.
+
+**Description:** The SolarPro codebase has two migration execution paths that operate independently and do not share a common governance framework:
+
+1. **Primary runner (`app/api/migrate/route.ts`):** A 4,223-line monolithic inline SQL runner. It does NOT read `lib/migrations/` files. It executes inline SQL statements directly. Idempotency is structural (IF NOT EXISTS, ON CONFLICT DO NOTHING). There is no migration tracking table.
+
+2. **Secondary runner (`app/api/admin/system-tools/route.ts`):** An admin tool runner that CAN read and execute files from `lib/migrations/` via the `run_migration` tool. It performs SHA-256 checksum verification before executing a file. It logs admin actions. However, it also does not maintain a migration tracking table.
+
+**Why This Is a Blocking Risk:**
+
+- **No single authoritative execution path:** Migrations can be applied through either runner, and neither runner records what was applied. There is no way to determine which migrations have been applied to any given environment.
+- **No schema_migrations ledger:** Neither runner maintains a tracking table. Without a ledger, the applied-migration state of any environment is unknowable without direct schema inspection.
+- **No rollback tracking:** Neither runner records rollback actions or maintains a rollback reference.
+- **Filename numbering is advisory, not enforced:** The primary runner ignores filenames entirely; the secondary runner reads by name but does not enforce sequential ordering.
+- **No environment scoping:** Neither runner distinguishes between development, staging, and production environments in its tracking (because there is no tracking).
+
+**Required Future Ledger Fields:**
+
+Before any new migration (including `NEXT_ENTERPRISE_AUTHORITY_MIGRATION`) can be safely created and executed, a migration governance system must be established with a `schema_migrations` (or equivalent) tracking ledger containing at minimum the following fields:
+
+| Field | Purpose |
+|-------|---------|
+| Identifier | The numeric migration prefix (e.g., `105`) |
+| Filename | The full migration filename (e.g., `105_add_org_ownership_columns.sql`) |
+| SHA-256 checksum | Cryptographic hash of the migration file content for integrity verification |
+| Environment | The environment where the migration was applied (development, staging, production) |
+| Timestamp | When the migration was applied |
+| Actor | Who applied the migration (user ID or system identifier) |
+| Result | Success or failure status |
+| Failure state | If failed, the error details and partial application state |
+| Rollback reference | Reference to the rollback migration or procedure (if any) |
+
+**Status:** MIGRATION-GOV-01 is a BLOCKING governance risk. It must be resolved before `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` can be assigned a numeric identifier and executed. This document records the risk and the required ledger fields. **The governance system itself is NOT implemented** — it is documented as a prerequisite for future migration work. No production code, migrations, or tests were created or modified to address this risk.
+
+> **Note:** This risk was identified and documented during the Phase 0.5B documentation correction pass. It is recorded here as a blocking governance risk. Implementation of the governance system is deferred to a future phase and requires Raymond's approval.
+
 ---
 
 ## 5. Repository State
@@ -200,8 +242,8 @@ This means:
 | Branch | `dev` |
 | Pre-correction Phase 0.5 commit | `ef51acff` |
 | Codebase evidence baseline | `7b344aa1` (code commit — "Planset PV-1: fix pluralization") |
-| Worktree state | 5 Phase 0.5 documentation files modified (uncommitted) |
-| Origin/dev alignment | Local HEAD == origin/dev HEAD (both `ef51acff`) |
+| Worktree state | At document creation time: 5 Phase 0.5 documentation files modified. Run `git status` for current worktree state. |
+| Origin/dev alignment | At document creation time, local and remote were aligned. HEAD is not hard-coded — it advances with each commit. Run `git rev-parse HEAD` and `git rev-parse origin/dev` to verify current alignment. |
 
 ### 5.2 Commit Date
 
@@ -224,7 +266,7 @@ All git commits in this repository are dated **2026-07-11** (verified via `git l
 | Secondary runner | `app/api/admin/system-tools/route.ts` — CAN read files with SHA-256 verification |
 | Schema migrations table | None exists |
 | Idempotency mechanism | SQL-level (IF NOT EXISTS, ON CONFLICT DO NOTHING, existence checks) |
-| Next identifier | `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` (placeholder — cannot be assigned unambiguously) |
+| Next identifier | `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` (placeholder — repository-sequential candidate 105 is informational only; authoritative executable identifier NOT VERIFIED) |
 
 ---
 
@@ -232,13 +274,15 @@ All git commits in this repository are dated **2026-07-11** (verified via `git l
 
 > **WARNING:** The next migration identifier for the Enterprise Multi-Tenant Authority initiative CANNOT be assigned a numeric value until the following reconciliation steps are completed:
 >
-> 1. The numbering convention is confirmed ("highest + 1" vs "fill gaps first").
+> 1. The numbering convention is confirmed as monotonically increasing (gaps remain reserved, NOT reused).
 > 2. The duplicate at prefix 074 is resolved (accepted as intentional or renumbered).
-> 3. The gaps at prefixes 009, 012, 013, 014 are confirmed as intentional or resolved.
+> 3. The gaps at prefixes 009, 012, 013, 014 are confirmed as intentional (reserved, not reused).
+> 4. A schema_migrations tracking ledger is established (see MIGRATION-GOV-01 in Section 4.4).
+> 5. Production database state is verified.
 >
-> Assigning a numeric value without this reconciliation risks creating a migration file with an ambiguous or conflicting identifier. The placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` MUST be used in all Phase 0.5 and Phase 1 documents until the reconciliation is complete and the identifier is formally assigned.
+> The repository-sequential candidate is 105 (informational only — do not create). The authoritative executable identifier is NOT VERIFIED. Assigning a numeric value without this reconciliation risks creating a migration file with an ambiguous or conflicting identifier. The placeholder `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` MUST be used in all Phase 0.5 and Phase 1 documents until the reconciliation is complete and the identifier is formally assigned.
 >
-> Furthermore, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` is PROHIBITED from execution until all 15 Phase 1 entry gates pass and Raymond has explicitly approved in writing. See `ENTERPRISE-MULTI-TENANT-PHASE1-ENTRY-GATES.md` for the full entry gate conditions.
+> Furthermore, `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` is PROHIBITED from execution until all 15 program gates pass and Raymond has explicitly approved in writing. See `ENTERPRISE-MULTI-TENANT-PHASE1-ENTRY-GATES.md` for the full entry gate conditions.
 
 ---
 
@@ -305,8 +349,8 @@ grep -n "readFileSync\|readdirSync\|run_migration\|sha256" app/api/admin/system-
 
 ```bash
 git branch --show-current          # Expected: dev
-git rev-parse HEAD                 # Expected: ef51acff...
-git rev-parse origin/dev           # Expected: ef51acff... (aligned)
+git rev-parse HEAD                 # Run to obtain current HEAD (not hard-coded)
+git rev-parse origin/dev           # Run to obtain current origin/dev HEAD (verify alignment)
 git log --format=%ci -1            # Expected: 2026-07-11...
 ```
 
@@ -347,6 +391,8 @@ git log --format=%ci -1            # Expected: 2026-07-11...
 **Highest prefix:** 104
 **Gaps:** 009, 012, 013, 014
 **Duplicates:** 074 (2 files)
-**Next identifier:** `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` (placeholder — discovery required)
+**Gaps:** 009, 012, 013, 014 (reserved — not candidates for reuse)
+**Next identifier:** `NEXT_ENTERPRISE_AUTHORITY_MIGRATION` (placeholder — repository-sequential candidate 105 is informational only; authoritative executable identifier NOT VERIFIED)
+**Governance risk:** MIGRATION-GOV-01 (blocking — multiple non-authoritative migration execution paths; no schema_migrations ledger)
 **Confidence:** HIGH (all findings verified via direct inspection)
 **Warning:** Do NOT assign a numeric value until reconciliation is complete

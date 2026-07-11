@@ -286,10 +286,10 @@ The following work is BLOCKED pending Raymond's approval of this decision:
 
 **Option C — Gated sequential implementation with 15 entry gates.**
 
-Phase 1 implementation proceeds through 15 gates, each with explicit pass/fail criteria. No gate begins until the previous gate passes. NEXT_ENTERPRISE_AUTHORITY_MIGRATION (the first schema migration that adds org-level columns to existing resource tables) is PROHIBITED until all 15 gates are passed and Raymond approves. The 15 gates span two phases within Phase 1:
+The 15 gates describe the FULL program, not Phase 1 alone. Phase 1 is foundation-only (Gates 1-12); Gates 13-15 belong to later program phases. No gate begins until the previous gate passes. NEXT_ENTERPRISE_AUTHORITY_MIGRATION (the first schema migration that adds org-level columns to existing resource tables) is PROHIBITED until all 15 gates are passed and Raymond approves. The gate-to-phase assignment is:
 
-- **Phase 1 Foundation (Gates 1-12):** Canonical org table, org members junction table, org roles namespace, active org context table, active org resolution function, extended session/user object, authorization interface, org-scoped query helper, audit log org context, tenant-aware audit query API, dev auth bypass audit, impersonation hardening.
-- **Phase 1 Completion (Gates 13-15):** Legacy ownership backfill script (dry-run), ambiguity queue admin API, Phase 1 entry gate verification (full test suite, 121 test cases, no regressions, Raymond approval).
+- **Phase 1 — Foundation (Gates 1-12):** Canonical org table, org members junction table, org roles namespace, active org context table, active org resolution function, extended session/user object, authorization interface, org-scoped query helper, audit log org context, tenant-aware audit query API, dev auth bypass audit, impersonation hardening.
+- **Later Program Phases (Gates 13-15):** Legacy ownership backfill script (dry-run), ambiguity queue admin API, program entry gate verification (full test suite, 121 test cases, no regressions, Raymond approval). These are NOT "Phase 1 Completion" — they belong to later phases in the full program.
 
 ### The 15 Gates
 

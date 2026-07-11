@@ -32,7 +32,7 @@ Phase 0.5 is a read-only architecture decision phase. No production code may be 
 
 ### PROHIBITION 2: No Schema Migrations (NEXT_ENTERPRISE_AUTHORITY_MIGRATION) Until Entry Gates Met
 
-**NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED until every BLOCKING entry gate condition is satisfied and Raymond has explicitly approved in writing.** NEXT_ENTERPRISE_AUTHORITY_MIGRATION is defined as the first schema migration that modifies existing resource tables to add org-level ownership columns (e.g., `projects.organization_id`). The 15 implementation gates (ADR-014) define the work that must be completed before NEXT_ENTERPRISE_AUTHORITY_MIGRATION is even considered.
+**NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED until every BLOCKING entry gate condition is satisfied and Raymond has explicitly approved in writing.** NEXT_ENTERPRISE_AUTHORITY_MIGRATION is defined as the first schema migration that modifies existing resource tables to add org-level ownership columns (e.g., `projects.organization_id`). The 15 implementation gates (ADR-014) describe the FULL program and define the work that must be completed before NEXT_ENTERPRISE_AUTHORITY_MIGRATION is even considered. Phase 1 is foundation-only (Gates 1-12); Gates 13-15 belong to later program phases.
 
 ### PROHIBITION 3: No MFA Modifications
 
@@ -210,7 +210,7 @@ The following conditions must ALL be satisfied before Phase 1 implementation can
 
 **NEXT_ENTERPRISE_AUTHORITY_MIGRATION is PROHIBITED until:**
 
-1. All 15 implementation gates (ADR-014 Gates 1 through 15) have passed their pass/fail criteria.
+1. All 15 implementation gates (ADR-014 Gates 1 through 15) have passed their pass/fail criteria. (The 15 gates describe the full program — Phase 1 is foundation-only, Gates 1-12; Gates 13-15 belong to later program phases. All 15 must pass before NEXT_ENTERPRISE_AUTHORITY_MIGRATION.)
 2. The full Authorization Test Matrix (121 test cases) has passed.
 3. No regressions are detected across all 280 API routes.
 4. MFA code, tests, evidence, and acceptance artifacts are verified untouched.
