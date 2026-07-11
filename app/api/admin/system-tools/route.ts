@@ -36,49 +36,40 @@ export async function POST(req: NextRequest) {
         if (!migrationFile || !migrationFile.endsWith('.sql'))
           return NextResponse.json({ success: false, error: 'Invalid migration file' }, { status: 400 });
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Phase 1A — Migration Governance (MIGRATION-GOV-01)
+        // ────────────────────────────────────────────────────────────────────────
+        // Phase 1A.2 — Migration Governance (MIGRATION-GOV-13)
         //
-        // This legacy run_migration case is DEPRECATED as a migration execution
-        // path. The canonical migration execution path is now
-        // /api/admin/migrations (lib/migrations/runner.ts), which provides the
-        // schema_migrations ledger, mandatory SHA-256 checksums, transactional
-        // execution, advisory locks, environment-aware authorization, fresh TOTP,
-        // and audit event emission.
-        //
-        // This legacy case is gated behind the
-        // MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED feature flag (default:
-        // disabled). When invoked with the flag disabled, it emits a deprecation
-        // audit event and returns a deprecation notice directing the operator to
-        // the canonical API. The list_migrations case (diagnostic listing)
-        // remains functional.
-        // ─────────────────────────────────────────────────────────────────────
-        const legacySystemToolsRunEnabled = process.env.MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED === 'true';
-        if (!legacySystemToolsRunEnabled) {
-          console.log(JSON.stringify({
-            level: 'audit',
-            type: 'migration.legacy.invoked',
-            timestamp: new Date().toISOString(),
-            actorType: 'human',
-            actorId: admin.id,
-            environment: (process.env.VERCEL_ENV || process.env.NODE_ENV || 'development').toLowerCase(),
-            executionId: null,
-            migrationIdentifier: null,
-            filename: migrationFile,
-            details: {
-              legacyRunner: 'app/api/admin/system-tools/route.ts:run_migration',
-              reason: 'Legacy system-tools run_migration invoked while disabled by default (Phase 1A governance).',
-              canonicalPath: '/api/admin/migrations',
-            },
-          }));
-          return NextResponse.json({
-            success: false,
-            error: 'This legacy migration execution path is deprecated and disabled by default (Phase 1A Migration Governance). ' +
-              'Use the canonical migration API at /api/admin/migrations instead. ' +
-              'To re-enable this legacy path (NOT recommended), set MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED=true.',
+        // This legacy run_migration case is PERMANENTLY ELIMINATED as a
+        // migration execution path. Per MIGRATION-GOV-13 (Phase 1A.2), legacy
+        // mutation paths must be permanently blocked, not feature-flagged.
+        // The canonical migration execution path is /api/admin/migrations
+        // (lib/migrations/runner.ts). This case now ALWAYS returns 423 Locked
+        // and directs the operator to the canonical API. The list_migrations
+        // case (diagnostic listing) remains functional.
+        // ────────────────────────────────────────────────────────────────────────
+        console.log(JSON.stringify({
+          level: 'audit',
+          type: 'migration.legacy.invoked',
+          timestamp: new Date().toISOString(),
+          actorType: 'human',
+          actorId: admin.id,
+          environment: (process.env.VERCEL_ENV || process.env.NODE_ENV || 'development').toLowerCase(),
+          executionId: null,
+          migrationIdentifier: null,
+          filename: migrationFile,
+          details: {
+            legacyRunner: 'app/api/admin/system-tools/route.ts:run_migration',
+            reason: 'Legacy system-tools run_migration permanently eliminated (MIGRATION-GOV-13, Phase 1A.2).',
             canonicalPath: '/api/admin/migrations',
-          }, { status: 423 }); // 423 Locked
-        }
+          },
+        }));
+        return NextResponse.json({
+          success: false,
+          error: 'This legacy migration execution path has been permanently eliminated (MIGRATION-GOV-13, Phase 1A.2). ' +
+            'Use the canonical migration API at /api/admin/migrations instead. ' +
+            'This route will never re-enable, regardless of environment variables.',
+          canonicalPath: '/api/admin/migrations',
+        }, { status: 423 }); // 423 Locked
 
         // Security: only allow files from the migrations directory
         const migrationsDir = path.join(process.cwd(), 'lib', 'migrations');

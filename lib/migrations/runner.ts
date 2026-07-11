@@ -94,17 +94,31 @@ function isProductionExecutionAllowed(): boolean {
 }
 
 /**
- * Whether the legacy inline runner is enabled (feature flag, default false).
+ * Whether the legacy inline runner is enabled.
+ *
+ * Per MIGRATION-GOV-13 (Phase 1A.2), the legacy inline runner is PERMANENTLY
+ * ELIMINATED. This function now always returns false — the legacy path can
+ * never be re-enabled, regardless of environment variables. It is retained
+ * (as a constant false) so the canonical admin inspection endpoint
+ * (/api/admin/migrations GET) can continue reporting legacyFlags status
+ * without breaking its response shape.
  */
 export function isLegacyInlineEnabled(): boolean {
-  return process.env[MIGRATION_ENV_VARS.LEGACY_INLINE_ENABLED] === 'true';
+  return false;
 }
 
 /**
- * Whether the legacy system-tools run_migration is enabled (feature flag).
+ * Whether the legacy system-tools run_migration is enabled.
+ *
+ * Per MIGRATION-GOV-13 (Phase 1A.2), the legacy system-tools run_migration
+ * path is PERMANENTLY ELIMINATED. This function now always returns false —
+ * the legacy path can never be re-enabled, regardless of environment
+ * variables. It is retained (as a constant false) so the canonical admin
+ * inspection endpoint can continue reporting legacyFlags status without
+ * breaking its response shape.
  */
 export function isLegacySystemToolsRunEnabled(): boolean {
-  return process.env[MIGRATION_ENV_VARS.LEGACY_SYSTEM_TOOLS_RUN_ENABLED] === 'true';
+  return false;
 }
 
 /**
@@ -683,61 +697,44 @@ async function executeMigrationInTransaction(
     };
   }
 
-  // ── FORBIDDEN mode: execute outside a transaction, statement by statement ──
+  // ── FORBIDDEN mode: BLOCK automatic execution (MIGRATION-GOV-12, Phase 1A.2)
+  //
+  // FORBIDDEN migrations contain transaction-incompatible statements
+  // (CREATE INDEX CONCURRENTLY, VACUUM, REINDEX CONCURRENTLY, etc.). Executing
+  // these statement-by-statement outside a transaction means a partial failure
+  // leaves the schema in an inconsistent state with no rollback.
+  //
+  // Per MIGRATION-GOV-12, FORBIDDEN migrations must be BLOCKED from automatic
+  // execution. The runner returns MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED
+  // and does NOT execute any SQL. Manual operator intervention is required.
   if (file.transactionMode === 'FORBIDDEN') {
-    try {
-      // Acquire a session-scoped advisory lock (not transaction-scoped, since
-      // there is no single transaction). Use the exact decimal key as BIGINT.
-      // pg_try_advisory_lock returns true/false (bounded, non-blocking).
-      const lockResult = await sql`
-        SELECT pg_try_advisory_lock(${MIGRATION_LOCK_KEY_DECIMAL}::bigint) AS acquired
-      `;
-      const acquired = Boolean(lockResult[0]?.acquired);
-      if (!acquired) {
-        emitAuditEvent({
-          type: 'migration.lock_denied',
-          actorType: null,
-          actorId: null,
-          environment: getCurrentEnvironment(),
-          executionId: null,
-          migrationIdentifier: file.identifier,
-          filename: file.filename,
-          details: { lockKey: MIGRATION_LOCK_KEY_DECIMAL, mode: 'session' },
-        });
-        return {
-          success: false,
-          errorCode: 'LOCK_DENIED',
-          error: `Failed to acquire advisory lock for migration '${file.identifier}'. ` +
-            `Another migration may be in progress.`,
-        };
-      }
-
-      emitAuditEvent({
-        type: 'migration.lock_acquired',
-        actorType: null,
-        actorId: null,
-        environment: getCurrentEnvironment(),
-        executionId: null,
-        migrationIdentifier: file.identifier,
-        filename: file.filename,
-        details: { lockKey: MIGRATION_LOCK_KEY_DECIMAL, mode: 'session', transactionMode: 'FORBIDDEN' },
-      });
-
-      // Execute each statement individually (no transaction wrapper).
-      // CONCURRENTLY statements cannot run inside a transaction block.
-      try {
-        for (const stmt of statements) {
-          await sql(stmt, []);
-        }
-        return { success: true };
-      } finally {
-        // Always release the session lock, even on failure.
-        await sql`SELECT pg_advisory_unlock(${MIGRATION_LOCK_KEY_DECIMAL}::bigint)`.catch(() => {});
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      return { success: false, errorCode: 'FORBIDDEN_MODE_STATEMENT_ERROR', error: errorMsg };
-    }
+    // Re-detect the incompatible statements for the audit event details.
+    const sqlContent = readFileSync(file.fullPath, 'utf-8');
+    const { incompatibleStatements } = detectTransactionMode(sqlContent);
+    emitAuditEvent({
+      type: 'migration.execution_blocked_non_transactional',
+      actorType: null,
+      actorId: null,
+      environment: getCurrentEnvironment(),
+      executionId: null,
+      migrationIdentifier: file.identifier,
+      filename: file.filename,
+      details: {
+        transactionMode: 'FORBIDDEN',
+        incompatibleStatements,
+        reason: 'Non-transactional execution is not supported by the canonical runner.',
+      },
+    });
+    return {
+      success: false,
+      errorCode: 'MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED',
+      error: `Migration '${file.identifier}' contains non-transactional statements ` +
+        `(${incompatibleStatements.join(', ')}) and cannot be executed automatically. ` +
+        `Manual operator intervention required. The canonical migration runner ` +
+        `does not support statement-by-statement execution outside a transaction ` +
+        `because a partial failure would leave the schema in an inconsistent state ` +
+        `with no rollback (MIGRATION-GOV-12).`,
+    };
   }
 
   // ── REQUIRED mode (default): execute inside a transaction ──────────────

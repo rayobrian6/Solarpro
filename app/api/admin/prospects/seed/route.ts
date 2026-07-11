@@ -8,7 +8,7 @@
  * 093 as a single INSERT. Idempotent — safe to click repeatedly.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * Phase 1A.1 — Migration Governance (MIGRATION-GOV-07)
+ * Phase 1A.2 — Migration Governance (MIGRATION-GOV-13)
  *
  * This route is a NON-CANONICAL migration execution path: it reads numbered
  * migration SQL files (092_installer_prospects.sql, 093_seed_installer_prospects_batch1.sql)
@@ -18,13 +18,13 @@
  * transactional execution, advisory locks, environment-aware authorization,
  * fresh TOTP verification, and audit event emission.
  *
- * This route is now gated behind the MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED
- * feature flag (default: disabled). When invoked with the flag disabled, it
- * emits a deprecation audit event and returns a deprecation notice directing the
- * operator to the canonical API at /api/admin/migrations. The file is NOT
- * deleted in Phase 1A.1 (per spec: restrict/wrap, don't delete unless
- * demonstrably safe). To re-enable this legacy path (NOT recommended), set
- * MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED=true.
+ * This route's mutation path is PERMANENTLY ELIMINATED.
+ * Per MIGRATION-GOV-13 (Phase 1A.2), legacy mutation paths must be permanently
+ * blocked, not feature-flagged. A feature flag that can restore ungoverned DDL
+ * is a latent risk. This route now ALWAYS returns 423 Locked and directs the
+ * operator to the canonical migration API. The file is preserved (not deleted)
+ * so existing integrations receive a clear error response rather than a 404.
+ * This route will never re-enable, regardless of environment variables.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 export const dynamic = "force-dynamic";
@@ -58,42 +58,43 @@ export async function POST(req: NextRequest) {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // MIGRATION-GOV-07: Gate this non-canonical migration execution path.
+  // Phase 1A.2 — Migration Governance (MIGRATION-GOV-13)
   //
-  // This route executes numbered migration SQL files directly, bypassing the
-  // canonical governance system. It is gated behind a feature flag (default:
-  // disabled) so that it cannot be used to alter the database schema without
-  // going through the governed path. When disabled, emit a deprecation audit
-  // event and return 423 Locked with a pointer to the canonical API.
+  // This legacy prospects-seed route is PERMANENTLY ELIMINATED as a migration
+  // execution path. Per MIGRATION-GOV-13 (Phase 1A.2), legacy mutation paths
+  // must be permanently blocked, not feature-flagged. A feature flag that can
+  // restore ungoverned DDL is a latent risk. The canonical migration execution
+  // path is /api/admin/migrations (lib/migrations/runner.ts). This route now
+  // ALWAYS returns 423 Locked and directs the operator to the canonical API.
+  // This route will never re-enable, regardless of environment variables.
   // ─────────────────────────────────────────────────────────────────────────────
-  const legacyProspectsSeedEnabled = process.env.MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED === 'true';
-  if (!legacyProspectsSeedEnabled) {
-    // Emit deprecation audit event for observability.
-    console.log(JSON.stringify({
-      level: 'audit',
-      type: 'migration.legacy.invoked',
-      timestamp: new Date().toISOString(),
-      actorType: 'human',
-      actorId: admin.id,
-      environment: (process.env.VERCEL_ENV || process.env.NODE_ENV || 'development').toLowerCase(),
-      executionId: null,
-      migrationIdentifier: null,
-      filename: null,
-      details: {
-        legacyRunner: 'app/api/admin/prospects/seed/route.ts',
-        reason: 'Legacy prospects-seed migration execution path invoked while disabled by default (Phase 1A.1 governance).',
-        canonicalPath: '/api/admin/migrations',
-      },
-    }));
-    return NextResponse.json({
-      success: false,
-      error: 'This legacy migration execution path is deprecated and disabled by default (Phase 1A.1 Migration Governance). ' +
-        'Use the canonical migration API at /api/admin/migrations instead. ' +
-        'To re-enable this legacy path (NOT recommended), set MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED=true.',
+  console.log(JSON.stringify({
+    level: 'audit',
+    type: 'migration.legacy.invoked',
+    timestamp: new Date().toISOString(),
+    actorType: 'human',
+    actorId: admin.id,
+    environment: (process.env.VERCEL_ENV || process.env.NODE_ENV || 'development').toLowerCase(),
+    executionId: null,
+    migrationIdentifier: null,
+    filename: null,
+    details: {
+      legacyRunner: 'app/api/admin/prospects/seed/route.ts',
+      reason: 'Legacy prospects-seed migration execution path permanently eliminated (MIGRATION-GOV-13, Phase 1A.2).',
       canonicalPath: '/api/admin/migrations',
-    }, { status: 423 }); // 423 Locked
-  }
+    },
+  }));
+  return NextResponse.json({
+    success: false,
+    error: 'This legacy migration execution path has been permanently eliminated (MIGRATION-GOV-13, Phase 1A.2). ' +
+      'Use the canonical migration API at /api/admin/migrations instead. ' +
+      'This route will never re-enable, regardless of environment variables.',
+    canonicalPath: '/api/admin/migrations',
+  }, { status: 423 }); // 423 Locked
 
+  // The code below this point is unreachable. It is preserved (not deleted) so
+  // the file structure remains intact for any future reference. The permanent
+  // 423 return above means no schema mutation can ever occur through this route.
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     return NextResponse.json({ success: false, error: "DATABASE_URL not set" }, { status: 500 });

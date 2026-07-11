@@ -160,8 +160,11 @@ export type BaselineEvidenceType =
  *                     This is the default for most migrations.
  * - `FORBIDDEN`     — The migration contains transaction-incompatible
  *                     statements (e.g., CREATE INDEX CONCURRENTLY, VACUUM,
- *                     REINDEX CONCURRENTLY) and must be executed outside a
- *                     transaction.
+ *                     REINDEX CONCURRENTLY) and cannot be executed
+ *                     automatically. Per MIGRATION-GOV-12 (Phase 1A.2), the
+ *                     canonical runner BLOCKS FORBIDDEN migrations and
+ *                     returns MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED.
+ *                     Manual operator intervention is required.
  * - `MANUAL_REVIEW` — The migration's transaction compatibility cannot be
  *                     automatically determined and requires manual review
  *                     before execution.
@@ -200,8 +203,11 @@ export interface MigrationFile {
    * - `REQUIRED` \u2014 The file contains only transaction-compatible statements and
    *   must be executed inside a transaction.
    * - `FORBIDDEN` \u2014 The file contains transaction-incompatible statements
-   *   (CREATE INDEX CONCURRENTLY, VACUUM, REINDEX CONCURRENTLY, etc.) and must
-   *   be executed outside a transaction, statement by statement.
+   *   (CREATE INDEX CONCURRENTLY, VACUUM, REINDEX CONCURRENTLY, etc.) and
+   *   cannot be executed automatically. Per MIGRATION-GOV-12 (Phase 1A.2),
+   *   the canonical runner BLOCKS execution of FORBIDDEN migrations and
+   *   returns MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED. Manual
+   *   operator intervention is required.
    * - `MANUAL_REVIEW` \u2014 The file's compatibility cannot be automatically
    *   determined and requires manual review.
    *
@@ -459,6 +465,7 @@ export type MigrationAuditEventType =
   | 'migration.mfa.denied'
   | 'migration.mfa.replay_detected'
   | 'migration.transaction_mode.review_required'
+  | 'migration.execution_blocked_non_transactional'
   | 'manifest.duplicate_prefix';
 
 /**
@@ -537,11 +544,25 @@ export const MIGRATION_ENV_VARS = {
   ALLOWED_ENVS: 'MIGRATION_RUN_ALLOWED_ENVS',
   /** Explicit flag to allow production execution (two-key requirement). */
   ALLOW_PRODUCTION: 'MIGRATION_ALLOW_PRODUCTION_EXECUTION',
-  /** Feature flag for the legacy inline runner (default: disabled). */
+  /**
+   * Legacy inline runner flag. PERMANENTLY DEAD per MIGRATION-GOV-13 (Phase 1A.2).
+   * The env var name is retained for historical reference, but the legacy path
+   * is now permanently blocked (always 423) and can never be re-enabled.
+   * isLegacyInlineEnabled() always returns false.
+   */
   LEGACY_INLINE_ENABLED: 'MIGRATION_LEGACY_INLINE_ENABLED',
-  /** Feature flag for the legacy system-tools run_migration path. */
+  /**
+   * Legacy system-tools run_migration flag. PERMANENTLY DEAD per MIGRATION-GOV-13.
+   * The env var name is retained for historical reference, but the legacy path
+   * is now permanently blocked (always 423) and can never be re-enabled.
+   * isLegacySystemToolsRunEnabled() always returns false.
+   */
   LEGACY_SYSTEM_TOOLS_RUN_ENABLED: 'MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED',
-  /** Feature flag for the legacy prospects-seed direct SQL execution path. */
+  /**
+   * Legacy prospects-seed flag. PERMANENTLY DEAD per MIGRATION-GOV-13 (Phase 1A.2).
+   * The env var name is retained for historical reference, but the legacy path
+   * is now permanently blocked (always 423) and can never be re-enabled.
+   */
   LEGACY_PROSPECTS_SEED_ENABLED: 'MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED',
 } as const;
 

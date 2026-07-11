@@ -121,7 +121,8 @@ export type AuditAction =
   | 'migration_governance_execution_denied'
   | 'migration_mfa_denied'
   | 'migration_mfa_replay_detected'
-  | 'migration_transaction_mode_review_required';
+  | 'migration_transaction_mode_review_required'
+  | 'migration_execution_blocked_non_transactional';
 
 export interface AuditLogEntry {
   id?: string;

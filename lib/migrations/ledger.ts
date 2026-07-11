@@ -240,6 +240,7 @@ const MIGRATION_EVENT_TO_AUDIT_ACTION: Record<MigrationAuditEventType, AuditActi
   'migration.mfa.denied': 'migration_mfa_denied',
   'migration.mfa.replay_detected': 'migration_mfa_replay_detected',
   'migration.transaction_mode.review_required': 'migration_transaction_mode_review_required',
+  'migration.execution_blocked_non_transactional': 'migration_execution_blocked_non_transactional',
   'manifest.duplicate_prefix': 'data_read',
 };
 

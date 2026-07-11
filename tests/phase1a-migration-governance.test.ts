@@ -915,37 +915,52 @@ describe('Phase 1A: Canonical API route', () => {
 // 10. Legacy Runner Restriction — feature flag gates
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Phase 1A: Legacy runner restriction', () => {
+describe('Phase 1A: Legacy runner restriction (Phase 1A.2 permanent elimination)', () => {
   const migrateSrc = readSrc('app/api/migrate/route.ts');
   const systemToolsSrc = readSrc('app/api/admin/system-tools/route.ts');
 
-  it('legacy inline runner is gated behind MIGRATION_LEGACY_INLINE_ENABLED flag', () => {
-    expect(migrateSrc).toContain('MIGRATION_LEGACY_INLINE_ENABLED');
+  it('legacy inline runner is permanently eliminated — returns 423 Locked', () => {
     expect(migrateSrc).toContain('423'); // Locked status
+    expect(migrateSrc).toContain('permanently eliminated');
   });
 
-  it('legacy inline runner emits deprecation audit event when invoked', () => {
+  it('legacy inline runner does NOT read MIGRATION_LEGACY_INLINE_ENABLED env var', () => {
+    // Per MIGRATION-GOV-13 (Phase 1A.2), the flag is permanently removed.
+    // The route must not check process.env.MIGRATION_LEGACY_INLINE_ENABLED.
+    expect(migrateSrc).not.toContain('process.env.MIGRATION_LEGACY_INLINE_ENABLED');
+  });
+
+  it('legacy inline runner message says it will never re-enable', () => {
+    expect(migrateSrc).toContain('never re-enable');
+    expect(migrateSrc).toContain('regardless of environment variables');
+  });
+
+  it('legacy inline runner emits migration.legacy.invoked audit event', () => {
     expect(migrateSrc).toContain('migration.legacy.invoked');
-    expect(migrateSrc).toContain('deprecated');
   });
 
   it('legacy inline runner directs to canonical path', () => {
     expect(migrateSrc).toContain('/api/admin/migrations');
   });
 
-  it('legacy system-tools run_migration is gated behind feature flag', () => {
-    expect(systemToolsSrc).toContain('MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED');
+  it('legacy system-tools run_migration is permanently eliminated — returns 423 Locked', () => {
     expect(systemToolsSrc).toContain('423');
+    expect(systemToolsSrc).toContain('permanently eliminated');
   });
 
-  it('legacy system-tools run_migration emits deprecation audit event', () => {
+  it('legacy system-tools run_migration does NOT read MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED env var', () => {
+    // Per MIGRATION-GOV-13 (Phase 1A.2), the flag is permanently removed.
+    expect(systemToolsSrc).not.toContain('process.env.MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED');
+  });
+
+  it('legacy system-tools run_migration emits migration.legacy.invoked audit event', () => {
     expect(systemToolsSrc).toContain('migration.legacy.invoked');
   });
 
-  it('legacy system-tools list_migrations still functional (not gated)', () => {
-    // list_migrations should NOT have the feature flag gate.
+  it('legacy system-tools list_migrations still functional (not eliminated)', () => {
+    // list_migrations is a diagnostic listing and remains functional.
     const listSection = systemToolsSrc.split('case \'list_migrations\'')[1] ?? '';
-    expect(listSection).not.toContain('MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED');
+    expect(listSection).not.toContain('permanently eliminated');
   });
 
   it('legacy runners are NOT deleted (files still exist)', () => {
@@ -958,21 +973,30 @@ describe('Phase 1A: Legacy runner restriction', () => {
 // 10b. Non-Canonical Execution Path Elimination (MIGRATION-GOV-07)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('Phase 1A.1: Non-canonical execution path elimination', () => {
+describe('Phase 1A.1/1A.2: Non-canonical execution path elimination (permanent)', () => {
   const prospectsSeedSrc = readSrc('app/api/admin/prospects/seed/route.ts');
   const migrateSrc = readSrc('app/api/migrate/route.ts');
   const systemToolsSrc = readSrc('app/api/admin/system-tools/route.ts');
 
-  it('prospects/seed route is gated behind MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED flag (MIGRATION-GOV-07)', () => {
+  it('prospects/seed route is permanently eliminated — returns 423 Locked (MIGRATION-GOV-13)', () => {
     // The prospects/seed route reads migration SQL files (092, 093) directly
-    // and executes them without governance. It must be gated.
-    expect(prospectsSeedSrc).toContain('MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
+    // and executes them without governance. Per GOV-13 it is permanently blocked.
     expect(prospectsSeedSrc).toContain('423'); // Locked status
+    expect(prospectsSeedSrc).toContain('permanently eliminated');
   });
 
-  it('prospects/seed route emits migration.legacy.invoked deprecation audit event when disabled', () => {
+  it('prospects/seed route does NOT read MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED env var', () => {
+    // Per MIGRATION-GOV-13 (Phase 1A.2), the flag is permanently removed.
+    expect(prospectsSeedSrc).not.toContain('process.env.MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
+  });
+
+  it('prospects/seed route message says it will never re-enable', () => {
+    expect(prospectsSeedSrc).toContain('never re-enable');
+    expect(prospectsSeedSrc).toContain('regardless of environment variables');
+  });
+
+  it('prospects/seed route emits migration.legacy.invoked audit event', () => {
     expect(prospectsSeedSrc).toContain('migration.legacy.invoked');
-    expect(prospectsSeedSrc).toContain('deprecated');
   });
 
   it('prospects/seed route directs to canonical path /api/admin/migrations', () => {
@@ -980,29 +1004,36 @@ describe('Phase 1A.1: Non-canonical execution path elimination', () => {
     expect(prospectsSeedSrc).toContain('canonicalPath');
   });
 
-  it('prospects/seed route checks the flag AFTER admin authentication (not before)', () => {
-    // The gate must come after requireAdminApi so we can record the actor in the
-    // audit event. Use the function-body occurrences (not import/comment refs).
+  it('prospects/seed route audit event fires AFTER admin authentication (not before)', () => {
+    // The audit event must come after requireAdminApi so we can record the actor.
     const adminCallIdx = prospectsSeedSrc.indexOf('await requireAdminApi');
-    const flagCheckIdx = prospectsSeedSrc.indexOf('process.env.MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
+    const auditIdx = prospectsSeedSrc.indexOf('migration.legacy.invoked');
     expect(adminCallIdx).toBeGreaterThan(-1);
-    expect(flagCheckIdx).toBeGreaterThan(-1);
-    expect(flagCheckIdx).toBeGreaterThan(adminCallIdx);
+    expect(auditIdx).toBeGreaterThan(-1);
+    expect(auditIdx).toBeGreaterThan(adminCallIdx);
   });
 
   it('prospects/seed route is NOT deleted (file still exists)', () => {
     expect(fs.existsSync(path.join(root, 'app/api/admin/prospects/seed/route.ts'))).toBe(true);
   });
 
-  it('all three non-canonical paths are gated behind feature flags', () => {
+  it('all three non-canonical paths are permanently eliminated with 423 Locked (GOV-13)', () => {
     // Every path that executes migration SQL outside the canonical governance
-    // system must be gated behind a feature flag with 423 Locked.
-    expect(migrateSrc).toContain('MIGRATION_LEGACY_INLINE_ENABLED');
+    // system must be permanently blocked with 423 Locked — NOT feature-flagged.
     expect(migrateSrc).toContain('423');
-    expect(systemToolsSrc).toContain('MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED');
+    expect(migrateSrc).toContain('permanently eliminated');
     expect(systemToolsSrc).toContain('423');
-    expect(prospectsSeedSrc).toContain('MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
+    expect(systemToolsSrc).toContain('permanently eliminated');
     expect(prospectsSeedSrc).toContain('423');
+    expect(prospectsSeedSrc).toContain('permanently eliminated');
+  });
+
+  it('none of the three non-canonical paths read their legacy env vars (GOV-13)', () => {
+    // Per MIGRATION-GOV-13, the feature flags are permanently removed from the
+    // route function bodies. The routes must not check process.env for these.
+    expect(migrateSrc).not.toContain('process.env.MIGRATION_LEGACY_INLINE_ENABLED');
+    expect(systemToolsSrc).not.toContain('process.env.MIGRATION_LEGACY_SYSTEM_TOOLS_RUN_ENABLED');
+    expect(prospectsSeedSrc).not.toContain('process.env.MIGRATION_LEGACY_PROSPECTS_SEED_ENABLED');
   });
 
   it('no path writes to the migration ledger outside the canonical functions', () => {
@@ -1213,10 +1244,10 @@ describe('Phase 1A.1: Persistent audit integration', () => {
   it('executeMigrationInTransaction returns errorCode for transaction-mode failures', () => {
     // MANUAL_REVIEW mode should return a specific error code.
     expect(runnerSrc).toContain('TRANSACTION_MODE_MANUAL_REVIEW');
-    // FORBIDDEN mode statement errors should have a specific error code.
-    expect(runnerSrc).toContain('FORBIDDEN_MODE_STATEMENT_ERROR');
-    // Lock denial should have a specific error code.
-    expect(runnerSrc).toContain('LOCK_DENIED');
+    // FORBIDDEN mode is now BLOCKED (GOV-12) with a specific error code.
+    expect(runnerSrc).toContain('MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED');
+    // Lock denial (already running) should have a specific error code.
+    expect(runnerSrc).toContain('ALREADY_RUNNING');
     // Transaction errors should have a specific error code.
     expect(runnerSrc).toContain('TRANSACTION_ERROR');
   });
@@ -1465,9 +1496,11 @@ describe('Phase 1A.1: Lock key exactness', () => {
     // REQUIRED transaction path.
   });
 
-  it('FORBIDDEN mode uses pg_try_advisory_lock (session-scoped, bounded)', () => {
-    expect(runnerSrc).toContain('pg_try_advisory_lock');
-    expect(runnerSrc).toContain('pg_advisory_unlock');
+  it('REQUIRED mode uses pg_try_advisory_xact_lock (transaction-scoped, bounded)', () => {
+    // Per GOV-12 (Phase 1A.2), FORBIDDEN mode is now BLOCKED and never reaches
+    // the lock acquisition code. REQUIRED mode uses transaction-scoped advisory
+    // locks (pg_try_advisory_xact_lock) for concurrency safety.
+    expect(runnerSrc).toContain('pg_try_advisory_xact_lock');
   });
 });
 
@@ -1963,5 +1996,233 @@ describe('Phase 1A.2: Run-history for denied/blocked paths (MIGRATION-GOV-18)', 
 
   it('MIGRATION-GOV-14 reference documented in types (status expansion rationale)', () => {
     expect(typesSrc).toContain('MIGRATION-GOV-14');
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 23. Non-Transactional Blocking (MIGRATION-GOV-12)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.2: Non-transactional blocking (MIGRATION-GOV-12)', () => {
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+  const typesSrc = readSrc('lib/migrations/types.ts');
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const auditLogSrc = readSrc('lib/auditLog.ts');
+  const validationSrc = readSrc('lib/migrations/validation.ts');
+
+  it('FORBIDDEN transaction mode is BLOCKED, not executed statement-by-statement', () => {
+    // The runner must check for FORBIDDEN mode and return an error BEFORE
+    // attempting any SQL execution. It must NOT split the SQL and run
+    // statements individually.
+    expect(runnerSrc).toContain("file.transactionMode === 'FORBIDDEN'");
+    expect(runnerSrc).toContain('MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED');
+  });
+
+  it('FORBIDDEN block does NOT execute SQL statements individually', () => {
+    // The old behavior split SQL on ';' and ran each statement. The new
+    // behavior must return an error immediately without executing anything.
+    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+      ?.split('// ── REQUIRED mode')[0] ?? '';
+    expect(forbiddenSection).toContain('return {');
+    expect(forbiddenSection).toContain('success: false');
+    // Must NOT contain statement splitting logic in the FORBIDDEN block
+    expect(forbiddenSection).not.toContain('split(');
+    expect(forbiddenSection).not.toContain('.map(');
+  });
+
+  it('FORBIDDEN block emits migration.execution_blocked_non_transactional audit event', () => {
+    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+      ?.split('// ── REQUIRED mode')[0] ?? '';
+    expect(forbiddenSection).toContain('migration.execution_blocked_non_transactional');
+    expect(forbiddenSection).toContain('emitAuditEvent');
+  });
+
+  it('FORBIDDEN block includes incompatibleStatements in audit details', () => {
+    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+      ?.split('// ── REQUIRED mode')[0] ?? '';
+    expect(forbiddenSection).toContain('incompatibleStatements');
+    expect(forbiddenSection).toContain('detectTransactionMode');
+  });
+
+  it('FORBIDDEN block includes transactionMode and reason in audit details', () => {
+    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+      ?.split('// ── REQUIRED mode')[0] ?? '';
+    expect(forbiddenSection).toContain("transactionMode: 'FORBIDDEN'");
+    expect(forbiddenSection).toContain('reason');
+  });
+
+  it('MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED error references MIGRATION-GOV-12', () => {
+    // The GOV-12 reference is in the error message string within the FORBIDDEN
+    // block, not on the same line as the error code.
+    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+      ?.split('// ── REQUIRED mode')[0] ?? '';
+    expect(forbiddenSection).toContain('MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED');
+    expect(forbiddenSection).toContain('MIGRATION-GOV-12');
+  });
+
+  it('migration.execution_blocked_non_transactional is a valid MigrationAuditEventType', () => {
+    expect(typesSrc).toContain("'migration.execution_blocked_non_transactional'");
+  });
+
+  it('migration_execution_blocked_non_transactional is a valid AuditAction', () => {
+    expect(auditLogSrc).toContain("'migration_execution_blocked_non_transactional'");
+  });
+
+  it('ledger maps migration.execution_blocked_non_transactional to AuditAction', () => {
+    expect(ledgerSrc).toContain("'migration.execution_blocked_non_transactional': 'migration_execution_blocked_non_transactional'");
+  });
+
+  it('TransactionMode type JSDoc documents FORBIDDEN is now BLOCKED', () => {
+    // The JSDoc above the TransactionMode type must document that FORBIDDEN is
+    // blocked by the canonical runner, not executed. We need to capture the
+    // JSDoc comment block that precedes the type declaration.
+    const typeIdx = typesSrc.indexOf('export type TransactionMode');
+    const precedingText = typesSrc.substring(Math.max(0, typeIdx - 600), typeIdx);
+    expect(precedingText).toContain('FORBIDDEN');
+    expect(precedingText).toContain('BLOCKS');
+    expect(precedingText).toContain('MIGRATION-GOV-12');
+  });
+
+  it('MigrationFile.transactionMode field JSDoc documents FORBIDDEN blocking', () => {
+    // The JSDoc for the transactionMode field on MigrationFile must document
+    // that FORBIDDEN is blocked by the canonical runner.
+    const fieldIdx = typesSrc.indexOf('transactionMode: TransactionMode');
+    const precedingText = typesSrc.substring(Math.max(0, fieldIdx - 800), fieldIdx);
+    expect(precedingText).toContain('FORBIDDEN');
+    expect(precedingText).toContain('MIGRATION-GOV-12');
+    expect(precedingText).toContain('BLOCKS');
+  });
+
+  it('TransactionMode type includes REQUIRED, FORBIDDEN, and MANUAL_REVIEW', () => {
+    expect(typesSrc).toMatch(/TransactionMode = 'REQUIRED' \| 'FORBIDDEN' \| 'MANUAL_REVIEW'/);
+  });
+
+  it('validation detectTransactionMode returns incompatibleStatements array', () => {
+    expect(validationSrc).toContain('incompatibleStatements: string[]');
+    expect(validationSrc).toContain("mode: 'FORBIDDEN'");
+  });
+
+  it('validation has TRANSACTION_INCOMPATIBLE_PATTERNS for detection', () => {
+    expect(validationSrc).toContain('TRANSACTION_INCOMPATIBLE_PATTERNS');
+  });
+
+  it('MIGRATION-GOV-12 reference is documented in runner', () => {
+    expect(runnerSrc).toContain('MIGRATION-GOV-12');
+  });
+
+  it('MANUAL_REVIEW mode returns TRANSACTION_MODE_MANUAL_REVIEW (not executed)', () => {
+    // MANUAL_REVIEW should also not be auto-executed — it requires manual review.
+    expect(runnerSrc).toContain('TRANSACTION_MODE_MANUAL_REVIEW');
+    expect(runnerSrc).toContain("file.transactionMode === 'MANUAL_REVIEW'");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 24. Legacy Path Permanent Closure (MIGRATION-GOV-13)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.2: Legacy path permanent closure (MIGRATION-GOV-13)', () => {
+  const migrateSrc = readSrc('app/api/migrate/route.ts');
+  const systemToolsSrc = readSrc('app/api/admin/system-tools/route.ts');
+  const prospectsSeedSrc = readSrc('app/api/admin/prospects/seed/route.ts');
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+  const typesSrc = readSrc('lib/migrations/types.ts');
+
+  it('all three legacy routes reference MIGRATION-GOV-13 in their elimination comments', () => {
+    expect(migrateSrc).toContain('MIGRATION-GOV-13');
+    expect(systemToolsSrc).toContain('MIGRATION-GOV-13');
+    expect(prospectsSeedSrc).toContain('MIGRATION-GOV-13');
+  });
+
+  it('all three legacy routes reference Phase 1A.2 in their elimination comments', () => {
+    expect(migrateSrc).toContain('Phase 1A.2');
+    expect(systemToolsSrc).toContain('Phase 1A.2');
+    expect(prospectsSeedSrc).toContain('Phase 1A.2');
+  });
+
+  it('migrate/route.ts does NOT contain a conditional feature-flag check', () => {
+    // The old code had: if (!legacyInlineEnabled) { return 423; }
+    // The new code unconditionally returns 423.
+    expect(migrateSrc).not.toContain('legacyInlineEnabled');
+  });
+
+  it('system-tools/route.ts does NOT contain a conditional feature-flag check for run_migration', () => {
+    expect(systemToolsSrc).not.toContain('legacySystemToolsRunEnabled');
+  });
+
+  it('prospects/seed/route.ts does NOT contain a conditional feature-flag check', () => {
+    expect(prospectsSeedSrc).not.toContain('legacyProspectsSeedEnabled');
+  });
+
+  it('isLegacyInlineEnabled() permanently returns false (GOV-13)', () => {
+    // The helper function must always return false — it cannot be re-enabled.
+    const fnSection = runnerSrc.split('export function isLegacyInlineEnabled')[1]
+      ?.split('export function')[0] ?? '';
+    expect(fnSection).toContain('return false');
+    expect(fnSection).not.toContain("process.env");
+  });
+
+  it('isLegacySystemToolsRunEnabled() permanently returns false (GOV-13)', () => {
+    const fnSection = runnerSrc.split('export function isLegacySystemToolsRunEnabled')[1]
+      ?.split('export function')[0] ?? '';
+    expect(fnSection).toContain('return false');
+    expect(fnSection).not.toContain("process.env");
+  });
+
+  it('both helper functions document MIGRATION-GOV-13 permanent elimination', () => {
+    // The JSDoc comment block precedes the function declaration. We need to
+    // capture text before each function declaration to include the JSDoc.
+    const inlineIdx = runnerSrc.indexOf('export function isLegacyInlineEnabled');
+    const inlinePreceding = runnerSrc.substring(Math.max(0, inlineIdx - 500), inlineIdx);
+    expect(inlinePreceding).toContain('MIGRATION-GOV-13');
+
+    const sysToolsIdx = runnerSrc.indexOf('export function isLegacySystemToolsRunEnabled');
+    const sysToolsPreceding = runnerSrc.substring(Math.max(0, sysToolsIdx - 500), sysToolsIdx);
+    expect(sysToolsPreceding).toContain('MIGRATION-GOV-13');
+  });
+
+  it('MIGRATION_ENV_VARS legacy entries are documented as permanently dead (GOV-13)', () => {
+    const envVarsSection = typesSrc.split('MIGRATION_ENV_VARS')[1]
+      ?.split('} as const')[0] ?? '';
+    expect(envVarsSection).toContain('PERMANENTLY DEAD');
+    expect(envVarsSection).toContain('MIGRATION-GOV-13');
+  });
+
+  it('migrate/route.ts has unreachable code after the 423 return (file preserved)', () => {
+    // The route returns 423 unconditionally. The old mutation code below is
+    // now unreachable but preserved (not deleted) per GOV-13.
+    const returnIdx = migrateSrc.indexOf("{ status: 423 }");
+    expect(returnIdx).toBeGreaterThan(-1);
+    // There should be code after the return (the old migration logic, now dead)
+    const afterReturn = migrateSrc.substring(returnIdx);
+    expect(afterReturn.length).toBeGreaterThan(50);
+  });
+
+  it('prospects/seed/route.ts has unreachable code after the 423 return (file preserved)', () => {
+    const returnIdx = prospectsSeedSrc.indexOf("{ status: 423 }");
+    expect(returnIdx).toBeGreaterThan(-1);
+    const afterReturn = prospectsSeedSrc.substring(returnIdx);
+    expect(afterReturn.length).toBeGreaterThan(50);
+  });
+
+  it('all three legacy routes emit migration.legacy.invoked audit event', () => {
+    expect(migrateSrc).toContain('migration.legacy.invoked');
+    expect(systemToolsSrc).toContain('migration.legacy.invoked');
+    expect(prospectsSeedSrc).toContain('migration.legacy.invoked');
+  });
+
+  it('all three legacy routes direct to canonicalPath /api/admin/migrations', () => {
+    expect(migrateSrc).toContain('canonicalPath');
+    expect(migrateSrc).toContain('/api/admin/migrations');
+    expect(systemToolsSrc).toContain('canonicalPath');
+    expect(prospectsSeedSrc).toContain('canonicalPath');
+  });
+
+  it('system-tools list_migrations case is NOT permanently eliminated (remains functional)', () => {
+    // Only run_migration is permanently eliminated; list_migrations is diagnostic.
+    const listSection = systemToolsSrc.split("case 'list_migrations'")[1]
+      ?.split("case '")[0] ?? '';
+    expect(listSection).not.toContain('permanently eliminated');
   });
 });
