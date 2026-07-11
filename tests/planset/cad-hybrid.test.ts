@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateCADLayout } from '../../lib/cad/cadEngine';
+import { generatePermitHTML } from '../../lib/permit/generatePermit';
 import { roofProject } from '../../test-fixtures/roofProject';
 
 // Hybrid P1: the CAD engine runs EVERY present solver with a SCOPED input and
@@ -48,5 +49,15 @@ describe('hybrid CAD composition', () => {
     expect(cad.roof).toBeDefined();
     expect(cad.ground).toBeUndefined();
     expect(cad.fence).toBeUndefined();
+  });
+
+  it('the top-down site plan draws ALL systems: ground overlay + fence overlay on the roof plan', () => {
+    // Ray: "the top down aerial view of the property gets all of the variety
+    // from roof to ground and fence."
+    const html = generatePermitHTML(mkInput());
+    expect(html).toContain('GROUND MOUNT —');
+    expect(html).toContain('SOLAR FENCE —');
+    expect(html).toContain('pv2-hybrid');                       // overlay layer rendered
+    expect(html).toContain('HYBRID DESIGN — THIS SET IS NOT PERMIT-READY'); // P0 banner stays until P2/P3
   });
 });

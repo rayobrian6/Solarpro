@@ -248,8 +248,23 @@ export function getArrayPlanFromCAD(
   // ── Step 10: Validate ────────────────────────────────────────────────────
   assertValidPlanSet(cad, cad.systemType as SystemType);
 
-  // Convert pre-solved CADModel → DraftingInput
-  const dInput = adaptCADToDrafting(cad, input);
+  // ── HYBRID (Phase 1): the plan sheet is the TOP-DOWN SITE PLAN ─────────────
+  // Ray: the aerial must show ALL the variety — roof, ground AND fence. When
+  // the composed CADModel is hybrid and carries a roof section, route the plan
+  // sheet to drawRoofPlan (which overlays the ground arrays + fence runs via
+  // hybridOverlay) instead of the winner's single-system view. The base model's
+  // origin belongs to the WINNER (e.g. the fence), so build a roof-origin VIEW
+  // — cad.roof's local geometry is relative to the roof section's own origin.
+  // The DraftingInput must be adapted from this VIEW too: drawRoofPlan reads
+  // planes/panels from dInput, and adapting the fence-typed base produced
+  // "planes=0 panels=0" (caught in harness).
+  const _hybRoofSec = cad.hybrid?.sections.find(sec => sec.key === 'roof');
+  const _hybridPlanCad = (cad.hybrid && cad.roof && _hybRoofSec)
+    ? { ...cad, systemType: 'roof' as const, originLat: _hybRoofSec.originLat, originLng: _hybRoofSec.originLng }
+    : null;
+
+  // Convert pre-solved CADModel → DraftingInput (roof-origin view for hybrids)
+  const dInput = adaptCADToDrafting(_hybridPlanCad ?? cad, input);
   const intent = safeBuildIntent(dInput);
 
   // Site context (county-GIS parcel + street) projected into the roof's own
@@ -258,11 +273,16 @@ export function getArrayPlanFromCAD(
   // roof plan renders exactly as before.
   try {
     (dInput as unknown as { _siteContext?: SiteContext | null })._siteContext =
-      buildSiteContext(cad, input);
+      buildSiteContext(_hybridPlanCad ?? cad, input);
   } catch { /* non-fatal — roof-only render */ }
 
   // Route to template using cad.systemType (authoritative), passing cad directly
   let svg: string;
+  if (_hybridPlanCad) {
+    svg = drawRoofPlan(dInput, intent, _hybridPlanCad, ctx, panelColorById);
+    console.log('[COMPOSER] HYBRID plan → roof site plan w/ ground+fence overlays');
+    return svg;
+  }
   switch (cad.systemType) {
     case 'solar_fence':
       svg = drawFencePlan(dInput, intent, cad, ctx);

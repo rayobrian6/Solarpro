@@ -158,9 +158,20 @@ export function generateCADLayout(input: PermitInputShape): CADModel {
       if (sub.key === 'roof' && m.roof) model.roof = m.roof;
       if (sub.key === 'ground' && m.ground) model.ground = m.ground;
       if (sub.key === 'fence' && m.fence) model.fence = m.fence;
+      // A sub-solver that synthesized geometry without GPS leaves origin (0,0)
+      // — fall back to the sub-system's panel centroid (panels always carry
+      // lat/lng from the design studio) so overlays/re-projection stay real.
+      let _oLat = m.originLat, _oLng = m.originLng;
+      if (!isFinite(_oLat) || !isFinite(_oLng) || (Math.abs(_oLat) < 0.01 && Math.abs(_oLng) < 0.01)) {
+        const pts = (sub.panels as any[]).filter(p => isFinite(p?.lat) && isFinite(p?.lng) && Math.abs(p.lat) > 0.001);
+        if (pts.length) {
+          _oLat = pts.reduce((t, p) => t + p.lat, 0) / pts.length;
+          _oLng = pts.reduce((t, p) => t + p.lng, 0) / pts.length;
+        }
+      }
       model.hybrid.sections.push({
         key: sub.key,
-        originLat: m.originLat, originLng: m.originLng,
+        originLat: _oLat, originLng: _oLng,
         totalPanels: m.totalPanels, dcKw: m.totalDcKw,
       });
     }

@@ -75,14 +75,21 @@ export function validatePlanSet(
   }
 
   // ── 4. System-specific validation ──
+  // HYBRID (multi-system, Phase 1): a composed model INTENTIONALLY carries
+  // every present section (each built scoped by its own solver — cadEngine
+  // hybrid path). The cross-contamination rule below exists to catch STALE
+  // residue from single-system re-runs; for a declared hybrid the extra
+  // sections are real, so the contamination check is skipped (the per-section
+  // validators still run for the primary type).
+  const _isHybrid = !!(cad as { hybrid?: unknown }).hybrid;
   switch (systemType) {
     case 'solar_fence':
       validateFence(cad, errors, warnings);
       // Cross-contamination: fence must NOT have roof or ground data
-      if (cad.roof) {
+      if (!_isHybrid && cad.roof) {
         errors.push('CROSS-CONTAMINATION: solar_fence model contains cad.roof — forbidden');
       }
-      if (cad.ground) {
+      if (!_isHybrid && cad.ground) {
         errors.push('CROSS-CONTAMINATION: solar_fence model contains cad.ground — forbidden');
       }
       break;
@@ -90,10 +97,10 @@ export function validatePlanSet(
     case 'ground_mount':
       validateGround(cad, errors, warnings);
       // Cross-contamination: ground must NOT have roof or fence data
-      if (cad.roof) {
+      if (!_isHybrid && cad.roof) {
         errors.push('CROSS-CONTAMINATION: ground_mount model contains cad.roof — forbidden');
       }
-      if (cad.fence) {
+      if (!_isHybrid && cad.fence) {
         errors.push('CROSS-CONTAMINATION: ground_mount model contains cad.fence — forbidden');
       }
       break;
@@ -101,10 +108,10 @@ export function validatePlanSet(
     case 'roof':
       validateRoof(cad, errors, warnings);
       // Cross-contamination: roof must NOT have ground or fence data
-      if (cad.ground) {
+      if (!_isHybrid && cad.ground) {
         errors.push('CROSS-CONTAMINATION: roof model contains cad.ground — forbidden');
       }
-      if (cad.fence) {
+      if (!_isHybrid && cad.fence) {
         errors.push('CROSS-CONTAMINATION: roof model contains cad.fence — forbidden');
       }
       break;

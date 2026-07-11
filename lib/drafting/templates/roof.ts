@@ -45,6 +45,7 @@ import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
 import { computeFitWindow, drawSiteContextEls, type SiteContext } from './roofSiteContext';
+import { buildHybridOverlays } from './hybridOverlay';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -273,6 +274,18 @@ export function drawRoofPlan(
   const _ctxPts = _site
     ? [...(_site.parcel ?? []), ..._site.buildings.flat(), ..._site.roads.flatMap(r => r.pts), ..._site.driveways.flat()]
     : [];
+  // ── HYBRID overlays (ground arrays + fence) are SUBJECT MATTER ─────────────
+  // Ray: the top-down aerial must show ALL the variety — roof, ground AND
+  // fence. Their projected extents are unioned into the fit basis (below) so
+  // computeFitWindow's zoom caps can never clip them like mere context.
+  const _hyb = cad?.hybrid ? buildHybridOverlays(cad, cad.originLat, cad.originLng) : null;
+  const _hLngs = _hyb ? _hyb.allPts.map(p => p.lng) : [];
+  const _hLats = _hyb ? _hyb.allPts.map(p => p.lat) : [];
+  const subjMinLng = _hLngs.length ? Math.min(minLng, ..._hLngs) : minLng;
+  const subjMaxLng = _hLngs.length ? Math.max(maxLng, ..._hLngs) : maxLng;
+  const subjMinLat = _hLats.length ? Math.min(minLat, ..._hLats) : minLat;
+  const subjMaxLat = _hLats.length ? Math.max(maxLat, ..._hLats) : maxLat;
+
   // ── BIG / SHARED PARCEL → frame the SUBJECT building only ──────────────────
   // If the parcel is far larger than the roof (an apartment complex — Braidon's
   // building is 1 of ~13 on a 3.12-ac lot — or a big rural parcel), fitting the
@@ -309,9 +322,9 @@ export function drawRoofPlan(
     // v21 review: the subject roof rendered at ~38% of the window (1/2.6) with
     // the neighbor's tree canopy dominating. Tighter caps keep the roof ≥ ~50%
     // (≥ 80% on big lots); nearest context still shows, SVG clips the rest.
-    ? computeFitWindow({ minLng, maxLng, minLat, maxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.25 : 2.0 })
+    ? computeFitWindow({ minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.25 : 2.0 })
     : _arrayFit
-    ?? { minLng, maxLng, minLat, maxLat };
+    ?? { minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat };
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
 
@@ -354,6 +367,29 @@ export function drawRoofPlan(
       }
     } catch (e) {
       console.warn('[drawRoofPlan] site context skipped (non-fatal):', (e as Error)?.message);
+    }
+  }
+
+  // ── HYBRID overlay layer: ground arrays + fence on the same site plan ──────
+  if (_hyb) {
+    const hEls: string[] = [];
+    for (const g of _hyb.ground) {
+      const pts = g.ring.map(p => `${toX(p.lng).toFixed(1)},${toY(p.lat).toFixed(1)}`).join(' ');
+      hEls.push(`<polygon points="${pts}" fill="#2b6cb0" fill-opacity="0.12" stroke="#2b6cb0" stroke-width="1.6"/>`);
+      for (const [a, b] of g.rowLines) {
+        hEls.push(`<line x1="${toX(a.lng).toFixed(1)}" y1="${toY(a.lat).toFixed(1)}" x2="${toX(b.lng).toFixed(1)}" y2="${toY(b.lat).toFixed(1)}" stroke="#2b6cb0" stroke-width="1"/>`);
+      }
+      hEls.push(`<text x="${toX(g.labelPt.lng).toFixed(1)}" y="${toY(g.labelPt.lat).toFixed(1)}" font-size="8" font-weight="bold" fill="#2b6cb0" text-anchor="middle">${g.label}</text>`);
+    }
+    for (const fShape of _hyb.fence) {
+      const [a, b] = fShape.line;
+      hEls.push(`<line x1="${toX(a.lng).toFixed(1)}" y1="${toY(a.lat).toFixed(1)}" x2="${toX(b.lng).toFixed(1)}" y2="${toY(b.lat).toFixed(1)}" stroke="#1a7a3a" stroke-width="3.2" stroke-linecap="round"/>`);
+      hEls.push(`<text x="${toX(fShape.labelPt.lng).toFixed(1)}" y="${(toY(fShape.labelPt.lat) - 5).toFixed(1)}" font-size="8" font-weight="bold" fill="#1a7a3a" text-anchor="middle">${fShape.label}</text>`);
+    }
+    if (hEls.length) {
+      els.push(`<g class="pv2-hybrid">${hEls.join('')}</g>`);
+      _siteLegend.push({ swatch: '#2b6cb0', label: 'Ground-mount array (see ground sheets)' });
+      _siteLegend.push({ swatch: '#1a7a3a', label: 'Solar fence run (see fence sheets)' });
     }
   }
 

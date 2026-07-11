@@ -554,6 +554,17 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 // DYNAMIC PAGE ROUTERS (PV-2 and PV-3)
 // ═══════════════════════════════════════════════════════════════
 export function pageArrayPrimary(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+  // HYBRID (Phase 1): the primary sheet is the TOP-DOWN SITE PLAN — the roof
+  // plan-dominant composition whose drawing (getArrayPlanFromCAD → drawRoofPlan)
+  // overlays the ground arrays + fence runs. Rendering the winner's view instead
+  // made the whole set fence-dominated with the real site plan shrunk to an
+  // inset (Stowell). Pass a roof-typed VIEW with the roof section's origin so
+  // composition/validation and the drawing agree.
+  const _hybRoof = cad.hybrid?.sections.find(sec => sec.key === 'roof');
+  if (cad.hybrid && cad.roof && _hybRoof) {
+    const roofView = { ...cad, systemType: 'roof' as const, originLat: _hybRoof.originLat, originLng: _hybRoof.originLng };
+    return pageRoofPlan(input, roofView, pageNum, totalPages, ctx);
+  }
   // Use cad.systemType — single source of truth
   if (isFence(cad.systemType))  return pageFencePlan(input, cad, pageNum, totalPages, ctx);
   if (isGround(cad.systemType)) return pageGroundArrayPlan(input, cad, pageNum, totalPages, ctx);
