@@ -33,6 +33,11 @@ export interface ArrayStructuralLayout {
   panelLengthIn: number;     // panel LONG dimension (in)
   panelWidthIn: number;      // panel SHORT dimension (in)
   panelWeightLbs: number;
+  /**
+   * Distinct sub-arrays (design arrayId, else roof planeId) — drives trunk-cable
+   * bridge splices (a raw-cable M+F jumper per gap between sub-arrays).
+   */
+  subArrayCount: number;
   /** Human-readable provenance for the audit trail / warnings. */
   source: string;
   /** True when no panelPositions were available and we fell back to a guess. */
@@ -59,7 +64,7 @@ export function resolveArrayStructuralLayout(
 ): ArrayStructuralLayout {
   const project = input.project ?? ({} as PermitInput['project']);
   const positions = (project.panelPositions ?? []) as Array<{
-    row?: number; col?: number; orientation?: string; arrayId?: string;
+    row?: number; col?: number; orientation?: string; arrayId?: string; planeId?: string;
   }>;
 
   // ── Panel physical dimensions (single-sourced: CAD panel dims from the
@@ -83,6 +88,7 @@ export function resolveArrayStructuralLayout(
       panelCount, rowCount, colCount,
       orientation: 'portrait',
       panelLengthIn, panelWidthIn, panelWeightLbs,
+      subArrayCount: 1,
       source: 'FALLBACK autoLayout (no panelPositions on design)',
       isFallback: true,
     };
@@ -106,12 +112,18 @@ export function resolveArrayStructuralLayout(
   //    multi-plane design contributes all its rail runs. This drives
   //    railCount = 2 × rowCount in the engine. ──
   const courseKeys = new Set<string>();
+  // Distinct sub-arrays: prefer the design's arrayId, else the roof planeId —
+  // each extra sub-array is a physical gap the trunk cable must BRIDGE (one
+  // field-wireable M+F jumper), which is where splices actually occur.
+  const subArrayKeys = new Set<string>();
   for (const p of positions) {
-    const arr = p.arrayId ?? '0';
+    const arr = p.arrayId ?? p.planeId ?? '0';
     const row = p.row ?? 0;
     courseKeys.add(`${arr}:${row}`);
+    subArrayKeys.add(String(p.arrayId ?? p.planeId ?? '0'));
   }
   const rowCount = Math.max(1, courseKeys.size);
+  const subArrayCount = Math.max(1, subArrayKeys.size);
 
   // ── colCount is chosen to conserve total array area:
   //    mountCount = (railLen/spacing + 1) × 2·rowCount, and railLen ∝ colCount,
@@ -122,7 +134,8 @@ export function resolveArrayStructuralLayout(
   return {
     panelCount, rowCount, colCount, orientation,
     panelLengthIn, panelWidthIn, panelWeightLbs,
-    source: `design panelPositions (${panelCount} modules, ${rowCount} courses, ${orientation})`,
+    subArrayCount,
+    source: `design panelPositions (${panelCount} modules, ${rowCount} courses, ${subArrayCount} sub-array(s), ${orientation})`,
     isFallback: false,
   };
 }

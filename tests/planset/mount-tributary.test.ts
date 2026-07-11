@@ -106,6 +106,21 @@ describe('resolveArrayStructuralLayout single-sources the design layout', () => 
     // Distinct (arrayId,row): A:0, B:0, B:1 = 3 courses.
     expect(out.rowCount).toBe(3);
     expect(out.orientation).toBe('landscape'); // 3 landscape vs 1 portrait
+    // Two sub-arrays (A, B) — drives one trunk-cable bridge splice.
+    expect(out.subArrayCount).toBe(2);
+  });
+
+  it('sub-arrays fall back to planeId when arrayId is absent, else 1', () => {
+    const byPlane = resolveArrayStructuralLayout(mkInput([
+      { row: 0, col: 0, orientation: 'portrait', planeId: 'p1' },
+      { row: 0, col: 1, orientation: 'portrait', planeId: 'p2' },
+    ]), cad as any);
+    expect(byPlane.subArrayCount).toBe(2);
+    const single = resolveArrayStructuralLayout(mkInput([
+      { row: 0, col: 0, orientation: 'portrait' },
+      { row: 0, col: 1, orientation: 'portrait' },
+    ]), cad as any);
+    expect(single.subArrayCount).toBe(1);
   });
 
   it('falls back honestly (flagged) when the design has no placed panels', () => {

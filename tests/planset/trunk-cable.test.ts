@@ -72,4 +72,15 @@ describe('BOM consumes the trunk resolver', () => {
     const l: any = generateBOMV4(mk('landscape'));
     expect(find(l, 'trunk_cable')[0].partNumber).toBe('Q-12-17-240');
   });
+
+  it('real design geometry drives splices: subArrayCount bridges + spliceAtRows preference', () => {
+    // 3 sub-arrays (roof planes) → 2 forced bridge splice pairs (M + F each).
+    const bridged: any = generateBOMV4({ ...mk('portrait'), subArrayCount: 3 });
+    const conns = find(bridged, 'connector');
+    expect(conns.find((c: any) => c.partNumber === 'Q-CONN-10M')?.quantity).toBe(2);
+    expect(conns.find((c: any) => c.partNumber === 'Q-CONN-10F')?.quantity).toBe(2);
+    // Installer cut-at-rows preference: 6 rows / 4 branches → 2 within-branch cuts.
+    const cutAtRows: any = generateBOMV4({ ...mk('portrait'), rowCount: 6, spliceAtRows: true });
+    expect(find(cutAtRows, 'connector').find((c: any) => c.partNumber === 'Q-CONN-10M')?.quantity).toBe(2);
+  });
 });

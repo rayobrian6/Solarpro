@@ -267,6 +267,9 @@ interface ProjectConfig {
   rowCount?: number;
   columnCount?: number;
   layoutOrientation?: 'portrait' | 'landscape';
+  // Installer preference: cut the AC trunk at row transitions (splice pair per
+  // within-branch transition) instead of the cheapest-option service loop.
+  spliceAtRows?: boolean;
   panelCoordinates?: Array<{ x: number; y: number; row: number; col: number; }>;
   notes: string;
   // Interconnection method
@@ -5366,6 +5369,16 @@ function EngineeringPageInner() {
           rowCount:         config.rowCount,
           columnCount:      config.columnCount,
           layoutOrientation: config.layoutOrientation,
+          // Trunk-cable install logic: distinct sub-arrays (design arrayId/planeId
+          // from the CAD placed panels) force one bridge splice pair per gap;
+          // spliceAtRows = installer cut-at-rows preference (default = cheapest
+          // option: continuous cable + service loop).
+          subArrayCount:    (() => {
+            const panels = (projectLayout?.panels ?? []) as Array<{ arrayId?: string; planeId?: string }>;
+            if (panels.length === 0) return undefined;
+            return new Set(panels.map(p => String(p.arrayId ?? p.planeId ?? '0'))).size;
+          })(),
+          spliceAtRows:     config.spliceAtRows === true,
           // Interconnection method — controls whether backfed breaker appears in BOM
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
@@ -13764,6 +13777,20 @@ function EngineeringPageInner() {
                         </button>
                       </>
                     ) : null}
+                    {/* Trunk install preference: cheapest option (continuous cable +
+                        service loop) vs cutting at row transitions (M/F splice pairs).
+                        Only meaningful for micro topologies with a trunk cable. */}
+                    {config.inverters?.[0]?.type === 'micro' && (
+                      <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none" title="Default = continuous trunk with service loops at row transitions (cheapest). Check to cut the trunk at rows instead — adds a male+female field-wireable splice pair per within-branch row transition.">
+                        <input
+                          type="checkbox"
+                          checked={config.spliceAtRows === true}
+                          onChange={e => setConfig(c => ({ ...c, spliceAtRows: e.target.checked }))}
+                          className="accent-amber-500"
+                        />
+                        Splice trunk at rows
+                      </label>
+                    )}
                     <button onClick={fetchBOM} disabled={bomLoading} className="btn-primary btn-sm">
                       <RefreshCw size={13} className={bomLoading ? 'animate-spin' : ''} />
                       {bomLoading ? 'Generating…' : bom.length > 0 ? 'Regenerate' : 'Generate BOM'}

@@ -282,6 +282,10 @@ export async function POST(req: NextRequest) {
       rowCount:           body.rowCount !== undefined ? Number(body.rowCount) : undefined,
       columnCount:        body.columnCount !== undefined ? Number(body.columnCount) : undefined,
       layoutOrientation:  body.layoutOrientation,
+      // Trunk-cable install logic: sub-arrays force bridge splices; spliceAtRows
+      // = installer cut-at-rows preference (vs cheapest-option service loop).
+      subArrayCount:      body.subArrayCount !== undefined ? Number(body.subArrayCount) : undefined,
+      spliceAtRows:       body.spliceAtRows === true,
       mainPanelAmps:      Number(body.mainPanelAmps)      || 200,
       backfeedAmps:       Number(body.backfeedAmps)       || 0,   // FIX: was 40A hardcoded default — now 0 forces correct calculation
       acOCPD:             Number(body.acOCPD)             || 0,   // FIX: was 40A hardcoded default — frontend now sends correct value

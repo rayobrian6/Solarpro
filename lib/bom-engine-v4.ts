@@ -89,6 +89,18 @@ export interface BOMGenerationInputV4 {
   rowCount?: number;          // number of rows in array layout
   columnCount?: number;       // columns per row
   layoutOrientation?: 'portrait' | 'landscape';
+  /**
+   * Distinct sub-arrays / roof planes from the REAL design (arrayLayout
+   * selector) — each extra sub-array forces one trunk-cable bridge splice
+   * (field-wireable M+F pair). Default 1 (single contiguous plane).
+   */
+  subArrayCount?: number;
+  /**
+   * Installer preference: cut the trunk at row transitions (short cut-lengths /
+   * crew habit) instead of the cheapest-option service loop. Splice pairs then
+   * = (rows-1) - (branches-1), since branch boundaries absorb transitions.
+   */
+  spliceAtRows?: boolean;
 
   // Electrical
   mainPanelAmps: number;
@@ -405,8 +417,10 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       deviceCount: trunkDeviceCount,
       orientation: input.layoutOrientation === 'landscape' ? 'landscape' : 'portrait',
       rowCount: input.rowCount,
-      // subArrayCount / spliceAtRows: future inputs from the design (plane count)
-      // and installer preference; defaults = 1 plane, cheapest option.
+      // Real design geometry: distinct sub-arrays/planes force bridge splices.
+      subArrayCount: input.subArrayCount,
+      // Installer preference: cut at rows instead of service-looping.
+      spliceAtRows: input.spliceAtRows,
     });
 
     if (plan) {

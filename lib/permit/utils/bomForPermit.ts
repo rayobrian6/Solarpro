@@ -43,6 +43,7 @@ import { buildConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
 import { buildCanonical } from './canonical';
 import { buildStructuralInputForPermit } from './structuralInput';
+import { resolveArrayStructuralLayout } from './arrayLayout';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 
@@ -412,6 +413,9 @@ export function generateBOMForPermit(
   // via the SAME builder generatePermit uses — so the BOM matches the structural
   // sheets instead of guessing attachmentCount/railSections. Deterministic:
   // buildCanonical + buildStructuralInputForPermit are pure functions of `input`.
+  // Real design layout (pure selector — same values the structural path reads):
+  // orientation → trunk SKU, subArrayCount → trunk bridge splices.
+  const _arrayLayout = resolveArrayStructuralLayout(input, cad);
   let roofRackingBOM: import('@/lib/structural-engine-v4').RackingBOM | undefined;
   let roofMountCount = 0;
   let roofRowCount   = 0;
@@ -457,6 +461,13 @@ export function generateBOMForPermit(
         railSections:        roofRackingBOM?.rails.qty || project.railSections || Math.ceil(totalPanels / 2),
         rowCount:            roofRowCount || undefined,
         rackingBOM:          roofRackingBOM,
+        // Real design layout (arrayLayout selector): orientation drives the
+        // trunk-cable SKU (portrait vs landscape spacing — was silently portrait
+        // always), sub-array count forces trunk bridge splices, spliceAtRows is
+        // the installer's cut-at-rows preference.
+        layoutOrientation:   _arrayLayout.orientation,
+        subArrayCount:       _arrayLayout.subArrayCount,
+        spliceAtRows:        project.spliceAtRows,
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,

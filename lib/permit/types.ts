@@ -191,6 +191,10 @@ export interface PermitInput {
     // (the design-studio picker will write this). Read by buildIntegratedEquipment.
     bosDeviceIds?: string[];
     combinerId?: string;
+    // Installer preference: cut the AC trunk at row transitions (splice pair per
+    // within-branch transition) instead of the cheapest-option service loop.
+    // Read by bomForPermit → generateBOMV4 → resolveTrunkCablePlan.
+    spliceAtRows?: boolean;
     // AHJ data (auto-populated server-side from ahj-national.ts)
     ahjName?: string;
     ahjWindSpeedMph?: number;
