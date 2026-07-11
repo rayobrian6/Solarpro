@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 import { generateBOMV4, bomToMarkdown, bomToCSV, BOMGenerationInputV4 } from '@/lib/bom-engine-v4';
-import { deriveStructuralBOM, type BOMSystemType, type StructuralBOMItem } from '@/lib/bom-system-profiles';
+import { deriveStructuralBOMForSubsystems, type BOMSystemType, type StructuralBOMItem, type SubSystemPanelCounts } from '@/lib/bom-system-profiles';
 import type { BOMGenerationResultV4, BOMLineItemV4, BOMStageResult, BOMStageId } from '@/lib/bom-engine-v4';
 import { validateBOMInputs } from '@/lib/bom-validation';
 import { deriveEcoFlowBOM, MICRO_ONLY_CATEGORIES } from '@/lib/ecoflow-bom';
@@ -83,6 +83,15 @@ function structuralToV4Item(si: StructuralBOMItem): BOMLineItemV4 {
 function injectStructuralIntoV4(
   v4: BOMGenerationResultV4,
   structuralItems: StructuralBOMItem[],
+  // HYBRID (P3): a partitioned project legitimately carries BOTH roof racking
+  // lines (V4 registry: 'rail'/'mid_clamp'/'end_clamp' for the roof subset) AND
+  // ground-mount structural lines of the SAME category names (Unirac RM10 rails/
+  // clamps for the ground subset). The category-collision dedup below exists to
+  // stop double-billing the SAME physical hardware in single-type projects (e.g.
+  // pure-ground: registry GFT rails vs profile RM10 rails) — in hybrid mode those
+  // are DIFFERENT physical assemblies, so skip only the V4-owned (electrical
+  // authority) check. Legacy callers omit the flag → behavior unchanged.
+  allowStructuralCoexist = false,
 ): BOMGenerationResultV4 {
   _structuralIdCounter = 0;
   const v4Categories = new Set(v4.items.map(i => i.category));
@@ -95,7 +104,7 @@ function injectStructuralIntoV4(
       overlapsSkipped.push(`${si.category}: V4 wins (electrical authority)`);
       continue;
     }
-    if (v4Categories.has(si.category)) {
+    if (!allowStructuralCoexist && v4Categories.has(si.category)) {
       overlapsSkipped.push(`${si.category}: V4 wins (existing item)`);
       continue;
     }
@@ -179,10 +188,35 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // ── HYBRID (P3): optional multi-system payload fields ─────────────────
+      // ALL optional — legacy payloads (none of these present) behave identically.
+      //   subSystemCounts        → per-mount-type panel partition (roof/ground/fence)
+      //   fenceData.fencePanelCount → fence SUBSET count (drives section math fix)
+      //   roofData               → roof SUBSET structural quantities + mounting system
+      //   groundData             → may now arrive even when systemType !== 'ground'
+      const _ssc: SubSystemPanelCounts | undefined = (() => {
+        const s = body.subSystemCounts;
+        if (!s || typeof s !== 'object') return undefined;
+        const roof   = _finiteOrUndef(s.roof);
+        const ground = _finiteOrUndef(s.ground);
+        const fence  = _finiteOrUndef(s.fence);
+        if (roof === undefined && ground === undefined && fence === undefined) return undefined;
+        return { roof: roof ?? 0, ground: ground ?? 0, fence: fence ?? 0 };
+      })();
+      const _roofData = (body.roofData && typeof body.roofData === 'object') ? body.roofData : undefined;
+      const _roofAttach      = _finiteOrUndef(_roofData?.attachmentCount);
+      const _roofRails       = _finiteOrUndef(_roofData?.railSections);
+      const _fencePanelCount = _finiteOrUndef(body.fenceData?.fencePanelCount);
+
       const input: BOMGenerationInputV4 = {
         inverterId:         resolvedInverterId,
         optimizerId:        resolvedOptimizerId,
-      rackingId:          body.rackingId,
+      // HYBRID: V4's racking stage is roof-only by design — when the client sends
+      // a roof subset (roofData.mountingSystemId), that id is the roof racking
+      // authority even if the project-level rackingId is a fence/ground system.
+      rackingId:          (typeof _roofData?.mountingSystemId === 'string' && _roofData.mountingSystemId)
+                            ? _roofData.mountingSystemId
+                            : body.rackingId,
       batteryId:          body.batteryId,
       batteryCount:       Number(body.batteryCount) || undefined,  // C6 fix: was dropped → bom-engine forced battery qty to 1
       panelId:            body.panelId,
@@ -276,8 +310,14 @@ export async function POST(req: NextRequest) {
       conduitType:        body.conduitType        ?? 'EMT',
       conduitSizeInch:    body.conduitSizeInch    ?? '3/4',
       roofType:           body.roofType           ?? 'shingle',
-      attachmentCount:    body.attachmentCount !== undefined ? Number(body.attachmentCount) : 12,
-      railSections:       body.railSections !== undefined ? Number(body.railSections) : 4,
+      // HYBRID: roofData carries the roof SUBSET structural quantities. On a
+      // fence/ground-typed hybrid the page historically sent 0 for these, which
+      // suppressed the V4 roof racking lines entirely — the roofData values win
+      // when present and > 0.
+      attachmentCount:    (_roofAttach !== undefined && _roofAttach > 0) ? _roofAttach
+                            : (body.attachmentCount !== undefined ? Number(body.attachmentCount) : 12),
+      railSections:       (_roofRails !== undefined && _roofRails > 0) ? _roofRails
+                            : (body.railSections !== undefined ? Number(body.railSections) : 4),
       // Phase 3 - Layout fields
       rowCount:           body.rowCount !== undefined ? Number(body.rowCount) : undefined,
       columnCount:        body.columnCount !== undefined ? Number(body.columnCount) : undefined,
@@ -305,6 +345,11 @@ export async function POST(req: NextRequest) {
 
       // System type — used for topology detection and merge layer routing
       systemType:               body.systemType,         // 'roof' | 'ground' | 'fence'
+      // HYBRID (P3): per-mount-type panel partition. Drives NEC 690.12 RSD qty
+      // for the ROOF subset inside generateBOMV4 even when the project's winning
+      // systemType is fence/ground (Stowell: 51 on-roof modules need module-level
+      // RSD despite the fence project tag).
+      subSystemCounts:          _ssc,
       // fenceData/groundData still accepted for structural derivation (passed to merge layer)
       fenceData:                body.fenceData,
       groundData:               body.groundData,
@@ -366,26 +411,42 @@ export async function POST(req: NextRequest) {
     let structuralCount = 0;
     let overlapsSkipped: string[] = [];
 
-    if (sysType !== 'roof') {
+    // HYBRID (P3): partition-aware structural derivation. When the client sends
+    // subsystem fields (subSystemCounts / fenceData.fencePanelCount), the fence
+    // AND ground branches each run for their own panel subset — a single project
+    // may get SolFence sections AND ground piles. Legacy payloads (no subsystem
+    // fields) reduce to the old single-branch call for sysType fence/ground.
+    const hybridPartition = _ssc !== undefined || _fencePanelCount !== undefined;
+
+    if (sysType !== 'roof' || hybridPartition) {
       try {
-        const structuralResult = deriveStructuralBOM({
+        const structuralResult = deriveStructuralBOMForSubsystems({
           systemType: sysType,
           moduleCount: input.moduleCount,
+          subSystemCounts: _ssc,
+          fencePanelCount: _fencePanelCount,
           fence: input.fenceData || undefined,
           ground: input.groundData || undefined,
         });
 
-        console.log(`[BOM MERGE] ${sysType}: ${structuralResult.items.length} structural items from profile`);
+        console.log(`[BOM MERGE] ${sysType}${hybridPartition ? ' (hybrid partition)' : ''}: ` +
+          `${structuralResult.items.length} structural items from profile ` +
+          `(branches: ${structuralResult.subsystemsRun.join('+') || 'none'})`);
+        if (structuralResult.derivationLog.length > 0) {
+          console.log('[BOM MERGE] Structural derivation:', structuralResult.derivationLog);
+        }
 
-        // Capture overlaps for response
+        // Capture overlaps for response (mirror injectStructuralIntoV4's rules:
+        // in hybrid mode only the V4-owned check applies — roof racking lines and
+        // ground-mount lines of the same category coexist intentionally)
         const v4Categories = new Set(v4Result.items.map(i => i.category));
         for (const si of structuralResult.items) {
           if (V4_OWNED_CATEGORIES.has(si.category)) overlapsSkipped.push(`${si.category}: V4 wins (electrical authority)`);
-          else if (v4Categories.has(si.category)) overlapsSkipped.push(`${si.category}: V4 wins (existing item)`);
+          else if (!hybridPartition && v4Categories.has(si.category)) overlapsSkipped.push(`${si.category}: V4 wins (existing item)`);
         }
 
         // Inject structural into V4 (preserves manufacturer/model/partNumber)
-        finalResult = injectStructuralIntoV4(v4Result, structuralResult.items);
+        finalResult = injectStructuralIntoV4(v4Result, structuralResult.items, hybridPartition);
         structuralCount = finalResult.totalLineItems - v4Result.totalLineItems;
         console.log(`[BOM MERGE] Final: ${finalResult.totalLineItems} items (V4=${v4Result.totalLineItems}, structural added=${structuralCount})`);
       } catch (mergeErr) {
@@ -651,7 +712,7 @@ export async function POST(req: NextRequest) {
         complianceNotes: finalResult.complianceNotes,
         warnings: [...finalResult.warnings, ...validation.warnings],
       },
-      merge: sysType !== 'roof' ? {
+      merge: (sysType !== 'roof' || hybridPartition) ? {
         v4ItemCount: v4Result.totalLineItems,
         structuralItemCount: structuralCount,
         totalItemCount: finalResult.totalLineItems,

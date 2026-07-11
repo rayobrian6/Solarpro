@@ -2474,6 +2474,26 @@ function EngineeringPageInner() {
     });
   }, [projectLayout, totalPanels, config]);
   const systemPanelCount = resolvedPanelCount.value;
+
+  // ── HYBRID partition (roof/ground/fence) from per-panel design stamps ──────
+  // The engineering pipeline historically treated the whole project as ONE
+  // config.systemType: a 51-roof/26-ground/17-fence design got fence structural
+  // for all 94 modules and a BOM of 94 fence sections (Stowell). Partition once
+  // here; the structural payload, BOM payload, and the Structural/Mounting tabs
+  // all consume it. Empty/unstamped layouts collapse to a single legacy bucket.
+  const subSystemCounts = useMemo(() => {
+    const counts = { roof: 0, ground: 0, fence: 0 };
+    const panels = (projectLayout?.panels ?? []) as Array<{ systemType?: string; placementType?: string }>;
+    for (const p of panels) {
+      const st = String(p.systemType ?? p.placementType ?? '').toLowerCase();
+      if (st === 'fence' || st === 'solar_fence') counts.fence++;
+      else if (st === 'ground' || st === 'ground_mount') counts.ground++;
+      else counts.roof++;
+    }
+    const present = (['roof', 'ground', 'fence'] as const).filter(k => counts[k] > 0);
+    return { ...counts, present, isHybrid: present.length > 1 };
+  }, [projectLayout]);
+
   const totalWatts = config.inverters.reduce((sum, inv) =>
     sum + inv.strings.reduce((s2, str) => {
       const panel = getPanelById(str.panelId);
@@ -4472,10 +4492,33 @@ function EngineeringPageInner() {
             })();
             return { fenceHeightFt, fenceLengthFt, postSpacingFt: 8, groundClearanceFt: 2 / 12 };
           })() : {}),
+          // ── HYBRID: per-subsystem structural runs (roof + ground + fence) ──
+          // Without this the whole 94-module project got ONE analyzeFenceSystem
+          // pass; the roof and ground subsets had NO structural analysis at all.
+          ...(subSystemCounts.isHybrid ? {
+            subSystems: subSystemCounts.present.map(key => {
+              const M2FT = 3.28084;
+              if (key === 'fence') {
+                // Fence-subset length from the fence panels themselves (panel
+                // width × count — the project fenceLine is NULL on hybrids).
+                const _fp0 = config.inverters[0]?.strings[0];
+                const _pd0 = _fp0?.panelId ? (SOLAR_PANELS as any[]).find((p: any) => p.id === _fp0.panelId) : null;
+                const _panelWidFt = ((_pd0?.width ?? 41.0) / 12);
+                return { key, panelCount: subSystemCounts.fence,
+                  fenceLengthFt: Math.ceil(subSystemCounts.fence * _panelWidFt * 1.05) };
+              }
+              if (key === 'ground') {
+                return { key, panelCount: subSystemCounts.ground,
+                  groundTiltDeg: (projectLayout as any)?.groundTilt ?? 25,
+                  groundAzimuth: (projectLayout as any)?.groundAzimuth ?? 180 };
+              }
+              return { key, panelCount: subSystemCounts.roof };
+            }),
+          } : {}),
         };
       })(),
     };
-  }, [config, totalPanels, sizingRecommendation, projectLayout]);
+  }, [config, totalPanels, sizingRecommendation, projectLayout, subSystemCounts]);
 
   // ── saveEngineeringOutputs: persist live engine state to project_files ──────
   const saveEngineeringOutputs = useCallback(async (calcData: any) => {
@@ -4671,7 +4714,13 @@ function EngineeringPageInner() {
         // V3 and V4 share identical output field names, so the same transform works
         // sourced from V4. (UNIFIED-ENGINE-DESIGN-SPEC.md Step 5.)
         try {
-          const v4s = calcData.structural;
+          const v4sRaw = calcData.structural;
+          const _subs = v4sRaw?.subSystems as Record<string, any> | undefined;
+          // HYBRID: the top-level scalars must render the ROOF subset — the
+          // legacy scalar result is the winner-type run (fence on Stowell),
+          // whose roof fields are empty. Fence/ground cards bind to their own
+          // sub-results below; kept on .subSystems.
+          const v4s = (_subs?.roof && _subs.roof.status) ? _subs.roof : v4sRaw;
           if (v4s?.status) {
             const ra = v4s.rafterAnalysis;
             const ml = v4s.mountLayout;
@@ -4688,8 +4737,12 @@ function EngineeringPageInner() {
               // Fence (SolFence) structural — carries the real post embedment /
               // overturning / wind from analyzeFence so the Structural tab can show
               // it instead of the stubbed roof rafter rows.
-              fenceMountAnalysis: v4s.fenceMountAnalysis,
+              fenceMountAnalysis: _subs?.fence?.fenceMountAnalysis ?? v4sRaw.fenceMountAnalysis,
               engineered:         v4s.engineered,
+              // HYBRID: keyed per-subsystem V4 results (roof/ground/fence) —
+              // the Structural tab renders one card per present subsystem.
+              subSystems:      _subs,
+              subSystemMeta:   v4sRaw.subSystemMeta,
               // Native V4 top-level fields — the "Structural Compliance" card
               // (page.tsx ~9792) reads native names (totalSystemWeightLbs,
               // addedDeadLoadPsf, wind.netUpliftPressurePsf, snow.roofSnowLoadPsf).
@@ -4752,8 +4805,14 @@ function EngineeringPageInner() {
                 existingRoofDeadLoad:  15,
                 totalRoofDeadLoad:     (v4s.addedDeadLoadPsf ?? 0) + 15,
               },
-              errors:          v4s.errors,
-              warnings:        v4s.warnings,
+              // Merge sub-system findings so a fence/ground FAIL still surfaces
+              // in overall status even when the scalars display the roof subset.
+              errors:          _subs
+                ? [...new Set([...(v4sRaw.errors ?? []), ...Object.values(_subs).flatMap((s: any) => s?.errors ?? [])])]
+                : v4s.errors,
+              warnings:        _subs
+                ? [...new Set([...(v4sRaw.warnings ?? []), ...Object.values(_subs).flatMap((s: any) => s?.warnings ?? [])])]
+                : v4s.warnings,
               recommendations: v4s.recommendations,
             };
             // Auto-update framing type if detected
@@ -5403,15 +5462,21 @@ function EngineeringPageInner() {
           // MASTER TASK NOTE: This is best-effort estimation. When CAD geometry is
           // available server-side, use extractStructuralInputFromCAD() instead.
           // derivedFrom: 'estimated-ui-defaults' (not CAD geometry)
-          fenceData: config.systemType === 'fence' ? (() => {
+          // HYBRID: partition counts drive the server's per-subsystem structural
+          // branches + the NEC 690.12 RSD roof-subset qty in generateBOMV4.
+          subSystemCounts: subSystemCounts.isHybrid
+            ? { roof: subSystemCounts.roof, ground: subSystemCounts.ground, fence: subSystemCounts.fence }
+            : undefined,
+          fenceData: (config.systemType === 'fence' || subSystemCounts.fence > 0) ? (() => {
             // fenceCAD.ts defaults: 8ft post spacing, 3ft embed, 2 rails
             const panelWidthFt = 3.28;    // ~1m panel width (fenceCAD DEFAULT_PANEL_WIDTH_FT)
             const panelHeightFt = 5.5;    // ~1.676m panel height
             const postSpacingFt = 8;      // DEFAULT_POST_SPACING_FT from fenceCAD.ts
             const postEmbedFt = 3;        // DEFAULT_POST_EMBED_FT from fenceCAD.ts
             const railCount = 2;          // DEFAULT_RAIL_COUNT from fenceCAD.ts
-            // Estimate fence length from panel count: each panel ~3.28ft wide
-            const totalFenceLengthFt = totalPanels * panelWidthFt;
+            // Estimate fence length from the FENCE SUBSET (hybrid: 17, not 94)
+            const _fencePanels = subSystemCounts.fence > 0 ? subSystemCounts.fence : totalPanels;
+            const totalFenceLengthFt = _fencePanels * panelWidthFt;
             // Posts: ceil(length / spacing) + 1 per segment (assume 1 segment for simple calc)
             const totalPosts = Math.ceil(totalFenceLengthFt / postSpacingFt) + 1;
             // Fence segments from projectLayout if available
@@ -5427,7 +5492,10 @@ function EngineeringPageInner() {
               segmentCount: fenceSegments,
               gateCount: 0,                     // gate data from CAD if available
               gateWidthsFt: [] as number[],
-              solarSectionCount: totalPanels,
+              // 1:1 panel:section was the $61.8k Stowell lie (a 6' section holds
+              // 2 panels) — the server now derives sections from fencePanelCount.
+              fencePanelCount: _fencePanels,
+              solarSectionCount: 0,
               vinylSectionCount: 0,
               panelWidthFt,
               panelHeightFt,
@@ -5439,14 +5507,15 @@ function EngineeringPageInner() {
           // falls back to mounting system defaults. When CAD geometry is available
           // server-side, use extractStructuralInputFromCAD() instead.
           // derivedFrom: 'compliance-structural + mounting-system-defaults'
-          groundData: config.systemType === 'ground' ? (() => {
+          groundData: (config.systemType === 'ground' || subSystemCounts.ground > 0) ? (() => {
             const gma = (compliance.structural as any)?.groundMountAnalysis;
             const mountSys = ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId);
             const gm = mountSys?.groundMount as any;
             const pileSpacingFt = gma?.pileSpacingFt ?? gm?.pileSpacingFt ?? 10;
             const pileEmbedFt = gma?.pileEmbedmentFt ?? gm?.pileEmbedmentFt ?? 4;
             const rowCount = config.rowCount ?? 1;
-            const panelsPerRow = Math.ceil(totalPanels / rowCount);
+            const _groundPanels = subSystemCounts.ground > 0 ? subSystemCounts.ground : totalPanels;
+            const panelsPerRow = Math.ceil(_groundPanels / rowCount);
             const panelWidthIn = 41.7;  // default panel width in inches
             const arrayWidthFt = (panelsPerRow * panelWidthIn) / 12;
             const pilesPerRow = Math.ceil(arrayWidthFt / pileSpacingFt) + 1;
@@ -5460,6 +5529,22 @@ function EngineeringPageInner() {
               arrayWidthFt,
               railsPerRow: 2,           // standard from array-geometry.ts
               groundClearanceFt: 2,     // 0.6096m default from CAD types
+            };
+          })() : undefined,
+
+          // HYBRID: roof-subset racking quantities from the per-sub structural
+          // run — without these the V4 racking stage emits nothing on a
+          // fence-typed hybrid (attachmentCount/railSections were sent as 0).
+          roofData: (subSystemCounts.isHybrid && subSystemCounts.roof > 0) ? (() => {
+            const roofSub = (compliance.structural as any)?.subSystems?.roof;
+            const ml = roofSub?.mountLayout;
+            const rb = roofSub?.rackingBOM;
+            if (!ml?.mountCount) return undefined;
+            return {
+              panelCount: subSystemCounts.roof,
+              attachmentCount: ml.mountCount,
+              railSections: rb?.rails?.qty ?? undefined,
+              mountingSystemId: config.mountingId || undefined,
             };
           })() : undefined,
 
@@ -10574,7 +10659,21 @@ function EngineeringPageInner() {
                   different analysis not yet implemented — so for those mount types the numbers below
                   are roof-based PLACEHOLDERS. Surface that clearly so no one submits them as
                   engineered for permit. */}
-              {config.systemType && config.systemType !== 'roof' ? (
+              {subSystemCounts.isHybrid ? (
+                <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4 flex items-start gap-3">
+                  <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-200 leading-relaxed">
+                    <div className="font-bold text-amber-300 mb-1 uppercase tracking-wide">
+                      Hybrid design — each sub-system analyzed separately
+                    </div>
+                    This project spans {subSystemCounts.present.map(k => `${subSystemCounts[k]} ${k}`).join(' + ')} modules.
+                    The roof analysis below covers the {subSystemCounts.roof}-module roof subset (ASCE 7-22 roof zones,
+                    rafter/lag attachment). The SOL Fence and ground-mount panels are ESTIMATES — not engineered until a
+                    licensed structural PE reviews them.
+                  </div>
+                </div>
+              ) : null}
+              {!subSystemCounts.isHybrid && config.systemType && config.systemType !== 'roof' ? (
                 <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 flex items-start gap-3">
                   <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" />
                   <div className="text-xs text-red-200 leading-relaxed">
@@ -10600,7 +10699,7 @@ function EngineeringPageInner() {
                 </div>
               ) : null}
               {/* ══════════ SOL FENCE STRUCTURAL (analyzeFence) ══════════ */}
-              {config.systemType === 'fence' && (compliance.structural as any)?.fenceMountAnalysis ? (() => {
+              {(config.systemType === 'fence' || subSystemCounts.fence > 0) && (compliance.structural as any)?.fenceMountAnalysis ? (() => {
                 const fm = (compliance.structural as any).fenceMountAnalysis;
                 const cell = (label: string, value: string, sub: string) => (
                   <div className="rounded-lg border border-purple-500/30 bg-slate-900/40 p-2.5">
@@ -10613,7 +10712,7 @@ function EngineeringPageInner() {
                   <div className="rounded-xl border border-purple-500/40 bg-purple-500/5 p-4 mb-5">
                     <div className="flex items-center gap-2 mb-3">
                       <Wind size={14} className="text-purple-300" />
-                      <span className="text-sm font-bold text-purple-100">SOL Fence Structural — freestanding-wall wind → post embedment</span>
+                      <span className="text-sm font-bold text-purple-100">SOL Fence Structural — freestanding-wall wind → post embedment{typeof fm.panelCount === 'number' ? ` · ${fm.panelCount} modules` : ''}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-mono ml-auto">ASCE 7-22 §29 · IBC 1807.3</span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -10641,8 +10740,39 @@ function EngineeringPageInner() {
                   </div>
                 );
               })() : null}
+              {/* ══════════ GROUND MOUNT STRUCTURAL (per-subsystem, hybrid) ══════════ */}
+              {(subSystemCounts.ground > 0 && (compliance.structural as any)?.subSystems?.ground?.groundMountAnalysis) ? (() => {
+                const gm = (compliance.structural as any).subSystems.ground.groundMountAnalysis;
+                const cell = (label: string, value: string, sub: string) => (
+                  <div className="rounded-lg border border-emerald-500/30 bg-slate-900/40 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-emerald-300/80">{label}</div>
+                    <div className="text-sm font-bold text-white">{value}</div>
+                    <div className="text-[10px] text-slate-400">{sub}</div>
+                  </div>
+                );
+                return (
+                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Wind size={14} className="text-emerald-300" />
+                      <span className="text-sm font-bold text-emerald-100">Ground Mount Structural — pile embedment · {subSystemCounts.ground} modules</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-mono ml-auto ${gm.passes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/15 text-red-300 border border-red-500/30'}`}>{gm.passes ? 'PASS' : 'CHECK'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                      {cell('Piles', `${gm.pileCount}`, `@ ${gm.pileSpacingFt} ft spacing`)}
+                      {cell('Embedment', `${gm.pileEmbedmentFt.toFixed(1)} ft`, 'driven pile min')}
+                      {cell('Uplift / Pile', `${Math.round(gm.upliftPerPileLbs)} lb`, `SF ${gm.safetyFactorUplift.toFixed(2)}`)}
+                      {cell('Lateral / Pile', `${Math.round(gm.lateralPerPileLbs)} lb`, `down ${Math.round(gm.downwardPerPileLbs)} lb · SF ${gm.safetyFactorDownward.toFixed(2)}`)}
+                    </div>
+                    {(gm.notes ?? []).slice(0, 3).map((n: string, i: number) => (
+                      <div key={i} className="text-[11px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+                        <span className="text-emerald-300 mt-0.5 shrink-0">→</span><span>{n}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })() : null}
               {/* ══════════ STRUCTURAL INTEGRITY HERO (roof/ground only — a fence uses the SOL Fence panel above) ══════════ */}
-              {config.systemType !== 'fence' ? (
+              {(config.systemType !== 'fence' || subSystemCounts.roof > 0) ? (
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
 <div className="flex items-center gap-2 mb-4">
                   <Wind size={14} className="text-amber-400" />
@@ -10703,7 +10833,7 @@ function EngineeringPageInner() {
                     <input type="number" value={config.groundSnowLoad} onChange={e => updateConfig({ groundSnowLoad: +e.target.value })}
                       className="eng-input" />
                   </div>
-                  {config.systemType !== 'fence' ? (<>
+                  {(config.systemType !== 'fence' || subSystemCounts.roof > 0) ? (<>
                   <div>
                     <label className="eng-label">Roof Pitch (degrees)</label>
                     <input type="number" min={0} max={60} value={config.roofPitch} onChange={e => updateConfig({ roofPitch: +e.target.value })}
@@ -10743,7 +10873,7 @@ function EngineeringPageInner() {
                 </div>
               </div>
               {/* Roof framing / roof racking / roof structural results — not applicable to a fence (SOL Fence panel above covers it) */}
-              {config.systemType !== 'fence' ? (<>
+              {(config.systemType !== 'fence' || subSystemCounts.roof > 0) ? (<>
               <div className="eng-panel">
                 <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight"><Ruler size={14} className="text-amber-400" /> Roof Framing</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -12657,7 +12787,7 @@ function EngineeringPageInner() {
                     ) : null}
                   </div>
                   {/* ══════════ SOL FENCE MOUNTING (real SolFence system, not a roof picker) ══════════ */}
-                  {config.systemType === 'fence' ? (() => {
+                  {(config.systemType === 'fence' || subSystemCounts.fence > 0) ? (() => {
                     const eq = resolveEquipment('fence');
                     const rk = eq.racking;
                     const spec = (label: string, value: string) => (
@@ -12698,8 +12828,8 @@ function EngineeringPageInner() {
                       </div>
                     );
                   })() : null}
-                  {/* Roof/ground mounting picker — not applicable to a fence (the SOL Fence panel above covers it) */}
-                  {config.systemType !== 'fence' ? (<>
+                  {/* Roof/ground mounting picker — shown whenever roof/ground panels exist (hybrid-aware) */}
+                  {(config.systemType !== 'fence' || subSystemCounts.roof > 0 || subSystemCounts.ground > 0) ? (<>
                   {/* Search bar + roof type indicator */}
                   <div className="flex items-center gap-3 mb-3">
                     <div className="flex-1 relative">
@@ -12790,7 +12920,7 @@ function EngineeringPageInner() {
                 </div>
 
                 {/* ── Selected System Spec Panel ── */}
-                {selectedSystem && config.systemType !== 'fence' ? (
+                {selectedSystem && (config.systemType !== 'fence' || subSystemCounts.roof > 0 || subSystemCounts.ground > 0) ? (
                   <div className="eng-panel">
                     <div className="flex items-start justify-between mb-4">
                       <div>
@@ -12960,7 +13090,7 @@ function EngineeringPageInner() {
                 ) : null}
 
                 {/* Layout diagrams + load analysis + BOM preview + code refs — roof/ground/commercial only, not a fence */}
-                {config.systemType !== 'fence' ? (<>
+                {(config.systemType !== 'fence' || subSystemCounts.roof > 0 || subSystemCounts.ground > 0) ? (<>
                 {/* ── Real-Time Layout Visualization ── */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* Mount Spacing Diagram */}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { runElectricalCalc, ElectricalCalcInput } from '@/lib/electrical-calc';
 import { runStructuralCalcV4, type StructuralInputV4 } from '@/lib/structural-engine-v4';
+import { buildStructuralInputV4, runSubSystemStructural } from './subSystemStructural';
 import { getJurisdictionInfo, getDesignTemperatures, getGroundSnowLoad, getDesignWindSpeed, parseStateFromAddress } from '@/lib/jurisdiction';
 import {
   generateStringConfig,
@@ -284,42 +285,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Run structural calculations (V4 engine)
+    // The legacy payload → StructuralInputV4 mapping lives in ./subSystemStructural
+    // (buildStructuralInputV4) so the whole-project run and the hybrid per-sub
+    // runs share ONE mapping. Legacy behavior is byte-identical.
     let structuralResult = null;
+    let subSystemStructural: ReturnType<typeof runSubSystemStructural> = null;
     if (structural) {
       try {
-        const structuralInput: StructuralInputV4 = {
-          installationType: structural.installationType ?? 'roof_residential',
-          windSpeed:        Number(structural.windSpeed ?? windSpeed),
-          windExposure:     structural.windExposure ?? 'C',
-          groundSnowLoad:   Number(structural.groundSnowLoad ?? groundSnowLoad),
-          meanRoofHeight:   Number(structural.meanRoofHeight ?? 15),
-          roofPitch:        Number(structural.roofPitch ?? 20),
-          framingType:      structural.framingType ?? 'unknown',
-          rafterSize:       structural.rafterSize ?? '2x6',
-          rafterSpacingIn:  Number(structural.rafterSpacing ?? structural.rafterSpacingIn ?? 24),
-          rafterSpanFt:     Number(structural.rafterSpan ?? structural.rafterSpanFt ?? 16),
-          woodSpecies:      structural.rafterSpecies ?? structural.woodSpecies ?? 'Douglas Fir-Larch',
-          panelCount:       Number(structural.panelCount ?? 24),
-          panelLengthIn:    Number(structural.panelLength ?? structural.panelLengthIn ?? 73.0),
-          panelWidthIn:     Number(structural.panelWidth ?? structural.panelWidthIn ?? 41.0),
-          panelWeightLbs:   Number(structural.panelWeight ?? structural.panelWeightLbs ?? 45.0),
-          panelOrientation: structural.panelOrientation ?? 'portrait',
-          rowCount:         structural.rowCount,
-          colCount:         structural.colCount,
-          moduleGapIn:      structural.moduleGapIn ?? 0.5,
-          rowGapIn:         structural.rowGapIn ?? 6,
-          mountingSystemId: structural.mountingSystem ?? structural.mountingSystemId ?? 'ironridge-xr100',
-          rackingWeightPerPanelLbs: structural.rackingWeight ?? structural.rackingWeightPerPanelLbs ?? 4.0,
-          roofDeadLoadPsf:  structural.roofDeadLoadPsf ?? 15,
-          soilType:         structural.soilType,
-          frostDepthIn:     structural.frostDepthIn,
-          // Fence (SolFence) — forwarded to analyzeFence; falls back to SolFence
-          // defaults (6ft height, 8ft section) when the client omits them.
-          fenceHeightFt:    structural.fenceHeightFt,
-          fenceLengthFt:    structural.fenceLengthFt,
-          postSpacingFt:    structural.postSpacingFt,
-          groundClearanceFt: structural.groundClearanceFt,
-        };
+        const structuralInput: StructuralInputV4 = buildStructuralInputV4(structural, { windSpeed, groundSnowLoad });
         structuralResult = runStructuralCalcV4(structuralInput);
       } catch (structErr: unknown) {
         console.error('[calculate] V4 structural engine crashed:', structErr);
@@ -331,6 +304,21 @@ export async function POST(req: NextRequest) {
           errors: [{ code: 'ENGINE_ERROR', message: `Structural engine error: ${String(structErr)}`, severity: 'error', suggestion: 'Structural analysis could not be completed — do not treat as engineered. Check inputs and retry.' }],
           warnings: [],
         };
+      }
+
+      // ── Hybrid multi-system: per-sub-system structural runs ──────────────
+      // When the client sends structural.subSystems[] (roof/ground/fence
+      // partition), run the V4 engine once per entry so each subset gets its
+      // OWN analysis (roof rafters, ground piles, fence posts) instead of the
+      // whole project being sized as one system. Additive: the legacy
+      // whole-project result above is untouched; results are attached as
+      // structural.subSystems + structural.subSystemMeta on the response.
+      // Per-entry engine crashes are caught inside (key logged + omitted).
+      try {
+        subSystemStructural = runSubSystemStructural(structural, { windSpeed, groundSnowLoad });
+      } catch (subErr: unknown) {
+        console.error('[calculate] sub-system structural partition failed:', subErr);
+        subSystemStructural = null;
       }
     }
 
@@ -356,7 +344,16 @@ export async function POST(req: NextRequest) {
       overallStatus,
       jurisdiction,
       electrical: electricalResult,
-      structural: structuralResult,
+      // Hybrid: attach per-sub-system results WITHOUT touching the legacy
+      // top-level result. Legacy payloads (no subSystems) get the exact
+      // pre-hybrid object — no subSystems/subSystemMeta keys at all.
+      structural: structuralResult && subSystemStructural
+        ? {
+            ...structuralResult,
+            subSystems: subSystemStructural.subSystems,
+            subSystemMeta: subSystemStructural.subSystemMeta,
+          }
+        : structuralResult,
       stringConfig: stringConfig ? {
         totalStrings:           stringConfig.totalStrings,
         panelsPerString:        stringConfig.strings[0]?.panelsInString ?? 0,
