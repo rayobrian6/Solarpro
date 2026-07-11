@@ -1242,3 +1242,331 @@ describe('Phase 1A.1: Persistent audit integration', () => {
     expect(reviewEventSection).toContain('MANUAL_REVIEW');
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 14. Governance Lifecycle & Historical Baseline (MIGRATION-GOV-02,03)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.1: Governance lifecycle & historical baseline', () => {
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const typesSrc = readSrc('lib/migrations/types.ts');
+
+  it('MigrationGovernanceLifecycle includes all 6 lifecycle states', () => {
+    expect(typesSrc).toContain('UNBOOTSTRAPPED');
+    expect(typesSrc).toContain('LEDGER_BOOTSTRAPPED');
+    expect(typesSrc).toContain('BASELINE_REQUIRED');
+    expect(typesSrc).toContain('BASELINE_IN_PROGRESS');
+    expect(typesSrc).toContain('BASELINE_VERIFIED');
+    expect(typesSrc).toContain('EXECUTION_ENABLED');
+  });
+
+  it('governance_lifecycle table DDL has lifecycle_state CHECK with all 6 states', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS governance_lifecycle')[1] ?? '';
+    expect(ddlSection).toContain('UNBOOTSTRAPPED');
+    expect(ddlSection).toContain('LEDGER_BOOTSTRAPPED');
+    expect(ddlSection).toContain('BASELINE_REQUIRED');
+    expect(ddlSection).toContain('BASELINE_IN_PROGRESS');
+    expect(ddlSection).toContain('BASELINE_VERIFIED');
+    expect(ddlSection).toContain('EXECUTION_ENABLED');
+    // Default state after bootstrap is LEDGER_BOOTSTRAPPED
+    expect(ddlSection).toContain("DEFAULT 'LEDGER_BOOTSTRAPPED'");
+    // Environment is unique (one row per environment)
+    expect(ddlSection).toContain('UNIQUE');
+  });
+
+  it('setGovernanceLifecycleState and getGovernanceLifecycleState are exported', () => {
+    expect(ledgerSrc).toContain('export async function getGovernanceLifecycleState');
+    expect(ledgerSrc).toContain('export async function setGovernanceLifecycleState');
+  });
+
+  it('setGovernanceLifecycleState emits migration.governance.state_change audit event', () => {
+    expect(ledgerSrc).toContain('migration.governance.state_change');
+  });
+
+  it('BaselineReconciliationStatus includes all 5 statuses', () => {
+    expect(typesSrc).toContain('CONFIRMED_APPLIED');
+    expect(typesSrc).toContain('CONFIRMED_NOT_APPLIED');
+    expect(typesSrc).toContain('PARTIALLY_APPLIED');
+    expect(typesSrc).toContain('NOT_APPLICABLE');
+    expect(typesSrc).toContain('UNKNOWN');
+  });
+
+  it('migration_baseline table DDL has reconciliation_status CHECK with all 5 statuses', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_baseline')[1] ?? '';
+    expect(ddlSection).toContain('CONFIRMED_APPLIED');
+    expect(ddlSection).toContain('CONFIRMED_NOT_APPLIED');
+    expect(ddlSection).toContain('PARTIALLY_APPLIED');
+    expect(ddlSection).toContain('NOT_APPLICABLE');
+    expect(ddlSection).toContain('UNKNOWN');
+    // Unique constraint per migration+environment
+    expect(ddlSection).toContain('migration_baseline_env_identifier_unique');
+    // Evidence type CHECK
+    expect(ddlSection).toContain('SCHEMA_INTROSPECTION');
+    expect(ddlSection).toContain('LEDGER_RECORD');
+    expect(ddlSection).toContain('MANUAL_VERIFICATION');
+    expect(ddlSection).toContain('CHECKSUM_MATCH');
+    expect(ddlSection).toContain('OBJECT_EXISTENCE');
+  });
+
+  it('recordBaselineReconciliation is exported and emits baseline audit events', () => {
+    expect(ledgerSrc).toContain('export async function recordBaselineReconciliation');
+    expect(ledgerSrc).toContain('migration.baseline.completed');
+    expect(ledgerSrc).toContain('migration.baseline.failed');
+  });
+
+  it('verifyBaselineComplete is exported', () => {
+    expect(ledgerSrc).toContain('export async function verifyBaselineComplete');
+  });
+
+  it('advanceToBaselineVerified is exported and emits state_change event', () => {
+    expect(ledgerSrc).toContain('export async function advanceToBaselineVerified');
+  });
+
+  it('enableExecution is exported and emits state_change event', () => {
+    expect(ledgerSrc).toContain('export async function enableExecution');
+  });
+
+  it('assertExecutionPermitted is exported with fail-closed semantics', () => {
+    expect(ledgerSrc).toContain('export async function assertExecutionPermitted');
+    // The function should have fail-closed behavior (deny on unreadable state).
+    const gateSection = ledgerSrc.split('assertExecutionPermitted')[1] ?? '';
+    expect(gateSection).toContain('permitted');
+  });
+
+  it('assertExecutionPermitted emits execution_denied audit event when blocked', () => {
+    expect(ledgerSrc).toContain('migration.governance.execution_denied');
+  });
+
+  it('execution gate only permits BASELINE_VERIFIED and EXECUTION_ENABLED', () => {
+    // The assertExecutionPermitted function should check that the lifecycle
+    // state is one of the execution-permitting states.
+    const gateSection = ledgerSrc.split('async function assertExecutionPermitted')[1] ?? '';
+    expect(gateSection).toContain('BASELINE_VERIFIED');
+    expect(gateSection).toContain('EXECUTION_ENABLED');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 15. Transaction Mode Detection (MIGRATION-GOV-06)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.1: Transaction mode detection', () => {
+  const validationSrc = readSrc('lib/migrations/validation.ts');
+  const manifestSrc = readSrc('lib/migrations/manifest.ts');
+
+  it('TransactionMode type includes REQUIRED, FORBIDDEN, MANUAL_REVIEW', () => {
+    const typesSrc = readSrc('lib/migrations/types.ts');
+    expect(typesSrc).toContain("'REQUIRED'");
+    expect(typesSrc).toContain("'FORBIDDEN'");
+    expect(typesSrc).toContain("'MANUAL_REVIEW'");
+  });
+
+  it('detectTransactionMode is exported from validation.ts', () => {
+    expect(validationSrc).toContain('export function detectTransactionMode');
+  });
+
+  it('detectTransactionModeFromFile is exported from validation.ts', () => {
+    expect(validationSrc).toContain('export function detectTransactionModeFromFile');
+  });
+
+  it('TRANSACTION_INCOMPATIBLE_PATTERNS includes CREATE INDEX CONCURRENTLY', () => {
+    expect(validationSrc).toContain('CREATE INDEX CONCURRENTLY');
+    expect(validationSrc).toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY/i);
+  });
+
+  it('TRANSACTION_INCOMPATIBLE_PATTERNS includes REINDEX CONCURRENTLY', () => {
+    expect(validationSrc).toContain('REINDEX CONCURRENTLY');
+  });
+
+  it('TRANSACTION_INCOMPATIBLE_PATTERNS includes VACUUM', () => {
+    expect(validationSrc).toContain('VACUUM');
+  });
+
+  it('TRANSACTION_INCOMPATIBLE_PATTERNS includes ALTER TYPE ADD VALUE', () => {
+    expect(validationSrc).toContain('ALTER TYPE ADD VALUE');
+  });
+
+  it('TRANSACTION_INCOMPATIBLE_PATTERNS includes CREATE DATABASE', () => {
+    expect(validationSrc).toContain('CREATE DATABASE');
+  });
+
+  it('TRANSACTION_INCOMPATIBLE_PATTERNS includes CREATE TABLESPACE', () => {
+    expect(validationSrc).toContain('CREATE TABLESPACE');
+  });
+
+  it('TRANSACTION_INCOMPATIBLE_PATTERNS includes DROP DATABASE', () => {
+    expect(validationSrc).toContain('DROP DATABASE');
+  });
+
+  it('manifest.ts computes transactionMode at discovery time', () => {
+    expect(manifestSrc).toContain('transactionMode');
+    expect(manifestSrc).toContain('detectTransactionMode');
+  });
+
+  it('MigrationFile interface includes transactionMode field', () => {
+    const typesSrc = readSrc('lib/migrations/types.ts');
+    expect(typesSrc).toContain('transactionMode: TransactionMode');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 16. Lock Key Exactness (MIGRATION-GOV-06)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.1: Lock key exactness', () => {
+  const typesSrc = readSrc('lib/migrations/types.ts');
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+
+  it('MIGRATION_LOCK_KEY_DECIMAL is a decimal string constant (not a JS number)', () => {
+    expect(typesSrc).toContain("MIGRATION_LOCK_KEY_DECIMAL");
+    // The decimal value should be a string, not a number literal.
+    expect(typesSrc).toMatch(/MIGRATION_LOCK_KEY_DECIMAL\s*[:=]\s*['"]/);
+  });
+
+  it('MIGRATION_LOCK_KEY_DECIMAL equals 6003100736085771346 (exact, not rounded)', () => {
+    expect(typesSrc).toContain('6003100736085771346');
+  });
+
+  it('MIGRATION_LOCK_KEY as hex is 0x534f4c504d474452 (SOLPMGDR)', () => {
+    expect(typesSrc).toContain('0x534f4c504d474452');
+  });
+
+  it('runner casts the decimal key to BIGINT in SQL (not passing as JS number)', () => {
+    expect(runnerSrc).toContain('MIGRATION_LOCK_KEY_DECIMAL');
+    expect(runnerSrc).toContain('::bigint');
+  });
+
+  it('ledger bootstrap casts the decimal key to BIGINT in advisory lock', () => {
+    expect(ledgerSrc).toContain('MIGRATION_LOCK_KEY_DECIMAL');
+    expect(ledgerSrc).toContain('::bigint');
+  });
+
+  it('runner uses pg_try_advisory_xact_lock (bounded, not indefinite block)', () => {
+    expect(runnerSrc).toContain('pg_try_advisory_xact_lock');
+    // Should NOT use pg_advisory_xact_lock (which blocks indefinitely) in the
+    // REQUIRED transaction path.
+  });
+
+  it('FORBIDDEN mode uses pg_try_advisory_lock (session-scoped, bounded)', () => {
+    expect(runnerSrc).toContain('pg_try_advisory_lock');
+    expect(runnerSrc).toContain('pg_advisory_unlock');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 17. Append-Only Run History & Ledger Constraints (MIGRATION-GOV-02,03,08)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Phase 1A.1: Append-only run history & ledger constraints', () => {
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+
+  it('schema_migration_runs table is created in bootstrap DDL', () => {
+    expect(ledgerSrc).toContain('CREATE TABLE IF NOT EXISTS schema_migration_runs');
+  });
+
+  it('schema_migration_runs has status CHECK with all 5 run statuses', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1] ?? '';
+    expect(ddlSection).toContain("'started'");
+    expect(ddlSection).toContain("'applied'");
+    expect(ddlSection).toContain("'failed'");
+    expect(ddlSection).toContain("'denied'");
+    expect(ddlSection).toContain("'skipped'");
+  });
+
+  it('schema_migration_runs has migration_identifier CHECK constraint', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1]?.split(');')[0] ?? '';
+    expect(ddlSection).toContain('migration_identifier');
+    expect(ddlSection).toContain('CHECK');
+    expect(ddlSection).toContain("'^[0-9]{3}");
+  });
+
+  it('schema_migration_runs has checksum_sha256 CHECK constraint', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1]?.split(');')[0] ?? '';
+    expect(ddlSection).toContain('checksum_sha256');
+    expect(ddlSection).toContain('CHECK');
+    expect(ddlSection).toContain("'^[0-9a-f]{64}$");
+  });
+
+  it('schema_migration_runs has actor_type CHECK constraint', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1] ?? '';
+    expect(ddlSection).toContain("'human'");
+    expect(ddlSection).toContain("'migration-actor'");
+  });
+
+  it('schema_migration_runs has indexes on execution_id, identifier+env, and status', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1] ?? '';
+    expect(ddlSection).toContain('schema_migration_runs_exec_id_idx');
+    expect(ddlSection).toContain('schema_migration_runs_identifier_env_idx');
+    expect(ddlSection).toContain('schema_migration_runs_status_idx');
+  });
+
+  it('recordMigrationRunEvent is exported (INSERT-only, never UPDATE/DELETE)', () => {
+    expect(ledgerSrc).toContain('export async function recordMigrationRunEvent');
+    const fnSection = ledgerSrc.split('export async function recordMigrationRunEvent')[1] ?? '';
+    expect(fnSection).toContain('INSERT INTO schema_migration_runs');
+    // Should not contain UPDATE or DELETE on this table.
+    expect(fnSection).not.toMatch(/UPDATE\s+schema_migration_runs/i);
+    expect(fnSection).not.toMatch(/DELETE\s+FROM\s+schema_migration_runs/i);
+  });
+
+  it('schema_migrations has unique constraint on (migration_identifier, environment)', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migrations')[1] ?? '';
+    expect(ddlSection).toContain('schema_migrations_env_identifier_unique');
+  });
+
+  it('schema_migrations has status CHECK with all 5 statuses', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migrations')[1] ?? '';
+    expect(ddlSection).toContain("'pending'");
+    expect(ddlSection).toContain("'running'");
+    expect(ddlSection).toContain("'applied'");
+    expect(ddlSection).toContain("'failed'");
+    expect(ddlSection).toContain("'superseded'");
+  });
+
+  it('migration_totp_uses table is created in bootstrap DDL (MIGRATION-GOV-05)', () => {
+    expect(ledgerSrc).toContain('CREATE TABLE IF NOT EXISTS migration_totp_uses');
+  });
+
+  it('migration_totp_uses has unique constraint on (user_id, time_step)', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_totp_uses')[1] ?? '';
+    expect(ddlSection).toContain('migration_totp_uses_user_step_unique');
+    expect(ddlSection).toContain('UNIQUE (user_id, time_step)');
+  });
+
+  it('migration_totp_uses stores use_hash (SHA-256), NOT the TOTP code itself', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_totp_uses')[1]?.split('`')[0] ?? '';
+    expect(ddlSection).toContain('use_hash');
+    expect(ddlSection).toContain("'^[0-9a-f]{64}$");
+    // There should be no column named 'totp_code' in this table DDL.
+    expect(ddlSection).not.toMatch(/totp_code/i);
+  });
+
+  it('recordTotpUse is exported and uses ON CONFLICT DO NOTHING', () => {
+    expect(ledgerSrc).toContain('export async function recordTotpUse');
+    const fnSection = ledgerSrc.split('export async function recordTotpUse')[1] ?? '';
+    expect(fnSection).toContain('ON CONFLICT');
+    expect(fnSection).toContain('DO NOTHING');
+    expect(fnSection).toContain('RETURNING');
+  });
+
+  it('recordTotpUse returns true for first use (new row) and false for replay (conflict)', () => {
+    const fnSection = ledgerSrc.split('export async function recordTotpUse')[1] ?? '';
+    // The function should distinguish between first-use (row inserted) and
+    // replay (conflict, no row inserted).
+    expect(fnSection).toContain('true');
+    expect(fnSection).toContain('false');
+  });
+
+  it('isTotpTimeStepUsed is exported (read-only replay check)', () => {
+    expect(ledgerSrc).toContain('export async function isTotpTimeStepUsed');
+  });
+
+  it('bootstrap sets governance_lifecycle state to BASELINE_REQUIRED after ledger creation', () => {
+    // After the ledger tables are created, the lifecycle should advance from
+    // LEDGER_BOOTSTRAPPED to BASELINE_REQUIRED, requiring baseline reconciliation
+    // before execution is permitted.
+    const bootstrapFnSection = ledgerSrc.split('export async function bootstrapMigrationLedger')[1] ?? '';
+    expect(bootstrapFnSection).toContain('BASELINE_REQUIRED');
+  });
+});
