@@ -46,6 +46,7 @@ import { buildStructuralInputForPermit } from './structuralInput';
 import { resolveArrayStructuralLayout } from './arrayLayout';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
+import { buildComputedRunsForPermit } from './computedRuns';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -471,6 +472,12 @@ export function generateBOMForPermit(
         layoutOrientation:   _arrayLayout.orientation,
         subArrayCount:       _arrayLayout.subArrayCount,
         spliceAtRows:        project.spliceAtRows,
+        // Sized per-segment runs from the wire-sizing engine (computeSystem)
+        // fed with REAL deriveRunLengths(cad) geometry — switches generateBOMV4
+        // to its per-segment wire/conduit path (qty = Σ length × conductors ×
+        // 1.15 per gauge) instead of one flat length × generic conductor count.
+        // null → previous flat path (never blocks a permit).
+        runs:                buildComputedRunsForPermit(input, cad) ?? undefined,
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,
