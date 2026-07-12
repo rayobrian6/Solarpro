@@ -403,6 +403,12 @@ Since Phase 1A.3 adds only new files (no modifications to existing governance so
 - Phase 1A.2 final report: `docs/phase1a/PHASE1A2-FINAL-REPORT.md`
 - Phase 1A.2 baseline control plane: `docs/phase1a/PHASE1A2-BASELINE-CONTROL-PLANE.md`
 - Phase 1A.2 PostgreSQL integration validation: `docs/phase1a/PHASE1A2-POSTGRES-INTEGRATION-VALIDATION.md`
+- Phase 1A.3 final report: `docs/phase1a/PHASE1A3-FINAL-REPORT.md`
+- Phase 1A.3 e2e validation: `docs/phase1a/PHASE1A3-E2E-VALIDATION.md`
+- Phase 1A.3 canary migration: `docs/phase1a/PHASE1A3-CANARY-MIGRATION.md`
+- Phase 1A.3 operational state report: `docs/phase1a/PHASE1A3-OPERATIONAL-STATE-REPORT.md`
+- Phase 1A.3 baseline evidence report: `docs/phase1a/PHASE1A3-BASELINE-EVIDENCE-REPORT.md`
+- Phase 1A.3 Neon compatibility report: `docs/phase1a/PHASE1A3-NEON-COMPATIBILITY-REPORT.md`
 - Architecture decision: `docs/phase1a/ARCHITECTURE-DECISION-MIGRATION-MODEL.md`
 - Audit system: `docs/phase1a/AUDIT-MIGRATION-SYSTEM.md`
 - Source-scanning tests: `tests/phase1a-migration-governance.test.ts`
