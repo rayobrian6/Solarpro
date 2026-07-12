@@ -38,6 +38,7 @@ const TEST_SCHEMA = 'phase1b_org_schema_test';
 
 // Path to the migration file under test.
 const MIGRATION_FILE = join(process.cwd(), 'lib', 'migrations', '105_organization_authority_foundation.sql');
+const MIGRATION_106_FILE = join(process.cwd(), 'lib', 'migrations', '106_membership_org_lifecycle_correction.sql');
 
 const describeOrSkip = HAS_TEST_DB ? describe : describe.skip;
 
@@ -140,6 +141,13 @@ function readMigration(): string {
 }
 
 /**
+ * Read the Phase 1B.1 lifecycle correction migration (106) from disk.
+ */
+function readMigration106(): string {
+  return readFileSync(MIGRATION_106_FILE, 'utf-8');
+}
+
+/**
  * Set up a fresh test schema with prerequisite tables, then apply the migration.
  */
 async function setupSchema(): Promise<void> {
@@ -166,10 +174,14 @@ async function setupSchema(): Promise<void> {
 
 /**
  * Apply the migration SQL to the test schema.
+ * Applies migration 105 followed by the Phase 1B.1 lifecycle correction
+ * migration 106, so the schema reflects the corrected final state.
  */
 async function applyMigration(): Promise<void> {
   const migrationSql = readMigration();
   await execScript(migrationSql);
+  const migration106Sql = readMigration106();
+  await execScript(migration106Sql);
 }
 
 /**
@@ -267,7 +279,7 @@ describeOrSkip('Phase 1B: Organization Authority Schema (Migration 105)', () => 
       expect(rows[0].table_name).toBe('active_organization_context');
     });
 
-    it('should add status, suspended_at, deleted_at, slug, settings columns to organizations', async () => {
+    it('should add status, suspended_at, deleted_at, archived_at, slug, settings columns to organizations', async () => {
       await applyMigration();
       const rows = await exec(`
         SELECT column_name, data_type, column_default
@@ -279,6 +291,7 @@ describeOrSkip('Phase 1B: Organization Authority Schema (Migration 105)', () => 
       expect(colNames).toContain('status');
       expect(colNames).toContain('suspended_at');
       expect(colNames).toContain('deleted_at');
+      expect(colNames).toContain('archived_at');
       expect(colNames).toContain('slug');
       expect(colNames).toContain('settings');
 
@@ -312,12 +325,12 @@ describeOrSkip('Phase 1B: Organization Authority Schema (Migration 105)', () => 
       `)).rejects.toThrow();
     });
 
-    it('should enforce organization_members status vocabulary (active, invited, suspended)', async () => {
+    it('should enforce organization_members status vocabulary (active, invited, suspended, removed)', async () => {
       await applyMigration();
       const { userId, orgId } = await insertTestData();
 
-      // Valid statuses should succeed
-      for (const status of ['active', 'invited', 'suspended']) {
+      // Valid statuses should succeed (including 'removed' added by migration 106)
+      for (const status of ['active', 'invited', 'suspended', 'removed']) {
         await exec(`DELETE FROM organization_members WHERE user_id = '${userId}' AND organization_id = '${orgId}'`);
         await exec(`
           INSERT INTO organization_members (organization_id, user_id, role, status)
@@ -333,7 +346,7 @@ describeOrSkip('Phase 1B: Organization Authority Schema (Migration 105)', () => 
       `)).rejects.toThrow();
     });
 
-    it('should enforce organizations status vocabulary (active, suspended, deleted)', async () => {
+    it('should enforce organizations status vocabulary (active, suspended, deleted, archived)', async () => {
       await applyMigration();
       const { userId } = await insertTestData();
 
@@ -345,13 +358,14 @@ describeOrSkip('Phase 1B: Organization Authority Schema (Migration 105)', () => 
       `);
       const orgId = orgRows[0].id;
 
-      // Valid statuses
+      // Valid statuses (including 'archived' added by migration 106)
       await exec(`UPDATE organizations SET status = 'suspended', suspended_at = now() WHERE id = '${orgId}'`);
       await exec(`UPDATE organizations SET status = 'active', suspended_at = NULL WHERE id = '${orgId}'`);
       await exec(`UPDATE organizations SET status = 'deleted', deleted_at = now() WHERE id = '${orgId}'`);
+      await exec(`UPDATE organizations SET status = 'archived', archived_at = now() WHERE id = '${orgId}'`);
 
       // Invalid status should fail
-      await expect(exec(`UPDATE organizations SET status = 'archived' WHERE id = '${orgId}'`)).rejects.toThrow();
+      await expect(exec(`UPDATE organizations SET status = 'banned' WHERE id = '${orgId}'`)).rejects.toThrow();
     });
 
     it('should enforce active_organization_context set_by vocabulary', async () => {

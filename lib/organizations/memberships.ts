@@ -54,6 +54,9 @@ type SqlExecutor = ReturnType<typeof getDbReady> extends Promise<infer T> ? T : 
 
 /**
  * Map a raw DB row (snake_case) to an OrganizationMembership (camelCase).
+ *
+ * Includes lifecycle timestamp fields (joined_at, removed_at, removed_by)
+ * added in Phase 1B.1 migration 106.
  */
 function mapMembership(row: Record<string, unknown>): OrganizationMembership {
   return {
@@ -65,8 +68,11 @@ function mapMembership(row: Record<string, unknown>): OrganizationMembership {
     invitedBy: row.invited_by ? String(row.invited_by) : null,
     invitedAt: row.invited_at ? String(row.invited_at) : null,
     acceptedAt: row.accepted_at ? String(row.accepted_at) : null,
+    joinedAt: row.joined_at ? String(row.joined_at) : null,
     suspendedAt: row.suspended_at ? String(row.suspended_at) : null,
     suspendedBy: row.suspended_by ? String(row.suspended_by) : null,
+    removedAt: row.removed_at ? String(row.removed_at) : null,
+    removedBy: row.removed_by ? String(row.removed_by) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -170,7 +176,7 @@ export async function getMembershipsWithOrgByUser(
   return rows.map((row) => ({
     ...mapMembership(row),
     orgName: String(row.org_name ?? ''),
-    orgStatus: row.org_status as 'active' | 'suspended' | 'deleted',
+    orgStatus: row.org_status as 'active' | 'suspended' | 'archived' | 'deleted',
   }));
 }
 
@@ -181,18 +187,24 @@ export async function getMembershipsWithOrgByUser(
  */
 export async function getMembersByOrg(
   organizationId: string,
-  status?: MembershipStatus
+  status?: MembershipStatus | 'all'
 ): Promise<MembershipWithUser[]> {
   if (!isValidUUID(organizationId)) return [];
 
   const sql = await getDbReady();
-  const rows = status
+
+  // Default: return only 'active' members. This is the correct lifecycle
+  // semantics — removed, suspended, and invited members should not appear
+  // in the normal member listing. Pass 'all' (or an explicit status) to
+  // override.
+  const effectiveStatus = status === undefined ? 'active' : status;
+
+  const rows = effectiveStatus === 'all'
     ? await sql`
         SELECT om.*, u.name AS user_name, u.email AS user_email
         FROM organization_members om
         JOIN users u ON u.id = om.user_id
         WHERE om.organization_id = ${organizationId}
-          AND om.status = ${status}
         ORDER BY
           CASE om.role
             WHEN 'owner' THEN 0
@@ -207,6 +219,7 @@ export async function getMembersByOrg(
         FROM organization_members om
         JOIN users u ON u.id = om.user_id
         WHERE om.organization_id = ${organizationId}
+          AND om.status = ${effectiveStatus}
         ORDER BY
           CASE om.role
             WHEN 'owner' THEN 0
@@ -350,6 +363,32 @@ export async function addMember(
   // Check for existing membership (any status)
   const existing = await getMembership(organizationId, userId);
   if (existing) {
+    // If the member was previously removed, reactivate the existing row
+    // instead of returning ALREADY_MEMBER. This preserves the membership
+    // history and audit trail (ADR-001). The removed_at/removed_by fields
+    // are cleared, and joined_at is updated to the current time (re-join).
+    if (existing.status === 'removed') {
+      const now = new Date().toISOString();
+      const rows = await sql`
+        UPDATE organization_members
+        SET status = 'active',
+            role = ${role},
+            removed_at = NULL,
+            removed_by = NULL,
+            suspended_at = NULL,
+            suspended_by = NULL,
+            joined_at = ${now}
+        WHERE organization_id = ${organizationId}
+          AND user_id = ${userId}
+        RETURNING *
+      `;
+      const membership = mapMembership(rows[0]);
+
+      // Compatibility: sync users.org_id if the user has no legacy org_id
+      await syncLegacyOrgId(sql, userId);
+
+      return ok(membership);
+    }
     return fail('ALREADY_MEMBER', 'User is already a member of this organization');
   }
 
@@ -363,7 +402,7 @@ export async function addMember(
   if (orgRows[0].status === 'suspended') {
     return fail('ORG_SUSPENDED', 'Cannot add members to a suspended organization');
   }
-  if (orgRows[0].status === 'deleted') {
+  if (orgRows[0].status === 'deleted' || orgRows[0].status === 'archived') {
     return fail('NOT_FOUND', 'Organization not found');
   }
 
@@ -371,10 +410,10 @@ export async function addMember(
   const now = new Date().toISOString();
   const rows = await sql`
     INSERT INTO organization_members
-      (organization_id, user_id, role, status, invited_by, invited_at, accepted_at, created_at, updated_at)
+      (organization_id, user_id, role, status, invited_by, invited_at, accepted_at, joined_at, created_at, updated_at)
     VALUES
       (${organizationId}, ${userId}, ${role}, 'active',
-       ${invitedBy ?? null}, ${invitedBy ? now : null}, ${now}, ${now}, ${now})
+       ${invitedBy ?? null}, ${invitedBy ? now : null}, ${now}, ${now}, ${now}, ${now})
     RETURNING *
   `;
   const membership = mapMembership(rows[0]);
@@ -386,16 +425,23 @@ export async function addMember(
 }
 
 /**
- * Remove a member from an organization.
+ * Remove a member from an organization (soft-delete).
+ *
+ * Instead of hard-deleting the membership row, this sets status to 'removed'
+ * and records removed_at and removed_by for audit trail integrity (ADR-001,
+ * Threat Model T-12). The row is retained so the removal is auditable and
+ * the member can be re-added later without losing history.
  *
  * Enforces last-owner protection: if the target is the last active owner,
  * returns CANNOT_REMOVE_LAST_OWNER.
  *
- * Also clears users.org_id if it pointed to this org (compatibility).
+ * Also clears users.org_id if it pointed to this org (compatibility) and
+ * invalidates the active org context if the removed member had this org set
+ * as their active context.
  *
  * @param organizationId  The org to remove from.
  * @param userId           The user to remove.
- * @param removedBy        The user ID of the remover (for audit, optional).
+ * @param removedBy        The user ID of the remover (for audit).
  */
 export async function removeMember(
   organizationId: string,
@@ -417,7 +463,12 @@ export async function removeMember(
     return fail('NOT_A_MEMBER', 'User is not a member of this organization');
   }
 
-  // Last-owner protection
+  // If already removed, this is a no-op success (idempotent)
+  if (membership.status === 'removed') {
+    return ok(undefined);
+  }
+
+  // Last-owner protection (only applies to active owners)
   if (membership.role === 'owner' && membership.status === 'active') {
     const ownerCount = await countActiveOwners(organizationId);
     if (ownerCount <= 1) {
@@ -428,24 +479,40 @@ export async function removeMember(
     }
   }
 
-  // Delete the membership row (hard delete — the row is gone)
+  // Soft-delete: set status to 'removed' and record the audit fields
+  const now = new Date().toISOString();
   await sql`
-    DELETE FROM organization_members
+    UPDATE organization_members
+    SET status = 'removed',
+        removed_at = ${now},
+        removed_by = ${removedBy ?? null}
     WHERE organization_id = ${organizationId}
       AND user_id = ${userId}
   `;
 
+  // Invalidate the active org context if this org was the user's active context.
+  // This prevents a removed member from continuing to operate in the org's
+  // context until they switch to another org or are re-added.
+  try {
+    await sql`
+      DELETE FROM active_organization_context
+      WHERE user_id = ${userId}
+        AND organization_id = ${organizationId}
+    `;
+  } catch {
+    // Best-effort: active context cleanup should not block the removal
+  }
+
   // Compatibility: clear users.org_id if it pointed to this org
-  if (removedBy) {
-    // Best-effort legacy sync — do not fail the operation if this errors
-    try {
-      await sql`
-        UPDATE users SET org_id = NULL, org_role = 'owner'
-        WHERE id = ${userId} AND org_id = ${organizationId}
-      `;
-    } catch {
-      // Best-effort: legacy sync failure should not block the removal
-    }
+  try {
+    await sql`
+      UPDATE users SET org_id = NULL, org_role = 'owner'
+      WHERE id = ${userId} AND org_id = ${organizationId}
+    `;
+    // Re-sync the legacy pointer to pick up any other active memberships
+    await syncLegacyOrgId(sql, userId);
+  } catch {
+    // Best-effort: legacy sync failure should not block the removal
   }
 
   return ok(undefined);
@@ -564,6 +631,19 @@ export async function suspendMember(
       AND user_id = ${userId}
     RETURNING *
   `;
+
+  // Invalidate the active org context if this org was the user's active
+  // context. A suspended member should not continue operating in the org's
+  // context. The next resolution will fall back to another active membership.
+  try {
+    await sql`
+      DELETE FROM active_organization_context
+      WHERE user_id = ${userId}
+        AND organization_id = ${organizationId}
+    `;
+  } catch {
+    // Best-effort: active context cleanup should not block the suspension
+  }
 
   return ok(mapMembership(rows[0]));
 }
@@ -710,9 +790,9 @@ export async function backfillMembershipForUser(
   const now = new Date().toISOString();
   const rows = await sql`
     INSERT INTO organization_members
-      (organization_id, user_id, role, status, accepted_at, created_at, updated_at)
+      (organization_id, user_id, role, status, accepted_at, joined_at, created_at, updated_at)
     VALUES
-      (${orgId}, ${userId}, ${role}, 'active', ${now}, ${now}, ${now})
+      (${orgId}, ${userId}, ${role}, 'active', ${now}, ${now}, ${now}, ${now})
     ON CONFLICT (organization_id, user_id) DO NOTHING
     RETURNING *
   `;
@@ -764,9 +844,9 @@ export async function createOrganizationWithOwner(
   const now = new Date().toISOString();
   const memberRows = await sql`
     INSERT INTO organization_members
-      (organization_id, user_id, role, status, accepted_at, created_at, updated_at)
+      (organization_id, user_id, role, status, accepted_at, joined_at, created_at, updated_at)
     VALUES
-      (${org.id}, ${ownerId}, 'owner', 'active', ${now}, ${now}, ${now})
+      (${org.id}, ${ownerId}, 'owner', 'active', ${now}, ${now}, ${now}, ${now})
     RETURNING *
   `;
 

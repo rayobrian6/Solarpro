@@ -51,30 +51,41 @@ export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
 export const ORG_ROLES: readonly OrgRole[] = ['owner', 'admin', 'member', 'viewer'] as const;
 
 /**
- * Membership status lifecycle:
+ * Membership status lifecycle (ADR-001):
  *
  *   active    — full membership, the role applies.
  *   invited   — pending acceptance (the user has been invited but has not
  *               yet joined). Replaces some org_invites use cases.
  *   suspended — temporarily disabled by an admin. The row is retained for
  *               audit; the user cannot access the org while suspended.
+ *   removed   — the member has been removed (soft-delete). The row is
+ *               retained for audit trail integrity (ADR-001, Threat Model
+ *               T-12). Removed members are excluded from active membership
+ *               queries and cannot access the org. A removed member may be
+ *               re-added (addMember reactivates the existing row).
  */
-export type MembershipStatus = 'active' | 'invited' | 'suspended';
+export type MembershipStatus = 'active' | 'invited' | 'suspended' | 'removed';
 
-export const MEMBERSHIP_STATUSES: readonly MembershipStatus[] = ['active', 'invited', 'suspended'] as const;
+export const MEMBERSHIP_STATUSES: readonly MembershipStatus[] = ['active', 'invited', 'suspended', 'removed'] as const;
 
 /**
- * Organization lifecycle status:
+ * Organization lifecycle status (ADR-001):
  *
  *   active    — normal operating state.
  *   suspended — billing or admin action has paused the org. Members are
  *               effectively read-only while suspended.
- *   deleted   — soft-delete marker. The row is retained for audit trail
- *               integrity; the org is not visible or usable.
+ *   archived  — soft-delete marker (canonical term). The row is retained
+ *               for audit trail integrity; the org is not visible or
+ *               usable. This replaces the Phase 1B 'deleted' status.
+ *   deleted   — legacy soft-delete marker (retained for backward
+ *               compatibility with existing data from Phase 1B). The
+ *               application layer treats both 'deleted' and 'archived' as
+ *               terminal org states. New archive operations should use
+ *               'archived'.
  */
-export type OrgStatus = 'active' | 'suspended' | 'deleted';
+export type OrgStatus = 'active' | 'suspended' | 'archived' | 'deleted';
 
-export const ORG_STATUSES: readonly OrgStatus[] = ['active', 'suspended', 'deleted'] as const;
+export const ORG_STATUSES: readonly OrgStatus[] = ['active', 'suspended', 'archived', 'deleted'] as const;
 
 /**
  * Who set the active organization context:
@@ -93,6 +104,11 @@ export type ActiveOrgSetBy = 'user' | 'system' | 'default';
 /**
  * A membership row in the organization_members table.
  * Represents a user's relationship with a single organization.
+ *
+ * Lifecycle fields (ADR-001, Phase 1B.1):
+ *   joinedAt   — when the user joined the org (accepted invite or was added).
+ *   removedAt  — when the member was removed (null unless status is 'removed').
+ *   removedBy  — who removed the member (null unless status is 'removed').
  */
 export interface OrganizationMembership {
   id: string;
@@ -103,14 +119,22 @@ export interface OrganizationMembership {
   invitedBy: string | null;
   invitedAt: string | null;
   acceptedAt: string | null;
+  joinedAt: string | null;
   suspendedAt: string | null;
   suspendedBy: string | null;
+  removedAt: string | null;
+  removedBy: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 /**
  * An organization with its lifecycle columns.
+ *
+ * Lifecycle fields (ADR-001, Phase 1B.1):
+ *   archivedAt — when the org was archived (null unless status is 'archived').
+ *   deletedAt  — legacy soft-delete timestamp (retained for backward
+ *                compatibility with Phase 1B data).
  */
 export interface Organization {
   id: string;
@@ -119,6 +143,7 @@ export interface Organization {
   plan: string;
   status: OrgStatus;
   suspendedAt: string | null;
+  archivedAt: string | null;
   deletedAt: string | null;
   slug: string | null;
   settings: Record<string, unknown>;

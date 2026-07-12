@@ -110,7 +110,7 @@ export async function getActiveOrgContextRow(
  *
  * This is the canonical way to switch orgs. The server validates that:
  *   1. The user is an active member of the target org.
- *   2. The target org is in 'active' status (not suspended/deleted).
+ *   2. The target org is in 'active' status (not suspended/archived/deleted).
  *
  * If the user already has an active org context row, it is updated (UPSERT).
  * If not, a new row is inserted.
@@ -292,7 +292,7 @@ async function resolveActiveOrgNew(
       }
     }
     // The explicit context is stale (user left the org, or org was
-    // suspended/deleted). Clean it up and fall through to primary
+    // suspended/archived/deleted). Clean it up and fall through to primary
     // membership resolution.
     await clearActiveOrg(userId).catch(() => {
       // Best-effort cleanup — don't fail resolution if this errors

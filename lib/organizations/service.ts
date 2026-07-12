@@ -84,7 +84,10 @@ export {
 
 /**
  * Get an organization by ID.
- * Returns null if not found or if soft-deleted (unless includeDeleted).
+ * Returns null if not found or if soft-deleted/archived (unless includeDeleted).
+ *
+ * Both 'deleted' (legacy Phase 1B status) and 'archived' (canonical Phase 1B.1
+ * status) are treated as terminal — the org is not visible in normal queries.
  */
 export async function getOrganization(
   organizationId: string,
@@ -95,18 +98,18 @@ export async function getOrganization(
   const sql = await getDbReady();
   const rows = includeDeleted
     ? await sql`
-        SELECT id, name, owner_id, plan, status, suspended_at, deleted_at,
-               slug, settings, created_at, updated_at
+        SELECT id, name, owner_id, plan, status, suspended_at, archived_at,
+               deleted_at, slug, settings, created_at, updated_at
         FROM organizations
         WHERE id = ${organizationId}
         LIMIT 1
       `
     : await sql`
-        SELECT id, name, owner_id, plan, status, suspended_at, deleted_at,
-               slug, settings, created_at, updated_at
+        SELECT id, name, owner_id, plan, status, suspended_at, archived_at,
+               deleted_at, slug, settings, created_at, updated_at
         FROM organizations
         WHERE id = ${organizationId}
-          AND status != 'deleted'
+          AND status NOT IN ('deleted', 'archived')
         LIMIT 1
       `;
 
@@ -120,6 +123,7 @@ export async function getOrganization(
     plan: String(row.plan),
     status: row.status as OrgStatus,
     suspendedAt: row.suspended_at ? String(row.suspended_at) : null,
+    archivedAt: row.archived_at ? String(row.archived_at) : null,
     deletedAt: row.deleted_at ? String(row.deleted_at) : null,
     slug: row.slug ? String(row.slug) : null,
     settings: (row.settings ?? {}) as Record<string, unknown>,
@@ -181,8 +185,11 @@ async function getOrganizationsForUserLegacy(
     invitedBy: null,
     invitedAt: null,
     acceptedAt: null,
+    joinedAt: null,
     suspendedAt: null,
     suspendedBy: null,
+    removedAt: null,
+    removedBy: null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     orgName: String(row.org_name),
