@@ -13,6 +13,7 @@ import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
 import { equipmentDatasheetIndexRows } from './datasheetAppendix';
 import { buildSheetManifest } from '../sheetManifest';
 import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE, SUB_LABEL } from './subSystemSheets';
+import { hybridSubmissionGate } from './hybridReadiness';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -449,11 +450,31 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
           </div>
         </div>` : ''}
 
-        ${_c?.hybridSystemTypes ? `
+        ${_c?.hybridSystemTypes ? (() => {
+          // ── Wave 6.3 — banner retirement GATE (computed, never a blind removal).
+          // ready ⇔ per-sub structural authority ∧ per-sub conductor authority
+          //         ∧ golden hybrid fixture green (hybridReadiness.ts).
+          // Phase-0 loud console.warn stays in canonical.ts regardless.
+          const _gate = _coverHybrid ? hybridSubmissionGate(input, cad) : null;
+          if (_gate && _gate.ready) {
+            // Gate PASSED: the DO-NOT-SUBMIT banner is retired. A compact
+            // neutral note documents the multi-system structure for the AHJ.
+            return `
+        <div class="sec">
+          <div class="sec-hdr">HYBRID MULTI-SYSTEM SET — PER-SUB-SYSTEM DOCUMENTATION</div>
+          <div class="sec-body" style="line-height:1.5;">
+            This design contains ${_coverSubRows.length} sub-systems (${escapeH(_coverSubRows.map(r => r.label.toLowerCase()).join(', '))}), each documented on its own
+            plan/elevation, circuit-layout, structural and PE-letter sheets (suffixed G/F). Electrical sources combine at ONE point of
+            interconnection — see E-1 (multi-source single line) and the summed NEC 705.12(B) analysis on PV-4A/PV-4B.
+            PER-SUB-SYSTEM STRUCTURAL &amp; ELECTRICAL AUTHORITY VERIFIED.
+          </div>
+        </div>`;
+          }
+          return `
         <!-- HYBRID DESIGN — NOT PERMIT-READY (Phase 0 guard; see canonical.ts).
-             Wave 5B: copy softened when per-sub authority + per-sub sheets are
-             present — the banner itself is retired only by the Wave 6 gate
-             (per-sub authority present + hybrid fixture green + Ray sign-off). -->
+             Wave 6.3: gate computed in hybridReadiness.ts; this banner renders
+             only while a sub's authority is missing (list below) or the golden
+             fixture is not green. -->
         <div class="sec" style="border:3px solid #cc0000;">
           <div class="sec-hdr" style="background:#cc0000;color:#fff;">&#9888; HYBRID DESIGN — THIS SET IS NOT PERMIT-READY</div>
           ${_coverHybrid ? `
@@ -468,8 +489,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
               and per-sub PE structural letters (PE-1${_coverSubRows.slice(1).map(r => `, PE-1${r.label === 'GROUND' ? 'G' : 'F'}`).join('')}).
             </div>
             <div style="margin-top:4px;color:#cc0000;">
-              <strong>REMAINING BEFORE SUBMISSION (WAVE 6 GATE):</strong> multi-lane single-line diagram verification (E-1),
-              end-to-end hybrid fixture sign-off, and shared-trench / separate-conduit review where sub-systems share a route.
+              <strong>MISSING BEFORE SUBMISSION (WAVE 6 GATE):</strong>
+              ${(_gate?.missing ?? []).map(m => `<div style="margin-left:8px;">&bull; ${escapeH(m)}</div>`).join('') || '<div style="margin-left:8px;">&bull; gate evaluation unavailable</div>'}
             </div>
           </div>` : `
           <div class="sec-body" style="font-weight:bold;color:#cc0000;line-height:1.5;">
@@ -479,7 +500,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
             other sub-systems are MISSING from this set and its bill of materials. DO NOT SUBMIT. Split the design
             into single-system projects, or wait for multi-system support.
           </div>`}
-        </div>` : ''}
+        </div>`;
+        })() : ''}
 
         <!-- SCOPE OF WORK -->
         <div class="sec">

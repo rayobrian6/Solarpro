@@ -146,10 +146,14 @@ describe('wave 5B — hybrid cover sheet', () => {
     expect(hybridHtml).not.toMatch(/12 × Canadian Solar CS6R-430MS/);
   });
 
-  it('DO-NOT-SUBMIT banner survives (Wave 6 gate) with softened per-sub copy', () => {
-    expect(hybridHtml).toContain('HYBRID DESIGN — THIS SET IS NOT PERMIT-READY');
-    expect(hybridHtml).toContain('NOW DOCUMENTED PER SUB-SYSTEM');
-    expect(hybridHtml).toContain('REMAINING BEFORE SUBMISSION (WAVE 6 GATE)');
+  it('Wave 6.3: banner gate PASSES for a fully-authoritative hybrid — banner retired', () => {
+    // This fixture renders with per-sub structural runs (generatePermit's V4
+    // loop) + per-sub conductor authority + the golden fixture green, so the
+    // Phase-0 DO-NOT-SUBMIT banner is replaced by the neutral hybrid note.
+    expect(hybridHtml).toContain('HYBRID MULTI-SYSTEM SET — PER-SUB-SYSTEM DOCUMENTATION');
+    expect(hybridHtml).toContain('PER-SUB-SYSTEM STRUCTURAL &amp; ELECTRICAL AUTHORITY VERIFIED');
+    expect(hybridHtml).not.toContain('DO NOT SUBMIT');
+    expect(hybridHtml).not.toContain('HYBRID DESIGN — THIS SET IS NOT PERMIT-READY');
   });
 
   it('single-type cover keeps the legacy headline and no hybrid chrome', () => {
