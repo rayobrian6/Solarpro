@@ -28,6 +28,7 @@ import {
   ledgerExists,
   getGovernanceLifecycleState,
   readAllBaselineReconciliations,
+  readExecutionActivation,
 } from './ledger';
 import type {
   MigrationGovernanceLifecycle,
@@ -127,65 +128,6 @@ async function readMfaEnrolled(operatorId: string | null): Promise<boolean> {
   }
 }
 
-/** Read execution activation (incl. bounded-window expiry when the column
- *  exists — added in the bounded-activation commit). Fail-closed: on any error
- *  returns an inactive activation. */
-async function readActivation(
-  lifecycle: MigrationGovernanceLifecycle | 'UNBOOTSTRAPPED',
-): Promise<ExecutionActivation> {
-  const inactive: ExecutionActivation = {
-    active: false, enabledAt: null, enabledBy: null,
-    expiresAt: null, expired: false, secondsRemaining: 0,
-  };
-  if (lifecycle !== 'EXECUTION_ENABLED') return inactive;
-  try {
-    const sql = getRawSql();
-    const environment = getCurrentEnvironment();
-    // execution_enabled_expires_at may not exist yet (older bootstrap). Use a
-    // to_jsonb/coalesce probe so the query never errors on a missing column:
-    // information_schema check keeps this one round-trip and column-safe.
-    const colRows = (await sql`
-      SELECT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'governance_lifecycle'
-          AND column_name = 'execution_enabled_expires_at'
-      ) AS has_expiry
-    `) as Array<{ has_expiry: boolean }>;
-    const hasExpiry = Boolean(colRows[0]?.has_expiry);
-
-    const rows = hasExpiry
-      ? (await sql`
-          SELECT execution_enabled_at, execution_enabled_by,
-                 execution_enabled_expires_at,
-                 (execution_enabled_expires_at IS NOT NULL
-                   AND execution_enabled_expires_at < now()) AS is_expired,
-                 GREATEST(0, EXTRACT(EPOCH FROM (execution_enabled_expires_at - now())))::int AS secs
-          FROM governance_lifecycle WHERE environment = ${environment} LIMIT 1
-        `) as Array<Record<string, unknown>>
-      : (await sql`
-          SELECT execution_enabled_at, execution_enabled_by,
-                 NULL AS execution_enabled_expires_at,
-                 FALSE AS is_expired, 0 AS secs
-          FROM governance_lifecycle WHERE environment = ${environment} LIMIT 1
-        `) as Array<Record<string, unknown>>;
-
-    const r = rows[0];
-    if (!r) return inactive;
-    const expiresAt = r.execution_enabled_expires_at ? String(r.execution_enabled_expires_at) : null;
-    const expired = Boolean(r.is_expired);
-    return {
-      active: !expired,
-      enabledAt: r.execution_enabled_at ? String(r.execution_enabled_at) : null,
-      enabledBy: r.execution_enabled_by ? String(r.execution_enabled_by) : null,
-      expiresAt,
-      expired,
-      secondsRemaining: Number(r.secs) || 0,
-    };
-  } catch {
-    return inactive;
-  }
-}
-
 function getAllowedEnvs(): string[] {
   return (process.env.MIGRATION_RUN_ALLOWED_ENVS ?? '')
     .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -223,6 +165,17 @@ export async function buildOperatorReadiness(operator: {
   const lifecycleState: MigrationGovernanceLifecycle | 'UNBOOTSTRAPPED' =
     lifecycleRaw ?? 'UNBOOTSTRAPPED';
 
+  // Canonical activation snapshot (single source: ledger.readExecutionActivation).
+  const act = await readExecutionActivation().catch(() => null);
+  const activation: ExecutionActivation = {
+    active: act?.active ?? false,
+    enabledAt: act?.enabledAt ?? null,
+    enabledBy: act?.enabledBy ?? null,
+    expiresAt: act?.expiresAt ?? null,
+    expired: act?.expired ?? false,
+    secondsRemaining: act?.secondsRemaining ?? 0,
+  };
+
   // Ledger-derived counts — only meaningful when the ledger exists.
   let appliedCount = 0, pendingCount = 0, conflictCount = 0, runningCount = 0;
   if (hasLedger) {
@@ -244,8 +197,6 @@ export async function buildOperatorReadiness(operator: {
     return b && !NON_BLOCKING_BASELINE.has(b.reconciliation_status);
   });
   const baselineReconciledCount = manifestIds.length - baselineUnreconciled.length;
-
-  const activation = await readActivation(lifecycleState);
 
   // ── Derive plain-language blockers + next action ──
   const blockers: string[] = [];

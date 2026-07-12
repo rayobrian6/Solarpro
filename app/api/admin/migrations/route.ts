@@ -55,6 +55,8 @@ import {
   disableExecution,
   bootstrapMigrationLedger,
   recordBaselineBatchRows,
+  enableExecutionTemporary,
+  readExecutionActivation,
 } from '@/lib/migrations/ledger';
 import { generateBaselineEvidence } from '@/lib/migrations/baselineEvidence';
 import { buildOperatorReadiness } from '@/lib/migrations/operatorReadiness';
@@ -186,6 +188,8 @@ export async function POST(req: NextRequest) {
     'bootstrap',                // create the ledger tables (super_admin + TOTP)
     'prepare-baseline-batch',   // read-only: canonicalize + digest a reviewed set
     'record-baseline-batch',    // mutation: record whole reviewed batch (1 TOTP)
+    'activation-status',        // read-only: bounded-activation status + expiry
+    'enable-execution-temporary', // mutation: bounded activation window (TOTP)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -227,7 +231,8 @@ export async function POST(req: NextRequest) {
   //   (execute action — super_admin + TOTP + env checks required).
   const isBaselineReadonly = action === 'inspect-baseline';
   const isBaselineMutation = ['record-baseline-entry', 'verify-baseline'].includes(action);
-  const isExecutionActivation = ['enable-execution', 'disable-execution'].includes(action);
+  const isExecutionActivation = ['enable-execution', 'disable-execution', 'enable-execution-temporary'].includes(action);
+  const isActivationStatus = action === 'activation-status';
 
   // Operator-recovery surface classification.
   // - inspect-readiness / generate-baseline-evidence: READ-ONLY (no mutation,
@@ -240,7 +245,7 @@ export async function POST(req: NextRequest) {
   const isBootstrap = action === 'bootstrap';
   const isPrepareBatch = action === 'prepare-baseline-batch';
   const isRecordBatch = action === 'record-baseline-batch';
-  const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch;
+  const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus;
 
   // Determine the migration action type for authorization.
   let migrationAction: MigrationAction;
@@ -555,6 +560,39 @@ export async function POST(req: NextRequest) {
         digest: recordResult.digest,
         error: recordResult.error,
       }, { status: recordResult.success ? 200 : 409 });
+    }
+
+    if (isActivationStatus) {
+      // Read-only bounded-activation snapshot (Commit 4).
+      const activation = await readExecutionActivation();
+      return NextResponse.json({ success: true, action: 'activation-status', activation });
+    }
+
+    if (action === 'enable-execution-temporary') {
+      // Bounded activation (Commit 4). super_admin + fresh TOTP verified above;
+      // authorizeMigration enforced env allowlist + production two-key.
+      const reason = (body?.reason as string | undefined)?.trim();
+      if (!reason) {
+        return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.' }, { status: 400 });
+      }
+      if (getCurrentEnvironment() === 'production'
+          && (body?.productionConfirmation as string | undefined) !== 'production') {
+        return NextResponse.json(
+          { success: false, error: 'Production activation requires productionConfirmation === "production".' },
+          { status: 400 },
+        );
+      }
+      // Duration is server-clamped to [1,15] (default 10); a client can never
+      // exceed the maximum.
+      const result = await enableExecutionTemporary(adminUser.id, reason, body?.durationMinutes);
+      return NextResponse.json({
+        success: result.success,
+        action: 'enable-execution-temporary',
+        grantedMinutes: result.grantedMinutes,
+        expiresAt: result.expiresAt,
+        error: result.error,
+        lifecycleState: (await getGovernanceLifecycleState()) ?? 'UNBOOTSTRAPPED',
+      }, { status: result.success ? 200 : 409 });
     }
 
     // ── Baseline control plane (MIGRATION-GOV-11, Phase 1A.2) ──────────────

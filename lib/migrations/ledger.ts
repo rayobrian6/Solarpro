@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS governance_lifecycle (
   baseline_reconciled_at    TIMESTAMPTZ,
   execution_enabled_by      TEXT,
   execution_enabled_at      TIMESTAMPTZ,
+  -- Bounded activation window (Commit 4). NULL = no bounded window (legacy
+  -- indefinite enable). When set and in the past, the execution gate treats
+  -- EXECUTION_ENABLED as disabled (fail-safe, not UI-timer-dependent).
+  execution_enabled_expires_at TIMESTAMPTZ,
   last_state_change_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -449,6 +453,10 @@ export async function bootstrapMigrationLedger(
     const alreadyExisted = Boolean(existsRows[0]?.exists);
 
     if (alreadyExisted) {
+      // Commit 4: upgrade legacy environments in-place (idempotent ADD COLUMN
+      // IF NOT EXISTS) so the bounded-activation column always exists after any
+      // bootstrap, even when the tables predate it.
+      await ensureGovernanceSchemaCurrent();
       emitAuditEvent({
         type: 'migration.bootstrap.completed',
         actorType,
@@ -511,6 +519,92 @@ export async function bootstrapMigrationLedger(
       details: { error: errorMsg },
     });
     return { success: false, alreadyExisted: false, error: errorMsg };
+  }
+}
+
+/**
+ * Idempotently bring the governance schema up to date (Commit 4). Adds the
+ * bounded-activation column to environments bootstrapped before it existed.
+ * Governance tables are bootstrap infrastructure, not numbered migrations, so
+ * this is safe to run any time and requires no numbered migration. Never
+ * throws — returns false on failure (caller decides).
+ */
+export async function ensureGovernanceSchemaCurrent(): Promise<boolean> {
+  try {
+    const sql = getRawSql();
+    await sql`
+      ALTER TABLE governance_lifecycle
+        ADD COLUMN IF NOT EXISTS execution_enabled_expires_at TIMESTAMPTZ
+    `;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The runtime activation snapshot for the current environment (Commit 4). */
+export interface ExecutionActivationStatus {
+  /** EXECUTION_ENABLED and NOT past its bounded expiry. */
+  active: boolean;
+  lifecycleState: MigrationGovernanceLifecycle | 'UNBOOTSTRAPPED';
+  enabledAt: string | null;
+  enabledBy: string | null;
+  /** Bounded-window expiry, or null (legacy indefinite / not activated). */
+  expiresAt: string | null;
+  /** A bounded window exists and is in the past. */
+  expired: boolean;
+  secondsRemaining: number;
+}
+
+/**
+ * Read the execution activation status, column-safe against environments not
+ * yet upgraded (probes information_schema for the expiry column). Fail-closed:
+ * on any error returns an inactive snapshot.
+ */
+export async function readExecutionActivation(): Promise<ExecutionActivationStatus> {
+  const environment = getCurrentEnvironment();
+  const inactive: ExecutionActivationStatus = {
+    active: false, lifecycleState: 'UNBOOTSTRAPPED', enabledAt: null,
+    enabledBy: null, expiresAt: null, expired: false, secondsRemaining: 0,
+  };
+  try {
+    const sql = getRawSql();
+    const colRows = await sql`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'governance_lifecycle'
+          AND column_name = 'execution_enabled_expires_at'
+      ) AS has_expiry
+    ` as Array<{ has_expiry: boolean }>;
+    const hasExpiry = Boolean(colRows[0]?.has_expiry);
+    const rows = (hasExpiry
+      ? await sql`
+          SELECT lifecycle_state, execution_enabled_at, execution_enabled_by,
+                 execution_enabled_expires_at AS expires_at,
+                 (execution_enabled_expires_at IS NOT NULL
+                   AND execution_enabled_expires_at <= now()) AS is_expired,
+                 GREATEST(0, EXTRACT(EPOCH FROM (execution_enabled_expires_at - now())))::int AS secs
+          FROM governance_lifecycle WHERE environment = ${environment} LIMIT 1`
+      : await sql`
+          SELECT lifecycle_state, execution_enabled_at, execution_enabled_by,
+                 NULL AS expires_at, FALSE AS is_expired, 0 AS secs
+          FROM governance_lifecycle WHERE environment = ${environment} LIMIT 1`
+    ) as Array<Record<string, unknown>>;
+    const r = rows[0];
+    if (!r) return inactive;
+    const lifecycleState = (r.lifecycle_state as MigrationGovernanceLifecycle) ?? 'UNBOOTSTRAPPED';
+    const expired = Boolean(r.is_expired);
+    return {
+      active: lifecycleState === 'EXECUTION_ENABLED' && !expired,
+      lifecycleState,
+      enabledAt: r.execution_enabled_at ? String(r.execution_enabled_at) : null,
+      enabledBy: r.execution_enabled_by ? String(r.execution_enabled_by) : null,
+      expiresAt: r.expires_at ? String(r.expires_at) : null,
+      expired,
+      secondsRemaining: Number(r.secs) || 0,
+    };
+  } catch {
+    return inactive;
   }
 }
 
@@ -1002,6 +1096,87 @@ export async function enableExecution(
   }
 }
 
+/** Bounded-activation limits (Commit 4). */
+export const ACTIVATION_DEFAULT_MINUTES = 10;
+export const ACTIVATION_MAX_MINUTES = 15;
+export const ACTIVATION_MIN_MINUTES = 1;
+
+/** Clamp a requested activation duration into [MIN, MAX]. Absent (null/
+ *  undefined/'') or non-finite input → default. A client can never exceed MAX. */
+export function clampActivationMinutes(requested: unknown): number {
+  if (requested === null || requested === undefined || requested === '') {
+    return ACTIVATION_DEFAULT_MINUTES;
+  }
+  const n = Number(requested);
+  if (!Number.isFinite(n)) return ACTIVATION_DEFAULT_MINUTES;
+  return Math.max(ACTIVATION_MIN_MINUTES, Math.min(ACTIVATION_MAX_MINUTES, Math.floor(n)));
+}
+
+/**
+ * Enable execution for a BOUNDED window (Commit 4). Replaces indefinite
+ * activation: sets execution_enabled_expires_at = now() + clamped(duration).
+ * The server clamps the duration to [1,15] minutes (default 10) — a client can
+ * never exceed the maximum. Transitions ONLY from BASELINE_VERIFIED (same
+ * predecessor guard as enableExecution). Returns the granted window on success.
+ *
+ * TOTP + reason + super_admin + env authorization are enforced by the route
+ * BEFORE this is called; this function owns the durable state + audit.
+ */
+export async function enableExecutionTemporary(
+  enabledBy: string | null,
+  reason: string | undefined,
+  requestedMinutes: unknown,
+): Promise<{ success: boolean; expiresAt: string | null; grantedMinutes: number; error?: string }> {
+  const grantedMinutes = clampActivationMinutes(requestedMinutes);
+  if (!reason || reason.trim().length === 0) {
+    emitAuditEvent({
+      type: 'migration.governance.execution_denied',
+      actorType: null, actorId: enabledBy, environment: getCurrentEnvironment(),
+      executionId: null, migrationIdentifier: null, filename: null,
+      details: { reason: 'ENABLE_EXECUTION_REASON_REQUIRED' },
+    });
+    return { success: false, expiresAt: null, grantedMinutes, error: 'REASON_REQUIRED' };
+  }
+
+  // Ensure the bounded-activation column exists (upgrades legacy environments).
+  const upgraded = await ensureGovernanceSchemaCurrent();
+  if (!upgraded) {
+    return { success: false, expiresAt: null, grantedMinutes, error: 'SCHEMA_UPGRADE_FAILED' };
+  }
+
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+  try {
+    const rows = await sql`
+      UPDATE governance_lifecycle
+      SET execution_enabled_by = ${enabledBy},
+          execution_enabled_at = now(),
+          execution_enabled_expires_at = now() + make_interval(mins => ${grantedMinutes}),
+          lifecycle_state = 'EXECUTION_ENABLED',
+          last_state_change_at = now()
+      WHERE environment = ${environment}
+        AND lifecycle_state = 'BASELINE_VERIFIED'
+      RETURNING lifecycle_state, execution_enabled_expires_at AS expires_at
+    ` as Array<{ lifecycle_state: string; expires_at: string }>;
+    if (!Array.isArray(rows) || rows.length !== 1 || rows[0].lifecycle_state !== 'EXECUTION_ENABLED') {
+      return { success: false, expiresAt: null, grantedMinutes, error: 'WRONG_PREDECESSOR_STATE' };
+    }
+    const expiresAt = String(rows[0].expires_at);
+    emitAuditEvent({
+      type: 'migration.governance.state_change',
+      actorType: null, actorId: enabledBy, environment,
+      executionId: null, migrationIdentifier: null, filename: null,
+      details: {
+        newState: 'EXECUTION_ENABLED', changedBy: enabledBy, reason: reason.trim(),
+        bounded: true, grantedMinutes, expiresAt,
+      },
+    });
+    return { success: true, expiresAt, grantedMinutes };
+  } catch (err) {
+    return { success: false, expiresAt: null, grantedMinutes, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /**
  * Disable execution and return the governance lifecycle to BASELINE_VERIFIED.
  *
@@ -1046,11 +1221,15 @@ export async function disableExecution(
     // BASELINE_VERIFIED, the UPDATE matched nothing but the function still
     // reported success). We now return true ONLY when exactly one row was
     // transitioned from EXECUTION_ENABLED to BASELINE_VERIFIED.
+    // Clear the bounded-activation window too (Commit 4). Column-safe: ensure
+    // it exists first so legacy environments don't error on the SET.
+    await ensureGovernanceSchemaCurrent();
     const rows = await sql`
       UPDATE governance_lifecycle
       SET lifecycle_state = 'BASELINE_VERIFIED',
           execution_enabled_by = null,
           execution_enabled_at = null,
+          execution_enabled_expires_at = null,
           last_state_change_at = now()
       WHERE environment = ${environment}
         AND lifecycle_state = 'EXECUTION_ENABLED'
@@ -1151,7 +1330,45 @@ export async function assertExecutionPermitted(
   // mutation. BASELINE_VERIFIED is a readiness state, not an execution state.
   // The operator must explicitly activate execution via enable-execution
   // (with TOTP + reason) before any migration can be applied.
-  const permitted = lifecycle === 'EXECUTION_ENABLED';
+  //
+  // Commit 4 (bounded activation): EXECUTION_ENABLED is additionally gated by
+  // the bounded-activation window. An expired window behaves as DISABLED —
+  // fail-safe, enforced server-side and NOT dependent on any UI timer. A NULL
+  // expiry (legacy indefinite enable) is treated as not-expired for backward
+  // compatibility. Expiry is detected + auto-relocked here so state converges.
+  const activation = await readExecutionActivation().catch(() => null);
+  const expired = activation?.expired === true;
+  const permitted = lifecycle === 'EXECUTION_ENABLED' && !expired;
+
+  // Auto-relock an expired window to BASELINE_VERIFIED (opportunistic; never
+  // blocks the gate result). This makes "expired behaves as disabled" durable.
+  if (lifecycle === 'EXECUTION_ENABLED' && expired) {
+    try {
+      const sql = getRawSql();
+      const environment = getCurrentEnvironment();
+      const relocked = await sql`
+        UPDATE governance_lifecycle
+        SET lifecycle_state = 'BASELINE_VERIFIED',
+            execution_enabled_by = null,
+            execution_enabled_at = null,
+            execution_enabled_expires_at = null,
+            last_state_change_at = now()
+        WHERE environment = ${environment}
+          AND lifecycle_state = 'EXECUTION_ENABLED'
+          AND execution_enabled_expires_at IS NOT NULL
+          AND execution_enabled_expires_at <= now()
+        RETURNING lifecycle_state
+      ` as unknown[];
+      if (Array.isArray(relocked) && relocked.length === 1) {
+        emitAuditEvent({
+          type: 'migration.governance.state_change',
+          actorType: null, actorId: null, environment,
+          executionId: null, migrationIdentifier: null, filename: null,
+          details: { newState: 'BASELINE_VERIFIED', reason: 'ACTIVATION_EXPIRED', autoRelock: true },
+        });
+      }
+    } catch { /* relock is best-effort; the gate already denies */ }
+  }
 
   if (!permitted) {
     emitAuditEvent({
@@ -1162,7 +1379,7 @@ export async function assertExecutionPermitted(
       executionId: null,
       migrationIdentifier: null,
       filename: null,
-      details: { lifecycleState: lifecycle },
+      details: { lifecycleState: lifecycle, activationExpired: expired },
     });
   }
 
