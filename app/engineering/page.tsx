@@ -3667,11 +3667,20 @@ function EngineeringPageInner() {
         if (!prev.batteryCount || prev.batteryCount < 1) patch.batteryCount = 1;
       } else if (rec.battery && rec.battery.equipmentDbId) {
         // No user battery yet — adopt the engine's sized battery as the seed.
+        // Wave 3.6 (contract §3 Wave 3 item 6 — the battery-reverts fix):
+        //  • batteryKwh is PER-UNIT by contract (legacy batteryKwh IS
+        //    per-unit; the page multiplies by batteryCount for totals).
+        //    rec.battery.installedKwh is the TOTAL — stuffing it into the
+        //    per-unit field was the 5P×2→3T×3 disease's kWh ratchet.
+        //  • batteryModel is a MODEL string, never an equipment-db id.
+        const _adoptBat = getBatteryById(rec.battery.equipmentDbId);
+        const _adoptUnits = Math.max(1, rec.battery.moduleCount || 1);
         patch.batteryId = rec.battery.equipmentDbId;
-        patch.batteryCount = rec.battery.moduleCount;
-        patch.batteryKwh = rec.battery.installedKwh;
-        patch.batteryBrand = rec.brand.manufacturer;
-        patch.batteryModel = rec.battery.equipmentDbId;
+        patch.batteryCount = _adoptUnits;
+        patch.batteryKwh = _adoptBat?.usableCapacityKwh
+          ?? (rec.battery.installedKwh > 0 ? rec.battery.installedKwh / _adoptUnits : 0);
+        patch.batteryBrand = _adoptBat?.manufacturer ?? rec.brand.manufacturer;
+        patch.batteryModel = _adoptBat?.model ?? rec.battery.equipmentDbId;
       } else {
         // No user battery and the engine sized none — leave cleared.
         patch.batteryId = '';
@@ -3706,6 +3715,20 @@ function EngineeringPageInner() {
             inverterId: primaryModel.equipmentDbId,
             topology: uiType === 'micro' ? 'micro' : uiType === 'optimizer' ? 'optimizer' : 'string',
             ecosystemBrand: rec.brand.id,
+            // Wave 3.6 — battery mirrored into the map with PER-UNIT
+            // semantics (batteryKwhPerUnit by construction, §1.2):
+            //   adopt   → id + count + per-unit kWh (patch.batteryKwh IS per-unit)
+            //   clear   → batteryId: null (explicit), count 0, kWh dropped
+            //   preserve→ map battery untouched (user's choice is authoritative)
+            ...(patch.batteryId !== undefined
+              ? (patch.batteryId
+                  ? {
+                      batteryId: patch.batteryId,
+                      batteryCount: patch.batteryCount,
+                      batteryKwhPerUnit: patch.batteryKwh,
+                    }
+                  : { batteryId: null, batteryCount: 0, batteryKwhPerUnit: undefined })
+              : {}),
             source: 'engineering',
             updatedAt: new Date().toISOString(),
           },
@@ -4015,6 +4038,14 @@ function EngineeringPageInner() {
   // NOT treated as drifted vs a sizing result reporting 36 microinverters.
   // Before this fix, auto-apply for Enphase ran every render in a loop.
   useEffect(() => {
+    // Wave 3.6 — HYDRATION-COMPLETE GATE (contract §3 Wave 3 item 6): this
+    // watcher writes equipment AND battery fields via applySizingRecommendation.
+    // Mid-hydration, prev.batteryId is still empty, so a pre-hydration fire
+    // adopted the engine's battery over the user's saved one — the
+    // 5P×2 → 3T×3 disease (batteryModel flipped to an id, count 2→3, TOTAL
+    // kWh stuffed into the per-unit field). Never fire before the project's
+    // saved config has landed. (Projectless scratch usage is unaffected.)
+    if (currentProjectId && !isHydrated) return;
     if (!sizingAutoApply) return;
     if (!sizingRecommendation) return;
     // Compute the mismatch FIRST so the user-intent locks below can tell a
@@ -4094,7 +4125,7 @@ function EngineeringPageInner() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks]);
+  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks, isHydrated, currentProjectId]);
 
      // ─── Phase 14.2 — HARD DC/AC ERROR AUTO-HEAL ─────────────────────────────────
      // When validationResult contains DC_AC_RATIO_AC_EXCEEDS_DC (ratio < 1.0) AND
@@ -4103,6 +4134,9 @@ function EngineeringPageInner() {
      // corrects a hard electrical constraint violation. The system cannot permit export
      // while DC/AC < 1.0; auto-healing prevents the "screaming errors, no solution" UX.
      useEffect(() => {
+       // Wave 3.6 — hydration-complete gate (same battery-writer rationale as
+       // the auto-apply watcher above): never heal against a half-hydrated config.
+       if (currentProjectId && !isHydrated) return;
        if (!validationResult) return;
        if (!sizingRecommendation) return;
        const hasHardDcAcError = validationResult.errors.some(
@@ -4135,7 +4169,7 @@ function EngineeringPageInner() {
        });
        applySizingRecommendation(sizingRecommendation);
        // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, [validationResult, sizingRecommendation, config.userHasEditedInverters]);
+     }, [validationResult, sizingRecommendation, config.userHasEditedInverters, isHydrated, currentProjectId]);
 
 
   // ═══════════════════════════════════════════════════════════════════════
