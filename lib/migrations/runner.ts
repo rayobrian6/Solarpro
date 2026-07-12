@@ -70,6 +70,120 @@ import { generateTOTPCode, decryptTOTPSecret } from '@/lib/mfa';
 import { AdminUser } from '@/lib/adminAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Manifest Provider — Dependency Injection Boundary (Gap 1 corrective patch)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The canonical runner discovers migration files by calling
+// discoverMigrationFiles() with NO arguments, which scans the production
+// lib/migrations/ directory. This is the single source of truth for which
+// migrations exist and may be executed in production.
+//
+// For end-to-end testing we need the runner to discover TEST FIXTURES from
+// tests/fixtures/migrations/ instead — proving the full canonical execution
+// path (manifest → lifecycle → authorization → runner → transaction → ledger
+// → run history → audit) against isolated canary migrations 900-903 without
+// touching production migration files.
+//
+// Security constraints for this injection boundary:
+// 1. The default production export MUST remain locked to lib/migrations/.
+//    The exported functions inspectMigrationState, runSinglePendingMigration,
+//    and runPendingMigrations all use the PRODUCTION-LOCKED manifest provider
+//    when called with no dependencies argument. No caller in the application
+//    (route handler, CLI, cron) ever passes a dependencies argument.
+// 2. No API request may provide a directory or path. The dependencies object
+//    is accepted ONLY as an internal function argument — it is never
+//    deserialized from a request body, query string, or environment variable.
+// 3. No production environment variable may redirect the migration directory.
+//    The manifest provider is a function, not a string; it cannot be set via
+//    env var. The only way to inject a custom provider is to call
+//    createMigrationRunnerWithManifest() from within a test module.
+// 4. No arbitrary SQL may be injected. The manifest provider returns a
+//    MigrationManifest (file metadata + checksums); it does not accept or
+//    return SQL. The runner still reads SQL from the file's fullPath and
+//    verifies its checksum against the manifest.
+// 5. Test injection is only reachable through the internal module/test factory
+//    createMigrationRunnerWithManifest(), which is NOT imported by the route
+//    handler or any production module. It is exported solely so test files
+//    can import it; it has no runtime effect unless called.
+
+/**
+ * A function that produces a migration manifest. The production default
+ * scans lib/migrations/ via discoverMigrationFiles() (no args).
+ */
+export type MigrationManifestProvider = () => MigrationManifest;
+
+/**
+ * Optional dependencies for the canonical runner. When omitted (the default
+ * for all production callers), the runner uses the production-locked manifest
+ * provider. Tests may supply a provider that scans tests/fixtures/migrations/.
+ */
+export interface MigrationRunnerDependencies {
+  manifestProvider?: MigrationManifestProvider;
+}
+
+/**
+ * The production-locked manifest provider. This always scans
+ * lib/migrations/ (the canonical production directory). It is the default
+ * used by all exported runner functions when no dependencies argument is
+ * supplied.
+ */
+const productionManifestProvider: MigrationManifestProvider = () =>
+  discoverMigrationFiles();
+
+/**
+ * Resolve the manifest provider from optional dependencies. Falls back to the
+ * production-locked provider when no dependencies or no manifestProvider is
+ * supplied. This ensures the production default is ALWAYS lib/migrations/
+ * unless a test explicitly injects a custom provider.
+ */
+function resolveManifestProvider(
+  dependencies?: MigrationRunnerDependencies,
+): MigrationManifestProvider {
+  return dependencies?.manifestProvider ?? productionManifestProvider;
+}
+
+/**
+ * Create a migration runner bound to a specific manifest provider.
+ *
+ * This is an INTERNAL TEST FACTORY. It returns bound versions of
+ * inspectMigrationState, runSinglePendingMigration, and runPendingMigrations
+ * that use the supplied manifest provider instead of the production default.
+ *
+ * SECURITY: This function is intended for test use ONLY. It is never called by
+ * the route handler, any production module, or any code path reachable from an
+ * API request. The manifest provider it accepts is a function (not a string
+ * path), so it cannot be set via environment variables or request bodies. The
+ * returned runner still enforces all governance controls: authorization,
+ * lifecycle gating, checksum validation, advisory locking, transactional
+ * execution, ledger recording, and audit emission.
+ *
+ * @param manifestProvider The manifest provider to bind into the runner.
+ * @returns An object with bound inspectMigrationState, runSinglePendingMigration,
+ *          and runPendingMigrations functions.
+ */
+export function createMigrationRunnerWithManifest(
+  manifestProvider: MigrationManifestProvider,
+): {
+  inspectMigrationState: () => Promise<MigrationInspectionState>;
+  runSinglePendingMigration: (
+    identifier: string,
+    options: RunSingleMigrationOptions,
+  ) => Promise<MigrationExecutionResult>;
+  runPendingMigrations: (
+    options: RunPendingMigrationsOptions,
+  ) => Promise<MigrationRunResult>;
+} {
+  const dependencies: MigrationRunnerDependencies = { manifestProvider };
+  return {
+    inspectMigrationState: () => inspectMigrationStateInternal(dependencies),
+    runSinglePendingMigration: (identifier, options) =>
+      runSinglePendingMigrationInternal(identifier, options, dependencies),
+    runPendingMigrations: (options) =>
+      runPendingMigrationsInternal(options, dependencies),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Authorization
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -520,8 +634,11 @@ export function splitSqlStatements(sql: string): string[] {
  *
  * @returns The complete inspection state.
  */
-export async function inspectMigrationState(): Promise<MigrationInspectionState> {
-  const manifest = discoverMigrationFiles();
+async function inspectMigrationStateInternal(
+  dependencies?: MigrationRunnerDependencies,
+): Promise<MigrationInspectionState> {
+  const manifestProvider = resolveManifestProvider(dependencies);
+  const manifest = manifestProvider();
   const environment = getCurrentEnvironment();
   const exists = await ledgerExists().catch(() => false);
 
@@ -610,6 +727,16 @@ export async function inspectMigrationState(): Promise<MigrationInspectionState>
     conflicts,
     running,
   };
+}
+
+/**
+ * Inspect the current migration state — read-only. (Public production export.)
+ *
+ * Uses the production-locked manifest provider (scans lib/migrations/). For
+ * test-only manifest injection, use createMigrationRunnerWithManifest().
+ */
+export async function inspectMigrationState(): Promise<MigrationInspectionState> {
+  return inspectMigrationStateInternal();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -778,6 +905,18 @@ export async function runSinglePendingMigration(
   identifier: string,
   options: RunSingleMigrationOptions,
 ): Promise<MigrationExecutionResult> {
+  return runSinglePendingMigrationInternal(identifier, options);
+}
+
+/**
+ * Internal implementation of runSinglePendingMigration with optional
+ * dependency injection for the manifest provider.
+ */
+async function runSinglePendingMigrationInternal(
+  identifier: string,
+  options: RunSingleMigrationOptions,
+  dependencies?: MigrationRunnerDependencies,
+): Promise<MigrationExecutionResult> {
   const { dryRun, authorization } = options;
   const environment = getCurrentEnvironment();
   const executionId = `migrate-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -787,7 +926,8 @@ export async function runSinglePendingMigration(
   // available for run-history recording at all denial/block paths
   // (MIGRATION-GOV-18, Phase 1A.2). This is a filesystem-only operation and
   // does not touch the database.
-  const manifest = discoverMigrationFiles();
+  const manifestProvider = resolveManifestProvider(dependencies);
+  const manifest = manifestProvider();
   const file = findMigrationByIdentifier(manifest, identifier);
 
   // Verify authorization.
@@ -1249,6 +1389,17 @@ export async function runSinglePendingMigration(
 export async function runPendingMigrations(
   options: RunPendingMigrationsOptions,
 ): Promise<MigrationRunResult> {
+  return runPendingMigrationsInternal(options);
+}
+
+/**
+ * Internal implementation of runPendingMigrations with optional dependency
+ * injection for the manifest provider.
+ */
+async function runPendingMigrationsInternal(
+  options: RunPendingMigrationsOptions,
+  dependencies?: MigrationRunnerDependencies,
+): Promise<MigrationRunResult> {
   const { dryRun, authorization, limit } = options;
   const environment = getCurrentEnvironment();
   const executionId = `run-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -1348,7 +1499,7 @@ export async function runPendingMigrations(
   }
 
   // Inspect to find pending migrations.
-  const state = await inspectMigrationState();
+  const state = await inspectMigrationStateInternal(dependencies);
   const pendingIdentifiers = state.pending;
   const results: MigrationExecutionResult[] = [];
   let applied = 0;
@@ -1363,7 +1514,7 @@ export async function runPendingMigrations(
     // Stop on first failure — don't continue applying out of order.
     if (failed > 0) break;
 
-    const result = await runSinglePendingMigration(identifier, { dryRun, authorization });
+    const result = await runSinglePendingMigrationInternal(identifier, { dryRun, authorization }, dependencies);
     results.push(result);
 
     if (result.status === 'applied') {

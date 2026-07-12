@@ -553,7 +553,11 @@ export async function setGovernanceLifecycleState(
   const environment = getCurrentEnvironment();
 
   try {
-    await sql`
+    // Use INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING to inspect exactly
+    // how many rows were affected. A transition returns true ONLY when exactly
+    // one lifecycle row was created or updated for this environment
+    // (Gap 2 corrective patch: false-success elimination).
+    const rows = await sql`
       INSERT INTO governance_lifecycle (
         environment, lifecycle_state, last_state_change_at,
         baseline_reconciled_by, baseline_reconciled_at
@@ -573,7 +577,18 @@ export async function setGovernanceLifecycleState(
           ELSE governance_lifecycle.baseline_reconciled_at
         END,
         last_state_change_at = now()
+      RETURNING lifecycle_state
     `;
+
+    // Inspect the returned rows: exactly one row must have been created or
+    // updated, and it must reflect the requested new state.
+    if (!Array.isArray(rows) || rows.length !== 1) {
+      return false;
+    }
+    const updatedState = rows[0]?.lifecycle_state as MigrationGovernanceLifecycle | undefined;
+    if (updatedState !== newState) {
+      return false;
+    }
 
     emitAuditEvent({
       type: 'migration.governance.state_change',
@@ -786,16 +801,64 @@ export async function verifyBaselineComplete(
  * Advance the governance lifecycle to BASELINE_VERIFIED.
  *
  * This should only be called after verifyBaselineComplete() returns ok=true.
- * The caller is responsible for verifying completeness; this function trusts
- * the caller and records the state change. It sets baseline_reconciled_by/at.
+ * The caller is responsible for verifying completeness; this function records
+ * the state change. It sets baseline_reconciled_by/at.
+ *
+ * Gap 2 corrective patch: this function now enforces that the current lifecycle
+ * state is BASELINE_IN_PROGRESS before transitioning. The previous
+ * implementation delegated to setGovernanceLifecycleState() which uses an
+ * upsert (INSERT ... ON CONFLICT DO UPDATE) that would succeed regardless of
+ * the current state. We now use a guarded UPDATE ... RETURNING that only
+ * transitions from BASELINE_IN_PROGRESS, and we inspect the returned rows to
+ * confirm exactly one row was transitioned.
  *
  * @param reconciledBy The actor who verified the baseline.
- * @returns true on success, false on failure.
+ * @returns true on success, false on failure or invalid predecessor state.
  */
 export async function advanceToBaselineVerified(
   reconciledBy: string | null,
 ): Promise<boolean> {
-  return setGovernanceLifecycleState('BASELINE_VERIFIED', reconciledBy);
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+
+  try {
+    // Only transition from BASELINE_IN_PROGRESS to BASELINE_VERIFIED.
+    // Use RETURNING to inspect the number of rows actually updated.
+    const rows = await sql`
+      UPDATE governance_lifecycle
+      SET lifecycle_state = 'BASELINE_VERIFIED',
+          baseline_reconciled_by = ${reconciledBy},
+          baseline_reconciled_at = now(),
+          last_state_change_at = now()
+      WHERE environment = ${environment}
+        AND lifecycle_state = 'BASELINE_IN_PROGRESS'
+      RETURNING lifecycle_state
+    `;
+
+    // Exactly one row must have been transitioned to BASELINE_VERIFIED.
+    if (!Array.isArray(rows) || rows.length !== 1) {
+      return false;
+    }
+    const updatedState = rows[0]?.lifecycle_state as MigrationGovernanceLifecycle | undefined;
+    if (updatedState !== 'BASELINE_VERIFIED') {
+      return false;
+    }
+
+    emitAuditEvent({
+      type: 'migration.governance.state_change',
+      actorType: null,
+      actorId: reconciledBy,
+      environment,
+      executionId: null,
+      migrationIdentifier: null,
+      filename: null,
+      details: { newState: 'BASELINE_VERIFIED', changedBy: reconciledBy },
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -840,7 +903,14 @@ export async function enableExecution(
     // Update the execution_enabled_by/at columns and transition to
     // EXECUTION_ENABLED. The WHERE clause ensures we can only transition
     // from BASELINE_VERIFIED — not from any other state.
-    await sql`
+    //
+    // Gap 2 corrective patch: use RETURNING to inspect the number of rows
+    // actually updated. The previous implementation returned true even when
+    // zero rows were affected (e.g. when the lifecycle was in
+    // BASELINE_REQUIRED, the UPDATE matched nothing but the function still
+    // reported success). We now return true ONLY when exactly one row was
+    // transitioned to EXECUTION_ENABLED.
+    const rows = await sql`
       UPDATE governance_lifecycle
       SET execution_enabled_by = ${enabledBy},
           execution_enabled_at = now(),
@@ -848,7 +918,20 @@ export async function enableExecution(
           last_state_change_at = now()
       WHERE environment = ${environment}
         AND lifecycle_state = 'BASELINE_VERIFIED'
+      RETURNING lifecycle_state
     `;
+
+    // Inspect the returned rows: exactly one row must have been transitioned
+    // to EXECUTION_ENABLED. Zero rows (wrong predecessor state) or more than
+    // one (should be impossible due to the unique environment constraint, but
+    // defense-in-depth) both result in false.
+    if (!Array.isArray(rows) || rows.length !== 1) {
+      return false;
+    }
+    const updatedState = rows[0]?.lifecycle_state as MigrationGovernanceLifecycle | undefined;
+    if (updatedState !== 'EXECUTION_ENABLED') {
+      return false;
+    }
 
     emitAuditEvent({
       type: 'migration.governance.state_change',
@@ -909,7 +992,13 @@ export async function disableExecution(
   const environment = getCurrentEnvironment();
 
   try {
-    await sql`
+    // Gap 2 corrective patch: use RETURNING to inspect the number of rows
+    // actually updated. The previous implementation returned true even when
+    // zero rows were affected (e.g. when the lifecycle was in
+    // BASELINE_VERIFIED, the UPDATE matched nothing but the function still
+    // reported success). We now return true ONLY when exactly one row was
+    // transitioned from EXECUTION_ENABLED to BASELINE_VERIFIED.
+    const rows = await sql`
       UPDATE governance_lifecycle
       SET lifecycle_state = 'BASELINE_VERIFIED',
           execution_enabled_by = null,
@@ -917,7 +1006,20 @@ export async function disableExecution(
           last_state_change_at = now()
       WHERE environment = ${environment}
         AND lifecycle_state = 'EXECUTION_ENABLED'
+      RETURNING lifecycle_state
     `;
+
+    // Inspect the returned rows: exactly one row must have been
+    // transitioned to BASELINE_VERIFIED. Zero rows (wrong predecessor
+    // state, e.g. not in EXECUTION_ENABLED) or more than one both result
+    // in false.
+    if (!Array.isArray(rows) || rows.length !== 1) {
+      return false;
+    }
+    const updatedState = rows[0]?.lifecycle_state as MigrationGovernanceLifecycle | undefined;
+    if (updatedState !== 'BASELINE_VERIFIED') {
+      return false;
+    }
 
     emitAuditEvent({
       type: 'migration.governance.state_change',

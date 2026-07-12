@@ -1980,7 +1980,12 @@ describe('Phase 1A.2: Run-history for denied/blocked paths (MIGRATION-GOV-18)', 
     // The manifest discovery must happen before the authorization check so
     // that file metadata (filename, checksum) is available for run-history
     // recording at the denial path.
-    const manifestPos = runnerSrc.indexOf('const manifest = discoverMigrationFiles();');
+    //
+    // After the Phase 1A.3 Gap 1 DI refactor, the internal functions use
+    // resolveManifestProvider(dependencies) then manifestProvider() instead of
+    // a direct discoverMigrationFiles() call. The ordering guarantee (manifest
+    // discovered before auth check) is preserved — only the mechanism changed.
+    const manifestPos = runnerSrc.indexOf('const manifest = manifestProvider();');
     const authPos = runnerSrc.indexOf('if (!authorization.allowed)');
     expect(manifestPos).toBeGreaterThan(0);
     expect(authPos).toBeGreaterThan(0);
