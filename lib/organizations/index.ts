@@ -52,6 +52,41 @@ export {
   createOrganizationWithOwner,
 } from './memberships';
 
+// Permission matrix
+export {
+  type OrgAction,
+  ORG_ACTIONS,
+  PERMISSION_MATRIX,
+  roleCanPerform,
+  getRequiredRole,
+  isKnownAction,
+  getActionsForRole,
+  getRoleLevel,
+  canAssignRole,
+  getAssignableRoles,
+} from './permissions';
+
+// Authorization engine
+export {
+  type AuthzResult,
+  type AuthzDenyReason,
+  type DeniedAuthzResult,
+  type AllowedAuthzResult,
+  AuthzError,
+  authorize,
+  checkOwnerProtection,
+  authorizeMemberAction,
+  authorizeRoleChange,
+  isEnforcementEnabled,
+  logAuthzDecision,
+  enforceAuthz,
+  enforceMemberAction,
+  authzReasonToStatusCode,
+  quickCheckRole,
+  isPlatformAdminUser,
+  isOrgAuthzActive,
+} from './authorization';
+
 // Active organization context
 export {
   type ResolvedActiveOrg,
