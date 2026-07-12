@@ -97,6 +97,10 @@ export type RunSegmentId =
 
 export interface RunSegment {
   id: RunSegmentId;
+  /** Owning subsystem (contract §1.3 permit carriage). Absent on the legacy
+   *  single-system path (N=1 keeps bare run ids — Invariant I-1); stamped by
+   *  computeMultiSystem (Wave 2a) only when N>1. */
+  subSystem?: import('@/lib/system/subSystemEquipment').SubSystemKey;
   label: string;
   from: string;               // device label
   to: string;                 // device label

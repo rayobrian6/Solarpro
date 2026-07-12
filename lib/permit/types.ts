@@ -334,6 +334,9 @@ export interface PermitInput {
       ulListing: string;
       // Error 5c fix: mpptChannels accessed via (inv0 as any)?.mpptChannels in sldAdapter.ts
       mpptChannels?: number;
+      /** Per-subsystem tag (contract §1.3 permit carriage — derived cache,
+       *  re-stamped from panel stamps; see docs/ARCHITECTURE-per-subsystem-equipment.md). */
+      subSystemKey?: import('@/lib/system/subSystemEquipment').SubSystemKey;
       strings: Array<{
         label: string;
         panelCount: number;

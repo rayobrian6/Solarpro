@@ -13,6 +13,7 @@
 import type { DesignElectrical } from '@/types';
 import type { StringConfig } from '@/lib/system-state';
 import { STRING_INVERTERS, MICROINVERTERS } from '@/lib/equipment-db';
+import { isSubSystemKey, type SubSystemKey } from '@/lib/system/subSystemEquipment';
 
 export interface DesignEngineeringHandoff {
   inverterType: 'string' | 'micro' | 'optimizer';
@@ -114,10 +115,15 @@ export interface PermitInverter {
   strings: Array<{
     id: string; label: string; panelCount: number; panelId: string;
     wireGauge: string; tilt: number; azimuth: number; roofType: string; mountingSystem: string;
+    /** Per-subsystem tag (inherits the parent inverter's key — contract §1.1). */
+    subSystemKey?: SubSystemKey;
   }>;
   stringsPerInverter: number;
   modulesPerString: number;
   optimizerPeripheralId?: string;
+  /** Per-subsystem tag (derived cache — contract §1.1). MUST survive this
+   *  normalizer's whitelist (I-2, tag-survival rule §1.3). */
+  subSystemKey?: SubSystemKey;
 }
 
 /**
@@ -133,18 +139,26 @@ export function normalizeToPermitInverters(raw: unknown): PermitInverter[] | nul
     for (let i = 0; i < raw.length; i++) {
       const inv = raw[i] as any;
       const rawStrings = Array.isArray(inv?.strings) ? inv.strings : [];
+      // Tag survival (contract §1.3, I-2): subSystemKey is whitelisted here;
+      // untagged strings inherit the parent inverter's key.
+      const invSubSystemKey: SubSystemKey | undefined =
+        isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey : undefined;
       const strings = rawStrings
-        .map((s: any, j: number) => ({
-          id: String(s?.id ?? `str-${i}-${j}`),
-          label: String(s?.label ?? `String ${j + 1}`),
-          panelCount: Number(s?.panelCount) || 0,
-          panelId: String(s?.panelId ?? 'qcells-peak-duo-400'),
-          wireGauge: String(s?.wireGauge ?? '#10 AWG THWN-2'),
-          tilt: Number(s?.tilt) || 20,
-          azimuth: Number(s?.azimuth) || 180,
-          roofType: String(s?.roofType ?? 'shingle'),
-          mountingSystem: String(s?.mountingSystem ?? 'ironridge-xr100'),
-        }))
+        .map((s: any, j: number) => {
+          const strKey = isSubSystemKey(s?.subSystemKey) ? s.subSystemKey : invSubSystemKey;
+          return {
+            id: String(s?.id ?? `str-${i}-${j}`),
+            label: String(s?.label ?? `String ${j + 1}`),
+            panelCount: Number(s?.panelCount) || 0,
+            panelId: String(s?.panelId ?? 'qcells-peak-duo-400'),
+            wireGauge: String(s?.wireGauge ?? '#10 AWG THWN-2'),
+            tilt: Number(s?.tilt) || 20,
+            azimuth: Number(s?.azimuth) || 180,
+            roofType: String(s?.roofType ?? 'shingle'),
+            mountingSystem: String(s?.mountingSystem ?? 'ironridge-xr100'),
+            ...(strKey ? { subSystemKey: strKey } : {}),
+          };
+        })
         .filter((s: { panelCount: number }) => s.panelCount > 0);
       if (strings.length === 0) return null;
       const type: PermitInverter['type'] =
@@ -158,6 +172,7 @@ export function normalizeToPermitInverters(raw: unknown): PermitInverter[] | nul
         stringsPerInverter: strings.length,
         modulesPerString: strings[0].panelCount,
         ...(inv?.optimizerPeripheralId ? { optimizerPeripheralId: String(inv.optimizerPeripheralId) } : {}),
+        ...(invSubSystemKey ? { subSystemKey: invSubSystemKey } : {}),
       });
     }
     return out.length > 0 ? out : null;

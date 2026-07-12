@@ -533,6 +533,22 @@ export interface DesignElectrical {
   strings: Array<{ stringIndex: number; panelCount: number; panelIds: string[] }>;
   deviceCount: number;              // total optimizers / micros (0 for plain string)
   generatedAt: string;
+  /** Per-subsystem electrical blocks (contract §1.3, docs/
+   *  ARCHITECTURE-per-subsystem-equipment.md) — split via classifyPanel on
+   *  panel stamps when the design spans >1 system type. ABSENT for
+   *  single-system designs; the flat legacy fields above remain the primary
+   *  mirror (derived roof>ground>fence, §1.4). Wave-1 type stub — Design
+   *  Studio starts emitting it in Wave 4 Lane A. */
+  subSystems?: Array<{
+    key: 'roof' | 'ground' | 'fence';
+    topology: 'string' | 'optimizer' | 'micro';
+    panelId?: string;
+    rackingId?: string;
+    microModelId?: string;
+    optimizerModelId?: string;
+    strings: Array<{ stringIndex: number; panelCount: number; panelIds: string[] }>;
+    byPanelId: Record<string, number>;
+  }>;
 }
 
 // ─── Production ───────────────────────────────────────────────

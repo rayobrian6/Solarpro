@@ -186,148 +186,19 @@ type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' 
 type SystemType = 'roof' | 'ground' | 'fence';
 type TabId = 'config' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
 
-interface StringConfig {
-  id: string;
-  label: string;
-  panelCount: number;
-  panelId: string;
-  tilt: number;
-  azimuth: number;
-  roofType: RoofType;
-  mountingSystem: string;
-  wireGauge: string;
-  wireLength: number;
-  ocpdOverride?: number;
-  ocpdOverrideAcknowledged?: boolean;
-}
+// Wave 1 (docs/ARCHITECTURE-per-subsystem-equipment.md §1.3): the ProjectConfig
+// family is REUNIFIED — canonical declarations live in lib/engineering-helpers.ts;
+// this page aliases them (type-level only, shapes unchanged + additive
+// subSystems / defaultsAppliedBySubSystem / schemaVersion / subSystemKey fields).
+type StringConfig = import('@/lib/engineering-helpers').StringConfig;
 
-interface InverterConfig {
-  id: string;
-  inverterId: string;
-  type: InverterType;
-  strings: StringConfig[];
-  // User-controlled ratio overrides — override registry defaults
-  deviceRatioOverride?: number;   // micro: modules per microinverter; optimizer: optimizers per module
-  modulesPerString?: number;      // string: modules per string (informational, used for string count display)
-  stringsPerInverter?: number;    // string: strings per inverter (informational)
-  // v58.6: For optimizer topology, peripheral optimizer ID (e.g. 'se-p505') stored separately
-  // from inverterId (which holds the central string inverter, e.g. 'se-11400h').
-  // inverterId -> brand inference + sizing engine
-  // optimizerPeripheralId -> BOM Stage 1 optimizer line items
-  optimizerPeripheralId?: string;
-}
+type InverterConfig = import('@/lib/engineering-helpers').InverterConfig;
 
-interface ProjectConfig {
-  projectName: string;
-  clientName: string;
-  address: string;
-  state: string;          // Explicit state code (e.g. 'CA', 'TX') — overrides address parsing
-  city: string;           // City name — used for AHJ city-level overrides
-  county: string;         // County name — used for AHJ county-level overrides
-  designer: string;
-  date: string;
-  systemType: SystemType;
-  inverters: InverterConfig[];
-  batteryBrand: string;
-  batteryModel: string;
-  batteryCount: number;
-  batteryKwh: number;
-  batteryId: string;        // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
-  generatorId: string;      // equipment-db generator ID
-  generatorWireLength: number;  // ft — distance from generator to ATS (user-configurable)
-  trenchRunLengthFt?: number;   // ft — ground/fence array → service trench distance (user-input; adds to DC run + underground conduit)
-  atsId: string;            // equipment-db ATS ID
-  backupInterfaceId: string; // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, etc.)
-  mainPanelAmps: number;
-  mainPanelBrand: string;
-  utilityMeter: string;
-  acDisconnect: boolean;
-  dcDisconnect: boolean;
-  productionMeter: boolean;
-  rapidShutdown: boolean;
-  roofType: RoofType;
-  mountingId: string;
-  wireGauge: string;
-  conduitType: string;
-  wireLength: number;
-  windSpeed: number;
-  windExposure: 'B' | 'C' | 'D';
-  groundSnowLoad: number;
-  roofPitch: number;
-  rafterSpacing: number;
-  rafterSpan: number;
-  rafterSize: string;
-  rafterSpecies: string;
-  framingType: 'truss' | 'rafter' | 'unknown';  // V3 structural engine
-  meanRoofHeight?: number;              // ft — mean height of eave to ridge midpoint (ASCE 7 Kz)
-  panelOrientation?: 'portrait' | 'landscape';  // V3 array geometry
-  attachmentSpacing: number;
-  railSpacing: number;           // inches — distance between rail rows (row-to-row)
-  // Layout fields (Phase 3 - Future Layout Engine)
-  rowCount?: number;
-  columnCount?: number;
-  layoutOrientation?: 'portrait' | 'landscape';
-  // Installer preference: cut the AC trunk at row transitions (splice pair per
-  // within-branch transition) instead of the cheapest-option service loop.
-  spliceAtRows?: boolean;
-  panelCoordinates?: Array<{ x: number; y: number; row: number; col: number; }>;
-  notes: string;
-  // Interconnection method
-  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE';
-  panelBusRating: number;        // Bus bar rating (may differ from mainPanelAmps)
-  // Utility + AHJ (persisted to project, used by interconnection + compliance)
-  utilityId: string;             // e.g. 'ameren', 'comed', 'pge' — '' = auto/unknown
-  ahjId: string;                 // e.g. 'il-icc', 'manual' — '' = auto
-  // v44.0 optional fields — site geometry, equipment locations, mounting hardware, contractor
-  roofWidth?: number;            // approximate roof width (ft) — for A-1 site layout
-  roofLength?: number;           // approximate roof length ridge-to-eave (ft) — for A-1
-  inverterLocation?: string;     // e.g. 'Garage wall, south side'
-  disconnectLocation?: string;   // e.g. 'Adjacent to inverter'
-  meterLocation?: string;        // e.g. 'North exterior wall'
-  mainPanelLocation?: string;    // e.g. 'Garage, east wall'
-  railType?: string;             // e.g. 'IronRidge XR-100'
-  flashingType?: string;         // e.g. 'Flashed L-Foot'
-  lagBoltSize?: string;          // e.g. '5/16" × 3"'
-  sheathingType?: string;        // e.g. '7/16" OSB'
-  contractorLicense?: string;    // contractor license number
-  electricalLicense?: string;    // electrical contractor license number
-  ownerPhone?: string;           // owner contact phone
-  ownerEmail?: string;           // owner contact email
-  zip?: string;                  // ZIP code — used for AHJ lookup
-  apn?: string;                  // Assessor Parcel Number — Error 3e fix
-  // Phase 13 — Smart Defaults sentinel + seed brand.
-  // `defaultsApplied` is set exactly ONCE by applySmartDefaultsOnce() and
-  // must remain true until the user explicitly resets the system (via the
-  // reset hook clearDefaultsAppliedFlag). It blocks the defaults layer
-  // from ever overriding user edits after the first bootstrap.
-  // `selectedBrand` records the seed brand chosen by the defaults layer
-  // (only when the user had not already picked one). The user may freely
-  // overwrite it later; defaults will NOT re-fire on brand changes.
-  defaultsApplied?: boolean;
-  selectedBrand?: string;
-  // Phase 13.1 — USER INTENT LOCK.
-  // Set to `true` the moment the user touches ANY inverter / string field
-  // (model, count, layout, topology). Once this flag is on:
-  //   - Smart defaults (smartDefaults.useEffect) is a hard no-op.
-  //   - Auto-apply of the sizing recommendation is a hard no-op.
-  // Only an explicit user action flips it off again:
-  //   - Clicking "Apply Recommendation" (user has now adopted the system's
-  //     plan as-is — treat it as no longer "edited away from rec").
-  //   - "Reset System" (clearDefaultsAppliedFlag + clear inverters).
-  // NON-NEGOTIABLE: the sizing engine MAY still compute a recommendation
-  // for display, but it MUST NOT mutate the user's config once this lock
-  // is engaged. Source of truth is always the user config.
-  userHasEditedInverters?: boolean;
-  // v61.7 — CONFIG OVERWRITE KILL SWITCH.
-  // Set to `true` after any explicit user action (Apply Recommendation, manual edit,
-  // smart-defaults bootstrap). When true, ALL automatic config mutations are BLOCKED:
-  //   - CAD sync will only update panel count, never rearrange strings
-  //   - AUTO-APPLY is a hard no-op
-  //   - HARD DC/AC AUTO-HEAL is disabled (warning only)
-  //   - Ecosystem apply is blocked
-  // Only an explicit user action (Apply Recommendation, Reset System) may change inverters.
-  isUserControlled?: boolean;
-}
+// Phase 13 smart-defaults sentinel, Phase 13.1 USER INTENT LOCK
+// (userHasEditedInverters) and v61.7 CONFIG OVERWRITE KILL SWITCH
+// (isUserControlled) semantics are documented on the canonical declaration in
+// lib/engineering-helpers.ts — behavior is unchanged; only the declaration moved.
+type ProjectConfig = import('@/lib/engineering-helpers').ProjectConfig;
 
 interface ComplianceResult {
   overallStatus: 'PASS' | 'WARNING' | 'FAIL' | null;

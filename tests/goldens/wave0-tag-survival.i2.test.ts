@@ -4,15 +4,14 @@
 // rule — subSystemKey must land in BOTH normalizer whitelists in the same
 // commit as the tag).
 //
-// EXPECTED RED (as `it.fails`) until Wave 1: today both normalizers rebuild
-// the object from an explicit field whitelist and DROP subSystemKey. Each
-// test asserts the tag SURVIVES — which currently fails, so `it.fails` keeps
-// the suite green while pinning the hole. When Wave 1 adds the whitelist
-// entries (lib/system/buildInverterConfig.ts:335 normalizeRawInverter and
-// lib/system/designToEngineering.ts:129 normalizeToPermitInverters), these
-// inner assertions start PASSING, `it.fails` starts failing CI, and Wave 1
-// MUST flip `it.fails` → `it` in the same commit — the mechanical guard the
-// contract requires (a rebase dropping one whitelist edit fails CI, not prod).
+// GREEN since Wave 1: both normalizer whitelists carry subSystemKey
+// (lib/system/buildInverterConfig.ts normalizeRawInverter and
+// lib/system/designToEngineering.ts normalizeToPermitInverters), so the
+// original `it.fails` pins were flipped to `it` in the same commit as the
+// whitelist entries — the mechanical guard the contract requires (a rebase
+// dropping one whitelist edit fails CI, not prod). These tests must stay
+// green forever; a red here means a normalizer is silently stripping tags
+// (the old-client hybrid-collapse hole, contract §4 risk #1).
 // ============================================================================
 
 import { describe, it, expect } from 'vitest';
@@ -34,19 +33,19 @@ const fenceInverter = () => ({
   }],
 });
 
-describe('I-2 tag round-trip survival (RED until Wave 1 — see header comment)', () => {
-  it.fails('normalizeRawInverter preserves subSystemKey through the whitelist (buildInverterConfig.ts:335)', () => {
+describe('I-2 tag round-trip survival (GREEN since Wave 1 — see header comment)', () => {
+  it('normalizeRawInverter preserves subSystemKey through the whitelist (buildInverterConfig.ts:335)', () => {
     const out = normalizeRawInverter(fenceInverter() as unknown as Record<string, unknown>);
     expect((out as unknown as { subSystemKey?: string }).subSystemKey).toBe('fence');
   });
 
-  it.fails('normalizeToPermitInverters preserves subSystemKey through the whitelist (designToEngineering.ts:129)', () => {
+  it('normalizeToPermitInverters preserves subSystemKey through the whitelist (designToEngineering.ts:129)', () => {
     const out = normalizeToPermitInverters([fenceInverter()]);
     expect(out).not.toBeNull();
     expect((out![0] as unknown as { subSystemKey?: string }).subSystemKey).toBe('fence');
   });
 
-  it.fails('full round trip: raw → normalizeRawInverter → normalizeToPermitInverters keeps the tag', () => {
+  it('full round trip: raw → normalizeRawInverter → normalizeToPermitInverters keeps the tag', () => {
     const hydrated = normalizeRawInverter(fenceInverter() as unknown as Record<string, unknown>);
     const permit = normalizeToPermitInverters([hydrated]);
     expect(permit).not.toBeNull();

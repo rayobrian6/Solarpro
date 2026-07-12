@@ -17,6 +17,24 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type { CanonicalSysType } from '../types';
+import type { SubSystemKey } from '@/lib/system/subSystemEquipment';
+
+// Wave 1 (per-subsystem equipment contract §1.1/§1.2): the canonical
+// declarations live in lib/system/subSystemEquipment.ts (dependency-free,
+// client+server importable); this module — the partition primitive — is the
+// permit-side import path for them.
+export type {
+  SubSystemKey,
+  SubSystemEquipment,
+  SubSystemEquipmentMap,
+} from '@/lib/system/subSystemEquipment';
+export {
+  SUB_SYSTEM_KEYS,
+  isSubSystemKey,
+  toSubSystemKey,
+  ensureSubSystemShape,
+  synthesizeFromLegacyScalars,
+} from '@/lib/system/subSystemEquipment';
 
 export interface SubSystemPanel {
   systemType?: string;
@@ -30,7 +48,7 @@ export interface SubSystem<P extends SubSystemPanel = SubSystemPanel> {
   /** Canonical system type of this sub-system. */
   systemType: CanonicalSysType;
   /** Short id for namespacing (runs, sheets, logs): 'roof' | 'ground' | 'fence'. */
-  key: 'roof' | 'ground' | 'fence';
+  key: SubSystemKey;
   /** The panels belonging to this sub-system (original references, not copies). */
   panels: P[];
   panelCount: number;
@@ -39,7 +57,7 @@ export interface SubSystem<P extends SubSystemPanel = SubSystemPanel> {
 }
 
 /** Classify one panel by its per-panel provenance (placement-stamped). */
-export function classifyPanel(p: SubSystemPanel): 'roof' | 'ground' | 'fence' {
+export function classifyPanel(p: SubSystemPanel): SubSystemKey {
   const pt = String(p.placementType ?? '').toUpperCase();
   const st = String(p.systemType ?? '').toLowerCase();
   if (pt === 'FENCE' || st === 'fence' || st === 'solar_fence') return 'fence';

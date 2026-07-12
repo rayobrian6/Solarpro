@@ -110,6 +110,47 @@ const F = {
 };
 
 // ── Public Interface ─────────────────────────────────────────────────────────
+
+/**
+ * One PV source branch (lane) of a hybrid multi-subsystem SLD — contract §1.3
+ * permit carriage (docs/ARCHITECTURE-per-subsystem-equipment.md).
+ *
+ * WAVE-1 TYPE STUB ONLY: the multi-lane renderer (renderSourceLane, Wave 5
+ * Lane A) is NOT implemented yet. `sources` absent ⇒ the legacy single-source
+ * renderer path is taken byte-for-byte (Invariant I-1); no code in this file
+ * reads `sources` yet.
+ */
+export interface SLDSourceBranch {
+  /** Owning subsystem — drives the lane label (PV-R / PV-G / PV-F). */
+  key: import('@/lib/system/subSystemEquipment').SubSystemKey;
+  /** Lane label override, e.g. 'PV-R'. */
+  label?: string;
+  topologyType?: string;
+  systemType?: 'roof' | 'ground' | 'fence';
+  totalModules?: number;
+  totalStrings?: number;
+  panelModel?: string;
+  panelWatts?: number;
+  panelVoc?: number;
+  panelIsc?: number;
+  inverterManufacturer?: string;
+  inverterModel?: string;
+  /** Per-device AC kW (explicit per-device contract — never a summed total). */
+  acKwPerDevice?: number;
+  acOutputKw?: number;
+  acOutputAmps?: number;
+  acWireGauge?: string;
+  acConduitType?: string;
+  acOCPD?: number;
+  /** Per-branch backfeed contribution — Σ per-physical-inverter rounded OCPDs
+   *  within this sub (§1.7 breaker-granularity rule). */
+  backfeedAmps?: number;
+  rapidShutdownIntegrated?: boolean;
+  deviceCount?: number;
+  microBranches?: MicroBranch[];
+  runs?: RunSegment[];
+}
+
 export interface SLDProfessionalInput {
   /** Embedded in a planset sheet that has its own title block — suppress the
    *  internal SOLARPRO title panel (it duplicated project/system/code data
@@ -217,6 +258,10 @@ export interface SLDProfessionalInput {
   systemModel?:            import('./plan-set/permit-system-model').PermitSystemModel;
   // EGC gauge from computeSystem() NEC 250.122 table
   egcGauge?:               string;
+  /** Hybrid multi-subsystem source lanes (contract §1.3). ABSENT ⇒ legacy
+   *  single-source renderer path, byte-for-byte (I-1). Wave-1 type stub —
+   *  consumed only by the Wave-5 multi-lane renderer. */
+  sources?:                SLDSourceBranch[];
 }
 
 // ── SVG Primitives ───────────────────────────────────────────────────────────

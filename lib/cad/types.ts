@@ -251,6 +251,21 @@ export interface CADModel {
         lat: number; lng: number;
         azimuth?: number; row?: number; arrayId?: string;
       }>;
+      /** Per-subsystem equipment carriage (contract §1.3 — docs/
+       *  ARCHITECTURE-per-subsystem-equipment.md). Populated from the
+       *  subsystem's own SubSystemEquipment entry so hybrid sheet renderers
+       *  never fall back to a project-wide winner. `acKwPerDevice` is the
+       *  explicit per-device kW contract (never a summed total). */
+      equipment?: {
+        panelModel?: string;
+        panelWatts?: number;
+        voc?: number;
+        isc?: number;
+        inverterMfr?: string;
+        inverterModel?: string;
+        topology?: 'string' | 'micro' | 'optimizer';
+        acKwPerDevice?: number;
+      };
     }>;
   };
 

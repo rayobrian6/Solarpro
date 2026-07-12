@@ -38,4 +38,9 @@ export interface BOMLineItemV4 {
   formula?: string;
   notes?: string;
   required: boolean;
+  /** Owning subsystem (contract §1.3 permit carriage — docs/
+   *  ARCHITECTURE-per-subsystem-equipment.md). Absent on the legacy
+   *  single-system path; stamped in addItem by the per-sub BOM stages
+   *  (Wave 2c) only when the generation input carries subSystems. */
+  subSystem?: BOMSystemType;
 }
