@@ -427,6 +427,9 @@ export interface PermitInput {
     required?: boolean;
     unitCost?: number;
     totalCost?: number;
+    /** Wave 2c per-sub stamp ('roof'|'ground'|'fence') — present only when the
+     *  BOM was generated with per-subsystem inputs; SCHED groups by it. */
+    subSystem?: string;
     // Legacy compat
     ulListing?: string;
   }>;

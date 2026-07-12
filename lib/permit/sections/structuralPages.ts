@@ -15,7 +15,8 @@ import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../u
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
-import { buildConductorAuthority } from '../utils/conductorAuthority';
+import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
+import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
@@ -1100,10 +1101,19 @@ export function schedBomRowCount(bom: PermitInput['bom']): number {
  *  inverter tables); the continuation sheet is all-table and fits more. */
 export const SCHED_BOM_ROWS_FIRST = 15;
 
-function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY): string {
+/** Sub-system ordinal for BOM grouping (roof > ground > fence > unstamped). */
+const BOM_SUB_ORDER: Record<string, number> = { roof: 0, ground: 1, fence: 2 };
+const bomSubOrd = (s?: string) => (s && s in BOM_SUB_ORDER ? BOM_SUB_ORDER[s] : 3);
+const bomSubLabel = (s?: string) =>
+  s === 'roof' ? 'ROOF' : s === 'ground' ? 'GROUND' : s === 'fence' ? 'FENCE' : '—';
+
+function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY, opts?: { bySub?: boolean }): string {
   if (!bom || bom.length === 0) {
     return '<!-- No BOM data — permit generated without BOM integration -->';
   }
+  // Wave 5B hybrid: group stage rows by sub-system WHERE STAMPED (Wave 2c
+  // stamps; unstamped/shared items sort last in each stage and print '—').
+  const bySub = opts?.bySub === true;
 
   const bomItems = bom.filter(i => !BOM_SKIP_CATEGORIES.has(i.category));
   if (bomItems.length === 0) {
@@ -1133,22 +1143,28 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   html += '<table class="bom-table" style="width:100%;font-size:var(--f-sm);">';
   html += '<thead><tr style="background:#000;color:#fff;">';
   html += '<th style="width:4%">#</th>';
-  html += '<th style="width:12%">Stage</th>';
+  html += bySub
+    ? '<th style="width:10%">Stage</th><th style="width:7%">System</th>'
+    : '<th style="width:12%">Stage</th>';
   html += '<th style="width:12%">Category</th>';
   html += '<th style="width:13%">Manufacturer</th>';
-  html += '<th style="width:16%">Model / Description</th>';
+  html += bySub ? '<th style="width:14%">Model / Description</th>' : '<th style="width:16%">Model / Description</th>';
   html += '<th style="width:10%">Part Number</th>';
   html += '<th style="width:5%;text-align:right">Qty</th>';
   html += '<th style="width:5%">Unit</th>';
   html += '<th style="width:12%">NEC Reference</th>';
-  html += '<th style="width:11%">Derived From</th>';
+  html += bySub ? '<th style="width:8%">Derived From</th>' : '<th style="width:11%">Derived From</th>';
   html += '</tr></thead><tbody>';
+  const nCols = bySub ? 11 : 10;
 
   // Flatten in stage order so the table can be sliced across sheets.
   const flat: Array<{ item: (typeof bomItems)[number]; stageLabel: string }> = [];
   for (const stageKey of stages) {
-    const items = grouped[stageKey];
+    let items = grouped[stageKey];
     if (!items || items.length === 0) continue;
+    // Hybrid: within each stage, stamped rows group roof → ground → fence,
+    // unstamped (shared/POI) rows last. Stable — original order otherwise.
+    if (bySub) items = [...items].sort((a, b) => bomSubOrd(a.subSystem) - bomSubOrd(b.subSystem));
     const stageLabel = items[0].stageLabel || stageLabels[stageKey] || stageKey;
     for (const item of items) flat.push({ item, stageLabel });
   }
@@ -1168,6 +1184,7 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
       html += '<tr style="' + bg + '">';
       html += '<td class="mono f-lg" style="color:#888;text-align:center">' + rowNum + '</td>';
       html += '<td style="font-size:7.5px;color:#555">' + (item.stageLabel || stageLabel) + '</td>';
+      if (bySub) html += '<td style="font-size:7.5px;font-weight:700;">' + bomSubLabel(item.subSystem) + '</td>';
       html += '<td style="text-transform:capitalize;font-weight:600">' + item.category.replace(/_/g, ' ') + '</td>';
       html += '<td>' + (item.manufacturer || '—') + '</td>';
       html += '<td style="font-size:8px;">' + (item.model || '—') + descExtra + reqBadge + '</td>';
@@ -1183,14 +1200,14 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   if (endRow < flat.length) {
     // More rows follow on the continuation sheet — say so instead of clipping.
     html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-    html += '<td colspan="10" style="text-align:center;letter-spacing:1px;">CONTINUED ON SCHED-2 — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
+    html += '<td colspan="' + nCols + '" style="text-align:center;letter-spacing:1px;">CONTINUED ON SCHED-2 — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
     html += '</tr>';
     html += '</tbody></table>';
     return html;
   }
 
   html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-  html += '<td colspan="6" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS</td>';
+  html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS</td>';
   html += '<td class="tr">' + flat.length + '</td>';
   html += '<td colspan="3"></td>';
   html += '</tr>';
@@ -1217,7 +1234,7 @@ export function pageEquipmentScheduleCont(input: PermitInput, cad: CADModel, pag
   <div class="page">
     ${titleBlock(input, 'SCHED-2', 'EQUIPMENT SCHEDULE (CONTINUED)', pageNum, totalPages)}
     <div class="page-content">
-      ${renderBOMTable(input.bom, SCHED_BOM_ROWS_FIRST)}
+      ${renderBOMTable(input.bom, SCHED_BOM_ROWS_FIRST, Number.POSITIVE_INFINITY, { bySub: isHybridPlanset(cad) })}
     </div>
   </div>`;
 }
@@ -1249,6 +1266,55 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td>${b.conductorCallout}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
       + `<td class="center fw7">&check;</td></tr>`;
   }).join('');
+  // ── Wave 5B hybrid chrome ──────────────────────────────────────────────
+  const _schedHybrid = _schedAuth.isHybrid;
+  const _schedPrimaryKey = primarySubKey(cad);
+  const _schedSubOf = (inv: unknown): string =>
+    SUB_LABEL[inverterSubKey(inv as { subSystemKey?: string }, _schedPrimaryKey)];
+  // Per-sub wire-sizing blocks — each sub's OWN branch/string set from the
+  // shared authority (same values PV-4A/PV-4B/E-1 print).
+  const _schedSubWireBlock = (sub: SubSystemConductorAuthority): string => {
+    const eq2 = sub.equipment;
+    const inv = [eq2.inverterManufacturer, eq2.inverterModel].filter(s => s && s !== '—').join(' ');
+    const hdr = `${SUB_LABEL[sub.key]} — ${sub.panelCount} MODULES${inv ? ` — ${inv}` : ''} (${sub.topology})`;
+    if (sub.isMicro) {
+      const rows = sub.microBranches.map(b =>
+        `<tr><td class="fw7 mono">B${b.index}</td><td>${b.deviceCount} &times; microinverter</td>`
+        + `<td class="tr mono">${b.branchCurrentA.toFixed(1)}A</td><td class="tr mono">${b.continuousA.toFixed(1)}A</td>`
+        + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td>${b.conductorCallout}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
+        + `<td class="center fw7">&check;</td></tr>`).join('');
+      return `
+      <div class="section-title">AC Branch Circuit Schedule &mdash; ${hdr} &mdash; NEC 690.8(A)</div>
+      <table class="equip-table">
+        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" class="center">AC branch layout pending module placement &mdash; see PV-4A</td></tr>'}</tbody>
+      </table>`;
+    }
+    const rows = sub.dcStrings.map(s =>
+      `<tr><td class="fw7">${s.label}</td>`
+      + `<td class="tr mono">${s.ampacityA != null ? s.ampacityA.toFixed(2) + 'A' : '—'}</td>`
+      + `<td class="tr mono fw7">${s.ocpdAmps != null ? s.ocpdAmps + 'A' : '—'}</td>`
+      + `<td>${s.wireGauge} USE-2</td>`
+      + `<td class="tr">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>`
+      + `<td class="tr">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>`
+      + `<td class="center fw7">&check;</td></tr>`).join('');
+    return `
+      <div class="section-title">DC String Wire Sizing &mdash; ${hdr} &mdash; NEC 690.8</div>
+      <table class="equip-table">
+        <thead><tr><th>String</th><th>Isc&times;1.25 (A)</th><th>OCPD (A)</th><th>Wire</th><th>V-Drop</th><th>Length</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="center">String plan pending &mdash; see PV-4B</td></tr>'}</tbody>
+      </table>`;
+  };
+  const _schedHybridWireBlocks = _schedHybrid
+    ? _schedAuth.subSystems.map(_schedSubWireBlock).join('') + `
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+        <strong>WIRE SIZING INTERPRETATION (HYBRID):</strong>
+        Each sub-system's circuits are sized from ITS OWN equipment and module subset per NEC 690.8 — micro sub-systems
+        as AC branch circuits (&times;1.25 continuous), string/optimizer sub-systems as DC source circuits (Isc &times; 1.25,
+        OCPD per 690.8(B)). Values match PV-4A / PV-4B / E-1 (shared conductor authority). Rooftop temperature adder
+        applies to ROOF sub-system circuits only.
+      </div>`
+    : '';
   const _schedAcBranchBlock = `
       <div class="section-title">AC Branch Circuit Schedule &mdash; NEC 690.8(A) / 705.12</div>
       <table class="equip-table">
@@ -1264,14 +1330,15 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   <div class="page">
     ${titleBlock(input, 'SCHED', 'EQUIPMENT SCHEDULE', pageNum, totalPages)}
     <div class="page-content">
-      <div class="section-title">Solar Modules${_schedIsMicro ? ' — each module paired 1:1 with a microinverter (no series DC string)' : ''}</div>
+      <div class="section-title">Solar Modules${_schedHybrid ? ' — per sub-system (hybrid)' : _schedIsMicro ? ' — each module paired 1:1 with a microinverter (no series DC string)' : ''}</div>
       <table class="equip-table">
-        <thead><tr><th>${_schedGroupLabel}</th><th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
+        <thead><tr><th>${_schedGroupLabel}</th>${_schedHybrid ? '<th>System</th>' : ''}<th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
         <tbody>
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => `
             <tr>
               <td class="fw7">${invIdx + 1}-${strIdx + 1}</td>
+              ${_schedHybrid ? `<td class="fw7">${_schedSubOf(inv)}</td>` : ''}
               <td>${str.panelManufacturer || '—'}</td><td>${str.panelModel || '—'}</td>
               <td class="tr fw7">${str.panelCount}</td>
               <td class="tr">${str.panelWatts}W</td>
@@ -1283,19 +1350,20 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
             </tr>`) || []
           ).join('')}
           <tr style="background:#f5f5f5;font-weight:bold">
-            <td colspan="3">TOTAL</td><td class="tr">${system.totalPanels}</td>
+            <td colspan="${_schedHybrid ? 4 : 3}">TOTAL</td><td class="tr">${system.totalPanels}</td>
             <td colspan="3"></td><td class="tr">${system.totalDcKw?.toFixed(2)}</td>
             <td colspan="2"></td>
           </tr>
         </tbody>
       </table>
-      <div class="section-title">Inverters</div>
+      <div class="section-title">Inverters${_schedHybrid ? ' — per sub-system (hybrid)' : ''}</div>
       <table class="equip-table">
-        <thead><tr><th>#</th><th>Type</th><th>Manufacturer</th><th>Model</th><th>AC kW</th><th>Max DC V</th><th>Efficiency</th><th>UL Listing</th></tr></thead>
+        <thead><tr><th>#</th>${_schedHybrid ? '<th>System</th>' : ''}<th>Type</th><th>Manufacturer</th><th>Model</th><th>AC kW</th><th>Max DC V</th><th>Efficiency</th><th>UL Listing</th></tr></thead>
         <tbody>
           ${system.inverters?.map((inv, idx) => `
           <tr>
             <td class="fw7">${idx + 1}</td>
+            ${_schedHybrid ? `<td class="fw7">${_schedSubOf(inv)}</td>` : ''}
             <td>${inv.type === 'micro' ? 'Microinverter' : inv.type === 'optimizer' ? 'String + Optimizer' : 'String'}</td>
             <td>${inv.manufacturer || '—'}</td><td>${inv.model || '—'}</td>
             <td class="tr">${Number(inv.acOutputKw).toFixed(2)}</td>
@@ -1327,8 +1395,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       </table>
       ${_bos.branchSlotWarning ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#fff8e1;"><strong>NOTE:</strong> ${_bos.branchSlotWarning}</div>` : ''}`;
       })()}
-      <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string) -->
-      ${_schedIsMicro ? _schedAcBranchBlock : `
+      <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string;
+           hybrid: one block PER SUB from the shared conductor authority) -->
+      ${_schedHybrid ? _schedHybridWireBlocks : _schedIsMicro ? _schedAcBranchBlock : `
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>
       <table class="equip-table">
         <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Isc×1.25 (A)</th><th>OCPD ≥ Isc×1.56 (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
@@ -1370,7 +1439,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>
       </div>`}
 
-      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST)}
+      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid })}
 
 
       <!-- System-Specific Hardware Schedule -->

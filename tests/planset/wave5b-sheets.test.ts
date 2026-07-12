@@ -185,3 +185,32 @@ describe('wave 5B — hybrid electrical sheets', () => {
     expect(singleHtml).not.toContain('E-1 SOURCE SUMMARY');
   });
 });
+
+// ═════ 4. SCHED — per-sub module/inverter rows + BOM sub grouping ═══════════
+describe('wave 5B — hybrid equipment schedule (SCHED)', () => {
+  it('module + inverter tables carry a System column with per-sub rows', () => {
+    expect(hybridHtml).toContain('Solar Modules — per sub-system (hybrid)');
+    expect(hybridHtml).toContain('Inverters — per sub-system (hybrid)');
+    // Three module rows at subset counts with sub tags (order: row label then sub cell).
+    expect(hybridHtml).toMatch(/<td class="fw7">ROOF<\/td>\s*<td>Canadian Solar<\/td><td>CS6R-430MS<\/td>\s*<td class="tr fw7">4<\/td>/);
+    expect(hybridHtml).toMatch(/<td class="fw7">GROUND<\/td>\s*<td>Tesla<\/td><td>TSP-420<\/td>\s*<td class="tr fw7">4<\/td>/);
+    expect(hybridHtml).toMatch(/<td class="fw7">FENCE<\/td>\s*<td>SolFence<\/td><td>SF-BIF-400<\/td>\s*<td class="tr fw7">4<\/td>/);
+  });
+
+  it('wire sizing renders one block per sub from the shared authority', () => {
+    expect(hybridHtml).toMatch(/AC Branch Circuit Schedule &mdash; ROOF — 4 MODULES — Enphase IQ8M \(MICRO\)/);
+    expect(hybridHtml).toMatch(/DC String Wire Sizing &mdash; GROUND — 4 MODULES — Solis S6-GR1P6K \(STRING\)/);
+    expect(hybridHtml).toMatch(/DC String Wire Sizing &mdash; FENCE — 4 MODULES — SolFence SF-OPT-3800 \(OPTIMIZER\)/);
+    expect(hybridHtml).toContain('WIRE SIZING INTERPRETATION (HYBRID)');
+  });
+
+  it('BOM table groups stage rows by sub where stamped (System column)', () => {
+    // Hybrid structural lines are stamped by bomForPermit's per-sub loop —
+    // fence posts under FENCE, ground piles/beams under GROUND.
+    expect(hybridHtml).toMatch(/<th style="width:7%">System<\/th>/);
+    expect(hybridHtml).toMatch(/<td style="font-size:7.5px;font-weight:700;">FENCE<\/td>/);
+    expect(hybridHtml).toMatch(/<td style="font-size:7.5px;font-weight:700;">GROUND<\/td>/);
+    // Single-type SCHED keeps the legacy 10-column table (no System column).
+    expect(singleHtml).not.toMatch(/<th style="width:7%">System<\/th>/);
+  });
+});

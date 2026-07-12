@@ -72,6 +72,9 @@ export interface PermitBOMItem {
   required?: boolean;
   unitCost?: number;
   totalCost?: number;
+  /** Wave 5B passthrough of the Wave-2c per-sub stamp ('roof'|'ground'|'fence')
+   *  — SCHED groups stage rows by sub WHERE STAMPED (hybrid only). */
+  subSystem?: string;
   // Legacy compat
   ulListing?: string;
 }
@@ -153,6 +156,9 @@ function v4ToPermit(item: BOMLineItemV4): PermitBOMItem {
     required:     item.required,
     unitCost:     item.unitCost,
     totalCost:    item.totalCost,
+    // Per-sub stamp survives into the permit BOM (set by generateBOMV4 only
+    // when the generation input carries subSystems — Wave 2c).
+    subSystem:    item.subSystem,
   };
 }
 
@@ -416,7 +422,9 @@ export function generateBOMForPermit(
       const bomType = sec.key === 'fence' ? 'fence' : 'ground';
       const secInput = extractStructuralInputFromCAD(bomType as BOMSystemType, sec.totalPanels, cad);
       const secResult = deriveStructuralBOM(secInput);
-      for (const item of secResult.items) structItems.push(structuralToPermit(item, _idx++));
+      // Wave 5B: stamp each hybrid structural line with its owning sub so the
+      // SCHED table can group fence posts under FENCE and piles under GROUND.
+      for (const item of secResult.items) structItems.push({ ...structuralToPermit(item, _idx++), subSystem: sec.key });
       log.push(`[bomForPermit] hybrid ${sec.key} structural: ${secResult.items.length} items (${sec.totalPanels} panels)`);
     }
   } else {
