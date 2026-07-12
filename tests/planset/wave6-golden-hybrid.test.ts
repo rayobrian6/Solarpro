@@ -443,3 +443,57 @@ describe('wave 6 golden — equipment schedule', () => {
     expect(html).toMatch(/<td class="fw7">FENCE<\/td>\s*<td>SolFence<\/td><td>SF-BIF-400<\/td>\s*<td class="tr fw7">17<\/td>/);
   });
 });
+
+// ─── Ray ruling (2026-07-12): supply-side connections are NOT subject to the
+// 120% busbar rule — the tap (or a utility-approved meter-socket lug adapter)
+// lands AHEAD of the bus (NEC 705.11). The POI aggregation must never raise
+// a 705.12(B) failure for supply-side hybrids, at any summed backfeed.
+import { computeMultiSystem } from '../../lib/computed-multi-system';
+
+describe('supply-side hybrid POI — 120% rule not applicable (NEC 705.11)', () => {
+  const mkSub = (key: 'roof' | 'ground' | 'fence', panels: number, acKw: number) => ({
+    subSystemKey: key,
+    systemType: key === 'roof' ? 'roof' : key === 'ground' ? 'ground' : 'fence',
+    topologyType: 'string' as const,
+    totalPanels: panels,
+    totalStrings: 1,
+    panelsPerString: panels,
+    panelWatts: 400,
+    panelVoc: 41.5, panelIsc: 12.3,
+    inverterAcKw: acKw,
+    inverterAcCurrentMax: (acKw * 1000) / 240,
+    inverterCount: 1,
+    mainPanelAmps: 200,
+    busRating: 200,
+    interconnectionMethod: 'SUPPLY_SIDE_TAP',
+    systemVoltage: 240,
+    runLengths: {},
+  });
+
+  it('massive summed backfeed on a small bus still passes when supply-side', () => {
+    const result = computeMultiSystem([
+      mkSub('roof', 48, 12) as any,
+      mkSub('ground', 26, 10) as any,
+      mkSub('fence', 17, 7) as any,
+    ]);
+    // 29 kW AC on a 200A/200A bus would obliterate 120% load-side — but the
+    // connection is ahead of the bus, so the check is N/A and must PASS.
+    expect(result.aggregate.interconnectionPass).toBe(true);
+    expect(result.aggregate.issues.some((i: any) => i.code === 'NEC_705_12B_120PCT')).toBe(false);
+  });
+
+  it('same fleet load-side DOES fail (the honest counterpart)', () => {
+    const subs = [
+      { ...mkSub('roof', 48, 12), interconnectionMethod: 'LOAD_SIDE' },
+      { ...mkSub('ground', 26, 10), interconnectionMethod: 'LOAD_SIDE' },
+      { ...mkSub('fence', 17, 7), interconnectionMethod: 'LOAD_SIDE' },
+    ];
+    const result = computeMultiSystem(subs as any);
+    expect(result.aggregate.interconnectionPass).toBe(false);
+    const issue = result.aggregate.issues.find((i: any) => i.code === 'NEC_705_12B_120PCT');
+    expect(issue).toBeDefined();
+    // Remedy text carries Ray's field options: tap ahead of the main OR the
+    // utility-approved meter-socket lug adapter.
+    expect(issue!.suggestion).toMatch(/meter-socket lug adapter/);
+  });
+});

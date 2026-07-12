@@ -376,7 +376,8 @@ export function computeMultiSystem(
         `${backfeedBreakerAmps + mainPanelAmps}A > 120% of ${busRating}A bus (${Math.round(busRating * 1.2)}A max)`,
       necReference: 'NEC 705.12(B)',
       autoFixed: false,
-      suggestion: 'Consider supply-side tap (NEC 705.11) or panel upgrade',
+      suggestion: 'Consider a supply-side connection (NEC 705.11) — insulated tap ' +
+        'ahead of the main, or a utility-approved meter-socket lug adapter — or a panel upgrade',
     });
   }
   const errorCount = issues.filter(i => i.severity === 'error').length;

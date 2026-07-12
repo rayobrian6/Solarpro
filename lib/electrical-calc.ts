@@ -895,7 +895,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         necReference: interconnectionNecRef,
       });
     } else {
-      interconnectionMessage = `120% Busbar Rule Violation. Total backfeed (${icSolarBreaker}A) exceeds max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max. Options: supply-side tap, derate main breaker, or upgrade panel bus.`;
+      interconnectionMessage = `120% Busbar Rule Violation. Total backfeed (${icSolarBreaker}A) exceeds max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max. Options: supply-side connection (insulated tap or utility-approved meter-socket lug adapter, NEC 705.11), derate main breaker, or upgrade panel bus.`;
       interconnectionIssues.push({
         code: 'E-BUSBAR-120',
         severity: 'error',
