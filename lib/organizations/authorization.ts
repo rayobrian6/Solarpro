@@ -47,6 +47,7 @@
 
 import { getDbReady } from '@/lib/db-neon';
 import { isValidUUID } from '@/lib/db-neon';
+import { writeAuditLog } from '@/lib/auditLog';
 import {
   type OrgRole,
   isOrgFeatureEnabled,
@@ -479,19 +480,59 @@ export function isEnforcementEnabled(): boolean {
  * This is called internally by enforceAuthz() but can also be called
  * directly for advisory checks.
  */
-export function logAuthzDecision(
+/**
+ * Log an authorization decision to the tamper-evident audit log with org
+ * context (ADR-013, T-08). Previously this function only emitted a
+ * console.warn string; now it routes through lib/auditLog.ts writeAuditLog
+ * with actor_organization_id set to the org being authorized against.
+ *
+ * This is fire-and-forget (non-throwing): authz decision logging is
+ * observational, not a mutation. Fail-closed audit is reserved for
+ * authority mutations (auditOrgAuthorityEvent in lib/auditLog.ts).
+ *
+ * The console.warn is retained as a secondary safety net for cases where
+ * the audit_log table is unavailable.
+ */
+export async function logAuthzDecision(
   userId: string,
   organizationId: string,
   action: string,
   result: AuthzResult
-): void {
+): Promise<void> {
   const status = result.allowed ? 'ALLOWED' : `DENIED(${(result as DeniedAuthzResult).reason})`;
   const detail = result.allowed ? '' : `: ${(result as DeniedAuthzResult).detail}`;
-  // Using console.warn so it appears in server logs for audit purposes.
-  // In production, this would be routed to the audit log (lib/auditLog.ts).
+  // Secondary safety net — always emit to console for server log observability
   console.warn(
     `[AUTHZ] user=${userId} org=${organizationId} action=${action} → ${status}${detail}`
   );
+
+  // Primary path — route to tamper-evident audit log with org context
+  try {
+    await writeAuditLog({
+      category: 'admin',
+      action: 'organization_authz_decision',
+      description: `Authz decision: user=${userId} org=${organizationId} action=${action} → ${status}${detail}`,
+      actor_id: userId,
+      actor_email: null,
+      actor_role: null,
+      target_type: 'organization',
+      target_id: organizationId,
+      metadata: {
+        action,
+        allowed: result.allowed,
+        reason: result.allowed ? 'allowed' : (result as DeniedAuthzResult).reason,
+        detail: result.allowed ? null : (result as DeniedAuthzResult).detail,
+      },
+      ip_address: null,
+      user_agent: null,
+      request_path: null,
+      actor_organization_id: organizationId,
+      resource_owner_organization_id: organizationId,
+    });
+  } catch {
+    // Non-throwing: authz decision logging is observational, not a mutation.
+    // The console.warn above ensures the event is not silently lost.
+  }
 }
 
 /**
@@ -516,7 +557,7 @@ export async function enforceAuthz(
   action: OrgAction
 ): Promise<void> {
   const result = await authorize(userId, organizationId, action);
-  logAuthzDecision(userId, organizationId, action, result);
+  await logAuthzDecision(userId, organizationId, action, result);
 
   if (!result.allowed) {
     const denied = result as DeniedAuthzResult;
@@ -539,7 +580,7 @@ export async function enforceMemberAction(
   action: 'remove' | 'change_role' | 'suspend' | 'reactivate' | 'invite'
 ): Promise<void> {
   const result = await authorizeMemberAction(actorId, organizationId, targetUserId, action);
-  logAuthzDecision(actorId, organizationId, `member:${action}:${targetUserId}`, result);
+  await logAuthzDecision(actorId, organizationId, `member:${action}:${targetUserId}`, result);
 
   if (!result.allowed) {
     const denied = result as DeniedAuthzResult;

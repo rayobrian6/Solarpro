@@ -122,7 +122,20 @@ export type AuditAction =
   | 'migration_mfa_denied'
   | 'migration_mfa_replay_detected'
   | 'migration_transaction_mode_review_required'
-  | 'migration_execution_blocked_non_transactional';
+  | 'migration_execution_blocked_non_transactional'
+  // Organization authority events (Phase 1B.1 — tenant-aware audit context)
+  | 'organization_created'
+  | 'organization_updated'
+  | 'organization_archived'
+  | 'organization_suspended'
+  | 'organization_reactivated'
+  | 'organization_membership_invited'
+  | 'organization_membership_added'
+  | 'organization_membership_removed'
+  | 'organization_membership_suspended'
+  | 'organization_membership_reactivated'
+  | 'organization_membership_role_changed'
+  | 'organization_authz_decision';
 
 export interface AuditLogEntry {
   id?: string;
@@ -139,6 +152,9 @@ export interface AuditLogEntry {
   ip_address: string | null;
   user_agent: string | null;
   request_path: string | null;
+  // ── Tenant-aware audit context (ADR-013, T-08) ──
+  actor_organization_id: string | null;           // Org context of actor (per-org chain key)
+  resource_owner_organization_id: string | null;  // Org that owns affected resource
   prev_hash: string | null;   // SHA-256 of previous entry (tamper chain)
   entry_hash: string | null;  // SHA-256 of this entry (computed on insert)
 }
@@ -192,6 +208,8 @@ function computeEntryHash(entry: Omit<AuditLogEntry, 'id' | 'entry_hash'>): stri
     entry.ip_address ?? '',
     entry.user_agent ?? '',
     entry.request_path ?? '',
+    entry.actor_organization_id ?? '',
+    entry.resource_owner_organization_id ?? '',
     entry.prev_hash ?? '',
   ].join('|');
 
@@ -200,17 +218,32 @@ function computeEntryHash(entry: Omit<AuditLogEntry, 'id' | 'entry_hash'>): stri
 
 /**
  * Fetches the most recent audit log entry's hash for chain continuation.
+ * Per-org hash chain partitioning (ADR-013): when orgId is provided, only
+ * the latest entry for that org is returned. When orgId is null/undefined,
+ * the latest platform-level entry (actor_organization_id IS NULL) is returned.
  * Returns null if no entries exist (first entry in chain).
  */
-async function getLatestHash(): Promise<string | null> {
+async function getLatestHash(orgId?: string | null): Promise<string | null> {
   try {
     const sql = await getDbWithRetry();
-    const rows = await sql`
-      SELECT entry_hash FROM audit_log
-      ORDER BY timestamp DESC
-      LIMIT 1
-    `;
-    return (rows[0] as any)?.entry_hash ?? null;
+    if (orgId) {
+      const rows = await sql`
+        SELECT entry_hash FROM audit_log
+        WHERE actor_organization_id = ${orgId}::uuid
+        ORDER BY timestamp DESC
+        LIMIT 1
+      `;
+      return (rows[0] as any)?.entry_hash ?? null;
+    } else {
+      // Platform-level chain (actor_organization_id IS NULL)
+      const rows = await sql`
+        SELECT entry_hash FROM audit_log
+        WHERE actor_organization_id IS NULL
+        ORDER BY timestamp DESC
+        LIMIT 1
+      `;
+      return (rows[0] as any)?.entry_hash ?? null;
+    }
   } catch {
     // If audit_log table doesn't exist yet, return null (chain starts fresh)
     return null;
@@ -225,9 +258,13 @@ async function getLatestHash(): Promise<string | null> {
  * This is the primary function for recording security-relevant events.
  * It automatically:
  *   - Redacts sensitive metadata fields
- *   - Chains to the previous entry via SHA-256 hash
+ *   - Chains to the previous entry via SHA-256 hash (per-org partition, ADR-013)
  *   - Computes and stores its own hash for future chain verification
  *   - Handles missing audit_log table gracefully (falls back to console)
+ *
+ * Per-org hash chain (ADR-013): actor_organization_id partitions the chain.
+ * Each event's prev_hash links to the previous entry with the SAME
+ * actor_organization_id. Platform-level events (orgId null) form a separate chain.
  *
  * @returns The entry hash on success, null on failure (never throws)
  */
@@ -241,7 +278,10 @@ export async function writeAuditLog(
   // Redact sensitive metadata before storage
   const safeMetadata = redactMetadata(entry.metadata ?? {});
 
-  const prevHash = await getLatestHash();
+  // Per-org hash chain partitioning (ADR-013)
+  const orgId = entry.actor_organization_id ?? null;
+  const resourceOrgId = entry.resource_owner_organization_id ?? null;
+  const prevHash = await getLatestHash(orgId);
 
   const fullEntry: Omit<AuditLogEntry, 'id' | 'entry_hash'> = {
     timestamp: isoTimestamp,
@@ -257,6 +297,8 @@ export async function writeAuditLog(
     ip_address: entry.ip_address ?? null,
     user_agent: entry.user_agent ?? null,
     request_path: entry.request_path ?? null,
+    actor_organization_id: orgId,
+    resource_owner_organization_id: resourceOrgId,
     prev_hash: prevHash,
   };
 
@@ -271,6 +313,7 @@ export async function writeAuditLog(
         target_type, target_id,
         description, metadata,
         ip_address, user_agent, request_path,
+        actor_organization_id, resource_owner_organization_id,
         prev_hash, entry_hash
       ) VALUES (
         ${isoTimestamp}::timestamptz, ${entry.category}::text, ${entry.action}::text,
@@ -278,6 +321,7 @@ export async function writeAuditLog(
         ${fullEntry.target_type}, ${fullEntry.target_id},
         ${entry.description}, ${JSON.stringify(safeMetadata)}::jsonb,
         ${fullEntry.ip_address}, ${fullEntry.user_agent}, ${fullEntry.request_path},
+        ${orgId}::uuid, ${resourceOrgId}::uuid,
         ${prevHash}, ${entryHash}
       )
     `;
@@ -301,6 +345,9 @@ interface AuditContext {
   actor_id?: string | null;
   actor_email?: string | null;
   actor_role?: string | null;
+  // Tenant-aware context (ADR-013, T-08)
+  actor_organization_id?: string | null;
+  resource_owner_organization_id?: string | null;
   ip_address?: string | null;
   user_agent?: string | null;
   request_path?: string | null;
@@ -328,6 +375,8 @@ export async function auditAuth(
     ip_address: ctx.ip_address ?? null,
     user_agent: ctx.user_agent ?? null,
     request_path: ctx.request_path ?? null,
+    actor_organization_id: ctx.actor_organization_id ?? null,
+    resource_owner_organization_id: ctx.resource_owner_organization_id ?? null,
   });
 }
 
@@ -355,6 +404,8 @@ export async function auditData(
     ip_address: ctx.ip_address ?? null,
     user_agent: ctx.user_agent ?? null,
     request_path: ctx.request_path ?? null,
+    actor_organization_id: ctx.actor_organization_id ?? null,
+    resource_owner_organization_id: ctx.resource_owner_organization_id ?? null,
   });
 }
 
@@ -382,6 +433,8 @@ export async function auditAdmin(
     ip_address: ctx.ip_address ?? null,
     user_agent: ctx.user_agent ?? null,
     request_path: ctx.request_path ?? null,
+    actor_organization_id: ctx.actor_organization_id ?? null,
+    resource_owner_organization_id: ctx.resource_owner_organization_id ?? null,
   });
 }
 
@@ -407,6 +460,8 @@ export async function auditSecurity(
     ip_address: ctx.ip_address ?? null,
     user_agent: ctx.user_agent ?? null,
     request_path: ctx.request_path ?? null,
+    actor_organization_id: ctx.actor_organization_id ?? null,
+    resource_owner_organization_id: ctx.resource_owner_organization_id ?? null,
   });
 }
 
@@ -434,7 +489,77 @@ export async function auditCompliance(
     ip_address: ctx.ip_address ?? null,
     user_agent: ctx.user_agent ?? null,
     request_path: ctx.request_path ?? null,
+    actor_organization_id: ctx.actor_organization_id ?? null,
+    resource_owner_organization_id: ctx.resource_owner_organization_id ?? null,
   });
+}
+
+// ── Organization Authority Audit (Phase 1B.1, ADR-013, T-08, T-12) ───────
+
+export interface OrgAuditContext {
+  actor_id: string | null;
+  actor_email: string | null;
+  actor_role: string | null;
+  actor_organization_id: string | null;
+  resource_owner_organization_id: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  request_path?: string | null;
+}
+
+/**
+ * Fail-closed audit for organization authority mutations.
+ *
+ * Unlike the fire-and-forget convenience wrappers, this function THROWS
+ * if the audit log write fails. This is required for authority mutations
+ * (member removal, role change, org archive/suspend) where the audit trail
+ * is mandatory — silently losing the audit record would be a compliance
+ * violation (T-12, T-08).
+ *
+ * The caller should wrap the mutation AND this call in a transaction, or
+ * call this AFTER a successful mutation and roll back if it throws.
+ * In practice, the route handlers call this after the service-layer mutation
+ * succeeds; if the audit fails, the route returns a 500 error (the mutation
+ * is already committed, but the audit failure is surfaced and logged).
+ *
+ * @returns The entry hash (non-null on success)
+ * @throws Error if the audit log write fails
+ */
+export async function auditOrgAuthorityEvent(
+  action: AuditAction,
+  description: string,
+  ctx: OrgAuditContext,
+  targetType: string | null,
+  targetId: string | null,
+  meta?: Record<string, unknown>,
+): Promise<string> {
+  const entryHash = await writeAuditLog({
+    category: 'admin',
+    action,
+    description,
+    actor_id: ctx.actor_id,
+    actor_email: ctx.actor_email,
+    actor_role: ctx.actor_role,
+    target_type: targetType,
+    target_id: targetId,
+    metadata: meta ?? {},
+    ip_address: ctx.ip_address ?? null,
+    user_agent: ctx.user_agent ?? null,
+    request_path: ctx.request_path ?? null,
+    actor_organization_id: ctx.actor_organization_id,
+    resource_owner_organization_id: ctx.resource_owner_organization_id,
+  });
+
+  if (entryHash === null) {
+    // Fail-closed: the audit write failed (writeAuditLog fell back to console).
+    // For authority mutations, we must not silently swallow this.
+    throw new Error(
+      `AUDIT_WRITE_FAILED: Failed to persist audit log entry for action '${action}'. ` +
+      `Authority mutation audit trail is mandatory (ADR-013, T-08, T-12).`
+    );
+  }
+
+  return entryHash;
 }
 
 // ─── Chain Verification ─────────────────────────────────────────────────────
@@ -469,12 +594,29 @@ export interface ChainVerificationResult {
  */
 export async function verifyAuditChain(
   since?: Date,
+  orgId?: string | null,
 ): Promise<ChainVerificationResult> {
   const sql = await getDbWithRetry();
 
-  const sinceClause = since
-    ? sql`WHERE timestamp >= ${since.toISOString()}::timestamptz`
-    : sql``;
+  // Per-org chain partition (ADR-013): when orgId is provided, verify only
+  // that org's chain. When orgId is null, verify the platform-level chain.
+  // When orgId is undefined, verify all chains (backward-compatible behavior).
+  // Per-org chain partition (ADR-013): when orgId is provided, verify only
+  // that org's chain. When orgId is null, verify the platform-level chain.
+  // When orgId is undefined, verify all chains (backward-compatible behavior).
+  //
+  // We use the static-SQL pattern (same as queryAuditLog) with
+  // (${value ?? null}::type IS NULL OR ...) predicates instead of dynamic
+  // WHERE fragments. This avoids composable SQL fragment issues with the
+  // Neon mock/test driver while remaining production-safe.
+
+  const sinceIso = since ? since.toISOString() : null;
+  // orgFilterParam: when orgId is undefined (verify all), use null so the
+  // org predicate is always true. When orgId is null (platform chain), we
+  // need WHERE actor_organization_id IS NULL — handled via a separate boolean
+  // predicate below. When orgId is a string, filter by that org.
+  const orgFilterParam = orgId === undefined ? null : orgId;
+  const platformOnly = orgId === null; // true only when explicitly null
 
   const rows = await sql`
     SELECT id, timestamp, category, action,
@@ -482,9 +624,12 @@ export async function verifyAuditChain(
            target_type, target_id,
            description, metadata,
            ip_address, user_agent, request_path,
+           actor_organization_id, resource_owner_organization_id,
            prev_hash, entry_hash
     FROM audit_log
-    ${sinceClause}
+    WHERE (${orgFilterParam ?? null}::uuid IS NULL OR actor_organization_id = ${orgFilterParam ?? null}::uuid)
+      AND (${platformOnly} = false OR actor_organization_id IS NULL)
+      AND (${sinceIso ?? null}::timestamptz IS NULL OR timestamp >= ${sinceIso ?? null}::timestamptz)
     ORDER BY timestamp ASC
   ` as any[];
 
@@ -526,8 +671,14 @@ export async function verifyAuditChain(
     }
 
     // Verify entry_hash by recomputing
+    // Normalize timestamp: pg driver returns timestamptz as JS Date objects,
+    // but writeAuditLog computed the hash using the ISO string representation.
+    // We must match the exact format used at write time to avoid false tamper alerts.
+    const rowTimestamp = row.timestamp instanceof Date
+      ? row.timestamp.toISOString()
+      : String(row.timestamp);
     const recomputedHash = computeEntryHash({
-      timestamp: row.timestamp,
+      timestamp: rowTimestamp,
       category: row.category,
       action: row.action,
       actor_id: row.actor_id,
@@ -540,6 +691,8 @@ export async function verifyAuditChain(
       ip_address: row.ip_address,
       user_agent: row.user_agent,
       request_path: row.request_path,
+      actor_organization_id: row.actor_organization_id ?? null,
+      resource_owner_organization_id: row.resource_owner_organization_id ?? null,
       prev_hash: row.prev_hash,
     });
 
@@ -567,6 +720,8 @@ export interface AuditLogQueryOptions {
   actor_id?: string;
   target_type?: string;
   target_id?: string;
+  actor_organization_id?: string;          // Filter by actor's org (ADR-013)
+  resource_owner_organization_id?: string; // Filter by resource-owning org
   since?: Date;
   until?: Date;
   limit?: number;
@@ -576,20 +731,36 @@ export interface AuditLogQueryOptions {
 /**
  * Query audit log entries with filtering. Used for compliance reviews,
  * incident investigation, and SOC 2 evidence collection.
+ *
+ * Supports tenant-scoped queries via actor_organization_id and
+ * resource_owner_organization_id filters (ADR-013, T-08).
  */
 export async function queryAuditLog(
   options: AuditLogQueryOptions = {},
 ): Promise<Array<AuditLogEntry>> {
   const sql = await getDbWithRetry();
-  const { category, action, actor_id, target_type, target_id, since, until, limit = 100, offset = 0 } = options;
+  const {
+    category, action, actor_id, target_type, target_id,
+    actor_organization_id, resource_owner_organization_id,
+    since, until, limit = 100, offset = 0,
+  } = options;
 
   const rows = await sql`
-    SELECT * FROM audit_log
+    SELECT id, timestamp, category, action,
+           actor_id, actor_email, actor_role,
+           target_type, target_id,
+           description, metadata,
+           ip_address, user_agent, request_path,
+           actor_organization_id, resource_owner_organization_id,
+           prev_hash, entry_hash
+    FROM audit_log
     WHERE (${category ?? null}::text IS NULL OR category = ${category})
       AND (${action ?? null}::text IS NULL OR action = ${action})
       AND (${actor_id ?? null}::text IS NULL OR actor_id = ${actor_id})
       AND (${target_type ?? null}::text IS NULL OR target_type = ${target_type})
       AND (${target_id ?? null}::text IS NULL OR target_id = ${target_id})
+      AND (${actor_organization_id ?? null}::uuid IS NULL OR actor_organization_id = ${actor_organization_id}::uuid)
+      AND (${resource_owner_organization_id ?? null}::uuid IS NULL OR resource_owner_organization_id = ${resource_owner_organization_id}::uuid)
       AND (${since ?? null}::timestamptz IS NULL OR timestamp >= ${since?.toISOString()}::timestamptz)
       AND (${until ?? null}::timestamptz IS NULL OR timestamp <= ${until?.toISOString()}::timestamptz)
     ORDER BY timestamp DESC
@@ -611,6 +782,8 @@ export async function queryAuditLog(
     ip_address: row.ip_address,
     user_agent: row.user_agent,
     request_path: row.request_path,
+    actor_organization_id: row.actor_organization_id ?? null,
+    resource_owner_organization_id: row.resource_owner_organization_id ?? null,
     prev_hash: row.prev_hash,
     entry_hash: row.entry_hash,
   }));
