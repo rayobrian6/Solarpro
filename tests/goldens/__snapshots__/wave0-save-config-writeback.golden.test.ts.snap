@@ -1,0 +1,57 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Wave 0 golden — save-config write-back (reconcileFromEngineeringConfig) > battery REMOVED in engineering clears the design battery (legacy clear-patch shape) 1`] = `
+{
+  "batteries": [],
+  "batteryCount": 0,
+  "batteryId": "",
+  "source": "engineering",
+  "updatedAt": "2026-07-11T00:00:00.000Z",
+}
+`;
+
+exports[`Wave 0 golden — save-config write-back (reconcileFromEngineeringConfig) > panel + battery change on a legacy config emits the pre-contract patch shape 1`] = `
+{
+  "batteries": [
+    {
+      "capacityKwh": 13.5,
+      "chemistry": "LFP",
+      "id": "tesla-powerwall-3",
+      "manufacturer": "Tesla",
+      "model": "Powerwall 3",
+      "peakPowerKw": 11.5,
+      "powerKw": 11.5,
+      "pricePerUnit": 0,
+      "roundTripEfficiency": 97.5,
+      "voltage": 50,
+      "weight": 287,
+    },
+  ],
+  "batteryCount": 2,
+  "batteryId": "tesla-powerwall-3",
+  "batteryKwh": 27,
+  "panel": {
+    "bifacial": false,
+    "bifacialFactor": 1,
+    "cellType": "mono-PERC",
+    "datasheetUrl": "https://energylibrary.tesla.com/docs/Public/Solar/Retrofit/Datasheet/TeslaSolarPanel/DatasheetTeslaSolarPanel.pdf",
+    "efficiency": 20.5,
+    "height": 1.8059,
+    "id": "tesla-tsp-420",
+    "imp": 12.25,
+    "isc": 13.03,
+    "manufacturer": "Tesla",
+    "model": "Solar Panel TSP-420",
+    "pricePerWatt": 0,
+    "temperatureCoeff": -0.34,
+    "vmp": 34.29,
+    "voc": 40.95,
+    "wattage": 420,
+    "weight": 22.2,
+    "width": 1.1354,
+  },
+  "panelId": "tesla-tsp-420",
+  "source": "engineering",
+  "updatedAt": "2026-07-11T00:00:00.000Z",
+}
+`;
