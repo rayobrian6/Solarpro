@@ -2372,10 +2372,21 @@ function EngineeringPageInner() {
     saveTimerRef.current = setTimeout(async () => {
       try {
         let resBody: unknown;
+        // Wave 3.5 (contract §1.3/§3 item 5): a config carrying a subSystems
+        // map is a v2 envelope — stamp schemaVersion: 2 so the save route
+        // never mistakes this client for a stale-whitelist writer (the
+        // old-client re-normalization path stays reserved for actual old
+        // clients). Flat mirrors are NEVER computed client-side — storage
+        // derives them from the map at N>1 (§1.4 single-writer rule).
+        const _saveHasMap =
+          (config as any).subSystems && Object.keys((config as any).subSystems).length > 0;
+        const _savePayloadConfig = _saveHasMap
+          ? { ...config, schemaVersion: Math.max(2, Number((config as any).schemaVersion) || 0) }
+          : config;
         const res = await fetch('/api/engineering/save-config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId: currentProjectId, config }),
+          body: JSON.stringify({ projectId: currentProjectId, config: _savePayloadConfig }),
         });
         try { resBody = await res.clone().json(); } catch { resBody = null; }
         console.log('[AUTO-SAVE] status:', res.status, 'body:', resBody);
