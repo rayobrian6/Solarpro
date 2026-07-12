@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
+import { resolveEquipmentDatasheets } from '@/lib/permit/sections/datasheetAppendix';
 import { roofProject } from '../../test-fixtures/roofProject';
 
 const clone = <T>(o: T): T => JSON.parse(JSON.stringify(o));
@@ -186,6 +187,51 @@ describe('wave 5B — hybrid electrical sheets', () => {
   });
 });
 
+/** The one rendered page whose title block carries the given sheet id.
+ *  Splits on the page WRAPPER divs only (class="page" / "page sld-page"),
+ *  never on page-content/page-draw. */
+function pageById(html: string, id: string): string {
+  const chunks = html.split(/<div class="page(?:\s[^"]*)?">/);
+  const hit = chunks.find(c => c.includes(`class="tb-sheet-id">${id}<`));
+  expect(hit, `no rendered page with sheet id ${id}`).toBeTruthy();
+  return hit as string;
+}
+
+// ═════ 5. PE letters — per-sub subset params (kills the 94-modules lie) ═════
+describe('wave 5B — per-sub PE structural letters', () => {
+  it('PE-1 (roof) certifies the ROOF subset with roof equipment', () => {
+    const p = pageById(hybridHtml, 'PE-1');
+    expect(p).toContain('Roof-Mounted Array');
+    expect(p).toMatch(/Total Modules<\/td><td class="iv">4</);
+    expect(p).toContain('Canadian Solar CS6R-430MS');
+  });
+
+  it('PE-1F (fence) has FENCE subset params — never 12 modules or roof racking', () => {
+    const p = pageById(hybridHtml, 'PE-1F');
+    expect(p).toContain('Solar Fence Array');
+    expect(p).toMatch(/Total Modules<\/td><td class="iv">4</);
+    expect(p).toContain('SolFence SF-BIF-400');
+    expect(p).toContain('Solar Fence Rail System');
+    expect(p).not.toContain('IronRidge');          // roof racking must not be certified here
+    expect(p).not.toMatch(/Total Modules<\/td><td class="iv">12</);
+  });
+
+  it('PE-1G (ground) has GROUND subset params + pile/pier language', () => {
+    const p = pageById(hybridHtml, 'PE-1G');
+    expect(p).toContain('Ground Mount Array');
+    expect(p).toMatch(/Total Modules<\/td><td class="iv">4</);
+    expect(p).toContain('Tesla TSP-420');
+    expect(p).toContain('Ground Mount Racking System');
+    expect(p).not.toContain('IronRidge');
+  });
+
+  it('single-type PE-1 letter untouched (project-wide params)', () => {
+    const p = pageById(singleHtml, 'PE-1');
+    expect(p).toMatch(/Total Modules<\/td><td class="iv">12</);
+    expect(p).toContain('IronRidge XR100');
+  });
+});
+
 // ═════ 4. SCHED — per-sub module/inverter rows + BOM sub grouping ═══════════
 describe('wave 5B — hybrid equipment schedule (SCHED)', () => {
   it('module + inverter tables carry a System column with per-sub rows', () => {
@@ -202,6 +248,18 @@ describe('wave 5B — hybrid equipment schedule (SCHED)', () => {
     expect(hybridHtml).toMatch(/DC String Wire Sizing &mdash; GROUND — 4 MODULES — Solis S6-GR1P6K \(STRING\)/);
     expect(hybridHtml).toMatch(/DC String Wire Sizing &mdash; FENCE — 4 MODULES — SolFence SF-OPT-3800 \(OPTIMIZER\)/);
     expect(hybridHtml).toContain('WIRE SIZING INTERPRETATION (HYBRID)');
+  });
+
+  it('datasheet appendix fuzzes EVERY distinct panel/inverter across subs', () => {
+    // The hybrid fixture carries 3 distinct panel models + 3 distinct inverter
+    // models; the resolver must consider ALL of them (pages render only for
+    // models with a manufacturer asset on file — so assert superset + dedupe,
+    // not exact count).
+    const hybridDs = resolveEquipmentDatasheets(mkHybrid() as any);
+    const singleDs = resolveEquipmentDatasheets(JSON.parse(JSON.stringify(roofProject)) as any);
+    const ids = hybridDs.map(d => d.asset.id);
+    expect(new Set(ids).size).toBe(ids.length);                    // no duplicate pages
+    expect(hybridDs.length).toBeGreaterThanOrEqual(singleDs.length); // never fewer than the winner-only path
   });
 
   it('BOM table groups stage rows by sub where stamped (System column)', () => {

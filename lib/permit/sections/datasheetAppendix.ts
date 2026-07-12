@@ -31,10 +31,23 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
     if (a && a.imageUrl && !seen.has(a.id)) { seen.add(a.id); out.push({ label, asset: a }); }
   };
 
-  // PV module
-  const panelModel = system.inverters?.[0]?.strings?.[0]?.panelModel;
-  const dbPanel = fuzz(SOLAR_PANELS, panelModel);
-  push('PV MODULE', getManufacturerAsset(dbPanel?.id, 'module_spec'));
+  // PV module(s) — one datasheet per DISTINCT panel model across ALL
+  // inverters' strings (Wave 5B: a hybrid's roof/ground/fence subs each carry
+  // their own tagged fleet + panel model — every distinct module gets its
+  // page). Single-type sets have one model, so output is unchanged; the
+  // `seen` set dedupes models that fuzz to the same catalog entry.
+  const panelModels: string[] = [];
+  for (const inv of system.inverters ?? []) {
+    for (const str of inv.strings ?? []) {
+      const m = str?.panelModel;
+      if (m && !panelModels.includes(m)) panelModels.push(m);
+    }
+  }
+  if (panelModels.length === 0) panelModels.push(system.inverters?.[0]?.strings?.[0]?.panelModel ?? '');
+  for (const m of panelModels) {
+    const dbPanel = fuzz(SOLAR_PANELS, m);
+    push('PV MODULE', getManufacturerAsset(dbPanel?.id, 'module_spec'));
+  }
 
   // Inverter(s) / microinverter(s) — one datasheet per distinct model
   for (const inv of system.inverters ?? []) {
