@@ -5,12 +5,14 @@
 
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
-import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-professional-renderer';
+import { renderSLDProfessional, type SLDProfessionalInput, type SLDSourceBranch } from '@/lib/sld-professional-renderer';
 import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
-import { buildConductorAuthority } from './conductorAuthority';
+import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
+import { isSubSystemKey, type SubSystemKey } from './subSystems';
+import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 
 /**
  * Build a live SLDProfessionalInput from PermitInput canonical data.
@@ -125,7 +127,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // Error 5b fix: ocpd IS declared on string type — no need for `as any`
   const dcOCPD = isMicro ? 0 : strings[0]?.ocpd ?? 20;
 
-  return {
+  const sldInput: SLDProfessionalInput = {
     projectName:             project.projectName ?? 'Solar PV System',
     clientName:              project.clientName ?? 'Homeowner',
     address:                 project.address ?? '',
@@ -202,6 +204,227 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // Design temperature (if available from AHJ data)
     designTempMin:           project.designTempMin ?? -10,
   };
+
+  // ── Wave 5 Lane A — hybrid source lanes (I-8: E-1 at N>1 renders the REAL
+  // multi-lane diagram, never the single-lane fallback). SOURCE OF TRUTH:
+  // conductorAuthority.subSystems (see buildSourceBranchesFromAuthority).
+  const _sources = buildSourceBranchesFromAuthority(_auth, input);
+  if (_sources && _sources.length > 1) {
+    sldInput.sources = _sources;
+    // Multi-lane contract: backfeedAmps = authoritative TOTAL = Σ per-lane
+    // per-physical-inverter rounded OCPDs + battery bus impact (§1.7). The
+    // stored project.backfeedBreakerA is a single-system figure and must not
+    // undercount a hybrid's summed 120% panel.
+    sldInput.backfeedAmps =
+      _sources.reduce((s, b) => s + (b.backfeedAmps ?? 0), 0) +
+      (sldInput.hasBattery ? (sldInput.batteryBackfeedA ?? 0) : 0);
+  }
+  return sldInput;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Wave 5 Lane A — SLDSourceBranch builders
+//
+// PERMIT PATH — SOURCE OF TRUTH DECISION (contract deliverable): branches are
+// built from `buildConductorAuthority(input, cad).subSystems`, NOT re-derived
+// from tagged inverters or cad.hybrid.sections directly. Rationale: the
+// authority is already the ONE shared derivation PV-4A/PV-4B/SCHED/BOM/E-1
+// read (its own inputs are the panel stamps, tagged inverters and CAD hybrid
+// sections, §1.1 hierarchy) — a second independent derivation here would
+// reintroduce the EL-2/EL-4 divergence class this campaign exists to kill.
+// The only value the authority does not carry is the §1.7 per-physical-
+// inverter backfeed sum for string/optimizer subs; that is computed from the
+// SAME tagged inverter list the authority consumed (identical tag rule).
+// ═════════════════════════════════════════════════════════════════════════════
+
+const _AUTH_TOPO_TO_SLD: Record<string, string> = {
+  MICRO: 'MICROINVERTER',
+  OPTIMIZER: 'STRING_WITH_OPTIMIZER',
+  STRING: 'STRING_INVERTER',
+};
+
+/** §1.7 breaker-granularity rule — one sub's backfeed contribution equals its
+ *  PHYSICAL breaker schedule: Σ nextStandardOCPD(perInverterAmps × 1.25) over
+ *  the sub's own tagged inverters (micro subs: the combiner feeder OCPD). */
+function subBackfeedFromInverters(
+  sub: SubSystemConductorAuthority,
+  inverters: Array<{ subSystemKey?: string; acOutputKw?: number; type?: string }>,
+  primaryKey: SubSystemKey,
+): number | undefined {
+  if (sub.isMicro) return sub.acSubFeeder.ocpdAmps ?? undefined;
+  const own = inverters.filter(inv =>
+    (isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey : primaryKey) === sub.key
+    && String(inv?.type ?? '').toLowerCase() !== 'micro');
+  let sum = 0;
+  for (const inv of own) {
+    const kw = Number(inv.acOutputKw) || 0;
+    if (kw <= 0) continue;
+    sum += necNextStandardOcpd(((kw * 1000) / 240) * 1.25) || 0;
+  }
+  return sum > 0 ? sum : (sub.acSubFeeder.ocpdAmps ?? undefined);
+}
+
+/**
+ * Permit-path builder: ConductorAuthority.subSystems → SLDSourceBranch[].
+ * Returns undefined for single-system inputs (legacy renderer path, I-1).
+ */
+export function buildSourceBranchesFromAuthority(
+  auth: ConductorAuthority,
+  input: PermitInput,
+): SLDSourceBranch[] | undefined {
+  if (!auth.isHybrid || auth.subSystems.length < 2) return undefined;
+  const inverters = ((input.system?.inverters ?? []) as Array<{ subSystemKey?: string; acOutputKw?: number; type?: string }>);
+  const primaryKey = auth.subSystems[0].key;
+
+  return auth.subSystems.map((sub): SLDSourceBranch => {
+    const eq = sub.equipment;
+    const panelModel = eq.panelModel && eq.panelModel !== '—'
+      ? eq.panelModel
+      : (eq.panelWatts ? `${eq.panelWatts}W Module` : 'PV Module');
+    const acKw = (sub.acSubFeeder.currentA * 240) / 1000;
+    const dcOcpds = sub.dcStrings.map(s => s.ocpdAmps ?? 0).filter(n => n > 0);
+    return {
+      key: sub.key,
+      label: `${sub.key.toUpperCase()} — ${sub.panelCount} × ${panelModel}`,
+      topologyType: _AUTH_TOPO_TO_SLD[sub.topology] ?? 'STRING_INVERTER',
+      systemType: sub.key,
+      totalModules: sub.panelCount,
+      totalStrings: sub.isMicro ? 0 : (sub.dcStrings.length || 1),
+      panelModel,
+      panelWatts: eq.panelWatts || undefined,
+      panelVoc: eq.panelVoc || undefined,
+      panelIsc: eq.panelIsc || undefined,
+      inverterManufacturer: eq.inverterManufacturer !== '—' ? eq.inverterManufacturer : '',
+      inverterModel: eq.inverterModel !== '—' ? eq.inverterModel : 'Inverter',
+      inverterCount: sub.isMicro ? undefined : Math.max(1,
+        inverters.filter(inv => (isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey : primaryKey) === sub.key).length),
+      acKwPerDevice: eq.inverterAcOutputKw || undefined,
+      acOutputKw: acKw > 0 ? Math.round(acKw * 100) / 100 : undefined,
+      acOutputAmps: sub.acSubFeeder.currentA > 0 ? Math.round(sub.acSubFeeder.currentA * 100) / 100 : undefined,
+      acWireGauge: sub.acSubFeeder.wireGauge,
+      acOCPD: sub.acSubFeeder.ocpdAmps ?? undefined,
+      backfeedAmps: subBackfeedFromInverters(sub, inverters, primaryKey),
+      dcOCPD: dcOcpds.length ? Math.max(...dcOcpds) : undefined,
+      integratedDcDisconnect: sub.topology === 'OPTIMIZER' || undefined,
+      optimizerQty: sub.topology === 'OPTIMIZER' ? sub.panelCount : undefined,
+      rapidShutdownIntegrated: sub.key === 'roof' ? !!(input.project as { rapidShutdown?: boolean })?.rapidShutdown : false,
+      deviceCount: sub.isMicro ? sub.deviceCount : undefined,
+      microBranches: sub.isMicro
+        ? sub.microBranches.map(b => ({
+            branchIndex: b.index,
+            deviceCount: b.deviceCount,
+            branchCurrentA: b.branchCurrentA,
+            ocpdAmps: b.ocpdAmps,
+            conductorCallout: b.conductorCallout,
+            necReference: 'NEC 690.8(B)',
+          }))
+        : undefined,
+    };
+  });
+}
+
+// ─── PAGE PATH — computedMulti.subSystems → SLDSourceBranch[] ────────────────
+
+/** Structural slice of ComputedMultiSystem the page-path builder needs
+ *  (lib/computed-multi-system.ts is owned by Wave 2a — import types only). */
+export interface ComputedMultiSourceView {
+  subSystemKeys: SubSystemKey[];
+  subSystems: Partial<Record<SubSystemKey, ComputedSystem>>;
+}
+
+/**
+ * Page-path builder: one branch per computed sub-system. Subs with no
+ * ComputedSystem or zero panels are SKIPPED (a present-but-empty sub must
+ * never become a phantom lane); <2 usable lanes ⇒ undefined, and the page
+ * keeps the hybrid banner as the fallback (I-8).
+ */
+export function buildSourceBranchesFromComputedMulti(
+  multi: ComputedMultiSourceView,
+): SLDSourceBranch[] | undefined {
+  const branches: SLDSourceBranch[] = [];
+  for (const key of multi.subSystemKeys) {
+    const cs = multi.subSystems[key];
+    if (!cs || !(cs.totalPanels > 0)) continue;
+    const feeder: RunSegment | undefined = cs.runs?.find(r =>
+      String(r.id) === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+    const panelModel = cs.panelSpec
+      ? `${cs.panelSpec.manufacturer} ${cs.panelSpec.model}`.trim()
+      : (cs.panelSpec === null && cs.totalDcKw > 0 && cs.totalPanels > 0
+          ? `${Math.round((cs.totalDcKw * 1000) / cs.totalPanels)}W Module`
+          : 'PV Module');
+    branches.push({
+      key,
+      label: `${key.toUpperCase()} — ${cs.totalPanels} × ${panelModel}`,
+      topologyType: cs.isMicro ? 'MICROINVERTER' : cs.isOptimizer ? 'STRING_WITH_OPTIMIZER' : 'STRING_INVERTER',
+      systemType: key,
+      totalModules: cs.totalPanels,
+      totalStrings: cs.isMicro ? 0 : cs.stringCount,
+      panelsPerString: cs.isMicro ? undefined : cs.panelsPerString,
+      panelModel,
+      panelWatts: cs.panelSpec?.panelWatts
+        ?? (cs.totalPanels > 0 ? Math.round((cs.totalDcKw * 1000) / cs.totalPanels) : undefined),
+      panelVoc: cs.panelSpec?.panelVoc,
+      panelIsc: cs.panelSpec?.panelIsc,
+      inverterManufacturer: cs.inverterSpec?.manufacturer ?? '',
+      inverterModel: cs.inverterSpec?.model ?? 'Inverter',
+      acKwPerDevice: cs.isMicro && cs.microDeviceCount > 0
+        ? Math.round((cs.totalAcKw / cs.microDeviceCount) * 1000) / 1000
+        : cs.inverterSpec?.acOutput?.ratedKw,
+      acOutputKw: cs.totalAcKw,
+      acOutputAmps: Math.round(cs.acOutputCurrentA * 100) / 100,
+      acWireGauge: feeder?.wireGauge,
+      acConduitType: feeder && !feeder.isOpenAir ? feeder.conduitType : undefined,
+      acOCPD: cs.acOcpdAmps || undefined,
+      // Per-sub engine backfeed (per-inverter OCPDs + the sub's own battery
+      // impact). The POI total comes from the AGGREGATE via input.backfeedAmps
+      // — lanes only display their contribution.
+      backfeedAmps: cs.backfeedBreakerAmps || undefined,
+      dcOCPD: cs.isMicro ? undefined : (cs.strings?.[0]?.ocpdAmps || undefined),
+      integratedDcDisconnect: cs.isOptimizer || undefined,
+      optimizerQty: cs.isOptimizer ? cs.totalPanels : undefined,
+      rapidShutdownIntegrated: key === 'roof' ? undefined : false,
+      deviceCount: cs.isMicro ? cs.microDeviceCount : undefined,
+      microBranches: cs.isMicro ? cs.microBranches : undefined,
+      runs: cs.runs,
+    });
+  }
+  return branches.length > 1 ? branches : undefined;
+}
+
+// ─── W4B must-fix support (app/engineering/page.tsx) ─────────────────────────
+
+/**
+ * Synthesize a minimal one-inverter fleet for a PRESENT sub whose partitioned
+ * fleet is EMPTY, from the sub's own SubSystemEquipment record — so the sub
+ * computes with ITS OWN equipment instead of a phantom default (the Wave-4B.D
+ * SE7600H class). Returns null when the record carries no inverterId (the
+ * caller must then EXCLUDE the sub from aggregate numbers and surface a
+ * visible per-sub hint — never compute a made-up inverter).
+ */
+export function synthesizeFleetFromSubEquipment(
+  key: SubSystemKey,
+  sub: { inverterId?: string; topology?: string; panelId?: string } | undefined,
+  panelCount: number,
+): Array<{
+  id: string; inverterId: string; type: string; subSystemKey: SubSystemKey;
+  strings: Array<{ id: string; label: string; panelCount: number; panelId: string; subSystemKey: SubSystemKey }>;
+}> | null {
+  if (!sub?.inverterId || !(panelCount > 0)) return null;
+  const t = String(sub.topology ?? '').toLowerCase();
+  const type = ['micro', 'string', 'optimizer', 'hybrid', 'ecoflow'].includes(t) ? t : 'string';
+  return [{
+    id: `synth-${key}`,
+    inverterId: sub.inverterId,
+    type,
+    subSystemKey: key,
+    strings: [{
+      id: `synth-${key}-s1`,
+      label: `${key} panels`,
+      panelCount,
+      panelId: sub.panelId ?? '',
+      subSystemKey: key,
+    }],
+  }];
 }
 
 /**

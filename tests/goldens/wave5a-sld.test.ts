@@ -25,6 +25,18 @@ import {
   type SLDProfessionalInput,
   type SLDSourceBranch,
 } from '../../lib/sld-professional-renderer';
+import {
+  buildSourceBranchesFromAuthority,
+  buildSourceBranchesFromComputedMulti,
+  synthesizeFleetFromSubEquipment,
+  generateLiveSLD,
+} from '../../lib/permit/utils/sldAdapter';
+import { buildConductorAuthority } from '../../lib/permit/utils/conductorAuthority';
+import { computeMultiSystem } from '../../lib/computed-multi-system';
+import { roofProject } from '../../test-fixtures/roofProject';
+import { csMicroInput, csStringInput } from './wave0-fixtures';
+
+const clone = <T>(o: T): T => JSON.parse(JSON.stringify(o));
 
 const count = (svg: string, needle: string): number => svg.split(needle).length - 1;
 
@@ -224,5 +236,192 @@ describe('wave 5a — normalizeSourceBranches', () => {
     expect(normalizeSourceBranches(undefined)).toEqual([]);
     expect(normalizeSourceBranches(null)).toEqual([]);
     expect(normalizeSourceBranches([])).toEqual([]);
+  });
+});
+
+// ═════ 4. Permit-path adapter (conductorAuthority.subSystems = SoT) ═══════════
+// Same hybrid shape as wave2d-authority.test.ts: Enphase micro roof + Solis
+// string ground + SolFence optimizer fence.
+function mkHybridPermit() {
+  const input: any = clone(roofProject);
+  (input.project.panelPositions as any[]).forEach((p: any, i: number) => {
+    p.systemType = i < 4 ? 'fence' : i < 8 ? 'ground' : 'roof';
+  });
+  if (input.layout?.panels) (input.layout.panels as any[]).forEach((p: any, i: number) => {
+    p.systemType = i < 4 ? 'fence' : i < 8 ? 'ground' : 'roof';
+  });
+  input.system.inverters = [
+    { manufacturer: 'Enphase', model: 'IQ8M', type: 'micro',
+      acOutputKw: 0.33, maxDcVoltage: 60, efficiency: 0.97, ulListing: 'UL 1741',
+      subSystemKey: 'roof', strings: [] },
+    { manufacturer: 'Solis', model: 'S6-GR1P6K', type: 'string',
+      acOutputKw: 6.0, maxDcVoltage: 600, efficiency: 0.97, ulListing: 'UL 1741',
+      subSystemKey: 'ground',
+      strings: [{ label: 'G-1', panelCount: 4, panelManufacturer: 'Tesla', panelModel: 'TSP-420',
+        panelWatts: 420, panelVoc: 40.92, panelIsc: 13.03, isc: 13.03,
+        wireGauge: '#10 AWG', wireLength: 80 }] },
+    { manufacturer: 'SolFence', model: 'SF-OPT-3800', type: 'optimizer',
+      acOutputKw: 3.8, maxDcVoltage: 480, efficiency: 0.97, ulListing: 'UL 1741',
+      subSystemKey: 'fence',
+      strings: [{ label: 'F-1', panelCount: 4, panelManufacturer: 'SolFence', panelModel: 'SF-BIF-400',
+        panelWatts: 400, panelVoc: 37.1, panelIsc: 13.6, isc: 13.6,
+        wireGauge: '#10 AWG', wireLength: 60 }] },
+  ];
+  return input;
+}
+
+function mkHybridCad(): any {
+  return {
+    systemType: 'roof',
+    totalPanels: 12,
+    hybrid: {
+      sections: [
+        { key: 'roof',   totalPanels: 4, equipment: { topology: 'micro', inverterMfr: 'Enphase', inverterModel: 'IQ8M', acKwPerDevice: 0.33 } },
+        { key: 'ground', totalPanels: 4, equipment: { topology: 'string', inverterMfr: 'Solis', inverterModel: 'S6-GR1P6K' } },
+        { key: 'fence',  totalPanels: 4, equipment: { topology: 'optimizer', inverterMfr: 'SolFence', inverterModel: 'SF-OPT-3800', panelModel: 'SF-BIF-400', panelWatts: 400, voc: 37.1, isc: 13.6 } },
+      ],
+    },
+  };
+}
+
+describe('wave 5a — permit-path adapter (buildSourceBranchesFromAuthority)', () => {
+  it('single-system authority ⇒ undefined (legacy renderer path, I-1)', () => {
+    const auth = buildConductorAuthority(clone(roofProject), null);
+    expect(buildSourceBranchesFromAuthority(auth, clone(roofProject))).toBeUndefined();
+  });
+
+  it('hybrid ⇒ one branch per sub, each with ITS OWN topology/equipment (I-3)', () => {
+    const input = mkHybridPermit();
+    const auth = buildConductorAuthority(input, mkHybridCad());
+    const branches = buildSourceBranchesFromAuthority(auth, input)!;
+    expect(branches.map(b => b.key)).toEqual(['roof', 'ground', 'fence']);
+    const [roof, ground, fence] = branches;
+    expect(roof.topologyType).toBe('MICROINVERTER');
+    expect(roof.deviceCount).toBe(4);
+    expect(roof.microBranches!.length).toBeGreaterThan(0);
+    expect(roof.rapidShutdownIntegrated).toBe(true);      // roofProject.rapidShutdown
+    expect(ground.topologyType).toBe('STRING_INVERTER');
+    expect(ground.inverterModel).toBe('S6-GR1P6K');
+    expect(ground.totalStrings).toBe(1);
+    expect(fence.topologyType).toBe('STRING_WITH_OPTIMIZER');
+    expect(fence.integratedDcDisconnect).toBe(true);
+    expect(fence.optimizerQty).toBe(4);
+    expect(fence.rapidShutdownIntegrated).toBe(false);    // RSD scopes to buildings (I-7)
+  });
+
+  it('§1.7 backfeed: Σ per-physical-inverter rounded OCPDs, never one combined breaker', () => {
+    const input = mkHybridPermit();
+    const auth = buildConductorAuthority(input, mkHybridCad());
+    const branches = buildSourceBranchesFromAuthority(auth, input)!;
+    const ground = branches.find(b => b.key === 'ground')!;
+    const fence = branches.find(b => b.key === 'fence')!;
+    // Solis 6.0 kW → 25A × 1.25 = 31.25 → 35A; SolFence 3.8 kW → 19.8 → 20A
+    expect(ground.backfeedAmps).toBe(35);
+    expect(fence.backfeedAmps).toBe(20);
+  });
+
+  it('generateLiveSLD renders the hybrid as a REAL multi-lane E-1 (I-8)', () => {
+    const svg = generateLiveSLD(mkHybridPermit(), mkHybridCad(), { embedded: true });
+    expect(svg).toContain('SLD MULTI-LANE wave5a lanes=3 keys=roof+ground+fence');
+    expect(count(svg, 'UTILITY GRID')).toBe(1);
+    expect(count(svg, 'MAIN SERVICE PANEL')).toBe(1);
+    expect(svg).toContain('SOLAR FENCE ARRAY PV-F');
+  });
+
+  it('generateLiveSLD single-system output is unchanged by the hybrid wiring', () => {
+    const svg = generateLiveSLD(clone(roofProject), null);
+    expect(svg).not.toContain('SLD MULTI-LANE');
+    expect(count(svg, 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM')).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ═════ 5. Page-path adapter (computedMulti.subSystems) ════════════════════════
+describe('wave 5a — page-path adapter (buildSourceBranchesFromComputedMulti)', () => {
+  const multi = computeMultiSystem([
+    { ...csMicroInput(), subSystemKey: 'roof' },
+    { ...csStringInput(), rooftopTempAdderC: 0, subSystemKey: 'ground' },
+  ]);
+
+  it('builds one branch per computed sub with real engine values', () => {
+    const branches = buildSourceBranchesFromComputedMulti(multi)!;
+    expect(branches.map(b => b.key)).toEqual(['roof', 'ground']);
+    const [roof, ground] = branches;
+    expect(roof.topologyType).toBe('MICROINVERTER');
+    expect(roof.totalModules).toBe(20);
+    expect(roof.deviceCount).toBe(20);
+    expect(roof.microBranches!.length).toBeGreaterThan(0);
+    expect(roof.acKwPerDevice).toBeCloseTo(0.29, 2);
+    expect(ground.topologyType).toBe('STRING_INVERTER');
+    expect(ground.totalStrings).toBe(2);
+    expect(ground.acOutputKw).toBeCloseTo(7.6, 2);
+    expect(ground.backfeedAmps).toBeGreaterThan(0);
+    expect(ground.acWireGauge).toBeTruthy();              // from the sub's own feeder run
+    expect(ground.runs!.length).toBeGreaterThan(0);       // bare-id per-sub runs for lane callouts
+  });
+
+  it('renders through the multi-lane path with the AGGREGATE 120% total', () => {
+    const branches = buildSourceBranchesFromComputedMulti(multi)!;
+    const svg = renderSLDProfessional({
+      ...BASE,
+      topologyType: 'MICROINVERTER',
+      totalModules: multi.aggregate.totalPanels,
+      totalStrings: 2, dcOCPD: 20,
+      inverterModel: 'IQ8PLUS-72-2-US', inverterManufacturer: 'Enphase',
+      acOutputKw: multi.aggregate.totalAcKw,
+      acOutputAmps: Math.round(multi.aggregate.acOutputCurrentA),
+      acWireGauge: '#4 AWG', acConduitType: 'EMT',
+      acOCPD: multi.aggregate.acOcpdAmps,
+      backfeedAmps: multi.aggregate.backfeedBreakerAmps,  // §1.7 aggregator sum
+      rapidShutdownIntegrated: true,
+      runs: multi.aggregate.runs,                          // namespaced ids
+      sources: branches,
+    } as SLDProfessionalInput);
+    expect(svg).toContain('SLD MULTI-LANE wave5a lanes=2 keys=roof+ground');
+    expect(svg).toContain(`Σ BACKFEED ${multi.aggregate.backfeedBreakerAmps}A`);
+    // namespaced run ids print as R:/G: rows in the conduit schedule
+    expect(svg).toContain('R:');
+    expect(svg).toContain('G:');
+  });
+
+  it('EMPTY-FLEET SUB HANDLING: missing/zero-panel subs never become lanes', () => {
+    // Sub present in keys but with no computed system ⇒ skipped; 1 usable lane
+    // ⇒ undefined ⇒ page keeps the banner fallback (I-8).
+    expect(buildSourceBranchesFromComputedMulti({
+      subSystemKeys: ['roof', 'fence'],
+      subSystems: { roof: multi.subSystems.roof },
+    })).toBeUndefined();
+    // Zero-panel computed sub ⇒ also skipped.
+    expect(buildSourceBranchesFromComputedMulti({
+      subSystemKeys: ['roof', 'fence'],
+      subSystems: {
+        roof: multi.subSystems.roof,
+        fence: { ...multi.subSystems.ground!, totalPanels: 0 },
+      },
+    })).toBeUndefined();
+  });
+});
+
+// ═════ 6. Empty-fleet synthesis helper (W4B must-fix support) ═════════════════
+describe('wave 5a — synthesizeFleetFromSubEquipment', () => {
+  it('builds a one-inverter fleet from the sub\'s OWN equipment record', () => {
+    const fleet = synthesizeFleetFromSubEquipment('fence',
+      { inverterId: 'solfence-sf-opt-3800', topology: 'optimizer', panelId: 'solfence-sf-bif-400' }, 17)!;
+    expect(fleet).toHaveLength(1);
+    expect(fleet[0].inverterId).toBe('solfence-sf-opt-3800');
+    expect(fleet[0].type).toBe('optimizer');
+    expect(fleet[0].subSystemKey).toBe('fence');
+    expect(fleet[0].strings[0].panelCount).toBe(17);
+    expect(fleet[0].strings[0].panelId).toBe('solfence-sf-bif-400');
+  });
+
+  it('no inverterId / no panels ⇒ null (caller excludes the sub + shows a hint — never a phantom default)', () => {
+    expect(synthesizeFleetFromSubEquipment('ground', { panelId: 'x' }, 20)).toBeNull();
+    expect(synthesizeFleetFromSubEquipment('ground', undefined, 20)).toBeNull();
+    expect(synthesizeFleetFromSubEquipment('ground', { inverterId: 'solis-s6' }, 0)).toBeNull();
+  });
+
+  it('unknown topology falls back to string, never micro', () => {
+    const fleet = synthesizeFleetFromSubEquipment('ground', { inverterId: 'solis-s6', topology: 'weird' }, 8)!;
+    expect(fleet[0].type).toBe('string');
   });
 });

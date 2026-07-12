@@ -2949,10 +2949,15 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const isSupplySide = intercon.includes('supply') || intercon.includes('line');
 
   // §1.7: the sheet's 120% panel uses the AGGREGATOR-SUMMED backfeed when the
-  // adapter provided it; Σ lane contributions is the structural fallback.
+  // adapter provided it. CONTRACT: input.backfeedAmps on the multi-lane path
+  // is the authoritative TOTAL — Σ per-physical-inverter rounded OCPDs across
+  // subs INCLUDING battery bus impact (what computeMultiSystem's aggregate /
+  // the permit authority carries). Structural fallback: Σ lane contributions
+  // + batteryBackfeedA.
   const laneBackfeed = (b: SLDSourceBranch): number =>
     b.backfeedAmps ?? b.acOCPD ?? necNextStandardOcpd((b.acOutputAmps ?? 0) * 1.25) ?? 0;
-  const totalBackfeedAmps = input.backfeedAmps || lanes.reduce((s, b) => s + laneBackfeed(b), 0);
+  const totalBackfeedAmps = input.backfeedAmps
+    || (lanes.reduce((s, b) => s + laneBackfeed(b), 0) + (input.batteryBackfeedA ?? 0));
   const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
   const totalAcKw = Number(input.acOutputKw) || lanes.reduce((s, b) => s + (b.acOutputKw ?? 0), 0);
   const dcKw = lanes.reduce((s, b) => s + ((b.totalModules ?? 0) * (b.panelWatts ?? 0)) / 1000, 0)
@@ -3316,13 +3321,14 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const _busAmps = input.panelBusRating ?? input.mainPanelAmps;
   const _batBfA = input.batteryBackfeedA ?? 0;
   const _busLimit = _busAmps * 1.2;
-  const _sumWithBat = totalBackfeedAmps + (input.hasBattery && input.backfeedAmps ? 0 : _batBfA);
-  const _120pass = isSupplySide ? true : _busLimit >= input.mainPanelAmps + _sumWithBat;
+  // totalBackfeedAmps is already the authoritative TOTAL (incl. battery —
+  // see contract above); the battery row below is informational only.
+  const _120pass = isSupplySide ? true : _busLimit >= input.mainPanelAmps + totalBackfeedAmps;
   const p2rows: [string,string][] = [
     ['Total AC Output', `${totalAcKw.toFixed(2)} kW / ${Math.round(totalAcKw*1000/240)} A`],
     ...lanes.map((b): [string,string] => [`PV-${LANE_TAG[b.key]} Backfeed`, `${laneBackfeed(b)} A`]),
-    ...(_batBfA > 0 ? [['Battery Backfeed', `${_batBfA} A`] as [string,string]] : []),
-    ['Σ Backfeed (per-inverter OCPDs)', `${_sumWithBat} A`],
+    ...(_batBfA > 0 ? [['Battery Backfeed (incl.)', `${_batBfA} A`] as [string,string]] : []),
+    ['Σ Backfeed (per-inverter OCPDs)', `${totalBackfeedAmps} A`],
     ['Main Breaker', `${input.mainPanelAmps} A`],
     ['Bus Rating', `${_busAmps} A`],
     ...(isSupplySide ? [
