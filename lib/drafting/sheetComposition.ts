@@ -386,11 +386,16 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   // Same coverage-aware rule as the DRAWING (resolveFireSetbackIn) — the data
   // zone printed "1.5' EDGES" while the plan hatched 3'-0" bands.
   const _covRoofFt2 = (r?.planes ?? []).reduce((s: number, x: any) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _covPitch = (() => {
+    const ps = (r?.planes ?? []).map((x: any) => Number(x?.pitch)).filter((v: number) => isFinite(v));
+    return ps.length ? ps.reduce((a: number, b: number) => a + b, 0) / ps.length : undefined;
+  })();
   const _covFrac = arrayCoverageFrac(
     cad?.totalPanels ?? 0,
     (p?.panelLengthIn as number) || 66,
     (p?.panelWidthIn as number) || 40,
     _covRoofFt2,
+    _covPitch,   // plan-projected basis — same 18"-vs-36" decision as the drawing
   );
   const fireSetbackFt = Math.round((resolveFireSetbackIn(_fireIn, _covFrac) / 12) * 10) / 10;
   const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;

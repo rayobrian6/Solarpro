@@ -428,7 +428,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // Fire-setback numbers from the SAME rule the drawing uses \u2014 needed by the
   // callouts below and the supplemental block further down.
   const _fsRoofFt2Early = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
-  const _fsCovEarly = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2Early);
+  const _fsMeanPitch = (() => {
+    const ps = ((cad.roof?.planes ?? []) as any[]).map(x => Number(x?.pitch)).filter(v => isFinite(v));
+    return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : undefined;
+  })();
+  const _fsCovEarly = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2Early, _fsMeanPitch);
   const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
 
   // Callout notes for data zone
@@ -450,7 +454,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // System-specific supplemental data \u2014 setback text from the SAME rule the
   // drawing uses (it claimed 18" per-AHJ while PV-2 hatched 3'-0" bands).
   const _fsRoofFt2 = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
-  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2);
+  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2, _fsMeanPitch);
   const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>

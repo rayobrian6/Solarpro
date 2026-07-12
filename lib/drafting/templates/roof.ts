@@ -206,8 +206,37 @@ export function drawRoofPlan(
     return Math.abs(s) / 2;   // fake-degree verts: 1 unit = 1 ft
   };
   const _roofAreaFt2  = validPlanes.reduce((s: number, rp: any) => s + _shoelaceFt2(rp.vertices), 0);
-  const _arrayAreaFt2 = validPanels.length * (panelLenIn * panelWidIn) / 144;
-  const _coverage     = _roofAreaFt2 > 0 ? _arrayAreaFt2 / _roofAreaFt2 : 0;
+  // COVERAGE BASIS (documented choice): PLAN array area ÷ PLAN roof area —
+  // both terms in the same horizontal projection. A module lying on a pitched
+  // plane occupies (real area × cos(pitch)) of plan; the old REAL-module-area ÷
+  // PLAN-roof-area ratio mixed bases and overstated coverage by 1/cos(pitch),
+  // wrongly denying the 18" exception (Stowell 27.6°: 36.4% mixed vs ~30.4%
+  // consistent → the 18" ridge setback actually applies). Per-plane this is
+  // identical to real-array ÷ (plan-roof/cos) — surface basis.
+  const _cosOfPitch = (pitch: any): number => {
+    const pd = Number(pitch);
+    return isFinite(pd) && pd > 0 && pd < 89 ? Math.cos(pd * Math.PI / 180) : 1;
+  };
+  const _panelRealFt2 = (panelLenIn * panelWidIn) / 144;
+  const _planeIdxOf = (p: any, planes: any[]): number => {
+    let idx = planes.findIndex((rp: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices));
+    if (idx < 0) {   // regularized-border stragglers → nearest plane centroid
+      let bestD = Infinity;
+      planes.forEach((rp: any, i: number) => {
+        const cLa = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
+        const cLo = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
+        const d = (p.lat - cLa) ** 2 + (p.lng - cLo) ** 2;
+        if (d < bestD) { bestD = d; idx = i; }
+      });
+    }
+    return idx;
+  };
+  const _arrayPlanFt2 = validPanels.reduce((s: number, p: any) => {
+    const i = _planeIdxOf(p, validPlanes);
+    return s + _panelRealFt2 * (i >= 0 ? _cosOfPitch(validPlanes[i].pitch) : 1);
+  }, 0);
+  const _coverage     = _roofAreaFt2 > 0 ? _arrayPlanFt2 / _roofAreaFt2 : 0;
+  // AHJ-supplied override precedence unchanged — resolveFireSetbackIn owns it.
   const fireSetIn   = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _coverage);
   const setbackFt   = fireSetIn / 12;
 
@@ -219,6 +248,27 @@ export function drawRoofPlan(
   // eave when only the planes moved). Stored geometry is untouched.
   const regPlanes = regularizeRoofPlanes(validPlanes as any[]);
   const regPanels = coTransformPanels(validPlanes as any[], regPlanes as any[], validPanels as any[]);
+
+  // ── SLOPE→PLAN projection (per plane) ──────────────────────────────────────
+  // Panel CENTERS are plan-true (projected lat/lng), but module rectangle DIMS
+  // are physical (on-surface) and IFC 1204 setbacks/pathways are walked ALONG
+  // THE ROOF SURFACE. Anything with a fall-line (up/down-slope) component
+  // foreshortens by cos(pitch) when drawn/checked in plan; cross-slope
+  // distances (along the eave / rake direction) project 1:1. Drawing raw
+  // physical dims + raw band widths in plan space flagged compliant designs
+  // (Stowell: 16 phantom "MODULE(S) ENCROACH" on a roof that clears 36" by
+  // 0.3" measured on the surface).
+  const planeCosP = regPlanes.map((rp: any) => _cosOfPitch(rp.pitch));
+  const _hostIdxCache = new Map<any, number>();
+  const hostPlaneIdx = (p: any): number => {
+    let idx = _hostIdxCache.get(p);
+    if (idx === undefined) { idx = _planeIdxOf(p, regPlanes); _hostIdxCache.set(p, idx); }
+    return idx;
+  };
+  const panelCosP = (p: any): number => {
+    const i = hostPlaneIdx(p);
+    return i >= 0 ? planeCosP[i] : 1;
+  };
 
   // ── Layout zones (STEP 3) ──
   const zones = getLayoutForSystem('roof', 'plan');
@@ -473,12 +523,22 @@ export function drawRoofPlan(
       }
       const HIP_SETBACK_FT = 1.5;   // IFC 2021 §1204.2.1.2 — 18" clear at hips/valleys
       const edgeSetbackFt = edgeKind === 'ridge' ? setbackFt : HIP_SETBACK_FT;
-      const dPx = edgeSetbackFt * scale;
       // Inward unit normal (screen space) — probe a point just off the midpoint.
       const ex = b.x - a.x, ey = b.y - a.y, el = Math.hypot(ex, ey);
       let nx = -ey / el, ny = ex / el;
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       if (!ptInRingXY(mx + nx * 3, my + ny * 3, ptsXY)) { nx = -nx; ny = -ny; }
+      // SLOPE→PLAN band width: the IFC distance is walked ON the surface, so
+      // only the offset's FALL-LINE component foreshortens in plan:
+      //   k = √(1 − (n̂·f̂)²·sin²(pitch))
+      // Ridge/eave offsets run straight down-slope (n̂‖f̂) → k = cos(pitch);
+      // rake-parallel (cross-slope) offsets → k = 1 (NO foreshortening);
+      // diagonal hips/valleys land in between. f̂ = plan downslope unit from
+      // the plane azimuth (screen y is flipped: −dsY).
+      const _sinP2 = 1 - planeCosP[ri] * planeCosP[ri];
+      const _fdot = az != null ? Math.abs(nx * dsX + ny * (-dsY)) : 0;
+      const _kPlan = Math.sqrt(Math.max(0, 1 - Math.min(1, _fdot * _fdot) * _sinP2));
+      const dPx = edgeSetbackFt * _kPlan * scale;
       if (interior) {
         const a2x = a.x + nx * dPx, a2y = a.y + ny * dPx;
         const b2x = b.x + nx * dPx, b2y = b.y + ny * dPx;
@@ -551,6 +611,9 @@ export function drawRoofPlan(
     let cur = uMin;
     for (const [s, e] of merged) { if (s > cur) gaps.push([cur, s]); cur = Math.max(cur, e); }
     if (cur < uMax) gaps.push([cur, uMax]);
+    // Pathway WIDTH is measured CROSS-SLOPE (perpendicular to the eave→ridge
+    // walk), so it projects 1:1 into plan — NO cos(pitch) here (only fall-line
+    // components foreshorten; see the slope→plan block above).
     const needPx = pathwayFt * scale;
     const best = gaps.filter(g => g[1] - g[0] >= needPx)
       .sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]))[0];
@@ -595,8 +658,14 @@ export function drawRoofPlan(
   regPanels.forEach((p: any) => {
     const px = toX(p.lng), py = toY(p.lat);
     const isLandscape = (p.orientation || 'landscape') === 'landscape';
+    // SLOPE→PLAN: the rect's local HEIGHT runs up-slope after the azimuth
+    // rotation below (portrait long side / landscape short side = the module's
+    // fall-line dimension), so it foreshortens by cos(pitch); the cross-slope
+    // width projects 1:1. Raw physical dims on plan-true centers overdrew
+    // every module 1/cos(pitch) up-slope — the root of the phantom flags.
+    const _cosP = panelCosP(p);
     const pw = isLandscape ? panLenPx : panWidPx;
-    const ph = isLandscape ? panWidPx : panLenPx;
+    const ph = (isLandscape ? panWidPx : panLenPx) * _cosP;
     const x0 = px - pw / 2, y0 = py - ph / 2;
     const azRot = Number(p.azimuth ?? p.heading);
     // rotate so the long axis follows the plane azimuth — SNAPPED to the sheet
@@ -640,7 +709,7 @@ export function drawRoofPlan(
       // RAILED (IronRidge etc.): two rail lines at 25/75% of module height
       // (adjacent modules' segments join into continuous row rails) + one
       // foot per rail snapped to the nearest framing line.
-      const hostIdx = regPlanes.findIndex((rp: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices ?? []));
+      const hostIdx = hostPlaneIdx(p);
       const grid = hostIdx >= 0 ? framingGrids[hostIdx] : null;
       const snapX = (x: number): number => {
         if (!grid || rot !== 0 || grid.fAz !== 0) return x;
@@ -698,6 +767,9 @@ export function drawRoofPlan(
       const uOf = (x: number, y: number) => x * udx + y * udy;
       const vOf = (x: number, y: number) => x * vdx + y * vdy;
       const grid = framingGrids[ri];
+      // rails sit at 25/75% of the module's PLAN (foreshortened) height so
+      // they stay inside the drawn rects on pitched planes
+      const quarterUpP = quarterUp * planeCosP[ri];
       const rafStep = grid ? grid.spacingPx : 2 * FT;        // rafter spacing (24" default)
       const uPhase = grid ? uOf(grid.bcx, grid.bcy) : 0;     // rafter phase (feet land ON rafters)
       const stride = Math.max(2, Math.round((railFootOcIn / 12 * FT) / rafStep)); // rafters between feet (48"/24"=2)
@@ -713,7 +785,7 @@ export function drawRoofPlan(
         const vs = rowPanels.map((p: any) => vOf(toX(p.lng), toY(p.lat)));
         const vMid = vs.reduce((a: number, b: number) => a + b, 0) / vs.length;
         const uEdgeL = Math.min(...us) - halfPanU, uEdgeR = Math.max(...us) + halfPanU;   // panel-row extent
-        const vBot = vMid - quarterUp, vTop = vMid + quarterUp;                            // 25% / 75% rails
+        const vBot = vMid - quarterUpP, vTop = vMid + quarterUpP;                          // 25% / 75% rails
         // rail lines span the panels (they cantilever past the end feet)
         for (const vLine of [vBot, vTop]) {
           const a = P(uEdgeL, vLine), b = P(uEdgeR, vLine);
@@ -756,15 +828,21 @@ export function drawRoofPlan(
   // corner flag; the count lands in the general notes.
   els.push(...deferredBandEls);
   let _encroachCount = 0;
+  const _flagsByPlane = new Array(regPlanes.length).fill(0);
   if (!isBranchColorMode && bandQuads.length) {
     regPanels.forEach((p: any) => {
       const px = toX(p.lng), py = toY(p.lat);
       // FOOTPRINT test — center + all four corners (rotation-snapped like the
       // module renderer). The centers-only test let a module overlap a band by
       // half its width and still read as clean.
+      // SAME slope→plan geometry as the drawn rects + bands: the fall-line
+      // half-dimension foreshortens by cos(pitch). With bands ALSO plan-
+      // projected (above), checking in plan space is now exact — the old raw
+      // half-module vs raw band width read 62.2" plan ridge clearance as
+      // 28.3" < 36" and flagged 16 compliant Stowell modules.
       const isLandscape = (p.orientation || 'landscape') === 'landscape';
       let hw = (isLandscape ? panLenPx : panWidPx) / 2;
-      let hh = (isLandscape ? panWidPx : panLenPx) / 2;
+      let hh = ((isLandscape ? panWidPx : panLenPx) / 2) * panelCosP(p);
       const azRot = Number(p.azimuth ?? p.heading);
       let rot = isFinite(azRot) ? ((azRot % 360) + 360) % 360 % 180 : 0;
       if (rot >= 15 && rot <= 165 && Math.abs(rot - 90) < 15) { const t = hw; hw = hh; hh = t; }
@@ -775,10 +853,24 @@ export function drawRoofPlan(
       ];
       if (testPts.some(t => bandQuads.some(q => ptInRingXY(t.x, t.y, q)))) {
         _encroachCount++;
+        const hi = hostPlaneIdx(p);
+        if (hi >= 0) _flagsByPlane[hi]++;
         els.push(`<rect x="${(px - 4).toFixed(1)}" y="${(py - 4).toFixed(1)}" width="8" height="8" fill="none" stroke="#cc0000" stroke-width="1.2" transform="rotate(45 ${px.toFixed(1)} ${py.toFixed(1)})"/>`);
       }
     });
   }
+  // Slope→plan audit trail — one line per plane (pitch, cos, band widths
+  // slope-in → plan-in, coverage basis, flags).
+  regPlanes.forEach((rp: any, i: number) => {
+    const c = planeCosP[i];
+    const pd = Number(rp.pitch);
+    console.log(
+      `[drawRoofPlan] plane ${i + 1}: pitch=${isFinite(pd) ? pd.toFixed(1) : '?'}° cos=${c.toFixed(3)} ` +
+      `ridgeBand=${fireSetIn}"→${(fireSetIn * c).toFixed(1)}"plan hip/valley=18"→${(18 * c).toFixed(1)}"plan(fall-line component only; cross-slope 1:1) ` +
+      `pathway=${pathwayIn}" (cross-slope, no foreshorten) ` +
+      `coverage=${(_coverage * 100).toFixed(1)}% (plan-array ÷ plan-roof) flags=${_flagsByPlane[i]}`
+    );
+  });
 
   // ── AC branch trunk routing (PV-2B): the daisy-chain per branch ──
   // Branch MEMBERSHIP comes from panelColorById (arrayPages assignment; first-
@@ -1092,7 +1184,16 @@ export function drawRoofPlan(
     const roofAreaFt2  = regPlanes.reduce((s: number, rp: any) => s + planViewAreaFt2(rp.vertices), 0);
     const panelAreaFt2 = (panelLenIn * panelWidIn) / 144;
     const arrayAreaFt2 = totalPanels * panelAreaFt2;
-    const coverPct     = roofAreaFt2 > 0 ? (arrayAreaFt2 / roofAreaFt2) * 100 : 0;
+    // Coverage % on the SAME consistent plan basis as the 18"/36" band test
+    // above (plan-projected array ÷ plan roof) — the table printing a mixed-
+    // basis 36.4% beside an 18" band selected at 30.4% read as a contradiction
+    // to a plan checker. Mean cos over rendered panels scales the authoritative
+    // totalPanels count when it differs from regPanels.length.
+    const _meanCosTbl  = regPanels.length
+      ? regPanels.reduce((s: number, p: any) => s + panelCosP(p), 0) / regPanels.length
+      : 1;
+    const arrayPlanTblFt2 = arrayAreaFt2 * _meanCosTbl;
+    const coverPct     = roofAreaFt2 > 0 ? (arrayPlanTblFt2 / roofAreaFt2) * 100 : 0;
     const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
     // TRUSS SIZE + SPACING as real columns (reference parity) and typography
@@ -1138,7 +1239,8 @@ export function drawRoofPlan(
     const cy2 = ty + tblH + 14;
     const calc: Array<[string, string]> = [
       ['ROOF AREA (PLAN VIEW)', `${fmt(roofAreaFt2)} ft²`],
-      ['NEW ARRAY AREA', `${fmt(arrayAreaFt2)} ft²`],
+      ['NEW ARRAY AREA (ACTUAL)', `${fmt(arrayAreaFt2)} ft²`],
+      ['ARRAY AREA (PLAN VIEW)', `${fmt(arrayPlanTblFt2)} ft²`],
       ['ROOF COVERED BY ARRAY', `${coverPct.toFixed(1)}%`],
     ];
     const calcH = titleH + calc.length * rowH;
