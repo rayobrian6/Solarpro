@@ -46,7 +46,7 @@
   - Test advisory lock key isolation
 - [x] Verify tsc passes
 - [x] Verify e2e tests pass (with TEST_DATABASE_URL)
-- [ ] Commit 2: test(migrations): Phase 1A.3 e2e harness and test-only migration fixtures
+- [x] Commit 2: test(migrations): Phase 1A.3 e2e harness and test-only migration fixtures
 
 ## Section 3: Commit 3 — Baseline Evidence Generator
 - [ ] Create lib/migrations/baselineEvidence.ts
