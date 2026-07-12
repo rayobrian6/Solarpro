@@ -4524,6 +4524,115 @@ function EngineeringPageInner() {
 
   const updateConfig = (patch: Partial<ProjectConfig>) => setConfig(prev => ({ ...prev, ...patch }));
 
+  // ── Wave 4B.C — per-sub equipment writer (§1.1 equipment authority): every
+  // hybrid picker writes config.subSystems[key], NEVER raw index math. The
+  // flat mirror stays derived elsewhere (§1.4 single-writer rule).
+  const updateSubSystemEquip = (key: SubSystemKey, patch: Record<string, any>) => {
+    setConfig(prev => ({
+      ...prev,
+      subSystems: {
+        ...((prev as any).subSystems ?? {}),
+        [key]: {
+          ...(((prev as any).subSystems ?? {})[key] ?? {}),
+          key,
+          ...patch,
+          source: 'engineering',
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    } as ProjectConfig));
+  };
+
+  // ── Wave 4B.C — per-sub section header for the Inverters & Strings card
+  // (hybrid only). Shows the sub's stamp count vs fleet total, its engine
+  // pass summary, the subSystems[key] equipment record, and per-sub pickers
+  // (panel re-pins ONLY this sub's strings via applyPanelToEngineeringConfig;
+  // mounting writes the map entry). Single-system projects never render this.
+  const renderSubSystemHeader = (key: SubSystemKey) => {
+    const entry = (((config as any).subSystems ?? {})[key] ?? {}) as Record<string, any>;
+    const _fbH = toSubSystemKey(config.systemType);
+    const fleet = (partitionFleet(config.inverters as any[], _fbH)[key] ?? []) as InverterConfig[];
+    const fleetTotal = fleetPanelTotal(fleet as any[]);
+    const stampCount = subSystemCounts[key];
+    const subCs = computedMulti.subSystems[key];
+    const tone = key === 'roof'
+      ? 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+      : key === 'ground'
+        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+        : 'border-amber-500/40 bg-amber-500/10 text-amber-300';
+    const effPanelId: string = entry.panelId ?? fleet[0]?.strings?.[0]?.panelId ?? '';
+    const mountOpts = key === 'ground'
+      ? ALL_MOUNTING_SYSTEMS.filter(s => s.category === 'ground_mount' || s.category === 'tracker')
+      : key === 'roof'
+        ? ALL_MOUNTING_SYSTEMS.filter(s => String(s.category).startsWith('roof'))
+        : ALL_MOUNTING_SYSTEMS.filter(s =>
+            String(s.category).includes('fence') || String(s.systemType).includes('fence'));
+    return (
+      <div className={`rounded-lg border px-3 py-2 ${tone}`}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-black uppercase tracking-wider">{key}</span>
+          <span className="text-[10px] font-mono text-slate-400">{stampCount} modules (layout)</span>
+          {fleet.length > 0 && fleetTotal !== stampCount ? (
+            <span className="text-[10px] text-red-400 font-bold" title="This sub's inverter fleet does not cover its stamped module count — use Rebuild fleets per sub-system">
+              ⚠ fleet {fleetTotal}p ≠ layout {stampCount}p
+            </span>
+          ) : null}
+          {subCs ? (
+            <span className="text-[10px] font-mono text-slate-400 ml-auto">
+              {subCs.isMicro
+                ? `${subCs.microDeviceCount} micros · ${subCs.acBranchCount} branch${subCs.acBranchCount === 1 ? '' : 'es'} · ${subCs.totalAcKw?.toFixed(2)} kW AC`
+                : `${subCs.totalAcKw?.toFixed(2)} kW AC`}
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-1.5 grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Panel — this sub-system</label>
+            <select
+              value={effPanelId}
+              onChange={e => {
+                const pid = e.target.value;
+                if (!pid) return;
+                updateSubSystemEquip(key, { panelId: pid });
+                // I-4: re-pin ONLY this sub's strings (untagged inherit §1.5).
+                setConfig(prev =>
+                  (applyPanelToEngineeringConfig(prev as any, pid, key) as unknown as ProjectConfig | null) ?? prev);
+              }}
+              className="eng-select text-[11px] py-1"
+            >
+              {effPanelId === '' ? <option value="">Select panel…</option> : null}
+              {SOLAR_PANELS.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.manufacturer} {p.model} ({p.watts}W)</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Mounting — this sub-system</label>
+            {mountOpts.length > 0 ? (
+              <select
+                value={entry.mountingId ?? ''}
+                onChange={e => updateSubSystemEquip(key, { mountingId: e.target.value || undefined })}
+                className="eng-select text-[11px] py-1"
+              >
+                <option value="">Project default{config.mountingId ? ` (${ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.model ?? config.mountingId})` : ''}</option>
+                {mountOpts.map(s => <option key={s.id} value={s.id}>{s.manufacturer} {s.model}</option>)}
+              </select>
+            ) : (
+              <div className="text-[11px] text-slate-400 px-2 py-1 rounded bg-slate-800/50 border border-slate-700/50">
+                SolFence rack sections (fixed for fence sub-systems)
+              </div>
+            )}
+          </div>
+        </div>
+        {entry.batteryId ? (
+          <div className="text-[10px] text-slate-400 mt-1">
+            Battery (POI-level): {entry.batteryId} ×{entry.batteryCount ?? 1}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   // Phase 13.1 — USER INTENT LOCK helper.
   // Stamps `userHasEditedInverters: true` on every inverter / string
   // mutation. Once set, this lock blocks Smart Defaults re-entry AND
@@ -9717,7 +9826,39 @@ function EngineeringPageInner() {
                       ) : null}
 
                       <div className="space-y-3">
-                        {config.inverters.map((inv, invIdx) => {
+                        {/* Wave 4B.C — hybrid: cards grouped per sub-system in fixed
+                            roof > ground > fence order under a per-sub header (fleet
+                            from partitionFleet, equipment from subSystems[key] — never
+                            raw index math). Single-system: the flat legacy list,
+                            pixel-identical. */}
+                        {(subSystemCounts.isHybrid
+                          ? (() => {
+                              const _fbL = toSubSystemKey(config.systemType);
+                              const _partL = partitionFleet(config.inverters as any[], _fbL);
+                              const _keysL = (['roof', 'ground', 'fence'] as const).filter(k =>
+                                subSystemCounts.present.includes(k) || ((_partL[k]?.length ?? 0) > 0));
+                              return _keysL.flatMap(k => {
+                                const fleet = (_partL[k] ?? []) as InverterConfig[];
+                                return fleet.length === 0
+                                  ? [{ inv: null as InverterConfig | null, subKey: k as SubSystemKey | null, subFirst: true }]
+                                  : fleet.map((fv, fi) => ({ inv: fv as InverterConfig | null, subKey: k as SubSystemKey | null, subFirst: fi === 0 }));
+                              });
+                            })()
+                          : config.inverters.map(fv => ({ inv: fv as InverterConfig | null, subKey: null as SubSystemKey | null, subFirst: false }))
+                        ).map(({ inv: _rowInv, subKey: _rowSubKey, subFirst: _rowSubFirst }, invIdx) => {
+                          if (!_rowInv) {
+                            // Present sub with no fleet yet (post-discard / pre-seed).
+                            return (
+                              <React.Fragment key={`subhdr-empty-${_rowSubKey}`}>
+                                {renderSubSystemHeader(_rowSubKey!)}
+                                <div className="text-xs text-slate-500 italic px-1">
+                                  No inverter fleet for this sub-system yet — use “Rebuild fleets per sub-system” above, or add one manually.
+                                </div>
+                              </React.Fragment>
+                            );
+                          }
+                          const inv = _rowInv;
+                          const _cardCs = (_rowSubKey ? computedMulti.subSystems[_rowSubKey] : null) ?? cs;
                           const invData = getInvById(inv.inverterId, inv.type) as any;
                           const invList = inv.type === 'micro'
                             ? MICROINVERTERS
@@ -9728,7 +9869,9 @@ function EngineeringPageInner() {
                                 ? STRING_INVERTERS.filter(i => !i.id.startsWith('ecoflow-'))
                                 : STRING_INVERTERS.filter(i => !i.id.startsWith('ecoflow-'));
                           return (
-                            <div key={inv.id} className="border border-slate-700/50 rounded-xl overflow-hidden">
+                            <React.Fragment key={inv.id}>
+                            {_rowSubFirst && _rowSubKey ? renderSubSystemHeader(_rowSubKey) : null}
+                            <div className="border border-slate-700/50 rounded-xl overflow-hidden">
                               <div className="flex items-center gap-3 p-4 bg-slate-800/40 cursor-pointer hover:bg-slate-800/60 transition-colors"
                                 onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)}>
                                 <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-black text-xs flex-shrink-0">{invIdx + 1}</div>
@@ -9755,7 +9898,7 @@ function EngineeringPageInner() {
                                     })()) : null}
                                     {inv.type === 'micro' ? (
                                       <span className="ml-1 text-purple-400 font-semibold">
-                                        · {cs.microDeviceCount} microinverters · {cs.acBranchCount} AC branch{cs.acBranchCount > 1 ? 'es' : ''}
+                                        · {_cardCs.microDeviceCount} microinverters · {_cardCs.acBranchCount} AC branch{_cardCs.acBranchCount > 1 ? 'es' : ''}
                                       </span>
                                     ) : null}
                                   </div>
@@ -9813,7 +9956,12 @@ function EngineeringPageInner() {
                                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                     <div className="md:col-span-2">
                                       <label className="eng-label">Inverter Model</label>
-                                      <select value={inv.inverterId} onChange={e => updateInverter(inv.id, { inverterId: e.target.value })}
+                                      <select value={inv.inverterId} onChange={e => {
+                                        updateInverter(inv.id, { inverterId: e.target.value });
+                                        // Wave 4B.C — hybrid: the sub's equipment authority (§1.1)
+                                        // follows the fleet pick; never raw index math.
+                                        if (_rowSubKey) updateSubSystemEquip(_rowSubKey, { inverterId: e.target.value });
+                                      }}
                                         className="eng-select text-xs px-2 py-1.5">
                                         {invList.map(i => <option key={i.id} value={i.id}>{(i as any).isNew ? '🆕 ' : ''}{i.manufacturer} {i.model}{(inv.type === 'string' || inv.type === 'ecoflow' || inv.type === 'hybrid' || inv.type === 'optimizer') ? ` (${(i as any).acOutputKw}kW)` : ` (${(i as any).acOutputW}W)`}</option>)}
                                       </select>
@@ -10064,6 +10212,7 @@ function EngineeringPageInner() {
                                 </div>
                               ) : null}
                             </div>
+                            </React.Fragment>
                           );
                         })}
                       </div>
