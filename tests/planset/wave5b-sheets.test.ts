@@ -114,3 +114,38 @@ describe('wave 5B — hybrid sheet manifest', () => {
     expect(singleSeq.join(',')).not.toMatch(/PV-1G|PV-1F|PV-1BG|PV-1BF|PV-3G|PV-3F|PE-1G|PE-1F/);
   });
 });
+
+// ═════ 2. Cover sheet — hybrid title + per-sub kW lines + summary ═══════════
+describe('wave 5B — hybrid cover sheet', () => {
+  it('prints the HYBRID headline with all present subs', () => {
+    expect(hybridHtml).toContain('HYBRID: ROOF + GROUND + FENCE PHOTOVOLTAIC SYSTEM');
+  });
+
+  it('prints one kW line per sub-system with the sub\'s OWN equipment', () => {
+    // Per-sub dcKw from cad.hybrid.sections: 4 modules × 430W = 1.72 kW each
+    // (fixture wattage is uniform; equipment differs per sub).
+    expect(hybridHtml).toMatch(/ROOF — [\d.]+ kW DC · 4 MODULES · .*ENPHASE IQ8M \(MICROINVERTER\)/);
+    expect(hybridHtml).toMatch(/GROUND — [\d.]+ kW DC · 4 MODULES · .*SOLIS S6-GR1P6K \(STRING INVERTER\)/);
+    expect(hybridHtml).toMatch(/FENCE — [\d.]+ kW DC · 4 MODULES · .*SOLFENCE SF-OPT-3800 \(POWER OPTIMIZER\)/);
+  });
+
+  it('SYSTEM SUMMARY has three module lines at subset counts (they differ)', () => {
+    expect(hybridHtml).toMatch(/4 × Canadian Solar CS6R-430MS.* — ROOF/);
+    expect(hybridHtml).toMatch(/4 × Tesla TSP-420.* — GROUND/);
+    expect(hybridHtml).toMatch(/4 × SolFence SF-BIF-400.* — FENCE/);
+    // Never a project-wide 12× winner row on the hybrid cover.
+    expect(hybridHtml).not.toMatch(/12 × Canadian Solar CS6R-430MS/);
+  });
+
+  it('DO-NOT-SUBMIT banner survives (Wave 6 gate) with softened per-sub copy', () => {
+    expect(hybridHtml).toContain('HYBRID DESIGN — THIS SET IS NOT PERMIT-READY');
+    expect(hybridHtml).toContain('NOW DOCUMENTED PER SUB-SYSTEM');
+    expect(hybridHtml).toContain('REMAINING BEFORE SUBMISSION (WAVE 6 GATE)');
+  });
+
+  it('single-type cover keeps the legacy headline and no hybrid chrome', () => {
+    expect(singleHtml).toContain('PHOTOVOLTAIC ROOF MOUNT SYSTEM');
+    expect(singleHtml).not.toContain('HYBRID:');
+    expect(singleHtml).not.toContain('NOW DOCUMENTED PER SUB-SYSTEM');
+  });
+});

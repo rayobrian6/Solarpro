@@ -1378,8 +1378,10 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
 
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — EQUIPMENT SCHEDULE:</strong>
-        This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
-        rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
+        ${_schedAuth.isHybrid
+          ? `This hybrid system utilizes ${system.totalPanels} modules across ${_schedAuth.subSystems.length} sub-systems (see the per-sub module tables above)`
+          : `This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
+        rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each`} for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
         All equipment is UL-listed and installed per manufacturer specifications. Wire sizing has been verified per NEC 690.8 with appropriate derating applied.
         The equipment selection complies with NEC ${compliance?.jurisdiction?.necVersion || '2020'} and applicable UL standards (UL 1741, UL 61730, UL 2703).
       </div>
