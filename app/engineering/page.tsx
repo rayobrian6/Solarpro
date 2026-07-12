@@ -1555,6 +1555,19 @@ function EngineeringPageInner() {
         // hydration-boundary ensureSubSystemShape call in this effect.
         const _cadSystemTypeForTags: string | null =
           (p.systemType as string | undefined) ?? ((layout as any)?.systemType as string | undefined) ?? null;
+        // Wave 4B.A — per-sub layout stamp counts (§1.1 membership authority),
+        // hoisted ABOVE the ensureSubSystemShape boundary so the legacy-collapse
+        // rule sees the 3-key partition and never synthesizes a single
+        // winner-vote bucket on a hybrid (Ray's {fence: …}-only map bug). The
+        // same classification subSystemCounts uses (unstamped panels ⇒ roof).
+        const _hydExpectedBySub: Partial<Record<SubSystemKey, number>> = (() => {
+          const counts: Record<SubSystemKey, number> = { roof: 0, ground: 0, fence: 0 };
+          for (const pnl of (((layout as any)?.panels ?? []) as Array<{ systemType?: string; placementType?: string }>)) {
+            counts[toSubSystemKey(pnl?.systemType ?? pnl?.placementType)]++;
+          }
+          return counts;
+        })();
+        const _hydPresentKeys = presentStampKeys(_hydExpectedBySub);
         const _rawSavedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
         // Wave 3.1 — TAG AT THE SOURCE (contract §1.5/§3-Wave-3 item 1): the DB
         // config is normalized through ensureSubSystemShape BEFORE the staleness
@@ -1564,7 +1577,7 @@ function EngineeringPageInner() {
         // fleet can never lose the equipment CHOICE (it survives in the map, §1.1).
         const savedConfig: Partial<ProjectConfig> | undefined =
           _rawSavedConfig && Object.keys(_rawSavedConfig).length > 0
-            ? (ensureSubSystemShape(_rawSavedConfig as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as Partial<ProjectConfig>)
+            ? (ensureSubSystemShape(_rawSavedConfig as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as Partial<ProjectConfig>)
             : _rawSavedConfig;
         console.log('[HYDRATION] p.engineeringConfig:', savedConfig ? `${Object.keys(savedConfig).length} keys` : 'null/undefined');
         // v61.8 PRIMARY FIX: Panel count mismatch gate.
@@ -1581,19 +1594,10 @@ function EngineeringPageInner() {
         // which was synthesized at the hydration boundary above and is never
         // touched by this gate. Single-sub projects take the legacy-total path
         // with a decision IDENTICAL to the historical gate (I-10).
-        // Per-sub layout stamp counts (§1.1 membership authority) — the same
-        // classification subSystemCounts uses (unstamped panels ⇒ roof).
-        const _hydExpectedBySub: Partial<Record<SubSystemKey, number>> = (() => {
-          const counts: Record<SubSystemKey, number> = { roof: 0, ground: 0, fence: 0 };
-          for (const pnl of (((layout as any)?.panels ?? []) as Array<{ systemType?: string; placementType?: string }>)) {
-            counts[toSubSystemKey(pnl?.systemType ?? pnl?.placementType)]++;
-          }
-          return counts;
-        })();
         const _hydFallbackKey: SubSystemKey = toSubSystemKey(
           (savedConfig as any)?.systemType ?? _cadSystemTypeForTags ?? 'roof',
         );
-        const _hydMultiSub = presentStampKeys(_hydExpectedBySub).length > 1;
+        const _hydMultiSub = _hydPresentKeys.length > 1;
         if (
           savedConfig &&
           Array.isArray((savedConfig as any).inverters) &&
@@ -1986,7 +1990,8 @@ function EngineeringPageInner() {
             const _elecNorm = electricallyNormalizeInverterConfig(_metaNorm).config;
             // Wave 3.1 — hydration boundary (savedConfig commit): re-stamp tags +
             // guarantee the subSystems map after the normalizers (idempotent).
-            return ensureSubSystemShape(_elecNorm as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as ProjectConfig;
+            // Wave 4B.A — presentKeys: hybrid partitions synthesize per-key.
+            return ensureSubSystemShape(_elecNorm as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as ProjectConfig;
           });
         } else if (Object.keys(patches).length > 0) {
           // No saved config — use seed patches as before
@@ -2001,7 +2006,8 @@ function EngineeringPageInner() {
             const _elecNorm2 = electricallyNormalizeInverterConfig(_metaNorm2).config;
             // Wave 3.1 — hydration boundary (seed / no-seed / design-handoff
             // patches all funnel through here): tag + synthesize the map.
-            return ensureSubSystemShape(_elecNorm2 as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as ProjectConfig;
+            // Wave 4B.A — presentKeys: hybrid partitions synthesize per-key.
+            return ensureSubSystemShape(_elecNorm2 as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as ProjectConfig;
           });
         }
 
@@ -2022,7 +2028,8 @@ function EngineeringPageInner() {
                   const _elecMerge = electricallyNormalizeInverterConfig(_metaMerge).config;
                   // Wave 3.1 — hydration boundary (localStorage restore can
                   // resurrect PRE-migration snapshots): tag + synthesize the map.
-                  return ensureSubSystemShape(_elecMerge as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as ProjectConfig;
+                  // Wave 4B.A — presentKeys: hybrid partitions synthesize per-key.
+                  return ensureSubSystemShape(_elecMerge as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as ProjectConfig;
                 });
               }
             }
@@ -2299,8 +2306,11 @@ function EngineeringPageInner() {
             // Wave 3.1 — hydration boundary (reverse hydration from a generated
             // file's engineering_run): tag inverters + synthesize the map so a
             // restored fence/ground run never collapses to default-roof tags.
+            // Wave 4B.A — presentKeys from the live layout partition (only
+            // effective when the layout is already hydrated AND hybrid).
             return ensureSubSystemShape(merged as any, {
               cadSystemType: (run.systemType as string | undefined) ?? (snap.systemType as string | undefined) ?? null,
+              presentKeys: subSystemCounts.present as SubSystemKey[],
             }) as unknown as ProjectConfig;
           });
         }

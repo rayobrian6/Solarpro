@@ -126,6 +126,31 @@ export interface EnsureSubSystemShapeOpts {
   cadSystemType?: string | null;
   /** Injectable clock for deterministic tests. Defaults to new Date().toISOString(). */
   now?: () => string;
+  /**
+   * Wave 4B.A — layout-stamp partition (§1.1 membership authority): the sub
+   * keys with ≥1 stamped panel, in roof > ground > fence order. When >1 key
+   * is present:
+   *   • an ABSENT map is synthesized with ONE entry PER present key (never
+   *     the old winner-vote single bucket — the Ray/Stowell hybrid collapse);
+   *   • a stored SINGLE-entry map whose only entry is 'migration'-sourced is
+   *     treated as a degenerate collapse and re-synthesized per present key
+   *     (logged loudly; entries with source !== 'migration' are NEVER
+   *     discarded; an existing migration entry whose §1.6 id-tuple matches
+   *     the fresh synthesis is kept by reference for idempotence);
+   *   • present keys missing from a healthy map are additively filled with
+   *     synthesized 'migration' entries.
+   * Omitted / ≤1 key ⇒ byte-identical legacy behavior.
+   */
+  presentKeys?: SubSystemKey[];
+}
+
+/** §1.6 canonical id-tuple equality (panelId, inverterId, topology, mountingId, batteryId). */
+function sameIdTuple(a: SubSystemEquipment, b: SubSystemEquipment): boolean {
+  return (a.panelId ?? null) === (b.panelId ?? null)
+    && (a.inverterId ?? null) === (b.inverterId ?? null)
+    && (a.topology ?? null) === (b.topology ?? null)
+    && (a.mountingId ?? null) === (b.mountingId ?? null)
+    && (a.batteryId ?? null) === (b.batteryId ?? null);
 }
 
 /** Drop undefined-valued keys so synthesized records serialize minimally + stably. */
@@ -229,9 +254,69 @@ export function ensureSubSystemShape<T extends LegacyScalarConfig>(
     config.systemType ?? opts.cadSystemType ?? 'roof',
   );
 
-  const subSystems: SubSystemEquipmentMap = hasMap
-    ? stored as SubSystemEquipmentMap
-    : { [inheritedKey]: synthesizeFromLegacyScalars(config, inheritedKey, opts.now?.()) };
+  // Wave 4B.A — hybrid partition from panel stamps (§1.1). Only >1 valid key
+  // changes anything; the legacy single-key path below is untouched.
+  const presentKeys = (opts.presentKeys ?? []).filter(isSubSystemKey);
+  const multiPresent = presentKeys.length > 1;
+
+  let subSystems: SubSystemEquipmentMap;
+  if (!hasMap) {
+    subSystems = multiPresent
+      ? Object.fromEntries(
+          presentKeys.map(k => [k, synthesizeFromLegacyScalars(config, k, opts.now?.())]),
+        ) as SubSystemEquipmentMap
+      : { [inheritedKey]: synthesizeFromLegacyScalars(config, inheritedKey, opts.now?.()) };
+  } else if (multiPresent) {
+    const storedMap = stored as SubSystemEquipmentMap;
+    const storedEntries = Object.entries(storedMap)
+      .filter(([k, v]) => isSubSystemKey(k) && !!v) as Array<[SubSystemKey, SubSystemEquipment]>;
+    const degenerateSingle =
+      storedEntries.length === 1 && storedEntries[0][1]?.source === 'migration';
+    const missingPresent = presentKeys.filter(k => !storedMap[k]);
+
+    if (degenerateSingle || missingPresent.length > 0) {
+      const next: SubSystemEquipmentMap = {};
+      // source !== 'migration' entries are NEVER discarded — user/design/defaults
+      // provenance always survives, even for keys outside the current partition.
+      for (const [k, v] of storedEntries) {
+        if (v.source !== 'migration') next[k] = v;
+      }
+      // Non-degenerate healthy migration entries for present keys also survive
+      // as-is; the degenerate single entry is re-synthesized per key below
+      // (kept by reference only when its id-tuple matches fresh synthesis).
+      if (!degenerateSingle) {
+        for (const [k, v] of storedEntries) {
+          if (v.source === 'migration' && presentKeys.includes(k) && !next[k]) next[k] = v;
+        }
+      }
+      for (const k of presentKeys) {
+        if (next[k]) continue;
+        const fresh = synthesizeFromLegacyScalars(config, k, opts.now?.());
+        const existing = storedMap[k];
+        next[k] = existing && existing.source === 'migration' && sameIdTuple(existing, fresh)
+          ? existing // idempotence: same id-tuple ⇒ keep the stored entry (stable updatedAt)
+          : fresh;
+      }
+      const droppedKeys = storedEntries
+        .filter(([k]) => !next[k])
+        .map(([k]) => k);
+      if (degenerateSingle) {
+        // Loud by contract: this is the Ray/Stowell wrong-collapse being healed.
+        console.warn(
+          '[ensureSubSystemShape] DEGENERATE single-entry migration map re-synthesized per layout partition',
+          '\n  stored key:', storedEntries[0][0],
+          '\n  layout present keys:', presentKeys.join(', '),
+          '\n  dropped migration entries:', droppedKeys.length > 0 ? droppedKeys.join(', ') : '(none)',
+          '\n  non-migration entries preserved:', storedEntries.filter(([, v]) => v.source !== 'migration').map(([k]) => k).join(', ') || '(none)',
+        );
+      }
+      subSystems = next;
+    } else {
+      subSystems = storedMap;
+    }
+  } else {
+    subSystems = stored as SubSystemEquipmentMap;
+  }
 
   // Re-stamp derived tag caches (§1.1: tags are cache, re-stampable at every
   // hydration). Only fills MISSING tags — existing tags are never overwritten
@@ -253,4 +338,69 @@ export function ensureSubSystemShape<T extends LegacyScalarConfig>(
     ...(inverters !== undefined ? { inverters } : {}),
     subSystems,
   } as T & { subSystems: SubSystemEquipmentMap };
+}
+
+// ─── Degenerate single-fleet detector (Wave 4B items B/D) ────────────────────
+
+/** Minimal structural inverter shape the detector reads (page InverterConfig satisfies it). */
+export interface DegenerateFleetInverterLike {
+  subSystemKey?: SubSystemKey;
+  strings?: Array<{ panelCount?: number }>;
+}
+
+export interface DegenerateSingleFleetResult {
+  degenerate: boolean;
+  /** The one key the whole fleet lives under (null when not degenerate). */
+  key: SubSystemKey | null;
+  /** Σ panelCount across the fleet's strings. */
+  fleetPanelTotal: number;
+  /** Σ of the layout-stamp partition counts (the authoritative project total). */
+  projectPanelTotal: number;
+}
+
+/**
+ * TRUE when a HYBRID layout (≥2 stamped sub keys) is paired with a fleet
+ * that (a) all lives under ONE sub key (tags or the §1.5 fallback), and
+ * (b) whose panel total covers ≈ the WHOLE project rather than that key's
+ * own stamp count — i.e. the pre-contract single-system fleet that was
+ * never split per sub (Ray's live 85-panel string tagged 'fence' on a
+ * 48/20/17 roof/ground/fence layout).
+ *
+ * Such a fleet must NOT be partitioned into per-sub engine inputs: the one
+ * sub would compute the whole fleet at a fraction of its panels while the
+ * other subs compute over phantom empty fleets (the 17-device / 2-branch /
+ * AC-kW-drift bug class). Callers either fall back to a single whole-fleet
+ * engine pass (honest interim view) or split the fleet per sub.
+ *
+ * Tolerance: |fleetTotal − projectTotal| ≤ max(1, 2% of project total).
+ */
+export function detectDegenerateSingleFleet(
+  inverters: readonly DegenerateFleetInverterLike[] | null | undefined,
+  fallbackKey: SubSystemKey,
+  expectedBySub: Partial<Record<SubSystemKey, number>>,
+): DegenerateSingleFleetResult {
+  const present = SUB_SYSTEM_KEYS.filter(k => (expectedBySub[k] ?? 0) > 0);
+  const projectPanelTotal = present.reduce((s, k) => s + (expectedBySub[k] ?? 0), 0);
+  const list = inverters ?? [];
+
+  let fleetTotal = 0;
+  const keys = new Set<SubSystemKey>();
+  for (const inv of list) {
+    keys.add(isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey! : fallbackKey);
+    for (const s of inv?.strings ?? []) fleetTotal += s?.panelCount ?? 0;
+  }
+
+  const notDegenerate: DegenerateSingleFleetResult = {
+    degenerate: false, key: null, fleetPanelTotal: fleetTotal, projectPanelTotal,
+  };
+  if (present.length <= 1 || list.length === 0 || keys.size !== 1 || fleetTotal <= 0) {
+    return notDegenerate;
+  }
+  const only = [...keys][0];
+  // A single fleet whose total matches ITS OWN stamp count is a correctly
+  // scoped sub fleet (the other subs are merely unseeded) — not degenerate.
+  if (fleetTotal === (expectedBySub[only] ?? 0)) return notDegenerate;
+  const tolerance = Math.max(1, Math.round(projectPanelTotal * 0.02));
+  if (Math.abs(fleetTotal - projectPanelTotal) > tolerance) return notDegenerate;
+  return { degenerate: true, key: only, fleetPanelTotal: fleetTotal, projectPanelTotal };
 }
