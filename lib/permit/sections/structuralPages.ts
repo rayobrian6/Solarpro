@@ -72,7 +72,7 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
 
 
 
-export function pageGroundStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+export function pageGroundStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('ground_mount', 'structural', cad, inputRec);
   validateSheet('ground_mount', comp);
@@ -84,14 +84,14 @@ export function pageGroundStructural(input: PermitInput, cad: CADModel, pageNum:
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-3', 'GROUND MOUNT STRUCTURAL DETAILS', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-3', opts?.title ?? 'GROUND MOUNT STRUCTURAL DETAILS', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
 
 
 
-export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('solar_fence', 'structural', cad, inputRec);
   validateSheet('solar_fence', comp);
@@ -104,7 +104,7 @@ export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: 
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-3', 'FENCE STRUCTURAL DETAILS', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-3', opts?.title ?? 'FENCE STRUCTURAL DETAILS', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }

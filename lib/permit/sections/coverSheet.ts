@@ -12,6 +12,7 @@ import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDispla
 import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
 import { equipmentDatasheetIndexRows } from './datasheetAppendix';
 import { buildSheetManifest } from '../sheetManifest';
+import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE, SUB_LABEL } from './subSystemSheets';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -161,13 +162,20 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
   // Single source of truth for order/titles/count — same manifest generatePermit
   // and the engineering-page sheet status derive from, so they can't drift.
+  // Wave 5B: hybrid sets grow per-sub detail sheets — mirror generatePermit's
+  // sub loop by passing the SAME ordered present-sub list.
+  const _tocSubs = hybridSheetSections(cad).map(s => s.key);
+  const _tocPrimaryType = _tocSubs.length > 1
+    ? SUB_KEY_TO_CAD_TYPE[_tocSubs[0]]
+    : (cad.systemType as SysType);
   const sheets = buildSheetManifest({
-    pv1Title: pv2Title(cad.systemType as SysType),
-    pv3Title: pv3Title(cad.systemType as SysType),
+    pv1Title: pv2Title(_tocPrimaryType as SysType),
+    pv3Title: pv3Title(_tocPrimaryType as SysType),
     datasheets: equipmentDatasheetIndexRows(input),
     includeSchedCont,
     includeValidation: includeInternalValidation,
     includeCadAppendix: includeCADAppendixPreview,
+    ...(_tocSubs.length > 1 ? { hybridSubs: _tocSubs } : {}),
   });
 
   // ── Topology label ────────────────────────────────────────────────────────

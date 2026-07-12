@@ -16,6 +16,7 @@ import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escap
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
 import { classifyPanel } from '../utils/subSystems';
+import { isHybridPlanset, primarySubKey, subScopedView, subScopedInput } from './subSystemSheets';
 import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
@@ -54,7 +55,7 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
 
 
 
-export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
   const vr = validateSheetComposition('ground_mount', cad);
   if (!vr.valid) console.warn('[pageGroundArrayPlan] CAD warnings:', vr.errors);
 
@@ -76,14 +77,14 @@ export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: 
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-1', 'SITE & GROUND ARRAY PLAN', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SITE & GROUND ARRAY PLAN', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
 
 
 
-export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
   console.log('[PLANSET ENGINE] pageFencePlan — PV-1 fence elevation is PRIMARY view');
   const vr = validateSheetComposition('solar_fence', cad);
   if (!vr.valid) console.warn('[pageFencePlan] CAD warnings:', vr.errors);
@@ -110,7 +111,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-1', 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
     ${composeDrawPage(comp, primarySvg, secondarySvg)}
   </div>`;
 }
@@ -127,7 +128,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 // uses via getPrimaryView(roof_plan), so PV-1 and PV-1B came out as literal
 // duplicates. Removed: PV-1B now renders its own schematicGridSvg below.
 
-export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: { sheetId?: string; titleSuffix?: string }): string {
   const { project, system } = input;
   // CAD-sourced: use cad.totalPanels as authoritative count
   const cadTotalPanels = cad.totalPanels;
@@ -494,7 +495,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-1B', 'ARRAY GEOMETRY & STRING LAYOUT', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `ARRAY GEOMETRY & STRING LAYOUT${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
     <!-- PIPELINE v47.343: PV-2B now uses draw-zone/data-zone layout -->
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->
@@ -583,6 +584,17 @@ export function pageArrayPrimary(input: PermitInput, cad: CADModel, pageNum: num
         _projectTotalDcKw: input.system?.totalDcKw, _projectTotalPanels: input.system?.totalPanels },
     } as PermitInput;
     return pageRoofPlan(roofInput, roofView, pageNum, totalPages, ctx);
+  }
+  // HYBRID with NO roof section (ground + fence): the primary sub (fixed
+  // roof > ground > fence order) owns PV-1 — scoped, never the project-wide
+  // winner page (which would claim the other sub's modules).
+  if (cad.hybrid && isHybridPlanset(cad)) {
+    const primary = primarySubKey(cad);
+    const view = subScopedView(cad, primary);
+    const scoped = subScopedInput(input, cad, primary);
+    if (primary === 'fence')  return pageFencePlan(scoped, view, pageNum, totalPages, ctx);
+    if (primary === 'ground') return pageGroundArrayPlan(scoped, view, pageNum, totalPages, ctx);
+    return pageRoofPlan(scoped, view, pageNum, totalPages, ctx);
   }
   // Use cad.systemType — single source of truth
   if (isFence(cad.systemType))  return pageFencePlan(input, cad, pageNum, totalPages, ctx);

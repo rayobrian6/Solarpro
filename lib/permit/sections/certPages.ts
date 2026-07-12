@@ -7,8 +7,16 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
-import { roofTypeLabel, hasRealBattery } from '../utils/helpers';
+import { roofTypeLabel, hasRealBattery, resolveEquipmentBySubSystem } from '../utils/helpers';
 import { getEquipmentContext, isFence, isGround } from '@/lib/system';
+import type { SubSystemKey } from '../utils/subSystems';
+
+/** Wave 5B — per-sub PE letters (hybrid). `subKey` scopes the equipment
+ *  resolution to the sub's OWN fleet/carriage (never the project-wide winner)
+ *  and switches the mounting label to the sub's own family default instead of
+ *  the project-wide (roof) racking string. `sheetId` suffixes hybrid letters
+ *  (PE-1G / PE-1F) while the primary keeps PE-1. */
+export interface PELetterOpts { sheetId?: string; subKey?: SubSystemKey; }
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { BUILD_VERSION } from '@/lib/version';
@@ -209,7 +217,7 @@ function _peSiteLoading(input: PermitInput): string {
 }
 
 // ─── FENCE PE LETTER ──────────────────────────────────────────────────────────
-export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: PELetterOpts): string {
   const { project, system, compliance } = input;
   const necVer  = compliance.jurisdiction?.necVersion || '2023';
   const ibcVer  = '2021';
@@ -225,11 +233,17 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
   const postSpacing = cad.fence?.postSpacingM ? (cad.fence.postSpacingM * 3.281).toFixed(1) : '8.0';
   const panelHIn    = cad.fence?.panelHeightM ? (cad.fence.panelHeightM * 39.37).toFixed(0) + '"' : '72"';
   const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
-  const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'Solar Fence Rail System';
+  // Per-sub letter (hybrid): the project-wide mount string is the ROOF racking
+  // (IronRidge on Stowell) — a fence letter must never certify it. Sub-scoped
+  // letters print the fence family label; the primary/legacy path is unchanged.
+  const mountSys    = opts?.subKey
+    ? 'Solar Fence Rail System'
+    : (project._canonical?.mountSystem || project.mountingSystem || 'Solar Fence Rail System');
+  const _eqFence    = opts?.subKey ? resolveEquipmentBySubSystem(input, opts.subKey, cad) : null;
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
     <div class="page-content">
 
       <div class="bb-hvy pb-xs mb-sm">
@@ -245,7 +259,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
           <div class="section-title">PV System Parameters</div>
           <table class="info-table" class="mb-xs">
             <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
-            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
+            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = _eqFence ?? getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
             <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${mountSys}</td></tr>
             <tr><td class="il">Rail Orientation</td><td class="iv">Horizontal along fence line</td><td class="il">Foundation</td><td class="iv">Concrete footing</td></tr>
           </table>
@@ -302,7 +316,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
 }
 
 // ─── GROUND MOUNT PE LETTER ───────────────────────────────────────────────────
-export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: PELetterOpts): string {
   const { project, system, compliance } = input;
   const necVer  = compliance.jurisdiction?.necVersion || '2023';
   const ibcVer  = '2021';
@@ -320,11 +334,16 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
   const tiltDeg     = arr0?.tiltDeg || 20;
   const structType  = arr0?.structureType || 'driven steel pipe pile';
   const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
-  const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'Ground Mount Racking System';
+  // Per-sub letter (hybrid): never certify the project-wide (roof) racking
+  // string on the ground letter — see fence letter note.
+  const mountSys    = opts?.subKey
+    ? 'Ground Mount Racking System'
+    : (project._canonical?.mountSystem || project.mountingSystem || 'Ground Mount Racking System');
+  const _eqGround   = opts?.subKey ? resolveEquipmentBySubSystem(input, opts.subKey, cad) : null;
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
     <div class="page-content">
 
       <div class="bb-hvy pb-xs mb-sm">
@@ -340,7 +359,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
           <div class="section-title">PV System Parameters</div>
           <table class="info-table" class="mb-xs">
             <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
-            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
+            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = _eqGround ?? getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
             <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${mountSys}</td></tr>
             <tr><td class="il">Array Tilt</td><td class="iv">${tiltDeg}°</td><td class="il">Foundation</td><td class="iv">Pile / pier</td></tr>
           </table>
@@ -397,8 +416,9 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
 }
 
 // ─── ROOF PE LETTER ───────────────────────────────────────────────────────────
-export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: PELetterOpts): string {
   const { project, system, compliance } = input;
+  const _eqRoof = opts?.subKey ? resolveEquipmentBySubSystem(input, opts.subKey, cad) : null;
   const necVer  = compliance.jurisdiction?.necVersion || '2023';
   const ibcVer  = '2021';
   const state   = compliance.jurisdiction?.state || '—';
@@ -468,7 +488,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
     <div class="page-content pe-letter">
 
       <div class="bb-hvy pb-xs mb-sm" style="display:flex;justify-content:space-between;align-items:flex-end;">
@@ -490,7 +510,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <div class="section-title">PV System Parameters</div>
           <table class="info-table" class="mb-xs">
             <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
-            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
+            <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = _eqRoof ?? getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
             <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${mountSys}</td></tr>
             <tr><td class="il">Rail Orientation</td><td class="iv">Perpendicular to rafters</td><td class="il">Attachment</td><td class="iv">Lag bolt w/ flashing</td></tr>
           </table>

@@ -30,11 +30,17 @@ import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
-import { pageArrayPrimary, pageArrayGeometry } from './sections/arrayPages';
-import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPages';
+import { pageArrayPrimary, pageArrayGeometry, pageGroundArrayPlan, pageFencePlan } from './sections/arrayPages';
+import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
 import { pageWarningLabels, pageDisconnectDirectory, pageSpecSheetReference } from './sections/compliancePages';
-import { pageEngineerCert, pagePELetter } from './sections/certPages';
+import { pageEngineerCert, pagePELetter, pagePELetterRoof, pagePELetterGround, pagePELetterFence } from './sections/certPages';
+import {
+  hybridSheetSections, isHybridPlanset, primarySubKey, subScopedView, subScopedInput,
+  mapSubStructural, subStructuralResult, SUB_LABEL,
+  type HybridSectionRef,
+} from './sections/subSystemSheets';
+import { hybridSheetId } from './sheetManifest';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
 import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
@@ -913,6 +919,51 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Long BOMs paginate onto SCHED-2 instead of clipping at the page edge.
   const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
 
+  // ── Wave 5B: hybrid per-sub sheet loop ────────────────────────────────
+  // A hybrid design gets ONE detail set PER sub-system alongside the primary
+  // (roof-led) set — fence elevation + fence structural, ground array plan +
+  // ground structural, per-sub circuit layouts and per-sub PE letters — each
+  // rendered through the scoped-view pattern (sub-typed CAD view + placement-
+  // stamp-filtered input; project totals stashed for the title block). Sheet
+  // ids: primary sub keeps the legacy unsuffixed ids; additional subs suffix
+  // G (ground) / F (fence). buildSheetManifest mirrors this exactly.
+  const _w5Sections = hybridSheetSections(cad);
+  const _w5Hybrid = isHybridPlanset(cad);
+  const _w5Primary = primarySubKey(cad);
+  const _w5Extras: HybridSectionRef[] = _w5Hybrid ? _w5Sections.slice(1) : [];
+  /** Scoped input whose compliance.structural is the SUB's own V4 run —
+   *  kills the "94 modules on the fence PE letter" class of lie. */
+  const _w5StructuralInput = (key: HybridSectionRef['key']): PermitInput => {
+    const scoped = subScopedInput(input, cad, key);
+    return {
+      ...scoped,
+      compliance: {
+        ...(scoped.compliance ?? { overallStatus: '' }),
+        structural: mapSubStructural(subStructuralResult(input, key), input.compliance?.structural, key),
+      },
+    } as PermitInput;
+  };
+  const _w5PlanPage = (sec: HybridSectionRef) => (n: number, t: number) =>
+    sec.key === 'ground'
+      ? pageGroundArrayPlan(subScopedInput(input, cad, 'ground'), subScopedView(cad, 'ground'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-1', 'ground'), title: 'GROUND ARRAY PLAN — MODULE LAYOUT' })
+      : pageFencePlan(subScopedInput(input, cad, 'fence'), subScopedView(cad, 'fence'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-1', 'fence') });
+  const _w5StructPage = (sec: HybridSectionRef) => (n: number, t: number) =>
+    sec.key === 'ground'
+      ? pageGroundStructural(subScopedInput(input, cad, 'ground'), subScopedView(cad, 'ground'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-3', 'ground') })
+      : pageFenceStructural(subScopedInput(input, cad, 'fence'), subScopedView(cad, 'fence'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-3', 'fence') });
+  const _w5LetterFor = (key: HybridSectionRef['key'], sheetId: string) => (n: number, t: number) => {
+    const scoped = _w5StructuralInput(key);
+    const view = subScopedView(cad, key);
+    const opts = { sheetId, subKey: key };
+    if (key === 'ground') return pagePELetterGround(scoped, view, n, t, opts);
+    if (key === 'fence') return pagePELetterFence(scoped, view, n, t, opts);
+    return pagePELetterRoof(scoped, view, n, t, opts);
+  };
+
   // Dynamic page assembly — numbering derives from the list, so conditional
   // sheets can never desync pageNum/TOTAL or the cover index again.
   const pageFns: Array<(n: number, t: number) => string> = [
@@ -920,24 +971,41 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
     // the roof/array drawing now carries the integrated site context (parcel,
     // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.
-    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-1: Site & Roof / Ground / Fence (cad.systemType)
-    (n, t) => pageArrayGeometry(input, cad, n, t),                     // PV-1B: Array geometry (system-aware)
+    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-1: Site & Roof / Ground / Fence (cad.systemType; hybrid = roof-scoped w/ overlays)
+    ...(_w5Extras.map(_w5PlanPage)),                                   // PV-1G / PV-1F: per-sub plan/elevation (hybrid only)
+    (n, t) => _w5Hybrid
+      ? pageArrayGeometry(subScopedInput(input, cad, _w5Primary), subScopedView(cad, _w5Primary), n, t,
+          { titleSuffix: ` — ${SUB_LABEL[_w5Primary]}` })
+      : pageArrayGeometry(input, cad, n, t),                           // PV-1B: Array geometry (hybrid = primary sub scoped)
+    ..._w5Extras.map(sec => (n: number, t: number) =>
+      pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t,
+        { sheetId: hybridSheetId('PV-1B', sec.key), titleSuffix: ` — ${SUB_LABEL[sec.key]}` })), // PV-1BG / PV-1BF
     // ── Reading order (2026-07-09): electrical grouped together, E-1 with them ──
-    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (all)
-    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (system-aware)
+    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
+    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
     (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (was orphaned after the certs — moved up with the electrical set)
-    (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Attachment detail (structural group)
-    (n, t) => pageStructural(input, cad, n, t),                        // PV-4C: Structural calcs (system-aware)
+    (n, t) => _w5Hybrid
+      ? (_w5Primary === 'roof'
+          ? pageRoofStructural(subScopedInput(input, cad, 'roof'), subScopedView(cad, 'roof'), n, t, renderCtx)
+          : _w5StructPage(_w5Sections[0])(n, t))
+      : pageStructuralPrimary(input, cad, n, t, renderCtx),            // PV-3: Attachment detail (hybrid = primary sub scoped)
+    ..._w5Extras.map(_w5StructPage),                                   // PV-3G / PV-3F: per-sub structural detail (hybrid only)
+    (n, t) => _w5Hybrid
+      ? pageStructural(_w5StructuralInput(_w5Primary), subScopedView(cad, _w5Primary), n, t)
+      : pageStructural(input, cad, n, t),                              // PV-4C: Structural calcs (hybrid = primary sub scoped)
     (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
     (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
-    (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (all)
+    (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
     ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
     (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
     // DS-n: full-page REAL manufacturer datasheets (module/inverter/battery),
     // one per selected-equipment id that has an image on file (manufacturer_assets).
     ...equipmentDatasheetPageFns(input, cad),
     (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
-    (n, t) => pagePELetter(input, cad, n, t),                          // PE-1 (all)
+    (n, t) => _w5Hybrid
+      ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
+      : pagePELetter(input, cad, n, t),                                // PE-1 (hybrid = primary sub letter, subset params)
+    ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))), // PE-1G / PE-1F
     ...(includeInternalValidation ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
   ];
   const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);
