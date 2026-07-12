@@ -83,6 +83,20 @@ import {
   toSubSystemKey,
   type SubSystemKey,
 } from '@/lib/system/subSystemEquipment';
+// Wave 3 item 2 — staleness gates re-keyed PER SUB (a fence CAD edit can
+// never nuke roof engineering) + fleet primitives for sub-scoped watchers.
+import {
+  gateStaleFleetPerSub,
+  gateInactiveInverterPerSub,
+  presentStampKeys,
+} from '@/lib/system/subSystemStaleness';
+import {
+  fleetKeys,
+  fleetPanelTotal,
+  partitionFleet,
+  replaceSubFleet,
+  stampFleet,
+} from '@/lib/system/subSystemFleet';
 // Cast wrappers: builder types use wide `string` for roofType; page uses a
 // narrow RoofType union. Since the page's RoofType is a strict subset of
 // string, the cast is always safe. These wrappers are the ONLY call sites
@@ -1445,32 +1459,64 @@ function EngineeringPageInner() {
         // authoritative project panel count, the saved inverter layout is STALE
         // (auto-saved before CAD loaded, likely from newString() default panelCount:10).
         // Discard only the stale inverter fields + locks. Preserve all other saved fields.
+        //
+        // Wave 3.2 (contract §3 Wave 3 item 2): the gate is re-keyed PER SUB.
+        // With ≥2 subsystems stamped on the layout, each sub's fleet is compared
+        // against ITS OWN stamped panel count and only MISMATCHED fleets are
+        // discarded — a fence CAD edit can never nuke roof engineering. The
+        // equipment CHOICE always survives in savedConfig.subSystems (§1.1),
+        // which was synthesized at the hydration boundary above and is never
+        // touched by this gate. Single-sub projects take the legacy-total path
+        // with a decision IDENTICAL to the historical gate (I-10).
+        // Per-sub layout stamp counts (§1.1 membership authority) — the same
+        // classification subSystemCounts uses (unstamped panels ⇒ roof).
+        const _hydExpectedBySub: Partial<Record<SubSystemKey, number>> = (() => {
+          const counts: Record<SubSystemKey, number> = { roof: 0, ground: 0, fence: 0 };
+          for (const pnl of (((layout as any)?.panels ?? []) as Array<{ systemType?: string; placementType?: string }>)) {
+            counts[toSubSystemKey(pnl?.systemType ?? pnl?.placementType)]++;
+          }
+          return counts;
+        })();
+        const _hydFallbackKey: SubSystemKey = toSubSystemKey(
+          (savedConfig as any)?.systemType ?? _cadSystemTypeForTags ?? 'roof',
+        );
+        const _hydMultiSub = presentStampKeys(_hydExpectedBySub).length > 1;
         if (
           savedConfig &&
           Array.isArray((savedConfig as any).inverters) &&
           expectedHydrationPanelCount > 0
         ) {
-          const _savedInvTotal: number = ((savedConfig as any).inverters as any[]).reduce(
-            (s: number, inv: any) =>
-              s + ((inv.strings ?? []) as any[]).reduce(
-                (s2: number, str: any) => s2 + (str.panelCount ?? 0), 0
-              ),
-            0
-          );
-          if (_savedInvTotal > 0 && _savedInvTotal !== expectedHydrationPanelCount) {
+          const _pcGate = gateStaleFleetPerSub({
+            inverters: (savedConfig as any).inverters as any[],
+            expectedBySub: _hydExpectedBySub,
+            expectedTotal: expectedHydrationPanelCount,
+            fallbackKey: _hydFallbackKey,
+          });
+          if (_pcGate.anyDiscarded) {
             console.warn(
               '[HYDRATION STALE CONFIG DISCARD]',
               '\n  projectId:', projectId,
+              '\n  mode:', _pcGate.mode,
               '\n  expectedPanelCount:', expectedHydrationPanelCount,
-              '\n  savedInverterPanelTotal:', _savedInvTotal,
-              '\n  reason: saved inverter panel total does not match authoritative project panel count',
-              '\n  action: discarded savedConfig.inverters and cleared user lock/default stamp'
+              '\n  expectedBySub:', JSON.stringify(_hydExpectedBySub),
+              '\n  discardedSubSystems:', _pcGate.discardedKeys.join(', '),
+              '\n  reason: saved inverter panel total does not match authoritative panel count (per-sub at N>1)',
+              '\n  action: discarded the mismatched fleet(s) + cleared user lock/default stamp; equipment choices survive in subSystems map'
             );
-            // Discard only stale inverter layout + locks that protect it.
-            // All other fields (wire settings, mounting, utility, etc.) are preserved.
-            delete (savedConfig as any).inverters;
+            if (_pcGate.keptInverters.length > 0) {
+              (savedConfig as any).inverters = _pcGate.keptInverters;
+            } else {
+              delete (savedConfig as any).inverters;
+            }
             delete (savedConfig as any).isUserControlled;
             delete (savedConfig as any).defaultsApplied;
+            // Per-sub re-seed eligibility: a discarded sub may be re-defaulted
+            // by per-sub smart defaults; matched subs keep their stamp.
+            if (_pcGate.mode === 'per-sub' && (savedConfig as any).defaultsAppliedBySubSystem) {
+              const _dabs = { ...(savedConfig as any).defaultsAppliedBySubSystem };
+              for (const k of _pcGate.discardedKeys) delete _dabs[k];
+              (savedConfig as any).defaultsAppliedBySubSystem = _dabs;
+            }
           }
         }
 
@@ -1484,28 +1530,46 @@ function EngineeringPageInner() {
           Array.isArray((savedConfig as any).inverters) &&
           (savedConfig as any).inverters.length > 0
         ) {
-          const _savedPrimaryInvId: string = (savedConfig as any).inverters[0]?.inverterId ?? '';
-          const _savedEqEntry = STRING_INVERTERS.find(x => x.id === _savedPrimaryInvId);
-          // v61.13: also discard when the ID is not found in STRING_INVERTERS at all but
-          // matches a known-inactive legacy prefix — covers the escape hatch where
-          // _savedEqEntry is undefined (ID was fully removed from equipment-db).
-          const _isKnownInactiveLegacy = !_savedEqEntry && (
-            _savedPrimaryInvId.startsWith('ecoflow-power-ocean-') ||
-            _savedPrimaryInvId.startsWith('ecoflow-powerocean-')
+          // Wave 3.2 — per-sub at N>1: each fleet's PRIMARY inverter is checked;
+          // only the fleet(s) with a dead SKU are discarded (legacy behavior —
+          // inverters[0] check, discard all — is byte-identical at ≤1 fleet).
+          const _isStaleInvId = (id: string): boolean => {
+            const entry = STRING_INVERTERS.find(x => x.id === id);
+            // v61.13: also discard when the ID is not found in STRING_INVERTERS at all but
+            // matches a known-inactive legacy prefix — covers the escape hatch where
+            // the entry is undefined (ID was fully removed from equipment-db).
+            const knownInactiveLegacy = !entry && (
+              id.startsWith('ecoflow-power-ocean-') ||
+              id.startsWith('ecoflow-powerocean-')
+            );
+            return (entry ? entry.active === false : false) || knownInactiveLegacy;
+          };
+          const _invGate = gateInactiveInverterPerSub(
+            (savedConfig as any).inverters as any[],
+            _hydFallbackKey,
+            _isStaleInvId,
           );
-          if ((_savedEqEntry && _savedEqEntry.active === false) || _isKnownInactiveLegacy) {
+          if (_invGate.anyDiscarded) {
             console.warn(
               '[HYDRATION STALE INVERTER DISCARD]',
               '\n  projectId:', projectId,
-              '\n  inverterId:', _savedPrimaryInvId,
-              '\n  reason:', _isKnownInactiveLegacy
-                ? 'saved inverterId matches known-inactive legacy prefix (not found in equipment-db)'
-                : 'saved inverterId is active:false in equipment-db (deactivated SKU)',
-              '\n  action: discarded savedConfig.inverters and cleared user lock/default stamp'
+              '\n  mode:', _invGate.mode,
+              '\n  discardedSubSystems:', _invGate.discardedKeys.join(', '),
+              '\n  reason: fleet primary inverterId is active:false / known-inactive legacy SKU',
+              '\n  action: discarded the stale fleet(s) and cleared user lock/default stamp'
             );
-            delete (savedConfig as any).inverters;
+            if (_invGate.keptInverters.length > 0) {
+              (savedConfig as any).inverters = _invGate.keptInverters;
+            } else {
+              delete (savedConfig as any).inverters;
+            }
             delete (savedConfig as any).isUserControlled;
             delete (savedConfig as any).defaultsApplied;
+            if (_invGate.mode === 'per-sub' && (savedConfig as any).defaultsAppliedBySubSystem) {
+              const _dabs2 = { ...(savedConfig as any).defaultsAppliedBySubSystem };
+              for (const k of _invGate.discardedKeys) delete _dabs2[k];
+              (savedConfig as any).defaultsAppliedBySubSystem = _dabs2;
+            }
           }
         }
 
@@ -1521,7 +1585,19 @@ function EngineeringPageInner() {
         // committed config ALWAYS equal the single-source-of-truth allocator
         // output, for any brand and panel count. Guided/manual modes are left
         // untouched (the user curates those via the recommendation panel / edits).
+        // Wave 3.2 — the heal below rebuilds strings from ONE whole-project
+        // sizeSystemFromBrand pass, which is meaningless (and destructive)
+        // across ≥2 subsystems. At N>1 it is SKIPPED (protective no-op: the
+        // config loads exactly as saved; per-sub sizing belongs to the per-sub
+        // watchers/defaults). Single-sub behavior is unchanged.
+        const _hydMultiFleet =
+          _hydMultiSub ||
+          fleetKeys((savedConfig as any)?.inverters as any[], _hydFallbackKey).length > 1;
+        if (_hydMultiFleet && p.controlMode === 'auto') {
+          console.log('[HYDRATION STRING-DISTRIBUTION HEAL] skipped — multi-subsystem project (per-sub authority owns string layout)');
+        }
         if (
+          !_hydMultiFleet &&
           p.controlMode === 'auto' &&
           savedConfig &&
           Array.isArray((savedConfig as any).inverters) &&
@@ -1705,7 +1781,10 @@ function EngineeringPageInner() {
                     ? _savedSinglePc !== expectedHydrationPanelCount  // semantic mismatch (preferred)
                     : _savedSinglePc > 20                             // fallback when no reference count yet
                 );
-              const _isCorrupt = _isNx1Corrupt || _is1xNCorrupt;
+              // Wave 3.2 — the corruption rebuild below is a whole-fleet
+              // sizeSystemFromBrand pass; at N>1 subsystems it is skipped
+              // (per-sub authority owns each fleet's layout).
+              const _isCorrupt = (_isNx1Corrupt || _is1xNCorrupt) && !_hydMultiFleet;
               if (_isCorrupt) {
                 const _corruptLabel = _is1xNCorrupt
                   ? `1×${_allStrings[0]?.panelCount ?? '?'} (single over-sized string)`
