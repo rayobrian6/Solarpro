@@ -82,10 +82,10 @@ Starting HEAD: 100114c2
 - [x] tsc clean, focused tests pass (306/306 pass)
 - [x] Commit as Commit 5
 
-## Section 8 — Commit 6: PostgreSQL Integration Harness & Tests (GOV-15)
-- [ ] Determine if real PostgreSQL available
-- [ ] Build integration test harness
-- [ ] Run integration tests or report blocker
+## Section 8 — Commit 6: PostgreSQL Integration Harness & Tests (GOV-15) ✅
+- [x] Determine if real PostgreSQL available (installed PostgreSQL 15, created test DB)
+- [x] Build integration test harness (tests/phase1a2-postgres-integration.test.ts)
+- [x] Run integration tests (38/38 pass against local PostgreSQL, skip gracefully without DB)
 
 ## Section 9 — Commit 7: Expanded Unit and Integration Tests
 - [ ] Add all required tests per spec
