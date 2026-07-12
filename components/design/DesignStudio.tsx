@@ -12,6 +12,11 @@ import {
   RACKING_SYSTEMS, OPTIMIZERS, MICROINVERTERS,
   getMidClampGapMeters, getMidClampGapInches,
 } from '@/lib/equipment-db';
+// Wave 4A: per-subsystem design-electrical writer (contract §1.3) — pure
+// builder + stamp partitioner live in the design→engineering module so the
+// split is testable outside the component.
+import { buildDesignElectricalBlock, presentDesignSubSystemKeys } from '@/lib/system/designToEngineering';
+import { toSubSystemKey } from '@/lib/system/subSystemEquipment';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
 // v50.11: POA calculation + segment labels
@@ -726,6 +731,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     () => stringAssignment.strings.map(s => ({ label: s.label, color: s.color, panelCount: s.panelCount })),
     [stringAssignment],
   );
+  // Wave 4A: distinct sub-system keys stamped on the placed panels (membership
+  // authority §1.1), fixed roof > ground > fence order. >1 keys = hybrid design
+  // — equipment picks then carry a per-sub scope to the canonical store.
+  const presentSubSystemKeys = useMemo(() => presentDesignSubSystemKeys(panels as any), [panels]);
   // Turning equipment view on dims the panels so devices are visible underneath.
   const toggleEquipment = useCallback(() => {
     setShowEquipment(prev => {
@@ -753,18 +762,17 @@ export default function DesignStudio({ project, onSave }: Props) {
   // scratch/testing designs never persist), read by the Engineering page to seed
   // its inverter/string/topology config with no re-entry.
   const buildDesignElectrical = useCallback((): DesignElectrical => {
-    const byPanelId: Record<string, number> = {};
-    const stringMap = new Map<number, string[]>();
+    const assignmentByPanelId: Record<string, number> = {};
     for (const pid in stringAssignment.byPanelId) {
-      const idx = stringAssignment.byPanelId[pid].stringIndex;
-      byPanelId[pid] = idx;
-      const arr = stringMap.get(idx);
-      if (arr) arr.push(pid); else stringMap.set(idx, [pid]);
+      assignmentByPanelId[pid] = stringAssignment.byPanelId[pid].stringIndex;
     }
-    const strings = [...stringMap.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([stringIndex, panelIds]) => ({ stringIndex, panelCount: panelIds.length, panelIds }));
-    return {
+    // Wave 4A (contract §1.3): the pure builder splits by classifyPanel over
+    // the panel stamps — hybrid designs get per-sub `subSystems[]` blocks and
+    // the flat fields become the PRIMARY sub's mirror (§1.4); single-type
+    // designs emit the flat block only, byte-identical to the legacy writer.
+    return buildDesignElectricalBlock({
+      panels: panels as any,
+      assignmentByPanelId,
       topology,
       inverterBrand: topology === 'micro' ? 'Enphase' : 'SolarEdge',
       modulesPerString,
@@ -776,13 +784,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       // uses IQ8A (349W) makes the AC output ~17% low. Fall back to the catalog
       // default only when nothing is selected.
       microModelId: topology === 'micro' ? ((selectedInverter as any)?.id ?? MICROINVERTERS[0]?.id) : undefined,
-      byPanelId,
       overrides: Object.keys(stringOverrides).length > 0 ? stringOverrides : undefined,
-      strings,
       deviceCount: stringAssignment.deviceCount,
       generatedAt: new Date().toISOString(),
-    };
-  }, [stringAssignment, topology, modulesPerString, rackingId, selectedPanel, stringOverrides]);
+    });
+  }, [stringAssignment, panels, topology, modulesPerString, rackingId, selectedPanel, selectedInverter, stringOverrides]);
 
   // Keep the latest electrical design in a ref for the beforeunload save path.
   const designElectricalRef = useRef<DesignElectrical | null>(null);
@@ -5621,10 +5627,20 @@ export default function DesignStudio({ project, onSave }: Props) {
                           // Immediately persist to the canonical selected_equipment store
                           // (single source of truth both pages read) — don't wait on the
                           // debounced layout auto-save. Engineering picks it up on next load.
+                          // Wave 4A (§1.3): on a HYBRID design the pick is scoped to the
+                          // ACTIVE zone's sub-system (+ the stamped keys so the route can
+                          // derive the primary) — the route then writes the v2 per-sub
+                          // entry instead of a project-wide flat promotion. Single-type
+                          // designs keep the legacy flat body (byte-identical write).
                           fetch(`/api/projects/${project.id}/equipment`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ selectedPanel: p }),
+                            body: JSON.stringify({
+                              selectedPanel: p,
+                              ...(presentSubSystemKeys.length > 1
+                                ? { subSystem: toSubSystemKey(activeZoneType), presentKeys: presentSubSystemKeys }
+                                : {}),
+                            }),
                           }).catch(() => {/* non-fatal; auto-save is the backup */});
                         }}
                         className={`w-full text-left p-2.5 rounded-lg border transition-all ${
