@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type { PermitInput, ResolvedEquipment } from '../types';
+import { SOLAR_PANELS, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -357,6 +358,43 @@ export interface HybridEquipmentCarrier {
 const _blankStr = (s?: string) => !s || s === '—';
 const _blankNum = (n?: number) => !(typeof n === 'number' && n > 0);
 
+/** Resolve equipment-db ids from a §1.1 subSystems map entry into `out`,
+ *  filling ONLY blank fields (tagged-fleet names always win). Micro registry
+ *  is tried first — a micro id in the string registry is impossible, and the
+ *  two carry different AC-output units (acOutputW vs acOutputKw). */
+function fillFromEquipmentIds(
+  out: ResolvedEquipment,
+  entry: { inverterId?: string; panelId?: string; topology?: string },
+): void {
+  if (entry.inverterId) {
+    const micro = getMicroinverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputW?: number } | undefined;
+    const str = micro ? undefined : getInverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputKw?: number } | undefined;
+    const dev = micro ?? str;
+    if (dev) {
+      if (_blankStr(out.inverterManufacturer) && dev.manufacturer) out.inverterManufacturer = dev.manufacturer;
+      if (_blankStr(out.inverterModel)        && dev.model)        out.inverterModel = dev.model;
+      const kw = micro
+        ? (micro.acOutputW ? micro.acOutputW / 1000 : 0)
+        : (str?.acOutputKw ?? 0);
+      if (_blankNum(out.inverterAcOutputKw) && kw > 0) out.inverterAcOutputKw = kw;
+      if (_blankStr(out.inverterType)) out.inverterType = micro ? 'micro' : (entry.topology || 'string');
+    }
+  }
+  if (entry.panelId) {
+    const p = (SOLAR_PANELS as Array<{ id: string; manufacturer?: string; model?: string;
+      watts?: number; voc?: number; isc?: number }>).find(x => x.id === entry.panelId);
+    if (p) {
+      if (_blankStr(out.panelManufacturer) && p.manufacturer) out.panelManufacturer = p.manufacturer;
+      if (_blankStr(out.panelModel)        && p.model)        out.panelModel = p.model;
+      if (_blankNum(out.panelWatts)        && p.watts)        out.panelWatts = p.watts;
+      if (_blankNum(out.panelVoc)          && p.voc)          out.panelVoc = p.voc;
+      if (_blankNum(out.panelIsc)          && p.isc)          out.panelIsc = p.isc;
+    }
+  }
+}
+
 /**
  * Per-subsystem equipment resolution — the hybrid-safe sibling of
  * `resolveEquipment`. Reads the PermitInput carriage in priority order:
@@ -385,9 +423,16 @@ export function resolveEquipmentBySubSystem(
   const canonSubs = (input.project?._canonical as
     { subSystems?: Array<{ key: string; panels?: Array<{ wattage?: number }> }> } | undefined)?.subSystems;
   const canonSub = canonSubs?.find(s => s.key === key);
+  // §1.1 equipment authority map (project.subSystems carriage) — id-based
+  // fallback so a thin/legacy payload (untagged fleet, no enriched names)
+  // still resolves the sub's REAL equipment instead of '—'/0 (the Stowell v3
+  // "48 × 0W · Inverter" E-1 class).
+  const mapEntry = (input.project as { subSystems?: Record<string, {
+    inverterId?: string; panelId?: string; topology?: string;
+  }> })?.subSystems?.[key];
 
   // 4. Untagged / N=1 legacy: no per-sub carriage → legacy resolver unchanged.
-  if (tagged.length === 0 && !section?.equipment && !canonSub) {
+  if (tagged.length === 0 && !section?.equipment && !canonSub && !mapEntry) {
     return resolveEquipment(input);
   }
 
@@ -411,6 +456,12 @@ export function resolveEquipmentBySubSystem(
     out.inverterModel        = inv0.model        || '—';
     out.inverterType         = inv0.type         || '—';
     out.inverterAcOutputKw   = inv0.acOutputKw   || 0;
+  }
+
+  // 1.5. Equipment-authority ids → equipment-db specs (fills blanks only —
+  // the tagged fleet's enriched names always win when present).
+  if (mapEntry?.inverterId || mapEntry?.panelId) {
+    fillFromEquipmentIds(out, mapEntry);
   }
 
   // 2. The sub's CAD section equipment carriage fills what the fleet lacks.

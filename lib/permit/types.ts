@@ -195,6 +195,17 @@ export interface PermitInput {
     // (the design-studio picker will write this). Read by buildIntegratedEquipment.
     bosDeviceIds?: string[];
     combinerId?: string;
+    /** §1.1 per-subsystem equipment authority map (config.subSystems carriage).
+     *  Read by resolveEquipmentBySubSystem as the id-based fallback source when
+     *  a sub's tagged fleet carries no enriched names (legacy/thin payloads). */
+    subSystems?: Record<string, {
+      key?: string;
+      inverterId?: string;
+      panelId?: string;
+      topology?: string;
+      mountingId?: string;
+      ecosystemBrand?: string;
+    }>;
     // Installer preference: cut the AC trunk at row transitions (splice pair per
     // within-branch transition) instead of the cheapest-option service loop.
     // Read by bomForPermit → generateBOMV4 → resolveTrunkCablePlan.
@@ -337,6 +348,9 @@ export interface PermitInput {
       /** Per-subsystem tag (contract §1.3 permit carriage — derived cache,
        *  re-stamped from panel stamps; see docs/ARCHITECTURE-per-subsystem-equipment.md). */
       subSystemKey?: import('@/lib/system/subSystemEquipment').SubSystemKey;
+      /** Equipment-db id (carried so server-side resolvers can re-derive full
+       *  specs when the enriched name fields are blank). */
+      inverterId?: string;
       strings: Array<{
         label: string;
         panelCount: number;
@@ -347,6 +361,8 @@ export interface PermitInput {
         panelIsc: number;
         wireGauge: string;
         wireLength: number;
+        /** Per-subsystem tag (contract §1.3 — untagged strings inherit the parent inverter's key). */
+        subSystemKey?: import('@/lib/system/subSystemEquipment').SubSystemKey;
         // FIX v47.318: FIX7 conductor schedule fields (added by v47.315)
         isc?: number;
         ampacity?: number;

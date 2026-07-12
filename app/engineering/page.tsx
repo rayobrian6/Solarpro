@@ -479,7 +479,11 @@ function newString(idx: number, sysType?: string): StringConfig {
   return { id: `str-${Date.now()}-${idx}`, label: `String ${idx + 1}`, panelCount: 10, panelId: defaultPanelForSystemType(sysType), tilt: 20, azimuth: 180, roofType: 'shingle', mountingSystem: 'ironridge-xr100', wireGauge: '#10 AWG', wireLength: 50 };
 }
 
-function newInverter(type: InverterType, sysType?: string): InverterConfig {
+function newInverter(
+  type: InverterType,
+  sysType?: string,
+  opts?: { subSystemKey?: SubSystemKey; panelCount?: number; panelId?: string },
+): InverterConfig {
   // Use correct default inverterId per type — prevents cross-type ID mismatch.
   // v47.358: 'ecoflow' topology defaults to PowerOcean 10kW (middle tier).
   let defaultId: string;
@@ -493,11 +497,28 @@ function newInverter(type: InverterType, sysType?: string): InverterConfig {
     defaultId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
   }
   // v61.3: route through central builder — guarantees metadata invariants.
-  const firstString = newString(0, sysType);
+  const base = newString(0, sysType);
+  const firstString = (opts?.subSystemKey || opts?.panelCount !== undefined || opts?.panelId)
+    ? _buildStrCfg({
+        index:          0,
+        systemType:     sysType,
+        existingId:     base.id,
+        panelCount:     opts?.panelCount ?? base.panelCount,
+        panelId:        opts?.panelId ?? base.panelId,
+        tilt:           base.tilt,
+        azimuth:        base.azimuth,
+        roofType:       base.roofType as any,
+        mountingSystem: base.mountingSystem,
+        wireGauge:      base.wireGauge,
+        wireLength:     base.wireLength,
+        subSystemKey:   opts?.subSystemKey,
+      })
+    : base;
   return _buildInvCfg({
     inverterId: defaultId,
     type,
     strings: [firstString],
+    subSystemKey: opts?.subSystemKey,
   });
 }
 
@@ -4194,6 +4215,104 @@ function EngineeringPageInner() {
     return true;
   };
 
+  // ── Rebuild ONE sub-system's fleet (I-4 write scope) ───────────────────────
+  // The sub-header "Inverter — this sub-system" picker and the empty-fleet
+  // "Build fleet" button both land here: size a fleet for `key` around the
+  // preferred model (brand sizing first, manual chunking as fallback), then
+  // replaceSubFleet — every other sub's inverters stay untouched by reference.
+  const rebuildSubFleet = (key: SubSystemKey, prefer?: { inverterId?: string }): boolean => {
+    const count = Math.max(1, subSystemCounts[key]);
+    const entry = (((config as any).subSystems ?? {})[key] ?? {}) as Record<string, any>;
+    const wantId = prefer?.inverterId;
+
+    let fleet: InverterConfig[] | null = null;
+    let pickedId = wantId ?? '';
+    let topology: string = 'string';
+    let panelId: string | undefined = entry.panelId;
+    let brand: string | undefined;
+
+    const built = buildSubFleetForKey(key, count, {
+      ...(wantId ? { inverterId: wantId } : {}),
+      ...(entry.panelId ? { panelId: entry.panelId } : {}),
+    });
+    if (built && (!wantId || built.inverterId === wantId)) {
+      fleet = built.fleet;
+      pickedId = built.inverterId;
+      topology = built.topology;
+      panelId = built.panelId ?? panelId;
+      brand = built.brand;
+    } else if (wantId) {
+      // Brand sizing couldn't honor this exact model — build the fleet
+      // directly around it so the user's pick ALWAYS wins.
+      const isMicro = MICROINVERTERS.some(m => m.id === wantId);
+      const uiType: InverterType = isMicro ? 'micro' : wantId.startsWith('ecoflow-') ? 'ecoflow' : 'string';
+      const base = newString(0, key);
+      const effPanelId = entry.panelId ?? base.panelId;
+      const mkStr = (idx: number, panelCount: number) => _buildStrCfg({
+        index:          idx,
+        existingId:     `str-subpick-${key}-${Date.now()}-${idx}`,
+        panelCount,
+        panelId:        effPanelId,
+        tilt:           base.tilt,
+        azimuth:        base.azimuth,
+        roofType:       base.roofType as any,
+        mountingSystem: base.mountingSystem,
+        wireGauge:      base.wireGauge,
+        wireLength:     base.wireLength,
+        subSystemKey:   key,
+      });
+      const strings = isMicro
+        ? [mkStr(0, count)]
+        : (() => {
+            const n = Math.max(1, Math.ceil(count / 12));
+            const per = Math.floor(count / n);
+            const extra = count - per * n;
+            return Array.from({ length: n }, (_, i) => mkStr(i, per + (i < extra ? 1 : 0)));
+          })();
+      fleet = [_buildInvCfg({
+        existingId: `inv-subpick-${key}-${Date.now()}`,
+        inverterId: wantId,
+        type: uiType,
+        strings,
+        subSystemKey: key,
+      })];
+      pickedId = wantId;
+      topology = isMicro ? 'micro' : 'string';
+      panelId = effPanelId;
+    }
+    if (!fleet || fleet.length === 0) return false;
+
+    setConfig(prev => {
+      const fb = toSubSystemKey(prev.systemType);
+      const mapPrev = ((prev as any).subSystems ?? {}) as Record<string, any>;
+      return {
+        ...prev,
+        inverters: replaceSubFleet(prev.inverters as any[], key, fleet as any[], fb) as unknown as InverterConfig[],
+        subSystems: {
+          ...mapPrev,
+          [key]: {
+            ...(mapPrev[key] ?? {}),
+            key,
+            inverterId: pickedId,
+            topology,
+            ...(brand ? { ecosystemBrand: brand } : {}),
+            ...(panelId ? { panelId } : {}),
+            source: 'engineering',
+            updatedAt: new Date().toISOString(),
+          },
+        },
+        userHasEditedInverters: true,
+        isUserControlled: true,
+      } as ProjectConfig;
+    });
+    logDecision(
+      `Rebuild ${key} fleet`,
+      `${count} modules → ${pickedId} (${topology})`,
+      'manual',
+    );
+    return true;
+  };
+
   useEffect(() => {
     // Wave 3.4 (contract §3 Wave 3 item 4): at N>1 stamped subsystems the
     // legacy whole-project sentinel no longer gates — each sub has its OWN
@@ -4660,6 +4779,7 @@ function EngineeringPageInner() {
         ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
         : 'border-amber-500/40 bg-amber-500/10 text-amber-300';
     const effPanelId: string = entry.panelId ?? fleet[0]?.strings?.[0]?.panelId ?? '';
+    const effInverterId: string = fleet[0]?.inverterId ?? entry.inverterId ?? '';
     const mountOpts = key === 'ground'
       ? ALL_MOUNTING_SYSTEMS.filter(s => s.category === 'ground_mount' || s.category === 'tracker')
       : key === 'roof'
@@ -4683,8 +4803,17 @@ function EngineeringPageInner() {
                 : `${subCs.totalAcKw?.toFixed(2)} kW AC`}
             </span>
           ) : null}
+          {fleet.length > 0 && !fleet.some(i => i.type === 'micro') ? (
+            <button
+              onClick={() => addInverter('string', key)}
+              className="text-[10px] px-1.5 py-0.5 rounded border border-slate-600/60 text-slate-300 hover:text-white hover:bg-slate-700/40 transition-colors"
+              title={`Add another string inverter to the ${key.toUpperCase()} sub-system (sized to its uncovered modules)`}
+            >
+              + Inverter
+            </button>
+          ) : null}
         </div>
-        <div className="mt-1.5 grid grid-cols-2 gap-2">
+        <div className="mt-1.5 grid grid-cols-2 md:grid-cols-3 gap-2">
           <div>
             <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Panel — this sub-system</label>
             <select
@@ -4703,6 +4832,34 @@ function EngineeringPageInner() {
               {SOLAR_PANELS.map((p: any) => (
                 <option key={p.id} value={p.id}>{p.manufacturer} {p.model} ({p.watts}W)</option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Inverter — this sub-system</label>
+            <select
+              value={effInverterId}
+              onChange={e => {
+                const iid = e.target.value;
+                if (!iid || iid === effInverterId) return;
+                // Rebuild THIS sub's fleet around the picked model, sized to
+                // its stamped module count. Other subs are never touched.
+                const ok = rebuildSubFleet(key, { inverterId: iid });
+                if (!ok) console.warn(`[SUB INVERTER PICK] could not build a ${key} fleet around ${iid}`);
+              }}
+              className="eng-select text-[11px] py-1"
+              title={`Picking a model rebuilds the ${key.toUpperCase()} inverter fleet sized to its ${stampCount} modules — other sub-systems are untouched`}
+            >
+              {effInverterId === '' ? <option value="">Select inverter…</option> : null}
+              <optgroup label="Microinverters">
+                {MICROINVERTERS.map((m: any) => (
+                  <option key={m.id} value={m.id}>{m.manufacturer} {m.model} ({m.acOutputW}W)</option>
+                ))}
+              </optgroup>
+              <optgroup label="String / Hybrid inverters">
+                {STRING_INVERTERS.filter((i: any) => i.active !== false).map((i: any) => (
+                  <option key={i.id} value={i.id}>{i.manufacturer} {i.model} ({i.acOutputKw}kW)</option>
+                ))}
+              </optgroup>
             </select>
           </div>
           <div>
@@ -4741,8 +4898,44 @@ function EngineeringPageInner() {
   // v61.7: Every user edit stamps both flags to engage the kill switch.
   const LOCK = { userHasEditedInverters: true as const, isUserControlled: true as const };
 
-  const addInverter = (type: InverterType) => {
-    console.log('🔒 [USER EDIT] addInverter(', type, ') — engaging user lock');
+  const addInverter = (type: InverterType, subKey?: SubSystemKey | null) => {
+    console.log('🔒 [USER EDIT] addInverter(', type, ', sub:', subKey ?? '(project)', ') — engaging user lock');
+    if (subSystemCounts.isHybrid && subKey) {
+      // ── Hybrid + sub-scoped add (I-4 write scope) ─────────────────────────
+      // micro → replace ONLY this sub's fleet with one micro sized to its
+      // stamp count; string/optimizer/ecoflow → append ONE stamped inverter
+      // sized to the sub's uncovered module deficit (never another sub's).
+      setConfig(prev => {
+        const fb = toSubSystemKey(prev.systemType);
+        const part = partitionFleet(prev.inverters as any[], fb);
+        const subFleet = (part[subKey] ?? []) as InverterConfig[];
+        const subStamp = subSystemCounts[subKey];
+        const subPanelId = ((prev as any).subSystems?.[subKey]?.panelId as string | undefined)
+          ?? subFleet[0]?.strings?.[0]?.panelId;
+        if (type === 'micro') {
+          const inv = newInverter('micro', subKey, {
+            subSystemKey: subKey,
+            panelCount: subStamp > 0 ? subStamp : (fleetPanelTotal(subFleet as any[]) || 20),
+            panelId: subPanelId,
+          });
+          setExpandedInv(inv.id);
+          return {
+            ...prev,
+            inverters: replaceSubFleet(prev.inverters as any[], subKey, [inv] as any[], fb) as unknown as InverterConfig[],
+            ...LOCK,
+          };
+        }
+        const deficit = Math.max(1, subStamp - fleetPanelTotal(subFleet as any[]));
+        const inv = newInverter(type, subKey, {
+          subSystemKey: subKey,
+          panelCount: deficit,
+          panelId: subPanelId,
+        });
+        setExpandedInv(inv.id);
+        return { ...prev, inverters: [...prev.inverters, inv], ...LOCK };
+      });
+      return;
+    }
     if (type === 'micro') {
       // MICRO: replace ALL existing inverters with a single micro entry.
       // B5 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
@@ -4818,6 +5011,7 @@ function EngineeringPageInner() {
                 azimuth:        currentStrings[0]?.azimuth,
                 roofType:       (currentStrings[0] as any)?.roofType,
                 mountingSystem: (currentStrings[0] as any)?.mountingSystem,
+                subSystemKey:   (currentStrings[0] as any)?.subSystemKey ?? (i as any).subSystemKey,
               })
             );
             updated.strings = [...currentStrings, ...extra];
@@ -4843,6 +5037,7 @@ function EngineeringPageInner() {
               azimuth:        s.azimuth,
               roofType:       (s as any).roofType,
               mountingSystem: (s as any).mountingSystem,
+              subSystemKey:   (s as any).subSystemKey ?? (i as any).subSystemKey,
             })
           );
         }
@@ -4857,6 +5052,10 @@ function EngineeringPageInner() {
           strings:               updated.strings as StringConfig[],
           optimizerPeripheralId: (updated as any).optimizerPeripheralId,
           deviceRatioOverride:   (updated as any).deviceRatioOverride,
+          // Contract §1.1 (I-2): the sub-system tag must survive EVERY rebuild.
+          // Without this, any card edit untags the inverter and partitionFleet
+          // dumps it into the fallback sub — the card visibly jumps groups.
+          subSystemKey:          (updated as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4884,6 +5083,7 @@ function EngineeringPageInner() {
           azimuth:        baseStr?.azimuth,
           roofType:       (baseStr as any)?.roofType,
           mountingSystem: (baseStr as any)?.mountingSystem,
+          subSystemKey:   (baseStr as any)?.subSystemKey ?? (i as any).subSystemKey,
         });
         // v61.5: rebuild through _buildInvCfg to update stringsPerInverter metadata
         return _buildInvCfg({
@@ -4893,6 +5093,7 @@ function EngineeringPageInner() {
           strings:    [...i.strings, newStr] as StringConfig[],
           optimizerPeripheralId: (i as any).optimizerPeripheralId,
           deviceRatioOverride:   (i as any).deviceRatioOverride,
+          subSystemKey:          (i as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4915,6 +5116,7 @@ function EngineeringPageInner() {
           strings:    newStrings as StringConfig[],
           optimizerPeripheralId: (i as any).optimizerPeripheralId,
           deviceRatioOverride:   (i as any).deviceRatioOverride,
+          subSystemKey:          (i as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4941,6 +5143,7 @@ function EngineeringPageInner() {
             azimuth:        patched.azimuth,
             roofType:       (patched as any).roofType,
             mountingSystem: (patched as any).mountingSystem,
+            subSystemKey:   (patched as any).subSystemKey ?? (i as any).subSystemKey,
           });
         });
         // v61.5: rebuild the inverter wrapper to update modulesPerString metadata
@@ -4951,6 +5154,7 @@ function EngineeringPageInner() {
           strings:    newStrings as StringConfig[],
           optimizerPeripheralId: (i as any).optimizerPeripheralId,
           deviceRatioOverride:   (i as any).deviceRatioOverride,
+          subSystemKey:          (i as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4963,22 +5167,81 @@ function EngineeringPageInner() {
   };
 
   // Topology switch: calls API to propagate ecosystem when inverter type changes
-  const handleTopologySwitch = useCallback(async (invId: string, newType: InverterType, newInverterId: string) => {
+  // Hybrid (subKey passed from the card's sub-group): the switch is scoped to
+  // THAT sub-system's fleet only — a micro collapse on the ROOF card must never
+  // touch the ground/fence fleets (I-4 write scope).
+  const handleTopologySwitch = useCallback(async (invId: string, newType: InverterType, newInverterId: string, subKey?: SubSystemKey | null) => {
     // DIAGNOSTIC LOG 1
     const newTopo = newType === 'micro' ? 'MICRO' : newType === 'optimizer' ? 'STRING_OPTIMIZER' : 'STRING';
-    console.log('Topology switched:', newTopo, '| inverter:', newInverterId, '| type:', newType);
+    console.log('Topology switched:', newTopo, '| inverter:', newInverterId, '| type:', newType, '| sub:', subKey ?? '(whole project)');
 
     // USER INTENT LOCK — a topology switch is an explicit user edit, so
     // engage the lock for both branches (micro + non-micro).
     console.log('🔒 [USER EDIT] handleTopologySwitch — engaging user lock');
 
-    // When switching to micro: REPLACE ALL inverters with a single micro entry
+    // When switching to micro: REPLACE the fleet with a single micro entry.
+    // Scope: the card's sub-system in hybrid, the whole project otherwise.
     // B4 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
     // config fallback) over the stale config-derived sum. When CAD placed 36 panels
     // but the string config shows 20, the micro entry must use 36.
     const authoritativeCountForMicro = systemPanelCount > 0 ? systemPanelCount : undefined;
     if (newType === 'micro') {
       setConfig(prev => {
+        const fb = toSubSystemKey(prev.systemType);
+        const targetInv = prev.inverters.find(i => i.id === invId);
+        const scopeKey: SubSystemKey | null = subSystemCounts.isHybrid
+          ? (subKey ?? inverterFleetKey(targetInv as any, fb))
+          : null;
+        if (scopeKey) {
+          // ── Hybrid: collapse ONLY this sub's fleet, sized to ITS stamp count ──
+          const part = partitionFleet(prev.inverters as any[], fb);
+          const subFleet = (part[scopeKey] ?? []) as InverterConfig[];
+          const subStamp = subSystemCounts[scopeKey];
+          const subPanels = subStamp > 0 ? subStamp : (fleetPanelTotal(subFleet as any[]) || 20);
+          console.log(`Micro topology (hybrid): collapsing '${scopeKey}' fleet only, panels=`, subPanels);
+          const firstSubStr = subFleet[0]?.strings[0] ?? newString(0, scopeKey);
+          const microSubStr = _buildStrCfg({
+            index:          0,
+            systemType:     scopeKey,
+            panelCount:     subPanels,
+            panelId:        firstSubStr.panelId,
+            existingId:     firstSubStr.id,
+            tilt:           firstSubStr.tilt,
+            azimuth:        firstSubStr.azimuth,
+            roofType:       firstSubStr.roofType as any,
+            mountingSystem: firstSubStr.mountingSystem,
+            wireGauge:      firstSubStr.wireGauge,
+            wireLength:     firstSubStr.wireLength,
+            subSystemKey:   scopeKey,
+          });
+          const microSubInv = _buildInvCfg({
+            inverterId: newInverterId,
+            type: 'micro',
+            strings: [microSubStr],
+            existingId: invId,
+            subSystemKey: scopeKey,
+          });
+          const inverters = replaceSubFleet(prev.inverters as any[], scopeKey, [microSubInv] as any[], fb) as unknown as InverterConfig[];
+          // §1.1: the subSystems map is the equipment authority — keep it in step.
+          const mapPrev = ((prev as any).subSystems ?? {}) as Record<string, any>;
+          return {
+            ...prev,
+            inverters,
+            subSystems: {
+              ...mapPrev,
+              [scopeKey]: {
+                ...(mapPrev[scopeKey] ?? {}),
+                key: scopeKey,
+                inverterId: newInverterId,
+                topology: 'micro',
+                source: 'engineering',
+                updatedAt: new Date().toISOString(),
+              },
+            },
+            userHasEditedInverters: true,
+          } as ProjectConfig;
+        }
+        // ── Single-system: legacy whole-project collapse ──
         const configDerivedTotal = prev.inverters.reduce(
           (sum, i) => sum + i.strings.reduce((s, str) => s + str.panelCount, 0), 0
         ) || 20;
@@ -5009,8 +5272,16 @@ function EngineeringPageInner() {
       });
     } else {
       // Update local config immediately for string/optimizer. updateInverter
-      // already engages the lock internally.
+      // already engages the lock internally (and now preserves subSystemKey).
       updateInverter(invId, { type: newType, inverterId: newInverterId });
+      // Hybrid: keep the sub's equipment record (§1.1 authority) in step so
+      // synthesized fleets / plansets never see a stale topology or model.
+      if (subKey) {
+        updateSubSystemEquip(subKey, {
+          inverterId: newInverterId,
+          topology: newType === 'optimizer' ? 'optimizer' : 'string',
+        });
+      }
     }
     // v57.5 — Record topology change for audit banner
     setTopologyChangeLog(prev => [
@@ -5053,7 +5324,8 @@ function EngineeringPageInner() {
     } finally {
       setTopologySwitching(false);
     }
-  }, [engineeringMode, toSystemState, updateInverter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engineeringMode, toSystemState, updateInverter, subSystemCounts]);
 
   const buildCalcPayload = useCallback(() => {
     const electricalInverters = config.inverters.map(inv => {
@@ -7437,6 +7709,9 @@ function EngineeringPageInner() {
           zip: config.zip || '',
           county: config.county || '',
           apn: config.apn || undefined,    // Error 3e fix: pass APN from config
+          // §1.1 equipment authority map — id-based per-sub fallback for the
+          // server's resolveEquipmentBySubSystem (survives untagged fleets).
+          subSystems: (config as any).subSystems || undefined,
           panelVoc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.voc : undefined; })(),
           panelIsc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.isc : undefined; })(),
           panelWeightLbs: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.weightLbs : undefined; })(),
@@ -7471,12 +7746,19 @@ function EngineeringPageInner() {
               type: inv.type, acOutputKw: invData?.acOutputKw || (invData?.acOutputW/1000) || 0,
               maxDcVoltage: invData?.maxDcVoltage || 480, efficiency: invData?.efficiency || 97,
               ulListing: invData?.ulListing || 'UL 1741',
+              // Contract §1.3 permit carriage: WITHOUT the tag, the server's
+              // resolveEquipmentBySubSystem sees zero tagged inverters and every
+              // hybrid lane resolves to '—'/0 — E-1 prints "48 × 0W · Inverter"
+              // and SCHED prints 0.0A branch amps (Stowell v3 audit root cause).
+              ...(inv.subSystemKey ? { subSystemKey: inv.subSystemKey } : {}),
+              inverterId: inv.inverterId,
               strings: inv.strings.map(str => {
                 const panel = getPanelById(str.panelId) as any;
                 return { label: str.label, panelCount: str.panelCount,
                   panelManufacturer: panel?.manufacturer || '', panelModel: panel?.model || '',
                   panelWatts: panel?.watts || 400, panelVoc: panel?.voc || 41.6,
-                  panelIsc: panel?.isc || 12.26, wireGauge: str.wireGauge, wireLength: str.wireLength };
+                  panelIsc: panel?.isc || 12.26, wireGauge: str.wireGauge, wireLength: str.wireLength,
+                  ...((str as any).subSystemKey ? { subSystemKey: (str as any).subSystemKey } : {}) };
               }),
             };
           }),
@@ -9840,7 +10122,11 @@ function EngineeringPageInner() {
                               <AlertTriangle size={11} /> Rebuild fleets per sub-system
                             </button>
                           ) : null}
-                          {(['string', 'micro', 'optimizer'] as InverterType[]).map(t => {
+                          {/* Hybrid: whole-project add buttons are hidden — they cannot
+                              know WHICH sub-system the inverter is for (and a global
+                              micro add collapses every sub's fleet). Each sub-group
+                              carries its own scoped affordances instead. */}
+                          {!subSystemCounts.isHybrid ? (['string', 'micro', 'optimizer'] as InverterType[]).map(t => {
                             const hasMicro = config.inverters.some(i => i.type === 'micro');
                             if (t === 'micro' && hasMicro) return null;
                             return (
@@ -9848,7 +10134,7 @@ function EngineeringPageInner() {
                                 <Plus size={11} /> {t === 'string' ? 'String Inv.' : t === 'micro' ? 'Microinverter' : 'Optimizer'}
                               </button>
                             );
-                          })}
+                          }) : null}
                         </div>
                       </div>
 
@@ -9957,11 +10243,42 @@ function EngineeringPageInner() {
                         ).map(({ inv: _rowInv, subKey: _rowSubKey, subFirst: _rowSubFirst }, invIdx) => {
                           if (!_rowInv) {
                             // Present sub with no fleet yet (post-discard / pre-seed).
+                            // Give the user REAL affordances here — the sub-header
+                            // inverter picker and these buttons all write ONLY this
+                            // sub's fleet (I-4), so none of them can nuke another sub.
+                            const _emptyKey = _rowSubKey!;
                             return (
-                              <React.Fragment key={`subhdr-empty-${_rowSubKey}`}>
-                                {renderSubSystemHeader(_rowSubKey!)}
-                                <div className="text-xs text-slate-500 italic px-1">
-                                  No inverter fleet for this sub-system yet — use “Rebuild fleets per sub-system” above, or add one manually.
+                              <React.Fragment key={`subhdr-empty-${_emptyKey}`}>
+                                {renderSubSystemHeader(_emptyKey)}
+                                <div className="flex items-center gap-2 flex-wrap px-1 py-1">
+                                  <span className="text-xs text-slate-500 italic">
+                                    No inverter fleet for the {_emptyKey.toUpperCase()} sub-system yet.
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      const ok = rebuildSubFleet(_emptyKey);
+                                      setAutoLoadBanner(ok
+                                        ? `✓ ${_emptyKey.toUpperCase()} fleet built — ${subSystemCounts[_emptyKey]} modules.`
+                                        : `⚠ Could not auto-build the ${_emptyKey.toUpperCase()} fleet — pick an inverter model in the ${_emptyKey.toUpperCase()} header instead.`);
+                                      setTimeout(() => setAutoLoadBanner(null), 6000);
+                                    }}
+                                    className="text-[11px] px-2 py-1 rounded border border-amber-500/50 text-amber-300 hover:bg-amber-500/20 transition-colors font-semibold"
+                                    title={`Auto-size an inverter fleet for the ${_emptyKey.toUpperCase()} sub-system's ${subSystemCounts[_emptyKey]} modules using its default brand`}
+                                  >
+                                    ⚡ Build fleet ({subSystemCounts[_emptyKey]} modules)
+                                  </button>
+                                  <button
+                                    onClick={() => addInverter('string', _emptyKey)}
+                                    className="text-[11px] px-2 py-1 rounded border border-slate-600/60 text-slate-300 hover:bg-slate-700/40 transition-colors"
+                                  >
+                                    + String inverter
+                                  </button>
+                                  <button
+                                    onClick={() => addInverter('micro', _emptyKey)}
+                                    className="text-[11px] px-2 py-1 rounded border border-slate-600/60 text-slate-300 hover:bg-slate-700/40 transition-colors"
+                                  >
+                                    + Microinverter
+                                  </button>
                                 </div>
                               </React.Fragment>
                             );
@@ -10046,7 +10363,7 @@ function EngineeringPageInner() {
                                             // Clear ecosystemBrand when user manually switches topology
                                             // so the EcosystemPicker reappears for the new topology type
                                             updateConfig({ ecosystemBrand: undefined } as any);
-                                            handleTopologySwitch(inv.id, t, defaultId);
+                                            handleTopologySwitch(inv.id, t, defaultId, _rowSubKey);
                                           }
                                         }}
                                         title={desc}

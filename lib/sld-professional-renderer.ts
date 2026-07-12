@@ -3036,7 +3036,11 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     const watts = b.panelWatts ?? 0;
     const panelModel = b.panelModel && b.panelModel !== '—' ? b.panelModel : (watts ? `${watts}W MODULE` : 'PV MODULE');
     const invMfr = b.inverterManufacturer && b.inverterManufacturer !== '—' ? b.inverterManufacturer : '';
-    const invModel = b.inverterModel && b.inverterModel !== '—' ? b.inverterModel : 'Inverter';
+    // Field-accuracy rule: never print the placeholder word "Inverter" as if it
+    // were a model — an unresolved model degrades to the topology device name.
+    const invModel = b.inverterModel && b.inverterModel !== '—' && b.inverterModel !== 'Inverter'
+      ? b.inverterModel
+      : (g.topo === 'MICRO' ? 'MICROINVERTER' : g.topo === 'OPTIMIZER' ? 'STRING INVERTER + OPTIMIZERS' : 'STRING INVERTER');
     const laneLabel = b.label ?? `${b.key.toUpperCase()} — ${modules} × ${panelModel}`;
     const laneAcAmps = b.acOutputAmps ?? Math.round(((b.acOutputKw ?? 0) * 1000) / 240);
     const laneOcpd = b.acOCPD ?? necNextStandardOcpd(laneAcAmps * 1.25) ?? 20;
@@ -3051,7 +3055,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     const pvH = SLD_SYMBOL_MAP[pvSymbolId].height;
     parts.push(embedSymbol(pvSymbolId, g.xPV, laneY, W_PV, pvH));
     parts.push(txt(g.xPV, laneY-pvH/2-18, isFenceLane ? `SOLAR FENCE ARRAY PV-${tag}` : `PV ARRAY PV-${tag}`, {sz:F.hdr, bold:true, anc:'middle'}));
-    parts.push(txt(g.xPV, laneY-pvH/2-8, `${modules} × ${watts}W`, {sz:F.sub, anc:'middle'}));
+    parts.push(txt(g.xPV, laneY-pvH/2-8, watts ? `${modules} × ${watts}W` : `${modules} MODULES`, {sz:F.sub, anc:'middle'}));
     parts.push(txt(g.xPV, laneY+pvH/2+9, esc(panelModel), {sz:F.tiny, anc:'middle', italic:true}));
     if (g.topo === 'MICRO') {
       const md = b.deviceCount ?? modules;
@@ -3301,13 +3305,18 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   parts.push(txt(p1x+cW/2, CALC_Y+10, 'PV SOURCE LANES', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const p1rows: [string,string][] = lanes.flatMap((b, i): [string,string][] => {
     const g = geoms[i];
+    // Honest labels: an unresolved model prints the topology device name, an
+    // unresolved wattage is omitted — never "48 × 0W · Inverter".
+    const model = b.inverterModel && b.inverterModel !== '—' && b.inverterModel !== 'Inverter'
+      ? b.inverterModel : topoShort(g.topo);
     const devices = g.topo === 'MICRO'
-      ? `${b.deviceCount ?? b.totalModules ?? 0} × ${b.inverterModel ?? ''}`
-      : `${b.inverterCount ?? 1} × ${b.inverterModel ?? ''}`;
+      ? `${b.deviceCount ?? b.totalModules ?? 0} × ${model}`
+      : `${b.inverterCount ?? 1} × ${model}`;
+    const laneKw = b.acOutputKw ?? 0;
     return [
-      [`PV-${LANE_TAG[b.key]} ${b.key.toUpperCase()}`, `${b.totalModules ?? 0} × ${b.panelWatts ?? 0}W · ${topoShort(g.topo)}`],
+      [`PV-${LANE_TAG[b.key]} ${b.key.toUpperCase()}`, `${b.totalModules ?? 0}${b.panelWatts ? ` × ${b.panelWatts}W` : ' MODULES'} · ${topoShort(g.topo)}`],
       [`  Inverter(s)`, devices],
-      [`  AC / OCPD`, `${(b.acOutputKw ?? 0).toFixed(2)} kW · ${b.acWireGauge ?? '—'} · ${b.acOCPD ?? '—'}A`],
+      [`  AC / OCPD`, `${laneKw > 0 ? `${laneKw.toFixed(2)} kW` : '— kW'} · ${b.acWireGauge ?? '—'} · ${b.acOCPD ?? '—'}A`],
     ];
   });
   const p1rh = Math.min(13, (CALC_H-17)/Math.max(p1rows.length, 1));
