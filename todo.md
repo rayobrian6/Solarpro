@@ -87,9 +87,13 @@ Starting HEAD: 100114c2
 - [x] Build integration test harness (tests/phase1a2-postgres-integration.test.ts)
 - [x] Run integration tests (38/38 pass against local PostgreSQL, skip gracefully without DB)
 
-## Section 9 — Commit 7: Expanded Unit and Integration Tests
-- [ ] Add all required tests per spec
-- [ ] Verify focused suite passes
+## Section 9 — Commit 7: Expanded Unit and Integration Tests ✅
+- [x] Fix add_expanded_tests.py insertion bug (inserted outside describeOrSkip block)
+- [x] Add 17 new integration tests (Sections 12-18): ON CONFLICT replay, lifecycle state machine, append-only run history, baseline reconciliation, advisory lock key isolation, index verification, nullable actor type
+- [x] Fix 4 tsc type errors (indexname unknown → cast as string)
+- [x] tsc clean, 55/55 integration tests pass (with DB), 54 skip + 1 info (without DB)
+- [x] 306/306 source-scanning tests pass (no regressions)
+- [x] Commit as Commit 7 (6268b71a)
 
 ## Section 10 — Commit 8: Documentation & Final Report (GOV-16)
 - [ ] Create PHASE1A2-BASELINE-CONTROL-PLANE.md
