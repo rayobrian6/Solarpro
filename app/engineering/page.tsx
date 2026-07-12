@@ -12702,7 +12702,10 @@ function EngineeringPageInner() {
                                 acOutputKw: Number(totalInverterKw),
                                 acOutputAmps: Math.round(Number(totalInverterKw) * 1000 / 240),
                                 acOCPD: csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
-                                backfeedAmps: csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
+                                // Wave 5A: hybrids export the aggregate §1.7 total (Σ per-inverter OCPDs + battery)
+                                backfeedAmps: hybridSldSources
+                                  ? cs.backfeedBreakerAmps
+                                  : (csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5),
                                 panelModel: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.model || 'Solar Panel'; })(),
                                 panelWatts: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.watts || 400; })(),
                                 panelVoc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.voc || 41.6; })(),
@@ -12740,7 +12743,9 @@ function EngineeringPageInner() {
                                 branchWireGauge: computedSystem.isMicro ? csRun('BRANCH_RUN')?.wireGauge : undefined,
                                 branchConduitSize: computedSystem.isMicro ? csRun('BRANCH_RUN')?.conduitSize : undefined,
                                 branchOcpdAmps: computedSystem.isMicro ? csRun('BRANCH_RUN')?.ocpdAmps : undefined,
-                                runs: legacyRunsView(),
+                                // Wave 5A: multi-lane export gets the namespaced aggregate runs + source lanes
+                                runs: hybridSldSources ? (cs.runs ?? []) : legacyRunsView(),
+                                sources: hybridSldSources ?? undefined,
                                 calcResult: compliance.electrical || null,
                                 inverterSpecs: config.inverters.map(inv => {
                                   const invData = getInvById(inv.inverterId, inv.type) as any;

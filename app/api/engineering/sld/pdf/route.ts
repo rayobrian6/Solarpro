@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
+import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -169,6 +170,17 @@ export async function POST(req: NextRequest) {
       branchOcpdAmps:          buildInput.branchOcpdAmps ? Number(buildInput.branchOcpdAmps) : undefined,
       stringDetails:           buildInput.stringDetails ?? undefined,
     };
+
+    // Wave 5A — hybrid multi-lane export: validated source lanes ride the
+    // buildInput; >=2 usable lanes => the PDF renders the SAME multi-lane
+    // diagram the Diagram tab shows (I-8: a hybrid export must never be a
+    // plausible-wrong single-lane sheet). buildInput.backfeedAmps carries the
+    // aggregate §1.7 total on this path.
+    const _pdfSources = sanitizeClientSourceBranches(buildInput.sources);
+    if (_pdfSources) {
+      input.sources = _pdfSources;
+      console.log(`[SLD PDF] Wave 5A multi-lane export: lanes=${_pdfSources.length} keys=${_pdfSources.map(s2 => s2.key).join('+')}`);
+    }
 
     // Render SVG
     const svg = renderSLDProfessional(input);

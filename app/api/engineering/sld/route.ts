@@ -17,7 +17,8 @@ import { handleRouteDbError } from '@/lib/db-neon';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
-import { renderSLDProfessional, normalizeSourceBranches, SLDProfessionalInput, SLDSourceBranch } from '@/lib/sld-professional-renderer';
+import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
+import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { getInverterById } from '@/lib/equipment-db';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
@@ -66,55 +67,10 @@ function sanitizeClientRuns<T extends { id: string }>(runs: T[] | undefined | nu
   });
 }
 
-// ── Wave 5A — client `sources` validation (the primary hybrid path) ─────────
-// Coerce every field the multi-lane renderer consumes to its expected type;
-// invalid keys/duplicates are dropped by normalizeSourceBranches. ≥2 valid
+// ── Wave 5A — client `sources` validation lives in the shared adapter
+// (sanitizeClientSourceBranches — also used by the sld/pdf route). ≥2 valid
 // branches ⇒ multi-lane server render; otherwise the request falls through
 // to the legacy single-lane path (with sanitizeClientRuns as fallback armor).
-function sanitizeClientSources(raw: unknown): SLDSourceBranch[] | undefined {
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const num = (v: unknown): number | undefined => {
-    const n = Number(v);
-    return Number.isFinite(n) && n >= 0 ? n : undefined;
-  };
-  const str = (v: unknown): string | undefined =>
-    typeof v === 'string' && v.trim() ? String(v) : undefined;
-  const coerced = raw.map((b: any): SLDSourceBranch => ({
-    key: b?.key,
-    label: str(b?.label),
-    topologyType: str(b?.topologyType),
-    systemType: b?.systemType === 'roof' || b?.systemType === 'ground' || b?.systemType === 'fence' ? b.systemType : undefined,
-    totalModules: num(b?.totalModules),
-    totalStrings: num(b?.totalStrings),
-    panelsPerString: num(b?.panelsPerString),
-    panelModel: str(b?.panelModel),
-    panelWatts: num(b?.panelWatts),
-    panelVoc: num(b?.panelVoc),
-    panelIsc: num(b?.panelIsc),
-    inverterManufacturer: str(b?.inverterManufacturer),
-    inverterModel: str(b?.inverterModel),
-    inverterCount: num(b?.inverterCount),
-    acKwPerDevice: num(b?.acKwPerDevice),
-    acOutputKw: num(b?.acOutputKw),
-    acOutputAmps: num(b?.acOutputAmps),
-    acWireGauge: str(b?.acWireGauge),
-    acConduitType: str(b?.acConduitType),
-    acOCPD: num(b?.acOCPD),
-    backfeedAmps: num(b?.backfeedAmps),
-    dcOCPD: num(b?.dcOCPD),
-    integratedDcDisconnect: b?.integratedDcDisconnect === true || undefined,
-    optimizerQty: num(b?.optimizerQty),
-    optimizerModel: str(b?.optimizerModel),
-    combinerLabel: str(b?.combinerLabel),
-    disconnectLabel: str(b?.disconnectLabel),
-    rapidShutdownIntegrated: typeof b?.rapidShutdownIntegrated === 'boolean' ? b.rapidShutdownIntegrated : undefined,
-    deviceCount: num(b?.deviceCount),
-    microBranches: Array.isArray(b?.microBranches) ? b.microBranches : undefined,
-    runs: Array.isArray(b?.runs) ? b.runs.filter((r: any) => r && typeof r.id === 'string') : undefined,
-  }));
-  const lanes = normalizeSourceBranches(coerced);
-  return lanes.length > 1 ? lanes : undefined;
-}
 
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
@@ -140,7 +96,7 @@ export async function POST(req: NextRequest) {
     // byte-what the route persists/exports. No sizing-engine pass here — the
     // per-lane values ARE the engine outputs the client already computed.
     {
-      const _sources = sanitizeClientSources(body.sources);
+      const _sources = sanitizeClientSourceBranches(body.sources);
       if (_sources) {
         const _clientRuns = Array.isArray(body.runs)
           ? (body.runs as Array<{ id?: unknown }>).filter(r => r && typeof r.id === 'string')

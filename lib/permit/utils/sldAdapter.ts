@@ -5,7 +5,7 @@
 
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
-import { renderSLDProfessional, type SLDProfessionalInput, type SLDSourceBranch } from '@/lib/sld-professional-renderer';
+import { renderSLDProfessional, normalizeSourceBranches, type SLDProfessionalInput, type SLDSourceBranch } from '@/lib/sld-professional-renderer';
 import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
@@ -389,6 +389,60 @@ export function buildSourceBranchesFromComputedMulti(
     });
   }
   return branches.length > 1 ? branches : undefined;
+}
+
+// ─── Route-side client-payload sanitation (sld + sld/pdf routes) ─────────────
+
+/**
+ * Wave 5A — validate an untrusted client `sources` payload. Coerces every
+ * field the multi-lane renderer consumes; invalid/duplicate keys are dropped
+ * and lanes come back in fixed roof > ground > fence order
+ * (normalizeSourceBranches). Returns undefined below 2 usable lanes — the
+ * caller then takes the legacy single-lane path.
+ */
+export function sanitizeClientSourceBranches(raw: unknown): SLDSourceBranch[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const num = (v: unknown): number | undefined => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  };
+  const str = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() ? String(v) : undefined;
+  const coerced = raw.map((b: any): SLDSourceBranch => ({
+    key: b?.key,
+    label: str(b?.label),
+    topologyType: str(b?.topologyType),
+    systemType: b?.systemType === 'roof' || b?.systemType === 'ground' || b?.systemType === 'fence' ? b.systemType : undefined,
+    totalModules: num(b?.totalModules),
+    totalStrings: num(b?.totalStrings),
+    panelsPerString: num(b?.panelsPerString),
+    panelModel: str(b?.panelModel),
+    panelWatts: num(b?.panelWatts),
+    panelVoc: num(b?.panelVoc),
+    panelIsc: num(b?.panelIsc),
+    inverterManufacturer: str(b?.inverterManufacturer),
+    inverterModel: str(b?.inverterModel),
+    inverterCount: num(b?.inverterCount),
+    acKwPerDevice: num(b?.acKwPerDevice),
+    acOutputKw: num(b?.acOutputKw),
+    acOutputAmps: num(b?.acOutputAmps),
+    acWireGauge: str(b?.acWireGauge),
+    acConduitType: str(b?.acConduitType),
+    acOCPD: num(b?.acOCPD),
+    backfeedAmps: num(b?.backfeedAmps),
+    dcOCPD: num(b?.dcOCPD),
+    integratedDcDisconnect: b?.integratedDcDisconnect === true || undefined,
+    optimizerQty: num(b?.optimizerQty),
+    optimizerModel: str(b?.optimizerModel),
+    combinerLabel: str(b?.combinerLabel),
+    disconnectLabel: str(b?.disconnectLabel),
+    rapidShutdownIntegrated: typeof b?.rapidShutdownIntegrated === 'boolean' ? b.rapidShutdownIntegrated : undefined,
+    deviceCount: num(b?.deviceCount),
+    microBranches: Array.isArray(b?.microBranches) ? b.microBranches : undefined,
+    runs: Array.isArray(b?.runs) ? b.runs.filter((r: any) => r && typeof r.id === 'string') : undefined,
+  }));
+  const lanes = normalizeSourceBranches(coerced);
+  return lanes.length > 1 ? lanes : undefined;
 }
 
 // ─── W4B must-fix support (app/engineering/page.tsx) ─────────────────────────
