@@ -75,7 +75,29 @@ export async function GET(
         );
       }
 
-      return NextResponse.json({ success: true, organization: orgWithMembers });
+      // Flatten into a client-friendly shape so the UI receives a single
+      // object with the organization fields at the top level and a members
+      // array whose entries use display-friendly field names.
+      return NextResponse.json({
+        success: true,
+        organization: {
+          id: orgWithMembers.organization.id,
+          name: orgWithMembers.organization.name,
+          plan: orgWithMembers.organization.plan,
+          status: orgWithMembers.organization.status,
+          slug: orgWithMembers.organization.slug,
+          ownerId: orgWithMembers.organization.ownerId,
+          members: (orgWithMembers.members ?? []).map((m) => ({
+            id: m.id,
+            userId: m.userId,
+            name: m.userName,
+            email: m.userEmail,
+            role: m.role,
+            status: m.status,
+            joinedAt: m.createdAt,
+          })),
+        },
+      });
     }
 
     // --- Legacy path (feature flag off) ---

@@ -12,7 +12,7 @@ import {
 import Link from 'next/link';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
-import OrganizationPanel from '@/components/settings/OrganizationPanel';
+import OrganizationPanelWrapper from '@/components/settings/OrganizationPanelWrapper';
 import CrewMembersPanel from '@/components/settings/CrewMembersPanel';
 import SecurityPanel from '@/components/settings/SecurityPanel';
 import { useTheme, THEME_CONFIG, type Theme } from '@/contexts/ThemeContext';
@@ -730,7 +730,7 @@ export default function SettingsPage() {
 
         {/* ── ORGANIZATION TAB ── */}
         {activeTab === 'organization' && user ? (
-          <OrganizationPanel userId={user.id} />
+          <OrganizationPanelWrapper userId={user.id} />
         ) : null}
 
         {/* ── TEAMS TAB ── */}
