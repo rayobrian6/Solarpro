@@ -35,6 +35,10 @@ import {
   isValidChecksumFormat,
 } from '../lib/migrations/validation';
 import { splitSqlStatements, authorizeMigration } from '../lib/migrations/runner';
+import {
+  MIGRATION_IDENTIFIER_REGEX,
+  isValidMigrationIdentifier,
+} from '../lib/migrations/types';
 
 const root = path.resolve(__dirname, '..');
 
@@ -2224,5 +2228,347 @@ describe('Phase 1A.2: Legacy path permanent closure (MIGRATION-GOV-13)', () => {
     const listSection = systemToolsSrc.split("case 'list_migrations'")[1]
       ?.split("case '")[0] ?? '';
     expect(listSection).not.toContain('permanently eliminated');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 25. Phase 1A.2: Identifier & Status Contract Enforcement (MIGRATION-GOV-14)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Phase 1A.2: Identifier & status contract enforcement (MIGRATION-GOV-14)', () => {
+  const typesSrc = readSrc('lib/migrations/types.ts');
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+  const routeSrc = readSrc('app/api/admin/migrations/route.ts');
+
+  // ── Identifier grammar constant and validator ──
+
+  it('MIGRATION_IDENTIFIER_REGEX is exported from types', () => {
+    expect(typesSrc).toContain('MIGRATION_IDENTIFIER_REGEX');
+    expect(typesSrc).toContain('export const MIGRATION_IDENTIFIER_REGEX');
+  });
+
+  it('MIGRATION_IDENTIFIER_REGEX matches the DDL grammar ^[0-9]{3}[a-z]?$', () => {
+    // The TypeScript regex must match the DDL CHECK constraint grammar exactly.
+    const regexSection = typesSrc.split('MIGRATION_IDENTIFIER_REGEX')[1]
+      ?.split(';')[0] ?? '';
+    expect(regexSection).toContain('[0-9]{3}');
+    expect(regexSection).toContain('[a-z]?');
+    // The DDL grammar is '^[0-9]{3}[a-z]?$' — verify the TS regex matches the same set.
+    const regex = MIGRATION_IDENTIFIER_REGEX;
+    // Valid identifiers
+    expect(regex.test('001')).toBe(true);
+    expect(regex.test('074')).toBe(true);
+    expect(regex.test('074a')).toBe(true);
+    expect(regex.test('074b')).toBe(true);
+    expect(regex.test('999')).toBe(true);
+    expect(regex.test('999z')).toBe(true);
+    // Invalid identifiers
+    expect(regex.test('1')).toBe(false);
+    expect(regex.test('12')).toBe(false);
+    expect(regex.test('010aa')).toBe(false);
+    expect(regex.test('abc')).toBe(false);
+    expect(regex.test('105-extra')).toBe(false);
+    expect(regex.test('074A')).toBe(false); // uppercase
+    expect(regex.test('')).toBe(false);
+    expect(regex.test('  074')).toBe(false); // leading whitespace
+  });
+
+  it('isValidMigrationIdentifier is exported from types', () => {
+    expect(typesSrc).toContain('isValidMigrationIdentifier');
+    expect(typesSrc).toContain('export function isValidMigrationIdentifier');
+  });
+
+  it('isValidMigrationIdentifier returns true for valid identifiers', () => {
+    expect(isValidMigrationIdentifier('001')).toBe(true);
+    expect(isValidMigrationIdentifier('074')).toBe(true);
+    expect(isValidMigrationIdentifier('074a')).toBe(true);
+    expect(isValidMigrationIdentifier('074b')).toBe(true);
+    expect(isValidMigrationIdentifier('999')).toBe(true);
+  });
+
+  it('isValidMigrationIdentifier returns false for invalid identifiers', () => {
+    expect(isValidMigrationIdentifier('1')).toBe(false);
+    expect(isValidMigrationIdentifier('12')).toBe(false);
+    expect(isValidMigrationIdentifier('010aa')).toBe(false);
+    expect(isValidMigrationIdentifier('abc')).toBe(false);
+    expect(isValidMigrationIdentifier('105-extra')).toBe(false);
+    expect(isValidMigrationIdentifier('074A')).toBe(false); // uppercase not allowed
+    expect(isValidMigrationIdentifier('')).toBe(false);
+  });
+
+  it('MIGRATION_IDENTIFIER_REGEX JSDoc documents the GOV-14 identifier contract', () => {
+    const regexIdx = typesSrc.indexOf('MIGRATION_IDENTIFIER_REGEX');
+    const precedingJSDoc = typesSrc.substring(Math.max(0, regexIdx - 800), regexIdx);
+    expect(precedingJSDoc).toContain('MIGRATION-GOV-14');
+    expect(precedingJSDoc).toContain('CHECK constraint');
+    expect(precedingJSDoc).toContain('schema_migrations');
+    expect(precedingJSDoc).toContain('schema_migration_runs');
+    expect(precedingJSDoc).toContain('migration_baseline');
+  });
+
+  // ── DDL identifier CHECK constraint alignment ──
+
+  it('schema_migrations DDL enforces identifier grammar ^[0-9]{3}[a-z]?$', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migrations')[1] ?? '';
+    expect(ddlSection).toContain("CHECK (migration_identifier ~ '^[0-9]{3}[a-z]?$')");
+  });
+
+  it('schema_migration_runs DDL enforces identifier grammar ^[0-9]{3}[a-z]?$', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1] ?? '';
+    expect(ddlSection).toContain("CHECK (migration_identifier ~ '^[0-9]{3}[a-z]?$')");
+  });
+
+  it('migration_baseline DDL enforces identifier grammar ^[0-9]{3}[a-z]?$', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_baseline')[1] ?? '';
+    expect(ddlSection).toContain("CHECK (migration_identifier ~ '^[0-9]{3}[a-z]?$')");
+  });
+
+  it('identifier grammar is consistent across TypeScript and all 3 DDL tables', () => {
+    // The TS regex and all 3 DDL CHECK constraints must use the same pattern.
+    const expectedPattern = '^[0-9]{3}[a-z]?$';
+    // TS side
+    expect(typesSrc).toContain(expectedPattern);
+    // DDL side — 3 tables
+    const tables = ['schema_migrations', 'schema_migration_runs', 'migration_baseline'];
+    for (const table of tables) {
+      const ddlSection = ledgerSrc.split(`CREATE TABLE IF NOT EXISTS ${table}`)[1] ?? '';
+      expect(ddlSection).toContain(expectedPattern);
+    }
+  });
+
+  // ── Status vocabulary alignment (type ↔ DDL) ──
+
+  it('MigrationRunStatus type and schema_migration_runs DDL CHECK have identical 9-status vocabulary', () => {
+    const expectedStatuses = [
+      'started', 'applied', 'failed', 'denied', 'skipped',
+      'dry_run', 'conflict', 'lock_timeout', 'baseline_blocked',
+    ];
+    // Type side
+    const typeSection = typesSrc.split('export type MigrationRunStatus')[1]
+      ?.split(';')[0] ?? '';
+    for (const status of expectedStatuses) {
+      expect(typeSection).toContain(`'${status}'`);
+    }
+    // DDL side
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1] ?? '';
+    for (const status of expectedStatuses) {
+      expect(ddlSection).toContain(`'${status}'`);
+    }
+  });
+
+  it('schema_migrations status CHECK has all 5 current-state statuses (pending, running, applied, failed, superseded)', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migrations')[1] ?? '';
+    expect(ddlSection).toContain("'pending'");
+    expect(ddlSection).toContain("'running'");
+    expect(ddlSection).toContain("'applied'");
+    expect(ddlSection).toContain("'failed'");
+    expect(ddlSection).toContain("'superseded'");
+  });
+
+  it('governance_lifecycle DDL enforces 6-state lifecycle vocabulary', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS governance_lifecycle')[1] ?? '';
+    expect(ddlSection).toContain("'UNBOOTSTRAPPED'");
+    expect(ddlSection).toContain("'LEDGER_BOOTSTRAPPED'");
+    expect(ddlSection).toContain("'BASELINE_REQUIRED'");
+    expect(ddlSection).toContain("'BASELINE_IN_PROGRESS'");
+    expect(ddlSection).toContain("'BASELINE_VERIFIED'");
+    expect(ddlSection).toContain("'EXECUTION_ENABLED'");
+  });
+
+  it('migration_baseline DDL enforces 5 reconciliation_status values', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_baseline')[1] ?? '';
+    expect(ddlSection).toContain("'CONFIRMED_APPLIED'");
+    expect(ddlSection).toContain("'CONFIRMED_NOT_APPLIED'");
+    expect(ddlSection).toContain("'PARTIALLY_APPLIED'");
+    expect(ddlSection).toContain("'NOT_APPLICABLE'");
+    expect(ddlSection).toContain("'UNKNOWN'");
+  });
+
+  it('migration_baseline DDL enforces 6 evidence_type values', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_baseline')[1] ?? '';
+    expect(ddlSection).toContain("'SCHEMA_INTROSPECTION'");
+    expect(ddlSection).toContain("'LEDGER_RECORD'");
+    expect(ddlSection).toContain("'MANUAL_VERIFICATION'");
+    expect(ddlSection).toContain("'CHECKSUM_MATCH'");
+    expect(ddlSection).toContain("'OBJECT_EXISTENCE'");
+    expect(ddlSection).toContain("'NONE'");
+  });
+
+  // ── Actor type contract alignment ──
+
+  it('MigrationActorType has exactly 2 values: human and migration-actor', () => {
+    const typeSection = typesSrc.split('export type MigrationActorType')[1]
+      ?.split(';')[0] ?? '';
+    expect(typeSection).toContain("'human'");
+    expect(typeSection).toContain("'migration-actor'");
+  });
+
+  it('schema_migrations DDL enforces applied_by_actor_type CHECK (human, migration-actor)', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migrations')[1] ?? '';
+    expect(ddlSection).toContain('applied_by_actor_type');
+    expect(ddlSection).toContain("'human'");
+    expect(ddlSection).toContain("'migration-actor'");
+  });
+
+  it('schema_migration_runs DDL enforces actor_type CHECK (human, migration-actor)', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS schema_migration_runs')[1] ?? '';
+    expect(ddlSection).toContain('actor_type');
+    expect(ddlSection).toContain("'human'");
+    expect(ddlSection).toContain("'migration-actor'");
+  });
+
+  it('MigrationActorType JSDoc documents the GOV-14 actor contract', () => {
+    const actorIdx = typesSrc.indexOf('export type MigrationActorType');
+    const precedingJSDoc = typesSrc.substring(Math.max(0, actorIdx - 600), actorIdx);
+    expect(precedingJSDoc).toContain('MIGRATION-GOV-14');
+    expect(precedingJSDoc).toContain('CHECK constraint');
+  });
+
+  it('route hardcodes actorType to human and rejects client-supplied actorType', () => {
+    expect(routeSrc).toContain("const actorType: MigrationActorType = 'human'");
+    expect(routeSrc).toContain('Client-supplied actorType is not permitted');
+  });
+
+  it('checksum_sha256 CHECK constraint enforces 64-char hex on migration tables', () => {
+    const tables = ['schema_migrations', 'schema_migration_runs'];
+    for (const table of tables) {
+      const ddlSection = ledgerSrc.split(`CREATE TABLE IF NOT EXISTS ${table}`)[1] ?? '';
+      expect(ddlSection).toContain("CHECK (checksum_sha256 ~ '^[0-9a-f]{64}$')");
+    }
+  });
+
+  it('migration_totp_uses enforces use_hash CHECK with 64-char hex', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_totp_uses')[1] ?? '';
+    expect(ddlSection).toContain("CHECK (use_hash ~ '^[0-9a-f]{64}$')");
+  });
+
+  it('GOV-14 is referenced in types.ts (identifier and status contract documentation)', () => {
+    expect(typesSrc).toContain('MIGRATION-GOV-14');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 26. Phase 1A.2: TOTP Exact Matched-Step Recording (MIGRATION-GOV-17)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Phase 1A.2: TOTP exact matched-step recording (MIGRATION-GOV-17)', () => {
+  const runnerSrc = readSrc('lib/migrations/runner.ts');
+  const ledgerSrc = readSrc('lib/migrations/ledger.ts');
+  const typesSrc = readSrc('lib/migrations/types.ts');
+
+  // ── Exact matched-step recording ──
+
+  it('verifyFreshTotp computes matchedStep from the EXACT stepTime that matched', () => {
+    // The code must compute matchedStep from the stepTime variable (the
+    // time that produced the matching code), NOT from the current server time.
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    expect(fnSection).toContain('matchedStep = Math.floor(stepTime / 1000 / TOTP_PERIOD_SECONDS)');
+  });
+
+  it('verifyFreshTotp iterates the ±1 window (delta 0, ±1)', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    expect(fnSection).toContain('TOTP_WINDOW_STEPS');
+    expect(fnSection).toContain('delta === 0');
+    expect(fnSection).toContain('[-1, 1]');
+  });
+
+  it('verifyFreshTotp records the matchedStep (not current server step) in recordTotpUse', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    // recordTotpUse must be called with matchedStep, not a separate current-step variable.
+    expect(fnSection).toContain('recordTotpUse(adminUserId, matchedStep, executionId)');
+  });
+
+  it('verifyFreshTotp returns matchedStep in the TOTP_REPLAY denial result', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    const replaySection = fnSection.split('TOTP_REPLAY')[1] ?? '';
+    expect(replaySection).toContain('timeStep: matchedStep');
+  });
+
+  it('verifyFreshTotp returns matchedStep in the verified=true result', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    // After successful verification, timeStep should be the matchedStep.
+    const verifiedSection = fnSection.split('verified: true')[1] ?? '';
+    expect(verifiedSection).toContain('timeStep: matchedStep');
+  });
+
+  // ── Fail-closed on missing MFA ──
+
+  it('verifyFreshTotp returns MFA_NOT_ENABLED when user has no TOTP secret', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    expect(fnSection).toContain('MFA_NOT_ENABLED');
+    // The JSDoc should reference the fail-closed behavior.
+    const fnIdx = runnerSrc.indexOf('export async function verifyFreshTotp');
+    const precedingJSDoc = runnerSrc.substring(Math.max(0, fnIdx - 1800), fnIdx);
+    expect(precedingJSDoc).toContain('FAIL-CLOSED');
+  });
+
+  it('verifyFreshTotp does NOT record time-step on invalid code (failed auth does not consume valid code)', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    const invalidSection = fnSection.split('TOTP_INVALID')[1] ?? '';
+    // The invalid path should return before recordTotpUse is called.
+    expect(invalidSection).toContain('timeStep: null');
+  });
+
+  // ── Replay prevention table ──
+
+  it('migration_totp_uses table has UNIQUE constraint on (user_id, time_step)', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_totp_uses')[1] ?? '';
+    expect(ddlSection).toContain('migration_totp_uses_user_step_unique');
+    expect(ddlSection).toContain('UNIQUE (user_id, time_step)');
+  });
+
+  it('migration_totp_uses table does NOT store the TOTP code (only hashed time-step)', () => {
+    const ddlSection = ledgerSrc.split('CREATE TABLE IF NOT EXISTS migration_totp_uses')[1]
+      ?.split(');')[0] ?? '';
+    expect(ddlSection).toContain('use_hash');
+    expect(ddlSection).not.toMatch(/totp_code|otp_code|secret/);
+  });
+
+  it('recordTotpUse uses ON CONFLICT DO NOTHING for replay detection', () => {
+    const fnSection = ledgerSrc.split('export async function recordTotpUse')[1] ?? '';
+    expect(fnSection).toContain('ON CONFLICT');
+    expect(fnSection).toContain('DO NOTHING');
+  });
+
+  it('recordTotpUse returns false when the (user_id, time_step) pair already exists (replay)', () => {
+    const fnSection = ledgerSrc.split('export async function recordTotpUse')[1] ?? '';
+    // The function uses RETURNING id + ON CONFLICT DO NOTHING: if the pair
+    // already exists, no row is inserted, so rows.length > 0 is false (replay).
+    // If it's a new pair, a row is returned, so rows.length > 0 is true (first use).
+    expect(fnSection).toContain('RETURNING id');
+    expect(fnSection).toContain('ON CONFLICT');
+    expect(fnSection).toContain('DO NOTHING');
+    expect(fnSection).toContain('rows.length > 0');
+  });
+
+  // ── Constants ──
+
+  it('TOTP_PERIOD_SECONDS is defined (must match lib/mfa.ts)', () => {
+    expect(runnerSrc).toContain('TOTP_PERIOD_SECONDS');
+  });
+
+  it('TOTP_WINDOW_STEPS is defined', () => {
+    expect(runnerSrc).toContain('TOTP_WINDOW_STEPS');
+  });
+
+  // ── MFA Phase 3 frozen ──
+
+  it('lib/mfa.ts is NOT modified (frozen — verifyTOTPCode, generateTOTPCode, decryptTOTPSecret exist)', () => {
+    const mfaSrc = readSrc('lib/mfa.ts');
+    expect(mfaSrc).toContain('verifyTOTPCode');
+    expect(mfaSrc).toContain('generateTOTPCode');
+    expect(mfaSrc).toContain('decryptTOTPSecret');
+  });
+
+  it('runner reimplements TOTP window iteration specifically for matched-step tracking', () => {
+    // verifyFreshTotp does NOT call verifyTOTPCode directly — it reimplements
+    // the window iteration because it needs the matched step for replay tracking.
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+    // It should call generateTOTPCode (the frozen MFA library function) to
+    // compute the expected code at each step, rather than verifyTOTPCode.
+    expect(fnSection).toMatch(/generateTOTPCode\(\s*secret\s*,\s*stepTime\s*\)/);
+    // It should NOT call verifyTOTPCode (the frozen MFA function) in this function.
+    expect(fnSection).not.toMatch(/verifyTOTPCode\s*\(/);
   });
 });

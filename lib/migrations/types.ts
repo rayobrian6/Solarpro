@@ -172,6 +172,41 @@ export type BaselineEvidenceType =
 export type TransactionMode = 'REQUIRED' | 'FORBIDDEN' | 'MANUAL_REVIEW';
 
 /**
+ * The canonical migration identifier grammar, enforced as a CHECK constraint
+ * on all three ledger tables (`schema_migrations`, `schema_migration_runs`,
+ * `migration_baseline`):
+ *
+ *   CHECK (migration_identifier ~ '^[0-9]{3}[a-z]?$')
+ *
+ * The grammar is: exactly 3 digits (zero-padded prefix) followed by an
+ * optional single lowercase letter (duplicate-prefix disambiguation suffix).
+ * Valid: `001`, `074`, `074a`, `074b`. Invalid: `1`, `12`, `010aa`, `abc`,
+ * `105-extra`, `074A` (uppercase).
+ *
+ * MIGRATION-GOV-14 (Phase 1A.2): This TypeScript constant mirrors the DDL
+ * CHECK constraint so the identifier contract is enforced in code as well
+ * as at the database level. The `isValidMigrationIdentifier()` function
+ * should be used to validate identifiers before any ledger operation.
+ */
+export const MIGRATION_IDENTIFIER_REGEX = /^[0-9]{3}[a-z]?$/;
+
+/**
+ * Validate that a string conforms to the canonical migration identifier
+ * grammar (`^[0-9]{3}[a-z]?$`).
+ *
+ * This is the TypeScript-side enforcement of the same contract enforced by
+ * the DDL CHECK constraint on all ledger tables. Use this before any
+ * ledger INSERT or lookup to fail fast on malformed identifiers rather than
+ * relying on a database error.
+ *
+ * @param identifier The string to validate.
+ * @returns `true` if the identifier matches the grammar, `false` otherwise.
+ */
+export function isValidMigrationIdentifier(identifier: string): boolean {
+  return MIGRATION_IDENTIFIER_REGEX.test(identifier);
+}
+
+/**
  * A single migration file discovered from the canonical `lib/migrations/`
  * directory.
  *
@@ -339,6 +374,14 @@ export interface MigrationBaselineRow {
  * - `human`       — An authenticated admin user (requires fresh TOTP).
  * - `migration-actor` — An automated service token (exempt from TOTP, but still
  *                    subject to environment allowlist and production flag).
+ *
+ * MIGRATION-GOV-14 (Phase 1A.2): The `actor_type` vocabulary is enforced by
+ * CHECK constraints on both `schema_migrations.applied_by_actor_type` and
+ * `schema_migration_runs.actor_type`. Only these two values are permitted.
+ * The route layer hardcodes `actorType = 'human'` and rejects any
+ * client-supplied actor type to prevent privilege escalation
+ * (MIGRATION-GOV-05). The `migration-actor` type is reserved for future
+ * automated service-token execution and is never accepted from API clients.
  */
 export type MigrationActorType = 'human' | 'migration-actor';
 
