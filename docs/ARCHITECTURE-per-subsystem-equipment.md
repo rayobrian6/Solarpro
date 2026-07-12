@@ -166,3 +166,25 @@ Total: ~10–14 worker-days; critical path Wave 0→1→2→3; Waves 4–5 fan o
 10. **256KB save-config ceiling.** → Payload-size logging in Wave 1 with alert threshold at 200KB (panelCoordinates-heavy configs are already near it; the map adds <2KB).
 
 **Explicit v1 non-goals (documented on PV-4A/E-1):** per-panelboard/sub-panel 705.12(B), PCS (2023 NEC 705.13), per-sub interconnection methods, mixed micro+optimizer within one subsystem, per-sub field locks, deletion of the inline E-1 buildSLD duplicate (guarded, not deleted — fast-follow after the live renderer is proven).
+---
+
+## Addendum A — Roof mounting is a PAIRING, not a single id (Ray ruling, 2026-07-11)
+
+> "RT Mini gets a rail. We personally pair with IronRidge. The added L-foot has many different pairings."
+
+The roof mounting axis decomposes into **attachment × rail system**: the attachment
+(RT-MINI flashed pad, lag-into-rafter foot, S-5! clamp, …) and the rail system
+(IronRidge XR, Unirac SM, …) are separately chosen, composable products joined by
+an L-foot whose pairing varies. Consequences for this contract:
+
+- `SubSystemEquipment.mountingId` remains the single resolved id for v1, but the
+  equipment registry's `requiredAccessories` on an attachment-type entry represent
+  the DEFAULT pairing (RT-MINI → IronRidge XR set is Ray's real install method,
+  not a template error). Quantities must always scale to the subsystem's module
+  basis.
+- A future minor revision may split `mountingId` into
+  `{ attachmentId, railSystemId }` for roof subsystems so pairings become explicit
+  user choices; the BOM engine's rail-formula categories are already isolated
+  (RAIL_FORMULA_CATEGORIES) making that split mechanical.
+- `RAIL_LESS_ROOF_RACKING` (bom-engine-v4) exists for genuine direct-attach
+  systems and is intentionally EMPTY until one is cataloged.

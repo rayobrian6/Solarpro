@@ -138,9 +138,9 @@ describe('engineering BOM route — hybrid multi-system payload', () => {
     // ── ROOF subset: racking lines from roofData (attachmentCount/railSections threaded) ──
     expect(byPart(json, 'RT-MINI-ASSY')?.quantity).toBe(24);        // perAttachment
     expect(byPart(json, 'LAG-516-3-SS')?.quantity).toBe(48);        // attachments × 2
-    // Rail-less RT-MINI (racking-scope fix): the generic IronRidge rail line
-    // must NOT bill alongside the flashed pads in a hybrid payload.
-    expect(byPart(json, 'XR-100-168B')).toBeUndefined();
+    // RAY RULING (2026-07-11): RT-MINI pads pair WITH a rail system (IronRidge
+    // is Ray's pairing) — the rail set emits, scaled to the roof subset.
+    expect(byPart(json, 'XR-100-168B')).toBeDefined();
 
     // merge diagnostics present for hybrid
     expect(json.merge).toBeDefined();

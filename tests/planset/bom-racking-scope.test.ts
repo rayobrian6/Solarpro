@@ -76,9 +76,14 @@ const hybridBody = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('(a) hybrid + RT-MINI roof authority — ONE racking system, roof-subset quantities', () => {
-  it('emits RT-MINI lines only (zero IronRidge/XR/UFO/L-Foot) and scales WEEB to the 51-module roof subset', async () => {
+  // RAY RULING (2026-07-11): "RT Mini gets a rail. We personally pair with
+  // IronRidge. The added L-foot has many different pairings." The IronRidge
+  // rail set on the rooftech-mini registry entry is the intended default
+  // PAIRING — it must EMIT, scaled to the roof subset (the original CSV
+  // defect was the 94-module project-wide scaling, not the pairing itself).
+  it('emits RT-MINI pads + the paired IronRidge rail set, all scaled to the 51-module roof subset', async () => {
     const { status, json } = await postBom(hybridBody({
-      rackingId: 'ironridge-xr100',     // conflicting design_electrical id — must LOSE
+      rackingId: 'ironridge-xr100',     // conflicting design_electrical id — must LOSE as the PRIMARY
       roofData: { attachmentCount: 96, railSections: 8, mountingSystemId: 'rooftech-mini', panelCount: 51 },
     }));
 
@@ -87,7 +92,7 @@ describe('(a) hybrid + RT-MINI roof authority — ONE racking system, roof-subse
 
     const struct = structuralOf(json);
 
-    // Exactly ONE roof racking system: the resolved primary (roofData wins).
+    // Exactly ONE roof racking system lot: the resolved primary (roofData wins).
     const lots = struct.filter(i => i.category === 'racking');
     expect(lots).toHaveLength(1);
     expect(lots[0].manufacturer).toBe('Roof Tech');
@@ -97,11 +102,14 @@ describe('(a) hybrid + RT-MINI roof authority — ONE racking system, roof-subse
     expect(structBy(json, 'attachment', 'RT-MINI-ASSY')?.quantity).toBe(96);
     expect(structBy(json, 'lag_bolt', 'LAG-516-3-SS')?.quantity).toBe(192);
 
-    // ZERO IronRidge rail-system lines (rail-less: the pad IS the attachment).
-    expect(struct.some(i => i.manufacturer === 'IronRidge')).toBe(false);
-    for (const pn of ['XR-100-168B', 'UFO-MID-01', 'UFO-END-01', 'LFT-001-B', 'XR-100-SPLICE']) {
-      expect(struct.some(i => i.partNumber === pn)).toBe(false);
-    }
+    // The paired rail set EMITS, scaled to the ROOF SUBSET (51), never the
+    // project total (94): mid clamps (51−rows)×2 basis, not (94−2)×2=184.
+    const mid = structBy(json, 'mid_clamp', 'UFO-MID-01');
+    expect(mid).toBeDefined();
+    expect(mid!.quantity).toBeLessThan(184);
+    expect(mid!.quantity).toBeGreaterThan(0);
+    expect(structBy(json, 'rail', 'XR-100-168B')).toBeDefined();
+    expect(structBy(json, 'l_foot', 'LFT-001-B')?.quantity).toBe(96);
 
     // Grounding lugs are per-ROOF-module: 51, not the project total 94.
     expect(structBy(json, 'grounding', 'WEEB-LUG-6.7')?.quantity).toBe(51);

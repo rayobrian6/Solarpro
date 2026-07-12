@@ -1271,15 +1271,15 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     return Math.max(1, Math.ceil(_roofBasisModules / Math.max(1, _modulesPerRow)));
   })();
 
-  // Rail-less roof racking (Ray, 2026-07-11): the RT-MINI flashed pad IS the
-  // attachment — in a hybrid payload the generic rail-formula accessories that
-  // its registry entry defaults to (IronRidge XR rails / UFO clamps / L-feet)
-  // must NOT be billed alongside the pads: the Stowell CSV double-branded ONE
-  // roof (RT-MINI pads ×96 + a full IronRidge rail set scaled to all 94
-  // modules). Suppression is scoped to hybrid payloads so legacy single-system
-  // BOMs (no subSystemCounts) stay byte-identical; the permit path (rackingBOM
-  // from calcRackingBOM) is untouched either way — it bypasses these formulas.
-  const RAIL_LESS_ROOF_RACKING = new Set(['rooftech-mini']);
+  // Rail-less roof racking. RAY RULING (2026-07-11): RT-MINI is NOT rail-less
+  // — the flashed pad is the roof ATTACHMENT and a rail system rides on it via
+  // L-feet ("RT Mini gets a rail. We personally pair with IronRidge. The added
+  // L-foot has many different pairings."). So the registry entry's IronRidge
+  // accessories are the intended default PAIRING, not a copy-paste bug — the
+  // Stowell CSV's real defect was only the 94-module project-wide scaling,
+  // which _scaleToRoofSubset fixes. The set stays as the mechanism for genuine
+  // direct-attach systems; it is intentionally EMPTY until one is cataloged.
+  const RAIL_LESS_ROOF_RACKING = new Set<string>([]);
   const RAIL_FORMULA_CATEGORIES = new Set(['rail', 'splice', 'mid_clamp', 'end_clamp', 'l_foot']);
   // Scaling/suppression applies only to ROOF racking entries — a hybrid whose
   // resolved rackingId is a ground/fence system keeps legacy behavior (its
