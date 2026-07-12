@@ -372,7 +372,19 @@ export function drawFenceElevation(
   const totalLengthFt  = cadFence ? metersToFt(cadFence.totalLengthM) : (layout.fenceTotalLengthFt ?? 0);
   const totalPanels    = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw           = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
-  const windSpeedMph   = engineering.windSpeedMph   ?? project?.ahjWindSpeedMph   ?? 90;
+  // Wave 6.2 (punch 1b): the elevation's WIND callout/schedule row must agree
+  // with the FENCE DATA zone (sheetComposition.getFenceData), which reads the
+  // REAL design wind from compliance.structural.wind.windSpeed first. The
+  // canonical site block carries that same value (buildCanonical:
+  // site.windSpeed = structural wind || ahj || project). The old chain fell
+  // straight to a hardcoded 90 while FENCE DATA said 115 MPH Vult (Stowell).
+  const _canonWind     = Number((project as unknown as {
+    _canonical?: { site?: { windSpeed?: number } };
+  })?._canonical?.site?.windSpeed) || 0;
+  const windSpeedMph   = engineering.windSpeedMph
+    ?? (_canonWind > 0 ? _canonWind : undefined)
+    ?? project?.ahjWindSpeedMph
+    ?? 115;   // same last-resort default as getFenceData — never a private 90
   const groundSnowPsf  = engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
   // Wave 6.1 (punch 1a): fence-system name from the sub's own equipment —
   // never the raw project-wide mountingSystem scalar (roof racking leak).
@@ -395,9 +407,12 @@ export function drawFenceElevation(
   const els: string[] = [];
   els.push(drawSVGOpen(W, H));
   els.push(drawBackground(W, H, '#fafafa'));
+  // Wave 6.2 (punch 1c): the drawing shows a TYPICAL 2-bay section — the old
+  // header read as if the whole fence were the drawn ~16' width; name the
+  // full run length so the detail can't be mistaken for the total extent.
   els.push(drawTitleBar(W,
-    'SOLAR FENCE — STRUCTURAL ELEVATION + POST DETAIL',
-    'SCALE: 1/2"=1\'-0"'));
+    `SOLAR FENCE — TYPICAL 2-BAY ELEVATION + POST DETAIL (${ftToFtIn(totalLengthFt)} L.F. TOTAL RUN)`,
+    'SCALE: 1/2"=1\'-0" — TYP. SECTION'));
 
   const dz = zones.draw;
 
@@ -615,11 +630,11 @@ export function drawFenceElevation(
     12, ftToFtIn(postSpacingFt) + ' O.C.'
   ));
 
-  // L2 — Overall 2-bay width
+  // L2 — Overall 2-bay width (TYP. — the drawn section, never the total run)
   els.push(drawOverallDimension(
     toX(0), toX(elevWidthFt),
     groundY + postEmbedFt * FT_PX + 32,
-    16, ftToFtIn(elevWidthFt) + ' — 2 BAYS'
+    16, ftToFtIn(elevWidthFt) + ' — 2 BAYS (TYP. OF ' + ftToFtIn(totalLengthFt) + ' RUN)'
   ));
 
   // L3 — Panel height breakdown: each rail position
@@ -695,11 +710,11 @@ export function drawFenceElevation(
   // First-segment label reference
   ry += notes.length * 10 + 8;
   els.push(drawRectFilled(dZone.x, ry, dZone.width, 24, '#eef2ff', '#8899cc', 0.8));
-  els.push(drawText(dZone.x + 4, ry + 8, 'ELEVATION SHOWN:', {
+  els.push(drawText(dZone.x + 4, ry + 8, 'TYPICAL 2-BAY DETAIL OF:', {
     anchor: 'start', fontSize: 6.5, fill: '#333',
   }));
   els.push(drawText(dZone.x + 4, ry + 18,
-    `${firstSegLabel} (${segments.length} SEG TOTAL)`, {
+    `${ftToFtIn(totalLengthFt)} RUN — ${firstSegLabel} (${segments.length} SEG TOTAL)`, {
       anchor: 'start', fontSize: 7, fill: '#2255aa', fontWeight: 'bold',
     }));
   ry += 32;

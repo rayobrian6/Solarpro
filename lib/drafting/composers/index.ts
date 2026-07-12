@@ -260,10 +260,17 @@ export function getArrayPlanFromCAD(
   // planes/panels from dInput, and adapting the fence-typed base produced
   // "planes=0 panels=0" (caught in harness).
   const _hybRoofSec = cad.hybrid?.sections.find(sec => sec.key === 'roof');
+  // Wave 6.2 (punch 1c): a view explicitly scoped to a NON-ROOF sub (PV-1F /
+  // PV-1G / PV-3F secondary+primary views pass subScopedView(cad, key)) must
+  // render ITS OWN template below — never re-take this hybrid branch, which
+  // embedded the whole roof site plan as the fence sheet's "SEGMENT PLAN"
+  // inset. Roof-scoped and unscoped hybrid models keep the branch.
+  const _subScopedKey = (cad as unknown as { _subScoped?: string })._subScoped;
+  const _allowHybridPlan = !_subScopedKey || _subScopedKey === 'roof';
   // The VIEW scopes totals to the ROOF subset — the roof sheet documents the
   // roof; ground/fence appear as overlays with their own labels. Project-wide
   // totals here made the sheet claim "94 MOD" on IronRidge (Stowell v2).
-  const _hybridPlanCad = (cad.hybrid && cad.roof && _hybRoofSec)
+  const _hybridPlanCad = (_allowHybridPlan && cad.hybrid && cad.roof && _hybRoofSec)
     ? { ...cad, systemType: 'roof' as const,
         originLat: _hybRoofSec.originLat, originLng: _hybRoofSec.originLng,
         totalPanels: _hybRoofSec.totalPanels, totalDcKw: _hybRoofSec.dcKw }

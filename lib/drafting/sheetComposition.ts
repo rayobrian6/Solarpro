@@ -527,9 +527,12 @@ function fenceComposition(
     layout:         'elevation_dominant',
     drawPct:        78,
     dataPct:        22,
+    // Wave 6.2 (punch 1c): the drawn elevation is a TYPICAL 2-bay section of
+    // the run — headers must say so (the sheet otherwise read as if the whole
+    // fence were the drawn ~16' width).
     drawHeader:     isPlan
-      ? `SOLAR FENCE ELEVATION — ${d.totalLenFt} L.F. TOTAL | ${d.segmentCount} SEGMENTS | POST @ ${d.postSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`
-      : `FENCE STRUCTURAL ELEVATION — POST EMBED: ${d.embedFt}' MIN | WIND: ${d.windSpeedMph} MPH Vult | ASCE 7-22`,
+      ? `SOLAR FENCE — TYPICAL 2-BAY ELEVATION OF ${d.totalLenFt} L.F. RUN | ${d.segmentCount} SEGMENTS | POST @ ${d.postSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`
+      : `FENCE STRUCTURAL ELEVATION (TYP. 2-BAY SECTION OF ${d.totalLenFt} L.F.) — POST EMBED: ${d.embedFt}' MIN | WIND: ${d.windSpeedMph} MPH Vult | ASCE 7-22`,
     secondaryHeader: isPlan ? 'SEGMENT PLAN — TOP VIEW' : 'FOOTING DETAIL — NTS',
     dataTitle:      isPlan ? 'FENCE DATA' : 'STRUCTURAL DATA',
     dataRows,

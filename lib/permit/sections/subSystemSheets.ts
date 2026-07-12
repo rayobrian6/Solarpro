@@ -105,7 +105,14 @@ export function subScopedView(cad: CADModel, key: SubSystemKey): CADModel {
     originLng: sec.originLng,
     totalPanels: sec.totalPanels,
     totalDcKw: sec.dcKw,
-  };
+    // Wave 6.2 (punch 1c): mark the view as explicitly sub-scoped so the
+    // drafting composer renders THIS sub's own plan (fence line / ground
+    // rows) instead of re-taking its hybrid branch and embedding the whole
+    // roof site plan again (the PV-1F "SEGMENT PLAN" inset was a shrunken
+    // duplicate of PV-1). Underscore-prefixed passenger field — CADModel
+    // serialization is unaffected and single-system paths never see it.
+    _subScoped: key,
+  } as CADModel;
 }
 
 /** Inverter → owning sub key. Tagged inverters belong to their tag; untagged
