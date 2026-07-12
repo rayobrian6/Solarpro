@@ -147,8 +147,8 @@ describe('ensureSubSystemShape — presentKeys hybrid synthesis (Wave 4B.A)', ()
 
   it('untagged inverters still inherit the §1.5 chain key (tags unchanged by presentKeys)', () => {
     const out = ensureSubSystemShape(rayHybridConfig(), { presentKeys: RAY_PRESENT, now: NOW });
-    expect(out.inverters![0].subSystemKey).toBe('fence');
-    expect(out.inverters![0].strings![0].subSystemKey).toBe('fence');
+    expect((out.inverters![0] as any).subSystemKey).toBe('fence');
+    expect((out.inverters![0].strings![0] as any).subSystemKey).toBe('fence');
   });
 });
 

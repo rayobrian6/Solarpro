@@ -88,6 +88,7 @@ import { electricallyNormalizeInverterConfig, isElectricallyInvalid } from '@/li
 // per-sub staleness discard can never lose an equipment choice.
 import {
   ensureSubSystemShape,
+  detectDegenerateSingleFleet,
   toSubSystemKey,
   type SubSystemKey,
 } from '@/lib/system/subSystemEquipment';
@@ -2630,6 +2631,26 @@ function EngineeringPageInner() {
     return { ...counts, present, isHybrid: present.length > 1 };
   }, [projectLayout]);
 
+  // ── Wave 4B.B — fleet-shape diagnostics for hybrid layouts ─────────────────
+  // `degenerate` = the pre-contract whole-project single fleet (Ray's one
+  // 85-panel IQ8+ string tagged 'fence' on a 48/20/17 partition). Such a fleet
+  // must never be partitioned into per-sub engine inputs (item D) and is the
+  // auto-split trigger (item B). `suspect` is broader: ANY present sub whose
+  // fleet panel total disagrees with its stamp count — gates the explicit
+  // "Rebuild fleets per sub-system" action in the Inverters & Strings header.
+  const fleetDiag = useMemo(() => {
+    if (!subSystemCounts.isHybrid) {
+      return { degenerate: null as ReturnType<typeof detectDegenerateSingleFleet> | null, suspect: false };
+    }
+    const fb = toSubSystemKey(config.systemType);
+    const stamps = { roof: subSystemCounts.roof, ground: subSystemCounts.ground, fence: subSystemCounts.fence };
+    const degenerate = detectDegenerateSingleFleet(config.inverters as any[], fb, stamps);
+    const part = partitionFleet(config.inverters as any[], fb);
+    const suspect = degenerate.degenerate ||
+      subSystemCounts.present.some(k => fleetPanelTotal(part[k] ?? []) !== subSystemCounts[k]);
+    return { degenerate, suspect };
+  }, [config.inverters, config.systemType, subSystemCounts]);
+
   const totalWatts = config.inverters.reduce((sum, inv) =>
     sum + inv.strings.reduce((s2, str) => {
       const panel = getPanelById(str.panelId);
@@ -3902,6 +3923,178 @@ function EngineeringPageInner() {
   // seed `selectedBrand`. All downstream hooks (sizing recommendation,
   // validation, auto-apply) continue to run normally over the patched
   // config, because we stay on the existing pipeline.
+
+  // ── Wave 4B.B — ONE per-sub fleet builder, shared by the Wave 3.4 per-sub
+  // smart defaults (auto seed) and the explicit "Rebuild fleets per
+  // sub-system" action. Pure w.r.t. state: returns the built fleet or null.
+  type SeededSubFleet = {
+    key: SubSystemKey; fleet: InverterConfig[]; inverterId: string;
+    topology: 'string' | 'micro' | 'optimizer'; brand: string; panelId?: string;
+  };
+  const buildSubFleetForKey = (
+    key: SubSystemKey,
+    subCount: number,
+    prefer?: { inverterId?: string; panelId?: string; brand?: string },
+  ): SeededSubFleet | null => {
+    const _sdMap = (config as any).subSystems ?? {};
+    const seedBrand: string =
+      prefer?.brand
+      ?? _sdMap[key]?.ecosystemBrand
+      ?? (prefer?.inverterId ? getBrandProfileByInverterId(prefer.inverterId)?.id : undefined)
+      ?? getDefaultBrand(key);
+    try {
+      const _preferPanel = prefer?.panelId ? (SOLAR_PANELS.find(p => p.id === prefer.panelId) as any) : null;
+      const rec = sizeSystemFromBrand({
+        systemType: key,
+        panelCount: subCount,
+        panelWattage: _preferPanel?.watts ?? 400,
+        selectedBrand: seedBrand,
+        ...(prefer?.inverterId ? { selectedInverterId: prefer.inverterId } : {}),
+        batteryEnabled: false,
+      });
+      const primaryModel = rec.inverterModels[0];
+      if (!primaryModel) return null;
+      const uiType: InverterType =
+        rec.topology === 'hybrid' ? (rec.brand.id === 'ecoflow' ? 'ecoflow' : 'hybrid')
+        : rec.topology === 'micro' ? 'micro'
+        : rec.topology === 'optimizer' ? 'optimizer'
+        : 'string';
+      const base = newString(0, key); // per-sub panel/mounting defaults (fence → fence panel)
+      const basePanelId = prefer?.panelId ?? base.panelId;
+      const buildSubString = (idx: number, panelCount: number): StringConfig =>
+        _buildStrCfg({
+          index:          idx,
+          existingId:     `str-subdef-${key}-${Date.now()}-${idx}`,
+          panelCount,
+          panelId:        basePanelId,
+          tilt:           base.tilt,
+          azimuth:        base.azimuth,
+          roofType:       base.roofType as any,
+          mountingSystem: base.mountingSystem,
+          wireGauge:      base.wireGauge,
+          wireLength:     base.wireLength,
+        });
+      const fleet: InverterConfig[] = [];
+      if (uiType === 'micro') {
+        const actualPanelCount = rec.input.panelCount > 0 ? rec.input.panelCount : rec.microDeviceCount;
+        fleet.push(_buildInvCfg({
+          existingId: `inv-subdef-${key}-${Date.now()}`,
+          inverterId: primaryModel.equipmentDbId,
+          type: 'micro',
+          strings: [buildSubString(0, actualPanelCount)],
+          subSystemKey: key,
+        } as any));
+      } else {
+        const byInv = new Map<number, typeof rec.strings>();
+        for (const s of rec.strings) {
+          const idx = s.inverterIndex ?? 0;
+          if (!byInv.has(idx)) byInv.set(idx, []);
+          byInv.get(idx)!.push(s);
+        }
+        for (let idx = 0; idx < Math.max(1, rec.inverterCount); idx++) {
+          const assigned = byInv.get(idx) ?? [];
+          const invStrings = assigned.length > 0
+            ? assigned.map((s, i) => buildSubString(i, s.panelCount))
+            : [buildSubString(0, 0)];
+          fleet.push(_buildInvCfg({
+            existingId: `inv-subdef-${key}-${Date.now()}-${idx}`,
+            inverterId: primaryModel.equipmentDbId,
+            type: uiType,
+            strings: invStrings,
+            subSystemKey: key,
+          } as any));
+        }
+      }
+      return {
+        key,
+        fleet,
+        inverterId: primaryModel.equipmentDbId,
+        topology: uiType === 'micro' ? 'micro' : uiType === 'optimizer' ? 'optimizer' : 'string',
+        brand: rec.brand.id,
+        panelId: basePanelId,
+      };
+    } catch (err) {
+      console.warn(`[PER-SUB FLEET BUILD] sizing failed for '${key}' (brand ${seedBrand}):`, err);
+      return null;
+    }
+  };
+
+  // ── Wave 4B.B — split a degenerate whole-project fleet into per-sub fleets.
+  // 'auto'   = smart-defaults path (userHasEditedInverters === false only);
+  // 'manual' = the explicit header action (the click IS the user approval —
+  //            fires regardless of the user-intent lock, and re-locks after).
+  // Equipment choices are honored per key: subSystems[key] map entry first,
+  // then the degenerate fleet's own primary inverter/panel (Ray's IQ8+ carries
+  // over to all three subs), then per-sub brand defaults.
+  const rebuildFleetsPerSub = (trigger: 'auto' | 'manual'): boolean => {
+    if (!subSystemCounts.isHybrid || subSystemCounts.present.length === 0) return false;
+    const fb = toSubSystemKey(config.systemType);
+    const part = partitionFleet(config.inverters as any[], fb);
+    const mapNow = ((config as any).subSystems ?? {}) as Record<string, any>;
+    const degPrimary = fleetDiag.degenerate?.degenerate
+      ? (part[fleetDiag.degenerate.key!]?.[0] as InverterConfig | undefined)
+      : undefined;
+
+    const seeded: SeededSubFleet[] = [];
+    for (const key of subSystemCounts.present) {
+      const entry = mapNow[key];
+      const built = buildSubFleetForKey(key, subSystemCounts[key], {
+        inverterId: entry?.inverterId ?? degPrimary?.inverterId,
+        panelId:    entry?.panelId ?? degPrimary?.strings?.[0]?.panelId,
+        brand:      entry?.ecosystemBrand,
+      });
+      if (built) seeded.push(built);
+    }
+    if (seeded.length === 0) return false;
+
+    setConfig(prev => {
+      const fb2 = toSubSystemKey(prev.systemType);
+      let inverters = prev.inverters;
+      const nowIso = new Date().toISOString();
+      const dabsNext: Record<string, boolean> = { ...((prev as any).defaultsAppliedBySubSystem ?? {}) };
+      const mapNext: Record<string, any> = { ...((prev as any).subSystems ?? {}) };
+      for (const s of seeded) {
+        inverters = replaceSubFleet(inverters as any[], s.key, s.fleet as any[], fb2) as unknown as InverterConfig[];
+        dabsNext[s.key] = true;
+        mapNext[s.key] = {
+          ...(mapNext[s.key] ?? {}),
+          key: s.key,
+          inverterId: s.inverterId,
+          topology: s.topology,
+          ecosystemBrand: s.brand,
+          ...(s.panelId ? { panelId: s.panelId } : {}),
+          source: trigger === 'manual' ? 'engineering' : 'defaults',
+          updatedAt: nowIso,
+        };
+      }
+      const builtTotal = fleetPanelTotal(inverters as any[]);
+      const countOk = systemPanelCount > 0 && builtTotal === systemPanelCount;
+      if (!countOk) {
+        console.warn('[REBUILD FLEETS PER SUB] built total (' + builtTotal + ') !== systemPanelCount (' + systemPanelCount + ')');
+      }
+      return {
+        ...prev,
+        inverters,
+        defaultsApplied: true,
+        defaultsAppliedBySubSystem: dabsNext,
+        subSystems: mapNext,
+        // manual = explicit user decision → re-lock; auto = defaults semantics
+        ...(trigger === 'manual'
+          ? { userHasEditedInverters: true, isUserControlled: countOk }
+          : { isUserControlled: countOk }),
+      } as ProjectConfig;
+    });
+    logDecision(
+      'Rebuild fleets per sub-system',
+      subSystemCounts.present.map(k => `${k}=${subSystemCounts[k]}`).join(', ') +
+        (fleetDiag.degenerate?.degenerate
+          ? ` (split from one ${fleetDiag.degenerate.fleetPanelTotal}-panel '${fleetDiag.degenerate.key}' fleet)`
+          : ''),
+      trigger === 'manual' ? 'manual' : 'auto',
+    );
+    return true;
+  };
+
   useEffect(() => {
     // Wave 3.4 (contract §3 Wave 3 item 4): at N>1 stamped subsystems the
     // legacy whole-project sentinel no longer gates — each sub has its OWN
@@ -3923,6 +4116,16 @@ function EngineeringPageInner() {
     // A sub that already has equipment (map entry ids, or a live fleet) is
     // NEVER re-defaulted; seeding writes ONLY that sub's fleet + map entry.
     if (subSystemCounts.isHybrid) {
+      // Wave 4B.B — degenerate whole-project fleet (one untagged single-key
+      // fleet covering ≈ the project total): SPLIT it per sub instead of
+      // seeding around it — otherwise the 85-panel fleet survives under one
+      // key while the other subs get seeded ON TOP (double-counted project).
+      // Only reachable when userHasEditedInverters === false (guard above);
+      // the locked case surfaces the explicit header action instead.
+      if (fleetDiag.degenerate?.degenerate) {
+        console.log('[SMART DEFAULTS per-sub] degenerate single fleet detected — auto-splitting per sub-system');
+        if (rebuildFleetsPerSub('auto')) return;
+      }
       const _sdFb = toSubSystemKey(config.systemType);
       const _sdPart = partitionFleet(config.inverters as any[], _sdFb);
       const _sdDabs = (config as any).defaultsAppliedBySubSystem ?? {};
@@ -3941,85 +4144,15 @@ function EngineeringPageInner() {
       });
       if (_sdToSeed.length === 0) return;
 
-      type SeededFleet = {
-        key: SubSystemKey; fleet: InverterConfig[]; inverterId: string;
-        topology: 'string' | 'micro' | 'optimizer'; brand: string; panelId?: string;
-      };
-      const _sdSeeded: SeededFleet[] = [];
+      // Wave 4B.B — building extracted to buildSubFleetForKey (shared with the
+      // explicit "Rebuild fleets per sub-system" action). Defaults path passes
+      // NO preferences beyond the map's brand ⇒ identical seeding to Wave 3.4.
+      const _sdSeeded: SeededSubFleet[] = [];
       for (const key of _sdToSeed) {
-        const seedBrand: string = _sdMap[key]?.ecosystemBrand ?? getDefaultBrand(key);
-        const subCount = subSystemCounts[key];
-        try {
-          const rec = sizeSystemFromBrand({
-            systemType: key,
-            panelCount: subCount,
-            panelWattage: 400,
-            selectedBrand: seedBrand,
-            batteryEnabled: false,
-          });
-          const primaryModel = rec.inverterModels[0];
-          if (!primaryModel) continue;
-          const uiType: InverterType =
-            rec.topology === 'hybrid' ? (rec.brand.id === 'ecoflow' ? 'ecoflow' : 'hybrid')
-            : rec.topology === 'micro' ? 'micro'
-            : rec.topology === 'optimizer' ? 'optimizer'
-            : 'string';
-          const base = newString(0, key); // per-sub panel/mounting defaults (fence → fence panel)
-          const buildSubString = (idx: number, panelCount: number): StringConfig =>
-            _buildStrCfg({
-              index:          idx,
-              existingId:     `str-subdef-${key}-${Date.now()}-${idx}`,
-              panelCount,
-              panelId:        base.panelId,
-              tilt:           base.tilt,
-              azimuth:        base.azimuth,
-              roofType:       base.roofType as any,
-              mountingSystem: base.mountingSystem,
-              wireGauge:      base.wireGauge,
-              wireLength:     base.wireLength,
-            });
-          const fleet: InverterConfig[] = [];
-          if (uiType === 'micro') {
-            const actualPanelCount = rec.input.panelCount > 0 ? rec.input.panelCount : rec.microDeviceCount;
-            fleet.push(_buildInvCfg({
-              existingId: `inv-subdef-${key}-${Date.now()}`,
-              inverterId: primaryModel.equipmentDbId,
-              type: 'micro',
-              strings: [buildSubString(0, actualPanelCount)],
-              subSystemKey: key,
-            } as any));
-          } else {
-            const byInv = new Map<number, typeof rec.strings>();
-            for (const s of rec.strings) {
-              const idx = s.inverterIndex ?? 0;
-              if (!byInv.has(idx)) byInv.set(idx, []);
-              byInv.get(idx)!.push(s);
-            }
-            for (let idx = 0; idx < Math.max(1, rec.inverterCount); idx++) {
-              const assigned = byInv.get(idx) ?? [];
-              const invStrings = assigned.length > 0
-                ? assigned.map((s, i) => buildSubString(i, s.panelCount))
-                : [buildSubString(0, 0)];
-              fleet.push(_buildInvCfg({
-                existingId: `inv-subdef-${key}-${Date.now()}-${idx}`,
-                inverterId: primaryModel.equipmentDbId,
-                type: uiType,
-                strings: invStrings,
-                subSystemKey: key,
-              } as any));
-            }
-          }
-          _sdSeeded.push({
-            key,
-            fleet,
-            inverterId: primaryModel.equipmentDbId,
-            topology: uiType === 'micro' ? 'micro' : uiType === 'optimizer' ? 'optimizer' : 'string',
-            brand: rec.brand.id,
-            panelId: base.panelId,
-          });
-        } catch (err) {
-          console.warn(`[SMART DEFAULTS per-sub] sizing failed for '${key}' (brand ${seedBrand}):`, err);
-        }
+        const built = buildSubFleetForKey(key, subSystemCounts[key], {
+          brand: _sdMap[key]?.ecosystemBrand,
+        });
+        if (built) _sdSeeded.push(built);
       }
       if (_sdSeeded.length === 0) return;
       console.log('✅ [SMART DEFAULTS per-sub] seeded:',
@@ -9453,6 +9586,42 @@ function EngineeringPageInner() {
                           <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+14 Models</span>
                         </h3>
                         <div className="flex gap-2">
+                          {/* Wave 4B.B — hybrid fleet-shape mismatch: explicit split action.
+                              Shown when ≥2 sub-systems are stamped on the layout but the
+                              inverter fleet does not match the per-sub panel partition
+                              (e.g. one 85-panel fleet on a 48/20/17 roof/ground/fence
+                              project). The click IS the user approval — it rebuilds one
+                              fleet per present sub-system and logs the decision. */}
+                          {subSystemCounts.isHybrid && fleetDiag.suspect ? (
+                            <button
+                              onClick={() => {
+                                const parts = subSystemCounts.present
+                                  .map(k => `${k.toUpperCase()} ${subSystemCounts[k]}`).join(' · ');
+                                setConfirmDialog({
+                                  message: `Rebuild fleets per sub-system?\n\n` +
+                                    `This hybrid project spans ${parts} modules, but the current ` +
+                                    `inverter fleet does not match that partition` +
+                                    (fleetDiag.degenerate?.degenerate
+                                      ? ` (one ${fleetDiag.degenerate.fleetPanelTotal}-panel fleet covers the whole project under '${fleetDiag.degenerate.key}').`
+                                      : `.`) +
+                                    `\n\nThis rebuilds ONE fleet per sub-system, keeping your ` +
+                                    `equipment choices (inverter model / panel) per sub where known. ` +
+                                    `Click OK to rebuild.`,
+                                  onConfirm: () => {
+                                    const ok = rebuildFleetsPerSub('manual');
+                                    setAutoLoadBanner(ok
+                                      ? `✓ Fleets rebuilt per sub-system — ${parts}.`
+                                      : `⚠ Could not rebuild fleets — see console for the per-sub sizing error.`);
+                                    setTimeout(() => setAutoLoadBanner(null), 6000);
+                                  },
+                                });
+                              }}
+                              className="btn-secondary btn-sm text-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20"
+                              title="The inverter fleet does not match the roof/ground/fence panel partition — rebuild one fleet per sub-system"
+                            >
+                              <AlertTriangle size={11} /> Rebuild fleets per sub-system
+                            </button>
+                          ) : null}
                           {(['string', 'micro', 'optimizer'] as InverterType[]).map(t => {
                             const hasMicro = config.inverters.some(i => i.type === 'micro');
                             if (t === 'micro' && hasMicro) return null;
