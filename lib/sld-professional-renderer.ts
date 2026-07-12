@@ -115,26 +115,30 @@ const F = {
  * One PV source branch (lane) of a hybrid multi-subsystem SLD — contract §1.3
  * permit carriage (docs/ARCHITECTURE-per-subsystem-equipment.md).
  *
- * WAVE-1 TYPE STUB ONLY: the multi-lane renderer (renderSourceLane, Wave 5
- * Lane A) is NOT implemented yet. `sources` absent ⇒ the legacy single-source
- * renderer path is taken byte-for-byte (Invariant I-1); no code in this file
- * reads `sources` yet.
+ * Wave 5 Lane A: consumed by renderSLDMultiLane (below). `sources` absent or
+ * carrying ≤1 valid branch ⇒ the legacy single-source renderer path is taken
+ * byte-for-byte (Invariant I-1). Builders live in
+ * lib/permit/utils/sldAdapter.ts (permit path: conductorAuthority.subSystems;
+ * page path: computedMulti.subSystems).
  */
 export interface SLDSourceBranch {
   /** Owning subsystem — drives the lane label (PV-R / PV-G / PV-F). */
   key: import('@/lib/system/subSystemEquipment').SubSystemKey;
-  /** Lane label override, e.g. 'PV-R'. */
+  /** Lane label override, e.g. 'ROOF — 48 × Maxeon 6 400W'. */
   label?: string;
   topologyType?: string;
   systemType?: 'roof' | 'ground' | 'fence';
   totalModules?: number;
   totalStrings?: number;
+  panelsPerString?: number;
   panelModel?: string;
   panelWatts?: number;
   panelVoc?: number;
   panelIsc?: number;
   inverterManufacturer?: string;
   inverterModel?: string;
+  /** Physical inverter units on this lane (string/optimizer subs). */
+  inverterCount?: number;
   /** Per-device AC kW (explicit per-device contract — never a summed total). */
   acKwPerDevice?: number;
   acOutputKw?: number;
@@ -145,6 +149,17 @@ export interface SLDSourceBranch {
   /** Per-branch backfeed contribution — Σ per-physical-inverter rounded OCPDs
    *  within this sub (§1.7 breaker-granularity rule). */
   backfeedAmps?: number;
+  /** DC string OCPD (string/optimizer lanes with an external DC disco). */
+  dcOCPD?: number;
+  /** True when the lane's inverter integrates its own DC disconnect
+   *  (optimizer ecosystems) — the lane skips the external DC disco node. */
+  integratedDcDisconnect?: boolean;
+  optimizerQty?: number;
+  optimizerModel?: string;
+  /** Micro lanes — combiner nameplate (e.g. 'Enphase IQ Combiner 6C'). */
+  combinerLabel?: string;
+  /** Lane AC disconnect nameplate override (defaults to '(N) AC DISCONNECT'). */
+  disconnectLabel?: string;
   rapidShutdownIntegrated?: boolean;
   deviceCount?: number;
   microBranches?: MicroBranch[];
@@ -1577,6 +1592,15 @@ function renderMSPSupply(
 
 // ── Main Render ──────────────────────────────────────────────────────────────
 export function renderSLDProfessional(input: SLDProfessionalInput): string {
+  // ── Wave 5 Lane A — hybrid multi-lane dispatch ────────────────────────────
+  // N>1 valid source branches ⇒ the multi-lane renderer (one lane per
+  // subsystem, ONE POI, one service tail). Absent / empty / single-branch
+  // sources fall through to the legacy single-source path BYTE-FOR-BYTE
+  // (Invariant I-1 — the Wave-0 structural-marker goldens pin this).
+  if (Array.isArray(input.sources)) {
+    const _lanes = normalizeSourceBranches(input.sources);
+    if (_lanes.length > 1) return renderSLDMultiLane(input, _lanes);
+  }
   // [SLD SYMBOLS V2 ACTIVE] — hybrid realism v3.0 cabinet symbols
   if (typeof console !== 'undefined') {
     console.log('[SLD SYMBOLS V2 ACTIVE] renderSLDProfessional — hybrid realism v3.0');
@@ -2740,6 +2764,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push('</svg>');
     return parts.join('\n');
   }
+  parts.push(titleBlockSvg(input, dcKw));
+
+  parts.push('</svg>');
+  return parts.join('\n');
+}
+
+// ── TITLE BLOCK (shared by the legacy single-source path and the Wave-5
+//    multi-lane path — extracted verbatim, output joined with '\n' so the
+//    legacy byte stream is unchanged) ─────────────────────────────────────────
+function titleBlockSvg(input: SLDProfessionalInput, dcKw: number): string {
+  const parts: string[] = [];
   const tbX = TB_X, tbY = DY, tbH = DH;
   parts.push(rect(tbX, tbY, TB_W, tbH, {fill:WHT, stroke:BLK, sw:SW_HEAVY}));
 
@@ -2838,6 +2873,582 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(txt(tbX+TB_W/2, sealY+28, 'SEAL', {sz:F.tiny, anc:'middle', fill:'#888'}));
   parts.push(txt(tbX+TB_W/2, sealY+44, `${esc(input.designer)} — ${esc(input.drawingDate)}`, {sz:F.tiny, anc:'middle', fill:'#555'}));
 
+  return parts.join('\n');
+}
+// ═════════════════════════════════════════════════════════════════════════════
+// Wave 5 Lane A — HYBRID MULTI-LANE RENDERER
+// docs/ARCHITECTURE-per-subsystem-equipment.md §3 Wave 5 / §1.7 / I-6 / I-8.
+//
+// One horizontal source lane per subsystem (fixed roof > ground > fence
+// order), each drawn with ITS OWN topology symbol chain:
+//   MICRO:     PV ARRAY → AC COMBINER (branch breakers) → lane AC DISCO
+//   STRING:    PV ARRAY → DC DISCO → INVERTER → lane AC DISCO
+//   OPTIMIZER: PV ARRAY (optimizer callout) → INVERTER (integrated DC
+//              disco) → lane AC DISCO
+// All lanes join a single vertical POI bus; ONE shared service tail
+// (MSP → [BUI/battery] → utility meter → grid) — exactly one 120% panel,
+// computed from the SUMMED per-inverter backfeed (input.backfeedAmps, which
+// the adapters source from the §1.7 aggregator — never one combined rounded
+// breaker). The whole schematic is fit-scaled into the drawing box (k<1
+// allowed — three lanes must shrink to fit, unlike the legacy grow-only fit).
+//
+// v1 non-goals (documented on the sheet): generator/ATS glyphs are not drawn
+// on the multi-lane path (a NOTE is printed when generatorKw>0); per-lane
+// interconnection methods are not supported (one POI method for the sheet).
+// ═════════════════════════════════════════════════════════════════════════════
+
+const LANE_TAG: Record<string, string> = { roof: 'R', ground: 'G', fence: 'F' };
+const LANE_RANK: Record<string, number> = { roof: 0, ground: 1, fence: 2 };
+
+/** Validate + dedupe + order source branches (roof > ground > fence). */
+export function normalizeSourceBranches(raw: SLDSourceBranch[] | undefined | null): SLDSourceBranch[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: SLDSourceBranch[] = [];
+  for (const b of raw) {
+    const key = (b as any)?.key;
+    if (key !== 'roof' && key !== 'ground' && key !== 'fence') continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(b);
+  }
+  out.sort((a, b) => LANE_RANK[a.key] - LANE_RANK[b.key]);
+  return out;
+}
+
+/** Lane topology from branch.topologyType (adapter-normalized). */
+function laneTopology(b: SLDSourceBranch): 'MICRO' | 'OPTIMIZER' | 'STRING' {
+  const t = String(b.topologyType ?? '').toUpperCase();
+  if (t.includes('MICRO')) return 'MICRO';
+  if (t.includes('OPTIMIZER')) return 'OPTIMIZER';
+  return 'STRING';
+}
+
+function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[]): string {
+  console.log(`[SLD MULTI-LANE ACTIVE] wave5a lanes=${lanes.length} keys=${lanes.map(l => l.key).join('+')}`);
+
+  const parts: string[] = [];
+  const resolveSegY = makeOverlapGuard();
+
+  // Per-lane run lookup: the branch's own bare-id runs first, then the
+  // aggregate's namespaced `${key}:${id}` runs / subSystem-stamped runs.
+  const laneRun = (b: SLDSourceBranch, baseId: string): RunSegment | undefined => {
+    const own = b.runs?.find(r => String(r.id) === baseId);
+    if (own) return own;
+    return input.runs?.find(r => {
+      const id = String(r.id);
+      return id === `${b.key}:${baseId}` || (id === baseId && r.subSystem === b.key);
+    });
+  };
+  // Shared service runs keep bare ids in the aggregate (emitted exactly once).
+  const findSharedRun = (id: string): RunSegment | undefined =>
+    input.runs?.find(r => String(r.id) === id);
+
+  const intercon     = String(input.interconnection ?? '').toLowerCase();
+  const isLoadSide   = intercon.includes('load');
+  const isSupplySide = intercon.includes('supply') || intercon.includes('line');
+
+  // §1.7: the sheet's 120% panel uses the AGGREGATOR-SUMMED backfeed when the
+  // adapter provided it; Σ lane contributions is the structural fallback.
+  const laneBackfeed = (b: SLDSourceBranch): number =>
+    b.backfeedAmps ?? b.acOCPD ?? necNextStandardOcpd((b.acOutputAmps ?? 0) * 1.25) ?? 0;
+  const totalBackfeedAmps = input.backfeedAmps || lanes.reduce((s, b) => s + laneBackfeed(b), 0);
+  const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
+  const totalAcKw = Number(input.acOutputKw) || lanes.reduce((s, b) => s + (b.acOutputKw ?? 0), 0);
+  const dcKw = lanes.reduce((s, b) => s + ((b.totalModules ?? 0) * (b.panelWatts ?? 0)) / 1000, 0)
+    || (input.totalModules * input.panelWatts) / 1000;
+
+  // ── SVG root (same canvas + embedded-crop contract as the legacy path) ────
+  const effW = input.suppressTitleBlock ? TB_X - 10 : W;
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${H}" viewBox="0 0 ${effW} ${H}" style="background:${WHT};">`);
+  parts.push(rect(0, 0, effW, H, {fill:WHT, stroke:WHT, sw:0}));
+  parts.push(rect(MAR/2, MAR/2, effW-MAR, H-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
+
+  // ── Title ─────────────────────────────────────────────────────────────────
+  const tcx = (DX + TB_X) / 2;
+  parts.push(txt(tcx, DY+16, 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM (MULTI-SOURCE)', {sz:F.title, bold:true, anc:'middle'}));
+  parts.push(txt(tcx, DY+26,
+    `${esc(input.address)}  |  ${lanes.length} PV SOURCES (${lanes.map(l => l.key.toUpperCase()).join(' + ')})  |  ${totalModules} MODULES  |  ${totalAcKw.toFixed(2)} kW AC`,
+    {sz:F.sub, anc:'middle', fill:'#444'}));
+
+  // ── Schematic border ──────────────────────────────────────────────────────
+  parts.push(rect(SCH_X, SCH_Y, SCH_W, SCH_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  const _schScaleStart = parts.length;
+
+  // ── Lane geometry ─────────────────────────────────────────────────────────
+  const W_PV    = SLD_SYMBOL_MAP['pv-array'].width;
+  const W_INV   = SLD_SYMBOL_MAP['inverter'].width;
+  const W_DCDS  = SLD_SYMBOL_MAP['dc-disconnect'].width;
+  const W_ACDS  = SLD_SYMBOL_MAP['ac-disconnect'].width;
+  const W_COMB  = SLD_SYMBOL_MAP['ac-combiner'].width;
+  const W_BUI   = SLD_SYMBOL_MAP['bui-enphase'].width;
+  const WIRE_GAP = 120;
+  const LEFT_MARGIN = 60;
+  const nextCX = (cx: number, curW: number, nxtW: number, gap = WIRE_GAP) =>
+    cx + curW/2 + gap + nxtW/2;
+
+  const LANE_PITCH = 330;
+  const laneTop = SCH_Y + 150;
+  const laneYs = lanes.map((_, i) => laneTop + i * LANE_PITCH);
+
+  // Pre-compute each lane's node X positions so the POI bus clears the
+  // longest chain.
+  interface LaneGeom { topo: 'MICRO'|'OPTIMIZER'|'STRING'; xPV: number; xMid1: number; xMid2: number; xDisco: number; discoRX: number; }
+  const geoms: LaneGeom[] = lanes.map((b) => {
+    const topo = laneTopology(b);
+    const xPV = SCH_X + LEFT_MARGIN + W_PV/2;
+    let xMid1 = 0, xMid2 = 0, xDisco = 0;
+    if (topo === 'MICRO') {
+      xMid1 = nextCX(xPV, W_PV, W_COMB);          // combiner
+      xDisco = nextCX(xMid1, W_COMB, W_ACDS);
+    } else if (topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
+      xMid1 = nextCX(xPV, W_PV, W_INV);           // inverter (integrated DC disco)
+      xDisco = nextCX(xMid1, W_INV, W_ACDS);
+    } else {
+      xMid1 = nextCX(xPV, W_PV, W_DCDS);          // external DC disco
+      xMid2 = nextCX(xMid1, W_DCDS, W_INV);       // inverter
+      xDisco = nextCX(xMid2, W_INV, W_ACDS);
+    }
+    return { topo, xPV, xMid1, xMid2, xDisco, discoRX: xDisco + W_ACDS/2 + 10 };
+  });
+
+  const xPOI = Math.max(...geoms.map(g => g.discoRX)) + 110;
+  const xMSP = xPOI + 90 + 80;                    // MSP width = 160
+  const _hasBUI = !!input.hasBattery;
+  const xBUI = _hasBUI ? nextCX(xMSP, 160, W_BUI) : (xMSP + 130);
+  const xUtil = _hasBUI ? nextCX(xBUI, W_BUI, 120) : nextCX(xMSP, 160, 120);
+  const tailY = laneYs.length ? (laneYs[0] + laneYs[laneYs.length - 1]) / 2 : laneTop;
+
+  let calloutN = 0;
+
+  // ── Source lanes ──────────────────────────────────────────────────────────
+  lanes.forEach((b, i) => {
+    const g = geoms[i];
+    const laneY = laneYs[i];
+    const tag = LANE_TAG[b.key];
+    const isFenceLane = (b.systemType ?? b.key) === 'fence';
+    const modules = b.totalModules ?? 0;
+    const watts = b.panelWatts ?? 0;
+    const panelModel = b.panelModel && b.panelModel !== '—' ? b.panelModel : (watts ? `${watts}W MODULE` : 'PV MODULE');
+    const invMfr = b.inverterManufacturer && b.inverterManufacturer !== '—' ? b.inverterManufacturer : '';
+    const invModel = b.inverterModel && b.inverterModel !== '—' ? b.inverterModel : 'Inverter';
+    const laneLabel = b.label ?? `${b.key.toUpperCase()} — ${modules} × ${panelModel}`;
+    const laneAcAmps = b.acOutputAmps ?? Math.round(((b.acOutputKw ?? 0) * 1000) / 240);
+    const laneOcpd = b.acOCPD ?? necNextStandardOcpd(laneAcAmps * 1.25) ?? 20;
+    console.log(`[SLD LANE ${tag}] topo=${g.topo} modules=${modules} inv=${invMfr} ${invModel} ocpd=${laneOcpd}A`);
+
+    // Lane band label (left margin, above the PV array)
+    parts.push(txt(SCH_X + 16, laneY - 120, `PV-${tag} · ${laneLabel}`, {sz:F.hdr, bold:true, fill:'#1A237E'}));
+    parts.push(ln(SCH_X + 16, laneY - 114, xPOI, laneY - 114, {stroke:'#C5CAE9', sw:SW_HAIR}));
+
+    // ── PV array node ──
+    const pvSymbolId = isFenceLane ? 'pv-fence' : 'pv-array';
+    const pvH = SLD_SYMBOL_MAP[pvSymbolId].height;
+    parts.push(embedSymbol(pvSymbolId, g.xPV, laneY, W_PV, pvH));
+    parts.push(txt(g.xPV, laneY-pvH/2-18, isFenceLane ? `SOLAR FENCE ARRAY PV-${tag}` : `PV ARRAY PV-${tag}`, {sz:F.hdr, bold:true, anc:'middle'}));
+    parts.push(txt(g.xPV, laneY-pvH/2-8, `${modules} × ${watts}W`, {sz:F.sub, anc:'middle'}));
+    parts.push(txt(g.xPV, laneY+pvH/2+9, esc(panelModel), {sz:F.tiny, anc:'middle', italic:true}));
+    if (g.topo === 'MICRO') {
+      const md = b.deviceCount ?? modules;
+      parts.push(txt(g.xPV, laneY+pvH/2+18, `${md} × ${esc(invModel)}`, {sz:F.tiny, anc:'middle'}));
+    } else {
+      const ns = b.totalStrings || 1;
+      const pps = b.panelsPerString ?? Math.round(modules / Math.max(ns, 1));
+      parts.push(txt(g.xPV, laneY+pvH/2+18, `${ns} STRING${ns>1?'S':''} × ${pps} MODULES`, {sz:F.tiny, anc:'middle', bold:true}));
+      if (b.panelVoc || b.panelIsc) {
+        parts.push(txt(g.xPV, laneY+pvH/2+27, `Voc=${((b.panelVoc ?? 0) * pps).toFixed(1)}V  Isc=${(b.panelIsc ?? 0).toFixed(2)}A`, {sz:F.tiny, anc:'middle', fill:'#B71C1C'}));
+      }
+      if (g.topo === 'OPTIMIZER') {
+        const oq = b.optimizerQty ?? modules;
+        parts.push(txt(g.xPV, laneY+pvH/2+38, `${oq} DC OPTIMIZERS — 1 PER MODULE${b.optimizerModel ? ` (${b.optimizerModel})` : ''}`, {sz:F.tiny, anc:'middle', fill:'#1A237E', bold:true}));
+      }
+    }
+    parts.push(callout(g.xPV+W_PV/2+14, laneY-pvH/2-5, ++calloutN));
+    const pvPt = getAnchorPoint(pvSymbolId, 'dc_pos', g.xPV, laneY, W_PV, pvH);
+
+    // ── Middle chain ──
+    let feedX = pvPt.x;   // running right-edge terminal toward the disco
+    if (g.topo === 'MICRO') {
+      const md = b.deviceCount ?? modules;
+      const nb = b.microBranches?.length ?? microBranchCount(md, invModel);
+      const bocpd = b.microBranches?.length ? Math.max(...b.microBranches.map(x => x.ocpdAmps)) : 20;
+      const clabel = b.combinerLabel ?? `${invMfr || 'PV'} AC Combiner`;
+      const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN);
+      parts.push(cr.svg);
+      parts.push(txt(g.xMid1, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
+      // PV → combiner (branch circuits, open-air roof wiring for roof lanes)
+      {
+        const run = laneRun(b, 'BRANCH_RUN') ?? laneRun(b, 'ROOF_RUN');
+        const fb = [`${nb} AC BRANCH CIRCUIT${nb>1?'S':''}`, `${b.acWireGauge ?? '#10 AWG'} THWN-2 + EGC`, b.key === 'roof' ? 'NEC 690.12 RSD' : 'AT GRADE'];
+        const {lines} = runLines(run, fb);
+        const y = resolveSegY(pvPt.x, cr.lx, laneY);
+        parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_COMBINER`, pvPt.x, y, cr.lx, y, run, lines, false, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'), lines));
+      }
+      feedX = cr.feederOutX;
+    } else if (g.topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
+      const invBox = renderInverterBox(g.xMid1, laneY, invMfr, invModel,
+        b.acOutputKw ?? 0, laneAcAmps,
+        g.topo === 'OPTIMIZER' ? 'STRING + OPTIMIZER' : 'STRING INVERTER', '', ++calloutN);
+      parts.push(invBox.svg);
+      parts.push(txt(g.xMid1, laneY + SLD_SYMBOL_MAP['inverter'].height/2 + 45, 'INTEGRATED DC DISCONNECT — NEC 690.15', {sz:F.tiny, anc:'middle', italic:true}));
+      {
+        const run = laneRun(b, 'DC_STRING_RUN') ?? laneRun(b, 'DC_DISCO_TO_INV_RUN');
+        const fb = [`${(b.totalStrings || 1) * 2}#10 PV WIRE`, `+ EGC`, 'NEC 690.31'];
+        const {lines} = runLines(run, fb);
+        const y = resolveSegY(pvPt.x, invBox.dcInX, laneY);
+        parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_INV`, pvPt.x, y, invBox.dcInX, y, run, lines, true, 'OPEN_AIR'), lines));
+      }
+      feedX = invBox.acOutX;
+    } else {
+      // STRING: external DC disco → inverter
+      const dW = W_DCDS, dH = SLD_SYMBOL_MAP['dc-disconnect'].height;
+      parts.push(embedSymbol('dc-disconnect', g.xMid1, laneY, dW, dH));
+      parts.push(txt(g.xMid1, laneY-dH/2-15, '(N) DC DISCONNECT', {sz:F.sub, bold:true, anc:'middle'}));
+      parts.push(txt(g.xMid1, laneY+dH/2+9, `${b.dcOCPD ?? 20}A FUSED`, {sz:F.tiny, anc:'middle'}));
+      parts.push(callout(g.xMid1+dW/2-4, laneY-dH/2-5, ++calloutN));
+      const dcIn = getAnchorPoint('dc-disconnect', 'dc_in', g.xMid1, laneY, dW, dH);
+      const dcOut = getAnchorPoint('dc-disconnect', 'dc_out', g.xMid1, laneY, dW, dH);
+      {
+        const run = laneRun(b, 'DC_STRING_RUN');
+        const fb = [`${(b.totalStrings || 1) * 2}#10 USE-2/PV Wire`, `+ EGC`, 'NEC 690.31'];
+        const {lines} = runLines(run, fb);
+        const y = resolveSegY(pvPt.x, dcIn.x, laneY);
+        parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_DCDS`, pvPt.x, y, dcIn.x, y, run, lines, true, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'), lines));
+      }
+      const invBox = renderInverterBox(g.xMid2, laneY, invMfr, invModel,
+        b.acOutputKw ?? 0, laneAcAmps, 'STRING INVERTER', '', ++calloutN);
+      parts.push(invBox.svg);
+      {
+        const run = laneRun(b, 'DC_DISCO_TO_INV_RUN');
+        const fb = [`${(b.totalStrings || 1) * 2}#10 THWN-2`, `+ EGC`, `IN ${b.acConduitType ?? 'EMT'}`];
+        const {lines} = runLines(run, fb);
+        const y = resolveSegY(dcOut.x, invBox.dcInX, laneY);
+        parts.push(renderWireRun(buildWireRun(`LANE_${tag}_DCDS_TO_INV`, dcOut.x, y, invBox.dcInX, y, run, lines, true, 'RACEWAY'), lines));
+      }
+      feedX = invBox.acOutX;
+    }
+
+    // ── Lane AC disconnect ──
+    const disco = renderDisco(g.xDisco, laneY, laneOcpd, ++calloutN, isSupplySide);
+    parts.push(disco.svg);
+    parts.push(txt(g.xDisco, laneY-58, b.disconnectLabel ?? `(N) AC DISCONNECT PV-${tag}`, {sz:F.hdr, bold:true, anc:'middle'}));
+    {
+      const run = laneRun(b, g.topo === 'MICRO' ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
+      const fb = [`${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `IN ${b.acConduitType ?? 'EMT'}`];
+      const {lines} = runLines(run, fb);
+      const y = resolveSegY(feedX, disco.loadInX, laneY);
+      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_ACDISCO`, feedX, y, disco.loadInX, y, run, lines, false, 'RACEWAY'), lines));
+    }
+
+    // ── Lane feeder → POI bus ──
+    {
+      const run = laneRun(b, 'DISCO_TO_METER_RUN');
+      const fb = [`${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `${laneOcpd}A OCPD → POI`];
+      const {lines} = runLines(run, fb);
+      const y = resolveSegY(disco.lineOutX, xPOI, laneY);
+      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_POI`, disco.lineOutX, y, xPOI, y, run, lines, false, 'RACEWAY'), lines));
+      parts.push(circ(xPOI, laneY, 4, {fill:BLK, sw:0}));
+      parts.push(txt(xPOI+8, laneY-8, `PV-${tag}: ${laneBackfeed(b)}A`, {sz:F.sub, bold:true, fill:'#1B5E20'}));
+    }
+
+    // Lane ground symbols (equipment grounding at the disco)
+    parts.push(gnd(g.xDisco, laneY + 70, '#2E7D32'));
+    parts.push(ln(g.xDisco, laneY + 55, g.xDisco, laneY + 70, {stroke:'#2E7D32', sw:1.0, dash:'4,3'}));
+  });
+
+  // ── POI bus (vertical) ────────────────────────────────────────────────────
+  if (laneYs.length > 1) {
+    parts.push(ln(xPOI, laneYs[0], xPOI, laneYs[laneYs.length-1], {sw:SW_BUS}));
+  }
+  parts.push(txt(xPOI, laneYs[0] - 14, 'POINT OF INTERCONNECTION', {sz:F.hdr, bold:true, anc:'middle'}));
+  parts.push(txt(xPOI, laneYs[0] - 5, `Σ BACKFEED ${totalBackfeedAmps}A — NEC 705.12(B) (Σ PER-INVERTER OCPDs)`, {sz:F.tiny, anc:'middle', fill:'#1B5E20'}));
+
+  // ── Shared service tail: MSP → [BUI] → METER → GRID ──────────────────────
+  let mspResult: {svg:string; lx:number; rx:number; bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number};
+  if (isLoadSide) {
+    mspResult = renderMSPLoad(xMSP, tailY, input.mainPanelAmps, totalBackfeedAmps, ++calloutN);
+  } else {
+    mspResult = renderMSPSupply(xMSP, tailY, input.mainPanelAmps, totalBackfeedAmps, isSupplySide, ++calloutN);
+  }
+  parts.push(mspResult.svg);
+  {
+    const run = findSharedRun('DISCO_TO_METER_RUN');
+    const fb = [`${input.acWireGauge ?? '#6 AWG'} THWN-2 + EGC`, `IN ${input.acConduitType ?? 'EMT'}`, `SIZED AT Σ ${Math.round(totalAcKw * 1000 / 240)}A`];
+    const {lines} = runLines(run, fb);
+    const y = resolveSegY(xPOI, mspResult.bkfdInX, tailY);
+    // POI bus → MSP backfeed terminal (jog from bus level to terminal level)
+    if (Math.abs(y - tailY) > 1) parts.push(ln(xPOI, tailY, xPOI, y, {sw:SW_MED}));
+    parts.push(renderWireRun(buildWireRun('POI_TO_MSP', xPOI, y, mspResult.bkfdInX, y, run, lines, false, 'RACEWAY'), lines));
+  }
+
+  // Battery + BUI at the POI (shared tail, exactly once — I-6)
+  let tailOutX = mspResult.busOutX, tailOutY = mspResult.busOutY;
+  if (input.hasBattery) {
+    const buiResult = renderBUI(xBUI, tailY, input.backupInterfaceBrand ?? '', input.backupInterfaceModel ?? '',
+      input.atsAmpRating ?? 200, (input.backupInterfaceBrand ?? input.inverterManufacturer ?? '').toLowerCase().replace(/[\s\-_.]+/g, ''), false, ++calloutN);
+    parts.push(buiResult.svg);
+    parts.push(ln(mspResult.busOutX, mspResult.busOutY, buiResult.gridPortX, mspResult.busOutY, {stroke:BLK, sw:SW_MED}));
+    if (Math.abs(mspResult.busOutY - buiResult.gridPortY) > 1) {
+      parts.push(ln(buiResult.gridPortX, mspResult.busOutY, buiResult.gridPortX, buiResult.gridPortY, {stroke:BLK, sw:SW_MED}));
+    }
+    const batCY = tailY - 200;
+    const batModel = input.batteryModel || (input.batteryKwh ? `${input.batteryKwh} kWh Battery` : 'BATTERY STORAGE');
+    const batResult = renderBattery(xBUI, batCY, batModel, input.batteryKwh ?? 0,
+      input.batteryBackfeedA ?? 0, ++calloutN, input.batteryBrand ?? '', input.batteryKwhLabel ?? '');
+    parts.push(batResult.svg);
+    parts.push(ln(batResult.acOutX, batResult.acOutY, buiResult.batPortX, buiResult.batPortY, {stroke:'#1565C0', sw:SW_MED, dash:'6,3'}));
+    parts.push(txt(batResult.acOutX + 6, (batResult.acOutY + buiResult.batPortY) / 2, `${input.batteryBackfeedA ?? ''}A BATT — NEC 705.12(B)`, {sz:F.tiny, fill:'#1565C0'}));
+    tailOutX = buiResult.loadPortX; tailOutY = buiResult.loadPortY;
+  }
+  if ((input.generatorKw ?? 0) > 0) {
+    // v1 non-goal on the multi-lane path — declare it, never silently drop it.
+    parts.push(txt(xMSP, tailY + 130, `NOTE: ${input.generatorKw} kW GENERATOR + TRANSFER EQUIPMENT PER SINGLE-SOURCE DETAIL — NOT SHOWN ON MULTI-SOURCE DIAGRAM`, {sz:F.tiny, anc:'middle', italic:true, fill:'#E65100'}));
+  }
+
+  // Utility meter + grid (ONE service tail)
+  const mR = 40;
+  {
+    const run = findSharedRun('MSP_TO_UTILITY_RUN') ?? findSharedRun('DISCO_TO_METER_RUN');
+    const fb = [`SERVICE CONDUCTORS`, `${input.mainPanelAmps}A SERVICE`];
+    const {lines} = runLines(run, fb);
+    const y = resolveSegY(tailOutX, xUtil-mR-10, tailOutY);
+    parts.push(renderWireRun(buildWireRun('MSP_TO_METER', tailOutX, y, xUtil-mR-10, y, run, lines, false, 'RACEWAY'), lines));
+  }
+  parts.push(meterSymbol(xUtil, tailY, mR));
+  parts.push(ln(xUtil-mR-10, tailY, xUtil-mR, tailY, {sw:SW_MED}));
+  parts.push(txt(xUtil, tailY-mR-15, 'UTILITY METER', {sz:F.hdr, bold:true, anc:'middle'}));
+  parts.push(txt(xUtil, tailY-mR-6, esc(input.utilityName), {sz:F.sub, anc:'middle'}));
+  parts.push(txt(xUtil, tailY+mR+9, '120/240V, 1Ø, 3W', {sz:F.tiny, anc:'middle'}));
+  parts.push(callout(xUtil+mR+14, tailY-mR-5, ++calloutN));
+  const gridCY = tailY + mR + 48;
+  parts.push(ln(xUtil, tailY+mR, xUtil, gridCY-16, {sw:SW_MED}));
+  parts.push(circ(xUtil, gridCY, 16, {fill:WHT, sw:SW_MED}));
+  parts.push(txt(xUtil, gridCY-1, 'UTIL', {sz:5.5, bold:true, anc:'middle'}));
+  parts.push(txt(xUtil, gridCY+7, 'GRID', {sz:5, anc:'middle'}));
+  parts.push(txt(xUtil, gridCY+24, 'UTILITY GRID', {sz:F.tiny, anc:'middle', bold:true}));
+  parts.push(txt(xUtil, gridCY+33, esc(input.utilityName), {sz:F.tiny, anc:'middle'}));
+  parts.push(ln(xUtil, gridCY+16, xUtil, gridCY+26, {sw:SW_MED}));
+  parts.push(gnd(xUtil, gridCY+26));
+  parts.push(gnd(xMSP + 70, tailY + 100, '#2E7D32'));
+  parts.push(txt(xMSP, tailY + 118, 'EGC — NEC 250.122 / 690.43', {sz:F.tiny, anc:'middle', fill:GRN}));
+
+  // ── AUTO-SCALE (fit transform — k<1 ALLOWED, three lanes must shrink) ─────
+  {
+    const _sx0 = SCH_X + 12;
+    const _sx1 = xUtil + 96;
+    let _sy0 = laneTop - 140;
+    if (input.hasBattery) _sy0 = Math.min(_sy0, tailY - 295);
+    const _sy1 = Math.max(laneYs[laneYs.length-1] + 170, gridCY + 44);
+    const _k = Math.min(
+      (SCH_W - 28) / Math.max(1, _sx1 - _sx0),
+      (SCH_H - 32) / Math.max(1, _sy1 - _sy0),
+      1.35,
+    );
+    const _tx = SCH_X + (SCH_W - _k * (_sx1 - _sx0)) / 2 - _k * _sx0;
+    const _ty = SCH_Y + (SCH_H - _k * (_sy1 - _sy0)) / 2 - _k * _sy0;
+    parts.splice(_schScaleStart, 0,
+      `<g transform="translate(${_tx.toFixed(1)},${_ty.toFixed(1)}) scale(${_k.toFixed(3)})">`);
+    parts.push('</g>');
+    console.log(`[SLD MULTI-LANE FIT] k=${_k.toFixed(3)} content=${Math.round(_sx1-_sx0)}x${Math.round(_sy1-_sy0)}`);
+  }
+
+  // ── Rapid shutdown (roof lanes only — I-7) ────────────────────────────────
+  const roofLane = lanes.find(l => l.key === 'roof');
+  if (roofLane && (roofLane.rapidShutdownIntegrated ?? input.rapidShutdownIntegrated)) {
+    const rY = SCH_Y+SCH_H-22;
+    parts.push(rect(SCH_X+5, rY-10, 300, 16, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+    parts.push(txt(SCH_X+10, rY, 'RAPID SHUTDOWN — NEC 690.12 (ROOF ARRAY PV-R) COMPLIANT', {sz:F.tiny, bold:true}));
+  }
+
+  // ── LEGEND ────────────────────────────────────────────────────────────────
+  const legEntries: {dash: string; stroke: string; label: string}[] = [
+    {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
+    {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
+    {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
+    {dash:'4,2', stroke:BLK,       label:'DC Conductor in Conduit (USE-2/PV Wire)'},
+    ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
+  ];
+  const legH = 16 + legEntries.length * 11;
+  const legX = SCH_X+SCH_W-195, legY = SCH_Y+SCH_H - legH - 4;
+  parts.push(rect(legX, legY, 188, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(txt(legX+4, legY+10, 'LEGEND', {sz:F.sub, bold:true}));
+  parts.push(ln(legX, legY+13, legX+188, legY+13, {sw:SW_THIN}));
+  legEntries.forEach((item,i) => {
+    const ly = legY+19+i*11;
+    parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
+    parts.push(txt(legX+44, ly+3, item.label, {sz:F.tiny}));
+  });
+
+  // ── CALCULATION PANELS ────────────────────────────────────────────────────
+  const cW = Math.floor(DW/3) - 4;
+  const topoShort = (t: 'MICRO'|'OPTIMIZER'|'STRING') =>
+    t === 'MICRO' ? 'MICROINVERTER' : t === 'OPTIMIZER' ? 'STRING+OPTIMIZER' : 'STRING INVERTER';
+
+  // Panel 1 — per-lane source summary
+  const p1x = DX;
+  parts.push(rect(p1x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p1x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(p1x+cW/2, CALC_Y+10, 'PV SOURCE LANES', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  const p1rows: [string,string][] = lanes.flatMap((b, i): [string,string][] => {
+    const g = geoms[i];
+    const devices = g.topo === 'MICRO'
+      ? `${b.deviceCount ?? b.totalModules ?? 0} × ${b.inverterModel ?? ''}`
+      : `${b.inverterCount ?? 1} × ${b.inverterModel ?? ''}`;
+    return [
+      [`PV-${LANE_TAG[b.key]} ${b.key.toUpperCase()}`, `${b.totalModules ?? 0} × ${b.panelWatts ?? 0}W · ${topoShort(g.topo)}`],
+      [`  Inverter(s)`, devices],
+      [`  AC / OCPD`, `${(b.acOutputKw ?? 0).toFixed(2)} kW · ${b.acWireGauge ?? '—'} · ${b.acOCPD ?? '—'}A`],
+    ];
+  });
+  const p1rh = Math.min(13, (CALC_H-17)/Math.max(p1rows.length, 1));
+  p1rows.forEach(([l,v],i) => {
+    const ry = CALC_Y+19+i*p1rh;
+    if (i%2===1) parts.push(rect(p1x, ry-p1rh+2, cW, p1rh, {fill:LGY, stroke:'none', sw:0}));
+    parts.push(txt(p1x+4, ry, l, {sz:F.tiny}));
+    parts.push(txt(p1x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true}));
+  });
+
+  // Panel 2 — POI / NEC 705.12(B) (aggregator-owned, exactly ONE check — I-6)
+  const p2x = DX+cW+4;
+  parts.push(rect(p2x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p2x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(p2x+cW/2, CALC_Y+10, 'POINT OF INTERCONNECTION — NEC 705.12(B)', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  const _busAmps = input.panelBusRating ?? input.mainPanelAmps;
+  const _batBfA = input.batteryBackfeedA ?? 0;
+  const _busLimit = _busAmps * 1.2;
+  const _sumWithBat = totalBackfeedAmps + (input.hasBattery && input.backfeedAmps ? 0 : _batBfA);
+  const _120pass = isSupplySide ? true : _busLimit >= input.mainPanelAmps + _sumWithBat;
+  const p2rows: [string,string][] = [
+    ['Total AC Output', `${totalAcKw.toFixed(2)} kW / ${Math.round(totalAcKw*1000/240)} A`],
+    ...lanes.map((b): [string,string] => [`PV-${LANE_TAG[b.key]} Backfeed`, `${laneBackfeed(b)} A`]),
+    ...(_batBfA > 0 ? [['Battery Backfeed', `${_batBfA} A`] as [string,string]] : []),
+    ['Σ Backfeed (per-inverter OCPDs)', `${_sumWithBat} A`],
+    ['Main Breaker', `${input.mainPanelAmps} A`],
+    ['Bus Rating', `${_busAmps} A`],
+    ...(isSupplySide ? [
+      ['Interconnection', 'Supply Side Tap — NEC 705.11'] as [string,string],
+      ['120% Rule', 'N/A — Supply Side'] as [string,string],
+    ] : [
+      ['Bus 120% Limit', `${_busLimit.toFixed(0)} A`] as [string,string],
+      ['120% Rule', `${_120pass ? 'PASS ✓' : 'FAIL ✗'}`] as [string,string],
+    ]),
+    ['Basis', 'Σ per-inverter rounded OCPDs'],
+  ];
+  const p2rh = Math.min(13, (CALC_H-17)/p2rows.length);
+  p2rows.forEach(([l,v],i) => {
+    const ry = CALC_Y+19+i*p2rh;
+    if (i%2===1) parts.push(rect(p2x, ry-p2rh+2, cW, p2rh, {fill:LGY, stroke:'none', sw:0}));
+    parts.push(txt(p2x+4, ry, l, {sz:F.tiny}));
+    const isPF = v.includes('✓')||v.includes('✗');
+    parts.push(txt(p2x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true, fill: isPF ? (v.includes('✓')?PASS:FAIL) : BLK}));
+  });
+
+  // Panel 3 — equipment schedule (shared POI gear once — I-6)
+  const p3x = DX+(cW+4)*2;
+  parts.push(rect(p3x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p3x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(p3x+cW/2, CALC_Y+10, 'EQUIPMENT SCHEDULE', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  const p3rows: [string,string][] = [
+    ...lanes.map((b): [string,string] => [`PV-${LANE_TAG[b.key]} Modules`, `${b.totalModules ?? 0} × ${b.panelModel ?? ''}`]),
+    ...lanes.map((b, i): [string,string] => [`PV-${LANE_TAG[b.key]} Inverter`, `${b.inverterManufacturer ?? ''} ${b.inverterModel ?? ''}${geoms[i].topo==='MICRO' ? ` ×${b.deviceCount ?? b.totalModules ?? 0}` : (b.inverterCount && b.inverterCount > 1 ? ` ×${b.inverterCount}` : '')}`]),
+    ['AC Disconnects', `${lanes.length} × lane + service — NEC 690.13`],
+    ['Main Panel', `${input.mainPanelAmps} A`],
+    ['Utility', esc(input.utilityName)],
+    ['Interconnection', esc(input.interconnection)],
+    ['Battery Storage', input.hasBattery ? esc(input.batteryModel || input.batteryBrand || 'YES') : 'NONE'],
+    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity', input.batteryKwhLabel || `${input.batteryKwh} kWh`] as [string,string]] : []),
+  ];
+  const p3rh = Math.min(12, (CALC_H-17)/p3rows.length);
+  p3rows.forEach(([l,v],i) => {
+    const ry = CALC_Y+19+i*p3rh;
+    if (i%2===1) parts.push(rect(p3x, ry-p3rh+2, cW, p3rh, {fill:LGY, stroke:'none', sw:0}));
+    parts.push(txt(p3x+4, ry, l, {sz:F.tiny}));
+    parts.push(txt(p3x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true}));
+  });
+
+  // ── CONDUIT & CONDUCTOR SCHEDULE (namespaced run ids → R:/G:/F:) ──────────
+  parts.push(rect(DX, SCHED_Y, DW, SCHED_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(DX, SCHED_Y, DW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(DX+6, SCHED_Y+10, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9 TABLE 1 (PER SUB-SYSTEM)', {sz:F.hdr, bold:true, fill:WHT}));
+  const sCols = [
+    {label:'RUN ID',w:0.09},{label:'FROM',w:0.10},{label:'TO',w:0.10},
+    {label:'CONDUCTORS',w:0.27},{label:'CONDUIT',w:0.10},{label:'FILL %',w:0.06},
+    {label:'AMPACITY',w:0.07},{label:'OCPD',w:0.06},{label:'V-DROP %',w:0.07},
+    {label:'LENGTH',w:0.05},{label:'PASS',w:0.03},
+  ];
+  const hY = SCHED_Y+24;
+  const rH = 13;
+  let cx2 = DX;
+  sCols.forEach(col => {
+    parts.push(txt(cx2+3, hY, col.label, {sz:F.tiny, bold:true}));
+    parts.push(ln(cx2, SCHED_Y+14, cx2, SCHED_Y+SCHED_H, {sw:SW_HAIR}));
+    cx2 += col.w*DW;
+  });
+  parts.push(ln(DX, hY+2, DX+DW, hY+2, {sw:SW_THIN}));
+  const schedRuns: RunSegment[] = (input.runs && input.runs.length > 0)
+    ? input.runs
+    : lanes.flatMap(b => (b.runs ?? []).map(r => ({ ...r, id: `${b.key}:${r.id}` as RunSegment['id'] })));
+  const prettyRunId = (id: string): string =>
+    id.replace(/^roof:/, 'R:').replace(/^ground:/, 'G:').replace(/^fence:/, 'F:');
+  const schedRows = schedRuns
+    .filter(r => !String(r.id).endsWith('MSP_TO_UTILITY_RUN'))
+    .map(r => {
+      let cond = '';
+      if (r.conductorBundle && r.conductorBundle.length > 0) {
+        cond = r.conductorBundle.map((c: ConductorBundle) => {
+          const g = c.gauge.replace('#','').replace(' AWG','');
+          return `${c.qty}×#${g} ${c.insulation} ${c.color}`;
+        }).join(' + ');
+      } else if (r.conductorCallout) {
+        cond = r.conductorCallout.replace(/\n/g,' + ').trim();
+      } else {
+        cond = `${r.conductorCount}×${r.wireGauge} ${r.insulation}`;
+      }
+      return {
+        id: prettyRunId(String(r.id)), from: r.from, to: r.to, conductors: cond,
+        conduit: r.isOpenAir ? 'OPEN AIR' : `${r.conduitType} ${r.conduitSize}`,
+        fill: r.conduitFillPct ?? 0,
+        amp: Math.round((r.continuousCurrent ?? 0)*100)/100,
+        ocpd: r.ocpdAmps ?? 0,
+        vdrop: Math.round((r.voltageDropPct ?? 0)*100)/100,
+        len: r.onewayLengthFt ?? 0,
+        pass: r.overallPass ?? true,
+      };
+    });
+  const maxRows = Math.floor((SCHED_H-30)/rH);
+  schedRows.slice(0, maxRows).forEach((row, ri) => {
+    const ry = hY+4+(ri+1)*rH;
+    if (ri%2===1) parts.push(rect(DX, ry-rH+2, DW, rH, {fill:LGY, stroke:'none', sw:0}));
+    const pc = row.pass ? PASS : FAIL;
+    const vals = [
+      row.id, row.from, row.to, row.conductors, row.conduit,
+      row.fill>0?`${row.fill.toFixed(1)}%`:(row.conduit==='OPEN AIR'?'N/A':'—'),
+      row.amp>0?`${row.amp}A`:'—',
+      row.ocpd>0?`${row.ocpd}A`:'—',
+      row.vdrop>0?`${row.vdrop.toFixed(2)}%`:'—',
+      row.len>0?`${row.len} FT`:'—',
+      row.pass ? '✓ PASS' : '✗ FAIL',
+    ];
+    let cx3 = DX;
+    sCols.forEach((col,ci) => {
+      parts.push(txt(cx3+3, ry, String(vals[ci]??''), {sz:F.tiny, fill:ci===10?pc:BLK, bold:ci===10}));
+      cx3 += col.w*DW;
+    });
+  });
+  if (schedRows.length === 0) {
+    parts.push(txt(DX+8, hY+18, 'PER-SUB-SYSTEM CONDUCTOR SCHEDULE — SEE PV-4A / PV-4B', {sz:F.tiny, italic:true, fill:'#555'}));
+  }
+
+  // ── Artifact version stamp + title block ─────────────────────────────────
+  parts.push(`<!-- ${getBuildBadge()} | SLD MULTI-LANE wave5a lanes=${lanes.length} keys=${lanes.map(l => l.key).join('+')} -->`);
+  if (input.suppressTitleBlock) {
+    parts.push('</svg>');
+    return parts.join('\n');
+  }
+  parts.push(titleBlockSvg(
+    { ...input, topologyType: `HYBRID MULTI-SOURCE (${lanes.map(l => `PV-${LANE_TAG[l.key]}`).join(' + ')})` },
+    dcKw,
+  ));
   parts.push('</svg>');
   return parts.join('\n');
 }
