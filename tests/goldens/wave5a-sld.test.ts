@@ -28,6 +28,7 @@ import {
 import {
   buildSourceBranchesFromAuthority,
   buildSourceBranchesFromComputedMulti,
+  sanitizeClientSourceBranches,
   synthesizeFleetFromSubEquipment,
   generateLiveSLD,
 } from '../../lib/permit/utils/sldAdapter';
@@ -398,6 +399,31 @@ describe('wave 5a — page-path adapter (buildSourceBranchesFromComputedMulti)',
         fence: { ...multi.subSystems.ground!, totalPanels: 0 },
       },
     })).toBeUndefined();
+  });
+});
+
+// ═════ 5b. Route-payload sanitizer (sld + sld/pdf routes) ═════════════════════
+describe('wave 5a — sanitizeClientSourceBranches', () => {
+  it('coerces untrusted payloads, drops junk, requires ≥2 usable lanes', () => {
+    const lanes = sanitizeClientSourceBranches([
+      { key: 'fence', totalModules: '17', acOCPD: '20', panelWatts: 400, label: 'FENCE — 17 × SF-BIF-400', integratedDcDisconnect: true },
+      { key: 'roof', totalModules: 48, acOCPD: 90, backfeedAmps: 90, microBranches: [{ branchIndex: 1, deviceCount: 13, branchCurrentA: 17.9, ocpdAmps: 25, conductorCallout: '', necReference: '' }] },
+      { key: 'carport', totalModules: 9 },      // invalid key — dropped
+      { key: 'roof', totalModules: 999 },       // duplicate — dropped
+    ])!;
+    expect(lanes.map(l => l.key)).toEqual(['roof', 'fence']);
+    expect(lanes[1].totalModules).toBe(17);     // string-coerced
+    expect(lanes[1].acOCPD).toBe(20);
+    expect(lanes[0].backfeedAmps).toBe(90);
+    expect(lanes[0].microBranches).toHaveLength(1);
+  });
+
+  it('returns undefined for non-arrays / empty / single-lane payloads', () => {
+    expect(sanitizeClientSourceBranches(undefined)).toBeUndefined();
+    expect(sanitizeClientSourceBranches('junk')).toBeUndefined();
+    expect(sanitizeClientSourceBranches([])).toBeUndefined();
+    expect(sanitizeClientSourceBranches([{ key: 'roof', totalModules: 10 }])).toBeUndefined();
+    expect(sanitizeClientSourceBranches([{ key: 'x' }, { key: 'y' }])).toBeUndefined();
   });
 });
 
