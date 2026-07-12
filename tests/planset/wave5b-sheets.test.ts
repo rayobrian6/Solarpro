@@ -114,6 +114,14 @@ describe('wave 5B — hybrid sheet manifest', () => {
     const singleSeq = pageSeq(singleHtml);
     expect(singleSeq.join(',')).not.toMatch(/PV-1G|PV-1F|PV-1BG|PV-1BF|PV-3G|PV-3F|PE-1G|PE-1F/);
   });
+
+  it('each per-sub PV-1B circuit layout documents ONLY its own 4 modules', () => {
+    for (const id of ['PV-1B', 'PV-1BG', 'PV-1BF']) {
+      const p = pageById(hybridHtml, id);
+      expect(p, `${id} header`).toMatch(/CIRCUIT LAYOUT [\s\S]{0,40}4 MODULES/);
+      expect(p, `${id} claims project total`).not.toMatch(/CIRCUIT LAYOUT [\s\S]{0,40}12 MODULES/);
+    }
+  });
 });
 
 // ═════ 2. Cover sheet — hybrid title + per-sub kW lines + summary ═══════════
