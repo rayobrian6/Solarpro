@@ -460,9 +460,15 @@ export async function authorizeRoleChange(
 /**
  * Whether authorization decisions are enforced (vs advisory).
  *
- * When ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED is true, deny results
- * should block the action. When false, deny results are advisory
- * (computed and logged, but the caller decides).
+ * In the Phase 1B.1 corrected model, this flag controls whether routes
+ * *enter* the authority enforcement path. When true, routes call enforce*()
+ * which always throw on denied decisions. When false, routes may still
+ * call authorize() for informational/logging purposes but must not rely on
+ * it for access control.
+ *
+ * The enforce*() functions themselves are unconditional — they always throw
+ * on denied decisions. This flag does not weaken enforcement; it gates
+ * whether the enforcement path is entered at all.
  */
 export function isEnforcementEnabled(): boolean {
   return isOrgFeatureEnabled('ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED');
@@ -491,15 +497,18 @@ export function logAuthzDecision(
 /**
  * Enforce an authorization decision.
  *
- * When enforcement is enabled (ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED=true),
- * a denied result throws an AuthzError. When enforcement is disabled,
- * the decision is logged but not thrown (advisory mode).
+ * Always throws AuthzError when the decision is denied. The decision is
+ * logged regardless of outcome. This function is unconditional — once the
+ * authority path is active (ENTERPRISE_ORG_AUTHORITY_ENABLED=true), a denied
+ * decision always blocks the action. The ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED
+ * flag controls whether routes *enter* the authority path at all; it does not
+ * weaken enforcement once that path is taken (ADR-004, fail-closed principle).
  *
  * @param userId         The user requesting the action.
  * @param organizationId The org context.
  * @param action         The action to authorize.
  * @returns              void if allowed.
- * @throws               AuthzError if denied and enforcement is enabled.
+ * @throws               AuthzError if denied.
  */
 export async function enforceAuthz(
   userId: string,
@@ -509,14 +518,19 @@ export async function enforceAuthz(
   const result = await authorize(userId, organizationId, action);
   logAuthzDecision(userId, organizationId, action, result);
 
-  if (!result.allowed && isEnforcementEnabled()) {
+  if (!result.allowed) {
     const denied = result as DeniedAuthzResult;
     throw new AuthzError(denied.reason, denied.detail);
   }
 }
 
 /**
- * Enforce a member-to-member authorization decision:
+ * Enforce a member-to-member authorization decision.
+ *
+ * Always throws AuthzError when the decision is denied. The decision is
+ * logged regardless of outcome. This function is unconditional — once the
+ * authority path is active, a denied member-to-member decision always blocks
+ * the action (ADR-004, fail-closed principle).
  */
 export async function enforceMemberAction(
   actorId: string,
@@ -529,9 +543,7 @@ export async function enforceMemberAction(
 
   if (!result.allowed) {
     const denied = result as DeniedAuthzResult;
-    if (isEnforcementEnabled()) {
-      throw new AuthzError(denied.reason, denied.detail);
-    }
+    throw new AuthzError(denied.reason, denied.detail);
   }
 }
 
@@ -616,9 +628,16 @@ export async function isPlatformAdminUser(userId: string): Promise<boolean> {
 }
 
 /**
- * Check if the org authority system is fully enabled (master switch
- * + enforcement). When this is false, the system operates in legacy
- * mode and authorization is not enforced.
+ * Check if the org authority enforcement path is active.
+ *
+ * Returns true when both the master switch (ENTERPRISE_ORG_AUTHORITY_ENABLED)
+ * and the enforcement flag (ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED) are on.
+ * When true, routes should call enforce*() functions, which always throw on
+ * denied decisions. When false, routes fall back to legacy behavior.
+ *
+ * Note: enforce*() functions themselves are unconditional — they always throw
+ * on denied decisions regardless of this flag. This flag controls whether
+ * routes enter the enforcement path.
  */
 export function isOrgAuthzActive(): boolean {
   return isOrgAuthorityEnabled() && isEnforcementEnabled();
