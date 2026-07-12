@@ -188,3 +188,24 @@ an L-foot whose pairing varies. Consequences for this contract:
   (RAIL_FORMULA_CATEGORIES) making that split mechanical.
 - `RAIL_LESS_ROOF_RACKING` (bom-engine-v4) exists for genuine direct-attach
   systems and is intentionally EMPTY until one is cataloged.
+
+---
+
+## Addendum B — Ray rulings (2026-07-12), Wave-6 gates resolved early
+
+1. **Shared trench, separate conduits.** "They won't share a raceway. But we can
+   combine a trench and share conduit space." → When ground + fence (or any two
+   sub-systems) run toward the POI along combinable paths, the BOM may emit ONE
+   shared trench-footage line but MUST keep per-subsystem conduits (no shared-
+   raceway conductor derating scenario in v1). Trench dedup is an optimization,
+   never a merge of raceways.
+2. **Legacy backfeed recompute: always recompute.** "No one has a working hybrid
+   project. So regenerating will be fine." → No freeze flag; regeneration always
+   recomputes summed backfeed / 120% busbar math from the current sub-system set.
+3. **Pricing basis confirmed** — SolFence quantities/prices per the 2026-06-21
+   distributor sheet remain authoritative until Ray issues a revision.
+4. **Fire-setback geometry** (found during the campaign, fix in flight): setbacks
+   are measured ALONG THE ROOF SURFACE; plan-view drawing/checking must foreshorten
+   fall-line dimensions by cos(pitch), and the ≤33% coverage test must use one
+   consistent area basis. Stowell's design (top edge exactly 36" along-slope) is
+   compliant; the 16 flags were phantom.
