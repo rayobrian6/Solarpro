@@ -95,13 +95,18 @@ Starting HEAD: 100114c2
 - [x] 306/306 source-scanning tests pass (no regressions)
 - [x] Commit as Commit 7 (6268b71a)
 
-## Section 10 — Commit 8: Documentation & Final Report (GOV-16)
-- [ ] Create PHASE1A2-BASELINE-CONTROL-PLANE.md
-- [ ] Create PHASE1A2-POSTGRES-INTEGRATION-VALIDATION.md
-- [ ] Create PHASE1A2-FINAL-REPORT.md
-- [ ] Update existing docs as required
+## Section 10 — Commit 8: Documentation & Final Report (GOV-16) ✅
+- [x] Create PHASE1A2-BASELINE-CONTROL-PLANE.md
+- [x] Create PHASE1A2-POSTGRES-INTEGRATION-VALIDATION.md
+- [x] Create PHASE1A2-FINAL-REPORT.md
+- [x] Commit as Commit 8 (723ab164)
 
 ## Section 11 — Final Verification
+- [x] tsc clean (0 errors)
+- [x] Focused tests pass (306 source-scanning + 55 integration = 361)
+- [x] Full suite run: 7017 pass + 3 pre-existing golden-path failures (unrelated) + 54 skipped (integration without DB)
+- [ ] Git clean, aligned with remote, push
+- [ ] Deliver final report to user
 - [ ] npx tsc --noEmit
 - [ ] npx vitest run tests/phase1a-migration-governance.test.ts
 - [ ] npx vitest run (full suite, honest report)
