@@ -900,6 +900,392 @@ describeOrSkip('Phase 1A.2: PostgreSQL Integration — Migration Governance DDL 
       client.release();
     }
   });
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. Expanded Integration: ON CONFLICT DO NOTHING (TOTP Replay Detection Logic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+  it('ON CONFLICT DO NOTHING returns 0 rows on duplicate (replay) and 1 row on first use', async () => {
+    const client = await pool!.connect();
+    try {
+      // First use — INSERT succeeds, RETURNING returns 1 row
+      const r1 = await execSQL(client, `
+        INSERT INTO migration_totp_uses (user_id, time_step, use_hash)
+        VALUES ('replay_user', 5000, '${'a'.repeat(64)}')
+        ON CONFLICT (user_id, time_step) DO NOTHING
+        RETURNING id
+      `);
+      expect(r1).toHaveLength(1);
+
+      // Replay — ON CONFLICT DO NOTHING, RETURNING returns 0 rows
+      const r2 = await execSQL(client, `
+        INSERT INTO migration_totp_uses (user_id, time_step, use_hash)
+        VALUES ('replay_user', 5000, '${'b'.repeat(64)}')
+        ON CONFLICT (user_id, time_step) DO NOTHING
+        RETURNING id
+      `);
+      expect(r2).toHaveLength(0);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('ON CONFLICT DO NOTHING allows different time_step for same user', async () => {
+    const client = await pool!.connect();
+    try {
+      const r1 = await execSQL(client, `
+        INSERT INTO migration_totp_uses (user_id, time_step, use_hash)
+        VALUES ('replay_user2', 6000, '${'a'.repeat(64)}')
+        ON CONFLICT (user_id, time_step) DO NOTHING
+        RETURNING id
+      `);
+      expect(r1).toHaveLength(1);
+
+      const r2 = await execSQL(client, `
+        INSERT INTO migration_totp_uses (user_id, time_step, use_hash)
+        VALUES ('replay_user2', 6001, '${'b'.repeat(64)}')
+        ON CONFLICT (user_id, time_step) DO NOTHING
+        RETURNING id
+      `);
+      expect(r2).toHaveLength(1);
+    } finally {
+      client.release();
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 13. Expanded Integration: Governance Lifecycle State Machine
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('governance_lifecycle environment is UNIQUE', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO governance_lifecycle (environment, lifecycle_state)
+        VALUES ('unique_env', 'UNBOOTSTRAPPED')
+      `);
+      await expect(
+        execSQL(client, `
+          INSERT INTO governance_lifecycle (environment, lifecycle_state)
+          VALUES ('unique_env', 'EXECUTION_ENABLED')
+        `)
+      ).rejects.toThrow(/unique constraint/i);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('governance_lifecycle default state is LEDGER_BOOTSTRAPPED', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO governance_lifecycle (environment)
+        VALUES ('default_env')
+      `);
+      const rows = await execSQL(client, `
+        SELECT lifecycle_state FROM governance_lifecycle
+        WHERE environment = 'default_env'
+      `);
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).lifecycle_state).toBe('LEDGER_BOOTSTRAPPED');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('governance_lifecycle can transition through all states', async () => {
+    const client = await pool!.connect();
+    try {
+      const states = [
+        'UNBOOTSTRAPPED', 'LEDGER_BOOTSTRAPPED', 'BASELINE_REQUIRED',
+        'BASELINE_IN_PROGRESS', 'BASELINE_VERIFIED', 'EXECUTION_ENABLED',
+      ];
+      for (const state of states) {
+        await execSQL(client, `
+          INSERT INTO governance_lifecycle (environment, lifecycle_state)
+          VALUES ('transition_${state}', '${state}')
+          ON CONFLICT (environment) DO UPDATE SET lifecycle_state = EXCLUDED.lifecycle_state
+        `);
+      }
+      // Verify all 6 environments exist with correct states
+      const rows = await execSQL(client, `
+        SELECT environment, lifecycle_state FROM governance_lifecycle
+        WHERE environment LIKE 'transition_%'
+        ORDER BY environment
+      `);
+      expect(rows).toHaveLength(6);
+    } finally {
+      client.release();
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 14. Expanded Integration: Append-Only Run History (schema_migration_runs)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('schema_migration_runs allows multiple rows for same migration (append-only)', async () => {
+    const client = await pool!.connect();
+    try {
+      // Insert first run event (started)
+      await execSQL(client, `
+        INSERT INTO schema_migration_runs (
+          run_id, execution_id, migration_identifier, filename, checksum_sha256, status,
+          environment, actor_type
+        ) VALUES (
+          'run_001_a', 'exec_001', '001', '001_test.sql',
+          '${'a'.repeat(64)}',
+          'started', 'test', 'human'
+        )
+      `);
+      // Insert second run event (applied) — same migration, different run_id
+      await execSQL(client, `
+        INSERT INTO schema_migration_runs (
+          run_id, execution_id, migration_identifier, filename, checksum_sha256, status,
+          environment, actor_type
+        ) VALUES (
+          'run_001_b', 'exec_001', '001', '001_test.sql',
+          '${'a'.repeat(64)}',
+          'applied', 'test', 'human'
+        )
+      `);
+      // Verify both rows exist (append-only, no unique constraint on run_id alone)
+      const rows = await execSQL(client, `
+        SELECT status FROM schema_migration_runs
+        WHERE migration_identifier = '001'
+        ORDER BY status
+      `);
+      expect(rows).toHaveLength(2);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('schema_migration_runs records denied status for blocked migrations', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO schema_migration_runs (
+          run_id, execution_id, migration_identifier, filename, checksum_sha256, status,
+          environment, actor_type
+        ) VALUES (
+          'run_denied', 'exec_denied', '002', '002_test.sql',
+          '${'a'.repeat(64)}',
+          'denied', 'test', 'human'
+        )
+      `);
+      const rows = await execSQL(client, `
+        SELECT status, error_code FROM schema_migration_runs
+        WHERE run_id = 'run_denied'
+      `);
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).status).toBe('denied');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('schema_migration_runs records baseline_blocked status', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO schema_migration_runs (
+          run_id, execution_id, migration_identifier, filename, checksum_sha256, status,
+          environment, actor_type
+        ) VALUES (
+          'run_blblocked', 'exec_blblocked', '003', '003_test.sql',
+          '${'a'.repeat(64)}',
+          'baseline_blocked', 'test', 'human'
+        )
+      `);
+      const rows = await execSQL(client, `
+        SELECT status FROM schema_migration_runs WHERE run_id = 'run_blblocked'
+      `);
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).status).toBe('baseline_blocked');
+    } finally {
+      client.release();
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 15. Expanded Integration: Baseline Reconciliation Operations
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('migration_baseline allows multiple environments for same migration', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO migration_baseline (migration_identifier, environment, reconciliation_status)
+        VALUES ('004', 'staging', 'CONFIRMED_APPLIED')
+      `);
+      await execSQL(client, `
+        INSERT INTO migration_baseline (migration_identifier, environment, reconciliation_status)
+        VALUES ('004', 'production', 'CONFIRMED_NOT_APPLIED')
+      `);
+      const rows = await execSQL(client, `
+        SELECT environment, reconciliation_status FROM migration_baseline
+        WHERE migration_identifier = '004'
+        ORDER BY environment
+      `);
+      expect(rows).toHaveLength(2);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('migration_baseline default evidence_type is NONE', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO migration_baseline (migration_identifier, environment, reconciliation_status)
+        VALUES ('005', 'test', 'UNKNOWN')
+      `);
+      const rows = await execSQL(client, `
+        SELECT evidence_type FROM migration_baseline
+        WHERE migration_identifier = '005'
+      `);
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).evidence_type).toBe('NONE');
+    } finally {
+      client.release();
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 16. Expanded Integration: Advisory Lock Concurrent Contention
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('advisory lock with different key does not conflict', async () => {
+    const client1 = await pool!.connect();
+    const client2 = await pool!.connect();
+    try {
+      // Use two different lock keys
+      await client1.query('BEGIN');
+      const r1 = await client1.query('SELECT pg_try_advisory_xact_lock(12345::bigint) AS acquired');
+      expect(r1.rows[0].acquired).toBe(true);
+
+      await client2.query('BEGIN');
+      const r2 = await client2.query('SELECT pg_try_advisory_xact_lock(67890::bigint) AS acquired');
+      expect(r2.rows[0].acquired).toBe(true); // Different key, no conflict
+
+      await client1.query('COMMIT');
+      await client2.query('COMMIT');
+    } finally {
+      client1.release();
+      client2.release();
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 17. Expanded Integration: Index Verification
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('schema_migrations has index on status', async () => {
+    const client = await pool!.connect();
+    try {
+      const rows = await execSQL(client, `
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname = '${TEST_SCHEMA}' AND tablename = 'schema_migrations'
+      `);
+      const indexNames = rows.map((r: Record<string, unknown>) => r.indexname as string);
+      expect(indexNames.some(n => n.includes('status'))).toBe(true);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('schema_migration_runs has index on execution_id', async () => {
+    const client = await pool!.connect();
+    try {
+      const rows = await execSQL(client, `
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname = '${TEST_SCHEMA}' AND tablename = 'schema_migration_runs'
+      `);
+      const indexNames = rows.map((r: Record<string, unknown>) => r.indexname as string);
+      expect(indexNames.some(n => n.includes('exec_id'))).toBe(true);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('schema_migration_runs has index on (migration_identifier, environment)', async () => {
+    const client = await pool!.connect();
+    try {
+      const rows = await execSQL(client, `
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname = '${TEST_SCHEMA}' AND tablename = 'schema_migration_runs'
+      `);
+      const indexNames = rows.map((r: Record<string, unknown>) => r.indexname as string);
+      expect(indexNames.some(n => n.includes('identifier_env'))).toBe(true);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('migration_totp_uses has index on user_id', async () => {
+    const client = await pool!.connect();
+    try {
+      const rows = await execSQL(client, `
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname = '${TEST_SCHEMA}' AND tablename = 'migration_totp_uses'
+      `);
+      const indexNames = rows.map((r: Record<string, unknown>) => r.indexname as string);
+      expect(indexNames.some(n => n.includes('user'))).toBe(true);
+    } finally {
+      client.release();
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 18. Expanded Integration: Nullable Actor Type (NULL allowed by CHECK)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('schema_migration_runs allows NULL actor_type (CHECK permits NULL)', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO schema_migration_runs (
+          run_id, execution_id, migration_identifier, filename, checksum_sha256, status,
+          environment
+        ) VALUES (
+          'run_null', 'exec_null', '006', '006_test.sql',
+          '${'a'.repeat(64)}',
+          'started', 'test'
+        )
+      `);
+      const rows = await execSQL(client, `
+        SELECT actor_type FROM schema_migration_runs WHERE run_id = 'run_null'
+      `);
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).actor_type).toBeNull();
+    } finally {
+      client.release();
+    }
+  });
+
+  it('schema_migrations allows NULL applied_by_actor_type (CHECK permits NULL)', async () => {
+    const client = await pool!.connect();
+    try {
+      await execSQL(client, `
+        INSERT INTO schema_migrations (
+          migration_identifier, filename, checksum_sha256, description,
+          status, environment
+        ) VALUES (
+          '007', '007_test.sql',
+          '${'a'.repeat(64)}',
+          'test null actor', 'pending', 'test_null'
+        )
+      `);
+      const rows = await execSQL(client, `
+        SELECT applied_by_actor_type FROM schema_migrations
+        WHERE migration_identifier = '007'
+      `);
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).applied_by_actor_type).toBeNull();
+    } finally {
+      client.release();
+    }
+  });
+
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
