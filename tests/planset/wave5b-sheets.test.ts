@@ -149,3 +149,39 @@ describe('wave 5B — hybrid cover sheet', () => {
     expect(singleHtml).not.toContain('NOW DOCUMENTED PER SUB-SYSTEM');
   });
 });
+
+// ═════ 3. Electrical sheets — per-sub schedules from conductorAuthority ═════
+describe('wave 5B — hybrid electrical sheets', () => {
+  it('PV-4A renders one circuit schedule per sub with the sub\'s OWN equipment', () => {
+    expect(hybridHtml).toMatch(/AC Branch Circuit Schedule — ROOF — 4 MODULES — Enphase IQ8M \(MICRO\)/);
+    expect(hybridHtml).toMatch(/DC String Schedule — GROUND — 4 MODULES — Solis S6-GR1P6K \(STRING\)/);
+    expect(hybridHtml).toMatch(/DC String Schedule — FENCE — 4 MODULES — SolFence SF-OPT-3800 \(OPTIMIZER\)/);
+  });
+
+  it('PV-4B has per-sub sections plus ONE shared service section', () => {
+    expect(hybridHtml).toContain('SHARED SERVICE — POINT OF INTERCONNECTION (NEC 705)');
+    expect(hybridHtml).toContain('ROOF AC Feeder');
+    expect(hybridHtml).toContain('GROUND AC Feeder');
+    expect(hybridHtml).toContain('FENCE AC Feeder');
+    // Wiring notes for BOTH non-roof subs (the old ternary printed only one).
+    expect(hybridHtml).toContain('FENCE WIRING REQUIREMENTS — FENCE SUB-SYSTEM');
+    expect(hybridHtml).toContain('GROUND MOUNT WIRING REQUIREMENTS — GROUND SUB-SYSTEM');
+    expect(hybridHtml).toContain('SHARED TRENCH / SEPARATE CONDUITS (HYBRID)');
+  });
+
+  it('no 94-modules-one-branch-set contamination: no branch covers >4 devices', () => {
+    // Every micro branch row prints "N × microinverter" — the roof sub has 4
+    // devices total, so no branch may claim more (aggregate had 12 before 2d).
+    const counts = [...hybridHtml.matchAll(/(\d+) × microinverter/gi)].map(m => Number(m[1]));
+    expect(counts.length).toBeGreaterThan(0);
+    for (const c of counts) expect(c).toBeLessThanOrEqual(4);
+  });
+
+  it('E-1 carries the per-sub source summary (same authority as PV-4A/4B)', () => {
+    expect(hybridHtml).toContain('E-1 SOURCE SUMMARY — PER SUB-SYSTEM');
+    expect(hybridHtml).toMatch(/AC branch/);
+    expect(hybridHtml).toMatch(/DC string/);
+    // Single-type E-1 has no per-sub zone.
+    expect(singleHtml).not.toContain('E-1 SOURCE SUMMARY');
+  });
+});

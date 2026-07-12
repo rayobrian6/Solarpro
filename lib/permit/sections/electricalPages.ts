@@ -10,8 +10,18 @@ import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, 
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
 import { microBranchCount, planMicroBranches } from '../utils/branching';
-import { buildConductorAuthority } from '../utils/conductorAuthority';
+import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { SUB_LABEL } from './subSystemSheets';
+
+// ─── Wave 5B shared helpers: per-sub circuit schedule sections ──────────────
+// One renderer for the sub-system heading line every hybrid electrical sheet
+// prints — the sub's OWN equipment + topology, never a project-wide winner.
+function subSectionLabel(sub: SubSystemConductorAuthority): string {
+  const eq = sub.equipment;
+  const inv = [eq.inverterManufacturer, eq.inverterModel].filter(s => s && s !== '—').join(' ');
+  return `${SUB_LABEL[sub.key]} — ${sub.panelCount} MODULES${inv ? ` — ${inv}` : ''} (${sub.topology})`;
+}
 
 // ─── (Existing pages reused with minor upgrades) ─────────────────────────────
 
@@ -40,7 +50,9 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
     || (cadTotalPanels > 0 ? (cadTotalDcKw * 1000) / cadTotalPanels : 0);
   const _pairAcW = Number(_inv0?.acOutputKw) * 1000;
   const _pairRatio = _pairIsMicro && _pairAcW > 0 && _pairModW > 0 ? _pairModW / _pairAcW : 0;
-  const _pairWarn = _pairRatio > 1.55;
+  // Hybrid: inverters[0]-based pairing math is a project-wide-winner lie —
+  // suppressed until the per-sub pairing check lands (Wave 6).
+  const _pairWarn = !_auth.isHybrid && _pairRatio > 1.55;
   const _extraWarn = _pairWarn ? 1 : 0;
   return `
   <div class="page">
@@ -115,6 +127,48 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         </tbody>
       </table>
       ${(() => {
+        // ── Wave 5B: HYBRID — one circuit schedule PER SUB-SYSTEM ──────────
+        // Each sub prints ITS OWN branch/string set from its own authority
+        // entry (topology, perMicroA, OCPD from the sub's own equipment) —
+        // never one 94-modules-single-branch-set claim.
+        if (_auth.isHybrid) {
+          return _auth.subSystems.map(sub => {
+            if (sub.isMicro) {
+              const rows = sub.microBranches.map((b, i) =>
+                `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">` +
+                `<td class="fw9 mono">B${b.index}</td>` +
+                `<td>${b.deviceCount} × microinverter</td>` +
+                `<td style="text-align:right;font-family:monospace">${b.branchCurrentA.toFixed(1)} A</td>` +
+                `<td style="text-align:right;font-family:monospace">${b.continuousA.toFixed(1)} A</td>` +
+                `<td style="text-align:center;font-family:monospace">${b.ocpdAmps} A</td>` +
+                `<td>${b.conductorCallout}</td>` +
+                `<td>AC Combiner / Subpanel — see E-1</td>` +
+                `</tr>`).join('');
+              return `
+      <div class="section-title">AC Branch Circuit Schedule — ${subSectionLabel(sub)} — NEC 690.8(A)</div>
+      <table class="equip-table">
+        <thead><tr><th style="width:8%">Branch</th><th style="width:20%">Devices</th><th style="width:12%">Output</th><th style="width:14%">× 1.25 Cont.</th><th style="width:10%">OCPD</th><th style="width:20%">Conductor</th><th>Terminates</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="center">Branch plan pending module placement</td></tr>`}</tbody>
+      </table>`;
+            }
+            const rows = sub.dcStrings.map((s, i) =>
+              `<tr style="background:${i % 2 ? '#f5f5f5' : '#fff'}">` +
+              `<td class="fw9 mono">${s.label}</td>` +
+              `<td>DC string</td>` +
+              `<td style="text-align:right;font-family:monospace">${s.ampacityA != null ? s.ampacityA.toFixed(2) + ' A' : '—'}</td>` +
+              `<td style="text-align:center;font-family:monospace">${s.ocpdAmps != null ? s.ocpdAmps + ' A' : '—'}</td>` +
+              `<td>${s.wireGauge} USE-2/PV Wire</td>` +
+              `<td style="text-align:right;font-family:monospace">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>` +
+              `<td style="text-align:right;font-family:monospace">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>` +
+              `</tr>`).join('');
+            return `
+      <div class="section-title">DC String Schedule — ${subSectionLabel(sub)} — NEC 690.8(A)</div>
+      <table class="equip-table">
+        <thead><tr><th style="width:10%">String</th><th style="width:16%">Circuit</th><th style="width:14%">Isc × 1.25</th><th style="width:10%">OCPD</th><th style="width:22%">Conductor</th><th style="width:12%">V-Drop</th><th>Length</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="center">String plan pending — see PV-4B</td></tr>`}</tbody>
+      </table>`;
+          }).join('');
+        }
         // AC branch circuit schedule (micro topology) — the sheet's bottom
         // 60% shipped blank while the branch plan existed in the engine.
         if (!_pairIsMicro) return '';
@@ -172,13 +226,13 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;background:#fafafa;">
         <strong>ENGINEERING INTERPRETATION:</strong> The above methodology is applied to all DC and AC circuits in this system.
         Each conductor, overcurrent device, and disconnect has been sized using the calculation chain shown.
-        Temperature correction factors per NEC 310.15(B)(1) are applied. ${_isRoof ? 'Rooftop temperature adders per NEC 310.15(B)(3)(c) are applied where conduit is routed on or above the roof surface.' : _isFence ? 'No rooftop temperature adder applies \u2014 fence-mounted system (NEC 310.15(B)(3)(c) N/A).' : 'No rooftop temperature adder applies \u2014 ground-mounted system (NEC 310.15(B)(3)(c) N/A).'}
+        Temperature correction factors per NEC 310.15(B)(1) are applied. ${_auth.isHybrid ? 'Rooftop temperature adders per NEC 310.15(B)(3)(c) apply to ROOF sub-system circuits only \u2014 ground and fence sub-system circuits use standard ambient (no rooftop adder).' : _isRoof ? 'Rooftop temperature adders per NEC 310.15(B)(3)(c) are applied where conduit is routed on or above the roof surface.' : _isFence ? 'No rooftop temperature adder applies \u2014 fence-mounted system (NEC 310.15(B)(3)(c) N/A).' : 'No rooftop temperature adder applies \u2014 ground-mounted system (NEC 310.15(B)(3)(c) N/A).'}
         ${rulesResult && rulesResult.errorCount === 0 ? 'All calculations produce compliant results with no errors identified.' : 'Review flagged items above before submission.'}
       </div>
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — NEC COMPLIANCE:</strong>
-        This ${cadTotalDcKw.toFixed(2)} kW DC / ${cadTotalPanels} module photovoltaic system has been evaluated against NEC ${necVer} Articles 690, 705, 250, and 310.
-        ${_isRoof ? '' : _isFence ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a fence-mounted system.' : 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a ground-mounted system.'}
+        This ${cadTotalDcKw.toFixed(2)} kW DC / ${cadTotalPanels} module ${_auth.isHybrid ? `HYBRID photovoltaic system (${_auth.subSystems.map(s => `${SUB_LABEL[s.key]}: ${s.panelCount}`).join(' · ')})` : 'photovoltaic system'} has been evaluated against NEC ${necVer} Articles 690, 705, 250, and 310.
+        ${_auth.isHybrid ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) applies to the ROOF sub-system only.' : _isRoof ? '' : _isFence ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a fence-mounted system.' : 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a ground-mounted system.'}
         ${rulesResult ? `The rules engine identified ${rulesResult.errorCount} error(s), ${rulesResult.warningCount + _extraWarn} warning(s), and ${rulesResult.autoFixCount} auto-correction(s).` : 'Compliance evaluation is pending.'}
         System configuration ${rulesResult && rulesResult.errorCount === 0 ? 'complies with' : 'requires review per'} NEC ${necVer} and applicable local amendments.
       </div>
@@ -223,6 +277,58 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         </thead>
         <tbody>
           ${(() => {
+            // ── Wave 5B: HYBRID — per-sub conductor sections + ONE shared
+            // service section. Each sub's rows come from ITS OWN authority
+            // entry (I-3): a fence optimizer sub prints DC strings, a roof
+            // micro sub prints AC branches — never one topology fork over
+            // the whole project's panels.
+            if (_auth.isHybrid) {
+              const subHdr = (label: string) =>
+                `<tr style="background:#000;color:#fff;font-weight:900;"><td colspan="9" style="letter-spacing:0.6px;">${label}</td></tr>`;
+              const sections = _auth.subSystems.map(sub => {
+                if (sub.isMicro) {
+                  return subHdr(subSectionLabel(sub)) + sub.microBranches.map(b => `
+              <tr>
+                <td class="fw7">AC Branch ${b.index}</td>
+                <td>${b.deviceCount} × Microinverter</td>
+                <td>AC Combiner / Panel</td>
+                <td>${b.wireGauge} THWN-2</td>
+                <td>${b.branchCurrentA.toFixed(1)}A</td>
+                <td>${b.ocpdAmps}A</td>
+                <td>—</td>
+                <td>${project.conduitType || 'EMT'}</td>
+                <td>—</td>
+              </tr>`).join('');
+                }
+                return subHdr(subSectionLabel(sub)) + sub.dcStrings.map(s => `
+              <tr>
+                <td class="fw7">${s.label}</td>
+                <td>String ${s.invIdx + 1}-${s.strIdx + 1}</td>
+                <td>Inverter ${s.invIdx + 1}</td>
+                <td>${s.wireGauge} USE-2/PV Wire</td>
+                <td>${s.ampacityA != null ? s.ampacityA.toFixed(2) + 'A' : '—'}</td>
+                <td>${s.ocpdAmps != null ? s.ocpdAmps + 'A' : '—'}</td>
+                <td>${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>
+                <td>${project.conduitType || 'EMT'}</td>
+                <td>${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>
+              </tr>`).join('');
+              }).join('');
+              // Per-sub AC feeders toward the POI (Σ into the shared service run).
+              const feeders = subHdr('SHARED SERVICE — POINT OF INTERCONNECTION (NEC 705)')
+                + _auth.subSystems.map(sub => `
+              <tr>
+                <td class="fw7">${SUB_LABEL[sub.key]} AC Feeder</td>
+                <td>${SUB_LABEL[sub.key]} sub-system</td>
+                <td>POI (shared service)</td>
+                <td>${sub.acSubFeeder.wireGauge} THWN-2</td>
+                <td>${sub.acSubFeeder.currentA.toFixed(1)}A</td>
+                <td>${sub.acSubFeeder.ocpdAmps != null ? sub.acSubFeeder.ocpdAmps + 'A' : '—'}</td>
+                <td>—</td>
+                <td>${project.conduitType || 'EMT'}</td>
+                <td>—</td>
+              </tr>`).join('');
+              return sections + feeders;
+            }
             // FIX v47.341: Topology-aware DC/AC branch rows
             const _csTopo = topologyToLegacy(getInverterTopology(input, cad));
             if (_csTopo === 'MICRO') {
@@ -320,31 +426,40 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
            matrix) removed — they duplicated code-book content, pushed the
            project-specific LOAD CALC off the fixed sheet (silent clipping),
            and PV-4A's methodology table already cites the sections. */''}
-      ${_isRoof ? `
+      ${(_isRoof || (_auth.isHybrid && _auth.subSystems.some(s => s.key === 'roof'))) ? `
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);background:#fafafa;">
-        <strong>TEMPERATURE DERATING NOTE:</strong>
+        <strong>TEMPERATURE DERATING NOTE${_auth.isHybrid ? ' — ROOF SUB-SYSTEM' : ''}:</strong>
         Conductors routed in conduit on the roof surface are subject to the rooftop temperature adder per NEC 310.15(B)(3)(c).
         All conductor selections account for the worst-case temperature condition.
         USE-2 and THWN-2 conductors (90°C rated) are specified to maximize ampacity retention.
-      </div>` : _isFence ? `
+      </div>` : ''}
+      ${(_auth.isHybrid ? _auth.subSystems.some(s => s.key === 'fence') : _isFence) ? `
       <div class="section-title">Fence Array Wiring Notes — NEC 690, ASCE 7-22 §29</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);background:#fafafa;">
-        <strong>FENCE WIRING REQUIREMENTS:</strong><br/>
+        <strong>FENCE WIRING REQUIREMENTS${_auth.isHybrid ? ' — FENCE SUB-SYSTEM' : ''}:</strong><br/>
         • DC conductors: USE-2 or PV wire rated for outdoor/wet locations per NEC 690.31(C)<br/>
         • Conduit: RMC or IMC required below 8 ft above grade per NEC 690.31(G)<br/>
         • Rapid shutdown: Module-level shutdown required per NEC 690.12(B)(2)<br/>
         • Temperature correction: Standard ambient (no rooftop adder) — fence not on roof surface<br/>
         • Grounding: All metallic fence posts bonded to EGC per NEC 250.169 and 690.43
-      </div>` : `
+      </div>` : ''}
+      ${(_auth.isHybrid ? _auth.subSystems.some(s => s.key === 'ground') : (!_isRoof && !_isFence)) ? `
       <div class="section-title">Ground Mount Wiring Notes — NEC 690</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);background:#fafafa;">
-        <strong>GROUND MOUNT WIRING REQUIREMENTS:</strong><br/>
+        <strong>GROUND MOUNT WIRING REQUIREMENTS${_auth.isHybrid ? ' — GROUND SUB-SYSTEM' : ''}:</strong><br/>
         • DC conductors: USE-2 or PV wire per NEC 690.31(C)<br/>
         • Underground conductors: USE-2 direct burial or conduit per NEC 690.31(E)<br/>
         • Temperature correction: Standard ambient — no rooftop adder applies<br/>
         • Rapid shutdown: System-level per NEC 690.12(B)(1) acceptable for ground mount<br/>
         • Grounding: Per NEC 690.47 and 250.166
-      </div>`}
+      </div>` : ''}
+      ${_auth.isHybrid ? `
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);background:#fff8e1;">
+        <strong>SHARED TRENCH / SEPARATE CONDUITS (HYBRID):</strong>
+        Where two sub-systems run toward the point of interconnection along a combinable path, ONE shared trench is
+        permitted, but each sub-system keeps its OWN conduit — conductors of different sub-systems shall not share a
+        raceway in this design (no shared-raceway derating scenario). Field-verify routing.
+      </div>` : ''}
 
       ${/* Full NEC code-reference table removed — duplicated PV-4A's
            methodology table row-for-row and displaced project content. */''}
@@ -504,6 +619,12 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
 export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, storedSldSvg?: string): string {
   const { project, system, compliance } = input;
   const _sldSysType = cad.systemType as SysType;
+  // Wave 5B / Invariant I-8: at N>1 sub-systems E-1 must NEVER render the
+  // stored single-system SVG or the inline single-source buildSLD fallback —
+  // a plausible-looking single-lane diagram over a hybrid system is the worst
+  // failure mode a permit sheet has. Live renderer or an explicit banner.
+  const _sldAuth = buildConductorAuthority(input, cad);
+  const _sldHybrid = _sldAuth.isHybrid;
   const _sldArrayLabel = isFence(_sldSysType) ? 'SOLAR FENCE ARRAY'
     : isGround(_sldSysType) ? 'GROUND MOUNT ARRAY'
     : 'ROOF-MOUNTED ARRAY';
@@ -1336,7 +1457,18 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
       liveSvg = null;
     }
 
-    if (!liveSvg && storedSldSvg && storedSldSvg.trim().startsWith('<svg')) {
+    if (!liveSvg && _sldHybrid) {
+      // I-8: never a stored single-system SVG, never the inline single-source
+      // fallback — an explicit banner beats a plausible-wrong permit sheet.
+      sldBodyHtml = `
+      <div style="border:3px solid #cc0000;background:#fff5f5;margin:12px;padding:16px;font-size:11px;line-height:1.6;">
+        <div style="font-weight:900;color:#cc0000;font-size:14px;letter-spacing:0.5px;">&#9888; HYBRID SINGLE-LINE DIAGRAM UNAVAILABLE</div>
+        This project contains ${_sldAuth.subSystems.length} sub-systems (${_sldAuth.subSystems.map(s => SUB_LABEL[s.key]).join(', ')}).
+        The live multi-source renderer did not produce a diagram, and the single-system fallbacks are suppressed for
+        hybrids — a single-lane diagram would misstate the system. Regenerate the single-line diagram before submission.
+        Per-sub source data appears below; conductor values match PV-4A / PV-4B (shared conductor authority).
+      </div>`;
+    } else if (!liveSvg && storedSldSvg && storedSldSvg.trim().startsWith('<svg')) {
       // FIX v47.296: Sanitize stored SLD — replace roof-specific labels for non-roof systems
       if (_sldSysType !== 'roof') {
         storedSldSvg = storedSldSvg
@@ -1376,10 +1508,49 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     }
   }
 
+  // ── Wave 5B: hybrid per-sub SOURCE SUMMARY data zone ──────────────────────
+  // One row per sub-system from the shared conductor authority — the SAME
+  // values PV-4A/PV-4B print, so E-1's data zone can never disagree with the
+  // schedules regardless of which renderer produced the diagram above.
+  const _sldSubZone = _sldHybrid ? `
+    <div style="margin:6px 12px 10px;">
+      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">E-1 SOURCE SUMMARY — PER SUB-SYSTEM (SHARED CONDUCTOR AUTHORITY)</div>
+      <table class="equip-table" style="width:100%;">
+        <thead><tr>
+          <th>Sub-System</th><th>Modules</th><th>Topology</th><th>Inverter</th>
+          <th>Circuits</th><th>Governing OCPD</th><th>EGC</th><th>AC Feeder → POI</th>
+        </tr></thead>
+        <tbody>
+          ${_sldAuth.subSystems.map(sub => {
+            const eq2 = sub.equipment;
+            const inv = [eq2.inverterManufacturer, eq2.inverterModel].filter(s => s && s !== '—').join(' ') || '—';
+            const circuits = sub.isMicro
+              ? `${sub.microBranches.length} AC branch${sub.microBranches.length === 1 ? '' : 'es'}`
+              : `${sub.dcStrings.length} DC string${sub.dcStrings.length === 1 ? '' : 's'}`;
+            return `<tr>
+            <td class="fw7">${SUB_LABEL[sub.key]}</td>
+            <td class="tr">${sub.panelCount}</td>
+            <td>${sub.topology}</td>
+            <td>${inv}</td>
+            <td>${circuits}</td>
+            <td class="tr">${sub.governingOcpd}A</td>
+            <td>${sub.egc.gauge}</td>
+            <td>${sub.acSubFeeder.currentA.toFixed(1)}A${sub.acSubFeeder.ocpdAmps != null ? ` / ${sub.acSubFeeder.ocpdAmps}A OCPD` : ''} — ${sub.acSubFeeder.wireGauge}</td>
+          </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fafafa;">
+        Backfeed basis: Σ of each physical inverter's rounded OCPD per sub-system + battery (NEC 705.12(B)) — one shared
+        service feeder; shared runs emitted once. Shared trench permitted, separate conduits per sub-system (no shared raceway).
+      </div>
+    </div>` : '';
+
   return `
   <div class="page sld-page">
     ${titleBlock(input, 'E-1', 'SINGLE-LINE ELECTRICAL DIAGRAM', pageNum, totalPages)}
     ${sldBodyHtml}
+    ${_sldSubZone}
   </div>`;
 }
 
