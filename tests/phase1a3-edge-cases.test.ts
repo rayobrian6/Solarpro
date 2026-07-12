@@ -493,7 +493,7 @@ describeOrSkip('Phase 1A.3: Edge-Case Coverage — DB-Backed (GOV-26)', () => {
       recordBaselineReconciliation,
       verifyBaselineComplete,
       advanceToBaselineVerified,
-      enableExecution,
+      enableExecutionTemporary,
     } = await import('../lib/migrations/ledger');
 
     await bootstrapMigrationLedger('human', 'test-admin-001');
@@ -510,8 +510,10 @@ describeOrSkip('Phase 1A.3: Edge-Case Coverage — DB-Backed (GOV-26)', () => {
     expect(v.ok).toBe(true);
     const advanced = await advanceToBaselineVerified('test-admin-001');
     expect(advanced).toBe(true);
-    const enabled = await enableExecution('test-admin-001', 'edge-case test activation');
-    expect(enabled).toBe(true);
+    // Commit 4 fail-closed: execution requires a bounded window (indefinite
+    // enable no longer permits execution).
+    const enabled = await enableExecutionTemporary('test-admin-001', 'edge-case test activation', 15);
+    expect(enabled.success).toBe(true);
   }
 
   async function createFixtureRunner() {

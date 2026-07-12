@@ -30,14 +30,27 @@ async function q(client: PoolClient, sql: string, params: unknown[] = []): Promi
   return (await client.query(sql, params)).rows;
 }
 
-// The exact predicate the gate uses: permitted iff EXECUTION_ENABLED and NOT
-// (a bounded window that has passed).
+// The exact predicate the gate uses (fail-closed): permitted iff
+// EXECUTION_ENABLED AND a VALID BOUNDED window exists (non-null expiry in the
+// future). NULL expiry (indefinite) and past expiry both fail closed.
 const GATE_PERMITTED = `
   SELECT (
     lifecycle_state = 'EXECUTION_ENABLED'
-    AND NOT (execution_enabled_expires_at IS NOT NULL AND execution_enabled_expires_at <= now())
+    AND execution_enabled_expires_at IS NOT NULL
+    AND execution_enabled_expires_at > now()
   ) AS permitted
   FROM governance_lifecycle WHERE environment = 'test' LIMIT 1
+`;
+
+// The relock predicate: any EXECUTION_ENABLED row that is expired OR indefinite.
+const RELOCK = `
+  UPDATE governance_lifecycle
+  SET lifecycle_state = 'BASELINE_VERIFIED',
+      execution_enabled_by = null, execution_enabled_at = null,
+      execution_enabled_expires_at = null, last_state_change_at = now()
+  WHERE environment = 'test' AND lifecycle_state = 'EXECUTION_ENABLED'
+    AND (execution_enabled_expires_at IS NULL OR execution_enabled_expires_at <= now())
+  RETURNING lifecycle_state
 `;
 
 describeOrSkip('Commit 4: bounded activation — real Postgres gate + relock', () => {
@@ -92,10 +105,10 @@ describeOrSkip('Commit 4: bounded activation — real Postgres gate + relock', (
     finally { client.release(); }
   });
 
-  it('a NULL expiry (legacy indefinite) is permitted (backward compatible)', async () => {
+  it('a NULL expiry (legacy indefinite) is NOT permitted — fail-closed', async () => {
     await seed(`NULL`);
     const client = await pool!.connect();
-    try { expect((await q(client, GATE_PERMITTED))[0].permitted).toBe(true); }
+    try { expect((await q(client, GATE_PERMITTED))[0].permitted).toBe(false); }
     finally { client.release(); }
   });
 
@@ -103,18 +116,21 @@ describeOrSkip('Commit 4: bounded activation — real Postgres gate + relock', (
     await seed(`now() - interval '1 minute'`);
     const client = await pool!.connect();
     try {
-      const relocked = await q(client, `
-        UPDATE governance_lifecycle
-        SET lifecycle_state = 'BASELINE_VERIFIED',
-            execution_enabled_by = null, execution_enabled_at = null,
-            execution_enabled_expires_at = null, last_state_change_at = now()
-        WHERE environment = 'test' AND lifecycle_state = 'EXECUTION_ENABLED'
-          AND execution_enabled_expires_at IS NOT NULL AND execution_enabled_expires_at <= now()
-        RETURNING lifecycle_state`);
+      const relocked = await q(client, RELOCK);
       expect(relocked).toHaveLength(1);
       const row = (await q(client, `SELECT lifecycle_state, execution_enabled_expires_at FROM governance_lifecycle WHERE environment='test'`))[0];
       expect(row.lifecycle_state).toBe('BASELINE_VERIFIED');
       expect(row.execution_enabled_expires_at).toBeNull();
+    } finally { client.release(); }
+  });
+
+  it('auto-relock ALSO transitions an INDEFINITE (NULL-expiry) window — fail-closed', async () => {
+    await seed(`NULL`);
+    const client = await pool!.connect();
+    try {
+      const relocked = await q(client, RELOCK);
+      expect(relocked).toHaveLength(1);
+      expect((await q(client, `SELECT lifecycle_state FROM governance_lifecycle WHERE environment='test'`))[0].lifecycle_state).toBe('BASELINE_VERIFIED');
     } finally { client.release(); }
   });
 

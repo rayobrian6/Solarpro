@@ -218,10 +218,16 @@ export async function buildOperatorReadiness(operator: {
       && lifecycleState !== 'BASELINE_VERIFIED' && lifecycleState !== 'EXECUTION_ENABLED') {
     blockers.push('Baseline is reconciled but not yet verified. Run "Verify Historical Baseline".');
   }
-  if (lifecycleState !== 'EXECUTION_ENABLED') {
-    blockers.push('Migration execution is not enabled. Temporarily enable execution (bounded window) to run a migration.');
-  } else if (activation.expired) {
-    blockers.push('The execution activation window has expired. Re-enable execution to run a migration.');
+  if (!activation.active) {
+    if (lifecycleState !== 'EXECUTION_ENABLED') {
+      blockers.push('Migration execution is not enabled. Temporarily enable execution (bounded window) to run a migration.');
+    } else if (activation.expired) {
+      blockers.push('The execution activation window has expired. Re-enable execution (bounded window) to run a migration.');
+    } else if (activation.expiresAt === null) {
+      // EXECUTION_ENABLED but no bounded window (legacy indefinite). Fail-closed:
+      // the gate treats this as disabled and auto-relocks on next check.
+      blockers.push('Execution is flagged enabled without a bounded window (legacy/indefinite) — this fails closed. Temporarily enable execution to get a valid window.');
+    }
   }
   if (!allowedEnvs.includes(environment)) {
     blockers.push(`This environment ("${environment}") is not in MIGRATION_RUN_ALLOWED_ENVS. Execution is blocked here (dry-run still allowed).`);
@@ -237,15 +243,14 @@ export async function buildOperatorReadiness(operator: {
   else if (baselineUnreconciled.length > 0) nextAction = 'Generate baseline evidence and review the historical baseline batch.';
   else if (baselineBlocking.length > 0) nextAction = 'Resolve UNKNOWN / PARTIALLY_APPLIED baseline entries.';
   else if (lifecycleState !== 'BASELINE_VERIFIED' && lifecycleState !== 'EXECUTION_ENABLED') nextAction = 'Verify the historical baseline.';
-  else if (lifecycleState !== 'EXECUTION_ENABLED' || activation.expired) nextAction = 'Temporarily enable migration execution.';
+  else if (!activation.active) nextAction = 'Temporarily enable migration execution (bounded window).';
   else if (pendingCount > 0) nextAction = 'Dry-run then run a pending migration.';
   else nextAction = 'Nothing pending — all migrations are applied.';
 
   const canExecuteNow =
     operator.role === 'super_admin' &&
     mfaEnrolled &&
-    lifecycleState === 'EXECUTION_ENABLED' &&
-    !activation.expired &&
+    activation.active && // EXECUTION_ENABLED + valid bounded window (fail-closed)
     allowedEnvs.includes(environment) &&
     (!isProduction || process.env.MIGRATION_ALLOW_PRODUCTION_EXECUTION === 'true') &&
     pendingCount > 0;

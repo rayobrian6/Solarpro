@@ -593,13 +593,18 @@ export async function readExecutionActivation(): Promise<ExecutionActivationStat
     const r = rows[0];
     if (!r) return inactive;
     const lifecycleState = (r.lifecycle_state as MigrationGovernanceLifecycle) ?? 'UNBOOTSTRAPPED';
+    const expiresAt = r.expires_at ? String(r.expires_at) : null;
     const expired = Boolean(r.is_expired);
+    // Commit 4 (fail-closed correction): a valid activation REQUIRES a bounded
+    // window with a future expiry. EXECUTION_ENABLED with a NULL expiry (a
+    // legacy indefinite enable) is NOT active — indefinite activation is no
+    // longer a permitted path.
     return {
-      active: lifecycleState === 'EXECUTION_ENABLED' && !expired,
+      active: lifecycleState === 'EXECUTION_ENABLED' && expiresAt !== null && !expired,
       lifecycleState,
       enabledAt: r.execution_enabled_at ? String(r.execution_enabled_at) : null,
       enabledBy: r.execution_enabled_by ? String(r.execution_enabled_by) : null,
-      expiresAt: r.expires_at ? String(r.expires_at) : null,
+      expiresAt,
       expired,
       secondsRemaining: Number(r.secs) || 0,
     };
@@ -1331,18 +1336,24 @@ export async function assertExecutionPermitted(
   // The operator must explicitly activate execution via enable-execution
   // (with TOTP + reason) before any migration can be applied.
   //
-  // Commit 4 (bounded activation): EXECUTION_ENABLED is additionally gated by
-  // the bounded-activation window. An expired window behaves as DISABLED —
-  // fail-safe, enforced server-side and NOT dependent on any UI timer. A NULL
-  // expiry (legacy indefinite enable) is treated as not-expired for backward
-  // compatibility. Expiry is detected + auto-relocked here so state converges.
+  // Commit 4 (bounded activation, fail-closed): EXECUTION_ENABLED alone is not
+  // sufficient — a VALID BOUNDED WINDOW is required. Permitted iff the lifecycle
+  // is EXECUTION_ENABLED AND there is a non-null expiry that is still in the
+  // future. Two states fail closed and are auto-relocked to BASELINE_VERIFIED:
+  //   • EXPIRED    — a bounded window whose time has passed;
+  //   • INDEFINITE — EXECUTION_ENABLED with a NULL expiry (a legacy enable).
+  // Indefinite production-capable activation is no longer a permitted path.
+  // Enforcement is server-side and does NOT rely on any UI timer.
   const activation = await readExecutionActivation().catch(() => null);
   const expired = activation?.expired === true;
-  const permitted = lifecycle === 'EXECUTION_ENABLED' && !expired;
+  const indefinite = lifecycle === 'EXECUTION_ENABLED' && (activation?.expiresAt ?? null) === null;
+  const hasValidWindow = activation?.active === true; // EXECUTION_ENABLED + future non-null expiry
+  const permitted = lifecycle === 'EXECUTION_ENABLED' && hasValidWindow;
 
-  // Auto-relock an expired window to BASELINE_VERIFIED (opportunistic; never
-  // blocks the gate result). This makes "expired behaves as disabled" durable.
-  if (lifecycle === 'EXECUTION_ENABLED' && expired) {
+  // Auto-relock any invalid activation (expired OR indefinite) to
+  // BASELINE_VERIFIED (opportunistic; never blocks the gate result). This makes
+  // "invalid activation behaves as disabled" durable + audited.
+  if (lifecycle === 'EXECUTION_ENABLED' && (expired || indefinite)) {
     try {
       const sql = getRawSql();
       const environment = getCurrentEnvironment();
@@ -1355,8 +1366,8 @@ export async function assertExecutionPermitted(
             last_state_change_at = now()
         WHERE environment = ${environment}
           AND lifecycle_state = 'EXECUTION_ENABLED'
-          AND execution_enabled_expires_at IS NOT NULL
-          AND execution_enabled_expires_at <= now()
+          AND (execution_enabled_expires_at IS NULL
+               OR execution_enabled_expires_at <= now())
         RETURNING lifecycle_state
       ` as unknown[];
       if (Array.isArray(relocked) && relocked.length === 1) {
@@ -1364,7 +1375,11 @@ export async function assertExecutionPermitted(
           type: 'migration.governance.state_change',
           actorType: null, actorId: null, environment,
           executionId: null, migrationIdentifier: null, filename: null,
-          details: { newState: 'BASELINE_VERIFIED', reason: 'ACTIVATION_EXPIRED', autoRelock: true },
+          details: {
+            newState: 'BASELINE_VERIFIED',
+            reason: indefinite ? 'ACTIVATION_INDEFINITE_FAIL_CLOSED' : 'ACTIVATION_EXPIRED',
+            autoRelock: true,
+          },
         });
       }
     } catch { /* relock is best-effort; the gate already denies */ }
@@ -1379,7 +1394,7 @@ export async function assertExecutionPermitted(
       executionId: null,
       migrationIdentifier: null,
       filename: null,
-      details: { lifecycleState: lifecycle, activationExpired: expired },
+      details: { lifecycleState: lifecycle, activationExpired: expired, activationIndefinite: indefinite },
     });
   }
 

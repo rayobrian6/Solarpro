@@ -181,6 +181,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ip_address    TEXT,
   user_agent    TEXT,
   request_path  TEXT,
+  -- Org-context columns added by migration 107 (Phase 1B.1). writeAuditLog now
+  -- writes these, so the test harness DDL must include them or every governance
+  -- audit write fails and the fail-closed audit path blocks migration execution.
+  actor_organization_id UUID,
+  resource_owner_organization_id UUID,
   prev_hash     TEXT,
   entry_hash    TEXT NOT NULL
 );
@@ -728,14 +733,16 @@ describeOrSkip('Phase 1A.3: End-to-End Migration Governance Validation (GOV-19, 
       expect(gate.permitted).toBe(true);
     });
 
-    it('assertExecutionPermitted permits mutation only in EXECUTION_ENABLED', async () => {
+    it('assertExecutionPermitted permits mutation only with a valid bounded window', async () => {
       const {
         bootstrapMigrationLedger,
         setGovernanceLifecycleState,
         recordBaselineReconciliation,
         advanceToBaselineVerified,
         enableExecution,
+        enableExecutionTemporary,
         assertExecutionPermitted,
+        getGovernanceLifecycleState,
       } = await import('../lib/migrations/ledger');
 
       await bootstrapMigrationLedger('human', 'test-admin-001');
@@ -760,8 +767,15 @@ describeOrSkip('Phase 1A.3: End-to-End Migration Governance Validation (GOV-19, 
       await advanceToBaselineVerified('test-admin-001');
       expect((await assertExecutionPermitted(false)).permitted).toBe(false);
 
-      // Enable execution → permitted
-      await enableExecution('test-admin-001', 'e2e test activation');
+      // Commit 4 fail-closed: an INDEFINITE enable (NULL expiry) does NOT permit
+      // execution and is auto-relocked to BASELINE_VERIFIED on the next gate check.
+      await enableExecution('test-admin-001', 'e2e indefinite activation (should fail closed)');
+      expect((await assertExecutionPermitted(false)).permitted).toBe(false);
+      expect(await getGovernanceLifecycleState()).toBe('BASELINE_VERIFIED'); // auto-relocked
+
+      // A BOUNDED activation window → permitted.
+      const enabled = await enableExecutionTemporary('test-admin-001', 'e2e bounded activation', 15);
+      expect(enabled.success).toBe(true);
       const gate = await assertExecutionPermitted(false);
       expect(gate.permitted).toBe(true);
       expect(gate.lifecycleState).toBe('EXECUTION_ENABLED');
@@ -823,7 +837,7 @@ describeOrSkip('Phase 1A.3: End-to-End Migration Governance Validation (GOV-19, 
         recordBaselineReconciliation,
         verifyBaselineComplete,
         advanceToBaselineVerified,
-        enableExecution,
+        enableExecutionTemporary,
       } = await import('../lib/migrations/ledger');
 
       await bootstrapMigrationLedger('human', 'test-admin-001');
@@ -840,8 +854,12 @@ describeOrSkip('Phase 1A.3: End-to-End Migration Governance Validation (GOV-19, 
       expect(v.ok).toBe(true);
       const advanced = await advanceToBaselineVerified('test-admin-001');
       expect(advanced).toBe(true);
-      const enabled = await enableExecution('test-admin-001', 'e2e canary test activation');
-      expect(enabled).toBe(true);
+      // Commit 4 (fail-closed): execution requires a BOUNDED activation window.
+      // Indefinite enableExecution no longer permits execution, so the canary
+      // setup uses the bounded path with a max (15 min) window.
+      const enabled = await enableExecutionTemporary('test-admin-001', 'e2e canary test activation', 15);
+      expect(enabled.success).toBe(true);
+      expect(enabled.expiresAt).not.toBeNull();
     }
 
     /**
