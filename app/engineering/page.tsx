@@ -32,6 +32,15 @@ import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
+// ── Wave 5A — multi-lane SLD: page-path source-branch builder + the W4B.D
+// empty-fleet synthesis helper (a present sub with an empty fleet computes
+// from ITS OWN subSystems[key] equipment, or is excluded with a visible hint
+// — never a phantom default inverter).
+import {
+  buildSourceBranchesFromComputedMulti,
+  synthesizeFleetFromSubEquipment,
+} from '@/lib/permit/utils/sldAdapter';
+import type { SLDSourceBranch } from '@/lib/sld-professional-renderer';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
 
@@ -2651,6 +2660,38 @@ function EngineeringPageInner() {
     return { degenerate, suspect };
   }, [config.inverters, config.systemType, subSystemCounts]);
 
+  // ── Wave 5A / W4B.D must-fix — per-sub fleet plan for the hybrid compute ───
+  // A PRESENT sub whose partitioned fleet is EMPTY must never compute as a
+  // phantom default inverter (the SE7600H class). DECISION (documented):
+  //   1. If config.subSystems[key] carries an inverterId → synthesize a
+  //      one-inverter fleet from the sub's OWN equipment record (§1.1: the
+  //      map is the equipment authority) and compute normally;
+  //   2. otherwise EXCLUDE the sub from the aggregate numbers and surface a
+  //      visible per-sub hint (Diagram tab) until equipment is picked/split.
+  const hybridFleetPlan = useMemo(() => {
+    if (!subSystemCounts.isHybrid || fleetDiag.degenerate?.degenerate) return null;
+    const fb = toSubSystemKey(config.systemType);
+    const part = partitionFleet(config.inverters as any[], fb);
+    const subMap = ((config as any).subSystems ?? {}) as Record<string, { inverterId?: string; topology?: string; panelId?: string }>;
+    const fleets: Partial<Record<SubSystemKey, InverterConfig[]>> = {};
+    const synthesized: SubSystemKey[] = [];
+    const excluded: SubSystemKey[] = [];
+    for (const key of subSystemCounts.present) {
+      const fleet = (part[key] ?? []) as InverterConfig[];
+      if (fleet.length > 0) { fleets[key] = fleet; continue; }
+      const synth = synthesizeFleetFromSubEquipment(key, subMap[key], subSystemCounts[key]);
+      if (synth) {
+        fleets[key] = synth as unknown as InverterConfig[];
+        synthesized.push(key);
+        console.warn(`[hybridFleetPlan] '${key}' fleet empty — computing from subSystems.${key} equipment (${subMap[key]?.inverterId})`);
+      } else {
+        excluded.push(key);
+        console.warn(`[hybridFleetPlan] '${key}' fleet empty and no subSystems.${key}.inverterId — EXCLUDED from aggregate (no phantom default)`);
+      }
+    }
+    return { fleets, synthesized, excluded };
+  }, [subSystemCounts, fleetDiag, config]);
+
   const totalWatts = config.inverters.reduce((sum, inv) =>
     sum + inv.strings.reduce((s2, str) => {
       const panel = getPanelById(str.panelId);
@@ -2999,10 +3040,27 @@ function EngineeringPageInner() {
 
     // ── N > 1: one engine pass per PRESENT sub (layouts.panels stamps are the
     // membership authority, §1.1), aggregated at ONE POI (§1.7 / I-6).
-    const _part = partitionFleet(config.inverters as any[], _fbKey);
+    // Wave 5A / W4B.D: fleets come from hybridFleetPlan — empty fleets are
+    // synthesized from subSystems[key] equipment or the sub is EXCLUDED
+    // (visible hint in the Diagram tab) — never a phantom default inverter.
     const _subMapForCompute = ((config as any).subSystems ?? {}) as Record<string, any>;
-    const inputs: MultiSubSystemInput[] = _present.map((key, i) => {
-      const fleet = (_part[key] ?? []) as InverterConfig[];
+    const _plan = hybridFleetPlan;
+    const _computeKeys = _present.filter(k => !(_plan?.excluded ?? []).includes(k));
+    if (_computeKeys.length === 0) {
+      // Every present sub is equipment-less — legacy whole-project fallback.
+      const input = buildCsInputFor(
+        config.inverters,
+        systemPanelCount > 0 ? systemPanelCount : totalPanels,
+        totalPanels,
+        config.systemType,
+        true,
+      );
+      return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
+    }
+    const inputs: MultiSubSystemInput[] = _computeKeys.map((key, i) => {
+      const fleet = (_plan?.fleets[key]
+        ?? partitionFleet(config.inverters as any[], _fbKey)[key]
+        ?? []) as InverterConfig[];
       const subCount = subSystemCounts[key];
       return {
         ...buildCsInputFor(fleet, subCount, subCount, key, i === 0),
@@ -3032,12 +3090,23 @@ function EngineeringPageInner() {
       return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag]);
+  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag, hybridFleetPlan]);
 
   const computedSystem = computedMulti.aggregate;
 
   // Shorthand aliases from ComputedSystem
   const cs = computedSystem;
+
+  // ── Wave 5A — multi-lane SLD sources (Diagram tab / SLD route payload) ─────
+  // Built from computedMulti.subSystems (each lane = that sub's OWN engine
+  // pass). null ⇒ the Diagram tab keeps the hybrid banner as the FALLBACK
+  // (I-8: never a plausible-wrong single-lane sheet); a real branch set ⇒ the
+  // tab fetches a genuine multi-lane render from /api/engineering/sld.
+  const hybridSldSources = useMemo<SLDSourceBranch[] | null>(() => {
+    if (!subSystemCounts.isHybrid) return null;
+    if (computedMulti.subSystemKeys.length <= 1) return null; // degenerate/whole-fleet pass — not lane-splittable yet
+    return buildSourceBranchesFromComputedMulti(computedMulti) ?? null;
+  }, [subSystemCounts.isHybrid, computedMulti]);
 
   // Wave 3.7 — namespaced-run-id-tolerant lookup (parseRunId): at N=1 ids are
   // bare (legacy, byte-identical); at N>1 per-sub runs are `${key}:`-prefixed
@@ -5851,8 +5920,15 @@ function EngineeringPageInner() {
           generatorOutputBreakerA: config.generatorId
             ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
             : undefined,
-          // Pass ComputedSystem.runs as single source of truth for conduit schedule
-          runs:           legacyRunsView(),
+          // Pass ComputedSystem.runs as single source of truth for conduit schedule.
+          // Wave 5A: with source lanes the route renders MULTI-LANE and accepts
+          // the aggregate's NAMESPACED `${sub}:` run ids as-is; the legacy
+          // single-lane path keeps the bare-id primary-sub view.
+          runs:           hybridSldSources ? (cs.runs ?? []) : legacyRunsView(),
+          // Wave 5A — hybrid source lanes + the §1.7 aggregate total (Σ
+          // per-physical-inverter rounded OCPDs + battery bus impact).
+          sources:        hybridSldSources ?? undefined,
+          backfeedAmps:   hybridSldSources ? cs.backfeedBreakerAmps : undefined,
           // Microinverter branch data — for per-branch SLD drawing
           microBranches:     cs.isMicro ? cs.microBranches : undefined,
           branchWireGauge:   cs.isMicro ? csRun('BRANCH_RUN')?.wireGauge : undefined,
@@ -5903,13 +5979,14 @@ function EngineeringPageInner() {
 
   // ── V4 SLD fetch (uses /api/engineering/sld — professional renderer) ──────────
   const fetchSLD = async () => {
-    // Wave 3.7 / I-8: never fetch (or keep showing) a single-lane SLD for a
-    // hybrid — the Diagram tab renders the hybrid banner instead until the
-    // Wave-5 multi-lane renderer lands.
-    if (subSystemCounts.isHybrid) {
+    // Wave 5A / I-8: hybrids render a REAL multi-lane SLD when source lanes
+    // can be built from computedMulti. The banner remains ONLY as the
+    // fallback (degenerate whole-fleet pass, equipment-less subs) — never a
+    // plausible-wrong single-lane sheet, never a silent nothing.
+    if (subSystemCounts.isHybrid && !hybridSldSources) {
       setSldSvg(null);
       setSldError(null);
-      console.log('[SLD] hybrid project — single-lane SLD generation disabled (I-8); Diagram tab shows the hybrid banner');
+      console.log('[SLD] hybrid project without usable source lanes — Diagram tab shows the hybrid banner (I-8 fallback)');
       return;
     }
     setSldLoading(true);
@@ -7520,11 +7597,13 @@ function EngineeringPageInner() {
       // Ensure we have the accurate SLD before building the plan set.
       // If sldSvg is null (user hasn't clicked Generate SLD this session),
       // fetch it now so E-1 always uses renderSLDProfessional(), never the fallback.
-      // Wave 3.7 / I-8: at N>1 subsystems a client-cached single-lane SVG is a
-      // plausible-wrong permit sheet — never attach one; the permit engine's
-      // hybrid handling (Phase-0 DO-NOT-SUBMIT banner) owns E-1 until Wave 5.
-      let activeSldSvg = subSystemCounts.isHybrid ? null : sldSvg;
-      if (!activeSldSvg && !subSystemCounts.isHybrid) {
+      // Wave 5A / I-8: hybrids WITH usable source lanes attach a genuine
+      // multi-lane SVG (fetchSLDSvg now sends sources); only a hybrid whose
+      // lanes can't be built keeps the passthrough suppressed — the permit
+      // engine's own generateLiveSLD renders E-1 multi-lane server-side.
+      const _sldPassthroughOk = !subSystemCounts.isHybrid || !!hybridSldSources;
+      let activeSldSvg = _sldPassthroughOk ? sldSvg : null;
+      if (!activeSldSvg && _sldPassthroughOk) {
         console.log('[handleGeneratePlanSet] sldSvg is null — auto-fetching SLD before plan-set...');
         activeSldSvg = await fetchSLDSvg();
         if (activeSldSvg) {
@@ -7534,8 +7613,8 @@ function EngineeringPageInner() {
           console.warn('[handleGeneratePlanSet] SLD auto-fetch returned null — E-1 will use fallback renderer');
         }
       }
-      if (subSystemCounts.isHybrid) {
-        console.warn('[handleGeneratePlanSet] hybrid project — client SLD passthrough suppressed (I-8); permit engine owns E-1 handling');
+      if (subSystemCounts.isHybrid && !_sldPassthroughOk) {
+        console.warn('[handleGeneratePlanSet] hybrid project without usable source lanes — client SLD passthrough suppressed (I-8); permit engine owns E-1 handling');
       }
 
       // Gather all system data
@@ -12468,26 +12547,51 @@ function EngineeringPageInner() {
               </div>
             ) : (
               <div className="max-w-none space-y-4">
-                {/* Wave 3.7 / I-8 — HYBRID: the single-lane SLD cannot represent
-                    ≥2 sub-systems; until the Wave-5 multi-lane renderer lands,
-                    the Diagram tab shows this banner instead of a plausible-
-                    wrong single-system diagram (never a silent resolve-to-
-                    nothing). Single-system projects render exactly as before. */}
-                {subSystemCounts.isHybrid ? (
+                {/* Wave 5A / I-8 — HYBRID: with usable source lanes the tab
+                    fetches a REAL multi-lane render (one lane per sub-system,
+                    one POI, one service tail). This banner is now ONLY the
+                    fallback for hybrids whose lanes can't be built (degenerate
+                    whole-project fleet, equipment-less subs) — never a
+                    plausible-wrong single-lane sheet, never a silent nothing. */}
+                {subSystemCounts.isHybrid && !hybridSldSources ? (
                   <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4 flex items-start gap-3">
                     <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
                     <div className="text-xs text-amber-200 leading-relaxed">
                       <div className="font-bold text-amber-300 mb-1 uppercase tracking-wide">
-                        Hybrid design — single-line diagram not yet multi-system
+                        Hybrid design — source lanes not ready
                       </div>
-                      This project spans {subSystemCounts.present.map(k => `${subSystemCounts[k]} ${k}`).join(' + ')} modules.
-                      The SLD renderer currently draws ONE source lane, which cannot correctly represent
-                      {' '}{subSystemCounts.present.length} sub-systems at the point of interconnection.
-                      Diagram generation is disabled for this project until the multi-lane renderer ships —
-                      the electrical math (backfeed, conductor schedules) above and in the plan set already
+                      This project spans {subSystemCounts.present.map(k => `${subSystemCounts[k]} ${k}`).join(' + ')} modules,
+                      but per-sub-system source lanes can&apos;t be built yet
+                      {fleetDiag.degenerate?.degenerate
+                        ? ' — one whole-project inverter fleet still covers every sub-system. Use "Rebuild fleets per sub-system" in Inverters & Strings, then regenerate.'
+                        : ' — at least one sub-system has no usable per-sub equipment/fleet. Pick equipment for each sub-system, then regenerate.'}
+                      {' '}The electrical math (backfeed, conductor schedules) above and in the plan set already
                       aggregates every sub-system correctly. <span className="font-semibold text-amber-100">Do not
                       submit a single-lane SLD for this hybrid design.</span>
                     </div>
+                  </div>
+                ) : null}
+                {subSystemCounts.isHybrid && hybridSldSources ? (
+                  <div className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2.5 flex items-center gap-2 text-xs text-blue-300">
+                    <GitBranch size={14} className="shrink-0" />
+                    <span>
+                      Hybrid multi-source SLD — {hybridSldSources.length} lanes
+                      ({hybridSldSources.map(b => b.key).join(' + ')}) joining at one point of interconnection;
+                      120% check uses the summed per-inverter backfeed ({cs.backfeedBreakerAmps}A).
+                    </span>
+                  </div>
+                ) : null}
+                {/* W4B.D hint — present subs excluded from the aggregate because
+                    they have neither a fleet nor subSystems[key] equipment. */}
+                {(hybridFleetPlan?.excluded?.length ?? 0) > 0 ? (
+                  <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 flex items-center gap-2 text-xs text-amber-300">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>
+                      {hybridFleetPlan!.excluded.map(k => `${k} (${subSystemCounts[k]} modules)`).join(', ')} excluded from
+                      the aggregate numbers — no inverter assigned. Pick equipment for
+                      {' '}{hybridFleetPlan!.excluded.join(' + ')} in System Config to include
+                      {hybridFleetPlan!.excluded.length > 1 ? ' them' : ' it'}.
+                    </span>
                   </div>
                 ) : null}
                 {/* ══ SLD HERO ══════════════════════════════════════════════════ */}
