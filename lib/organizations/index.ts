@@ -111,4 +111,7 @@ export {
   resolveUserOrgs,
   resolvePrimaryOrg,
   getOrgMemberCount,
+  suspendOrganization,
+  archiveOrganization,
+  reactivateOrganization,
 } from './service';

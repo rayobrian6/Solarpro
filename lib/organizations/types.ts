@@ -207,8 +207,10 @@ export type MembershipError =
   | { code: 'INSUFFICIENT_PERMISSIONS'; message: string }
   | { code: 'ORG_NOT_ACTIVE'; message: string }
   | { code: 'ORG_SUSPENDED'; message: string }
+  | { code: 'ORG_ARCHIVED'; message: string }
   | { code: 'MEMBER_SUSPENDED'; message: string }
   | { code: 'SELF_TARGET'; message: string }
+  | { code: 'FEATURE_DISABLED'; message: string }
   | { code: 'DATABASE_ERROR'; message: string };
 
 // ============================================================================
