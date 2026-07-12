@@ -695,6 +695,52 @@ export async function recordBaselineReconciliation(params: {
 }
 
 /**
+ * Record an ENTIRE reviewed baseline batch in ONE transaction (Commit 3).
+ *
+ * All upserts commit together or roll back together — a single-entry failure
+ * aborts the whole batch (no partial baseline). Idempotent: re-recording the
+ * identical batch upserts to the same values via ON CONFLICT. Throws on failure
+ * so the caller (recordBaselineBatch) can report TRANSACTION_FAILED and record
+ * nothing.
+ *
+ * The evidence_type is server-fixed to MANUAL_VERIFICATION (a reviewed batch's
+ * evidence source is the operator, never a client claim); evidence_summary is
+ * the operator's note.
+ */
+export async function recordBaselineBatchRows(
+  entries: Array<{
+    identifier: string;
+    status: BaselineReconciliationStatus;
+    notes: string;
+  }>,
+  reconciledBy: string | null,
+): Promise<void> {
+  if (entries.length === 0) throw new Error('recordBaselineBatchRows: empty batch');
+  const sql = getRawSql();
+  const environment = getCurrentEnvironment();
+  // Neon transaction: build the array of parameterized upserts; executed
+  // atomically. Any rejection rolls the whole transaction back.
+  await sql.transaction((txn) =>
+    entries.map((e) => txn`
+      INSERT INTO migration_baseline (
+        migration_identifier, environment, reconciliation_status,
+        evidence_type, evidence_summary, reconciled_by
+      ) VALUES (
+        ${e.identifier}, ${environment}, ${e.status},
+        'MANUAL_VERIFICATION', ${e.notes.length > 0 ? e.notes : null}, ${reconciledBy}
+      )
+      ON CONFLICT (migration_identifier, environment)
+      DO UPDATE SET
+        reconciliation_status = EXCLUDED.reconciliation_status,
+        evidence_type = EXCLUDED.evidence_type,
+        evidence_summary = EXCLUDED.evidence_summary,
+        reconciled_by = EXCLUDED.reconciled_by,
+        reconciled_at = now()
+    `),
+  );
+}
+
+/**
  * Read the baseline reconciliation status for a single migration in the
  * current environment.
  *

@@ -54,9 +54,18 @@ import {
   enableExecution,
   disableExecution,
   bootstrapMigrationLedger,
+  recordBaselineBatchRows,
 } from '@/lib/migrations/ledger';
 import { generateBaselineEvidence } from '@/lib/migrations/baselineEvidence';
 import { buildOperatorReadiness } from '@/lib/migrations/operatorReadiness';
+import {
+  canonicalizeBaselineBatch,
+  computeBaselineBatchDigest,
+  validateBaselineBatch,
+  baselineBatchStatusCounts,
+  recordBaselineBatch,
+  type ClientBaselineReview,
+} from '@/lib/migrations/baselineBatch';
 import type {
   MigrationAction,
   MigrationActorType,
@@ -175,6 +184,8 @@ export async function POST(req: NextRequest) {
     'inspect-readiness',        // consolidated read-only dashboard
     'generate-baseline-evidence', // read-only schema-introspection evidence
     'bootstrap',                // create the ledger tables (super_admin + TOTP)
+    'prepare-baseline-batch',   // read-only: canonicalize + digest a reviewed set
+    'record-baseline-batch',    // mutation: record whole reviewed batch (1 TOTP)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -227,13 +238,15 @@ export async function POST(req: NextRequest) {
   const isReadiness = action === 'inspect-readiness';
   const isEvidence = action === 'generate-baseline-evidence';
   const isBootstrap = action === 'bootstrap';
-  const isOperatorReadonly = isReadiness || isEvidence;
+  const isPrepareBatch = action === 'prepare-baseline-batch';
+  const isRecordBatch = action === 'record-baseline-batch';
+  const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch;
 
   // Determine the migration action type for authorization.
   let migrationAction: MigrationAction;
   if (isExecute || isExecutionActivation) {
     migrationAction = 'execute';
-  } else if (isBaselineMutation || isBootstrap) {
+  } else if (isBaselineMutation || isBootstrap || isRecordBatch) {
     migrationAction = 'bootstrap';
   } else {
     migrationAction = 'inspect';
@@ -242,7 +255,7 @@ export async function POST(req: NextRequest) {
   // Operator-console surface is super_admin-only (matches the page's access
   // model). The read-only operator actions need an explicit gate because
   // authorizeMigration('inspect') otherwise permits plain 'admin'.
-  if ((isOperatorReadonly || isBootstrap) && adminUser.role !== 'super_admin') {
+  if ((isOperatorReadonly || isBootstrap || isRecordBatch) && adminUser.role !== 'super_admin') {
     return NextResponse.json(
       { success: false, error: `Action '${action}' requires super_admin role.` },
       { status: 403 },
@@ -257,7 +270,7 @@ export async function POST(req: NextRequest) {
   // - TOTP_INVALID: code doesn't match → retry allowed
   // - TOTP_REPLAY: time-step already consumed → must wait for next step
   let totpVerified = false;
-  if (isExecute || isExecutionActivation || isBootstrap) {
+  if (isExecute || isExecutionActivation || isBootstrap || isRecordBatch) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
         { success: false, error: 'A fresh TOTP code is required for this action. Provide it in the "totpCode" field.' },
@@ -414,6 +427,134 @@ export async function POST(req: NextRequest) {
         error: result.error ?? undefined,
         lifecycleState: (await getGovernanceLifecycleState()) ?? 'UNBOOTSTRAPPED',
       }, { status: result.success ? 200 : 500 });
+    }
+
+    if (isPrepareBatch || isRecordBatch) {
+      // ── Reviewed baseline batch (Commit 3) ──────────────────────────────
+      // The client supplies ONLY per-identifier review decisions; the server
+      // owns identifiers/filenames/checksums/order from the manifest and
+      // computes the tamper-evident digest. Reordered/tampered client input
+      // cannot change the recorded facts.
+      const rawReviews = Array.isArray(body?.reviews) ? body.reviews : null;
+      if (!rawReviews) {
+        return NextResponse.json(
+          { success: false, error: '"reviews" (array of { identifier, status, notes }) is required.' },
+          { status: 400 },
+        );
+      }
+      const VALID_STATUSES = new Set<BaselineReconciliationStatus>([
+        'CONFIRMED_APPLIED', 'CONFIRMED_NOT_APPLIED', 'PARTIALLY_APPLIED',
+        'NOT_APPLICABLE', 'UNKNOWN',
+      ]);
+      const clientReviews: ClientBaselineReview[] = [];
+      for (const r of rawReviews) {
+        const id = typeof r?.identifier === 'string' ? r.identifier : '';
+        const status = r?.status as BaselineReconciliationStatus;
+        if (!id || !VALID_STATUSES.has(status)) {
+          return NextResponse.json(
+            { success: false, error: `Each review needs an identifier and a valid status. Bad entry: ${JSON.stringify(r)?.slice(0, 120)}` },
+            { status: 400 },
+          );
+        }
+        clientReviews.push({ identifier: id, status, notes: typeof r?.notes === 'string' ? r.notes : null });
+      }
+
+      // Server-owned entries from the manifest (filenames + checksums + order).
+      const manifest = discoverMigrationFiles();
+      const serverEntries = manifest.files.map((f, i) => ({
+        identifier: f.identifier,
+        filename: f.filename,
+        checksumSha256: f.checksumSha256,
+        order: i,
+      }));
+
+      let batch;
+      try {
+        batch = canonicalizeBaselineBatch({
+          environment: getCurrentEnvironment(),
+          serverEntries,
+          clientReviews,
+        });
+      } catch (e) {
+        return NextResponse.json(
+          { success: false, error: (e as Error).message },
+          { status: 400 },
+        );
+      }
+
+      // Checksum-conflicted identifiers are blocking. Guarded — a missing
+      // ledger (fresh env) simply yields no conflicts.
+      let conflictIdentifiers: string[] = [];
+      try {
+        const state = await inspectMigrationState();
+        conflictIdentifiers = state.conflicts.map((c) => c.identifier);
+      } catch { /* no ledger yet — no conflicts */ }
+
+      const digest = computeBaselineBatchDigest(batch);
+      const validation = validateBaselineBatch(batch, { conflictIdentifiers });
+      const statusCounts = baselineBatchStatusCounts(batch);
+
+      if (isPrepareBatch) {
+        return NextResponse.json({
+          success: true,
+          action: 'prepare-baseline-batch',
+          environment: batch.environment,
+          digest,
+          entryCount: batch.entries.length,
+          canonicalOrder: batch.entries.map((e) => e.identifier),
+          statusCounts,
+          blocking: !validation.ok,
+          issues: validation.issues,
+        });
+      }
+
+      // record-baseline-batch — super_admin + fresh TOTP already verified.
+      const reason = (body?.reason as string | undefined)?.trim();
+      const confirmedDigest = typeof body?.confirmedDigest === 'string' ? body.confirmedDigest : '';
+      if (!reason) {
+        return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.' }, { status: 400 });
+      }
+      if (!confirmedDigest) {
+        return NextResponse.json({ success: false, error: '"confirmedDigest" (from prepare-baseline-batch) is required.' }, { status: 400 });
+      }
+      const recordResult = await recordBaselineBatch({
+        batch,
+        confirmedDigest,
+        reconciledBy: adminUser.id,
+        reason,
+        conflictIdentifiers,
+        deps: {
+          environment: batch.environment,
+          runTransaction: (entries, reconciledBy) =>
+            recordBaselineBatchRows(
+              entries.map((e) => ({ identifier: e.identifier, status: e.status, notes: e.notes })),
+              reconciledBy,
+            ),
+          audit: (ev) => emitAuditEvent({
+            type: 'migration.baseline.completed',
+            actorType: 'human',
+            actorId: ev.reconciledBy,
+            environment: ev.environment,
+            executionId: null,
+            migrationIdentifier: null,
+            filename: null,
+            details: {
+              reviewedBatch: true,
+              digest: ev.digest,
+              identifiers: ev.identifiers,
+              statusCounts: ev.statusCounts,
+              reason: ev.reason,
+            },
+          }),
+        },
+      });
+      return NextResponse.json({
+        success: recordResult.success,
+        action: 'record-baseline-batch',
+        recorded: recordResult.recorded,
+        digest: recordResult.digest,
+        error: recordResult.error,
+      }, { status: recordResult.success ? 200 : 409 });
     }
 
     // ── Baseline control plane (MIGRATION-GOV-11, Phase 1A.2) ──────────────
