@@ -52,6 +52,18 @@ export {
   createOrganizationWithOwner,
 } from './memberships';
 
+// Active organization context
+export {
+  type ResolvedActiveOrg,
+  getActiveOrgContextRow,
+  setActiveOrg,
+  clearActiveOrg,
+  setDefaultActiveOrg,
+  resolveActiveOrg,
+  resolveActiveOrgWithRole,
+  resolveActiveOrgCanonical,
+} from './context';
+
 // High-level service
 export {
   getOrganization,
