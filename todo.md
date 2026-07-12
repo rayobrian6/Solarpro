@@ -107,9 +107,9 @@ Starting HEAD: 100114c2
 - [x] Full suite run: 7017 pass + 3 pre-existing golden-path failures (unrelated) + 54 skipped (integration without DB)
 - [x] Git clean, aligned with remote (HEAD = 2df14f75 = origin/dev), pushed
 - [x] Deliver final report to user
-- [ ] npx tsc --noEmit
-- [ ] npx vitest run tests/phase1a-migration-governance.test.ts
-- [ ] npx vitest run (full suite, honest report)
-- [ ] git status clean, dev aligned with origin/dev
-- [ ] Push all commits
-- [ ] Deliver final report
+- [x] npx tsc --noEmit
+- [x] npx vitest run tests/phase1a-migration-governance.test.ts
+- [x] npx vitest run (full suite, honest report)
+- [x] git status clean, dev aligned with origin/dev
+- [x] Push all commits
+- [x] Deliver final report
