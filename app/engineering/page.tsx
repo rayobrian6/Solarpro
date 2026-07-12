@@ -2972,6 +2972,31 @@ function EngineeringPageInner() {
       }
     }
 
+    // ── Wave 4B.D — degenerate whole-project fleet guard. Partitioning would
+    // hand the ONE tagged sub the whole fleet at a fraction of its panels
+    // (Ray live: the 85-panel IQ8+ fleet tagged 'fence' computed at the 17
+    // fence-stamped modules ⇒ "17 microinverters · 2 AC branches"), while the
+    // other present subs computed over EMPTY fleets ⇒ phantom default string
+    // inverters inflating/warping the aggregate AC kW. Until the fleet is
+    // split per sub (4B.B auto-split or the header action), run ONE honest
+    // whole-fleet pass: deviceCount=85, branches=ceil(85/13)=7 for a single
+    // IQ8+ fleet, and the header AC kW equals the fleet's real output.
+    if (fleetDiag.degenerate?.degenerate) {
+      const degKey = fleetDiag.degenerate.key ?? _fbKey;
+      console.warn(
+        '[ComputedMultiSystem] degenerate single fleet (' + fleetDiag.degenerate.fleetPanelTotal +
+        "p under '" + degKey + "' on a hybrid layout) — ONE whole-fleet pass until fleets are split per sub",
+      );
+      const input = buildCsInputFor(
+        config.inverters,
+        systemPanelCount > 0 ? systemPanelCount : totalPanels,
+        totalPanels,
+        degKey,
+        true,
+      );
+      return computeMultiSystem([{ ...input, subSystemKey: degKey }]);
+    }
+
     // ── N > 1: one engine pass per PRESENT sub (layouts.panels stamps are the
     // membership authority, §1.1), aggregated at ONE POI (§1.7 / I-6).
     const _part = partitionFleet(config.inverters as any[], _fbKey);
@@ -3007,7 +3032,7 @@ function EngineeringPageInner() {
       return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts]);
+  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag]);
 
   const computedSystem = computedMulti.aggregate;
 
@@ -3433,15 +3458,20 @@ function EngineeringPageInner() {
 
   // Snapshot of current config for diffing.
     // v58.0 — Canonical AC output kW.
-    // Always prefer sizingRecommendation (engine truth) over totalInverterKw
-    // (which reads config.inverters and may reflect stale model/count).
-    // Used by Electrical tab, Engineering Summary, and DC/AC ratio display.
+    // Wave 4B.D — was: "always prefer sizingRecommendation over
+    // totalInverterKw". That made the Electrical-tab hero show the
+    // RECOMMENDED fleet's output (e.g. 85 × IQ8A 0.349 = 29.66 kW) while the
+    // System Config header showed the COMMITTED fleet (85 × IQ8+ 0.290 =
+    // 24.65 kW) — Ray's cross-tab AC kW drift. Per the v61.2 single-source
+    // rule the display mode decides: 'recommended' reads the engine proposal,
+    // 'current' reads the committed config (recommendation only as fallback
+    // when the config carries no inverters yet).
     const _recInverterAcKw = sizingRecommendation
       ? sizingRecommendation.inverterModels.reduce((s, m) => s + m.acKw * m.qty, 0)
       : 0;
-    const canonicalAcKw = _recInverterAcKw > 0
+    const canonicalAcKw = displayMode === 'recommended' && _recInverterAcKw > 0
       ? _recInverterAcKw
-      : Number(totalInverterKw);
+      : (Number(totalInverterKw) > 0 ? Number(totalInverterKw) : _recInverterAcKw);
 
   // ─── v61.2 SINGLE SOURCE OF TRUTH ──────────────────────────────────────────
   // ALL UI components read from displayConfig — never mix sources.
