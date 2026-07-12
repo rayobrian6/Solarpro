@@ -5,6 +5,12 @@
 
 import type { Project, PlacedPanel, Layout, SolarPanel } from '@/types';
 import type { DesignSnapshot, RoofSegmentSummary, GroundArraySummary, FenceArraySummary } from './types';
+import {
+  canonicalIdTuple,
+  canonicalMapSerialization,
+  isDegenerateSubSystemMap,
+  normalizeSubSystemMap,
+} from '@/lib/system/subSystemMirror';
 
 
 // Default panel specs (400W monocrystalline) used when no panel selected
@@ -110,10 +116,20 @@ export function buildDesignSnapshot(project: Project, layout: Layout): DesignSna
  * inverter / mounting / battery selection changes — including the panel's
  * physical dimensions, so a size change (which alters the array footprint)
  * invalidates the engineering report and forces a rebuild + layout recompute.
+ *
+ * Wave 1b — §1.6 degenerate-map rule (I-9 hash stability): the LEGACY shape
+ * is hashed whenever the per-subsystem equipment map is ABSENT or DEGENERATE
+ * (exactly one entry whose canonical id-tuple matches the flat mirror's), so
+ * migrate-on-load synthesis / lazy write-back of the map to an unchanged
+ * single-system project NEVER changes its designVersionId (no false
+ * staleness, no fleet-wide report rebuild). The extended hash — the legacy
+ * key plus the canonically-serialized map (fixed key order, id-tuples only,
+ * rename/provenance immune) — kicks in only for genuinely hybrid equipment
+ * or real map/mirror drift.
  */
 function computeDesignVersionId(layout: Layout, project?: Project): string {
   const sp = project?.selectedPanel;
-  const key = JSON.stringify({
+  const legacyShape = {
     id: layout.id,
     panelCount: layout.totalPanels,
     systemSizeKw: layout.systemSizeKw,
@@ -123,7 +139,21 @@ function computeDesignVersionId(layout: Layout, project?: Project): string {
     inverter: project?.selectedInverter ? { m: project.selectedInverter.manufacturer, model: project.selectedInverter.model } : null,
     mounting: project?.selectedMounting ? { id: (project.selectedMounting as { id?: string }).id, model: (project.selectedMounting as { model?: string }).model } : null,
     batteryCount: project?.batteryCount ?? 0,
+  };
+
+  // Per-subsystem map from the canonical selected_equipment envelope
+  // (hydrated by rowToProject; absent for every pre-contract project).
+  const map = normalizeSubSystemMap(project?.selectedEquipmentSubSystems);
+  const flatMirrorTuple = canonicalIdTuple({
+    panelId: sp?.id,
+    inverterId: (project?.selectedInverter as { id?: string } | undefined)?.id,
+    mountingId: (project?.selectedMounting as { id?: string } | undefined)?.id,
+    batteryId: project?.selectedBatteries?.[0]?.id,
   });
+  const key = !map || isDegenerateSubSystemMap(map, flatMirrorTuple)
+    ? JSON.stringify(legacyShape)
+    : JSON.stringify({ ...legacyShape, subSystems: canonicalMapSerialization(map) });
+
   // Simple hash
   let hash = 0;
   for (let i = 0; i < key.length; i++) {

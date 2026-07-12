@@ -729,6 +729,11 @@ export interface Project {
   selectedMounting?: MountingSystem;
   selectedBatteries?: Battery[];
   batteryCount?: number;
+  /** Wave 1b (contract §1.3): per-subsystem equipment map from the canonical
+   *  projects.selected_equipment envelope. The flat selected* fields above
+   *  remain the primary mirror (derived roof > ground > fence, §1.4).
+   *  Absent for every pre-contract project. */
+  selectedEquipmentSubSystems?: import('@/lib/system/subSystemEquipment').SubSystemEquipmentMap;
   billAnalysis?: BillAnalysis;
   billData?: Record<string, unknown>;  // raw extracted bill data from BillUploadFlow
   engineeringSeed?: EngineeringSeed;  // structured seed from bill upload — drives engineering engine hydration

@@ -229,6 +229,7 @@ export function hydrateCanonicalEquipment(row: Record<string, unknown>): {
   selectedMounting?: import('@/types').MountingSystem;
   selectedBatteries?: import('@/types').Battery[];
   batteryCount?: number;
+  selectedEquipmentSubSystems?: import('@/lib/system/subSystemEquipment').SubSystemEquipmentMap;
 } {
   const raw = row.selected_equipment;
   let selEq: Record<string, unknown> | null = null;
@@ -240,12 +241,20 @@ export function hydrateCanonicalEquipment(row: Record<string, unknown>): {
     }
   }
   if (!selEq) return {};
+  // Wave 1b (contract §1.3): pass the per-subsystem map through when present
+  // and non-empty ({} = absent, Wave-1a rule) — computeDesignVersionId's §1.6
+  // degenerate-map hash rule reads it off Project.selectedEquipmentSubSystems.
+  const subs = selEq.subSystems;
+  const hasSubs = !!subs && typeof subs === 'object' && !Array.isArray(subs) && Object.keys(subs).length > 0;
   return {
     selectedPanel: (selEq.panel as import('@/types').SolarPanel | undefined) ?? undefined,
     selectedInverter: (selEq.inverter as import('@/types').Inverter | undefined) ?? undefined,
     selectedMounting: (selEq.mounting as import('@/types').MountingSystem | undefined) ?? undefined,
     selectedBatteries: (selEq.batteries as import('@/types').Battery[] | undefined) ?? undefined,
     batteryCount: typeof selEq.batteryCount === 'number' ? (selEq.batteryCount as number) : undefined,
+    selectedEquipmentSubSystems: hasSubs
+      ? subs as import('@/lib/system/subSystemEquipment').SubSystemEquipmentMap
+      : undefined,
   };
 }
 
@@ -282,6 +291,7 @@ export function rowToProject(row: Record<string, unknown>): Project {
     selectedMounting: canonEq.selectedMounting,
     selectedBatteries: canonEq.selectedBatteries,
     batteryCount: canonEq.batteryCount,
+    selectedEquipmentSubSystems: canonEq.selectedEquipmentSubSystems,
     billData: rawBillData,
     billAnalysis,
     utilityName,

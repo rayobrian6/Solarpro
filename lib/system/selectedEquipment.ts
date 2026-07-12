@@ -22,6 +22,8 @@
 import type { Project, SolarPanel, Battery } from '@/types';
 import { getPanelById, getBatteryById, type SolarPanel as DbSolarPanel, type BatterySystem } from '@/lib/equipment-db';
 import type { ProjectConfig } from '@/lib/engineering-helpers';
+import type { SubSystemEquipmentMap } from '@/lib/system/subSystemEquipment';
+import { derivePrimaryMirror, normalizeSubSystemMap, subSystemEntryCount } from '@/lib/system/subSystemMirror';
 
 /** Canonical design-equipment record persisted to projects.selected_equipment. */
 export interface SelectedEquipment {
@@ -34,9 +36,15 @@ export interface SelectedEquipment {
   batteryId?: string;
   batteries?: Battery[];
   batteryCount?: number;
-  batteryKwh?: number;
+  batteryKwh?: number;     // LEGACY PER-UNIT kWh (mirror of ProjectConfig.batteryKwh — 1:1 with batteryKwhPerUnit)
   source?: 'design' | 'engineering';
   updatedAt?: string;
+  // ── Wave 1b (contract §1.3) — cross-app sync mirror carries the map ──
+  /** Per-subsystem equipment map; top-level ids above REMAIN the primary
+   *  mirror, derived roof > ground > fence (§1.4). */
+  subSystems?: SubSystemEquipmentMap;
+  /** 2 = per-subsystem contract envelope (upsertSelectedEquipment guards on it). */
+  schemaVersion?: number;
 }
 
 /** Minimal project view the reconciler needs (avoids requiring a full Project). */
@@ -191,8 +199,15 @@ export function reconcileFromEngineeringConfig(
   const patch: SelectedEquipment = { source: 'engineering', updatedAt: now };
   let changed = false;
 
+  // ── Wave 1b (§1.4): with a MULTI-entry subSystems map, every flat field is
+  // derived from derivePrimaryMirror(map) — never computed in parallel (the
+  // dominant-panel vote and the flat battery scalars are the legacy N<=1
+  // sources only). Single-entry maps mirror identically to today.
+  const map = normalizeSubSystemMap(cfg.subSystems);
+  const mirror = subSystemEntryCount(map) > 1 ? derivePrimaryMirror(map) : null;
+
   // ── Panel ────────────────────────────────────────────────────────────────
-  const panelId = dominantPanelId(cfg);
+  const panelId = mirror ? (mirror.panelId ?? undefined) : dominantPanelId(cfg);
   if (panelId) {
     const panel = getPanelById(panelId);
     if (panel && panel.id !== project?.selectedPanel?.id) {
@@ -203,25 +218,40 @@ export function reconcileFromEngineeringConfig(
   }
 
   // ── Battery ────────────────────────────────────────────────────────────────
-  const cfgCount = typeof cfg.batteryCount === 'number' ? cfg.batteryCount : 0;
+  // Mirror rule: primary sub's battery; batteryKwhPerUnit → batteryKwh is 1:1
+  // (legacy batteryKwh is PER-UNIT — never multiply by count here).
+  const effBatteryId = mirror ? (mirror.batteryId ?? '') : cfg.batteryId;
+  const effBatteryCount = mirror
+    ? (typeof mirror.batteryCount === 'number' ? mirror.batteryCount : 0)
+    : (typeof cfg.batteryCount === 'number' ? cfg.batteryCount : 0);
+  const effBatteryKwh = mirror ? mirror.batteryKwhPerUnit : cfg.batteryKwh;
   const curBatId = project?.selectedBatteries?.[0]?.id;
   const curCount = project?.batteryCount ?? 0;
-  if (cfg.batteryId) {
-    const bat = getBatteryById(cfg.batteryId);
-    if (bat && (bat.id !== curBatId || cfgCount !== curCount)) {
+  if (effBatteryId) {
+    const bat = getBatteryById(effBatteryId);
+    if (bat && (bat.id !== curBatId || effBatteryCount !== curCount)) {
       patch.batteryId = bat.id;
-      patch.batteries = cfgCount > 0 ? [batterySystemToBattery(bat)] : [];
-      patch.batteryCount = cfgCount;
-      patch.batteryKwh = typeof cfg.batteryKwh === 'number' && cfg.batteryKwh > 0
-        ? cfg.batteryKwh
+      patch.batteries = effBatteryCount > 0 ? [batterySystemToBattery(bat)] : [];
+      patch.batteryCount = effBatteryCount;
+      patch.batteryKwh = typeof effBatteryKwh === 'number' && effBatteryKwh > 0
+        ? effBatteryKwh
         : bat.usableCapacityKwh;
       changed = true;
     }
-  } else if (cfgCount === 0 && curCount > 0) {
+  } else if (effBatteryCount === 0 && curCount > 0) {
     // Battery removed in engineering — clear it from the design record too.
     patch.batteryId = '';
     patch.batteries = [];
     patch.batteryCount = 0;
+    changed = true;
+  }
+
+  // ── subSystems map passthrough (§1.3 cross-app sync mirror) ───────────────
+  // Any v2 config (non-empty map) propagates the map + schemaVersion so
+  // upsertSelectedEquipment's per-key deep merge keeps the stores aligned.
+  if (map) {
+    patch.subSystems = map;
+    patch.schemaVersion = 2;
     changed = true;
   }
 
