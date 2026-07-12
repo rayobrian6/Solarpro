@@ -84,6 +84,7 @@ export {
   authzReasonToStatusCode,
   quickCheckRole,
   isPlatformAdminUser,
+  isSupportElevationActive,
   isOrgAuthzActive,
 } from './authorization';
 

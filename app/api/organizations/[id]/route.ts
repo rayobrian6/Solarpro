@@ -10,8 +10,12 @@
 // legacy behavior (checking users.org_id directly).
 //
 // Authorization:
-//   - The caller must be an active member of the org (or a platform admin).
-//   - Platform admins (admin/super_admin) bypass membership checks.
+//   - The caller must be an active member of the org.
+//   - Platform admin/super_admin roles do NOT bypass membership checks
+//     (ADR-004). A platform admin without org membership is denied,
+//     identical to any other non-member. Support elevation, if active
+//     (ADR-012), would be handled by the authorization engine — but is
+//     fail-closed by default.
 // ============================================================================
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
@@ -21,7 +25,6 @@ import {
   getOrganizationWithMembers,
   isOrgAuthorityEnabled,
   isMember,
-  isPlatformAdminUser,
 } from '@/lib/organizations';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +35,8 @@ export const maxDuration = 30;
  * GET /api/organizations/[id]
  *
  * Returns the organization details and its member list. The caller must
- * be a member of the org (or a platform admin).
+ * be an active member of the org. Platform admin/super_admin roles do NOT
+ * bypass this requirement (ADR-004).
  *
  * In legacy mode (feature flag off), falls back to checking users.org_id.
  */
@@ -53,18 +57,14 @@ export async function GET(
   try {
     // --- New authority path (feature-flagged) ---
     if (isOrgAuthorityEnabled()) {
-      // Platform admins bypass membership checks
-      const isPlatformAdmin = await isPlatformAdminUser(user.id);
-
-      if (!isPlatformAdmin) {
-        // Check membership in the requested org directly using the new system
-        const member = await isMember(orgId, user.id);
-        if (!member) {
-          return NextResponse.json(
-            { success: false, error: 'You are not a member of this organization' },
-            { status: 403 }
-          );
-        }
+      // Membership is required for all users, including platform admins
+      // (ADR-004). Platform admin status does not bypass this check.
+      const member = await isMember(orgId, user.id);
+      if (!member) {
+        return NextResponse.json(
+          { success: false, error: 'You are not a member of this organization' },
+          { status: 403 }
+        );
       }
 
       const orgWithMembers = await getOrganizationWithMembers(orgId);
