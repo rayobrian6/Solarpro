@@ -113,6 +113,23 @@ export interface DerivedRunLengths {
 }
 
 /**
+ * Wave 2a (contract §3, 2a Compute): options for per-subsystem derivation.
+ * A hybrid CADModel carries roof + ground + fence geometry simultaneously —
+ * the whole-project `cad.systemType` can no longer pick the branch. Callers
+ * computing ONE subsystem pass its systemType explicitly; legacy callers
+ * (no opts) keep the exact pre-Wave-2a behavior.
+ */
+export interface DeriveRunLengthsOpts {
+  /**
+   * Explicit subsystem scope — beats cad.systemType. Accepts both canonical
+   * CAD spellings ('roof' | 'ground_mount' | 'solar_fence') and engineering
+   * spellings ('ground' | 'fence'). Unknown/absent values scope to roof
+   * (the end-to-end default placement type).
+   */
+  systemType?: string | null;
+}
+
+/**
  * Derive wire run lengths from CAD geometry.
  *
  * Returns a `Partial<Record<RunSegmentId, number>>` that can be spread directly
@@ -121,13 +138,19 @@ export interface DerivedRunLengths {
  *
  * All returned values include the 15% NEC slack factor.
  */
-export function deriveRunLengths(cad: CADModel): DerivedRunLengths {
+export function deriveRunLengths(cad: CADModel, opts?: DeriveRunLengthsOpts): DerivedRunLengths {
   const result: Partial<Record<RunSegmentId, number>> = {};
   const notes: Partial<Record<RunSegmentId, string>> = {};
 
-  const isRoof   = cad.systemType === 'roof'         || !cad.systemType;
-  const isGround = cad.systemType === 'ground_mount';
-  const isFence  = cad.systemType === 'solar_fence';
+  // Wave 2a: explicit per-subsystem scope beats the whole-project systemType.
+  // Legacy path (no opts.systemType) is byte-identical to pre-Wave-2a.
+  const explicit = opts?.systemType != null && opts.systemType !== '';
+  const st = String((explicit ? opts!.systemType : cad.systemType) ?? '').toLowerCase();
+  const isGround = st === 'ground_mount' || st === 'ground';
+  const isFence  = st === 'solar_fence'  || st === 'fence';
+  const isRoof   = explicit
+    ? (!isGround && !isFence)                          // explicit scope: roof is the default bucket
+    : (cad.systemType === 'roof' || !cad.systemType);  // legacy semantics preserved exactly
 
   const conduitFt   = totalConduitLengthFt(cad.conduitRoutes);
   const mspNode     = findMspNode(cad.electricalNodes);

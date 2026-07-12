@@ -18,12 +18,13 @@
 // per-branch / per-EGC derivation that was previously scattered.
 // ═══════════════════════════════════════════════════════════════
 
-import type { PermitInput } from '../types';
+import type { PermitInput, ResolvedEquipment } from '../types';
 import type { CADModel } from '@/lib/cad/types';
-import { necNextStandardOcpd } from './helpers';
+import { necNextStandardOcpd, resolveEquipmentBySubSystem } from './helpers';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { balancedBranchSizes, microBranchCount, planMicroBranches, type BranchPlanPanel } from './branching';
+import { partitionSubSystems, toSubSystemKey, isSubSystemKey, type SubSystemKey, type SubSystemPanel } from './subSystems';
 
 export type ConductorTopology = 'MICRO' | 'STRING' | 'OPTIMIZER';
 
@@ -48,6 +49,41 @@ export interface DcStringRun {
   ocpdAmps: number | null;  // Isc × 1.56 → next standard
   voltageDropPct: number | null;
   lengthFt: number | null;
+}
+
+/**
+ * Wave 2d — ONE sub-system's conductor authority (contract §1.7:
+ * `conductorAuthority.subSystems[key]`). Each sub derives its topology,
+ * branch plan, perMicroA and EGC from ITS OWN panels + equipment — never
+ * from the project-wide winner. Wave 5 sheet workers consume this set.
+ */
+export interface SubSystemConductorAuthority {
+  key: SubSystemKey;
+  topology: ConductorTopology;
+  isMicro: boolean;
+  /** Panels stamped to this sub (membership authority = placement stamps). */
+  panelCount: number;
+  /** Micro devices on THIS sub (0 for string/optimizer subs). */
+  deviceCount: number;
+  /** Per-device AC output amps — from the SUB's own per-device kW, never
+   *  totalAcKw/totalPanels (the Stowell-class mis-sizing this wave kills). */
+  perMicroA: number | null;
+  /** The sub's own resolved equipment (resolveEquipmentBySubSystem). */
+  equipment: ResolvedEquipment;
+  /** MICRO subs only — AC branch circuits over THIS sub's panels. */
+  microBranches: MicroBranch[];
+  /** STRING/OPTIMIZER subs only — DC strings of THIS sub's inverters. */
+  dcStrings: DcStringRun[];
+  /** Governing branch/string OCPD of THIS sub (EGC basis). */
+  governingOcpd: number;
+  egc: { gauge: string; basisOcpd: number; source: 'engine' | 'nec-250.122' };
+  /** The sub's AC output feeder toward the POI (per-sub OCPD basis). */
+  acSubFeeder: {
+    currentA: number;      // Σ device/inverter AC output amps for this sub
+    continuousA: number;   // × 1.25 (NEC 690.8(A))
+    ocpdAmps: number | null;
+    wireGauge: string;
+  };
 }
 
 export interface ConductorAuthority {
@@ -81,6 +117,13 @@ export interface ConductorAuthority {
   };
   /** Governing branch/string OCPD used as the EGC-sizing basis. */
   governingOcpd: number;
+  /** Wave 2d — per-sub authority set (roof → ground → fence order). ALWAYS
+   *  present: N=1 yields a single entry mirroring the top level, so consumers
+   *  can iterate unconditionally. At N>1, every top-level field above is
+   *  DERIVED from this set (aggregate view for legacy consumers). */
+  subSystems: SubSystemConductorAuthority[];
+  /** True when the design spans more than one sub-system. */
+  isHybrid: boolean;
 }
 
 /** Normalize a conductor callout / gauge string down to a plain '#N AWG'. */
@@ -112,77 +155,88 @@ export function wireGaugeForOcpd(ocpdAmps: number): string {
   return '#2/0 AWG';
 }
 
+/** One micro branch row from a device count + per-device amps — the ONE
+ *  formula both the legacy top level and the per-sub set use. */
+function microBranchRow(index: number, deviceCount: number, perMicroA: number): MicroBranch {
+  const branchCurrentA = deviceCount * perMicroA;
+  const continuousA = branchCurrentA * 1.25;
+  const ocpdAmps = necNextStandardOcpd(continuousA) || 20;
+  const wireGauge = wireGaugeForOcpd(ocpdAmps);
+  return {
+    index,
+    deviceCount,
+    branchCurrentA,
+    continuousA,
+    ocpdAmps,
+    wireGauge,
+    conductorCallout: `${wireGauge} THWN-2 + EGC`,
+    egcGauge: getEGCSize(ocpdAmps),
+  };
+}
+
+/** One DC string row — same derivation both paths (legacy + per-sub). */
+function dcStringRow(index: number, invIdx: number, strIdx: number, str: any): DcStringRun {
+  const isc = Number(str.isc) || 0;
+  return {
+    index,
+    invIdx,
+    strIdx,
+    label: `DC ${invIdx + 1}-${strIdx + 1}`,
+    wireGauge: plainGauge(str.wireGauge, '#10 AWG'),
+    ampacityA: isc ? Math.ceil(isc * 1.25 * 100) / 100 : (str.ampacity ?? null),
+    ocpdAmps: isc ? necNextStandardOcpd(isc * 1.56) : (str.ocpd ?? null),
+    voltageDropPct: str.voltageDrop != null ? Number(str.voltageDrop) : null,
+    lengthFt: str.wireLength != null ? Number(str.wireLength) : null,
+  };
+}
+
+/** Resolve ONE sub-system's topology from ITS OWN equipment — never from
+ *  inverters[0] or a project-wide vote (Invariant I-3). */
+function topologyForSub(eq: ResolvedEquipment, fallback: ConductorTopology): ConductorTopology {
+  const t = (eq.inverterType || '').toLowerCase();
+  if (t.includes('micro')) return 'MICRO';
+  if (t.includes('optimizer')) return 'OPTIMIZER';
+  if (t.includes('string')) return 'STRING';
+  const bm = `${eq.inverterManufacturer} ${eq.inverterModel}`.toLowerCase();
+  if (bm.includes('enphase') || bm.includes('iq8') || bm.includes('iq7')) return 'MICRO';
+  if (bm.includes('solaredge') || bm.includes('optimizer')) return 'OPTIMIZER';
+  if (bm.includes('solis') || bm.includes('sol-ark') || bm.includes('solark') || bm.includes('sma')
+    || bm.includes('fronius') || bm.includes('growatt') || bm.includes('huawei')) return 'STRING';
+  return fallback;
+}
+
 /**
  * Build the shared conductor authority. PURE — no I/O, no engine run.
  * Safe to call from every consumer; identical inputs → identical output.
+ *
+ * Wave 2d: the authority is now a PER-SUB SET plus a derived aggregate.
+ * Single-system inputs take the exact pre-Wave-2d code path (top-level output
+ * byte-identical; the one `subSystems` entry mirrors it). Hybrid inputs get
+ * one authority per sub — each sub's topology, branch plan and perMicroA from
+ * its OWN panels + equipment, killing the 94-panel single-topology
+ * contamination (one `planMicroBranches` over ALL panels with ONE inverter
+ * model, perMicroA = totalAcKw/totalPanels across sub boundaries).
  */
 export function buildConductorAuthority(input: PermitInput, cad?: CADModel | null): ConductorAuthority {
   const { project, system, compliance } = input;
   const elec = compliance?.electrical as any;
-  const topology = topologyToLegacy(getInverterTopology(input, cad ?? undefined)) as ConductorTopology;
-  const isMicro = topology === 'MICRO';
+  const legacyTopology = topologyToLegacy(getInverterTopology(input, cad ?? undefined)) as ConductorTopology;
 
   const eq = getEquipmentContext(input, cad ?? undefined);
   const totalPanels = system?.totalPanels || cad?.totalPanels || 0;
   const totalAcKw = system?.totalAcKw || 0;
+  const positions = ((project as any).panelPositions ?? []) as BranchPlanPanel[];
 
-  // ── Micro branches ─────────────────────────────────────────────
-  const microBranches: MicroBranch[] = [];
-  if (isMicro && totalPanels > 0) {
-    const positions = ((project as any).panelPositions ?? []) as BranchPlanPanel[];
-    const plan = positions.length ? planMicroBranches(positions, eq.inverterModel) : null;
-    const sizes = plan?.sizes?.length
-      ? plan.sizes
-      : balancedBranchSizes(totalPanels, microBranchCount(totalPanels, eq.inverterModel));
-    // Per-micro AC output amps. Prefer the true per-device figure from the
-    // system total; only if that is missing does the branch collapse to 0A.
-    const perMicroA = totalAcKw > 0 ? (totalAcKw * 1000 / totalPanels) / 240 : 0;
-    sizes.forEach((n, i) => {
-      const branchCurrentA = n * perMicroA;
-      const continuousA = branchCurrentA * 1.25;
-      const ocpdAmps = necNextStandardOcpd(continuousA) || 20;
-      const wireGauge = wireGaugeForOcpd(ocpdAmps);
-      microBranches.push({
-        index: i + 1,
-        deviceCount: n,
-        branchCurrentA,
-        continuousA,
-        ocpdAmps,
-        wireGauge,
-        conductorCallout: `${wireGauge} THWN-2 + EGC`,
-        egcGauge: getEGCSize(ocpdAmps),
-      });
-    });
-  }
+  // ── Wave 2d sub-system detection ───────────────────────────────
+  // Membership authority = panel placement stamps (contract §1.1); the CAD
+  // hybrid sections corroborate when positions are absent from the payload.
+  const partition = positions.length ? partitionSubSystems(positions as unknown as SubSystemPanel[]) : [];
+  const sectionKeys = ((cad?.hybrid?.sections ?? []).map(s => s.key)).filter(isSubSystemKey);
+  const orderedKeys = (['roof', 'ground', 'fence'] as const).filter(k =>
+    partition.some(s => s.key === k && s.panelCount > 0) || sectionKeys.includes(k));
+  const isHybrid = orderedKeys.length > 1;
 
-  // ── DC strings (string / optimizer) ────────────────────────────
-  const dcStrings: DcStringRun[] = [];
-  if (!isMicro) {
-    (system?.inverters ?? []).forEach((inv: any, invIdx: number) => {
-      (inv.strings ?? []).forEach((str: any, strIdx: number) => {
-        const isc = Number(str.isc) || 0;
-        dcStrings.push({
-          index: dcStrings.length + 1,
-          invIdx,
-          strIdx,
-          label: `DC ${invIdx + 1}-${strIdx + 1}`,
-          wireGauge: plainGauge(str.wireGauge, '#10 AWG'),
-          ampacityA: isc ? Math.ceil(isc * 1.25 * 100) / 100 : (str.ampacity ?? null),
-          ocpdAmps: isc ? necNextStandardOcpd(isc * 1.56) : (str.ocpd ?? null),
-          voltageDropPct: str.voltageDrop != null ? Number(str.voltageDrop) : null,
-          lengthFt: str.wireLength != null ? Number(str.wireLength) : null,
-        });
-      });
-    });
-  }
-
-  // ── Governing OCPD for EGC sizing (largest branch / string OCPD) ─
-  const branchOcpds = isMicro
-    ? microBranches.map(b => b.ocpdAmps)
-    : dcStrings.map(s => s.ocpdAmps ?? 0);
-  const governingOcpd = branchOcpds.length ? Math.max(...branchOcpds) : 20;
-
-  // ── AC feeder (from the upstream engine result) ────────────────
+  // ── Shared AC feeder + engine EGC (identical both paths) ───────
   const acAmps = totalAcKw > 0 ? (totalAcKw * 1000 / 240) : 0;
   const feederOcpd = elec?.busbar?.backfeedBreakerRequired
     ?? project.backfeedBreakerA
@@ -197,22 +251,182 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
     conduitSize: elec?.conduitFill?.conduitSize ?? null,
     lengthFt: project.wireLength != null ? Number(project.wireLength) : null,
   };
-
-  // ── The one authoritative system EGC ───────────────────────────
-  // Prefer the engine value E-1 already prints; fall back to NEC 250.122
-  // on the governing OCPD so the two can never diverge again.
   const engineEgc = elec?.groundingConductor ? plainGauge(elec.groundingConductor, '') : '';
+
+  if (!isHybrid) {
+    // ═════ LEGACY SINGLE-SYSTEM PATH — byte-identical to pre-Wave-2d ═════
+    const topology = legacyTopology;
+    const isMicro = topology === 'MICRO';
+
+    // ── Micro branches ─────────────────────────────────────────────
+    const microBranches: MicroBranch[] = [];
+    // Per-micro AC output amps. Prefer the true per-device figure from the
+    // system total; only if that is missing does the branch collapse to 0A.
+    const perMicroA = totalAcKw > 0 && totalPanels > 0 ? (totalAcKw * 1000 / totalPanels) / 240 : 0;
+    if (isMicro && totalPanels > 0) {
+      const plan = positions.length ? planMicroBranches(positions, eq.inverterModel) : null;
+      const sizes = plan?.sizes?.length
+        ? plan.sizes
+        : balancedBranchSizes(totalPanels, microBranchCount(totalPanels, eq.inverterModel));
+      sizes.forEach((n, i) => microBranches.push(microBranchRow(i + 1, n, perMicroA)));
+    }
+
+    // ── DC strings (string / optimizer) ────────────────────────────
+    const dcStrings: DcStringRun[] = [];
+    if (!isMicro) {
+      (system?.inverters ?? []).forEach((inv: any, invIdx: number) => {
+        (inv.strings ?? []).forEach((str: any, strIdx: number) => {
+          dcStrings.push(dcStringRow(dcStrings.length + 1, invIdx, strIdx, str));
+        });
+      });
+    }
+
+    // ── Governing OCPD for EGC sizing (largest branch / string OCPD) ─
+    const branchOcpds = isMicro
+      ? microBranches.map(b => b.ocpdAmps)
+      : dcStrings.map(s => s.ocpdAmps ?? 0);
+    const governingOcpd = branchOcpds.length ? Math.max(...branchOcpds) : 20;
+
+    // ── The one authoritative system EGC ───────────────────────────
+    // Prefer the engine value E-1 already prints; fall back to NEC 250.122
+    // on the governing OCPD so the two can never diverge again.
+    const egc = engineEgc
+      ? { gauge: engineEgc, basisOcpd: governingOcpd, source: 'engine' as const }
+      : { gauge: getEGCSize(governingOcpd), basisOcpd: governingOcpd, source: 'nec-250.122' as const };
+
+    // Single-entry sub view MIRRORS the top level (derived, never re-computed).
+    const soloKey: SubSystemKey = orderedKeys[0]
+      ?? toSubSystemKey((project as any).systemType ?? cad?.systemType ?? 'roof');
+    const subSystems: SubSystemConductorAuthority[] = [{
+      key: soloKey,
+      topology,
+      isMicro,
+      panelCount: totalPanels,
+      deviceCount: isMicro ? totalPanels : 0,
+      perMicroA: isMicro ? perMicroA : null,
+      equipment: eq,
+      microBranches,
+      dcStrings,
+      governingOcpd,
+      egc,
+      acSubFeeder: {
+        currentA: acAmps,
+        continuousA: acAmps * 1.25,
+        ocpdAmps: feederOcpd,
+        wireGauge: acFeeder.wireGauge,
+      },
+    }];
+
+    return { topology, isMicro, microBranches, dcStrings, acFeeder, egc, governingOcpd, subSystems, isHybrid: false };
+  }
+
+  // ═════ HYBRID (N>1) — one authority per sub, aggregate derived ═════
+  const inverters = (system?.inverters ?? []) as any[];
+  const primaryKey = orderedKeys[0];
+  // Tag rule (§1.5): tagged inverters belong to their tag; untagged inverters
+  // inherit the PRIMARY sub (deterministic roof>ground>fence — never a vote).
+  const effKey = (inv: any): SubSystemKey =>
+    isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey : primaryKey;
+
+  const subSystems: SubSystemConductorAuthority[] = orderedKeys.map((key) => {
+    const subPanels = (partition.find(s => s.key === key)?.panels ?? []) as unknown as BranchPlanPanel[];
+    const section = cad?.hybrid?.sections?.find(s => s.key === key);
+    const panelCount = subPanels.length || section?.totalPanels || 0;
+    const subEq = resolveEquipmentBySubSystem(input, key, cad);
+    const topo = topologyForSub(subEq, legacyTopology);
+    const isM = topo === 'MICRO';
+
+    // Micro branches — THIS sub's panels, THIS sub's inverter model, and
+    // perMicroA from THIS sub's per-device kW (acKwPerDevice contract).
+    const microBranches: MicroBranch[] = [];
+    let perMicroA: number | null = null;
+    let deviceCount = 0;
+    if (isM && panelCount > 0) {
+      deviceCount = panelCount;
+      perMicroA = subEq.inverterAcOutputKw > 0 ? (subEq.inverterAcOutputKw * 1000) / 240 : 0;
+      const plan = subPanels.length
+        ? planMicroBranches(subPanels, subEq.inverterModel, subEq.inverterManufacturer)
+        : null;
+      const sizes = plan?.sizes?.length
+        ? plan.sizes
+        : balancedBranchSizes(panelCount, microBranchCount(panelCount, subEq.inverterModel, subEq.inverterManufacturer));
+      sizes.forEach((n, i) => microBranches.push(microBranchRow(i + 1, n, perMicroA!)));
+    }
+
+    // DC strings — ONLY this sub's inverters (string/optimizer subs produce
+    // string groupings, never fake AC branches).
+    const dcStrings: DcStringRun[] = [];
+    if (!isM) {
+      inverters.forEach((inv: any, invIdx: number) => {
+        if (effKey(inv) !== key) return;
+        (inv.strings ?? []).forEach((str: any, strIdx: number) => {
+          dcStrings.push(dcStringRow(dcStrings.length + 1, invIdx, strIdx, str));
+        });
+      });
+    }
+
+    const branchOcpds = isM ? microBranches.map(b => b.ocpdAmps) : dcStrings.map(s => s.ocpdAmps ?? 0);
+    const governingOcpd = branchOcpds.length ? Math.max(...branchOcpds) : 20;
+    // Per-sub EGC is always NEC 250.122 on the sub's own governing OCPD — the
+    // engine value is a whole-system figure and belongs to the aggregate.
+    const egc = { gauge: getEGCSize(governingOcpd), basisOcpd: governingOcpd, source: 'nec-250.122' as const };
+
+    // Sub AC feeder — Σ of THIS sub's device/inverter output amps.
+    let subAcA = 0;
+    if (isM) {
+      subAcA = deviceCount * (perMicroA ?? 0);
+    } else {
+      subAcA = inverters
+        .filter(inv => effKey(inv) === key)
+        .reduce((s, inv) => s + (((inv.acOutputKw || 0) * 1000) / 240), 0);
+      if (subAcA <= 0 && subEq.inverterAcOutputKw > 0) subAcA = (subEq.inverterAcOutputKw * 1000) / 240;
+    }
+    const subContA = subAcA * 1.25;
+    const subOcpd = subAcA > 0 ? (necNextStandardOcpd(subContA) || null) : null;
+
+    return {
+      key,
+      topology: topo,
+      isMicro: isM,
+      panelCount,
+      deviceCount,
+      perMicroA: isM ? perMicroA : null,
+      equipment: subEq,
+      microBranches,
+      dcStrings,
+      governingOcpd,
+      egc,
+      acSubFeeder: {
+        currentA: subAcA,
+        continuousA: subContA,
+        ocpdAmps: subOcpd,
+        wireGauge: subOcpd ? wireGaugeForOcpd(subOcpd) : '#10 AWG',
+      },
+    };
+  });
+
+  // ── Aggregate view for legacy consumers (derived from the set) ──
+  const microBranches: MicroBranch[] = [];
+  for (const s of subSystems) for (const b of s.microBranches) microBranches.push({ ...b, index: microBranches.length + 1 });
+  const dcStrings: DcStringRun[] = [];
+  for (const s of subSystems) for (const d of s.dcStrings) dcStrings.push({ ...d, index: dcStrings.length + 1 });
+
+  const primary = subSystems[0];
+  const allOcpds = subSystems.map(s => s.governingOcpd);
+  const governingOcpd = allOcpds.length ? Math.max(...allOcpds) : 20;
   const egc = engineEgc
     ? { gauge: engineEgc, basisOcpd: governingOcpd, source: 'engine' as const }
     : { gauge: getEGCSize(governingOcpd), basisOcpd: governingOcpd, source: 'nec-250.122' as const };
 
   return {
-    topology,
-    isMicro,
+    topology: primary.topology,
+    isMicro: primary.isMicro,
     microBranches,
     dcStrings,
     acFeeder,
     egc,
     governingOcpd,
+    subSystems,
+    isHybrid: true,
   };
 }

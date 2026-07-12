@@ -329,6 +329,112 @@ export function resolveEquipment(input: PermitInput): ResolvedEquipment {
 
 export type { ResolvedEquipment } from '../types';
 
+// ═══════════════════════════════════════════════════════════════
+// Wave 2d — per-subsystem equipment resolution (contract §1.7)
+// ═══════════════════════════════════════════════════════════════
+
+/** The slice of CADModel the per-sub resolver reads (structural — a full
+ *  CADModel satisfies it; tests can pass a hand-built object). */
+export interface HybridEquipmentCarrier {
+  hybrid?: {
+    sections?: Array<{
+      key: string;
+      totalPanels?: number;
+      equipment?: {
+        panelModel?: string;
+        panelWatts?: number;
+        voc?: number;
+        isc?: number;
+        inverterMfr?: string;
+        inverterModel?: string;
+        topology?: 'string' | 'micro' | 'optimizer';
+        acKwPerDevice?: number;
+      };
+    }>;
+  } | null;
+}
+
+const _blankStr = (s?: string) => !s || s === '—';
+const _blankNum = (n?: number) => !(typeof n === 'number' && n > 0);
+
+/**
+ * Per-subsystem equipment resolution — the hybrid-safe sibling of
+ * `resolveEquipment`. Reads the PermitInput carriage in priority order:
+ *
+ *   1. Tagged inverters (`system.inverters[].subSystemKey === key`) + their
+ *      strings' panel fields — the sub's OWN fleet, never `inverters[0]`.
+ *   2. `cad.hybrid.sections[key].equipment` (panelModel/watts/voc/isc,
+ *      inverterMfr/Model, topology, acKwPerDevice — per-device kW contract).
+ *   3. `input.project._canonical.subSystems[key].panels[].wattage` (panel
+ *      wattage from the sub's own placement stamps).
+ *   4. NO per-sub carriage at all (untagged single-system legacy payloads):
+ *      full fallback to `resolveEquipment(input)` — byte-identical legacy.
+ *
+ * When PARTIAL per-sub carriage exists, missing fields stay '—'/0 rather than
+ * backfilling from the project-wide winner — a fence sub must never print the
+ * roof sub's panel model (the contamination class this wave kills).
+ */
+export function resolveEquipmentBySubSystem(
+  input: PermitInput,
+  key: 'roof' | 'ground' | 'fence',
+  cad?: HybridEquipmentCarrier | null,
+): ResolvedEquipment {
+  const inverters = input.system?.inverters ?? [];
+  const tagged = inverters.filter(inv => (inv as { subSystemKey?: string }).subSystemKey === key);
+  const section = cad?.hybrid?.sections?.find(s => s.key === key);
+  const canonSubs = (input.project?._canonical as
+    { subSystems?: Array<{ key: string; panels?: Array<{ wattage?: number }> }> } | undefined)?.subSystems;
+  const canonSub = canonSubs?.find(s => s.key === key);
+
+  // 4. Untagged / N=1 legacy: no per-sub carriage → legacy resolver unchanged.
+  if (tagged.length === 0 && !section?.equipment && !canonSub) {
+    return resolveEquipment(input);
+  }
+
+  const out: ResolvedEquipment = {
+    panelManufacturer: '—', panelModel: '—', panelWatts: 0, panelVoc: 0, panelIsc: 0,
+    inverterManufacturer: '—', inverterModel: '—', inverterType: '—', inverterAcOutputKw: 0,
+  };
+
+  // 1. The sub's own tagged fleet.
+  if (tagged.length > 0) {
+    const inv0 = tagged[0];
+    const anyString = tagged.flatMap(inv => inv.strings ?? []).find(s => s?.panelModel);
+    if (anyString) {
+      out.panelManufacturer = anyString.panelManufacturer || '—';
+      out.panelModel        = anyString.panelModel        || '—';
+      out.panelWatts        = anyString.panelWatts        || 0;
+      out.panelVoc          = anyString.panelVoc          || 0;
+      out.panelIsc          = anyString.panelIsc          || 0;
+    }
+    out.inverterManufacturer = inv0.manufacturer || '—';
+    out.inverterModel        = inv0.model        || '—';
+    out.inverterType         = inv0.type         || '—';
+    out.inverterAcOutputKw   = inv0.acOutputKw   || 0;
+  }
+
+  // 2. The sub's CAD section equipment carriage fills what the fleet lacks.
+  const se = section?.equipment;
+  if (se) {
+    if (_blankStr(out.panelModel)           && se.panelModel)    out.panelModel = se.panelModel;
+    if (_blankNum(out.panelWatts)           && se.panelWatts)    out.panelWatts = se.panelWatts;
+    if (_blankNum(out.panelVoc)             && se.voc)           out.panelVoc = se.voc;
+    if (_blankNum(out.panelIsc)             && se.isc)           out.panelIsc = se.isc;
+    if (_blankStr(out.inverterManufacturer) && se.inverterMfr)   out.inverterManufacturer = se.inverterMfr;
+    if (_blankStr(out.inverterModel)        && se.inverterModel) out.inverterModel = se.inverterModel;
+    if (_blankStr(out.inverterType)         && se.topology)      out.inverterType = se.topology;
+    if (_blankNum(out.inverterAcOutputKw)   && se.acKwPerDevice) out.inverterAcOutputKw = se.acKwPerDevice;
+  }
+
+  // 3. Panel wattage from the sub's OWN placement-stamped panels.
+  if (_blankNum(out.panelWatts) && canonSub?.panels?.length) {
+    const w = canonSub.panels.find(p => typeof p?.wattage === 'number' && p.wattage > 0)?.wattage;
+    if (w) out.panelWatts = w;
+  }
+
+  return out;
+}
+
 
 // Error 5bb fix: NEC 240.6(A) standard OCPD ampere ratings
 // DO NOT use Math.ceil(x/5)*5 — it can produce 55, 65, 75, 85, 95A which are NOT standard.

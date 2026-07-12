@@ -21,6 +21,7 @@ import {
 } from '@/lib/engineeringDecisionProvenance';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
+import { classifyPanel, isSubSystemKey } from './utils/subSystems';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
@@ -413,6 +414,40 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const _getInvById = getInverterById;
       const _getMicroById = getMicroinverterById;
 
+      // ── Wave 2d: per-sub fleet detection (STRICT N>1 gate — Invariant I-10;
+      //    never tag-presence, which migrate-on-load would defeat) ──
+      const _taggedKeys = new Set(
+        input.system.inverters
+          .map(inv => (inv as { subSystemKey?: string }).subSystemKey)
+          .filter(isSubSystemKey),
+      );
+      const _hybridSections = cad.hybrid?.sections ?? [];
+      const _perSubFleet = _taggedKeys.size > 1 || _hybridSections.length > 1;
+      // Per-sub panel counts: placement stamps first (membership authority),
+      // CAD hybrid sections as corroboration when positions are absent.
+      const _subPanelCounts: Partial<Record<'roof' | 'ground' | 'fence', number>> = {};
+      if (_perSubFleet) {
+        const _positions = (input.project.panelPositions ?? []) as Array<{ systemType?: string; placementType?: string }>;
+        for (const p of _positions) {
+          const k = classifyPanel(p);
+          _subPanelCounts[k] = (_subPanelCounts[k] ?? 0) + 1;
+        }
+        for (const sec of _hybridSections) {
+          if (!(_subPanelCounts[sec.key] ?? 0) && sec.totalPanels > 0) _subPanelCounts[sec.key] = sec.totalPanels;
+        }
+      }
+      /** Micro panel basis: the inverter's OWN sub's panel count when the
+       *  fleet is per-sub — never the whole project's totalPanels (a roof
+       *  micro fleet must not absorb ground/fence modules). Legacy path
+       *  (N<=1) keeps the exact historical basis. */
+      const _microPanelBasis = (inv: { subSystemKey?: string }): number => {
+        if (_perSubFleet && isSubSystemKey(inv.subSystemKey)) {
+          const n = _subPanelCounts[inv.subSystemKey] ?? 0;
+          if (n > 0) return n;
+        }
+        return input.system.totalPanels || 1;
+      };
+
       // ── Build InverterInput[] from system.inverters + equipment-db backfill ──
       const invInputs: InverterInput[] = input.system.inverters.map((inv, invIdx) => {
         // Resolve full inverter spec from equipment DB if model matches
@@ -492,12 +527,93 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
           acOutputCurrentMax: invSpec?.acOutputCurrentMax || 0,
           strings:           stringInputs,
           modulesPerDevice:  invSpec?.modulesPerDevice,
+          // Wave 2d: micro device count from the inverter's OWN sub's panel
+          // basis (per-sub fleet), legacy totalPanels basis at N<=1.
           deviceCount:       inv.type === 'micro'
-            ? Math.ceil((input.system.totalPanels || 1) / (invSpec?.modulesPerDevice || 1))
+            ? Math.ceil(_microPanelBasis(inv) / (invSpec?.modulesPerDevice || 1))
             : undefined,
           integratedDcDisconnect: invSpec?.integratedDcDisconnect,
+          // Per-sub tag carried through for the electrical engine (2b reads
+          // it when its per-sub result lands; harmless passthrough today).
+          ...(isSubSystemKey((inv as { subSystemKey?: string }).subSystemKey)
+            ? { subSystemKey: (inv as { subSystemKey?: string }).subSystemKey }
+            : {}),
         } as InverterInput;
       });
+
+      // ── Wave 2d: fallback per-sub synthesis — a hybrid section that carries
+      //    equipment but has NO tagged inverter still needs its fleet entry,
+      //    so the compliance run sees the REAL per-sub fleet (not a collapsed
+      //    single-system view). Untagged inverters are assumed to cover the
+      //    PRIMARY sub (first present in roof>ground>fence order). ──
+      if (_perSubFleet) {
+        const _presentKeys = (['roof', 'ground', 'fence'] as const)
+          .filter(k => (_subPanelCounts[k] ?? 0) > 0 || _hybridSections.some(s => s.key === k));
+        const _primaryKey = _presentKeys[0];
+        const _covered = new Set<string>();
+        for (const inv of input.system.inverters) {
+          const k = (inv as { subSystemKey?: string }).subSystemKey;
+          _covered.add(isSubSystemKey(k) ? k : _primaryKey);
+        }
+        for (const sec of _hybridSections) {
+          if (_covered.has(sec.key) || !sec.equipment) continue;
+          const se = sec.equipment;
+          const secPanels = _subPanelCounts[sec.key] ?? sec.totalPanels ?? 0;
+          if (secPanels <= 0) continue;
+          const secTopo: 'string' | 'micro' | 'optimizer' = se.topology ?? 'string';
+          const secSpec: any = secTopo === 'micro'
+            ? (_getMicroById(se.inverterModel ?? '') || _getMicroById((se.inverterModel ?? '').toLowerCase()))
+            : (_getInvById(se.inverterModel ?? '') || _getInvById((se.inverterModel ?? '').toLowerCase()));
+          const perDeviceKw = se.acKwPerDevice || secSpec?.acOutputKw || 0;
+          const voc = se.voc || 0;
+          const maxDcV = secSpec?.maxDcVoltage || (secTopo === 'micro' ? 60 : 600);
+          const mkString = (panelCount: number): StringInput => ({
+            panelCount,
+            panelVoc:     voc,
+            panelIsc:     se.isc || 0,
+            panelImp:     secSpec?.imp || 0,
+            panelVmp:     secSpec?.vmp || 0,
+            panelWatts:   se.panelWatts || 0,
+            tempCoeffVoc: -0.27,
+            tempCoeffIsc: 0.05,
+            maxSeriesFuseRating: 20,
+            wireGauge:    input.project.wireGauge || '#12 AWG',
+            wireLength:   input.project.wireLength || 50,
+            conduitType:  input.project.conduitType || 'EMT',
+          });
+          let secStrings: StringInput[];
+          if (secTopo === 'micro') {
+            secStrings = [mkString(secSpec?.modulesPerDevice || 1)];
+          } else {
+            // Chunk the section's modules into plausible series strings —
+            // cold-Voc-safe when voc is known, 12/string otherwise.
+            const perString = voc > 0
+              ? Math.max(1, Math.min(secPanels, Math.floor((maxDcV * 0.95) / (voc * 1.2))))
+              : Math.min(secPanels, 12);
+            secStrings = [];
+            for (let left = secPanels; left > 0; left -= perString) {
+              secStrings.push(mkString(Math.min(perString, left)));
+            }
+          }
+          invInputs.push({
+            type:              secTopo,
+            acOutputKw:        perDeviceKw,
+            maxDcVoltage:      maxDcV,
+            mpptVoltageMin:    secSpec?.mpptVoltageMin || 0,
+            mpptVoltageMax:    secSpec?.mpptVoltageMax || 0,
+            maxInputCurrentPerMppt: secSpec?.maxInputCurrentPerMppt || secSpec?.maxInputCurrent || 0,
+            acOutputCurrentMax: secSpec?.acOutputCurrentMax || 0,
+            strings:           secStrings,
+            modulesPerDevice:  secSpec?.modulesPerDevice,
+            deviceCount:       secTopo === 'micro'
+              ? Math.ceil(secPanels / (secSpec?.modulesPerDevice || 1))
+              : undefined,
+            integratedDcDisconnect: secSpec?.integratedDcDisconnect,
+            subSystemKey:      sec.key,
+          } as InverterInput);
+          console.log(`[PLANSET] Wave 2d: synthesized '${sec.key}' ${secTopo} fleet entry from hybrid section equipment (${secPanels} modules, ${perDeviceKw} kW/device)`);
+        }
+      }
 
       // ── Determine NEC version from jurisdiction or AHJ ──
       const _rawNec = input.compliance?.jurisdiction?.necVersion ?? '';

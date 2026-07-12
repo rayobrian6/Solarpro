@@ -54,5 +54,6 @@ export {
   getSystemType,
   getInverterTopology,
   getEquipmentContext,
+  getEquipmentContextBySubSystem,
   topologyToLegacy,
 } from './systemAccessors';

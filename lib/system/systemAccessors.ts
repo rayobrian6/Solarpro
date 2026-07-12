@@ -32,8 +32,10 @@ import {
   resolveSystemType as legacyResolveSystemType,
   resolveTopology as legacyResolveTopology,
   resolveEquipment as legacyResolveEquipment,
+  resolveEquipmentBySubSystem,
   type SysType,
 } from '@/lib/permit/utils/helpers';
+import type { SubSystemKey } from './subSystemEquipment';
 
 // ── Accessor: getSystemType ──────────────────────────────────────
 /**
@@ -127,4 +129,24 @@ export function getEquipmentContext(input: PermitInput, cad?: CADModel | null): 
   const result = legacyResolveEquipment(input);
   console.debug(`[SYSDEF FALLBACK] getEquipmentContext source=legacy panel="${result.panelManufacturer} ${result.panelModel}"`);
   return result;
+}
+
+// ── Accessor: getEquipmentContextBySubSystem (Wave 2d) ────────────
+/**
+ * Per-subsystem equipment view — the hybrid-safe variant of
+ * getEquipmentContext. Resolves ONE sub-system's equipment from the permit
+ * carriage (tagged inverters + cad.hybrid.sections[].equipment + canonical
+ * partition); untagged/N=1 payloads fall through to the exact legacy
+ * resolution, so single-system consumers see identical values.
+ *
+ * NOTE: deliberately does NOT prefer cad.systemDefinition here — the
+ * SystemDefinition is a single-system snapshot and would re-introduce the
+ * project-wide-winner contamination for hybrid sub-systems.
+ */
+export function getEquipmentContextBySubSystem(
+  input: PermitInput,
+  key: SubSystemKey,
+  cad?: CADModel | null,
+): ResolvedEquipment {
+  return resolveEquipmentBySubSystem(input, key, cad);
 }

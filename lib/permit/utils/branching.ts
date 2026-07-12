@@ -10,6 +10,8 @@
 // ============================================================
 
 import { ENPHASE_CAPABILITY_PROFILES } from '@/lib/system/brandCapabilities/enphase';
+import { TRUNK_CABLE_SYSTEMS } from '@/lib/equipment/trunkCable';
+import { classifyPanel, type SubSystemPanel } from './subSystems';
 
 /** Conservative default when the model is unknown — matches IQ8+/IQ8 base
  *  territory without ever overselling a hotter unit. Never 16. */
@@ -17,13 +19,50 @@ const DEFAULT_MAX_PER_BRANCH = 13;
 
 const _norm = (s: string) => s.toLowerCase().replace(/plus/g, '+').replace(/[^a-z0-9+]/g, '');
 
+// ── Wave 2d: non-Enphase capability profiles ────────────────────
+// Model-family hints map a bare model string to its micro ecosystem when the
+// caller has no manufacturer field. Sourced from the same single-source trunk
+// catalog the BOM uses (lib/equipment/trunkCable.ts) — never a parallel table.
+const NON_ENPHASE_MODEL_HINTS: Array<{ re: RegExp; brand: string }> = [
+  { re: /(^|[^a-z0-9])(ds3|qs1|qt2|yc600)/, brand: 'APsystems' },
+  { re: /(^|[^a-z0-9+])(hms|hmt|hm[0-9])/,  brand: 'Hoymiles' },
+  { re: /(^|[^a-z0-9])bdm/,                 brand: 'NEP' },
+];
+
+/** Per-model branch max from the trunk-cable catalog (non-Enphase brands).
+ *  Returns null when the model/manufacturer doesn't resolve to a cataloged
+ *  non-Enphase micro ecosystem — callers then keep the legacy default. */
+function nonEnphaseMaxPerBranch(normModel: string, manufacturer?: string | null): number | null {
+  const mfr = String(manufacturer ?? '').trim().toLowerCase();
+  let system = mfr
+    ? TRUNK_CABLE_SYSTEMS.find(s =>
+        mfr.includes(s.brand.toLowerCase()) || s.brand.toLowerCase().includes(mfr))
+    : undefined;
+  if (!system) {
+    const hint = NON_ENPHASE_MODEL_HINTS.find(h => h.re.test(normModel));
+    if (hint) system = TRUNK_CABLE_SYSTEMS.find(s => s.brand === hint.brand);
+  }
+  if (!system || system.brand === 'Enphase') return null; // Enphase = profile path
+  // Longest-model-key match wins (mirror of the Enphase profile rule).
+  let best: number | null = null;
+  let bestLen = -1;
+  for (const [key, v] of Object.entries(system.deviceBranchLimits ?? {})) {
+    const nk = _norm(key);
+    if (nk && normModel.includes(nk) && nk.length > bestLen) { best = v; bestLen = nk.length; }
+  }
+  return best ?? system.maxDevicesPerBranch;
+}
+
 /**
  * Max microinverters on a standard 20A/240V branch for the given model.
  * Longest-model-name match wins ('IQ8AC' must not resolve via 'IQ8A').
+ * Wave 2d: non-Enphase micro ecosystems (APsystems/Hoymiles/NEP) resolve via
+ * the trunk-cable catalog — an APsystems DS3 is 4/branch, never the Enphase-
+ * shaped default of 13 (a 20 A-branch NEC violation for that hardware).
  */
-export function microMaxPerBranch(inverterModel?: string | null): number {
+export function microMaxPerBranch(inverterModel?: string | null, manufacturer?: string | null): number {
   const m = _norm(String(inverterModel ?? ''));
-  if (!m) return DEFAULT_MAX_PER_BRANCH;
+  if (!m && !manufacturer) return DEFAULT_MAX_PER_BRANCH;
   let best: number | null = null;
   let bestLen = -1;
   for (const prof of ENPHASE_CAPABILITY_PROFILES) {
@@ -33,13 +72,14 @@ export function microMaxPerBranch(inverterModel?: string | null): number {
       if (typeof v === 'number' && v > 0) { best = v; bestLen = key.length; }
     }
   }
-  return best ?? DEFAULT_MAX_PER_BRANCH;
+  if (best != null) return best;
+  return nonEnphaseMaxPerBranch(m, manufacturer) ?? DEFAULT_MAX_PER_BRANCH;
 }
 
 /** Branch count for a micro system: ceil(modules / per-model branch max). */
-export function microBranchCount(totalModules: number, inverterModel?: string | null): number {
+export function microBranchCount(totalModules: number, inverterModel?: string | null, manufacturer?: string | null): number {
   if (!isFinite(totalModules) || totalModules <= 0) return 1;
-  return Math.max(1, Math.ceil(totalModules / microMaxPerBranch(inverterModel)));
+  return Math.max(1, Math.ceil(totalModules / microMaxPerBranch(inverterModel, manufacturer)));
 }
 
 /**
@@ -61,6 +101,10 @@ export interface BranchPlanPanel {
   col?: number | null;
   lat?: number;
   lng?: number;
+  /** Placement-stamped sub-system provenance (Wave 2d fencing — a fence
+   *  panel must NEVER share an AC branch with a roof panel). */
+  systemType?: string;
+  placementType?: string;
 }
 
 export interface BranchPlan {
@@ -93,12 +137,49 @@ export interface BranchPlan {
  *
  * Plane grouping key: planeId, else arrayId; no keys at all → one global
  * group (legacy payloads — still NEC-sized, still minimal count).
+ *
+ * Wave 2d SUB-SYSTEM FENCING (Invariant I-4): panels are partitioned by their
+ * placement-stamped systemType FIRST (roof → ground → fence), and the plane/
+ * array grouping + leftover-merge runs WITHIN each sub-system only. The
+ * leftover-merge can therefore never join fence panels onto a roof branch.
+ * Single-system payloads (every panel one sub) take the exact legacy path.
  */
 export function planMicroBranches(
   panels: BranchPlanPanel[],
   inverterModel?: string | null,
+  manufacturer?: string | null,
 ): BranchPlan {
-  const maxPer = microMaxPerBranch(inverterModel);
+  const maxPer = microMaxPerBranch(inverterModel, manufacturer);
+  if (!panels?.length) return { count: 1, sizes: [], assign: new Map<string, number>() };
+
+  // ── Sub-system fence: partition first, plan within each sub ────
+  const subGroups: Record<'roof' | 'ground' | 'fence', BranchPlanPanel[]> =
+    { roof: [], ground: [], fence: [] };
+  for (const p of panels) subGroups[classifyPanel(p as unknown as SubSystemPanel)].push(p);
+  const presentSubs = (['roof', 'ground', 'fence'] as const).filter(k => subGroups[k].length > 0);
+
+  if (presentSubs.length <= 1) {
+    return planBranchesWithinSub(panels, maxPer); // legacy single-system path, byte-identical
+  }
+
+  const assign = new Map<string, number>();
+  const sizes: number[] = [];
+  let offset = 0;
+  for (const key of presentSubs) {
+    const sub = planBranchesWithinSub(subGroups[key], maxPer);
+    for (const [id, idx] of sub.assign) assign.set(id, idx + offset);
+    sizes.push(...sub.sizes);
+    offset += sub.sizes.length;
+  }
+  return { count: offset || 1, sizes, assign };
+}
+
+/** The pre-Wave-2d branch planner, unchanged — runs over ONE sub-system's
+ *  panels (or the whole array on legacy single-system payloads). */
+function planBranchesWithinSub(
+  panels: BranchPlanPanel[],
+  maxPer: number,
+): BranchPlan {
   const assign = new Map<string, number>();
   if (!panels?.length) return { count: 1, sizes: [], assign };
 
