@@ -24,10 +24,11 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { computeModuleAzimuthGrid, snapModuleAzimuth } from './moduleAzimuthGrid';
+import { classifyPanel } from './subSystems';
 
 const DEG = Math.PI / 180;
 
-interface DPanel { lat: number; lng: number; azimuth?: number; row?: number; col?: number; planeId?: string; [k: string]: unknown; }
+interface DPanel { lat: number; lng: number; azimuth?: number; row?: number; col?: number; planeId?: string; systemType?: string; placementType?: string; [k: string]: unknown; }
 interface DPlane { id?: string; azimuth?: number; [k: string]: unknown; }
 
 /** Fold an angle (deg) to the signed distance from its nearest multiple of 90. */
@@ -69,7 +70,15 @@ export function deskewArrayToTrue(input: {
 }): DeskewResult {
   const out: DeskewResult = { changed: false, planes: [] };
   const planes = input?.project?.roofPlanes ?? [];
-  const panels = input?.project?.panelPositions ?? [];
+  // ROOF SCOPE (Stowell plan-rotation repair, 2026-07-12): de-skew is a ROOF-
+  // grid operation — planeGridTilt measures the roof's row/col lattice against
+  // the building's cardinal grid. Fence + ground panels carry no planeId, so a
+  // hybrid design pooled them all into one '_' group whose mixed "grid tilt"
+  // rotated the WHOLE fence+ground cluster ~15.6° about a shared centroid
+  // (Stowell: a truly E-W fence drew ~13° tilted on PV-1, and both clusters
+  // translated off their designed spots). Non-roof panels keep their designed
+  // positions/azimuths — their own sheets + the site-plan overlay draw them.
+  const panels = (input?.project?.panelPositions ?? []).filter(p => classifyPanel(p) === 'roof');
   if (panels.length < 2) return out;
 
   const cosLat = Math.cos((panels[0].lat) * DEG);
