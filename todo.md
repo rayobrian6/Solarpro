@@ -12,7 +12,7 @@
 - [x] Confirm lib/mfa.ts FROZEN — no modifications
 
 ## Section 1: Commit 1 — Exact-State and Environment Safety Audit
-- [ ] Create docs/phase1a/PHASE1A3-OPERATIONAL-ACTIVATION-AUDIT.md
+- [x] Create docs/phase1a/PHASE1A3-OPERATIONAL-ACTIVATION-AUDIT.md
   - Document exact-state findings for GOV-19..25
   - Document environment safety classification (is_production=false, is_isolated=true)
   - Document manifest discovery injection point (dirOverride param)
@@ -20,16 +20,16 @@
   - Document baseline evidence generator design (read-only PostgreSQL catalog)
   - Document canary migration fixture requirements
   - Document Neon serverless compatibility test plan
-- [ ] Verify tsc still passes after doc-only commit
-- [ ] Commit 1: docs(migrations): Phase 1A.3 exact-state and environment safety audit
+- [x] Verify tsc still passes after doc-only commit
+- [x] Commit 1: docs(migrations): Phase 1A.3 exact-state and environment safety audit
 
 ## Section 2: Commit 2 — End-to-End Harness and Test-Only Migration Fixtures
-- [ ] Create tests/fixtures/migrations/ directory (NOT lib/migrations/)
-- [ ] Create 900_canary_test_table.sql fixture (canary migration, transactional)
-- [ ] Create 901_canary_add_column.sql fixture (second canary migration)
-- [ ] Create 902_canary_add_index.sql fixture (third canary, with index)
-- [ ] Create 903_canary_seed_data.sql fixture (fourth canary, with INSERT)
-- [ ] Create tests/phase1a3-migration-governance-e2e.test.ts
+- [x] Create tests/fixtures/migrations/ directory (NOT lib/migrations/)
+- [x] Create 900_canary_test_table.sql fixture (canary migration, transactional)
+- [x] Create 901_canary_add_column.sql fixture (second canary migration)
+- [x] Create 902_canary_add_index.sql fixture (third canary, with index)
+- [x] Create 903_canary_seed_data.sql fixture (fourth canary, with INSERT)
+- [x] Create tests/phase1a3-migration-governance-e2e.test.ts
   - Test manifest discovery with fixture dirOverride
   - Test full lifecycle: UNBOOTSTRAPPED → BOOTSTRAP → BASELINE_REQUIRED →
     BASELINE_IN_PROGRESS → BASELINE_VERIFIED → EXECUTION_ENABLED
@@ -44,8 +44,8 @@
   - Test FORBIDDEN transaction mode blocking
   - Test SQL statement splitting (dollar-quoted, strings, comments)
   - Test advisory lock key isolation
-- [ ] Verify tsc passes
-- [ ] Verify e2e tests pass (with TEST_DATABASE_URL)
+- [x] Verify tsc passes
+- [x] Verify e2e tests pass (with TEST_DATABASE_URL)
 - [ ] Commit 2: test(migrations): Phase 1A.3 e2e harness and test-only migration fixtures
 
 ## Section 3: Commit 3 — Baseline Evidence Generator
