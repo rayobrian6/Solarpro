@@ -36,6 +36,33 @@ import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizingEngine';
 import type { LayoutCandidate } from '@/lib/system/inverterCapabilities';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { parseRunId } from '@/lib/computed-multi-system';
+
+// ── Wave 3.7 — versioned client-passthrough guard (contract §3 Wave 3 item 7)
+// A per-subsystem-aware client (engineering_config schemaVersion 2) namespaces
+// per-sub run ids `${sub}:${RunSegmentId}` at N>1. This route's renderer keys
+// off BARE ids; when the compute-failure fallback consumes client-passed runs,
+// namespaced ids must resolve to the PRIMARY sub's runs (fixed roof > ground >
+// fence order — first prefix seen wins) + the shared service runs, re-keyed to
+// base ids — never a silent resolve-to-nothing (I-8). Legacy bare-id payloads
+// pass through IDENTICALLY (same array reference).
+function sanitizeClientRuns<T extends { id: string }>(runs: T[] | undefined | null): T[] | undefined {
+  if (!Array.isArray(runs) || runs.length === 0) return runs ?? undefined;
+  const RANK: Record<string, number> = { roof: 0, ground: 1, fence: 2 };
+  let primary: string | null = null;
+  for (const r of runs) {
+    const { subSystem } = parseRunId(String(r?.id ?? ''));
+    if (subSystem && (primary === null || RANK[subSystem] < RANK[primary])) primary = subSystem;
+  }
+  if (primary === null) return runs; // legacy bare-id payload — untouched by reference
+  console.warn('[SLD] hybrid client passthrough detected — resolving primary-sub runs to bare ids (Wave 3.7 guard)');
+  return runs.flatMap(r => {
+    const parsed = parseRunId(String(r?.id ?? ''));
+    if (parsed.subSystem === null) return [r];
+    if (parsed.subSystem === primary) return [{ ...r, id: parsed.baseId } as T];
+    return [];
+  });
+}
 
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
@@ -509,7 +536,9 @@ export async function POST(req: NextRequest) {
       console.warn('[SLD] computeSystem failed, using body fallback values:', csErr);
       cs = null;
       systemModel = null;
-      computedRuns = body.runs ?? undefined;
+      // Wave 3.7 — client-passthrough guard: namespaced (hybrid) run ids are
+      // resolved to the primary sub's bare ids; legacy payloads untouched.
+      computedRuns = sanitizeClientRuns(body.runs) ?? undefined;
     }
 
     // ── Resolve all electrical display values from PermitSystemModel (engine) ──

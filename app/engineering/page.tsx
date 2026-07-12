@@ -2,7 +2,15 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
+import { computeSystem, type ComputedSystem, type ComputedSystemInput, type RunSegment } from '@/lib/computed-system';
+// Wave 3.7 — the page memo runs computeMultiSystem (N=1 returns plain
+// computeSystem BY REFERENCE; N>1 aggregates per-sub passes at one POI).
+import {
+  computeMultiSystem,
+  parseRunId,
+  type ComputedMultiSystem,
+  type MultiSubSystemInput,
+} from '@/lib/computed-multi-system';
 import { systemTypeToInstallationType } from '@/lib/structural/types';
 import { resolveEquipment } from '@/lib/systemEquipmentResolver';
 import { applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
@@ -2636,8 +2644,33 @@ function EngineeringPageInner() {
   // ── ComputedSystem: centralized calculation engine ─────────────────────────
   // All modules (SLD, BoM, Electrical, Conduit, Permit) read from this object.
   // Recomputes whenever config changes.
-  const computedSystem = useMemo<ComputedSystem>(() => {
-    const firstInv = config.inverters[0];
+  //
+  // Wave 3.7 (contract §3 Wave 3 item 7): the memo now runs through
+  // computeMultiSystem. At N=1 subsystems it returns the plain computeSystem
+  // output BY REFERENCE (I-1: bare run ids, byte-identical aggregate); at N>1
+  // it runs one engine pass per sub — each with its OWN fleet / panel count /
+  // topology / rooftopTempAdderC / geometry-derived run lengths — and
+  // aggregates at ONE POI (§1.7: shared service runs emitted once, summed
+  // per-inverter backfeed, per-sub run ids namespaced `${key}:`).
+  const computedMulti = useMemo<ComputedMultiSystem>(() => {
+    // ── One sub's ComputedSystemInput, built from ITS OWN fleet (I-3) ──────
+    //  fleet         — the sub's inverters (legacy call: the whole config)
+    //  csPanels      — authoritative panel count for the engine
+    //  geomPanels    — panel count for geometry heuristics (fence length /
+    //                  array diagonal / branch estimates)
+    //  systemTypeStr — drives run-length geometry + rooftop adder + the
+    //                  SolFence equipment-schedule row
+    //  includePoi    — battery/generator/ATS/backup-interface devices are
+    //                  POI-level; they ride the PRIMARY sub's input exactly
+    //                  once (I-6), never every sub's.
+    const buildCsInputFor = (
+      fleet: InverterConfig[],
+      csPanels: number,
+      geomPanels: number,
+      systemTypeStr: string | undefined,
+      includePoi: boolean,
+    ): ComputedSystemInput => {
+    const firstInv = fleet[0];
     const firstStr = firstInv?.strings[0];
     const invData = firstInv ? getInvById(firstInv.inverterId, firstInv.type) as any : null;
     const panelData = firstStr ? getPanelById(firstStr.panelId) as any : null;
@@ -2675,7 +2708,7 @@ function EngineeringPageInner() {
       // back to the config-derived totalPanels only when no authoritative
       // source is available. This keeps ComputedSystem consistent with
       // the sizing engine and the UI card display.
-      totalPanels: systemPanelCount > 0 ? systemPanelCount : totalPanels,
+      totalPanels: csPanels,
       panelWatts: panelData?.watts ?? 400,
       panelVoc: panelData?.voc ?? 41.6,
       panelIsc: panelData?.isc ?? 12.26,
@@ -2690,7 +2723,7 @@ function EngineeringPageInner() {
       inverterModel: invData?.model ?? (topology === 'micro' ? 'IQ8+' : 'SE7600H'),
       inverterAcKw: invData?.acOutputKw ?? (invData?.acOutputW ? invData.acOutputW / 1000 : topology === 'micro' ? 0.290 : 7.6), // v58.4: fallback 0.295->0.290 (IQ8+ datasheet max continuous = 290VA)
       // C7 fix: physical inverter count so multi-inverter AC current / OCPD / schedule qty are sized for ALL units, not just the primary.
-      inverterCount: topology === 'micro' ? 1 : Math.max(1, config.inverters.length),
+      inverterCount: topology === 'micro' ? 1 : Math.max(1, fleet.length),
       inverterMaxDcV: invData?.maxDcVoltage ?? (topology === 'micro' ? 60 : 600),
       inverterMpptVmin: invData?.mpptVoltageMin ?? (topology === 'micro' ? 16 : 100),
       inverterMpptVmax: invData?.mpptVoltageMax ?? (topology === 'micro' ? 60 : 480),
@@ -2708,7 +2741,8 @@ function EngineeringPageInner() {
       // Using 95°C here causes massive over-derating (factor 0.41) → wrong wire gauges.
       ambientTempC: Math.min((compliance.autoDetected as any)?.designTempMax ?? 40, 40),
       // Rooftop temp adder: 30°C for roof (NEC 310.15), 0°C for fence/ground (no rooftop heat)
-      rooftopTempAdderC: config.systemType === 'roof' ? 30 : 0,
+      // Wave 3.7 / I-7: per-SUB at N>1 — the sub's own type, never the project's.
+      rooftopTempAdderC: systemTypeStr === 'roof' ? 30 : 0,
       // System-type-aware run lengths — ESTIMATED from panel count + layout heuristics
       // derivedFrom: 'estimated-geometry' (not CAD model)
       // v47.432: CAD-based version historically lived in bom-unified.ts (deleted Stage 8.1)
@@ -2716,8 +2750,8 @@ function EngineeringPageInner() {
       // Ground: array footprint → diagonal from array width × depth
       // Roof: standard defaults (attic/roof routing to inverter/MSP)
       runLengths: (() => {
-        const isFence = config.systemType === 'fence';
-        const isGround = config.systemType === 'ground';
+        const isFence = systemTypeStr === 'fence';
+        const isGround = systemTypeStr === 'ground';
         const userDcLen = firstStr?.wireLength ?? config.wireLength;
 
         if (isFence) {
@@ -2732,13 +2766,13 @@ function EngineeringPageInner() {
           //   Legacy deriveWiring() defaults: micro -> 2ft/panel DC, string -> 3ft/panel DC
           //   (source bom-unified.ts deleted in v47.432 Stage 8.1)
           const panelWidthFt = 3.72;    // resolveDefaultFencePanelSpec(): 1.133m
-          const estFenceLenFt = totalPanels * panelWidthFt;
+          const estFenceLenFt = geomPanels * panelWidthFt;
           const isMicroTopo = firstInv?.type === 'micro';
           // Per-branch trunk cable: fence length ÷ estimated branch count
           // Branch count estimate: ceil(panels / 16) for micro, ceil(panels/stringSize) for string
           const estBranches = isMicroTopo
-            ? Math.max(1, Math.ceil(totalPanels / 16))   // ~16 micros per branch @240V
-            : Math.max(1, config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || 1);
+            ? Math.max(1, Math.ceil(geomPanels / 16))   // ~16 micros per branch @240V
+            : Math.max(1, fleet.reduce((s, inv) => s + inv.strings.length, 0) || 1);
           const branchRunFt = Math.ceil(estFenceLenFt / estBranches);
           return {
             DC_STRING_RUN:         userDcLen ?? 15,          // fence: short DC home run (panels at ground level)
@@ -2764,15 +2798,15 @@ function EngineeringPageInner() {
           //   Legacy defaults: string -> 3ft/panel DC + 2x diagonal, micro -> 2ft/panel + 1.5x diagonal
           //   (source bom-unified.ts deleted in v47.432 Stage 8.1)
           const panelWidthIn = 41.7;
-          const panelsPerRow = Math.ceil(totalPanels / Math.max(1, config.rowCount ?? 1));
+          const panelsPerRow = Math.ceil(geomPanels / Math.max(1, config.rowCount ?? 1));
           const arrayWidthFt = (panelsPerRow * panelWidthIn) / 12;
           const rowDepthFt = (config.rowCount ?? 1) * 12;
           const diagonalFt = Math.sqrt(arrayWidthFt * arrayWidthFt + rowDepthFt * rowDepthFt);
           const isMicroTopo = firstInv?.type === 'micro';
           // Per-branch run: diagonal ÷ branch count (each branch covers a section of the array)
           const estBranches = isMicroTopo
-            ? Math.max(1, Math.ceil(totalPanels / 16))
-            : Math.max(1, config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || 1);
+            ? Math.max(1, Math.ceil(geomPanels / 16))
+            : Math.max(1, fleet.reduce((s, inv) => s + inv.strings.length, 0) || 1);
           const branchRunFt = Math.ceil(diagonalFt / estBranches);
           // DC string run: array width ÷ strings (for string inverter) or 5ft for micro
           const dcRunFt = isMicroTopo ? 5 : Math.max(15, Math.min(Math.ceil(arrayWidthFt / estBranches), 80));
@@ -2810,84 +2844,165 @@ function EngineeringPageInner() {
       mainPanelBrand: config.mainPanelBrand ?? 'Square D',
       panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
       interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
-      systemType: config.systemType,   // adds the SolFence mounting row to the equipment schedule for fence
+      systemType: systemTypeStr as ComputedSystemInput['systemType'],   // adds the SolFence mounting row to the equipment schedule for fence
 
-      branchCount: topology === 'micro' ? Math.ceil(totalPanels / (modulesPerDevice * branchLimit)) : undefined,
+      branchCount: topology === 'micro' ? Math.ceil(geomPanels / (modulesPerDevice * branchLimit)) : undefined,
       // B1 FIX: Pass the actual string count from config.inverters so computeSystem()
       // uses the user's layout rather than auto-calculating from NEC 690.7 physics.
       // Without this, the UI SLD display shows a different string count than the
       // user's applied configuration (e.g. 3 physics-derived strings vs 2 user strings).
       // Only applies to string/optimizer/hybrid topology — micro has no DC strings.
       totalStrings: topology !== 'micro'
-        ? config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || undefined
+        ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
         : undefined,
-      // v61.7: Pass actual per-string panel counts from config.inverters[].strings so
+      // v61.7: Pass actual per-string panel counts from the fleet's strings so
       // computeSystem() performs NEC 690.7 Voc checks on the REAL string lengths,
       // not on equally-divided totalPanels/totalStrings. Prevents false Voc violations.
       configStringPanelCounts: topology !== 'micro'
-        ? config.inverters.flatMap(inv => inv.strings.map(s => s.panelCount))
+        ? fleet.flatMap(inv => inv.strings.map(s => s.panelCount))
         : undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
       // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading
-      batteryIds: config.batteryId ? [config.batteryId] : [],
+      // Wave 3.7 / I-6: POI-level devices ride the PRIMARY sub's input exactly once.
+      batteryIds: includePoi && config.batteryId ? [config.batteryId] : [],
       // BUILD v24: Battery/Generator/ATS NEC-sized segment inputs
-      batteryBackfeedA: config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
-      batteryContinuousOutputA: config.batteryId
+      batteryBackfeedA: includePoi && config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
+      batteryContinuousOutputA: includePoi && config.batteryId
         ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
         : undefined,
-      generatorOutputBreakerA: config.generatorId
+      generatorOutputBreakerA: includePoi && config.generatorId
         ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
         : undefined,
-      generatorKw: config.generatorId
+      generatorKw: includePoi && config.generatorId
         ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })()
         : undefined,
-      atsAmpRating: config.atsId
+      atsAmpRating: includePoi && config.atsId
         ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
         : undefined,
-      backupInterfaceMaxA: (() => {
+      backupInterfaceMaxA: !includePoi ? undefined : (() => {
         const _atsId = config.atsId?.toLowerCase() ?? '';
         const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
         const _resolvedBuiId = config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : '');
         const _bi = _resolvedBuiId ? getBackupInterfaceById(_resolvedBuiId) : undefined;
         return _bi?.maxContinuousOutputA ?? undefined;
       })(),
-      hasEnphaseIQSC3: (() => {
+      hasEnphaseIQSC3: !includePoi ? undefined : (() => {
         const buiId = config.backupInterfaceId?.toLowerCase() ?? '';
         const atsId = config.atsId?.toLowerCase() ?? '';
         return buiId.includes('iq-system-controller-3') || buiId.includes('iq-sc3') || buiId.includes('iqsc3')
           || atsId.includes('enphase-iq-sc3') || atsId.includes('enphase-iq-system-controller');
       })(),
       // Equipment IDs — for equipment schedule display
-      generatorId:    config.generatorId || undefined,
-      atsId:          config.atsId || undefined,
-      backupInterfaceId: (() => {
+      generatorId:    includePoi ? (config.generatorId || undefined) : undefined,
+      atsId:          includePoi ? (config.atsId || undefined) : undefined,
+      backupInterfaceId: !includePoi ? undefined : (() => {
         const _atsId = config.atsId?.toLowerCase() ?? '';
         const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
         return config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : undefined);
       })(),
       // Derived labels for equipment schedule fallback
-      generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })() : undefined,
-      generatorModel: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? undefined; })() : undefined,
-      atsBrand:       config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? undefined; })() : undefined,
-      atsModel:       config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? undefined; })() : undefined,
-      backupInterfaceBrand: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.manufacturer ?? undefined; })() : undefined,
-      backupInterfaceModel: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.model ?? undefined; })() : undefined,
-      batteryCount:   config.batteryCount || undefined,
+      generatorBrand: includePoi && config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })() : undefined,
+      generatorModel: includePoi && config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? undefined; })() : undefined,
+      atsBrand:       includePoi && config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? undefined; })() : undefined,
+      atsModel:       includePoi && config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? undefined; })() : undefined,
+      backupInterfaceBrand: includePoi && config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.manufacturer ?? undefined; })() : undefined,
+      backupInterfaceModel: includePoi && config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.model ?? undefined; })() : undefined,
+      batteryCount:   includePoi ? (config.batteryCount || undefined) : undefined,
+    };
+    return input;
     };
 
+    const _fbKey = toSubSystemKey(config.systemType);
+    const _present = subSystemCounts.present;
+
+    // ── N ≤ 1 subsystems: EXACTLY the legacy input, through the N=1 identity
+    // path of computeMultiSystem (returns plain computeSystem by reference —
+    // I-1: bare run ids, unsuffixed tags, byte-identical serialization).
+    if (_present.length <= 1) {
+      const onlyKey: SubSystemKey = _present[0] ?? _fbKey;
+      const input = buildCsInputFor(
+        config.inverters,
+        systemPanelCount > 0 ? systemPanelCount : totalPanels,
+        totalPanels,
+        config.systemType,
+        true,
+      );
+      try {
+        return computeMultiSystem([{ ...input, subSystemKey: onlyKey }]);
+      } catch (e) {
+        console.error('ComputedSystem error:', e);
+        // Return a minimal safe object on error
+        return computeMultiSystem([{
+          ...input,
+          totalPanels: Math.max(1, systemPanelCount > 0 ? systemPanelCount : totalPanels),
+          subSystemKey: onlyKey,
+        }]);
+      }
+    }
+
+    // ── N > 1: one engine pass per PRESENT sub (layouts.panels stamps are the
+    // membership authority, §1.1), aggregated at ONE POI (§1.7 / I-6).
+    const _part = partitionFleet(config.inverters as any[], _fbKey);
+    const _subMapForCompute = ((config as any).subSystems ?? {}) as Record<string, any>;
+    const inputs: MultiSubSystemInput[] = _present.map((key, i) => {
+      const fleet = (_part[key] ?? []) as InverterConfig[];
+      const subCount = subSystemCounts[key];
+      return {
+        ...buildCsInputFor(fleet, subCount, subCount, key, i === 0),
+        subSystemKey: key,
+        // Addendum B ruling 1 metadata only (ONE combinable trench, conduits
+        // stay per-subsystem) — the sub's own value first, flat as fallback.
+        trenchRunLengthFt: key !== 'roof'
+          ? (_subMapForCompute[key]?.trenchRunLengthFt ?? config.trenchRunLengthFt ?? undefined)
+          : undefined,
+      };
+    });
     try {
-      return computeSystem(input);
+      return computeMultiSystem(inputs, {
+        mainPanelAmps: config.mainPanelAmps ?? 200,
+        busRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+        interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+      });
     } catch (e) {
-      console.error('ComputedSystem error:', e);
-      // Return a minimal safe object on error
-      return computeSystem({ ...input, totalPanels: Math.max(1, systemPanelCount > 0 ? systemPanelCount : totalPanels) });
+      console.error('ComputedMultiSystem error (hybrid) — falling back to whole-project aggregate:', e);
+      const input = buildCsInputFor(
+        config.inverters,
+        Math.max(1, systemPanelCount > 0 ? systemPanelCount : totalPanels),
+        totalPanels,
+        config.systemType,
+        true,
+      );
+      return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, totalPanels, systemPanelCount, compliance.autoDetected]);
+  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts]);
+
+  const computedSystem = computedMulti.aggregate;
 
   // Shorthand aliases from ComputedSystem
   const cs = computedSystem;
+
+  // Wave 3.7 — namespaced-run-id-tolerant lookup (parseRunId): at N=1 ids are
+  // bare (legacy, byte-identical); at N>1 per-sub runs are `${key}:`-prefixed
+  // and the FIRST base-id match wins — the fixed roof > ground > fence concat
+  // order makes that the PRIMARY sub's run. Shared service runs stay bare.
+  const csRun = (baseId: string): RunSegment | undefined =>
+    cs.runs?.find((r: RunSegment) => parseRunId(String(r.id)).baseId === baseId);
+
+  // Wave 3.7 — passthrough view for routes/payloads that expect BARE run ids
+  // (SLD route fallback, BOM route, save-outputs). At N>1: the PRIMARY sub's
+  // runs re-keyed to base ids + the shared service runs. N=1: cs.runs as-is.
+  const legacyRunsView = (): RunSegment[] => {
+    if (computedMulti.subSystemKeys.length <= 1) return cs.runs ?? [];
+    const primary = computedMulti.primaryKey;
+    return (cs.runs ?? []).flatMap((r: RunSegment) => {
+      const parsed = parseRunId(String(r.id));
+      if (parsed.subSystem === null) return [r];
+      if (parsed.subSystem === primary) return [{ ...r, id: parsed.baseId }];
+      return [];
+    });
+  };
 
   // ──────────────────────────────────────────────────────────────────
   // v61.7 — STRING PIPELINE GUARDRAIL
@@ -2897,6 +3012,9 @@ function EngineeringPageInner() {
   // ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') return;
+    // Wave 3.7 — the aggregate's strings span multiple subs at N>1; the
+    // 1:1 config-vs-cs comparison below is a single-system invariant only.
+    if (computedMulti.subSystemKeys.length > 1) return;
     if (!Array.isArray(cs.strings) || cs.strings.length === 0) return;
     if (cs.isMicro) return; // micro has no DC strings
 
@@ -4898,11 +5016,11 @@ function EngineeringPageInner() {
             panelsPerString: calcData?.stringConfig?.panelsPerString ?? (firstStr?.panelCount ?? 0),
             stringVoc:       calcData?.stringConfig?.stringVoc ?? null,
             stringIsc:       calcData?.stringConfig?.stringIsc ?? null,
-            dcWireGauge:     computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
-            dcConduitSize:   computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.conduitSize ?? '3/4" EMT',
+            dcWireGauge:     csRun('DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
+            dcConduitSize:   csRun('DC_STRING_RUN')?.conduitSize ?? '3/4" EMT',
             dcDisconnect:    `${calcData?.acSizing?.ocpdAmps ?? 15}A, 600VDC`,
-            acWireGauge:     computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
-            acConduitSize:   computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.conduitSize ?? '1" EMT',
+            acWireGauge:     csRun('DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
+            acConduitSize:   csRun('DISCO_TO_METER_RUN')?.conduitSize ?? '1" EMT',
             acBreaker:       calcData?.acSizing?.ocpdAmps ?? null,
             mainPanelBus:    config.panelBusRating ?? 200,
             backfeedBreaker: calcData?.interconnection?.backfeedAmps ?? calcData?.acSizing?.ocpdAmps ?? null,
@@ -4937,7 +5055,7 @@ function EngineeringPageInner() {
           utility:           config.utilityId ?? null,
           estimatedFee:      calcData?.jurisdiction?.estimatedPermitFee ?? null,
         },
-        runs:                computedSystem.runs ?? [],
+        runs:                legacyRunsView(),
         // ── Reverse hydration fields ──────────────────────────────────────────
         address:             config.address ?? null,
         utilityId:           config.utilityId ?? null,
@@ -5294,8 +5412,8 @@ function EngineeringPageInner() {
       const designTempMin = cs.designTempMin;
       const acOutputKw = cs.totalAcKw || invData?.acOutputKw || (invData?.acOutputW / 1000) || 7.6;
       // Get wire gauges from ComputedSystem runs
-      const csAcRun = cs.runs.find(r => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
-      const csDcRun = cs.runs.find(r => r.id === (cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN'));
+      const csAcRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
+      const csDcRun = csRun(cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN');
       // For micro: ALWAYS use cs.runs — never fall back to config.wireGauge (which is string-inverter only)
       const csAcWireGauge = csAcRun?.wireGauge
         || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
@@ -5452,12 +5570,12 @@ function EngineeringPageInner() {
             ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
             : undefined,
           // Pass ComputedSystem.runs as single source of truth for conduit schedule
-          runs:           cs.runs,
+          runs:           legacyRunsView(),
           // Microinverter branch data — for per-branch SLD drawing
           microBranches:     cs.isMicro ? cs.microBranches : undefined,
-          branchWireGauge:   cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.wireGauge : undefined,
-          branchConduitSize: cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.conduitSize : undefined,
-          branchOcpdAmps:    cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.ocpdAmps : undefined,
+          branchWireGauge:   cs.isMicro ? csRun('BRANCH_RUN')?.wireGauge : undefined,
+          branchConduitSize: cs.isMicro ? csRun('BRANCH_RUN')?.conduitSize : undefined,
+          branchOcpdAmps:    cs.isMicro ? csRun('BRANCH_RUN')?.ocpdAmps : undefined,
           // AP Systems / manufacturer branch limits
           inverterModulesPerDevice: invData?.modulesPerDevice ?? 1,
           inverterBranchLimit:      invData?.branchLimit ?? 16,
@@ -5503,6 +5621,15 @@ function EngineeringPageInner() {
 
   // ── V4 SLD fetch (uses /api/engineering/sld — professional renderer) ──────────
   const fetchSLD = async () => {
+    // Wave 3.7 / I-8: never fetch (or keep showing) a single-lane SLD for a
+    // hybrid — the Diagram tab renders the hybrid banner instead until the
+    // Wave-5 multi-lane renderer lands.
+    if (subSystemCounts.isHybrid) {
+      setSldSvg(null);
+      setSldError(null);
+      console.log('[SLD] hybrid project — single-lane SLD generation disabled (I-8); Diagram tab shows the hybrid banner');
+      return;
+    }
     setSldLoading(true);
     setSldError(null);
     try {
@@ -5667,7 +5794,7 @@ function EngineeringPageInner() {
         // FIX: csAcOcpd was only defined in the SLD callback - define it here too
         // Derive AC OCPD: prefer ComputedSystem runs → compliance acSizing → formula fallback
         const csAcOcpdBom: number = (() => {
-          const acRun = cs.runs?.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+          const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
           if (acRun?.ocpdAmps) return acRun.ocpdAmps;
           const compOcpd = (compliance.electrical as any)?.acSizing?.ocpd
             || (compliance.electrical as any)?.acSizing?.ocpdAmps;
@@ -5737,27 +5864,27 @@ function EngineeringPageInner() {
           })(),
           systemKw:         parseFloat(totalKw),
           dcWireGauge:      (() => {
-            const dcRun = cs.runs.find(r => r.id === (cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN'));
+            const dcRun = csRun(cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN');
             return dcRun?.wireGauge || firstStr?.wireGauge || '#10 AWG';
           })(),
           // Use ComputedSystem wire gauges — single source of truth
           // For micro: ALWAYS use cs.runs — never fall back to config.wireGauge
           acWireGauge:      (() => {
-            const acRun = cs.runs.find(r => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+            const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
             return acRun?.wireGauge
               || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
           })(),
           // Ground/fence arrays sit away from the house: add the user-input trench
           // run length to the DC home run (drives wire footage + NEC 300.5 conduit).
-          dcWireLength:     (firstStr?.wireLength || cs.runs.find(r => r.id === 'DC_STRING_RUN')?.onewayLengthFt || 50)
+          dcWireLength:     (firstStr?.wireLength || csRun('DC_STRING_RUN')?.onewayLengthFt || 50)
                               + ((config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0),
-          acWireLength:     config.wireLength || cs.runs.find(r => r.id === 'DISCO_TO_METER_RUN')?.onewayLengthFt || 50,
+          acWireLength:     config.wireLength || csRun('DISCO_TO_METER_RUN')?.onewayLengthFt || 50,
           // Trench length for the NEC 300.5 underground conduit line (ground/fence).
           trenchRunLengthFt: (config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0,
           conduitType:      config.conduitType,
           // Use ComputedSystem conduit size
           conduitSizeInch:  (() => {
-            const acRun = cs.runs.find(r => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+            const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
             return (acRun?.conduitSize || (compliance.electrical as any)?.acSizing?.conduitSize || '3/4"').replace('"','');
           })(),
           roofType:         isRoofSystem ? config.roofType : 'none',
@@ -5799,7 +5926,7 @@ function EngineeringPageInner() {
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
-          runs:             cs.runs,
+          runs:             legacyRunsView(),
           // Pass ComputedSystem.bomQuantities for EXACT match with summary card quantities
           bomQuantities:    cs.bomQuantities,
           // Generator / ATS / BUI — for BOM line items
@@ -7111,8 +7238,11 @@ function EngineeringPageInner() {
       // Ensure we have the accurate SLD before building the plan set.
       // If sldSvg is null (user hasn't clicked Generate SLD this session),
       // fetch it now so E-1 always uses renderSLDProfessional(), never the fallback.
-      let activeSldSvg = sldSvg;
-      if (!activeSldSvg) {
+      // Wave 3.7 / I-8: at N>1 subsystems a client-cached single-lane SVG is a
+      // plausible-wrong permit sheet — never attach one; the permit engine's
+      // hybrid handling (Phase-0 DO-NOT-SUBMIT banner) owns E-1 until Wave 5.
+      let activeSldSvg = subSystemCounts.isHybrid ? null : sldSvg;
+      if (!activeSldSvg && !subSystemCounts.isHybrid) {
         console.log('[handleGeneratePlanSet] sldSvg is null — auto-fetching SLD before plan-set...');
         activeSldSvg = await fetchSLDSvg();
         if (activeSldSvg) {
@@ -7121,6 +7251,9 @@ function EngineeringPageInner() {
         } else {
           console.warn('[handleGeneratePlanSet] SLD auto-fetch returned null — E-1 will use fallback renderer');
         }
+      }
+      if (subSystemCounts.isHybrid) {
+        console.warn('[handleGeneratePlanSet] hybrid project — client SLD passthrough suppressed (I-8); permit engine owns E-1 handling');
       }
 
       // Gather all system data
@@ -7131,7 +7264,7 @@ function EngineeringPageInner() {
 
       // Build strings array for plan set — use computedSystem.strings (engine output) when available
       const csStrings = cs.strings ?? [];
-      const csDcRun   = cs.runMap?.['DC_STRING_RUN'] ?? cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN');
+      const csDcRun   = csRun('DC_STRING_RUN');
       const planStrings = csStrings.length > 0
         ? csStrings.map((s: any, i: number) => ({
             id:          `S${i + 1}`,
@@ -7215,20 +7348,16 @@ function EngineeringPageInner() {
         // cs = computedSystem from useMemo above — already called computeSystem()
         // Use cs.runMap / cs.runs for wire gauges; cs.acOcpdAmps / cs.backfeedBreakerAmps for OCPDs.
         strings: planStrings,
-        dcWireGauge:          (cs.runMap?.['DC_STRING_RUN'] as any)?.wireGauge
-                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.wireGauge
+        dcWireGauge:          (csRun('DC_STRING_RUN') as any)?.wireGauge
                                 ?? config.wireGauge
                                 ?? '#10 AWG',
-        dcConduitType:        (cs.runMap?.['DC_STRING_RUN'] as any)?.conduitSize
-                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.conduitSize
+        dcConduitType:        (csRun('DC_STRING_RUN') as any)?.conduitSize
                                 ?? config.conduitType
                                 ?? '3/4" EMT',
-        acWireGauge:          (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.wireGauge
-                                ?? (cs.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN') as any)?.wireGauge
+        acWireGauge:          (csRun('DISCO_TO_METER_RUN') as any)?.wireGauge
                                 ?? compliance.electrical?.acWireGauge
                                 ?? '#8 AWG',
-        acConduitType:        (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.conduitSize
-                                ?? (cs.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN') as any)?.conduitSize
+        acConduitType:        (csRun('DISCO_TO_METER_RUN') as any)?.conduitSize
                                 ?? config.conduitType
                                 ?? '1" EMT',
         dcDisconnectAmps:     (csStrings[0] as any)?.ocpdAmps
@@ -7252,9 +7381,8 @@ function EngineeringPageInner() {
         interconnectionMethod: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'Supply-Side Tap' : 'Backfeed Breaker',
         rapidShutdownRequired: config.rapidShutdown,
         rapidShutdownDevice:  config.inverters[0]?.type === 'micro' ? 'Enphase IQ RSD (integrated)' : 'Tigo RSS / SolarEdge SafeDC',
-        groundWireGauge:      (cs.runMap?.['DC_STRING_RUN'] as any)?.egcGauge
-                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.egcGauge
-                                ?? (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.egcGauge
+        groundWireGauge:      (csRun('DC_STRING_RUN') as any)?.egcGauge
+                                ?? (csRun('DISCO_TO_METER_RUN') as any)?.egcGauge
                                 ?? '#10 AWG',
         // Battery
         hasBattery: config.batteryCount > 0 && !!config.batteryId,
@@ -7835,10 +7963,18 @@ function EngineeringPageInner() {
                   }
                   setSaveState('saving');
                   try {
+                    // Wave 3.5 — manual save carries the same v2 envelope as auto-save.
+                    const _manualHasMap =
+                      (config as any).subSystems && Object.keys((config as any).subSystems).length > 0;
                     const res = await fetch('/api/engineering/save-config', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ projectId: currentProjectId, config }),
+                      body: JSON.stringify({
+                        projectId: currentProjectId,
+                        config: _manualHasMap
+                          ? { ...config, schemaVersion: Math.max(2, Number((config as any).schemaVersion) || 0) }
+                          : config,
+                      }),
                     });
                     const body = await res.json();
                     console.log('[MANUAL SAVE] status:', res.status, 'body:', body);
@@ -8459,7 +8595,7 @@ function EngineeringPageInner() {
                         <div className="text-xs font-bold text-white">AC Run</div>
                         <div className="text-[10px] text-slate-400">
                           {(() => {
-                            const acRun = cs.runs.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+                            const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
                             return acRun?.wireGauge || config.wireGauge || '—';
                           })()}
                           {' · '}{config.wireLength}ft
@@ -8924,7 +9060,7 @@ function EngineeringPageInner() {
                           <span className="text-slate-500">Wire:</span>
                           <span className="text-blue-400 font-bold">
                             {(() => {
-                              const acRun = cs.runs.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+                              const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
                               return acRun?.wireGauge || config.wireGauge || '—';
                             })()}
                           </span>
@@ -8978,7 +9114,7 @@ function EngineeringPageInner() {
                           </label>
                           <div className="eng-auto-field" title="Auto-calculated from ComputedSystem (NEC 310.16 / NEC 690.8). Not user-editable.">
                             {(() => {
-                              const acRun = cs.runs.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+                              const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
                               const gauge = acRun?.wireGauge
                                 || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
                               return `${gauge} THWN-2`;
@@ -10051,7 +10187,7 @@ function EngineeringPageInner() {
                                 onChange={e => updateConfig({ generatorWireLength: Math.max(5, +e.target.value) })}
                                 className="eng-input" />
                               {config.generatorWireLength ? ((() => {
-                                const genRun = cs.runs?.find((r: any) => r.id === 'GENERATOR_TO_ATS_RUN');
+                                const genRun = csRun('GENERATOR_TO_ATS_RUN');
                                 if (!genRun) return null;
                                 return (
                                   <div className="mt-1.5 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 flex flex-wrap gap-3">
@@ -11972,6 +12108,28 @@ function EngineeringPageInner() {
               </div>
             ) : (
               <div className="max-w-none space-y-4">
+                {/* Wave 3.7 / I-8 — HYBRID: the single-lane SLD cannot represent
+                    ≥2 sub-systems; until the Wave-5 multi-lane renderer lands,
+                    the Diagram tab shows this banner instead of a plausible-
+                    wrong single-system diagram (never a silent resolve-to-
+                    nothing). Single-system projects render exactly as before. */}
+                {subSystemCounts.isHybrid ? (
+                  <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4 flex items-start gap-3">
+                    <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-200 leading-relaxed">
+                      <div className="font-bold text-amber-300 mb-1 uppercase tracking-wide">
+                        Hybrid design — single-line diagram not yet multi-system
+                      </div>
+                      This project spans {subSystemCounts.present.map(k => `${subSystemCounts[k]} ${k}`).join(' + ')} modules.
+                      The SLD renderer currently draws ONE source lane, which cannot correctly represent
+                      {' '}{subSystemCounts.present.length} sub-systems at the point of interconnection.
+                      Diagram generation is disabled for this project until the multi-lane renderer ships —
+                      the electrical math (backfeed, conductor schedules) above and in the plan set already
+                      aggregates every sub-system correctly. <span className="font-semibold text-amber-100">Do not
+                      submit a single-lane SLD for this hybrid design.</span>
+                    </div>
+                  </div>
+                ) : null}
                 {/* ══ SLD HERO ══════════════════════════════════════════════════ */}
                 <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
 <div className="flex items-center justify-between gap-4 mb-4">
@@ -12079,14 +12237,14 @@ function EngineeringPageInner() {
                                 inverterModel: (() => { const inv = config.inverters[0]; const d = getInvById(inv?.inverterId, inv?.type) as any; return d?.model || (computedSystem.isMicro ? 'IQ8+' : 'SE7600H'); })(),
                                 acOutputKw: Number(totalInverterKw),
                                 acOutputAmps: Math.round(Number(totalInverterKw) * 1000 / 240),
-                                acOCPD: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
-                                backfeedAmps: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
+                                acOCPD: csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
+                                backfeedAmps: csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
                                 panelModel: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.model || 'Solar Panel'; })(),
                                 panelWatts: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.watts || 400; })(),
                                 panelVoc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.voc || 41.6; })(),
                                 panelIsc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.isc || 12.26; })(),
-                                dcWireGauge: computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
-                                acWireGauge: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
+                                dcWireGauge: csRun('DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
+                                acWireGauge: csRun('DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
                                 acConduitType: config.conduitType ?? 'EMT',
                                 dcConduitType: config.conduitType ?? 'EMT',
                                 acWireLength: config.wireLength ?? 60,
@@ -12115,10 +12273,10 @@ function EngineeringPageInner() {
                                 })(),
                                 deviceCount: computedSystem.isMicro ? totalPanels : undefined,
                                 microBranches: computedSystem.isMicro ? computedSystem.microBranches : undefined,
-                                branchWireGauge: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.wireGauge : undefined,
-                                branchConduitSize: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.conduitSize : undefined,
-                                branchOcpdAmps: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.ocpdAmps : undefined,
-                                runs: computedSystem.runs,
+                                branchWireGauge: computedSystem.isMicro ? csRun('BRANCH_RUN')?.wireGauge : undefined,
+                                branchConduitSize: computedSystem.isMicro ? csRun('BRANCH_RUN')?.conduitSize : undefined,
+                                branchOcpdAmps: computedSystem.isMicro ? csRun('BRANCH_RUN')?.ocpdAmps : undefined,
+                                runs: legacyRunsView(),
                                 calcResult: compliance.electrical || null,
                                 inverterSpecs: config.inverters.map(inv => {
                                   const invData = getInvById(inv.inverterId, inv.type) as any;
