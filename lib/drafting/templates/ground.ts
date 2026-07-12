@@ -449,7 +449,16 @@ export function drawGroundStructural(
   const panelLenFt  = panelLenIn / 12;
   const panelWidFt  = panelWidIn / 12;
   const mountSys    = (project?.mountingSystem || 'IRONRIDGE IFM').toUpperCase();
-  const windSpeedMph  = engineering.windSpeedMph   ?? project?.ahjWindSpeedMph   ?? 90;
+  // Same wind chain as the fence template (Wave 6.2): engineering → canonical
+  // site wind (compliance structural) → AHJ → 115 (ASCE minimum; the old 90
+  // fallback printed beside a 115-mph FENCE DATA table on hybrid sets).
+  const _canonWind = Number((project as unknown as {
+    _canonical?: { site?: { windSpeed?: number } };
+  })?._canonical?.site?.windSpeed) || 0;
+  const windSpeedMph  = engineering.windSpeedMph
+    ?? (_canonWind > 0 ? _canonWind : undefined)
+    ?? project?.ahjWindSpeedMph
+    ?? 115;
   const groundSnowPsf = engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
 
   const totalPanels = cad?.totalPanels ?? engineering.totalPanels ?? 0;
