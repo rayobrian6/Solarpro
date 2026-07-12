@@ -455,3 +455,37 @@ This implementation was performed under the explicit authorization of Raymond fo
 - No unrelated application work was done.
 
 The worktree is clean. The branch is ready for review and push.
+
+---
+
+## 12. Additive Correction Note — Phase 1B.1
+
+**Date:** 2026-07-12
+**Correction initiative:** Phase 1B.1 — Organization Authority Boundary and Lifecycle Correction
+**Corrective commits:** `b3c11797` through `dba34020` (7 commits on `dev`)
+
+A post-implementation audit of the Phase 1B work identified seven defects where the shipped implementation diverged from the approved canonical authority model, ADRs, and threat model. These defects were corrected in Phase 1B.1 as an additive initiative on the `dev` branch. No Phase 1B commits were amended or rewritten — the corrections are new commits that build on top of the Phase 1B foundation.
+
+**Defects corrected:**
+
+1. **Standing platform-admin cross-tenant bypass** (CRITICAL) — `authorize()`, `authorizeMemberAction()`, and `authorizeRoleChange()` granted platform administrators unconditional cross-tenant access. Corrected by removing the bypass and adding a fail-closed `isSupportElevationActive()` boundary function.
+
+2. **Advisory enforcement fall-through** (CRITICAL) — `enforceAuthz()` and `enforceMemberAction()` logged denied decisions as warnings without throwing when the enforcement flag was off. Corrected by making enforcement always throw on denied decisions.
+
+3. **Missing `removed` status and hard-delete lifecycle** (HIGH) — Member removal used hard `DELETE`, destroying the audit trail. Corrected by migration 106 adding `removed` status, `joined_at`/`removed_at`/`removed_by` columns, and converting `removeMember()` to soft-delete.
+
+4. **Organization lifecycle missing `archived` status** (HIGH) — Phase 1B used only `deleted`. Corrected by migration 106 adding `archived` as the canonical terminal status (with `deleted` retained for backward compatibility) and `archived_at` column.
+
+5. **Audit log lacks organization context** (HIGH) — The `audit_log` table had no org context columns. Corrected by migration 107 adding `actor_organization_id` and `resource_owner_organization_id` columns with per-org hash chain partitioning (ADR-013 Option B).
+
+6. **Authorization feature-flag behavior** (MEDIUM) — Feature flags controlled enforcement strength rather than path entry. Corrected as part of defect 2.
+
+7. **Incomplete tenant-aware audit in migration governance** (MEDIUM) — Migration audit events lacked org context. Corrected by passing null org context to `writeAuditLog()` for platform-level migration events.
+
+**Full documentation:** `docs/enterprise-multi-tenant/phase1b1/` — correctness audit, authority boundary, membership lifecycle, audit context, test evidence, and final report.
+
+**Test evidence:** 124 new adversarial tests across 6 test files, all passing. TypeScript compilation: 0 errors. Migrations 106 and 107 verified through the canonical migration runner with correct checksums.
+
+**MFA boundary:** Respected. No MFA files, migrations, tests, or behavior were modified.
+
+The Phase 1B foundation remains valid; Phase 1B.1 corrects the implementation to match the approved design.
