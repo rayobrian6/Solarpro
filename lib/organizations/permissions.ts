@@ -23,7 +23,7 @@
  * across the codebase.
  */
 
-import { type OrgRole, ORG_ROLES, canManageRole } from './types';
+import { type OrgRole, ORG_ROLES, roleAtLeast } from './types';
 
 // ============================================================================
 // Permission Actions
@@ -149,8 +149,14 @@ export function roleCanPerform(role: OrgRole, action: OrgAction): boolean {
   const requiredRole = PERMISSION_MATRIX[action];
   if (!requiredRole) return false; // Default-deny
 
-  // The role must be at least as privileged as the required role
-  return canManageRole(role, requiredRole) || role === requiredRole;
+  // The role must be at least as privileged as the required role.
+  // roleAtLeast uses the privilege hierarchy (owner > admin > member > viewer)
+  // so a higher-privileged role can always perform actions that require a
+  // lower-privileged role. This is the correct privilege-level comparison —
+  // canManageRole is a management hierarchy check (who can manage whom),
+  // not a privilege comparison, and would incorrectly deny e.g. a member
+  // from performing a viewer-level action.
+  return roleAtLeast(role, requiredRole);
 }
 
 /**
