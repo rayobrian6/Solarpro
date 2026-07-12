@@ -57,7 +57,14 @@ import {
   recordBaselineBatchRows,
   enableExecutionTemporary,
   readExecutionActivation,
+  readLedgerRow,
+  readMigrationRunHistory,
 } from '@/lib/migrations/ledger';
+import {
+  buildExecutionIdentity,
+  computeExecutionDigest,
+  assessExecutionEligibility,
+} from '@/lib/migrations/executionReview';
 import { generateBaselineEvidence } from '@/lib/migrations/baselineEvidence';
 import { buildOperatorReadiness } from '@/lib/migrations/operatorReadiness';
 import {
@@ -190,6 +197,8 @@ export async function POST(req: NextRequest) {
     'record-baseline-batch',    // mutation: record whole reviewed batch (1 TOTP)
     'activation-status',        // read-only: bounded-activation status + expiry
     'enable-execution-temporary', // mutation: bounded activation window (TOTP)
+    'prepare-execution-single', // read-only: reviewed execution payload + digest
+    'execute-reviewed-single',  // mutation: run ONE migration (canonical runner)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -245,11 +254,13 @@ export async function POST(req: NextRequest) {
   const isBootstrap = action === 'bootstrap';
   const isPrepareBatch = action === 'prepare-baseline-batch';
   const isRecordBatch = action === 'record-baseline-batch';
-  const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus;
+  const isPrepareExec = action === 'prepare-execution-single';
+  const isExecuteReviewed = action === 'execute-reviewed-single';
+  const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec;
 
   // Determine the migration action type for authorization.
   let migrationAction: MigrationAction;
-  if (isExecute || isExecutionActivation) {
+  if (isExecute || isExecutionActivation || isExecuteReviewed) {
     migrationAction = 'execute';
   } else if (isBaselineMutation || isBootstrap || isRecordBatch) {
     migrationAction = 'bootstrap';
@@ -260,7 +271,7 @@ export async function POST(req: NextRequest) {
   // Operator-console surface is super_admin-only (matches the page's access
   // model). The read-only operator actions need an explicit gate because
   // authorizeMigration('inspect') otherwise permits plain 'admin'.
-  if ((isOperatorReadonly || isBootstrap || isRecordBatch) && adminUser.role !== 'super_admin') {
+  if ((isOperatorReadonly || isBootstrap || isRecordBatch || isExecuteReviewed) && adminUser.role !== 'super_admin') {
     return NextResponse.json(
       { success: false, error: `Action '${action}' requires super_admin role.` },
       { status: 403 },
@@ -275,7 +286,7 @@ export async function POST(req: NextRequest) {
   // - TOTP_INVALID: code doesn't match → retry allowed
   // - TOTP_REPLAY: time-step already consumed → must wait for next step
   let totpVerified = false;
-  if (isExecute || isExecutionActivation || isBootstrap || isRecordBatch) {
+  if (isExecute || isExecutionActivation || isBootstrap || isRecordBatch || isExecuteReviewed) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
         { success: false, error: 'A fresh TOTP code is required for this action. Provide it in the "totpCode" field.' },
@@ -593,6 +604,149 @@ export async function POST(req: NextRequest) {
         error: result.error,
         lifecycleState: (await getGovernanceLifecycleState()) ?? 'UNBOOTSTRAPPED',
       }, { status: result.success ? 200 : 409 });
+    }
+
+    if (isPrepareExec || isExecuteReviewed) {
+      // ── Reviewed single-migration execution (Commit 5) ──────────────────
+      // The client supplies ONLY the identifier (+ confirmedDigest/reason for
+      // execute). The SERVER derives filename, checksum, transaction mode,
+      // current migration state, baseline status, conflicts, activation window,
+      // and env authorization — the client can substitute none of them.
+      const identifier = typeof body?.identifier === 'string' ? body.identifier : '';
+      if (!identifier) {
+        return NextResponse.json({ success: false, error: '"identifier" is required.' }, { status: 400 });
+      }
+
+      const env = getCurrentEnvironment();
+      const allowedEnvs = (process.env.MIGRATION_RUN_ALLOWED_ENVS ?? '')
+        .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const isProd = env === 'production';
+      const prodAllowed = process.env.MIGRATION_ALLOW_PRODUCTION_EXECUTION === 'true';
+
+      const manifest = discoverMigrationFiles();
+      const file = manifest.files.find((f) => f.identifier === identifier);
+
+      // Live state (guarded — a fresh env yields no ledger).
+      let currentStatus: string | null = null;
+      let hasConflict = false;
+      try {
+        const state = await inspectMigrationState();
+        currentStatus = state.ledgerRows[identifier]?.status ?? null;
+        hasConflict = state.conflicts.some((c) => c.identifier === identifier);
+      } catch { /* no ledger */ }
+      const baselineRow = await readBaselineReconciliation(identifier).catch(() => null);
+      const activation = await readExecutionActivation();
+
+      const identity = buildExecutionIdentity({
+        environment: env,
+        identifier,
+        filename: file?.filename ?? '',
+        checksumSha256: file?.checksumSha256 ?? '',
+        transactionMode: file?.transactionMode ?? 'MANUAL_REVIEW',
+      });
+      const digest = computeExecutionDigest(identity);
+      const eligibility = assessExecutionEligibility({
+        foundInManifest: !!file,
+        currentStatus: currentStatus as any,
+        hasChecksumConflict: hasConflict,
+        transactionMode: file?.transactionMode ?? 'MANUAL_REVIEW',
+        baselineStatus: (baselineRow?.reconciliation_status ?? null) as any,
+        hasValidActivationWindow: activation.active,
+        environmentAllowed: allowedEnvs.includes(env),
+        isProduction: isProd,
+        productionExecutionAllowed: prodAllowed,
+      });
+
+      if (isPrepareExec) {
+        return NextResponse.json({
+          success: true,
+          action: 'prepare-execution-single',
+          environment: env,
+          identifier,
+          filename: identity.filename,
+          checksumSha256: identity.checksumSha256,
+          transactionMode: identity.transactionMode,
+          currentStatus: currentStatus ?? 'pending',
+          baselineStatus: baselineRow?.reconciliation_status ?? null,
+          activation: { active: activation.active, expiresAt: activation.expiresAt, secondsRemaining: activation.secondsRemaining },
+          digest,
+          eligible: eligibility.eligible,
+          blockReasons: eligibility.blockReasons,
+        });
+      }
+
+      // ── execute-reviewed-single ──────────────────────────────────────────
+      // super_admin + fresh TOTP verified above; authorizeMigration('execute')
+      // enforced env allowlist + production two-key.
+      const reason = (body?.reason as string | undefined)?.trim();
+      const confirmedDigest = typeof body?.confirmedDigest === 'string' ? body.confirmedDigest : '';
+      if (!reason) {
+        return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.' }, { status: 400 });
+      }
+      if (!confirmedDigest) {
+        return NextResponse.json({ success: false, error: '"confirmedDigest" (from prepare-execution-single) is required.' }, { status: 400 });
+      }
+      if (isProd && (body?.productionConfirmation as string | undefined) !== 'production') {
+        return NextResponse.json({ success: false, error: 'Production execution requires productionConfirmation === "production".' }, { status: 400 });
+      }
+      // Rebuilt-and-verified digest (the target file/checksum/env cannot have
+      // changed since review).
+      if (digest !== confirmedDigest) {
+        return NextResponse.json({
+          success: false, action: 'execute-reviewed-single',
+          error: 'DIGEST_MISMATCH: the migration or environment changed since preparation. Re-prepare and confirm again.',
+          expectedDigest: digest,
+        }, { status: 409 });
+      }
+      // Live eligibility re-check immediately before execution.
+      if (!eligibility.eligible) {
+        return NextResponse.json({
+          success: false, action: 'execute-reviewed-single',
+          error: `INELIGIBLE: ${eligibility.blockReasons.join(', ')}`,
+          blockReasons: eligibility.blockReasons,
+        }, { status: 409 });
+      }
+
+      // Force a canonical dry-run first (a dry-run is NOT execution proof).
+      const dryRun = await runSinglePendingMigration(identifier, { dryRun: true, authorization: auth } as RunSingleMigrationOptions);
+      // Real execution — ONLY through the canonical runner.
+      const execution = await runSinglePendingMigration(identifier, { dryRun: false, authorization: auth } as RunSingleMigrationOptions);
+
+      // Determine success from the LEDGER + run history — never from HTTP/dry-run.
+      const ledgerRow = await readLedgerRow(identifier).catch(() => null);
+      const runHistory = await readMigrationRunHistory(identifier, 5).catch(() => []);
+      const appliedInLedger = ledgerRow?.status === 'applied';
+      const appliedRun = runHistory.some((r) => r.status === 'applied' && r.execution_id === execution.executionId);
+      const verifiedSuccess = appliedInLedger && appliedRun;
+
+      // Auto-relock after success OR failure (single-use window).
+      const relock = await disableExecution(adminUser.id, `auto-relock after reviewed single execution of ${identifier}`).catch(() => false);
+      const lifecycleAfter = (await getGovernanceLifecycleState()) ?? 'UNBOOTSTRAPPED';
+
+      emitAuditEvent({
+        type: verifiedSuccess ? 'migration.run.completed' : 'migration.run.failed',
+        actorType: 'human', actorId: adminUser.id, environment: env,
+        executionId: execution.executionId, migrationIdentifier: identifier,
+        filename: identity.filename,
+        details: {
+          reviewedSingle: true, digest, reason,
+          ledgerStatus: ledgerRow?.status ?? null,
+          verifiedSuccess, relock, lifecycleAfter,
+        },
+      });
+
+      return NextResponse.json({
+        success: verifiedSuccess,
+        action: 'execute-reviewed-single',
+        identifier,
+        // Proof is the ledger + run history, not this HTTP status.
+        verifiedFrom: 'ledger+run_history',
+        dryRun: { status: dryRun.status, errorCode: dryRun.errorCode },
+        execution: { status: execution.status, executionId: execution.executionId, durationMs: execution.durationMs, errorCode: execution.errorCode, errorSummary: execution.errorSummary },
+        ledger: ledgerRow ? { status: ledgerRow.status, appliedAt: ledgerRow.applied_at, executionId: ledgerRow.execution_id } : null,
+        runHistory: runHistory.map((r) => ({ status: r.status, executionId: r.execution_id, completedAt: r.completed_at, errorCode: r.error_code })),
+        relock: { relocked: relock, lifecycleState: lifecycleAfter },
+      }, { status: verifiedSuccess ? 200 : 409 });
     }
 
     // ── Baseline control plane (MIGRATION-GOV-11, Phase 1A.2) ──────────────
