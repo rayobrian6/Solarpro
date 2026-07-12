@@ -18,26 +18,36 @@
  *      and the server decides whether to allow them.
  *
  *   3. CONTEXT-AWARE: Authorization considers:
- *      - The user's platform role (admin/super_admin grant cross-tenant
- *        access, bypassing org role checks)
  *      - The user's org role within the target org
- *      - The org's status (active/suspended/deleted)
- *      - The user's membership status (active/invited/suspended)
+ *      - The org's status (active/suspended/archived)
+ *      - The user's membership status (active/invited/suspended/removed)
  *      - Owner protection rules (last-owner checks)
  *
- *   4. FEATURE-FLAGGED ENFORCEMENT: When
- *      ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED is true, authorization
- *      decisions are ENFORCED (deny results block the action). When
- *      false, decisions are ADVISORY (the result is computed and
- *      logged, but the caller is responsible for enforcement).
+ *   4. PLATFORM ROLES ARE SEPARATE FROM ORG ROLES (ADR-004): A platform
+ *      role (admin/super_admin) does NOT confer org-scoped permissions.
+ *      Org-scoped access requires org membership with a sufficient org
+ *      role. Platform admin status alone never grants cross-tenant
+ *      org access.
  *
- *   5. PLATFORM ROLES SEPARATE FROM ORG ROLES: Platform admin/super_admin
- *      can access all orgs (cross-tenant). Org roles grant scoped access
- *      within a single org. These are checked independently.
+ *   5. SUPPORT ELEVATION IS FAIL-CLOSED: Support access (if any) is
+ *      gated by isSupportElevationActive(), which defaults to false.
+ *      When no support-elevation mechanism is active, platform admins
+ *      are subject to the same membership and role checks as every
+ *      other user. This establishes the integration boundary for
+ *      future, explicit, time-limited, scoped, reason-bound, audited,
+ *      and revocable support access (ADR-012). Until such a mechanism
+ *      is implemented and explicitly enabled, support elevation is
+ *      disabled and the default is deny.
+ *
+ *   6. ENFORCEMENT IS UNCONDITIONAL: Denied decisions always block the
+ *      action when the new authority path is taken. The enforcement
+ *      flag does not convert a denial into an allow. (Corrected in
+ *      Phase 1B.1 Workstream 2.)
  */
 
 import { getDbReady } from '@/lib/db-neon';
 import { isValidUUID } from '@/lib/db-neon';
+import { writeAuditLog } from '@/lib/auditLog';
 import {
   type OrgRole,
   isOrgFeatureEnabled,
@@ -77,17 +87,18 @@ export type AuthzResult = AllowedAuthzResult | DeniedAuthzResult;
  * Categorized deny reasons for meaningful error responses.
  */
 export type AuthzDenyReason =
-  | 'no_org_context'        // The user has no active org
-  | 'not_a_member'          // The user is not a member of the org
-  | 'membership_inactive'   // The user's membership is not active (invited/suspended)
-  | 'org_not_found'         // The org doesn't exist
-  | 'org_suspended'         // The org is suspended
-  | 'org_deleted'           // The org is soft-deleted
-  | 'insufficient_role'     // The user's role doesn't grant the action
-  | 'last_owner_protection' // The action violates last-owner protection
-  | 'self_target'           // The action targets the user themselves (forbidden)
-  | 'cannot_manage_peer'    // The user cannot manage someone of equal/higher role
-  | 'unknown_action';       // The action is not in the permission matrix
+  | 'no_org_context'              // The user has no active org
+  | 'not_a_member'                // The user is not a member of the org
+  | 'membership_inactive'         // The user's membership is not active (invited/suspended)
+  | 'org_not_found'               // The org doesn't exist
+  | 'org_suspended'               // The org is suspended
+  | 'org_archived'                // The org has been archived
+  | 'insufficient_role'           // The user's role doesn't grant the action
+  | 'last_owner_protection'       // The action violates last-owner protection
+  | 'self_target'                 // The action targets the user themselves (forbidden)
+  | 'cannot_manage_peer'          // The user cannot manage someone of equal/higher role
+  | 'unknown_action'              // The action is not in the permission matrix
+  | 'support_elevation_not_active'; // Support elevation is disabled — platform admin denied
 
 // ============================================================================
 // Platform Role Helpers
@@ -97,9 +108,9 @@ export type AuthzDenyReason =
  * Get a user's platform role from the database.
  * Platform roles: 'admin', 'super_admin', 'user' (default).
  *
- * These are SEPARATE from org roles. A platform admin can access all
- * orgs cross-tenant, while an org role grants scoped access within
- * one org.
+ * These are SEPARATE from org roles (ADR-004). A platform role does NOT
+ * confer org-scoped permissions. Org-scoped access requires org membership
+ * with a sufficient org role.
  */
 async function getPlatformRole(userId: string): Promise<string> {
   if (!isValidUUID(userId)) return 'user';
@@ -113,12 +124,41 @@ async function getPlatformRole(userId: string): Promise<string> {
 }
 
 /**
- * Check if a platform role grants cross-tenant administrative access.
- * 'super_admin' and 'admin' bypass org-role checks.
+ * Check if a platform role is an administrative platform role.
+ * 'super_admin' and 'admin' are platform admin roles.
+ *
+ * NOTE: This function identifies platform admins for informational purposes
+ * only. It does NOT grant them org-scoped access. Platform admin status alone
+ * never bypasses org membership or role checks (ADR-004, Phase 1B.1
+ * Workstream 1). Support access — if any — is gated by
+ * isSupportElevationActive() and must be explicit, time-limited, scoped,
+ * reason-bound, audited, and revocable (ADR-012).
  */
 function isPlatformAdmin(platformRole: string): boolean {
   const r = platformRole.toLowerCase();
   return r === 'super_admin' || r === 'admin';
+}
+
+/**
+ * Whether a support-elevation mechanism is active.
+ *
+ * Support elevation is the ONLY authorized pathway for platform staff to
+ * access tenant organizations without org membership. It must be explicit,
+ * time-limited, scoped, reason-bound, audited, read-only by default, and
+ * revocable (ADR-012, Canonical Model Diagram 7).
+ *
+ * This function establishes the integration boundary. It defaults to false
+ * (fail-closed). No support-elevation mechanism is implemented in Phase 1B.1;
+ * this is a placeholder that returns false so that platform admins are always
+ * subject to the same membership and role checks as every other user. When a
+ * future phase implements support elevation, it will gate the actual elevation
+ * pathway through this function (or a successor), which will check for active,
+ * unexpired, scoped elevation grants at that time.
+ *
+ * @returns false — support elevation is disabled by default (fail-closed).
+ */
+export function isSupportElevationActive(): boolean {
+  return false;
 }
 
 // ============================================================================
@@ -134,11 +174,16 @@ function isPlatformAdmin(platformRole: string): boolean {
  *
  * Evaluation order (first deny wins):
  *   1. Validate IDs (deny if invalid).
- *   2. Check platform role — if super_admin/admin, ALLOW (cross-tenant).
- *   3. Check org exists and is active (deny if not found/suspended/deleted).
- *   4. Check user is an active member of the org (deny if not).
- *   5. Check user's org role grants the action (deny if insufficient).
- *   6. ALLOW.
+ *   2. Check org exists and is active (deny if not found/suspended/archived).
+ *   3. Check user is an active member of the org (deny if not).
+ *   4. Check user's org role grants the action (deny if insufficient).
+ *   5. ALLOW.
+ *
+ * Platform admin/super_admin roles do NOT bypass any of these checks
+ * (ADR-004). A platform admin without org membership is denied, identical
+ * to any other non-member. Support elevation, if active (ADR-012), would
+ * be checked here in a future phase — but is fail-closed by default
+ * (isSupportElevationActive() returns false).
  *
  * Note: Owner protection checks (last-owner) are handled separately
  * by checkOwnerProtection(), because they require knowing the specific
@@ -159,13 +204,7 @@ export async function authorize(
     return { allowed: false, reason: 'no_org_context', detail: 'Invalid user or organization ID' };
   }
 
-  // 2. Check platform role — super_admin/admin bypass org checks
-  const platformRole = await getPlatformRole(userId);
-  if (isPlatformAdmin(platformRole)) {
-    return { allowed: true, reason: 'allowed' };
-  }
-
-  // 3. Check org exists and is active
+  // 2. Check org exists and is active
   const sql = await getDbReady();
   const orgRows = await sql`
     SELECT status FROM organizations WHERE id = ${organizationId} LIMIT 1
@@ -177,11 +216,11 @@ export async function authorize(
   if (orgStatus === 'suspended') {
     return { allowed: false, reason: 'org_suspended', detail: 'Organization is suspended' };
   }
-  if (orgStatus === 'deleted') {
-    return { allowed: false, reason: 'org_deleted', detail: 'Organization has been deleted' };
+  if (orgStatus === 'archived' || orgStatus === 'deleted') {
+    return { allowed: false, reason: 'org_archived', detail: 'Organization has been archived' };
   }
 
-  // 4. Check user is an active member
+  // 3. Check user is an active member
   const membership = await getMembership(organizationId, userId);
   if (!membership) {
     return { allowed: false, reason: 'not_a_member', detail: 'You are not a member of this organization' };
@@ -194,7 +233,7 @@ export async function authorize(
     };
   }
 
-  // 5. Check org role grants the action
+  // 4. Check org role grants the action
   if (!roleCanPerform(membership.role, action)) {
     const required = getRequiredRole(action);
     return {
@@ -204,7 +243,7 @@ export async function authorize(
     };
   }
 
-  // 6. Allow
+  // 5. Allow
   return { allowed: true, reason: 'allowed' };
 }
 
@@ -315,16 +354,11 @@ export async function authorizeMemberAction(
     };
   }
 
-  // 3. Platform admins bypass member-to-member checks
-  const platformRole = await getPlatformRole(actorId);
-  if (isPlatformAdmin(platformRole)) {
-    // But still check owner protection (even admins can't remove the last owner)
-    if (action === 'remove' || action === 'change_role' || action === 'suspend') {
-      const ownerProtection = await checkOwnerProtection(organizationId, targetUserId, action);
-      if (!ownerProtection.allowed) return ownerProtection;
-    }
-    return { allowed: true, reason: 'allowed' };
-  }
+  // 3. Platform admins do NOT bypass member-to-member checks (ADR-004).
+  // A platform admin without org membership is denied by authorize() at
+  // step 1 above (the actorAuthz check). Support elevation, if active
+  // (ADR-012), would be checked here in a future phase — but is
+  // fail-closed by default (isSupportElevationActive() returns false).
 
   // 4. Get both roles
   const actorRole = await getOrgRole(organizationId, actorId);
@@ -389,14 +423,10 @@ export async function authorizeRoleChange(
   const authz = await authorizeMemberAction(actorId, organizationId, targetUserId, 'change_role');
   if (!authz.allowed) return authz;
 
-  // 2. Platform admins bypass role assignment checks
-  const platformRole = await getPlatformRole(actorId);
-  if (isPlatformAdmin(platformRole)) {
-    // But still check owner protection (can't demote last owner)
-    const ownerProtection = await checkOwnerProtection(organizationId, targetUserId, 'change_role');
-    if (!ownerProtection.allowed) return ownerProtection;
-    return { allowed: true, reason: 'allowed' };
-  }
+  // 2. Platform admins do NOT bypass role assignment checks (ADR-004).
+  // The actorAuthz check at step 1 already verified the actor's org role.
+  // Support elevation, if active (ADR-012), would be checked here in a
+  // future phase — but is fail-closed by default.
 
   // 3. Get the actor's role
   const actorRole = await getOrgRole(organizationId, actorId);
@@ -431,9 +461,15 @@ export async function authorizeRoleChange(
 /**
  * Whether authorization decisions are enforced (vs advisory).
  *
- * When ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED is true, deny results
- * should block the action. When false, deny results are advisory
- * (computed and logged, but the caller decides).
+ * In the Phase 1B.1 corrected model, this flag controls whether routes
+ * *enter* the authority enforcement path. When true, routes call enforce*()
+ * which always throw on denied decisions. When false, routes may still
+ * call authorize() for informational/logging purposes but must not rely on
+ * it for access control.
+ *
+ * The enforce*() functions themselves are unconditional — they always throw
+ * on denied decisions. This flag does not weaken enforcement; it gates
+ * whether the enforcement path is entered at all.
  */
 export function isEnforcementEnabled(): boolean {
   return isOrgFeatureEnabled('ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED');
@@ -444,33 +480,76 @@ export function isEnforcementEnabled(): boolean {
  * This is called internally by enforceAuthz() but can also be called
  * directly for advisory checks.
  */
-export function logAuthzDecision(
+/**
+ * Log an authorization decision to the tamper-evident audit log with org
+ * context (ADR-013, T-08). Previously this function only emitted a
+ * console.warn string; now it routes through lib/auditLog.ts writeAuditLog
+ * with actor_organization_id set to the org being authorized against.
+ *
+ * This is fire-and-forget (non-throwing): authz decision logging is
+ * observational, not a mutation. Fail-closed audit is reserved for
+ * authority mutations (auditOrgAuthorityEvent in lib/auditLog.ts).
+ *
+ * The console.warn is retained as a secondary safety net for cases where
+ * the audit_log table is unavailable.
+ */
+export async function logAuthzDecision(
   userId: string,
   organizationId: string,
   action: string,
   result: AuthzResult
-): void {
+): Promise<void> {
   const status = result.allowed ? 'ALLOWED' : `DENIED(${(result as DeniedAuthzResult).reason})`;
   const detail = result.allowed ? '' : `: ${(result as DeniedAuthzResult).detail}`;
-  // Using console.warn so it appears in server logs for audit purposes.
-  // In production, this would be routed to the audit log (lib/auditLog.ts).
+  // Secondary safety net — always emit to console for server log observability
   console.warn(
     `[AUTHZ] user=${userId} org=${organizationId} action=${action} → ${status}${detail}`
   );
+
+  // Primary path — route to tamper-evident audit log with org context
+  try {
+    await writeAuditLog({
+      category: 'admin',
+      action: 'organization_authz_decision',
+      description: `Authz decision: user=${userId} org=${organizationId} action=${action} → ${status}${detail}`,
+      actor_id: userId,
+      actor_email: null,
+      actor_role: null,
+      target_type: 'organization',
+      target_id: organizationId,
+      metadata: {
+        action,
+        allowed: result.allowed,
+        reason: result.allowed ? 'allowed' : (result as DeniedAuthzResult).reason,
+        detail: result.allowed ? null : (result as DeniedAuthzResult).detail,
+      },
+      ip_address: null,
+      user_agent: null,
+      request_path: null,
+      actor_organization_id: organizationId,
+      resource_owner_organization_id: organizationId,
+    });
+  } catch {
+    // Non-throwing: authz decision logging is observational, not a mutation.
+    // The console.warn above ensures the event is not silently lost.
+  }
 }
 
 /**
  * Enforce an authorization decision.
  *
- * When enforcement is enabled (ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED=true),
- * a denied result throws an AuthzError. When enforcement is disabled,
- * the decision is logged but not thrown (advisory mode).
+ * Always throws AuthzError when the decision is denied. The decision is
+ * logged regardless of outcome. This function is unconditional — once the
+ * authority path is active (ENTERPRISE_ORG_AUTHORITY_ENABLED=true), a denied
+ * decision always blocks the action. The ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED
+ * flag controls whether routes *enter* the authority path at all; it does not
+ * weaken enforcement once that path is taken (ADR-004, fail-closed principle).
  *
  * @param userId         The user requesting the action.
  * @param organizationId The org context.
  * @param action         The action to authorize.
  * @returns              void if allowed.
- * @throws               AuthzError if denied and enforcement is enabled.
+ * @throws               AuthzError if denied.
  */
 export async function enforceAuthz(
   userId: string,
@@ -478,16 +557,21 @@ export async function enforceAuthz(
   action: OrgAction
 ): Promise<void> {
   const result = await authorize(userId, organizationId, action);
-  logAuthzDecision(userId, organizationId, action, result);
+  await logAuthzDecision(userId, organizationId, action, result);
 
-  if (!result.allowed && isEnforcementEnabled()) {
+  if (!result.allowed) {
     const denied = result as DeniedAuthzResult;
     throw new AuthzError(denied.reason, denied.detail);
   }
 }
 
 /**
- * Enforce a member-to-member authorization decision:
+ * Enforce a member-to-member authorization decision.
+ *
+ * Always throws AuthzError when the decision is denied. The decision is
+ * logged regardless of outcome. This function is unconditional — once the
+ * authority path is active, a denied member-to-member decision always blocks
+ * the action (ADR-004, fail-closed principle).
  */
 export async function enforceMemberAction(
   actorId: string,
@@ -496,13 +580,11 @@ export async function enforceMemberAction(
   action: 'remove' | 'change_role' | 'suspend' | 'reactivate' | 'invite'
 ): Promise<void> {
   const result = await authorizeMemberAction(actorId, organizationId, targetUserId, action);
-  logAuthzDecision(actorId, organizationId, `member:${action}:${targetUserId}`, result);
+  await logAuthzDecision(actorId, organizationId, `member:${action}:${targetUserId}`, result);
 
   if (!result.allowed) {
     const denied = result as DeniedAuthzResult;
-    if (isEnforcementEnabled()) {
-      throw new AuthzError(denied.reason, denied.detail);
-    }
+    throw new AuthzError(denied.reason, denied.detail);
   }
 }
 
@@ -538,7 +620,7 @@ export function authzReasonToStatusCode(reason: AuthzDenyReason): number {
     case 'org_not_found':
       return 404;
     case 'org_suspended':
-    case 'org_deleted':
+    case 'org_archived':
       return 403;
     case 'insufficient_role':
     case 'cannot_manage_peer':
@@ -549,6 +631,8 @@ export function authzReasonToStatusCode(reason: AuthzDenyReason): number {
       return 400; // Bad request — self-targeting is a client error
     case 'unknown_action':
       return 400;
+    case 'support_elevation_not_active':
+      return 403;
     default:
       return 403;
   }
@@ -573,6 +657,11 @@ export async function quickCheckRole(
 
 /**
  * Quick check: is the user a platform admin (admin/super_admin)?
+ *
+ * This is an informational check only. It does NOT grant org-scoped
+ * access. Platform admin status alone never bypasses org membership or
+ * role checks (ADR-004, Phase 1B.1 Workstream 1). Callers must not use
+ * this function to grant cross-tenant org access.
  */
 export async function isPlatformAdminUser(userId: string): Promise<boolean> {
   const role = await getPlatformRole(userId);
@@ -580,9 +669,16 @@ export async function isPlatformAdminUser(userId: string): Promise<boolean> {
 }
 
 /**
- * Check if the org authority system is fully enabled (master switch
- * + enforcement). When this is false, the system operates in legacy
- * mode and authorization is not enforced.
+ * Check if the org authority enforcement path is active.
+ *
+ * Returns true when both the master switch (ENTERPRISE_ORG_AUTHORITY_ENABLED)
+ * and the enforcement flag (ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED) are on.
+ * When true, routes should call enforce*() functions, which always throw on
+ * denied decisions. When false, routes fall back to legacy behavior.
+ *
+ * Note: enforce*() functions themselves are unconditional — they always throw
+ * on denied decisions regardless of this flag. This flag controls whether
+ * routes enter the enforcement path.
  */
 export function isOrgAuthzActive(): boolean {
   return isOrgAuthorityEnabled() && isEnforcementEnabled();

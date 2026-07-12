@@ -1,19 +1,20 @@
 // ============================================================================
 // /api/organizations/[id]/members
 //
-// Phase 1B — Organization Authority Foundation
+// Phase 1B.1 — Organization Authority Boundary Correction
 //
 // GET  — list all members of an organization (requires member:view permission)
 // POST — add a new member to the organization (requires member:invite permission)
 //
 // Authorization is enforced through the centralized authorization engine
-// (lib/organizations/authorization.ts). When the enforcement flag is off,
-// authorization is advisory (computed and logged but not enforced), and
-// the route falls back to legacy behavior.
+// (lib/organizations/authorization.ts). When the authority master switch
+// (ENTERPRISE_ORG_AUTHORITY_ENABLED) is on, deny decisions are always enforced
+// (fail-closed). There is no advisory fall-through — a denied authorization
+// always blocks the action. Platform admins do NOT bypass membership checks
+// (ADR-004).
 //
 // Feature flags:
-//   - ENTERPRISE_ORG_AUTHORITY_ENABLED (master switch)
-//   - ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED (enforce deny decisions)
+//   - ENTERPRISE_ORG_AUTHORITY_ENABLED (master switch — gates the authority path)
 //   - ENTERPRISE_ORG_MEMBERSHIP_WRITE_ENABLED (allow write operations)
 // ============================================================================
 import { NextRequest, NextResponse } from 'next/server';
@@ -25,9 +26,7 @@ import {
   addMember,
   isOrgAuthorityEnabled,
   isOrgFeatureEnabled,
-  authorize,
   enforceAuthz,
-  isOrgAuthzActive,
   type OrgRole,
 } from '@/lib/organizations';
 
@@ -58,16 +57,9 @@ export async function GET(
   try {
     // --- New authority path ---
     if (isOrgAuthorityEnabled()) {
-      if (isOrgAuthzActive()) {
-        // Enforce authorization
-        await enforceAuthz(user.id, orgId, 'member:view');
-      } else {
-        // Advisory check (logged but not enforced)
-        const authz = await authorize(user.id, orgId, 'member:view');
-        if (!authz.allowed) {
-          // In advisory mode, fall through to legacy path if denied
-        }
-      }
+      // Enforce authorization — always throws on denied (fail-closed).
+      // Platform admins do NOT bypass this (ADR-004).
+      await enforceAuthz(user.id, orgId, 'member:view');
 
       const members = await getMembersByOrg(orgId);
       return NextResponse.json({ success: true, members });
@@ -165,10 +157,9 @@ export async function POST(
       );
     }
 
-    // Enforce authorization for the invite action
-    if (isOrgAuthzActive()) {
-      await enforceAuthz(user.id, orgId, 'member:invite');
-    }
+    // Enforce authorization — always throws on denied (fail-closed).
+    // Platform admins do NOT bypass this (ADR-004).
+    await enforceAuthz(user.id, orgId, 'member:invite');
 
     const result = await addMember(orgId, targetUserId, role, user.id);
 

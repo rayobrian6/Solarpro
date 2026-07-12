@@ -1,20 +1,24 @@
 // ============================================================================
 // /api/organizations/[id]/members/[userId]
 //
-// Phase 1B — Organization Authority Foundation
+// Phase 1B.1 — Organization Authority Boundary Correction
 //
 // PATCH  — change a member's role (requires member:change_role permission)
 // DELETE — remove a member from the org (requires member:remove permission)
 //
 // Authorization is enforced through the centralized authorization engine.
+// When the authority master switch (ENTERPRISE_ORG_AUTHORITY_ENABLED) is on,
+// deny decisions are always enforced (fail-closed). There is no advisory
+// mode — a denied authorization always blocks the action. Platform admins
+// do NOT bypass membership checks (ADR-004).
+//
 // Owner protection rules are enforced:
 //   - The last active owner cannot be removed or demoted.
 //   - A user cannot remove or suspend themselves.
 //   - An admin cannot manage another admin.
 //
 // Feature flags:
-//   - ENTERPRISE_ORG_AUTHORITY_ENABLED (master switch)
-//   - ENTERPRISE_ORG_AUTHZ_ENFORCEMENT_ENABLED (enforce deny decisions)
+//   - ENTERPRISE_ORG_AUTHORITY_ENABLED (master switch — gates the authority path)
 //   - ENTERPRISE_ORG_MEMBERSHIP_WRITE_ENABLED (allow write operations)
 // ============================================================================
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,10 +30,9 @@ import {
   removeMember,
   suspendMember,
   reactivateMember,
+  isOrgAuthorityEnabled,
   isOrgFeatureEnabled,
-  authorizeRoleChange,
   enforceMemberAction,
-  isOrgAuthzActive,
   type OrgRole,
 } from '@/lib/organizations';
 
@@ -95,16 +98,10 @@ export async function PATCH(
         );
       }
 
-      // Enforce authorization (if enforcement is active)
-      if (isOrgAuthzActive()) {
+      // Enforce authorization — always throws on denied (fail-closed).
+      // Platform admins do NOT bypass this (ADR-004).
+      if (isOrgAuthorityEnabled()) {
         await enforceMemberAction(user.id, orgId, targetUserId, 'change_role');
-      } else {
-        // Advisory check
-        const authz = await authorizeRoleChange(user.id, orgId, targetUserId, newRole);
-        if (!authz.allowed) {
-          // In advisory mode with authority enabled, we still proceed
-          // but log the decision. Only block when enforcement is on.
-        }
       }
 
       const result = await changeMemberRole(orgId, targetUserId, newRole);
@@ -129,7 +126,7 @@ export async function PATCH(
 
     // --- Suspend ---
     if (body?.action === 'suspend') {
-      if (isOrgAuthzActive()) {
+      if (isOrgAuthorityEnabled()) {
         await enforceMemberAction(user.id, orgId, targetUserId, 'suspend');
       }
 
@@ -156,7 +153,7 @@ export async function PATCH(
 
     // --- Reactivate ---
     if (body?.action === 'reactivate') {
-      if (isOrgAuthzActive()) {
+      if (isOrgAuthorityEnabled()) {
         await enforceMemberAction(user.id, orgId, targetUserId, 'reactivate');
       }
 
@@ -233,8 +230,9 @@ export async function DELETE(
   }
 
   try {
-    // Enforce authorization (if enforcement is active)
-    if (isOrgAuthzActive()) {
+    // Enforce authorization — always throws on denied (fail-closed).
+    // Platform admins do NOT bypass this (ADR-004).
+    if (isOrgAuthorityEnabled()) {
       await enforceMemberAction(user.id, orgId, targetUserId, 'remove');
     }
 

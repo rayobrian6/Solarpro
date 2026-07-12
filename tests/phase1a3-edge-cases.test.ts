@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ip_address    TEXT,
   user_agent    TEXT,
   request_path  TEXT,
+  actor_organization_id UUID,
+  resource_owner_organization_id UUID,
   prev_hash     TEXT,
   entry_hash    TEXT NOT NULL
 );

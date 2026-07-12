@@ -71,6 +71,7 @@ const TEST_SCHEMA = 'phase1b_membership_adv_test';
 
 const MIGRATION_016 = join(process.cwd(), 'lib', 'migrations', '016_organizations.sql');
 const MIGRATION_105 = join(process.cwd(), 'lib', 'migrations', '105_organization_authority_foundation.sql');
+const MIGRATION_106 = join(process.cwd(), 'lib', 'migrations', '106_membership_org_lifecycle_correction.sql');
 
 const describeOrSkip = HAS_TEST_DB ? describe : describe.skip;
 
@@ -244,6 +245,9 @@ describeOrSkip('Phase 1B — Membership Adversarial Integration Tests', () => {
       // Contains a $$ ... $$ function body — must NOT be split by ';'.
       const migration105 = readFileSync(MIGRATION_105, 'utf-8');
       await client.query(migration105);
+
+      const migration106 = readFileSync(MIGRATION_106, 'utf-8');
+      await client.query(migration106);
     } finally {
       client.release();
     }

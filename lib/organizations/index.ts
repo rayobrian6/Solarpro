@@ -84,6 +84,7 @@ export {
   authzReasonToStatusCode,
   quickCheckRole,
   isPlatformAdminUser,
+  isSupportElevationActive,
   isOrgAuthzActive,
 } from './authorization';
 
@@ -110,4 +111,7 @@ export {
   resolveUserOrgs,
   resolvePrimaryOrg,
   getOrgMemberCount,
+  suspendOrganization,
+  archiveOrganization,
+  reactivateOrganization,
 } from './service';

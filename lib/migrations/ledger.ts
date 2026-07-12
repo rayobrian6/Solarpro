@@ -283,6 +283,8 @@ async function persistMigrationAuditEvent(event: MigrationAuditEvent): Promise<s
     ip_address: null,
     user_agent: null,
     request_path: null,
+    actor_organization_id: null,
+    resource_owner_organization_id: null,
   });
 }
 

@@ -84,7 +84,10 @@ export {
 
 /**
  * Get an organization by ID.
- * Returns null if not found or if soft-deleted (unless includeDeleted).
+ * Returns null if not found or if soft-deleted/archived (unless includeDeleted).
+ *
+ * Both 'deleted' (legacy Phase 1B status) and 'archived' (canonical Phase 1B.1
+ * status) are treated as terminal — the org is not visible in normal queries.
  */
 export async function getOrganization(
   organizationId: string,
@@ -95,18 +98,18 @@ export async function getOrganization(
   const sql = await getDbReady();
   const rows = includeDeleted
     ? await sql`
-        SELECT id, name, owner_id, plan, status, suspended_at, deleted_at,
-               slug, settings, created_at, updated_at
+        SELECT id, name, owner_id, plan, status, suspended_at, archived_at,
+               deleted_at, slug, settings, created_at, updated_at
         FROM organizations
         WHERE id = ${organizationId}
         LIMIT 1
       `
     : await sql`
-        SELECT id, name, owner_id, plan, status, suspended_at, deleted_at,
-               slug, settings, created_at, updated_at
+        SELECT id, name, owner_id, plan, status, suspended_at, archived_at,
+               deleted_at, slug, settings, created_at, updated_at
         FROM organizations
         WHERE id = ${organizationId}
-          AND status != 'deleted'
+          AND status NOT IN ('deleted', 'archived')
         LIMIT 1
       `;
 
@@ -120,6 +123,7 @@ export async function getOrganization(
     plan: String(row.plan),
     status: row.status as OrgStatus,
     suspendedAt: row.suspended_at ? String(row.suspended_at) : null,
+    archivedAt: row.archived_at ? String(row.archived_at) : null,
     deletedAt: row.deleted_at ? String(row.deleted_at) : null,
     slug: row.slug ? String(row.slug) : null,
     settings: (row.settings ?? {}) as Record<string, unknown>,
@@ -181,8 +185,11 @@ async function getOrganizationsForUserLegacy(
     invitedBy: null,
     invitedAt: null,
     acceptedAt: null,
+    joinedAt: null,
     suspendedAt: null,
     suspendedBy: null,
+    removedAt: null,
+    removedBy: null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     orgName: String(row.org_name),
@@ -403,6 +410,172 @@ export async function getOrgMemberCount(
     WHERE org_id = ${organizationId}
   `;
   return rows.length > 0 ? Number(rows[0].cnt) : 0;
+}
+
+// ============================================================================
+// Organization Lifecycle Operations
+//
+// Phase 1B.1 corrects the org lifecycle model: organizations are never
+// truly deleted; they are archived (soft-delete) with the row retained for
+// audit trail integrity (ADR-001). The canonical terminal status is
+// 'archived'. The legacy 'deleted' status is retained in the schema for
+// backward compatibility but new archive operations use 'archived'.
+//
+// Lifecycle transitions:
+//   active  → suspended  (suspendOrganization)
+//   active  → archived   (archiveOrganization)  [terminal]
+//   suspended → active   (reactivateOrganization)
+//   archived  → active   (reactivateOrganization)  [un-archive]
+//
+// All transitions validate the org exists, record the transition timestamp,
+// and return the updated organization. They are gated on the authority
+// feature flag (ENTERPRISE_ORG_AUTHORITY_ENABLED).
+//
+// Authorization is NOT enforced here — callers must check authorize() with
+// the appropriate action (e.g. 'org:manage') before calling these functions.
+// This keeps the data layer pure and lets the route layer decide policy.
+// ============================================================================
+
+/**
+ * Result type for org lifecycle operations.
+ */
+type OrgLifecycleResult = MembershipResult<Organization>;
+
+/**
+ * Set an organization's status and record the transition timestamp.
+ * Internal helper — does not validate feature flags (callers do that).
+ */
+async function setOrgStatus(
+  organizationId: string,
+  newStatus: OrgStatus,
+  timestampColumn: 'suspended_at' | 'archived_at' | null
+): Promise<OrgLifecycleResult> {
+  if (!isValidUUID(organizationId)) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Invalid organization ID' } };
+  }
+
+  const sql = await getDbReady();
+  const now = new Date().toISOString();
+
+  let rows: Record<string, unknown>[];
+
+  if (newStatus === 'active') {
+    // Reactivation: clear terminal-state timestamps, set status to active.
+    rows = await sql`
+      UPDATE organizations
+      SET status = 'active',
+          suspended_at = NULL,
+          archived_at = NULL,
+          updated_at = ${now}
+      WHERE id = ${organizationId}
+      RETURNING id, name, owner_id, plan, status, suspended_at, archived_at,
+                deleted_at, slug, settings, created_at, updated_at
+    `;
+  } else if (timestampColumn === 'suspended_at') {
+    rows = await sql`
+      UPDATE organizations
+      SET status = 'suspended',
+          suspended_at = ${now},
+          updated_at = ${now}
+      WHERE id = ${organizationId}
+      RETURNING id, name, owner_id, plan, status, suspended_at, archived_at,
+                deleted_at, slug, settings, created_at, updated_at
+    `;
+  } else {
+    // archive: timestampColumn === 'archived_at'
+    rows = await sql`
+      UPDATE organizations
+      SET status = 'archived',
+          archived_at = ${now},
+          updated_at = ${now}
+      WHERE id = ${organizationId}
+      RETURNING id, name, owner_id, plan, status, suspended_at, archived_at,
+                deleted_at, slug, settings, created_at, updated_at
+    `;
+  }
+
+  if (rows.length === 0) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Organization not found' } };
+  }
+
+  const row = rows[0];
+  return {
+    ok: true,
+    data: {
+      id: String(row.id),
+      name: String(row.name),
+      ownerId: String(row.owner_id),
+      plan: String(row.plan),
+      status: row.status as OrgStatus,
+      suspendedAt: row.suspended_at ? String(row.suspended_at) : null,
+      archivedAt: row.archived_at ? String(row.archived_at) : null,
+      deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+      slug: row.slug ? String(row.slug) : null,
+      settings: (row.settings ?? {}) as Record<string, unknown>,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    },
+  };
+}
+
+/**
+ * Suspend an organization. Sets status to 'suspended' and records
+ * suspended_at. A suspended org denies all access via authorize().
+ *
+ * The org row is retained — this is a reversible lifecycle transition,
+ * not a deletion. Use reactivateOrganization() to restore.
+ *
+ * @param organizationId  The org to suspend.
+ * @returns  The updated organization, or NOT_FOUND if the org doesn't exist.
+ */
+export async function suspendOrganization(
+  organizationId: string
+): Promise<OrgLifecycleResult> {
+  if (!isOrgAuthorityEnabled()) {
+    return { ok: false, error: { code: 'FEATURE_DISABLED', message: 'Organization authority is not enabled' } };
+  }
+  return setOrgStatus(organizationId, 'suspended', 'suspended_at');
+}
+
+/**
+ * Archive an organization. Sets status to 'archived' and records
+ * archived_at. This is the canonical terminal lifecycle state (ADR-001).
+ *
+ * The org row is retained for audit trail integrity. An archived org
+ * denies all access via authorize() (reason: org_archived). It is excluded
+ * from getOrganization() unless includeDeleted=true is passed.
+ *
+ * Archiving is reversible — use reactivateOrganization() to un-archive.
+ *
+ * @param organizationId  The org to archive.
+ * @returns  The updated organization, or NOT_FOUND if the org doesn't exist.
+ */
+export async function archiveOrganization(
+  organizationId: string
+): Promise<OrgLifecycleResult> {
+  if (!isOrgAuthorityEnabled()) {
+    return { ok: false, error: { code: 'FEATURE_DISABLED', message: 'Organization authority is not enabled' } };
+  }
+  return setOrgStatus(organizationId, 'archived', 'archived_at');
+}
+
+/**
+ * Reactivate an organization. Sets status to 'active' and clears all
+ * terminal-state timestamps (suspended_at, archived_at).
+ *
+ * This reverses either a suspension or an archive. After reactivation,
+ * the org is fully accessible again via authorize().
+ *
+ * @param organizationId  The org to reactivate.
+ * @returns  The updated organization, or NOT_FOUND if the org doesn't exist.
+ */
+export async function reactivateOrganization(
+  organizationId: string
+): Promise<OrgLifecycleResult> {
+  if (!isOrgAuthorityEnabled()) {
+    return { ok: false, error: { code: 'FEATURE_DISABLED', message: 'Organization authority is not enabled' } };
+  }
+  return setOrgStatus(organizationId, 'active', null);
 }
 
 // ============================================================================
