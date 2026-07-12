@@ -507,8 +507,15 @@ export function drawRoofPlan(
     }
     for (const fShape of _hyb.fence) {
       const [a, b] = fShape.line;
-      hEls.push(`<line x1="${toX(a.lng).toFixed(1)}" y1="${toY(a.lat).toFixed(1)}" x2="${toX(b.lng).toFixed(1)}" y2="${toY(b.lat).toFixed(1)}" stroke="#1a7a3a" stroke-width="3.2" stroke-linecap="round"/>`);
-      hEls.push(`<text x="${toX(fShape.labelPt.lng).toFixed(1)}" y="${(toY(fShape.labelPt.lat) - 5).toFixed(1)}" font-size="8" font-weight="bold" fill="#1a7a3a" text-anchor="middle">${fShape.label}</text>`);
+      const fax = toX(a.lng), fay = toY(a.lat), fbx = toX(b.lng), fby = toY(b.lat);
+      hEls.push(`<line x1="${fax.toFixed(1)}" y1="${fay.toFixed(1)}" x2="${fbx.toFixed(1)}" y2="${fby.toFixed(1)}" stroke="#1a7a3a" stroke-width="3.2" stroke-linecap="round"/>`);
+      // Label ALONG the line (road-label treatment), just above it at 38% from
+      // the a-end — the horizontal midpoint label ran under the top-right
+      // LEGEND box whenever the fence's far end reached that corner.
+      const flx = fax + (fbx - fax) * 0.38, fly = fay + (fby - fay) * 0.38;
+      let fAng = Math.atan2(fby - fay, fbx - fax) * 180 / Math.PI;
+      if (fAng > 90) fAng -= 180; else if (fAng < -90) fAng += 180;   // never upside-down
+      hEls.push(`<text x="${flx.toFixed(1)}" y="${(fly - 5).toFixed(1)}" transform="rotate(${fAng.toFixed(1)} ${flx.toFixed(1)} ${fly.toFixed(1)})" font-size="8" font-weight="bold" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">${fShape.label}</text>`);
     }
     if (hEls.length) {
       els.push(`<g class="pv2-hybrid">${hEls.join('')}</g>`);
