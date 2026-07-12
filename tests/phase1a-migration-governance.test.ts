@@ -212,14 +212,14 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
     expect(extractDescription('001_initial_schema.sql')).toBe('initial schema');
   });
 
-  it('discovers 104 SQL files from lib/migrations/ (101 baseline + 105 organization authority + 106 lifecycle correction + 107 audit org context)', () => {
+  it('discovers 105 SQL files from lib/migrations/ (101 baseline + 105 organization authority + 106 lifecycle correction + 107 audit org context + 108 nearmap cache idx)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.count).toBe(104);
+    expect(manifest.count).toBe(105);
   });
 
-  it('highest prefix is 107', () => {
+  it('highest prefix is 108', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('107');
+    expect(manifest.highestPrefix).toBe('108');
   });
 
   it('detects duplicate prefix 074 and disambiguates as 074a/074b', () => {
@@ -1161,15 +1161,17 @@ describe('Phase 1A: Historical reconciliation', () => {
     expect(fileA.checksumSha256).not.toBe(fileB.checksumSha256);
   });
 
-  it('migration 105 exists (organization authority foundation), 106 exists (lifecycle correction), and 107 exists (audit org context)', () => {
+  it('migration 105 exists (organization authority foundation), 106 exists (lifecycle correction), 107 exists (audit org context), and 108 exists (nearmap cache idx)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('107');
+    expect(manifest.highestPrefix).toBe('108');
     const has105 = manifest.files.some((f: any) => f.prefix === '105');
     expect(has105).toBe(true);
     const has106 = manifest.files.some((f: any) => f.prefix === '106');
     expect(has106).toBe(true);
     const has107 = manifest.files.some((f: any) => f.prefix === '107');
     expect(has107).toBe(true);
+    const has108 = manifest.files.some((f: any) => f.prefix === '108');
+    expect(has108).toBe(true);
   });
 
   it('legacy migrations/ directory is excluded from manifest', () => {
