@@ -56,7 +56,7 @@ import { diffNormalizedInverterState } from '@/lib/system/normalizedInverter';
 // overrides user edits after that. The sizing engine remains the single
 // source of system logic — this module is pure bookkeeping + a thin call
 // to sizeSystemFromBrand() and hydration of the result into config.
-import { applySmartDefaultsOnce } from '@/lib/system/smartDefaults';
+import { applySmartDefaultsOnce, getDefaultBrand } from '@/lib/system/smartDefaults';
 // Lock Architecture — single inverter builder (v61.3).
 // All InverterConfig construction must go through this factory.
 import {
@@ -3741,7 +3741,11 @@ function EngineeringPageInner() {
   // validation, auto-apply) continue to run normally over the patched
   // config, because we stay on the existing pipeline.
   useEffect(() => {
-    if (config.defaultsApplied) return;
+    // Wave 3.4 (contract §3 Wave 3 item 4): at N>1 stamped subsystems the
+    // legacy whole-project sentinel no longer gates — each sub has its OWN
+    // once-only gate (defaultsAppliedBySubSystem[key]) and its own sizing
+    // pass; the per-sub branch below owns the hybrid path entirely.
+    if (config.defaultsApplied && !subSystemCounts.isHybrid) return;
     if (systemPanelCount <= 0) return;
     // Phase 13.1 — USER INTENT LOCK. Belt-and-suspenders: even if the
     // `defaultsApplied` sentinel somehow got cleared, never reapply
@@ -3749,6 +3753,151 @@ function EngineeringPageInner() {
     if (config.userHasEditedInverters || config.isUserControlled) {
       console.log('[CONFIG OVERWRITE BLOCKED] SMART DEFAULTS blocked —', config.isUserControlled ? 'isUserControlled=true' : 'userHasEditedInverters=true');
       return;
+    }
+
+    // ── Wave 3.4 — PER-SUB smart defaults (hybrid layouts) ──────────────────
+    // sizeSystemFromBrand × PRESENT subs (partition = layouts.panels stamps),
+    // getDefaultBrand(key) per sub, defaultsAppliedBySubSystem gate per key.
+    // A sub that already has equipment (map entry ids, or a live fleet) is
+    // NEVER re-defaulted; seeding writes ONLY that sub's fleet + map entry.
+    if (subSystemCounts.isHybrid) {
+      const _sdFb = toSubSystemKey(config.systemType);
+      const _sdPart = partitionFleet(config.inverters as any[], _sdFb);
+      const _sdDabs = (config as any).defaultsAppliedBySubSystem ?? {};
+      const _sdMap = (config as any).subSystems ?? {};
+      const _sdIsPlaceholderFleet = (fleet: InverterConfig[]): boolean =>
+        fleet.length === 1 &&
+        (fleet[0].strings?.length ?? 0) === 1 &&
+        ((fleet[0].strings[0]?.panelCount ?? 0) === 0 || fleet[0].strings[0]?.panelCount === 10);
+      const _sdToSeed = subSystemCounts.present.filter(key => {
+        if (_sdDabs[key]) return false;                              // per-key once-only gate
+        const entry = _sdMap[key];
+        if (entry && (entry.inverterId || entry.panelId)) return false; // sub already has equipment
+        const fleet = (_sdPart[key] ?? []) as InverterConfig[];
+        const effFleet = _sdIsPlaceholderFleet(fleet) ? [] : fleet;
+        return effFleet.length === 0;                                // only equipment-less subs
+      });
+      if (_sdToSeed.length === 0) return;
+
+      type SeededFleet = {
+        key: SubSystemKey; fleet: InverterConfig[]; inverterId: string;
+        topology: 'string' | 'micro' | 'optimizer'; brand: string; panelId?: string;
+      };
+      const _sdSeeded: SeededFleet[] = [];
+      for (const key of _sdToSeed) {
+        const seedBrand: string = _sdMap[key]?.ecosystemBrand ?? getDefaultBrand(key);
+        const subCount = subSystemCounts[key];
+        try {
+          const rec = sizeSystemFromBrand({
+            systemType: key,
+            panelCount: subCount,
+            panelWattage: 400,
+            selectedBrand: seedBrand,
+            batteryEnabled: false,
+          });
+          const primaryModel = rec.inverterModels[0];
+          if (!primaryModel) continue;
+          const uiType: InverterType =
+            rec.topology === 'hybrid' ? (rec.brand.id === 'ecoflow' ? 'ecoflow' : 'hybrid')
+            : rec.topology === 'micro' ? 'micro'
+            : rec.topology === 'optimizer' ? 'optimizer'
+            : 'string';
+          const base = newString(0, key); // per-sub panel/mounting defaults (fence → fence panel)
+          const buildSubString = (idx: number, panelCount: number): StringConfig =>
+            _buildStrCfg({
+              index:          idx,
+              existingId:     `str-subdef-${key}-${Date.now()}-${idx}`,
+              panelCount,
+              panelId:        base.panelId,
+              tilt:           base.tilt,
+              azimuth:        base.azimuth,
+              roofType:       base.roofType as any,
+              mountingSystem: base.mountingSystem,
+              wireGauge:      base.wireGauge,
+              wireLength:     base.wireLength,
+            });
+          const fleet: InverterConfig[] = [];
+          if (uiType === 'micro') {
+            const actualPanelCount = rec.input.panelCount > 0 ? rec.input.panelCount : rec.microDeviceCount;
+            fleet.push(_buildInvCfg({
+              existingId: `inv-subdef-${key}-${Date.now()}`,
+              inverterId: primaryModel.equipmentDbId,
+              type: 'micro',
+              strings: [buildSubString(0, actualPanelCount)],
+              subSystemKey: key,
+            } as any));
+          } else {
+            const byInv = new Map<number, typeof rec.strings>();
+            for (const s of rec.strings) {
+              const idx = s.inverterIndex ?? 0;
+              if (!byInv.has(idx)) byInv.set(idx, []);
+              byInv.get(idx)!.push(s);
+            }
+            for (let idx = 0; idx < Math.max(1, rec.inverterCount); idx++) {
+              const assigned = byInv.get(idx) ?? [];
+              const invStrings = assigned.length > 0
+                ? assigned.map((s, i) => buildSubString(i, s.panelCount))
+                : [buildSubString(0, 0)];
+              fleet.push(_buildInvCfg({
+                existingId: `inv-subdef-${key}-${Date.now()}-${idx}`,
+                inverterId: primaryModel.equipmentDbId,
+                type: uiType,
+                strings: invStrings,
+                subSystemKey: key,
+              } as any));
+            }
+          }
+          _sdSeeded.push({
+            key,
+            fleet,
+            inverterId: primaryModel.equipmentDbId,
+            topology: uiType === 'micro' ? 'micro' : uiType === 'optimizer' ? 'optimizer' : 'string',
+            brand: rec.brand.id,
+            panelId: base.panelId,
+          });
+        } catch (err) {
+          console.warn(`[SMART DEFAULTS per-sub] sizing failed for '${key}' (brand ${seedBrand}):`, err);
+        }
+      }
+      if (_sdSeeded.length === 0) return;
+      console.log('✅ [SMART DEFAULTS per-sub] seeded:',
+        _sdSeeded.map(s => `${s.key}=${subSystemCounts[s.key]}×(${s.brand})`).join(', '));
+
+      setConfig(prev => {
+        const fb = toSubSystemKey(prev.systemType);
+        let inverters = prev.inverters;
+        const nowIso = new Date().toISOString();
+        const dabsNext: Record<string, boolean> = { ...((prev as any).defaultsAppliedBySubSystem ?? {}) };
+        const mapNext: Record<string, any> = { ...((prev as any).subSystems ?? {}) };
+        for (const s of _sdSeeded) {
+          inverters = replaceSubFleet(inverters as any[], s.key, s.fleet as any[], fb) as unknown as InverterConfig[];
+          dabsNext[s.key] = true;
+          mapNext[s.key] = {
+            ...(mapNext[s.key] ?? {}),
+            key: s.key,
+            inverterId: s.inverterId,
+            topology: s.topology,
+            ecosystemBrand: s.brand,
+            ...(s.panelId ? { panelId: s.panelId } : {}),
+            source: 'defaults',
+            updatedAt: nowIso,
+          };
+        }
+        const builtTotal = fleetPanelTotal(inverters as any[]);
+        const countOk = systemPanelCount > 0 && builtTotal === systemPanelCount;
+        if (!countOk) {
+          console.warn('[SMART DEFAULTS per-sub] built total (' + builtTotal + ') !== systemPanelCount (' + systemPanelCount + ') — NOT stamping isUserControlled');
+        }
+        return {
+          ...prev,
+          inverters,
+          defaultsApplied: true,
+          defaultsAppliedBySubSystem: dabsNext,
+          subSystems: mapNext,
+          isUserControlled: countOk,
+        } as ProjectConfig;
+      });
+      return; // hybrid path complete — never fall through to the whole-project pass
     }
 
     const primary = config.inverters[0];
@@ -3830,13 +3979,19 @@ function EngineeringPageInner() {
         ...prev,
         inverters: hydratedInverters,
         defaultsApplied: true,
+        // Wave 3.4 — forward-consistent per-key stamp on the single-sub path
+        // too, so a later hybridization never re-defaults this sub.
+        defaultsAppliedBySubSystem: {
+          ...((prev as any).defaultsAppliedBySubSystem ?? {}),
+          [toSubSystemKey(prev.systemType)]: true,
+        },
         isUserControlled: _sdCountOk,
         // Only stamp selectedBrand when defaults picked one (user hadn't).
         ...(result.patch.selectedBrand ? { selectedBrand: result.patch.selectedBrand } : {}),
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemPanelCount, config.defaultsApplied, config.userHasEditedInverters]);
+  }, [systemPanelCount, config.defaultsApplied, config.userHasEditedInverters, subSystemCounts]);
 
   // Auto-apply watcher (opt-in). Fires only when:
   //   1. sizingAutoApply === true
