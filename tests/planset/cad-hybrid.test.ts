@@ -58,7 +58,10 @@ describe('hybrid CAD composition', () => {
     expect(html).toContain('GROUND MOUNT —');
     expect(html).toContain('SOLAR FENCE —');
     expect(html).toContain('pv2-hybrid');                       // overlay layer rendered
-    expect(html).toContain('HYBRID DESIGN — THIS SET IS NOT PERMIT-READY'); // P0 banner stays until P2/P3
+    // Wave 6.3: the P0 banner is now gate-computed — this fully-authoritative
+    // hybrid render retires it in favor of the neutral multi-system note.
+    expect(html).toContain('HYBRID MULTI-SYSTEM SET — PER-SUB-SYSTEM DOCUMENTATION');
+    expect(html).not.toContain('DO NOT SUBMIT');
   });
 
   it('the roof sheet documents ONLY the roof subset (counts + drawn modules)', () => {
