@@ -212,14 +212,14 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
     expect(extractDescription('001_initial_schema.sql')).toBe('initial schema');
   });
 
-  it('discovers 101 SQL files from lib/migrations/', () => {
+  it('discovers 102 SQL files from lib/migrations/ (101 baseline + 105 organization authority)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.count).toBe(101);
+    expect(manifest.count).toBe(102);
   });
 
-  it('highest prefix is 104', () => {
+  it('highest prefix is 105', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('104');
+    expect(manifest.highestPrefix).toBe('105');
   });
 
   it('detects duplicate prefix 074 and disambiguates as 074a/074b', () => {
@@ -1161,11 +1161,11 @@ describe('Phase 1A: Historical reconciliation', () => {
     expect(fileA.checksumSha256).not.toBe(fileB.checksumSha256);
   });
 
-  it('migration 105 does NOT exist (highest is 104)', () => {
+  it('migration 105 exists (organization authority foundation, highest prefix)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('104');
+    expect(manifest.highestPrefix).toBe('105');
     const has105 = manifest.files.some((f: any) => f.prefix === '105');
-    expect(has105).toBe(false);
+    expect(has105).toBe(true);
   });
 
   it('legacy migrations/ directory is excluded from manifest', () => {
