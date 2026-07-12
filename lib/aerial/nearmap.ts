@@ -485,6 +485,7 @@ export async function fetchNearmapRoofPlanes(
       const cov = await checkNearmapCoverage(lat, lng);
       if (!cov?.covered || !cov.hasAiFeatures) return [];
     }
+    console.warn('[nearmap] QUOTA-UNSAFE direct AI fetch (fetchNearmapRoofPlanes) — production callers must use lib/aerial/nearmapCache (durable, fail-closed)');
     const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
     const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -665,6 +666,7 @@ export async function fetchNearmapObstructions(
       if (!cov?.covered || !cov.hasAiFeatures) return [];
     }
 
+    console.warn('[nearmap] QUOTA-UNSAFE direct AI fetch (fetchNearmapObstructions) — production callers must use lib/aerial/nearmapCache (durable, fail-closed)');
     const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
     const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -722,6 +724,7 @@ export async function fetchNearmapAIResult(
       if (!cov?.covered || !cov.hasAiFeatures) return empty;
     }
 
+    console.warn('[nearmap] QUOTA-UNSAFE direct AI fetch (fetchNearmapAIResult) — production callers must use lib/aerial/nearmapCache (durable, fail-closed)');
     const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
     const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),

@@ -9,7 +9,8 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
 import { buildSchemSVG, escapeH } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
-import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, fetchNearmapStaticAerial, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { getNearmapAIResultCached } from '@/lib/aerial/nearmapCache';
 import { cropToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { locateEquipment } from '../utils/equipmentLocator';
 import { computeModuleAzimuthGrid, snapModuleAzimuth } from '../utils/moduleAzimuthGrid';
@@ -888,7 +889,10 @@ export async function fetchAerialRoofData(
       try {
         // ONE AI call returns both roof planes (for the frame snap) and roof
         // OBSTRUCTIONS (vents/chimneys/AC/skylights) for the PV-2 drawing.
-        const ai = await fetchNearmapAIResult(centerLat, centerLng, { radiusM: 45 });
+        // Durable DB cache (fail-closed): the in-memory cache dies on every
+        // serverless cold start, so this line was billing AI parcels on EVERY
+        // planset generate (81/100 trial parcels in 5 days).
+        const ai = await getNearmapAIResultCached(centerLat, centerLng);
         // Subject-building polygons (imagery-registered) → PV-1 dimming mask +
         // design-layer registration shift. cropToSubjectBuilding fails open.
         try {

@@ -12,7 +12,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { geocodeAddress } from '@/lib/geocode';
-import { nearmapConfigured, checkNearmapCoverage, fetchNearmapAIResult, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, checkNearmapCoverage, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { getNearmapAIResultCached } from '@/lib/aerial/nearmapCache';
 import { nearmapPlanesToRoofPlanes } from '@/lib/aerial/nearmapToRoofPlane';
 import { cropToSubjectBuilding, cropObstructionsToPlanes } from '@/lib/aerial/subjectBuildingCrop';
 
@@ -61,7 +62,9 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const { roofPlanes: raw, obstructions: rawObs } = await fetchNearmapAIResult(lat, lng, { radiusM: 45, skipCoverageCheck: true });
+    // Durable DB cache (fail-closed) — every Design Studio detect click on a
+    // cold serverless instance used to bill a fresh AI Features call.
+    const { roofPlanes: raw, obstructions: rawObs } = await getNearmapAIResultCached(lat, lng);
 
     // Crop the whole-block AI result down to just the subject building under the
     // detect point (map centre / geocode). Nearmap returns every roof in the
