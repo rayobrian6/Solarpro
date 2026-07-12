@@ -53,7 +53,10 @@ import {
   advanceToBaselineVerified,
   enableExecution,
   disableExecution,
+  bootstrapMigrationLedger,
 } from '@/lib/migrations/ledger';
+import { generateBaselineEvidence } from '@/lib/migrations/baselineEvidence';
+import { buildOperatorReadiness } from '@/lib/migrations/operatorReadiness';
 import type {
   MigrationAction,
   MigrationActorType,
@@ -168,6 +171,10 @@ export async function POST(req: NextRequest) {
     'verify-baseline',
     'enable-execution',
     'disable-execution',
+    // Operator-recovery surface (Phase 1A operator console):
+    'inspect-readiness',        // consolidated read-only dashboard
+    'generate-baseline-evidence', // read-only schema-introspection evidence
+    'bootstrap',                // create the ledger tables (super_admin + TOTP)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -211,14 +218,35 @@ export async function POST(req: NextRequest) {
   const isBaselineMutation = ['record-baseline-entry', 'verify-baseline'].includes(action);
   const isExecutionActivation = ['enable-execution', 'disable-execution'].includes(action);
 
+  // Operator-recovery surface classification.
+  // - inspect-readiness / generate-baseline-evidence: READ-ONLY (no mutation,
+  //   no TOTP) but super_admin-only (they reveal governance internals + the
+  //   operator's MFA gate signal). Enforced explicitly below.
+  // - bootstrap: MUTATION (creates ledger tables) — super_admin + fresh TOTP +
+  //   reason + production typed-confirmation, same bar as execution activation.
+  const isReadiness = action === 'inspect-readiness';
+  const isEvidence = action === 'generate-baseline-evidence';
+  const isBootstrap = action === 'bootstrap';
+  const isOperatorReadonly = isReadiness || isEvidence;
+
   // Determine the migration action type for authorization.
   let migrationAction: MigrationAction;
   if (isExecute || isExecutionActivation) {
     migrationAction = 'execute';
-  } else if (isBaselineMutation) {
+  } else if (isBaselineMutation || isBootstrap) {
     migrationAction = 'bootstrap';
   } else {
     migrationAction = 'inspect';
+  }
+
+  // Operator-console surface is super_admin-only (matches the page's access
+  // model). The read-only operator actions need an explicit gate because
+  // authorizeMigration('inspect') otherwise permits plain 'admin'.
+  if ((isOperatorReadonly || isBootstrap) && adminUser.role !== 'super_admin') {
+    return NextResponse.json(
+      { success: false, error: `Action '${action}' requires super_admin role.` },
+      { status: 403 },
+    );
   }
   const actorType: MigrationActorType = 'human';
 
@@ -229,10 +257,10 @@ export async function POST(req: NextRequest) {
   // - TOTP_INVALID: code doesn't match → retry allowed
   // - TOTP_REPLAY: time-step already consumed → must wait for next step
   let totpVerified = false;
-  if (isExecute || isExecutionActivation) {
+  if (isExecute || isExecutionActivation || isBootstrap) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
-        { success: false, error: 'A fresh TOTP code is required for migration execution. Provide it in the "totpCode" field.' },
+        { success: false, error: 'A fresh TOTP code is required for this action. Provide it in the "totpCode" field.' },
         { status: 403 },
       );
     }
@@ -303,6 +331,91 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // ── Operator-recovery surface (Phase 1A operator console) ──────────────
+
+    if (isReadiness) {
+      // Consolidated read-only readiness dashboard — one round-trip for the
+      // console. Server-derives identity + role + environment; never trusts
+      // client claims. Redacted: no DB URL / secret / token / MFA secret.
+      const readiness = await buildOperatorReadiness({
+        id: adminUser.id,
+        role: adminUser.role,
+      });
+      return NextResponse.json({ success: true, action: 'inspect-readiness', readiness });
+    }
+
+    if (isEvidence) {
+      // Read-only historical baseline evidence generation. Zero mutation
+      // (schema introspection only). The generator asserts read-only SQL
+      // internally. Returns one proposal per manifest migration for review.
+      const report = await generateBaselineEvidence();
+      return NextResponse.json({
+        success: true,
+        action: 'generate-baseline-evidence',
+        environment: report.environment,
+        generatedAt: report.generatedAt,
+        manifestCount: report.manifestCount,
+        performedMutation: report.performedMutation, // always false
+        statusCounts: report.statusCounts,
+        evidenceTypeCounts: report.evidenceTypeCounts,
+        hasManualReviewRequired: report.hasManualReviewRequired,
+        errors: report.errors,
+        proposals: report.proposals.map((p) => ({
+          identifier: p.migrationIdentifier,
+          filename: p.filename,
+          checksumSha256: p.checksumSha256,
+          transactionMode: p.transactionMode,
+          proposedStatus: p.proposedStatus,
+          confidence: p.confidence,
+          evidenceType: p.evidenceType,
+          manualReviewRequired: p.manualReviewRequired,
+          expectedObjectCount: p.expectedObjects.length,
+          detectedObjectCount: p.detectedObjects.length,
+          missingObjects: p.missingObjects.map((o) => `${o.kind}:${o.parentTable ? `${o.parentTable}.` : ''}${o.name}`),
+          conflictingObjects: p.conflictingObjects.map((o) => `${o.kind}:${o.parentTable ? `${o.parentTable}.` : ''}${o.name}`),
+          notes: p.notes,
+        })),
+      });
+    }
+
+    if (isBootstrap) {
+      // Create the ledger tables (idempotent). super_admin + fresh TOTP +
+      // reason enforced above; authorizeMigration enforced env allowlist +
+      // production two-key. Production also requires typed env confirmation.
+      const reason = (body?.reason as string | undefined)?.trim();
+      if (!reason) {
+        return NextResponse.json(
+          { success: false, error: 'A non-empty "reason" is required for bootstrap.' },
+          { status: 400 },
+        );
+      }
+      if (getCurrentEnvironment() === 'production'
+          && (body?.productionConfirmation as string | undefined) !== 'production') {
+        return NextResponse.json(
+          { success: false, error: 'Production bootstrap requires productionConfirmation === "production".' },
+          { status: 400 },
+        );
+      }
+      const result = await bootstrapMigrationLedger('human', adminUser.id);
+      emitAuditEvent({
+        type: result.success ? 'migration.bootstrap.completed' : 'migration.bootstrap.failed',
+        actorType: 'human',
+        actorId: adminUser.id,
+        environment: getCurrentEnvironment(),
+        executionId: null,
+        migrationIdentifier: null,
+        filename: null,
+        details: { reason, alreadyExisted: result.alreadyExisted, viaOperatorConsole: true, error: result.error ?? null },
+      });
+      return NextResponse.json({
+        success: result.success,
+        action: 'bootstrap',
+        alreadyExisted: result.alreadyExisted,
+        error: result.error ?? undefined,
+        lifecycleState: (await getGovernanceLifecycleState()) ?? 'UNBOOTSTRAPPED',
+      }, { status: result.success ? 200 : 500 });
+    }
+
     // ── Baseline control plane (MIGRATION-GOV-11, Phase 1A.2) ──────────────
 
     if (action === 'inspect-baseline') {
