@@ -1,115 +1,148 @@
-# Phase 1A.2 — Migration Governance Activation and Correctness Closure
+# Phase 1A.3 — Non-Production Operational Activation and Historical Baseline Reconciliation
 
-Repository: rayobrian6/Solarpro, branch: dev (work directly on dev)
-Starting HEAD: 100114c2
+## Section 0: Initial Verification
+- [x] Verify git state (branch dev, HEAD aligned with origin/dev, worktree clean)
+- [x] Verify no migration 105 exists; 101 SQL files in lib/migrations/ (001-104)
+- [x] Verify tsc passes (0 errors)
+- [x] Verify source-scanning tests pass (306/306)
+- [x] Verify PostgreSQL integration tests pass (55/55 with TEST_DATABASE_URL)
+- [x] Verify PostgreSQL 15 test DB accessible (migration_gov_test, testuser/testpass)
+- [x] Audit source files: manifest.ts, runner.ts, ledger.ts, types.ts, route.ts
+- [x] Confirm discoverMigrationFiles(dirOverride) supports test fixture injection
+- [x] Confirm lib/mfa.ts FROZEN — no modifications
 
-## Section 0 — Initial Verification — COMPLETE
-- [x] Clone repo, checkout dev
-- [x] git status / branch / fetch / rev-parse / ls-remote / log
-- [x] tsc --noEmit baseline (exit 0)
-- [x] vitest focused baseline (185/185 pass)
-- [x] Document initial verification findings
+## Section 1: Commit 1 — Exact-State and Environment Safety Audit
+- [ ] Create docs/phase1a/PHASE1A3-OPERATIONAL-ACTIVATION-AUDIT.md
+  - Document exact-state findings for GOV-19..25
+  - Document environment safety classification (is_production=false, is_isolated=true)
+  - Document manifest discovery injection point (dirOverride param)
+  - Document runner execution gate (assertExecutionPermitted → EXECUTION_ENABLED)
+  - Document baseline evidence generator design (read-only PostgreSQL catalog)
+  - Document canary migration fixture requirements
+  - Document Neon serverless compatibility test plan
+- [ ] Verify tsc still passes after doc-only commit
+- [ ] Commit 1: docs(migrations): Phase 1A.3 exact-state and environment safety audit
 
-## Section 1 — Read Documents and Source (Audit-First) — COMPLETE
-- [x] Read types.ts, manifest.ts, validation.ts, ledger.ts, runner.ts
-- [x] Read app/api/admin/migrations/route.ts
-- [x] Read app/api/migrate/route.ts (legacy)
-- [x] Read app/api/admin/system-tools/route.ts (legacy)
-- [x] Read app/api/admin/prospects/seed/route.ts (legacy)
-- [x] Read lib/auditLog.ts, lib/mfa.ts (frozen, read-only)
-- [x] Read tests/phase1a-migration-governance.test.ts
-- [x] Read Phase 1A/1A.1 docs (7 files)
+## Section 2: Commit 2 — End-to-End Harness and Test-Only Migration Fixtures
+- [ ] Create tests/fixtures/migrations/ directory (NOT lib/migrations/)
+- [ ] Create 900_canary_test_table.sql fixture (canary migration, transactional)
+- [ ] Create 901_canary_add_column.sql fixture (second canary migration)
+- [ ] Create 902_canary_add_index.sql fixture (third canary, with index)
+- [ ] Create 903_canary_seed_data.sql fixture (fourth canary, with INSERT)
+- [ ] Create tests/phase1a3-migration-governance-e2e.test.ts
+  - Test manifest discovery with fixture dirOverride
+  - Test full lifecycle: UNBOOTSTRAPPED → BOOTSTRAP → BASELINE_REQUIRED →
+    BASELINE_IN_PROGRESS → BASELINE_VERIFIED → EXECUTION_ENABLED
+  - Test canary migration execution in EXECUTION_ENABLED state
+  - Test migration blocked before EXECUTION_ENABLED
+  - Test migration blocked after disable-execution
+  - Test TOTP fail-closed (no MFA secret → denied)
+  - Test TOTP replay prevention
+  - Test audit event persistence (fail-closed)
+  - Test append-only run history (started → applied)
+  - Test checksum conflict detection
+  - Test FORBIDDEN transaction mode blocking
+  - Test SQL statement splitting (dollar-quoted, strings, comments)
+  - Test advisory lock key isolation
+- [ ] Verify tsc passes
+- [ ] Verify e2e tests pass (with TEST_DATABASE_URL)
+- [ ] Commit 2: test(migrations): Phase 1A.3 e2e harness and test-only migration fixtures
 
-## Section 2 — Audit MIGRATION-GOV-09..18 Against Live Code — COMPLETE
-- [x] GOV-09: BASELINE_VERIFIED permits execution before activation — CONFIRMED (ledger.ts:833)
-- [x] GOV-10: Durable audit persistence may fail open — CONFIRMED (ledger.ts:298-313)
-- [x] GOV-11: No governed baseline reconciliation control plane — CONFIRMED (no baseline ops in route.ts)
-- [x] GOV-12: Non-transactional execution safety insufficient — CONFIRMED (runner.ts:685-740)
-- [x] GOV-13: Legacy mutation paths may remain reactivatable — CONFIRMED (3 feature flags)
-- [x] GOV-14: Ledger identifier and status contracts require exact enforcement — CONFIRMED (types.ts:55-60, ledger.ts:135)
-- [x] GOV-15: Governance behavior lacks real PostgreSQL integration proof — CONFIRMED (no DB integration tests)
-- [x] GOV-16: Documentation and commit metadata inconsistent — PENDING (will address in final report)
-- [x] GOV-17: TOTP replay-step selection requires exact verification — ALREADY CORRECT (runner.ts:295-316 records exact matched step)
-- [x] GOV-18: Failure and denial run-history semantics require exact verification — CONFIRMED (denied paths return 'failed', no 'denied' run event recorded)
+## Section 3: Commit 3 — Baseline Evidence Generator
+- [ ] Create lib/migrations/baselineEvidence.ts
+  - Read-only PostgreSQL catalog inspection (pg_class, pg_namespace, pg_attribute,
+    pg_indexes, pg_constraint, pg_proc, pg_trigger, pg_type, pg_policy,
+    information_schema)
+  - classifyMigrationEvidence(migration, catalogSnapshot) → evidence status
+  - generateBaselineEvidence(manifest, sql) → per-migration evidence report
+  - Evidence statuses: CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED,
+    PARTIALLY_APPLIED, UNKNOWN, NOT_APPLICABLE
+  - No automatic approval — returns evidence for operator confirmation
+  - Pure function: takes catalog snapshot, returns classification (testable without DB)
+- [ ] Create tests/phase1a3-baseline-evidence.test.ts (unit tests for classifier)
+- [ ] Verify tsc passes
+- [ ] Verify baseline evidence tests pass
+- [ ] Commit 3: feat(migrations): baseline evidence generator (read-only catalog inspection)
 
-## Section 3 — Commit 1: Exact-State Audit Doc — COMPLETE
-- [x] Create PHASE1A2-CORRECTNESS-AUDIT.md (commit ed85cdeb)
+## Section 4: Commit 4 — Runtime Route, MFA, Audit, and Lifecycle Tests
+- [ ] Expand tests/phase1a3-migration-governance-e2e.test.ts with runtime tests
+  - Route action validation (inspect, run-pending, run-single, dry-run, baseline control)
+  - Authorization matrix (super_admin vs admin vs none, env allowlist, prod flag)
+  - TOTP verification (fail-closed, replay, invalid)
+  - Audit event emission paths (console JSON + durable persistence)
+  - Lifecycle state machine transitions (all 6 states)
+  - Execution gate enforcement (block before EXECUTION_ENABLED)
+  - enable-execution / disable-execution with reason
+  - verify-baseline completeness check
+  - record-baseline-entry validation
+- [ ] Verify tsc passes
+- [ ] Verify all tests pass
+- [ ] Commit 4: test(migrations): runtime route, MFA, audit, and lifecycle tests
 
-## Section 4 — Commit 2: Lifecycle Activation & Baseline Control Plane — COMPLETE
-- [x] Fix BASELINE_VERIFIED execution gate (GOV-09)
-- [x] Add enable-execution separation (reason required)
-- [x] Add disableExecution function
-- [x] Create baseline control plane API (GOV-11) — 5 actions
-- [x] Tests for lifecycle/baseline control plane (21 new, 206 total)
+## Section 5: Commit 5 — Non-Production Baseline Evidence Generation
+- [ ] Create tests/phase1a3-baseline-evidence-generation.test.ts
+  - Connect to local PostgreSQL test DB
+  - Run baseline evidence generator against all 101 migrations
+  - Generate evidence report (all CONFIRMED_NOT_APPLIED for fresh DB)
+  - Verify evidence report correctness
+  - Verify no mutation occurred (read-only)
+- [ ] Create docs/phase1a/PHASE1A3-BASELINE-EVIDENCE-REPORT.md
+  - Document evidence generation run against local test DB
+  - Summary: 101 migrations classified
+  - Methodology: PostgreSQL catalog inspection
+  - Evidence status breakdown
+- [ ] Verify tsc passes
+- [ ] Verify evidence generation tests pass
+- [ ] Commit 5: test(migrations): non-production baseline evidence generation
 
-## Section 5 — Commit 3: Fail-Closed Persistent Audit & Run-History (GOV-10, GOV-18) — COMPLETE
-- [x] Fix duplicate JSDoc fragment in types.ts
-- [x] Expand MigrationRunStatus type to 9 statuses (GOV-14 prerequisite)
-- [x] Update DDL CHECK constraint on schema_migration_runs.status to 9 statuses
-- [x] Add emitAuditEventAsync to ledger.ts (fail-closed durable audit)
-- [x] Add emitAuditEventAsync to runner.ts import and re-export
-- [x] Wire emitAuditEventAsync into mutation success/failure paths in runner.ts
-- [x] Add AUDIT_PERSISTENCE_FAILED fail-closed return on audit persistence failure
-- [x] Add recordMigrationRunEvent calls for denied/blocked/conflict/skip/dry-run paths
-- [x] Move manifest discovery before authorization check (run-history metadata)
-- [x] Add tests for GOV-10 (12 tests) and GOV-18 (14 tests) — 26 new, 232 total
-- [x] tsc clean, 232/232 focused tests pass
+## Section 6: Commit 6 — Neon Non-Production Compatibility Validation
+- [ ] Check for authorized Neon branch (NEON_TEST_BRANCH or similar)
+- [ ] If no authorized Neon branch: create blocker report
+  - Document in PHASE1A3-NEON-COMPATIBILITY-REPORT.md that Neon validation
+    is a BLOCKED workstream requiring authorized non-production Neon branch
+  - Document what tests WOULD run (advisory lock, transaction, cold start)
+  - Document that local PostgreSQL 15 compatibility is validated (Commit 2,5)
+- [ ] If authorized Neon branch available: run compatibility tests
+  - Advisory lock behavior
+  - Transaction execution
+  - Cold-start/scale-to-zero
+  - serverless driver compatibility
+- [ ] Create docs/phase1a/PHASE1A3-NEON-COMPATIBILITY-REPORT.md
+- [ ] Verify tsc passes
+- [ ] Commit 6: docs(migrations): Neon non-production compatibility validation (or blocker report)
 
-## Section 6 — Commit 4: Non-Transactional Blocking & Legacy Closure (GOV-12, GOV-13) — COMPLETE
-- [x] Block FORBIDDEN transaction mode entirely — return MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED
-- [x] Emit migration.execution_blocked_non_transactional audit event
-- [x] Permanently eliminate legacy path in migrate/route.ts (permanent 423, no feature flag)
-- [x] Permanently eliminate legacy path in system-tools/route.ts (run_migration case 423)
-- [x] Permanently eliminate legacy path in prospects/seed/route.ts (permanent 423, no feature flag)
-- [x] Update helper functions isLegacyInlineEnabled() and isLegacySystemToolsRunEnabled() to permanently return false
-- [x] Update MIGRATION_ENV_VARS enum documentation (PERMANENTLY DEAD)
-- [x] Tests for GOV-12 (16 new tests, Section 23) and GOV-13 (14 new tests, Section 24)
-- [x] Update Sections 10 and 10b for permanent elimination semantics
-- [x] Fix all test failures (7 fixed)
-- [x] tsc clean, 268/268 focused tests pass
-- [x] Commit as Commit 4 (9a914faf)
+## Section 7: Commit 7 — Expanded Tests and Cleanup
+- [ ] Review all Phase 1A.3 test files for coverage gaps
+- [ ] Add edge-case tests (empty manifest, non-existent identifier, etc.)
+- [ ] Verify all fixture SQL files are valid (no path traversal, no FORBIDDEN mode)
+- [ ] Run full test suite (source-scanning + integration + e2e + baseline evidence)
+- [ ] Verify tsc passes (0 errors)
+- [ ] Commit 7: test(migrations): expanded tests and cleanup (Phase 1A.3)
 
-## Section 7 — Commit 5: Identifier, Status, TOTP-Step, Actor Correctness (GOV-14, GOV-17) ✅
-- [x] Add MIGRATION_IDENTIFIER_REGEX constant + isValidMigrationIdentifier() to types.ts (matches DDL grammar)
-- [x] Add JSDoc documenting identifier grammar contract (GOV-14)
-- [x] Verify actor_type CHECK constraints aligned across all tables (human, migration-actor)
-- [x] Add MigrationActorType JSDoc documenting GOV-14 actor contract
-- [x] Add tests for identifier grammar contract (valid/invalid identifiers, regex matches DDL)
-- [x] Add tests for actor_type CHECK constraint alignment
-- [x] Add tests for GOV-17 exact matched-step recording (verifyFreshTotp records exact step)
-- [x] Add tests for GOV-17 replay prevention (recordTotpUse called with matchedStep, not current step)
-- [x] Add tests for GOV-17 fail-closed on missing MFA (MFA_NOT_ENABLED)
-- [x] tsc clean, focused tests pass (306/306 pass)
-- [x] Commit as Commit 5
+## Section 8: Commit 8 — Documentation and Final Report
+- [ ] Create docs/phase1a/PHASE1A3-E2E-VALIDATION.md (e2e harness documentation)
+- [ ] Create docs/phase1a/PHASE1A3-CANARY-MIGRATION.md (canary fixture requirements)
+- [ ] Create docs/phase1a/PHASE1A3-OPERATIONAL-STATE-REPORT.md (GOV-25 — honest readiness)
+- [ ] Create docs/phase1a/PHASE1A3-FINAL-REPORT.md (comprehensive final report)
+- [ ] Update PHASE1A-FINAL-REPORT.md (link to Phase 1A.3)
+- [ ] Update PHASE1A2-FINAL-REPORT.md (link to Phase 1A.3)
+- [ ] Update ARCHITECTURE-DECISION-MIGRATION-MODEL.md (reference baseline evidence generator)
+- [ ] Update AUDIT-MIGRATION-SYSTEM.md (reference e2e validation)
+- [ ] Update PHASE1A-MIGRATION-GOVERNANCE-IMPLEMENTATION.md (Phase 1A.3 additions)
+- [ ] Update PHASE1A1-FINAL-REPORT.md (link to Phase 1A.3)
+- [ ] Update PHASE1A1-OPERATIONAL-HARDENING-AUDIT.md (link to Phase 1A.3)
+- [ ] Verify tsc passes
+- [ ] Commit 8: docs(migrations): Phase 1A.3 documentation and final report
 
-## Section 8 — Commit 6: PostgreSQL Integration Harness & Tests (GOV-15) ✅
-- [x] Determine if real PostgreSQL available (installed PostgreSQL 15, created test DB)
-- [x] Build integration test harness (tests/phase1a2-postgres-integration.test.ts)
-- [x] Run integration tests (38/38 pass against local PostgreSQL, skip gracefully without DB)
-
-## Section 9 — Commit 7: Expanded Unit and Integration Tests ✅
-- [x] Fix add_expanded_tests.py insertion bug (inserted outside describeOrSkip block)
-- [x] Add 17 new integration tests (Sections 12-18): ON CONFLICT replay, lifecycle state machine, append-only run history, baseline reconciliation, advisory lock key isolation, index verification, nullable actor type
-- [x] Fix 4 tsc type errors (indexname unknown → cast as string)
-- [x] tsc clean, 55/55 integration tests pass (with DB), 54 skip + 1 info (without DB)
-- [x] 306/306 source-scanning tests pass (no regressions)
-- [x] Commit as Commit 7 (6268b71a)
-
-## Section 10 — Commit 8: Documentation & Final Report (GOV-16) ✅
-- [x] Create PHASE1A2-BASELINE-CONTROL-PLANE.md
-- [x] Create PHASE1A2-POSTGRES-INTEGRATION-VALIDATION.md
-- [x] Create PHASE1A2-FINAL-REPORT.md
-- [x] Commit as Commit 8 (723ab164)
-
-## Section 11 — Final Verification ✅
-- [x] tsc clean (0 errors)
-- [x] Focused tests pass (306 source-scanning + 55 integration = 361)
-- [x] Full suite run: 7017 pass + 3 pre-existing golden-path failures (unrelated) + 54 skipped (integration without DB)
-- [x] Git clean, aligned with remote (HEAD = 2df14f75 = origin/dev), pushed
-- [x] Deliver final report to user
-- [x] npx tsc --noEmit
-- [x] npx vitest run tests/phase1a-migration-governance.test.ts
-- [x] npx vitest run (full suite, honest report)
-- [x] git status clean, dev aligned with origin/dev
-- [x] Push all commits
-- [x] Deliver final report
+## Section 9: Final Verification
+- [ ] Run tsc --noEmit (0 errors)
+- [ ] Run source-scanning tests (306+ pass)
+- [ ] Run PostgreSQL integration tests (55+ pass)
+- [ ] Run e2e tests (pass with TEST_DATABASE_URL)
+- [ ] Run baseline evidence tests (pass)
+- [ ] Verify git status clean
+- [ ] Push all commits to origin/dev
+- [ ] Verify origin/dev HEAD matches local HEAD
+- [ ] Verify all 8 commits present on dev
+- [ ] Verify 28 acceptance criteria met
+- [ ] Mark all todo items complete
