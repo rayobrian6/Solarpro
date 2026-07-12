@@ -21,7 +21,7 @@
 
 import type { CADModel } from '@/lib/cad/types';
 import { xyToLatLng } from '@/lib/cad/geometry';
-import { latLngToFakeDeg } from './roofSiteContext';
+import { latLngToFakeDeg, rotateFakePt } from './roofSiteContext';
 
 interface FakePt { lat: number; lng: number }
 
@@ -210,6 +210,32 @@ export function buildHybridOverlays(
   }
 
   return (out.ground.length || out.fence.length) ? out : null;
+}
+
+/** Rotate the hybrid overlays through the SAME global plan rotation the roof
+ *  plan applies to every other layer (see roofSiteContext.computePlanTiltDeg).
+ *  Pure — fresh points throughout (allPts alias ring points in the builder). */
+export function rotateHybridOverlays(
+  h: HybridOverlays,
+  angleDeg: number,
+  pivot: FakePt,
+): HybridOverlays {
+  if (angleDeg === 0) return h;
+  const r = (p: FakePt) => rotateFakePt(p, angleDeg, pivot);
+  return {
+    ground: h.ground.map(g => ({
+      ...g,
+      ring: g.ring.map(r),
+      rowLines: g.rowLines.map(([a, b]) => [r(a), r(b)] as [FakePt, FakePt]),
+      labelPt: r(g.labelPt),
+    })),
+    fence: h.fence.map(f => ({
+      ...f,
+      line: [r(f.line[0]), r(f.line[1])] as [FakePt, FakePt],
+      labelPt: r(f.labelPt),
+    })),
+    allPts: h.allPts.map(r),
+  };
 }
 
 // ── Legacy solver-geometry projections (pre-panels sections only) ──────────

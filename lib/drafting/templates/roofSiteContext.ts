@@ -180,6 +180,120 @@ export function computeFitWindow(
   return { minLng: minLng - marginFt, maxLng: maxLng + marginFt, minLat: minLat - marginFt, maxLat: maxLat + marginFt };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GLOBAL PLAN ROTATION (Ray 2026-07-11: "system is cocking everything to the
+// side"). Professional sets square the BUILDING to the sheet and rotate the
+// north arrow. ONE angle is derived from the dominant roof axis and applied to
+// EVERY drawn layer — plane polygons, module rects, setback bands, site
+// context, hybrid overlays, obstructions — so inter-layer bearings (fence vs
+// building vs rows) are preserved exactly. drawRoofPlan applies it as a
+// fake-degree pre-transform (before the toX/toY pixel mapping), which keeps
+// all text horizontal and lets the fit window recompute on rotated extents.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Dominant building-axis tilt in degrees CCW from sheet-horizontal, folded to
+ * (-45°, 45°] — length-weighted vector mean of the plane edges' doubled-doubled
+ * angles (4·angle, so 0° and 90° edges reinforce; same fold regularizeRoof
+ * uses to straighten linework). |tilt| < identityDeg returns EXACTLY 0 so an
+ * axis-aligned building renders through the identity transform.
+ */
+export function computePlanTiltDeg(
+  planes: Array<{ vertices?: FakePt[] }>,
+  opts?: { identityDeg?: number },
+): number {
+  let sx = 0, sy = 0;
+  for (const pl of planes ?? []) {
+    const vs = pl.vertices ?? [];
+    for (let i = 0; i < vs.length; i++) {
+      const a = vs[i], b = vs[(i + 1) % vs.length];
+      if (!a || !b || !isFinite(a.lat) || !isFinite(b.lat)) continue;
+      const dx = b.lng - a.lng, dy = b.lat - a.lat;
+      const len = Math.hypot(dx, dy);
+      if (len < 2) continue;               // fake-deg = ft; skip sliver edges
+      const ang4 = Math.atan2(dy, dx) * 4;
+      sx += Math.cos(ang4) * len; sy += Math.sin(ang4) * len;
+    }
+  }
+  if (sx === 0 && sy === 0) return 0;
+  const tilt = (Math.atan2(sy, sx) / 4) * 180 / Math.PI;   // (-45, 45]
+  return Math.abs(tilt) < (opts?.identityDeg ?? 0.75) ? 0 : tilt;
+}
+
+/**
+ * The rotation (deg CCW, fake-degree space) that squares the building to the
+ * sheet. Two candidates square it — minimal rotation (−tilt) or the long axis
+ * turned onto the other sheet axis (−tilt ± 90) — and the one whose ROTATED
+ * subject extents fit the draw window at the larger scale wins. Ties (≤3%) go
+ * to the smaller |rotation| so north stays up-ish, like the pro references.
+ */
+export function choosePlanRotationDeg(
+  tiltDeg: number,
+  subjectPts: FakePt[],
+  availW: number,
+  availH: number,
+): number {
+  if (tiltDeg === 0) return 0;
+  const primary = -tiltDeg;
+  if (!subjectPts.length || !(availW > 0) || !(availH > 0)) return primary;
+  let alt = primary + 90;
+  if (alt > 90) alt -= 180;
+  const scaleFor = (deg: number): number => {
+    const th = deg * Math.PI / 180, c = Math.cos(th), s = Math.sin(th);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of subjectPts) {
+      const x = p.lng * c - p.lat * s, y = p.lng * s + p.lat * c;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    return Math.min(availW / Math.max(maxX - minX, 1), availH / Math.max(maxY - minY, 1));
+  };
+  return scaleFor(alt) > scaleFor(primary) * 1.03 ? alt : primary;
+}
+
+/** Rotate a fake-degree point by angleDeg CCW about a pivot (1 unit = 1 ft on
+ *  both axes, so a plain 2D rotation is exact — no cos-lat correction). */
+export function rotateFakePt(p: FakePt, angleDeg: number, pivot: FakePt): FakePt {
+  if (angleDeg === 0) return { lat: p.lat, lng: p.lng };
+  const th = angleDeg * Math.PI / 180, c = Math.cos(th), s = Math.sin(th);
+  const x = p.lng - pivot.lng, y = p.lat - pivot.lat;
+  return { lng: pivot.lng + x * c - y * s, lat: pivot.lat + x * s + y * c };
+}
+
+/** Compass azimuth after the plan rotation: rotating the geometry CCW by θ
+ *  turns a bearing A into A − θ (bearing measured clockwise from +lat north). */
+export function rotateAzimuthDeg(az: number, planRotDeg: number): number {
+  return ((az - planRotDeg) % 360 + 360) % 360;
+}
+
+/** SVG rotation (clockwise, y-down screen space) for the north arrow — the
+ *  SAME angle constant every layer used, sign-flipped once for the screen
+ *  frame. Identity plan rotation → identity north arrow. */
+export function northArrowRotationDeg(planRotDeg: number): number {
+  return planRotDeg === 0 ? 0 : -planRotDeg;
+}
+
+/** Rotate every drawn site-context layer through the SAME plan transform.
+ *  Pure — returns a new SiteContext; the input (shared with other sheets that
+ *  draw north-up) is untouched. */
+export function rotateSiteContext(site: SiteContext, angleDeg: number, pivot: FakePt): SiteContext {
+  if (angleDeg === 0) return site;
+  const r = (p: FakePt) => rotateFakePt(p, angleDeg, pivot);
+  const rings = (rs: FakePt[][]) => rs.map(ring => ring.map(r));
+  return {
+    ...site,
+    parcel: site.parcel ? site.parcel.map(r) : null,
+    roads: site.roads.map(rd => ({ ...rd, pts: rd.pts.map(r) })),
+    buildings: rings(site.buildings),
+    driveways: rings(site.driveways),
+    paved: rings(site.paved),
+    roadSurfaces: rings(site.roadSurfaces),
+    lawn: rings(site.lawn),
+    trees: rings(site.trees),
+    equipment: site.equipment.map(e => ({ ...e, pt: r(e.pt) })),
+  };
+}
+
 const esc = (s: string) => String(s).replace(/&(?![a-zA-Z0-9#]+;)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Point→segment distance (fake-degree space). */

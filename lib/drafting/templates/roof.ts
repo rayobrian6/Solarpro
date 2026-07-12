@@ -44,8 +44,12 @@ import {
 import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
-import { computeFitWindow, drawSiteContextEls, type SiteContext } from './roofSiteContext';
-import { buildHybridOverlays } from './hybridOverlay';
+import {
+  computeFitWindow, drawSiteContextEls, type SiteContext,
+  computePlanTiltDeg, choosePlanRotationDeg, rotateFakePt, rotateAzimuthDeg,
+  northArrowRotationDeg, rotateSiteContext,
+} from './roofSiteContext';
+import { buildHybridOverlays, rotateHybridOverlays } from './hybridOverlay';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -70,6 +74,20 @@ function ptInRingXY(x: number, y: number, ring: { x: number; y: number }[]): boo
 // CAD-space vertex coincidence (fake-degrees, 1 unit ≈ 1 ft).
 function sameVert(a: { lat: number; lng: number }, b: { lat: number; lng: number }): boolean {
   return Math.abs(a.lat - b.lat) < 0.75 && Math.abs(a.lng - b.lng) < 0.75;
+}
+
+// Residual-noise axis snap for module/framing angles (deg, folded mod 180).
+// The GLOBAL plan rotation squares the BUILDING to the sheet, so on-sheet
+// angles land within a couple degrees of the axes — this only cleans that
+// residual trace noise (same 8° regularizeRoof straightens linework with).
+// It must stay SMALL: the old 15° tolerance squared modules INDEPENDENTLY of
+// a visibly tilted roof outline — the root of Ray's "cocking everything to
+// the side" PV-1 (modules axis-square, outline at ~6-8°, fence at ~13°).
+const AXIS_SNAP_DEG = 8;
+function snapAxisDeg(angMod180: number): number {
+  if (angMod180 < AXIS_SNAP_DEG || angMod180 > 180 - AXIS_SNAP_DEG) return 0;
+  if (Math.abs(angMod180 - 90) < AXIS_SNAP_DEG) return 90;
+  return angMod180;
 }
 
 // Edge classification: an edge shared with ANOTHER facet (same endpoints, either
@@ -246,8 +264,78 @@ export function drawRoofPlan(
   // dogleg ridge, asymmetric hips). Panels ride along via each facet's fitted
   // affine so rows stay flush to the straightened edges (they overhung the new
   // eave when only the planes moved). Stored geometry is untouched.
-  const regPlanes = regularizeRoofPlanes(validPlanes as any[]);
-  const regPanels = coTransformPanels(validPlanes as any[], regPlanes as any[], validPanels as any[]);
+  const regPlanes0 = regularizeRoofPlanes(validPlanes as any[]);
+  const regPanels0 = coTransformPanels(validPlanes as any[], regPlanes0 as any[], validPanels as any[]);
+
+  // ── Layout zones (STEP 3) — up-front: the plan-rotation fill choice below
+  // needs the draw-window dimensions. ──
+  const zones = getLayoutForSystem('roof', 'plan');
+  const W = zones.canvas.width;
+  const H = zones.canvas.height;
+  const dz = zones.draw;
+  // Margin leaves room for the dimension lines + callout row outside the roof.
+  const margin  = 52;
+  // PV-2 (plan mode) carries the tables + general-notes column at the left
+  // INSIDE the draw zone (tx=8, ~268px + 31'-6" vertical dim clearance).
+  // Reserve that width in fit-to-frame so the roof can never slide under it
+  // — the opaque-backing patch just erased whatever linework it covered.
+  // Same left reserve on BOTH sheets so PV-1B frames at the IDENTICAL zoom/position
+  // as PV-1 (they're sibling views of the same roof; different zoom read as sloppy).
+  const leftReserve = 280;
+
+  // ── ONE GLOBAL PLAN ROTATION (Ray 2026-07-11: "cocking everything to the
+  // side") ──────────────────────────────────────────────────────────────────
+  // Pro sets square the BUILDING to the sheet and rotate the north arrow. The
+  // angle comes from the dominant roof axis (length-weighted edge bearings
+  // folded mod 90°) and EVERY drawn layer goes through the SAME fake-degree
+  // pre-transform — plane polygons, module rects + azimuths, site context,
+  // hybrid overlays (ground slats / fence line), obstructions. Applied BEFORE
+  // the toX/toY pixel mapping, so the fit window recomputes on ROTATED extents
+  // and every text label stays horizontal. Modules end up square BECAUSE the
+  // building is square — not via the old module-only azimuth snap that left
+  // rects axis-square against a tilted outline. The north rose (below) turns
+  // by northArrowRotationDeg(planRotDeg) — the same constant.
+  const _siteRaw: SiteContext | null =
+    (input as unknown as { _siteContext?: SiteContext | null })._siteContext || null;
+  const _hybRaw = cad?.hybrid ? buildHybridOverlays(cad, cad.originLat, cad.originLng) : null;
+  const _planTilt = computePlanTiltDeg(regPlanes0 as any[]);
+  // Hybrid overlays are SUBJECT MATTER (fit-basis members below), so they vote
+  // on which squaring (long axis horizontal vs vertical) fills the window best.
+  const _subjPtsForRot = [
+    ...regPlanes0.flatMap((rp: any) => (rp.vertices ?? []) as Array<{ lat: number; lng: number }>),
+    ...(_hybRaw?.allPts ?? []),
+  ];
+  const planRotDeg = choosePlanRotationDeg(
+    _planTilt, _subjPtsForRot,
+    dz.width - 2 * margin - leftReserve, dz.height - 2 * margin,
+  );
+  const _pvLngs = regPlanes0.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
+  const _pvLats = regPlanes0.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
+  const _pivot = {
+    lng: (Math.min(..._pvLngs) + Math.max(..._pvLngs)) / 2,
+    lat: (Math.min(..._pvLats) + Math.max(..._pvLats)) / 2,
+  };
+  const _rotPt = (p: { lat: number; lng: number }) => rotateFakePt(p, planRotDeg, _pivot);
+  const _rotAz = (az: unknown) =>
+    (typeof az === 'number' && isFinite(az)) ? rotateAzimuthDeg(az, planRotDeg) : az;
+  const regPlanes = planRotDeg === 0 ? regPlanes0 : regPlanes0.map((rp: any) => ({
+    ...rp,
+    azimuth: _rotAz(rp.azimuth),
+    vertices: (rp.vertices ?? []).map((v: any) => ({ ...v, ..._rotPt(v) })),
+  }));
+  const regPanels = planRotDeg === 0 ? regPanels0 : regPanels0.map((p: any) => ({
+    ...p,
+    ..._rotPt(p),
+    azimuth: _rotAz(p.azimuth),
+    heading: _rotAz(p.heading),
+  }));
+  const _site = _siteRaw && planRotDeg !== 0 ? rotateSiteContext(_siteRaw, planRotDeg, _pivot) : _siteRaw;
+  const _hyb = _hybRaw && planRotDeg !== 0 ? rotateHybridOverlays(_hybRaw, planRotDeg, _pivot) : _hybRaw;
+  console.log('[drawRoofPlan] plan rotation:', {
+    dominantAxisTiltDeg: +_planTilt.toFixed(2),
+    planRotDeg: +planRotDeg.toFixed(2),
+    northArrowDeg: +northArrowRotationDeg(planRotDeg).toFixed(2),
+  });
 
   // ── SLOPE→PLAN projection (per plane) ──────────────────────────────────────
   // Panel CENTERS are plan-true (projected lat/lng), but module rectangle DIMS
@@ -269,12 +357,6 @@ export function drawRoofPlan(
     const i = hostPlaneIdx(p);
     return i >= 0 ? planeCosP[i] : 1;
   };
-
-  // ── Layout zones (STEP 3) ──
-  const zones = getLayoutForSystem('roof', 'plan');
-  const W = zones.canvas.width;
-  const H = zones.canvas.height;
-  const dz = zones.draw;
 
   const els: string[] = [];
   // v65: pre-compute branch-color mode flag (needed for title bar)
@@ -316,9 +398,8 @@ export function drawRoofPlan(
   // (identical to the prior behavior — no fabricated lot on parcel-less jobs).
   // Site context now renders on BOTH PV-1 and PV-1B (faded on PV-1B so the
   // circuit wiring stays the hero) — a bare white circuit sheet read as
-  // unfinished next to PV-1's rich contextual plan.
-  const _site: SiteContext | null =
-    (input as unknown as { _siteContext?: SiteContext | null })._siteContext || null;
+  // unfinished next to PV-1's rich contextual plan. (_site was resolved — and
+  // plan-rotated — in the global-rotation block above.)
   // Expand the fit to include the parcel + surrounding building footprints so the
   // lot + neighbors show (capped inside computeFitWindow so the roof stays large).
   const _ctxPts = _site
@@ -328,7 +409,7 @@ export function drawRoofPlan(
   // Ray: the top-down aerial must show ALL the variety — roof, ground AND
   // fence. Their projected extents are unioned into the fit basis (below) so
   // computeFitWindow's zoom caps can never clip them like mere context.
-  const _hyb = cad?.hybrid ? buildHybridOverlays(cad, cad.originLat, cad.originLng) : null;
+  // (_hyb was built — and plan-rotated — in the global-rotation block above.)
   const _hLngs = _hyb ? _hyb.allPts.map(p => p.lng) : [];
   const _hLats = _hyb ? _hyb.allPts.map(p => p.lat) : [];
   const subjMinLng = _hLngs.length ? Math.min(minLng, ..._hLngs) : minLng;
@@ -378,15 +459,8 @@ export function drawRoofPlan(
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
 
-  // Margin leaves room for the dimension lines + callout row outside the roof.
-  const margin  = 52;
-  // PV-2 (plan mode) carries the tables + general-notes column at the left
-  // INSIDE the draw zone (tx=8, ~268px + 31'-6" vertical dim clearance).
-  // Reserve that width in fit-to-frame so the roof can never slide under it
-  // — the opaque-backing patch just erased whatever linework it covered.
-  // Same left reserve on BOTH sheets so PV-1B frames at the IDENTICAL zoom/position
-  // as PV-1 (they're sibling views of the same roof; different zoom read as sloppy).
-  const leftReserve = 280;
+  // (margin + leftReserve are declared with the layout zones above — the
+  // plan-rotation fill choice shares them.)
   const scaleX  = (dz.width  - 2 * margin - leftReserve) / fitLngSpan;
   const scaleY  = (dz.height - 2 * margin) / fitLatSpan;
   // Fit-to-frame (was *1.35, which overzoomed and clipped the top hip + the
@@ -480,9 +554,9 @@ export function drawRoofPlan(
     // attachment dots land ON these lines. Snapped to the sheet axes like the
     // modules so the grid reads drafted, not traced.
     if (az != null) {
-      let fAz = ((az % 180) + 180) % 180;
-      if (fAz < 15 || fAz > 165) fAz = 0;
-      else if (Math.abs(fAz - 90) < 15) fAz = 90;
+      // Residual snap only — the global plan rotation already squared the
+      // building, so plane azimuths sit within a few degrees of the axes.
+      const fAz = snapAxisDeg(((az % 180) + 180) % 180);
       const fdX = Math.sin(fAz * Math.PI / 180), fdY = -Math.cos(fAz * Math.PI / 180); // screen dir (y down)
       const fpX = -fdY, fpY = fdX;                                                     // across-slope
       const bxs = ptsXY.map((p: { x: number; y: number }) => p.x);
@@ -668,12 +742,11 @@ export function drawRoofPlan(
     const ph = (isLandscape ? panWidPx : panLenPx) * _cosP;
     const x0 = px - pw / 2, y0 = py - ph / 2;
     const azRot = Number(p.azimuth ?? p.heading);
-    // rotate so the long axis follows the plane azimuth — SNAPPED to the sheet
-    // axes: rotating grid-placed rects by the raw 3-4° trace azimuth made every
-    // row read gapped + crooked against the regularized (axis-square) outline.
-    let rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
-    if (rot < 15 || rot > 165) rot = 0;
-    else if (Math.abs(rot - 90) < 15) rot = 90;
+    // rotate so the long axis follows the plane azimuth. RESIDUAL snap only
+    // (8°): the GLOBAL plan rotation squares the building, so azimuths land on
+    // the sheet axes ± trace noise. The old 15° snap squared modules
+    // INDEPENDENTLY of a tilted outline — the module-vs-outline mismatch.
+    const rot = isFinite(azRot) ? snapAxisDeg(((azRot % 180) + 180) % 180) : 0;
     const gOpen = rot > 1 && rot < 179
       ? `<g transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">` : '<g>';
 
@@ -844,8 +917,8 @@ export function drawRoofPlan(
       let hw = (isLandscape ? panLenPx : panWidPx) / 2;
       let hh = ((isLandscape ? panWidPx : panLenPx) / 2) * panelCosP(p);
       const azRot = Number(p.azimuth ?? p.heading);
-      let rot = isFinite(azRot) ? ((azRot % 360) + 360) % 360 % 180 : 0;
-      if (rot >= 15 && rot <= 165 && Math.abs(rot - 90) < 15) { const t = hw; hw = hh; hh = t; }
+      const rot = isFinite(azRot) ? ((azRot % 360) + 360) % 360 % 180 : 0;
+      if (snapAxisDeg(rot) === 90) { const t = hw; hw = hh; hh = t; }
       const testPts = [
         { x: px, y: py },
         { x: px - hw, y: py - hh }, { x: px + hw, y: py - hh },
@@ -909,8 +982,8 @@ export function drawRoofPlan(
       let pw = isLandscape ? panLenPx : panWidPx;
       let ph = isLandscape ? panWidPx : panLenPx;
       const azRot = Number(p.azimuth ?? p.heading);
-      let rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
-      if (rot >= 15 && rot <= 165 && Math.abs(rot - 90) < 15) { const t = pw; pw = ph; ph = t; }
+      const rot = isFinite(azRot) ? ((azRot % 180) + 180) % 180 : 0;
+      if (snapAxisDeg(rot) === 90) { const t = pw; pw = ph; ph = t; }
       return { x0: px - pw / 2, y0: py - ph / 2, x1: px + pw / 2, y1: py + ph / 2 };
     });
     const _ptInRect = (r: any, pt: { x: number; y: number }) =>
@@ -1064,7 +1137,10 @@ export function drawRoofPlan(
   // Footprint drawn as a white circle with a cross, keep-out clearance as a
   // dashed red ring with light hatch, type label above — the reference-set
   // treatment for vents/chimneys/AC/skylights.
-  const roofObs = (project.roofObstructions ?? []).filter((o: any) => isFinite(o.lat) && isFinite(o.lng));
+  const roofObs = (project.roofObstructions ?? [])
+    .filter((o: any) => isFinite(o.lat) && isFinite(o.lng))
+    // SAME global plan rotation as every other drawn layer.
+    .map((o: any) => planRotDeg === 0 ? o : { ...o, ..._rotPt(o) });
   // Canopy is an UNVERIFIED-area flag, not a surveyed fixture — notes and the
   // legend treat it separately from hard obstructions (vents/chimneys/etc.).
   const _canopyObs = roofObs.filter((o: any) => o.type === 'canopy');
@@ -1361,10 +1437,16 @@ export function drawRoofPlan(
 
   // ── Compass rose (BOTH sheets) + LEGEND (PV-1 only) ───────────────────────
   {
-    // Compass rose — 4-point star with N/E/S/W, bottom-right corner.
+    // Compass rose — 4-point star with N/E/S/W, bottom-right corner. Wired to
+    // the SAME global plan rotation as every drawn layer: the star turns by
+    // northArrowRotationDeg(planRotDeg) so true north points correctly on the
+    // building-squared plan; the letters ride the rotated anchors but stay
+    // horizontal (counter-rotated text — reference-set discipline).
     const crX = W - zones.dims.right - 6, crY = H - zones.dims.bottom - 2, cr = 20;
+    const nRot = northArrowRotationDeg(planRotDeg);
     const rose: string[] = [];
     rose.push(`<circle cx="${crX}" cy="${crY}" r="${cr}" fill="rgba(255,255,255,0.9)" stroke="#2b2f36" stroke-width="0.9"/>`);
+    rose.push(`<g class="north-rose" transform="rotate(${nRot.toFixed(2)} ${crX} ${crY})">`);
     // vertical (N/S) star — N solid, S light
     rose.push(`<polygon points="${crX},${crY - cr + 2} ${crX + 4},${crY} ${crX},${crY - 3} ${crX - 4},${crY}" fill="#1a1a1a"/>`);
     rose.push(`<polygon points="${crX},${crY + cr - 2} ${crX + 4},${crY} ${crX},${crY + 3} ${crX - 4},${crY}" fill="#b0b4bc"/>`);
@@ -1372,10 +1454,19 @@ export function drawRoofPlan(
     rose.push(`<polygon points="${crX + cr - 2},${crY} ${crX},${crY + 4} ${crX + 3},${crY} ${crX},${crY - 4}" fill="#6b7078"/>`);
     rose.push(`<polygon points="${crX - cr + 2},${crY} ${crX},${crY + 4} ${crX - 3},${crY} ${crX},${crY - 4}" fill="#6b7078"/>`);
     rose.push(`<circle cx="${crX}" cy="${crY}" r="1.4" fill="#1a1a1a"/>`);
-    rose.push(drawText(crX, crY - cr - 3, 'N', { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#1a1a1a' }));
-    rose.push(drawText(crX, crY + cr + 7, 'S', { anchor: 'middle', fontSize: 6, fill: '#555' }));
-    rose.push(drawText(crX + cr + 5, crY + 2.5, 'E', { anchor: 'middle', fontSize: 6, fill: '#555' }));
-    rose.push(drawText(crX - cr - 5, crY + 2.5, 'W', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    rose.push('</g>');
+    // Letters at the ROTATED cardinal anchors, text horizontal.
+    const _aR = nRot * Math.PI / 180;
+    const _dN = { x: Math.sin(_aR), y: -Math.cos(_aR) };   // screen (y down)
+    const _dE = { x: Math.cos(_aR), y: Math.sin(_aR) };
+    const _lp = (d: { x: number; y: number }, dist: number) =>
+      ({ x: crX + d.x * dist, y: crY + d.y * dist });
+    const pN = _lp(_dN, cr + 7), pS = _lp({ x: -_dN.x, y: -_dN.y }, cr + 7);
+    const pE = _lp(_dE, cr + 9), pW = _lp({ x: -_dE.x, y: -_dE.y }, cr + 9);
+    rose.push(drawText(pN.x, pN.y + 2.8, 'N', { anchor: 'middle', fontSize: 8, fontWeight: '900', fill: '#1a1a1a' }));
+    rose.push(drawText(pS.x, pS.y + 2.2, 'S', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    rose.push(drawText(pE.x, pE.y + 2.2, 'E', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+    rose.push(drawText(pW.x, pW.y + 2.2, 'W', { anchor: 'middle', fontSize: 6, fill: '#555' }));
     els.push(...rose);
   }
 
