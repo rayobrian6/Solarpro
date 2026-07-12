@@ -11709,8 +11709,10 @@ function EngineeringPageInner() {
                     <div className="text-[10px] text-slate-500 mt-0.5">psf Snow</div>
                   </div>
                   <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-3 py-2.5 text-center">
-                    <div className="text-xl font-black text-white tabular-nums">{totalPanels}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Panels</div>
+                    {/* Wave 4B.E — hybrid: this hero covers the ROOF SUBSET (per the
+                        banner above), never the whole-project module count. */}
+                    <div className="text-xl font-black text-white tabular-nums">{subSystemCounts.isHybrid ? subSystemCounts.roof : totalPanels}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{subSystemCounts.isHybrid ? 'Roof Panels' : 'Panels'}</div>
                   </div>
                   <div className="rounded-xl bg-slate-900/60 border border-emerald-500/20 px-3 py-2.5 text-center">
                     <div className="text-xl font-black text-emerald-400 tabular-nums">{config.roofPitch ?? 'N/A'}</div>
@@ -13303,18 +13305,40 @@ function EngineeringPageInner() {
                 ]
               : [];
 
-            // Compute layout from structural result or config
-            const mountCount = compliance.structural?.mountLayout?.mountCount ?? compliance.structural?.rackingBOM?.mounts?.qty ?? Math.ceil(totalPanels * 2.5);
-            const mountSpacing = compliance.structural?.mountLayout?.mountSpacing ?? config.attachmentSpacing ?? 48;
-            const upliftPerMount = compliance.structural?.wind?.upliftPerAttachment ?? compliance.structural?.mountLayout?.upliftPerMount ?? 0;
-            const downwardPerMount = compliance.structural?.deadLoad?.deadLoadPerAttachment ?? compliance.structural?.mountLayout?.downwardPerMount ?? 0;
-            const railCount = compliance.structural?.rackingBOM?.rails?.qty ?? Math.ceil(totalPanels / 4) * 2;
+            // Compute layout from structural result or config.
+            // Wave 4B.E — HYBRID HONESTY:
+            //  • the residential mount math/diagram covers the ROOF SUBSET only
+            //    (compliance.structural top-level = the roof run since 07-11);
+            //    the ground diagram covers the ground subset. Never 'all 85'.
+            //  • spacing may NEVER exceed the viewed mount's rated maxSpacingIn
+            //    (the engine may have run a DIFFERENT config.mountingId than the
+            //    system being viewed here — cap + flag instead of lying).
+            //  • v4 engine emits mountSpacingIn / upliftPerMountLbs /
+            //    downwardPerMountLbs — the old field names silently fell back.
+            const _mountModuleCount = subSystemCounts.isHybrid
+              ? (mountingInstallType === 'ground'
+                  ? (subSystemCounts.ground || totalPanels)
+                  : (subSystemCounts.roof || totalPanels))
+              : totalPanels;
+            const mountCount = compliance.structural?.mountLayout?.mountCount ?? compliance.structural?.rackingBOM?.mounts?.qty ?? Math.ceil(_mountModuleCount * 2.5);
+            const _rawMountSpacing = compliance.structural?.mountLayout?.mountSpacingIn
+              ?? compliance.structural?.mountLayout?.finalSpacingIn
+              ?? compliance.structural?.mountLayout?.mountSpacing
+              ?? config.attachmentSpacing ?? 48;
+            const _viewedMaxSpacing = selectedSystem?.mount?.maxSpacingIn;
+            const mountSpacing = _viewedMaxSpacing ? Math.min(_rawMountSpacing, _viewedMaxSpacing) : _rawMountSpacing;
+            const mountSpacingWasCapped = _viewedMaxSpacing != null && _rawMountSpacing > _viewedMaxSpacing;
+            const upliftPerMount = compliance.structural?.wind?.upliftPerAttachment ?? compliance.structural?.mountLayout?.upliftPerMountLbs ?? compliance.structural?.mountLayout?.upliftPerMount ?? 0;
+            const downwardPerMount = compliance.structural?.deadLoad?.deadLoadPerAttachment ?? compliance.structural?.mountLayout?.downwardPerMountLbs ?? compliance.structural?.mountLayout?.downwardPerMount ?? 0;
+            const railCount = compliance.structural?.rackingBOM?.rails?.qty ?? Math.ceil(_mountModuleCount / 4) * 2;
             const safetyFactor = compliance.structural?.attachment?.safetyFactor ?? compliance.structural?.mountLayout?.safetyFactor ?? 0;
 
             // SVG mount spacing diagram
             const MountSpacingDiagram = () => {
               const [diagramView, setDiagramView] = React.useState<'layout'|'section'|'iso'>('layout');
-              const attachSpIn  = compliance.structural?.attachment?.attachmentSpacing ?? compliance.structural?.mountLayout?.mountSpacingIn ?? mountSpacing;
+              // Wave 4B.E — spacing may never exceed the VIEWED mount's rated max.
+              const _attachSpInRaw = compliance.structural?.attachment?.attachmentSpacing ?? compliance.structural?.mountLayout?.mountSpacingIn ?? mountSpacing;
+              const attachSpIn  = _viewedMaxSpacing ? Math.min(_attachSpInRaw, _viewedMaxSpacing) : _attachSpInRaw;
               const railSpIn    = compliance.structural?.attachment?.railSpacing ?? 64;
               const upliftLbs   = compliance.structural?.wind?.upliftPerAttachment ?? upliftPerMount;
               const deadLbs     = compliance.structural?.deadLoad?.deadLoadPerAttachment ?? downwardPerMount;
@@ -13332,8 +13356,16 @@ function EngineeringPageInner() {
                 const panelWidPx = (compliance.structural?.arrayGeometry?.panelWidthIn  ?? 41) * SCALE;
                 const attachSpPx = Math.max(30, attachSpIn * SCALE);
                 const gapPx = 4;
-                const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(totalPanels))));
-                const rows = Math.min(3, Math.max(1, Math.ceil(totalPanels / cols)));
+                // Wave 4B.E — grid from the REAL roof-subset array geometry when the
+                // structural run carries it; the drawn grid is capped for space and
+                // flagged as a SECTION when smaller than the real array.
+                const _geomCols = compliance.structural?.arrayGeometry?.colCount as number | undefined;
+                const _geomRows = compliance.structural?.arrayGeometry?.rowCount as number | undefined;
+                const cols = Math.min(4, Math.max(2, _geomCols ?? Math.ceil(Math.sqrt(_mountModuleCount))));
+                const rows = Math.min(3, Math.max(1, _geomRows ?? Math.ceil(_mountModuleCount / cols)));
+                const _realCols = _geomCols ?? cols;
+                const _realRows = _geomRows ?? rows;
+                const _isSection = _realCols > cols || _realRows > rows;
                 const marginL = 56; const marginT = 28;
                 const svgW = marginL + cols * (panelLenPx + gapPx) + 60;
                 const svgH = marginT + rows * (panelWidPx + 22) + 72;
@@ -13377,7 +13409,7 @@ function EngineeringPageInner() {
                       </pattern>
                     </defs>
                     <text x={svgW/2} y={11} textAnchor="middle" fill="#94a3b8" fontSize="8" fontWeight="bold" fontFamily="monospace">
-                      TOP-DOWN ARRAY LAYOUT — {cols}×{rows} ({totalPanels} MODULES){isRtMini ? ' · STAGGERED FEET' : ''}
+                      TOP-DOWN ARRAY LAYOUT — {_realCols}×{_realRows} ({_mountModuleCount}{subSystemCounts.isHybrid ? ' ROOF' : ''} MODULES){_isSection ? ' · SECTION SHOWN' : ''}{isRtMini ? ' · STAGGERED FEET' : ''}
                     </text>
                     {rafterXs.map((rx,i)=>(
                       <line key={`rf-${i}`} x1={rx} y1={marginT-8} x2={rx} y2={svgH-42}
@@ -14047,18 +14079,31 @@ function EngineeringPageInner() {
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {mountingInstallType === 'residential' && <>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Mount Count</div><div className="text-white font-bold">{mountCount}</div></div>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Mount Spacing</div><div className="text-amber-300 font-bold">{mountSpacing}"</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2">
+                          <div className="text-slate-500">Mount Spacing</div>
+                          <div className="text-amber-300 font-bold">{mountSpacing}"{_viewedMaxSpacing ? <span className="text-slate-500 font-normal"> / max {_viewedMaxSpacing}"</span> : null}</div>
+                          {mountSpacingWasCapped ? (
+                            <div className="text-[10px] text-red-400 font-bold" title="The structural run produced a wider spacing than this mount's rated maximum (it likely ran a different mount) — displayed spacing is capped at the rated max.">
+                              ⚠ capped at rated max (calc gave {_rawMountSpacing}")
+                            </div>
+                          ) : null}
+                        </div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Rail Count</div><div className="text-white font-bold">{railCount}</div></div>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Safety Factor</div><div className={`font-bold ${safetyFactor >= 2 ? 'text-emerald-400' : safetyFactor >= 1.5 ? 'text-amber-400' : 'text-red-400'}`}>{safetyFactor > 0 ? safetyFactor.toFixed(2) : '—'}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2">
+                          <div className="text-slate-500">Safety Factor</div>
+                          <div className={`font-bold ${safetyFactor >= 2 ? 'text-emerald-400' : safetyFactor >= 1.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {safetyFactor > 0 ? safetyFactor.toFixed(2) : '—'}{safetyFactor > 0 && safetyFactor < 1 ? ' — FAIL' : ''}
+                          </div>
+                        </div>
                       </>}
                       {mountingInstallType === 'commercial' && <>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Blocks/Module</div><div className="text-purple-300 font-bold">{(compliance.structural as any)?.ballastAnalysis?.blocksPerModule ?? selectedSystem?.ballast?.minBlocksPerModule ?? '—'}</div></div>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Blocks</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.totalBallastBlocks ?? (totalPanels * (selectedSystem?.ballast?.minBlocksPerModule ?? 2))}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Blocks</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.totalBallastBlocks ?? (_mountModuleCount * (selectedSystem?.ballast?.minBlocksPerModule ?? 2))}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Ballast</div><div className="text-purple-300 font-bold">{(compliance.structural as any)?.ballastAnalysis?.ballastWeightLbs ? `${(compliance.structural as any).ballastAnalysis.ballastWeightLbs.toLocaleString()} lbs` : '—'}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Roof Load</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.roofLoadPsf ? `${(compliance.structural as any).ballastAnalysis.roofLoadPsf.toFixed(1)} psf` : '—'}</div></div>
                       </>}
                       {mountingInstallType === 'ground' && <>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Count</div><div className="text-green-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileCount ?? Math.ceil(totalPanels / 4)}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Count</div><div className="text-green-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileCount ?? (compliance.structural as any)?.subSystems?.ground?.groundMountAnalysis?.pileCount ?? Math.ceil(_mountModuleCount / 4)}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Spacing</div><div className="text-white font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileSpacingFt ?? selectedSystem?.groundMount?.pileSpacingFt ?? '—'}ft</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Uplift/Pile</div><div className="text-red-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.upliftPerPileLbs ? `${(compliance.structural as any).groundMountAnalysis.upliftPerPileLbs.toFixed(0)} lbs` : '—'}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Safety Factor</div><div className={`font-bold ${((compliance.structural as any)?.groundMountAnalysis?.safetyFactorUplift ?? 0) >= 2 ? 'text-emerald-400' : 'text-amber-400'}`}>{(compliance.structural as any)?.groundMountAnalysis?.safetyFactorUplift?.toFixed(2) ?? '—'}</div></div>

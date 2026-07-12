@@ -1412,7 +1412,12 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
     recommendations.push('High snow load: verify roof structure capacity with structural engineer');
   }
   if (mountLayout.spacingWasReduced) {
-    recommendations.push(`Mount spacing auto-reduced to ${mountLayout.mountSpacingIn}" to achieve SF ≥ 1.5`);
+    // Wave 4B.E — honest wording: the loop enforces MIN_ATTACHMENT_SF (1.0),
+    // not the 1.5 this string used to claim; and when even the 12" floor
+    // can't meet it, say FAIL — never claim a target was "achieved".
+    recommendations.push(mountLayout.safetyFactor >= MIN_ATTACHMENT_SF
+      ? `Mount spacing auto-reduced to ${mountLayout.mountSpacingIn}" (rated max ${mountLayout.maxAllowedSpacingIn}") to achieve SF ≥ ${MIN_ATTACHMENT_SF.toFixed(1)} (SF = ${mountLayout.safetyFactor.toFixed(2)})`
+      : `FAIL: attachment SF ${mountLayout.safetyFactor.toFixed(2)} < ${MIN_ATTACHMENT_SF.toFixed(1)} even at minimum 12" spacing — select a higher-capacity attachment or add rows of attachments`);
   }
   if (input.framingType === 'unknown') {
     const detected = rafterAnalysis.framingType;
