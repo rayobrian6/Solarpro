@@ -28,6 +28,23 @@ export function isSubSystemKey(v: unknown): v is SubSystemKey {
 }
 
 /**
+ * Wave 6.1 (punch item 1a) — the canonical SolFence mounting id.
+ *
+ * Fence sub-systems mount on SolFence vertical sections, ALWAYS (Ray's real
+ * distributor data; the Wave-4B System Config UI offers only fence-typed
+ * racking for fence subs; bom-system-profiles hardcodes rackingBrand
+ * 'SolFence' for fence BOMs). The legacy flat `config.mountingId` is the
+ * PROJECT-WIDE (roof) racking — cloning it into a fence entry produced the
+ * Stowell "FENCE SYSTEM: ROOF TECH RT-MINI" planset lie.
+ *
+ * Cross-ref: lib/equipment-db.ts MOUNTING_SYSTEMS entry { id: 'solfence-8ft',
+ * manufacturer: 'SolFence', systemType: 'fence' }. This module is
+ * dependency-free by contract, so the id is mirrored here as a constant;
+ * the Wave-6 golden test pins the equipment-db entry against it.
+ */
+export const SOLFENCE_MOUNTING_ID = 'solfence-8ft';
+
+/**
  * Normalize ANY systemType spelling (engineering 'roof'|'ground'|'fence',
  * canonical 'ground_mount'|'solar_fence', CAD variants) to a SubSystemKey.
  * Mirrors classifyPanel() in lib/permit/utils/subSystems.ts — roof is the
@@ -191,7 +208,10 @@ export function synthesizeFromLegacyScalars(
     topology: mapLegacyTopology(inv0?.type),
     ecosystemBrand: config.selectedBrand || undefined,
     optimizerId: inv0?.optimizerPeripheralId || undefined,
-    mountingId: config.mountingId || undefined,
+    // Wave 6.1 (punch 1a): fence subs FORCE the SolFence system id — the flat
+    // legacy mountingId is the project-wide (roof) racking and must never be
+    // cloned into a fence entry (Stowell "FENCE SYSTEM: ROOF TECH RT-MINI").
+    mountingId: key === 'fence' ? SOLFENCE_MOUNTING_ID : (config.mountingId || undefined),
     batteryId: hasBattery ? config.batteryId : undefined,
     batteryCount: hasBattery && typeof config.batteryCount === 'number' && config.batteryCount > 0
       ? config.batteryCount
@@ -316,6 +336,16 @@ export function ensureSubSystemShape<T extends LegacyScalarConfig>(
     }
   } else {
     subSystems = stored as SubSystemEquipmentMap;
+  }
+
+  // Wave 6.1 (punch 1a) — heal MIGRATION-sourced fence entries that still
+  // carry a cloned roof/ground mountingId (pre-Wave-6 synthesis wrote the
+  // flat legacy scalar into every key). Only 'migration' provenance is
+  // touched — user/design/defaults-authored entries are never rewritten.
+  // Idempotent: a healed entry re-enters this branch as a no-op.
+  const _fence = subSystems.fence;
+  if (_fence && _fence.source === 'migration' && _fence.mountingId !== SOLFENCE_MOUNTING_ID) {
+    subSystems = { ...subSystems, fence: { ..._fence, mountingId: SOLFENCE_MOUNTING_ID } };
   }
 
   // Re-stamp derived tag caches (§1.1: tags are cache, re-stampable at every

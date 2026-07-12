@@ -43,6 +43,28 @@ import {
 } from '../callouts';
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { getMountingSystemById } from '../../mounting-hardware-db';
+
+// Wave 6.1 (punch 1a) — canonical fence-system display name. Fence racking is
+// ALWAYS SolFence (equipment-db 'solfence-8ft'; bom-system-profiles rackingBrand
+// 'SolFence'); a fence sheet must never brand the project-wide ROOF racking
+// (legacy config.mountingId contamination — Stowell PV-1F printed
+// "FENCE SYSTEM: ROOF TECH RT-MINI" / "RAIL ×2 — ROOF TECH RT-MINI").
+const SOLFENCE_DISPLAY = 'SOLFENCE VERTICAL SECTION SYSTEM';
+const NON_FENCE_MOUNT_RE = /roof\s?tech|rt[-\s]?mini|ironridge|unirac|snapnrack|quick\s?mount|s-5|xr\d|ground\s?mount|iron\s?ridge/i;
+
+/** Resolve the fence-system display name from the sub's own equipment —
+ *  never from a roof/ground mounting that leaked through the flat scalars. */
+function resolveFenceMountName(project: Record<string, unknown> | undefined | null): string {
+  const sel = project?.mountingSystemId
+    ? getMountingSystemById(String(project.mountingSystemId))
+    : undefined;
+  if (sel && sel.category === 'solar_fence') return `${sel.manufacturer} ${sel.model}`;
+  if (sel) return SOLFENCE_DISPLAY;                          // non-fence id ⇒ contamination
+  const name = String(project?.mountingSystem ?? '').trim();
+  if (name && NON_FENCE_MOUNT_RE.test(name)) return SOLFENCE_DISPLAY; // roof brand by name
+  return name || 'SOLAR FENCE SYSTEM';
+}
 
 // ── SEGMENT COLORS (one per segment, wraps) ──────────────────────────────────
 const SEG_COLORS = [
@@ -352,7 +374,9 @@ export function drawFenceElevation(
   const dcKw           = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
   const windSpeedMph   = engineering.windSpeedMph   ?? project?.ahjWindSpeedMph   ?? 90;
   const groundSnowPsf  = engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
-  const mountSys       = (project?.mountingSystem   || 'SOLAR FENCE SYSTEM').toUpperCase();
+  // Wave 6.1 (punch 1a): fence-system name from the sub's own equipment —
+  // never the raw project-wide mountingSystem scalar (roof racking leak).
+  const mountSys       = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
 
   // First segment for display (show 2 full bays)
   const segments: any[] = cadFence?.segments ?? layout.fenceSegments ?? [];

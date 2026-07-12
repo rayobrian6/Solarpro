@@ -76,9 +76,12 @@ describe('ensureSubSystemShape — presentKeys hybrid synthesis (Wave 4B.A)', ()
   });
 
   it("Ray's stored degenerate {fence: migration} map is re-synthesized per key", () => {
+    // Wave 6.1: fence synthesis now FORCES the SolFence mounting id, so the
+    // idempotence fixture carries it too (a cloned roof mountingId is the
+    // contamination case — covered by the dedicated test below).
     const storedFence: SubSystemEquipment = {
       key: 'fence', inverterId: 'enphase-iq8plus', topology: 'micro',
-      panelId: 'qcells-peak-duo-400', mountingId: 'ironridge-xr100',
+      panelId: 'qcells-peak-duo-400', mountingId: 'solfence-8ft',
       ecosystemBrand: 'enphase', trenchRunLengthFt: 40,
       env: { rooftopTempAdderC: 0, conduitType: 'EMT', wireLengthFt: 60 },
       source: 'migration', updatedAt: '2026-07-10T00:00:00.000Z',
@@ -93,6 +96,39 @@ describe('ensureSubSystemShape — presentKeys hybrid synthesis (Wave 4B.A)', ()
     expect(out.subSystems.roof!.source).toBe('migration');
     expect(out.subSystems.roof!.roofType).toBe('shingle');
     expect(out.subSystems.ground!.source).toBe('migration');
+  });
+
+  it('Wave 6.1: fence entries never keep a cloned roof mountingId (SolFence forced)', () => {
+    // Fresh synthesis: the flat legacy mountingId (roof racking) must NOT be
+    // cloned into the fence entry; roof/ground keep it, fence gets SolFence.
+    const out = ensureSubSystemShape(rayHybridConfig(), { presentKeys: RAY_PRESENT, now: NOW });
+    expect(out.subSystems.roof!.mountingId).toBe('ironridge-xr100');
+    expect(out.subSystems.ground!.mountingId).toBe('ironridge-xr100');
+    expect(out.subSystems.fence!.mountingId).toBe('solfence-8ft');
+    // Stored contaminated migration entry (Ray's live Stowell shape): healed.
+    const contaminated: SubSystemEquipment = {
+      key: 'fence', inverterId: 'enphase-iq8plus', topology: 'micro',
+      panelId: 'qcells-peak-duo-400', mountingId: 'rooftech-mini',
+      source: 'migration', updatedAt: '2026-07-10T00:00:00.000Z',
+    };
+    const healed = ensureSubSystemShape(
+      rayHybridConfig({ subSystems: { fence: contaminated } }),
+      { presentKeys: RAY_PRESENT, now: NOW },
+    );
+    expect(healed.subSystems.fence!.mountingId).toBe('solfence-8ft');
+    // Idempotent: a second pass leaves the healed entry alone (by reference).
+    const again = ensureSubSystemShape(healed, { presentKeys: RAY_PRESENT, now: NOW });
+    expect(again.subSystems.fence).toBe(healed.subSystems.fence);
+    // Non-migration provenance is NEVER rewritten, even when contaminated.
+    const userFence: SubSystemEquipment = {
+      key: 'fence', inverterId: 'enphase-iq8plus', topology: 'micro',
+      mountingId: 'rooftech-mini', source: 'engineering', updatedAt: '2026-07-11T00:00:00.000Z',
+    };
+    const kept = ensureSubSystemShape(
+      rayHybridConfig({ subSystems: { fence: userFence } }),
+      { presentKeys: RAY_PRESENT, now: NOW },
+    );
+    expect(kept.subSystems.fence).toBe(userFence);
   });
 
   it('degenerate migration entry with a DIFFERENT id-tuple is replaced by fresh synthesis', () => {
