@@ -72,6 +72,17 @@ import {
   type RebuildStringsOptions as _RebuildStringsOptions,
 } from '@/lib/system/buildInverterConfig';
 import { electricallyNormalizeInverterConfig, isElectricallyInvalid } from '@/lib/system/electricalNormalize';
+// ── Wave 3 (per-subsystem equipment contract, docs/ARCHITECTURE-per-subsystem-equipment.md §3) ──
+// ensureSubSystemShape = THE one legacy-collapse rule (§1.5), applied at every
+// hydration boundary: untagged inverters inherit config.systemType (NEVER a
+// bare 'roof' default) and a missing subSystems map is synthesized from the
+// legacy flat scalars — so equipment authority lives in the map (§1.1) and a
+// per-sub staleness discard can never lose an equipment choice.
+import {
+  ensureSubSystemShape,
+  toSubSystemKey,
+  type SubSystemKey,
+} from '@/lib/system/subSystemEquipment';
 // Cast wrappers: builder types use wide `string` for roofType; page uses a
 // narrow RoofType union. Since the page's RoofType is a strict subset of
 // string, the cast is always safe. These wrappers are the ONLY call sites
@@ -1412,7 +1423,22 @@ function EngineeringPageInner() {
         const expectedHydrationPanelCount: number =
           _hydLayoutPanelCount > 0 ? _hydLayoutPanelCount : _hydSeedPanelCount;
 
-                const savedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
+        // Wave 3.1 — CAD-side systemType fallback for the §1.5 inherit chain
+        // (config.systemType ?? cad.systemType ?? 'roof'). Used by every
+        // hydration-boundary ensureSubSystemShape call in this effect.
+        const _cadSystemTypeForTags: string | null =
+          (p.systemType as string | undefined) ?? ((layout as any)?.systemType as string | undefined) ?? null;
+        const _rawSavedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
+        // Wave 3.1 — TAG AT THE SOURCE (contract §1.5/§3-Wave-3 item 1): the DB
+        // config is normalized through ensureSubSystemShape BEFORE the staleness
+        // gates below, so (a) every inverter/string carries a subSystemKey tag
+        // (inherited from systemType — never a bare 'roof' default), and (b) the
+        // subSystems equipment map exists — meaning a gate that discards a stale
+        // fleet can never lose the equipment CHOICE (it survives in the map, §1.1).
+        const savedConfig: Partial<ProjectConfig> | undefined =
+          _rawSavedConfig && Object.keys(_rawSavedConfig).length > 0
+            ? (ensureSubSystemShape(_rawSavedConfig as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as Partial<ProjectConfig>)
+            : _rawSavedConfig;
         console.log('[HYDRATION] p.engineeringConfig:', savedConfig ? `${Object.keys(savedConfig).length} keys` : 'null/undefined');
         // v61.8 PRIMARY FIX: Panel count mismatch gate.
         // If savedConfig.inverters totals a panel count different from the
@@ -1763,7 +1789,10 @@ function EngineeringPageInner() {
             // v61.6 Electrical Integrity: also detect + repair 1×N electrical violations
             // (e.g. strings:[{panelCount:44}] for a Solis inverter with maxPanelsPerString=13).
             const _metaNorm = normalizeInverterConfig(merged);
-            return electricallyNormalizeInverterConfig(_metaNorm).config;
+            const _elecNorm = electricallyNormalizeInverterConfig(_metaNorm).config;
+            // Wave 3.1 — hydration boundary (savedConfig commit): re-stamp tags +
+            // guarantee the subSystems map after the normalizers (idempotent).
+            return ensureSubSystemShape(_elecNorm as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as ProjectConfig;
           });
         } else if (Object.keys(patches).length > 0) {
           // No saved config — use seed patches as before
@@ -1775,7 +1804,10 @@ function EngineeringPageInner() {
             // v61.4 Hydration Lock: normalise seed patches inverters too.
             // v61.6 Electrical Integrity: repair 1×N violations in seed patches.
             const _metaNorm2 = normalizeInverterConfig(merged);
-            return electricallyNormalizeInverterConfig(_metaNorm2).config;
+            const _elecNorm2 = electricallyNormalizeInverterConfig(_metaNorm2).config;
+            // Wave 3.1 — hydration boundary (seed / no-seed / design-handoff
+            // patches all funnel through here): tag + synthesize the map.
+            return ensureSubSystemShape(_elecNorm2 as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as ProjectConfig;
           });
         }
 
@@ -1793,7 +1825,10 @@ function EngineeringPageInner() {
                 // v61.6 Electrical Integrity: also repair 1×N violations.
                 setConfig(prev => {
                   const _metaMerge = normalizeInverterConfig({ ...prev, ...localConfig });
-                  return electricallyNormalizeInverterConfig(_metaMerge).config;
+                  const _elecMerge = electricallyNormalizeInverterConfig(_metaMerge).config;
+                  // Wave 3.1 — hydration boundary (localStorage restore can
+                  // resurrect PRE-migration snapshots): tag + synthesize the map.
+                  return ensureSubSystemShape(_elecMerge as any, { cadSystemType: _cadSystemTypeForTags }) as unknown as ProjectConfig;
                 });
               }
             }
@@ -2067,7 +2102,12 @@ function EngineeringPageInner() {
             const merged = { ...prev, ...patches };
             // Phase 11: reconciliation removed from hydration path.
             // Mismatches are surfaced via SizingRecommendation panel.
-            return merged;
+            // Wave 3.1 — hydration boundary (reverse hydration from a generated
+            // file's engineering_run): tag inverters + synthesize the map so a
+            // restored fence/ground run never collapses to default-roof tags.
+            return ensureSubSystemShape(merged as any, {
+              cadSystemType: (run.systemType as string | undefined) ?? (snap.systemType as string | undefined) ?? null,
+            }) as unknown as ProjectConfig;
           });
         }
 
