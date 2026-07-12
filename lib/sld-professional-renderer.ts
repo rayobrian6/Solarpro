@@ -3153,7 +3153,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       const y = resolveSegY(disco.lineOutX, xPOI, laneY);
       parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_POI`, disco.lineOutX, y, xPOI, y, run, lines, false, 'RACEWAY'), lines));
       parts.push(circ(xPOI, laneY, 4, {fill:BLK, sw:0}));
-      parts.push(txt(xPOI+8, laneY-8, `PV-${tag}: ${laneBackfeed(b)}A`, {sz:F.sub, bold:true, fill:'#1B5E20'}));
+      // Contribution label BELOW the junction (above collides with the
+      // POI→MSP callout when this lane sits at the tail Y).
+      parts.push(txt(xPOI+8, laneY+20, `PV-${tag}: ${laneBackfeed(b)}A`, {sz:F.sub, bold:true, fill:'#1B5E20'}));
     }
 
     // Lane ground symbols (equipment grounding at the disco)
@@ -3165,8 +3167,10 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   if (laneYs.length > 1) {
     parts.push(ln(xPOI, laneYs[0], xPOI, laneYs[laneYs.length-1], {sw:SW_BUS}));
   }
-  parts.push(txt(xPOI, laneYs[0] - 14, 'POINT OF INTERCONNECTION', {sz:F.hdr, bold:true, anc:'middle'}));
-  parts.push(txt(xPOI, laneYs[0] - 5, `Σ BACKFEED ${totalBackfeedAmps}A — NEC 705.12(B) (Σ PER-INVERTER OCPDs)`, {sz:F.tiny, anc:'middle', fill:'#1B5E20'}));
+  // Header sits clear ABOVE the top lane's wire callouts (which occupy
+  // roughly laneY-40..laneY-8) and below the lane band label at laneY-114.
+  parts.push(txt(xPOI, laneYs[0] - 76, 'POINT OF INTERCONNECTION', {sz:F.hdr, bold:true, anc:'middle'}));
+  parts.push(txt(xPOI, laneYs[0] - 66, `Σ BACKFEED ${totalBackfeedAmps}A — NEC 705.12(B) (Σ PER-INVERTER OCPDs)`, {sz:F.tiny, anc:'middle', fill:'#1B5E20'}));
 
   // ── Shared service tail: MSP → [BUI] → METER → GRID ──────────────────────
   let mspResult: {svg:string; lx:number; rx:number; bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number};
@@ -3234,8 +3238,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   parts.push(txt(xUtil, gridCY+33, esc(input.utilityName), {sz:F.tiny, anc:'middle'}));
   parts.push(ln(xUtil, gridCY+16, xUtil, gridCY+26, {sw:SW_MED}));
   parts.push(gnd(xUtil, gridCY+26));
-  parts.push(gnd(xMSP + 70, tailY + 100, '#2E7D32'));
-  parts.push(txt(xMSP, tailY + 118, 'EGC — NEC 250.122 / 690.43', {sz:F.tiny, anc:'middle', fill:GRN}));
+  // (MSP grounding is drawn inside renderMSPLoad/renderMSPSupply — no extra
+  // glyph here; it collided with the MSP's own tap/breaker labels.)
+  parts.push(txt(xMSP, tailY + 145, 'EGC — NEC 250.122 / 690.43', {sz:F.tiny, anc:'middle', fill:GRN}));
 
   // ── AUTO-SCALE (fit transform — k<1 ALLOWED, three lanes must shrink) ─────
   {
