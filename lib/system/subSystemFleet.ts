@@ -23,7 +23,8 @@ import {
   type SubSystemKey,
 } from './subSystemEquipment';
 
-/** Structural inverter shape — page InverterConfig and raw DB payloads both satisfy it. */
+/** Structural inverter shape — page InverterConfig and raw DB payloads both
+ *  satisfy it (no index signatures so INTERFACE types stay assignable). */
 export interface FleetInverterLike {
   id?: string;
   subSystemKey?: SubSystemKey;
@@ -32,9 +33,7 @@ export interface FleetInverterLike {
   strings?: Array<{
     panelCount?: number;
     subSystemKey?: SubSystemKey;
-    [k: string]: unknown;
   }>;
-  [k: string]: unknown;
 }
 
 /** The key an inverter belongs to: its tag, else the caller's inherit-chain fallback. */

@@ -213,6 +213,58 @@ describe('gateInactiveInverterPerSub', () => {
   });
 });
 
+describe('applyPanelToEngineeringConfig — sub-scoped re-pin (contract I-4)', () => {
+  const cfg = () => ({
+    systemType: 'roof',
+    subSystems: {
+      roof:  { key: 'roof',  panelId: 'old-roof-panel',  source: 'engineering', updatedAt: 't0' },
+      fence: { key: 'fence', panelId: 'panel-fence-ps1', source: 'engineering', updatedAt: 't0' },
+    },
+    inverters: [
+      inv('r', [51], 'roof'),
+      { ...inv('f', [17], 'fence'), strings: [{ id: 'f-s0', panelCount: 17, panelId: 'panel-fence-ps1', subSystemKey: 'fence' }] },
+    ].map(i => ({
+      ...i,
+      strings: (i.strings ?? []).map(s => ({ panelId: 'old-roof-panel', ...s })),
+    })),
+  });
+
+  it('legacy (no subSystem): re-pins every string — unchanged behavior', async () => {
+    const { applyPanelToEngineeringConfig } = await import('@/lib/system/selectedEquipment');
+    const out = applyPanelToEngineeringConfig(cfg(), 'new-panel') as any;
+    expect(out).not.toBeNull();
+    expect(out.inverters[0].strings[0].panelId).toBe('new-panel');
+    expect(out.inverters[1].strings[0].panelId).toBe('new-panel');
+  });
+
+  it('scoped to roof: fence strings and fence map entry are untouched', async () => {
+    const { applyPanelToEngineeringConfig } = await import('@/lib/system/selectedEquipment');
+    const input = cfg();
+    const out = applyPanelToEngineeringConfig(input, 'new-panel', 'roof') as any;
+    expect(out).not.toBeNull();
+    expect(out.inverters[0].strings[0].panelId).toBe('new-panel');
+    expect(out.inverters[1]).toBe(input.inverters[1]); // same reference
+    expect(out.subSystems.roof.panelId).toBe('new-panel');
+    expect(out.subSystems.fence).toBe(input.subSystems.fence); // untouched
+  });
+
+  it('scoped no-op (target already applied in scope) returns null — no write', async () => {
+    const { applyPanelToEngineeringConfig } = await import('@/lib/system/selectedEquipment');
+    const out = applyPanelToEngineeringConfig(cfg(), 'panel-fence-ps1', 'fence');
+    expect(out).toBeNull();
+  });
+
+  it('untagged inverters inherit config.systemType for scope membership', async () => {
+    const { applyPanelToEngineeringConfig } = await import('@/lib/system/selectedEquipment');
+    const input = { systemType: 'fence', inverters: [inv('legacy', [17])] } as any;
+    input.inverters[0].strings[0].panelId = 'old';
+    const roofScoped = applyPanelToEngineeringConfig(input, 'new-panel', 'roof');
+    expect(roofScoped).toBeNull(); // fence-inherited fleet is out of roof scope
+    const fenceScoped = applyPanelToEngineeringConfig(input, 'new-panel', 'fence') as any;
+    expect(fenceScoped.inverters[0].strings[0].panelId).toBe('new-panel');
+  });
+});
+
 describe('presentStampKeys', () => {
   it('orders roof > ground > fence and drops zero counts', () => {
     expect(presentStampKeys({ fence: 17, roof: 51, ground: 0 })).toEqual(['roof', 'fence']);

@@ -93,6 +93,7 @@ import {
 import {
   fleetKeys,
   fleetPanelTotal,
+  inverterFleetKey,
   partitionFleet,
   replaceSubFleet,
   stampFleet,
@@ -350,6 +351,110 @@ function reconcileFencePanels(
     return changed ? { ...inv, strings: newStrings } : inv;
   });
   return changed ? reconciled : inverters;
+}
+
+// ── Wave 3.3 (contract §3 Wave 3 item 3 — sync-pipeline watcher scope) ──────
+/**
+ * Rebuild ONE sub's fleet to a new panel count using that fleet's OWN
+ * equipment (its inverter model / panel / topology) — never a project-wide
+ * winner or inverters[0]-of-the-project (I-3). Mirrors the legacy panel-count
+ * fix branches (micro single-string update / sizing-engine regroup / capped
+ * even-split fallback), but per fleet. Returns null when nothing sensible can
+ * be built — the caller keeps the old fleet.
+ */
+function rebuildFleetForCount(
+  fleet: InverterConfig[],
+  key: SubSystemKey,
+  targetCount: number,
+  selectedBrand: string | undefined,
+): InverterConfig[] | null {
+  const inv0 = fleet[0];
+  if (!inv0 || targetCount <= 0) return null;
+  const baseStr = inv0.strings[0];
+
+  // Micro: update the single string's total panel count — never N×1 strings.
+  if (inv0.type === 'micro') {
+    const newStr = _buildStrCfg({
+      index:      0,
+      existingId: baseStr?.id,
+      panelCount: targetCount,
+      panelId:    baseStr?.panelId,
+      wireGauge:  baseStr?.wireGauge,
+    });
+    return [_buildInvCfg({
+      existingId:   inv0.id,
+      inverterId:   inv0.inverterId,
+      type:         inv0.type,
+      strings:      [newStr],
+      subSystemKey: key,
+    } as any)];
+  }
+
+  // String / optimizer / hybrid: this sub's own sizing pass.
+  const panel = SOLAR_PANELS.find((pp: any) => pp.id === baseStr?.panelId) as any;
+  let engStrings: Array<{ panelCount: number; inverterIndex?: number }> | null = null;
+  try {
+    const input: Parameters<typeof sizeSystemFromBrand>[0] = {
+      systemType:        key,
+      panelCount:        targetCount,
+      panelWattage:      panel?.watts ?? 400,
+      panelVoc:          panel?.voc ?? 49.6,
+      panelTempCoeffVoc: panel?.tempCoeffVoc ?? -0.27,
+      designTempMin:     -10,
+      optimizerMaxOutputCurrent: 15.0,
+    };
+    if (inv0.inverterId)     input.selectedInverterId = inv0.inverterId;
+    else if (selectedBrand)  input.selectedBrand      = selectedBrand;
+    const result = sizeSystemFromBrand(input);
+    if (result.strings.length > 0 && result.topology !== 'micro') engStrings = result.strings;
+  } catch { /* fall through to even split */ }
+  if (!engStrings) {
+    const pps = Math.min(targetCount, 14);
+    const sc  = Math.max(1, Math.ceil(targetCount / pps));
+    engStrings = Array.from({ length: sc }, (_, i) => ({
+      panelCount: i === sc - 1 ? targetCount - pps * (sc - 1) : pps,
+      inverterIndex: 0,
+    }));
+  }
+  const byInv = new Map<number, Array<{ panelCount: number }>>();
+  for (const s of engStrings) {
+    const idx = s.inverterIndex ?? 0;
+    if (!byInv.has(idx)) byInv.set(idx, []);
+    byInv.get(idx)!.push(s);
+  }
+  const invCount = Math.max(1, byInv.size);
+  const out: InverterConfig[] = [];
+  for (let idx = 0; idx < invCount; idx++) {
+    const shell = fleet[idx] ?? inv0;
+    const assigned = byInv.get(idx) ?? [];
+    if (assigned.length === 0) { out.push(shell); continue; }
+    const newStrings = assigned.map((s, si) => {
+      const existing = shell.strings[si] ?? shell.strings[0];
+      return _buildStrCfg({
+        index:          si,
+        panelCount:     s.panelCount,
+        panelId:        existing?.panelId,
+        existingId:     existing?.id ?? `str-sub-sync-${key}-${idx}-${si}`,
+        label:          existing?.label,
+        tilt:           existing?.tilt,
+        azimuth:        existing?.azimuth,
+        roofType:       existing?.roofType as any,
+        mountingSystem: existing?.mountingSystem,
+        wireGauge:      existing?.wireGauge,
+        wireLength:     existing?.wireLength,
+      });
+    });
+    out.push(_buildInvCfg({
+      existingId:            shell.id,
+      inverterId:            shell.inverterId,
+      type:                  shell.type,
+      strings:               newStrings,
+      optimizerPeripheralId: (shell as any).optimizerPeripheralId,
+      deviceRatioOverride:   (shell as any).deviceRatioOverride,
+      subSystemKey:          key,
+    } as any));
+  }
+  return out;
 }
 
 function newString(idx: number, sysType?: string): StringConfig {
@@ -1731,7 +1836,8 @@ function EngineeringPageInner() {
                     strings:    inv.strings.slice(0, target) as any,
                     optimizerPeripheralId: inv.optimizerPeripheralId,
                     deviceRatioOverride:   inv.deviceRatioOverride,
-                  });
+                    subSystemKey: inv.subSystemKey, // Wave 3.3: rebuild never strips the tag
+                  } as any);
                 } else {
                   // v61.3/v61.5: use central builder for padded strings + rebuild inverter metadata
                   const extra = Array.from({ length: target - inv.strings.length }, (_: any, k: number) =>
@@ -1754,7 +1860,8 @@ function EngineeringPageInner() {
                     strings:    [...inv.strings, ...extra] as any,
                     optimizerPeripheralId: inv.optimizerPeripheralId,
                     deviceRatioOverride:   inv.deviceRatioOverride,
-                  });
+                    subSystemKey: inv.subSystemKey, // Wave 3.3: rebuild never strips the tag
+                  } as any);
                 }
               });
 
@@ -2299,13 +2406,23 @@ function EngineeringPageInner() {
   // an older panel. Runs once per distinct canonical id (ref-guarded), so in-session
   // engineering panel edits — which flow to canonical via the save-config write-back —
   // are not fought. Only acts on a real, resolvable equipment-db panel.
+  // Wave 3.3 (watcher 1/7, contract I-4): at N>1 fleets the canonical
+  // selected_equipment panel is the PRIMARY mirror (§1.4 roof > ground >
+  // fence) — it re-pins ONLY the primary sub's strings, never another sub's.
+  // Composite ref-guard (`${key}:${id}`) so cross-sub loops can't ping-pong.
   useEffect(() => {
     const canonId = canonicalPanelId;
-    if (!canonId || appliedCanonPanelRef.current === canonId) return;
+    if (!canonId) return;
+    const _cpFallbackKey = toSubSystemKey(config.systemType);
+    const _cpKeys = fleetKeys(config.inverters, _cpFallbackKey);
+    const _cpScopeKey: SubSystemKey | undefined = _cpKeys.length > 1 ? _cpKeys[0] : undefined;
+    const _cpRefKey = `${_cpScopeKey ?? 'all'}:${canonId}`;
+    if (appliedCanonPanelRef.current === _cpRefKey) return;
     if (!SOLAR_PANELS.find(pp => pp.id === canonId)) return;
-    appliedCanonPanelRef.current = canonId;
-    setConfig(prev => (applyPanelToEngineeringConfig(prev, canonId) as unknown as ProjectConfig | null) ?? prev);
-  }, [canonicalPanelId]);
+    appliedCanonPanelRef.current = _cpRefKey;
+    setConfig(prev => (applyPanelToEngineeringConfig(prev, canonId, _cpScopeKey) as unknown as ProjectConfig | null) ?? prev);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalPanelId, config.inverters, config.systemType]);
 
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
@@ -3551,6 +3668,39 @@ function EngineeringPageInner() {
         patch.batteryKwh = 0;
       }
 
+      // ── Wave 3.3 (contract §3 Wave 3 item 3 — the auto-apply/DC-AC-heal
+      // writer): the rebuilt fleet is scoped to ONE sub. The recommendation
+      // is computed for the PRIMARY sub (§1.4 fixed roof > ground > fence),
+      // so at N>1 fleets it replaces ONLY the primary fleet in place —
+      // every other sub's inverters keep their object references (I-4:
+      // an auto-apply can never nuke fence/ground engineering). At ≤1
+      // fleet this is the legacy whole-config path (fleet == everything),
+      // with the tag stamped so the fleet stays addressable.
+      const _asFallbackKey = toSubSystemKey(prev.systemType);
+      const _asKeys = fleetKeys(prev.inverters as any[], _asFallbackKey);
+      const _asScopeKey: SubSystemKey = _asKeys.length > 0 ? _asKeys[0] : _asFallbackKey;
+      patch.inverters = (_asKeys.length > 1
+        ? replaceSubFleet(prev.inverters as any[], _asScopeKey, newInverters as any[], _asFallbackKey)
+        : stampFleet(newInverters as any[], _asScopeKey)) as unknown as InverterConfig[];
+      // Equipment authority (§1.1): reflect the sub's inverter choice into
+      // subSystems[key] so it survives fleet regeneration. Only when the map
+      // already exists (hydration synthesizes it; watchers never invent it).
+      const _asMapPrev = (prev as any).subSystems as Record<string, any> | undefined;
+      if (_asMapPrev && Object.keys(_asMapPrev).length > 0) {
+        (patch as any).subSystems = {
+          ..._asMapPrev,
+          [_asScopeKey]: {
+            ...(_asMapPrev[_asScopeKey] ?? {}),
+            key: _asScopeKey,
+            inverterId: primaryModel.equipmentDbId,
+            topology: uiType === 'micro' ? 'micro' : uiType === 'optimizer' ? 'optimizer' : 'string',
+            ecosystemBrand: rec.brand.id,
+            source: 'engineering',
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      }
+
       return { ...prev, ...patch };
     });
 
@@ -3852,10 +4002,20 @@ function EngineeringPageInner() {
     const target = compat.effectivePanelId;
     if (!target) return;
 
+    // Wave 3.3 (watcher 6/7): the gate's verdict came from the PRIMARY sub's
+    // brand/panel pairing, so at N>1 fleets the heal reads and writes ONLY
+    // the primary fleet — a roof-brand incompatibility can never rewrite the
+    // fence sub's panel (I-4). At ≤1 fleet: legacy whole-config behavior.
+    const _pcFallbackKey = toSubSystemKey(config.systemType);
+    const _pcFleetKeys = fleetKeys(config.inverters, _pcFallbackKey);
+    const _pcScopeKey: SubSystemKey | null = _pcFleetKeys.length > 1 ? _pcFleetKeys[0] : null;
+    const _pcInScope = (inv: { subSystemKey?: SubSystemKey }): boolean =>
+      !_pcScopeKey || inverterFleetKey(inv as any, _pcFallbackKey) === _pcScopeKey;
+
     // Does the current config already reflect the swap? If every string
-    // on every inverter is already on the target panel, we are done.
+    // on every IN-SCOPE inverter is already on the target panel, we are done.
     const allAligned = config.inverters.every(inv =>
-      inv.strings.every(s => s.panelId === target),
+      !_pcInScope(inv as any) || inv.strings.every(s => s.panelId === target),
     );
     if (allAligned) return;
 
@@ -3881,7 +4041,9 @@ function EngineeringPageInner() {
 
     setConfig(prev => ({
       ...prev,
-      inverters: prev.inverters.map(inv => ({
+      // Wave 3.3: only IN-SCOPE (primary-fleet) inverters are rewritten at
+      // N>1; other subs' inverters keep their object references untouched.
+      inverters: prev.inverters.map(inv => (!_pcInScope(inv as any) ? inv : {
         ...inv,
         strings: inv.strings.map(s =>
           s.panelId === target ? s : { ...s, panelId: target }
@@ -6115,6 +6277,17 @@ function EngineeringPageInner() {
     const layoutIsFence = layoutType === 'solar_fence' || layoutType === 'fence' || hasFenceGeometry;
     const configIsFence = config.systemType === 'fence';
 
+    // Wave 3.3 (watcher 7/7): on a HYBRID layout (≥2 stamped subsystems) the
+    // flat systemType is the PRIMARY mirror (§1.4 roof > ground > fence) —
+    // fence geometry must NOT flip the whole project to 'fence' (that would
+    // hand roof modules fence structural/BOM/RSD authority). Single-system
+    // fence projects heal exactly as before.
+    if (subSystemCounts.isHybrid) {
+      if (layoutIsFence && !configIsFence) {
+        console.log('[FENCE WATCHER] hybrid layout — systemType stays the primary mirror; fence sub handled per-sub');
+      }
+      return;
+    }
     // Job 1 (kept): auto-heal systemType when the layout says fence (by type OR by
     // persisted fence geometry) but config says roof. DATA-INTEGRITY fix — the
     // user's intent (system is a fence) is already expressed by the layout.
@@ -6131,6 +6304,7 @@ function EngineeringPageInner() {
     projectLayout?.type,
     projectLayout?.systemType,
     projectLayout?.fenceLine,
+    subSystemCounts.isHybrid,
   ]);
   const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
   const [planSetError, setPlanSetError] = useState<string | null>(null);
@@ -6220,7 +6394,54 @@ function EngineeringPageInner() {
         // if the total changed — NEVER rearrange strings via sizing engine.
         // This prevents CAD sync from overwriting a user-configured string layout.
         const _cadUserLocked = !!(config.isUserControlled || config.userHasEditedInverters);
-        if (layout.panelCount > 0 && (currentTotal !== layout.panelCount || (!_cadUserLocked && _is1xNState))) {
+        // ── Wave 3.3 (watcher: sync-pipeline panel-count fix, re-keyed per sub) ──
+        // At ≥2 fleets/subsystems the whole-fleet rebuild below is DISABLED and
+        // replaced by per-sub reconciliation: each fleet is compared against ITS
+        // OWN layout stamp count and only mismatched fleets are rebuilt with that
+        // sub's own equipment (I-4: a fence count change never rebuilds roof).
+        const _spFallbackKey = toSubSystemKey(config.systemType);
+        const _spMultiSub =
+          subSystemCounts.isHybrid || fleetKeys(config.inverters as any[], _spFallbackKey).length > 1;
+        if (_spMultiSub && layout.panelCount > 0) {
+          if (subSystemCounts.present.length === 0) {
+            console.log('[EngineeringPage] PANEL COUNT FIX (per-sub) skipped — multi-sub fleet but layout stamps not loaded yet');
+          } else if (_cadUserLocked) {
+            const _lockedMismatches = subSystemCounts.present.filter(k => {
+              const fleet = partitionFleet(config.inverters as any[], _spFallbackKey)[k] ?? [];
+              return fleet.length > 0 && fleetPanelTotal(fleet) !== subSystemCounts[k];
+            });
+            if (_lockedMismatches.length > 0) {
+              console.log('[EngineeringPage] PANEL COUNT FIX (per-sub) skipped — user-controlled config; mismatched subs:', _lockedMismatches.join(', '));
+            }
+          } else {
+            const _spPart = partitionFleet(config.inverters as any[], _spFallbackKey);
+            const _spRebuilds: Array<{ key: SubSystemKey; fleet: InverterConfig[] }> = [];
+            for (const key of subSystemCounts.present) {
+              const fleet = (_spPart[key] ?? []) as InverterConfig[];
+              if (fleet.length === 0) continue; // per-sub smart defaults own seeding
+              const expected = subSystemCounts[key];
+              if (expected <= 0 || fleetPanelTotal(fleet as any[]) === expected) continue;
+              const rebuilt = rebuildFleetForCount(fleet, key, expected, config.selectedBrand);
+              if (rebuilt) _spRebuilds.push({ key, fleet: rebuilt });
+            }
+            if (_spRebuilds.length > 0) {
+              console.log('[EngineeringPage] PANEL COUNT FIX (per-sub):',
+                _spRebuilds.map(r => `${r.key}→${subSystemCounts[r.key]}`).join(', '));
+              setConfig(prev => {
+                const fb = toSubSystemKey(prev.systemType);
+                let inverters = prev.inverters;
+                for (const r of _spRebuilds) {
+                  inverters = replaceSubFleet(inverters as any[], r.key, r.fleet as any[], fb) as unknown as InverterConfig[];
+                }
+                return { ...prev, inverters };
+              });
+              setTimeout(() => {
+                console.log('[EngineeringPage] Auto-recalculating after per-sub panel count sync');
+                runCalc();
+              }, 400);
+            }
+          }
+        } else if (layout.panelCount > 0 && (currentTotal !== layout.panelCount || (!_cadUserLocked && _is1xNState))) {
             if (_is1xNState && !_cadUserLocked) {
               console.log('[EngineeringPage] PANEL COUNT FIX (1×N redistribution): 1 string with', _allCurrentStrings[0]?.panelCount, 'panels → redistributing via sizing engine');
             } else if (currentTotal !== layout.panelCount) {

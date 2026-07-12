@@ -22,7 +22,12 @@
 import type { Project, SolarPanel, Battery } from '@/types';
 import { getPanelById, getBatteryById, type SolarPanel as DbSolarPanel, type BatterySystem } from '@/lib/equipment-db';
 import type { ProjectConfig } from '@/lib/engineering-helpers';
-import type { SubSystemEquipmentMap } from '@/lib/system/subSystemEquipment';
+import {
+  isSubSystemKey,
+  toSubSystemKey,
+  type SubSystemEquipmentMap,
+  type SubSystemKey,
+} from '@/lib/system/subSystemEquipment';
 import { derivePrimaryMirror, normalizeSubSystemMap, subSystemEntryCount } from '@/lib/system/subSystemMirror';
 
 /** Canonical design-equipment record persisted to projects.selected_equipment. */
@@ -114,13 +119,31 @@ export function batterySystemToBattery(b: BatterySystem): Battery {
 export function applyPanelToEngineeringConfig(
   config: unknown,
   panelId: string,
+  /**
+   * Wave 3 (contract I-4): when provided, ONLY the strings of inverters
+   * belonging to this subsystem are re-pinned — the canonical top-level
+   * selected_equipment panel is the PRIMARY mirror (§1.4), so at N>1 it must
+   * never re-pin another sub's strings. Untagged inverters inherit
+   * config.systemType (§1.5 — never a bare roof default). Omitted ⇒ legacy
+   * whole-config behavior (single-subsystem projects, byte-identical).
+   */
+  subSystem?: SubSystemKey,
 ): Record<string, unknown> | null {
   if (!config || typeof config !== 'object' || !panelId) return null;
-  const cfg = config as { inverters?: Array<{ strings?: Array<{ panelId?: string }> }> };
+  const cfg = config as {
+    systemType?: string;
+    subSystems?: SubSystemEquipmentMap;
+    inverters?: Array<{ subSystemKey?: SubSystemKey; strings?: Array<{ panelId?: string }> }>;
+  };
   if (!Array.isArray(cfg.inverters)) return null;
+  const inheritedKey = toSubSystemKey(cfg.systemType ?? 'roof');
   let changed = false;
   const inverters = cfg.inverters.map(inv => {
     if (!inv || !Array.isArray(inv.strings)) return inv;
+    if (subSystem) {
+      const invKey = isSubSystemKey(inv.subSystemKey) ? inv.subSystemKey : inheritedKey;
+      if (invKey !== subSystem) return inv; // another sub's fleet — never touched
+    }
     return {
       ...inv,
       strings: inv.strings.map(s => {
@@ -130,7 +153,22 @@ export function applyPanelToEngineeringConfig(
     };
   });
   if (!changed) return null;
-  return { ...(config as Record<string, unknown>), inverters };
+  const out: Record<string, unknown> = { ...(config as Record<string, unknown>), inverters };
+  // Equipment authority (§1.1): reflect the re-pin into the owning sub's map
+  // entry so the choice survives fleet regeneration. Only when a map already
+  // exists (scoped writes never invent the map mid-watcher).
+  if (subSystem && cfg.subSystems && cfg.subSystems[subSystem]) {
+    out.subSystems = {
+      ...cfg.subSystems,
+      [subSystem]: {
+        ...cfg.subSystems[subSystem]!,
+        panelId,
+        source: 'design',
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+  return out;
 }
 
 /**
