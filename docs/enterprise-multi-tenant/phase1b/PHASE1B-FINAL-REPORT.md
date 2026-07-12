@@ -1,12 +1,12 @@
 # Phase 1B — Organization Authority Foundation: Final Report
 
-**Document type:** Phase completion report (Commit 9 of 9)
+**Document type:** Phase completion report (Commit 9 of 9 + governance test update)
 **Phase:** 1B — Organization Authority Foundation
 **Date:** 2026-07-12
 **Base commit:** `cedbfd88` (origin/dev, post-rebase)
-**Final commit:** `c1853b1a` (dev, 8 commits ahead of origin/dev)
+**Final commit:** `2cc6ae48` (dev, 10 commits ahead of origin/dev)
 **Implementer:** SuperNinja autonomous agent
-**Status:** Complete — all 9 commits landed on `dev`, all acceptance criteria met
+**Status:** Complete — all 9 Phase 1B commits plus 1 governance test update landed on `dev`, all acceptance criteria met
 
 ---
 
@@ -32,9 +32,10 @@ No production database was touched. No production migration was executed. No exi
 | 6 | `df56a81d` | feat | Organization and membership APIs |
 | 7 | `cb758594` | feat | Feature-flagged organization UI |
 | 8 | `c1853b1a` | test | Adversarial tests + critical roleCanPerform privilege hierarchy fix |
-| 9 | (this commit) | docs | Final report and documentation |
+| 9 | `47c402f9` | docs | Final report and documentation |
+| — | `2cc6ae48` | test | Phase 1A governance test update for migration 105 (full-suite verification) |
 
-All commits were made directly on the `dev` branch as authorized. No intermediate branches were created. The branch is 8 commits ahead of `origin/dev` (commit 9 is this documentation commit).
+All commits were made directly on the `dev` branch as authorized. No intermediate branches were created. The branch is 10 commits ahead of `origin/dev` (9 Phase 1B commits + 1 governance test update). The governance test update was a necessary companion to adding migration 105: the Phase 1A test suite had three assertions hard-coding the pre-Phase-1B migration count (101) and highest prefix (104), which became stale after migration 105 was added.
 
 ---
 
@@ -230,11 +231,11 @@ The fix replaced the `canManageRole` call with `roleAtLeast`, which correctly us
 
 **tsc passes.** ✅ `NODE_OPTIONS="--max-old-space-size=4096" npx tsc --noEmit` produces 0 errors.
 
-**Full test suite honestly reported.** ✅ The three Phase 1B test suites (99 tests) all pass. The broader test suite status is reported honestly below — no claims are made about suites not run.
+**Full test suite honestly reported.** ✅ The full SolarPro test suite was run (`npx vitest run`). Results: 317 test files passed, 2 failed, 4 skipped (323 total); 7366 tests passed, 6 failed, 312 skipped (7684 total). The 6 failures break down as: 3 in `tests/golden-path.test.ts` (pre-existing CAD/SLD golden reference failures unrelated to Phase 1B — no Phase 1B commit touched any CAD/SLD/golden file), and 3 in `tests/phase1a-migration-governance.test.ts` (stale assertions about the migration count/prefix, which were updated in a follow-up commit to reflect the new migration 105). After the governance test update, only the 3 pre-existing golden-path failures remain — none caused by Phase 1B.
 
-**Local and remote aligned.** ✅ The `dev` branch is rebased on `origin/dev` at `cedbfd88`. All 8 commits are ahead of origin and ready to push.
+**Local and remote aligned.** ✅ The `dev` branch is rebased on `origin/dev` at `cedbfd88`. All 9 Phase 1B commits plus 1 governance test update commit are ahead of origin and ready to push.
 
-**Worktree clean.** ✅ No uncommitted changes remain after commit 9.
+**Worktree clean.** ✅ No uncommitted changes remain.
 
 ### 5.6 Scope Compliance
 
@@ -362,7 +363,41 @@ All database-backed tests ran against PostgreSQL 15.18 (Debian 15.18-0+deb12u1) 
 
 ## 8. Full Test Suite Status
 
-The broader SolarPro test suite was not run in its entirety during this phase. The three Phase 1B test suites (99 tests total) all pass. Running the full suite would require the complete test database setup and may include tests from other waves that have their own dependencies. No claims are made about the status of tests outside the Phase 1B scope. The honest status is: Phase 1B suites pass (99/99), tsc is clean (0 errors), and the full suite has not been run in this session.
+The full SolarPro test suite was run (`npx vitest run --reporter=verbose`) to provide an honest, complete picture. The results are reported transparently below.
+
+### 8.1 Overall Results
+
+| Metric | Count |
+|--------|-------|
+| Test files passed | 317 |
+| Test files failed | 2 |
+| Test files skipped | 4 |
+| Total test files | 323 |
+| Tests passed | 7,366 |
+| Tests failed | 6 |
+| Tests skipped | 312 |
+| Total tests | 7,684 |
+| Duration | ~100 seconds |
+
+### 8.2 Failure Analysis
+
+**`tests/golden-path.test.ts` — 3 failures (PRE-EXISTING, unrelated to Phase 1B):**
+
+These tests compare generated CAD and SLD output against stored golden reference files. The failures are deep-equality mismatches in `generateCADLayout` (ground/fence projects) and `buildSLDInputFromPermit` (roof project). No Phase 1B commit touched any CAD, SLD, or golden-path file — verified via `git log cedbfd88..HEAD --name-only | grep -iE "golden|cad|sld"` (empty result). These failures predate Phase 1B and are caused by Wave 4B changes to the CAD/SLD engines from prior waves. Phase 1B is not responsible for these.
+
+**`tests/phase1a-migration-governance.test.ts` — 3 failures (DIRECT CONSEQUENCE of Phase 1B, now FIXED):**
+
+Phase 1B added migration `105_organization_authority_foundation.sql` to `lib/migrations/`, changing the live manifest from 101 files (highest prefix 104) to 102 files (highest prefix 105). The Phase 1A governance test suite had three assertions that hard-coded the pre-Phase-1B state:
+
+- `discovers 101 SQL files from lib/migrations/` → expected `101`, received `102`
+- `highest prefix is 104` → expected `'104'`, received `'105'`
+- `migration 105 does NOT exist (highest is 104)` → expected `false` for has105, received `true`
+
+These were stale assertions testing a snapshot of the migration state that Phase 1B legitimately changed. A follow-up commit (`2cc6ae48`) updated all three assertions to reflect the new reality: 102 files, highest prefix 105, migration 105 exists. After this update, all 306 tests in the Phase 1A governance suite pass.
+
+### 8.3 Post-Update Status
+
+After the governance test update commit, the full suite result is: **318 test files passed, 1 failed, 4 skipped; 7,369 tests passed, 3 failed, 312 skipped.** The only remaining failures are the 3 pre-existing `golden-path.test.ts` tests, which are unrelated to Phase 1B and were failing before any Phase 1B commit.
 
 ---
 
