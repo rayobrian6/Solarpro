@@ -72,7 +72,20 @@ export function hybridSheetSections(cad: CADModel | null | undefined): HybridSec
   const ordered: HybridSectionRef[] = [];
   for (const key of ['roof', 'ground', 'fence'] as const) {
     const sec = sections.find(s => s.key === key);
-    if (sec) ordered.push(sec as HybridSectionRef);
+    if (!sec) continue;
+    const ref = sec as HybridSectionRef;
+    // SYSTEMIC ROOT #2: the CAD section's dcKw is PRORATED at source (cadEngine
+    // scopeInputToSubSystem spreads projectDcKw by panel fraction), so the cover
+    // + TOC (which read sec.dcKw straight from here) showed roof 20.23 vs SCHED's
+    // true 48×430 = 20.64. When the section carries its OWN nameplate watts
+    // (enriched from the sub's SubSystemEquipment entry — present on real designs
+    // that thread project.subSystems), recompute the honest per-sub kW = modules
+    // × nameplate so every consumer of this list agrees with SCHED. Absent
+    // watts (a fixture with no project.subSystems), the prorated value stands.
+    const npW = Number(ref.equipment?.panelWatts);
+    ordered.push(npW > 0 && ref.totalPanels > 0
+      ? { ...ref, dcKw: Math.round(ref.totalPanels * npW) / 1000 }
+      : ref);
   }
   return ordered;
 }
@@ -139,14 +152,43 @@ export function subScopedInput(input: PermitInput, cad: CADModel, key: SubSystem
   const allPositions = (input.project?.panelPositions ?? []) as PanelPos[];
   const subPositions = allPositions.filter(p => classifyPanel(p as Parameters<typeof classifyPanel>[0]) === key);
   const totalPanels = subPositions.length || sec?.totalPanels || 0;
-  const totalDcKw = sec?.dcKw
-    ?? (input.system?.totalDcKw && input.system?.totalPanels
-      ? (input.system.totalDcKw * totalPanels) / input.system.totalPanels
-      : 0);
 
   const allInverters = input.system?.inverters ?? [];
   const subInverters = allInverters.filter(inv =>
     inverterSubKey(inv as { subSystemKey?: string }, primary) === key);
+
+  // ── SYSTEMIC ROOT #2 FIX — per-sub DC kW = the sub's OWN modules × nameplate
+  //    watts (Σ per sub), NEVER projectDcKw × panelFraction. Both the CAD
+  //    section dcKw (cadEngine scopeInputToSubSystem prorates fullKw/fullPanels)
+  //    and the old fallback here spread the PROJECT total by panel count, so the
+  //    roof read 20.23 kW on the cover/PV-1/PV-1B/PV-4A/PE-1 while SCHED showed
+  //    the true 48×430 = 20.64. Resolve the nameplate from the sub's tagged
+  //    inverter-fleet string, then the section-equipment carriage, then a placed
+  //    module's own wattage — and prefer summing each placed module's wattage so
+  //    a mixed-wattage sub still totals exactly. `sec.dcKw`/proration survive
+  //    only as a last resort when no nameplate is resolvable at all.
+  const subString0 = (subInverters[0] as
+    { strings?: Array<{ panelWatts?: number }> } | undefined)?.strings?.[0];
+  const nameplateW =
+    Number(subString0?.panelWatts)
+    || Number(sec?.equipment?.panelWatts)
+    || Number((subPositions.find(p => Number((p as { wattage?: number }).wattage) > 0) as
+        { wattage?: number } | undefined)?.wattage)
+    || 0;
+  let sumWatts = 0;
+  for (const p of subPositions) {
+    const w = Number((p as { wattage?: number }).wattage);
+    sumWatts += (isFinite(w) && w > 0) ? w : nameplateW;
+  }
+  const computedDcKw = subPositions.length
+    ? Math.round(sumWatts) / 1000
+    : Math.round(totalPanels * nameplateW) / 1000;
+  const totalDcKw = computedDcKw > 0
+    ? computedDcKw
+    : (sec?.dcKw
+      ?? (input.system?.totalDcKw && input.system?.totalPanels
+        ? (input.system.totalDcKw * totalPanels) / input.system.totalPanels
+        : 0));
 
   // Scoped AC kW: micro fleets carry PER-UNIT acOutputKw (× the sub's own
   // modules); string/optimizer fleets carry per-inverter output.

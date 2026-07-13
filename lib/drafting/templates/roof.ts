@@ -329,6 +329,17 @@ export function drawRoofPlan(
     azimuth: _rotAz(p.azimuth),
     heading: _rotAz(p.heading),
   }));
+  // ── COUNT RECONCILE (systemic root #2 sibling) ──────────────────────────────
+  // The authoritative module count (cad.totalPanels) can exceed the panels that
+  // actually resolved onto a plane and got DRAWN here (regPanels — one per valid
+  // panelPosition; modules with missing/invalid GPS never make it into
+  // validPanels). When they differ the header/callout must NOT silently claim
+  // the full count over a drawing (and per-facet table) that show fewer — that
+  // is the "PV-1 header 48 / drawing 40" self-contradiction. Annotate the drawn
+  // subset so the sheet tells ONE consistent story to a plan checker.
+  const _drawnPanels = regPanels.length;
+  const _countMismatch = totalPanels > 0 && _drawnPanels !== totalPanels;
+  const _shownNote = _countMismatch ? ` (${_drawnPanels} OF ${totalPanels} SHOWN)` : '';
   const _site = _siteRaw && planRotDeg !== 0 ? rotateSiteContext(_siteRaw, planRotDeg, _pivot) : _siteRaw;
   const _hyb = _hybRaw && planRotDeg !== 0 ? rotateHybridOverlays(_hybRaw, planRotDeg, _pivot) : _hybRaw;
   console.log('[drawRoofPlan] plan rotation:', {
@@ -1551,8 +1562,8 @@ export function drawRoofPlan(
     };
     const wattStr = panelWatts ? ` (${panelWatts}W)` : '';
     const modLine = _modNamed
-      ? `(N) ${totalPanels} — ${_modNamed}${wattStr} MODULES`
-      : `(N) ${totalPanels} PV MODULES${wattStr} — SEE EQUIPMENT SCHEDULE`;
+      ? `(N) ${totalPanels} — ${_modNamed}${wattStr} MODULES${_shownNote}`
+      : `(N) ${totalPanels} PV MODULES${wattStr}${_shownNote} — SEE EQUIPMENT SCHEDULE`;
     const invLine = _invNamed
       ? `(N) ${_invNamed} MICROINVERTER — 1 PER MODULE`
       : `(N) MICROINVERTER (1 PER MODULE) — SEE EQUIPMENT SCHEDULE`;

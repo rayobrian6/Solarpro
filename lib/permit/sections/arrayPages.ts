@@ -295,9 +295,19 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // Wp from the SYSTEM record (kW ÷ modules), never the stale per-panel
   // wattage field — layout panels carried 440W while the set said 400W,
   // and a checker multiplies qty × Wp on page one.
+  // Wp from the sub's REAL nameplate (inverter-fleet string first, then a
+  // placed module's own wattage) — NOT kW ÷ count. Dividing the (previously
+  // prorated) per-sub kW by the module count printed 421W for a 430W module;
+  // even with the kW now correct, count-division is a lossy round-trip, so the
+  // nameplate is authoritative and kW÷count is only a last-ditch fallback.
+  const _nameplateWp =
+    Number(system.inverters?.[0]?.strings?.[0]?.panelWatts)
+    || Number(panels.find(p => Number((p as { wattage?: number }).wattage) > 0)?.wattage)
+    || 0;
   const _sysWatts = (system.totalDcKw && totalPanels)
     ? Math.round((system.totalDcKw * 1000) / totalPanels) : null;
-  const _legendWatts = _sysWatts
+  const _legendWatts = _nameplateWp
+    || _sysWatts
     || system.inverters?.[0]?.strings?.[0]?.panelWatts
     || panels[0]?.wattage || 400;
   const legendItems = _isMicro
@@ -572,13 +582,18 @@ export function pageArrayPrimary(input: PermitInput, cad: CADModel, pageNum: num
     // ROOF; ground/fence draw as labeled overlays. Project-wide data here made
     // the sheet claim all 94 modules on IronRidge and render ground/fence
     // panels as floating roof modules with phantom setback violations.
+    // SYSTEMIC ROOT #2: `_hybRoof.dcKw` is the CAD section's PRORATED kW
+    // (projectDcKw × roofPanels/projectPanels → 20.23 for 48×430). Use the
+    // sub's OWN modules × nameplate instead (subScopedInput computes it, Σ
+    // per module) so PV-1's header/SYSTEM DATA reads the true 20.64 SCHED shows.
+    const _roofKw = subScopedInput(input, cad, 'roof').system?.totalDcKw ?? _hybRoof.dcKw;
     const roofView = { ...cad, systemType: 'roof' as const,
       originLat: _hybRoof.originLat, originLng: _hybRoof.originLng,
-      totalPanels: _hybRoof.totalPanels, totalDcKw: _hybRoof.dcKw };
+      totalPanels: _hybRoof.totalPanels, totalDcKw: _roofKw };
     const roofInput = { ...input,
       project: { ...(input.project ?? {}),
         panelPositions: ((input.project?.panelPositions ?? []) as any[]).filter(p => classifyPanel(p) === 'roof') },
-      system: { ...(input.system ?? {}), totalPanels: _hybRoof.totalPanels, totalDcKw: _hybRoof.dcKw,
+      system: { ...(input.system ?? {}), totalPanels: _hybRoof.totalPanels, totalDcKw: _roofKw,
         // Project totals for project-wide chrome (title block) — the subset
         // totals above are for the sheet header/drawing only.
         _projectTotalDcKw: input.system?.totalDcKw, _projectTotalPanels: input.system?.totalPanels },
