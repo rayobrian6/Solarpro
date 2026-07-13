@@ -139,6 +139,8 @@ const nextConfig = {
       'exif-reader',           // native EXIF parsing
       'puppeteer-core',        // Puppeteer PDF generation
       '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
+      'pg',                    // Node-only Postgres driver — local Pool adapter
+      'pg-connection-string',  // pg dep
     ],
   },
   images: {
@@ -161,6 +163,8 @@ const nextConfig = {
       'exif-reader',
       'puppeteer-core',
       '@sparticuz/chromium-min',
+      'pg',
+      'pg-connection-string',
     ];
     // sharp: on the server, resolve as a normal commonjs external;
     // on the client, resolve to an empty stub module so any accidental
