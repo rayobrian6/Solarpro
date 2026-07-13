@@ -118,7 +118,13 @@ function fenceLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones
 
 function groundLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones {
   const isPlan = viewType === 'plan';
-  const H = isPlan ? CANVAS_PLAN_H : CANVAS_ELEV_H;
+  // GROUND PLAN canvas is TALL (880 ≈ 1.20 aspect), matching the sheet's draw
+  // zone — not the generic 460 (2.30) plan strip. Same fix as roof (see
+  // roofLayout): the 2.30 canvas letterboxed into the ~1.15 zone and printed
+  // ~48% blank sheet above/below the drawing. The extra height carries the
+  // ground "split layout" the engine header promises: top-down array plan +
+  // row-spacing side elevation + typical pile section, stacked (drawGroundArray).
+  const H = isPlan ? 880 : CANVAS_ELEV_H;
   const W = CANVAS_W;
 
   const dimLeft   = 68;
@@ -127,7 +133,11 @@ function groundLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZone
   const dimBottom = isPlan ? 52 : 48;
 
   const usableW = W - dimLeft - dimRight;
-  const drawFrac = isPlan ? 0.65 : 0.60;
+  // PLAN uses the FULL width: the schedule lives in the OUTER frame (PV-1G
+  // ARRAY DATA / PV-1BG per-sub panel), so an internal 35% data column just
+  // duplicated it and squeezed the drawing. drawGroundArray now stacks the
+  // top-view / side-elevation / pile-section across the whole width instead.
+  const drawFrac = isPlan ? 1.0 : 0.60;
   const drawW   = Math.round(usableW * drawFrac);
   const dataW   = usableW - drawW;
 

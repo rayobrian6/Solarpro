@@ -581,6 +581,12 @@ function groundComposition(
         { n: 3, label: 'TILT INDICATOR', sub: `${d.tiltDeg}° array tilt` },
         { n: 4, label: 'SETBACK LINE', sub: `${d.setbackFt}' property setback` },
         { n: 5, label: 'PILE LOCATION', sub: d.structureType },
+        { n: 6, label: 'ROW SPACING', sub: `${d.rowSpacingFt}' O.C. — verify inter-row shading` },
+        { n: 7, label: 'PILE EMBEDMENT', sub: `${d.pileDepthFt}' min below grade — field-verify refusal` },
+        { n: 8, label: 'GROUND CLEARANCE', sub: `${d.groundClearIn}" min below lowest module` },
+        { n: 9, label: 'EQUIP. BONDING', sub: 'all metalwork bonded to EGC — see PV-3' },
+        { n: 10, label: 'FOUNDATION', sub: 'driven steel pile — no concrete' },
+        { n: 11, label: 'DESIGN LOADS', sub: `${d.windSpeedMph} MPH Vult · ASCE 7-22` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: `${d.tiltDeg}° tilt` },
@@ -594,7 +600,10 @@ function groundComposition(
     viewType,
     sheetId:        isPlan ? 'PV-2' : 'PV-3',
     primaryView:    isPlan ? 'ground_plan' : 'ground_elevation',
-    secondaryViews: isPlan ? ['row_layout'] : ['pier_detail'],
+    // Ground plan owns its row-spacing side elevation + pile section INSIDE the
+    // primary SVG (drawGroundArray split layout) — no duplicate outer strip, so
+    // the primary fills the full draw-zone height instead of ~48% letterbox.
+    secondaryViews: isPlan ? [] : ['pier_detail'],
     dataSections:   isPlan
       ? ['row_spacing', 'tilt', 'system_size']
       : ['foundation_depth', 'wind_load'],
