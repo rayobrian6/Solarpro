@@ -290,7 +290,10 @@ describe('wave 6 golden — PV-1F fence sheet (Wave 6.1/6.2 punch items)', () =>
 
   it('punch 1c: the SEGMENT PLAN inset is the fence\'s OWN plan, not the site plan', () => {
     expect(pv1f).toContain('SEGMENT PLAN — TOP VIEW');
-    expect(pv1f).toContain('FENCE SEGMENT SCHEDULE');            // drawFencePlan marker
+    // The inset is now a DEDICATED minimal segment plan (buildSegmentPlanThumb),
+    // not a shrunken copy of the whole drawFencePlan sheet (recursive-thumbnail
+    // bug: the old inset carried the full 'FENCE SEGMENT SCHEDULE' furniture).
+    expect(pv1f).toContain('FENCE SEGMENT PLAN');                // dedicated inset marker
     expect(pv1f).not.toContain('ROOF PLAN WITH MODULES');        // drawRoofPlan marker
     // PV-1 (the real site plan) still carries the roof site drawing.
     expect(pageById(html, 'PV-1')).toContain('ROOF PLAN WITH MODULES');

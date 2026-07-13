@@ -116,9 +116,8 @@ export function drawFencePlan(
   els.push(drawTitleBar(W, 'SOLAR FENCE — SITE PLAN (TOP-DOWN)', 'SCALE: AS SHOWN'));
 
   const dz = zones.draw;
-  const margin = 28;
 
-  // ── Compute bounding box of all segments ──
+  // ── Compute bounding box of all segments (local meters) ──
   const allX: number[] = [];
   const allY: number[] = [];
 
@@ -137,19 +136,32 @@ export function drawFencePlan(
   const minY = Math.min(...allY);
   const maxY = Math.max(...allY);
 
-  const spanX = (maxX - minX) * metersToFt(1) || 1;
-  const spanY = (maxY - minY) * metersToFt(1) || 1;
+  const mToFt   = metersToFt(1);
+  const spanXft = (maxX - minX) * mToFt;
+  const spanYft = (maxY - minY) * mToFt;
 
-  const scaleX = (dz.width  - 2 * margin) / spanX;
-  const scaleY = (dz.height - 2 * margin) / spanY;
-  const scale  = Math.min(scaleX, scaleY);
+  // ── AUTO-FIT + CENTER (kill the corner-of-empty-canvas look) ──
+  // Reserve padding for the module band, the parallel per-segment length dims
+  // and the overall run dimension so nothing clips at the draw-zone edges. Fit
+  // to the tighter axis, then CENTER the drawn extent in BOTH axes: a single
+  // straight run has ~0 height and previously pinned to the bottom edge, which
+  // is exactly the "85% dead canvas" Ray flagged.
+  const padPx    = 54;
+  const availW   = Math.max(80, dz.width  - 2 * padPx);
+  const availH   = Math.max(80, dz.height - 2 * padPx);
+  const fitScale = Math.min(availW / (spanXft || 1), availH / (spanYft || 1));
+  const scale    = Math.min(fitScale, 24);   // px per foot (cap so a short run isn't blown up huge)
 
-  const toSvgX = (xM: number) =>
-    dz.x + margin + (xM - minX) * metersToFt(1) * scale;
-  const toSvgY = (yM: number) =>
-    dz.y + dz.height - margin - (yM - minY) * metersToFt(1) * scale;
+  const drawnWpx = spanXft * scale;
+  const drawnHpx = spanYft * scale;
+  const originX  = dz.x + (dz.width  - drawnWpx) / 2;   // left edge of content
+  const originYb = dz.y + (dz.height + drawnHpx) / 2;   // bottom edge of content (svg y grows down)
 
-  // ── Draw each segment (STEP 6: per-segment, not blob) ──
+  const toSvgX = (xM: number) => originX  + (xM - minX) * mToFt * scale;
+  const toSvgY = (yM: number) => originYb - (yM - minY) * mToFt * scale;
+
+  // ── Draw each segment: module band + module ticks + colored run + parallel dim ──
+  const BAND = 11;   // half-height (px) of the top-view module band
   segments.forEach((seg: any, i: number) => {
     const sx = seg.startX ?? seg.startPoint?.x ?? 0;
     const sy = seg.startY ?? seg.startPoint?.y ?? 0;
@@ -160,57 +172,123 @@ export function drawFencePlan(
     const x2 = toSvgX(ex), y2 = toSvgY(ey);
 
     const color    = segColor(i);
-    const lenFt    = seg.lengthFt ?? metersToFt(seg.lengthM ?? 0);
+    // Length label must match the line we draw: prefer an explicit length field,
+    // else derive it from the segment's own start/end geometry (never 0 when the
+    // run clearly spans a distance — the "0'-0" while the line is 63'" bug).
+    const geomLenFt = metersToFt(Math.hypot(ex - sx, ey - sy));
+    const lenFt    = seg.lengthFt ?? (seg.lengthM != null ? metersToFt(seg.lengthM) : geomLenFt);
     const panCount = seg.panelCount ?? 0;
     const segLabel = seg.label ?? seg.id ?? `SEG-${i + 1}`;
 
-    // Segment line (thick — represents fence run)
-    els.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}"
-      x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
-      stroke="${color}" stroke-width="3.5" stroke-linecap="round"/>`);
+    // Unit vectors: along-run (ux,uy) and perpendicular (nx,ny)
+    const segPx = Math.hypot(x2 - x1, y2 - y1) || 1;
+    const ux = (x2 - x1) / segPx, uy = (y2 - y1) / segPx;
+    const nx = -uy, ny = ux;
 
-    // Post dots along segment
-    const posts: Array<{ x: number; y: number }> =
-      seg.posts ?? seg._cadPosts ?? [];
+    // Module band — thin rectangle centred on the run (panels seen top-down)
+    const p1x = x1 + nx * BAND, p1y = y1 + ny * BAND;
+    const p2x = x2 + nx * BAND, p2y = y2 + ny * BAND;
+    const p3x = x2 - nx * BAND, p3y = y2 - ny * BAND;
+    const p4x = x1 - nx * BAND, p4y = y1 - ny * BAND;
+    els.push(`<polygon points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)} ${p3x.toFixed(1)},${p3y.toFixed(1)} ${p4x.toFixed(1)},${p4y.toFixed(1)}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="1"/>`);
 
+    // Module ticks — divide the run into panelCount cells (module boundaries)
+    const cells = Math.max(panCount, 1);
+    for (let c = 0; c <= cells; c++) {
+      const t   = c / cells;
+      const cxp = x1 + (x2 - x1) * t;
+      const cyp = y1 + (y2 - y1) * t;
+      const isEnd = c === 0 || c === cells;
+      const tk   = isEnd ? BAND : BAND * 0.82;
+      els.push(`<line x1="${(cxp + nx * tk).toFixed(1)}" y1="${(cyp + ny * tk).toFixed(1)}" x2="${(cxp - nx * tk).toFixed(1)}" y2="${(cyp - ny * tk).toFixed(1)}" stroke="${color}" stroke-width="${isEnd ? 1.4 : 0.7}"/>`);
+    }
+
+    // Colored fence centreline (the run itself)
+    els.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="2.4" stroke-linecap="round"/>`);
+
+    // Post dots along the run (from CAD, else approximate from spacing)
+    const posts: Array<{ x: number; y: number }> = seg.posts ?? seg._cadPosts ?? [];
     if (posts.length > 0) {
       posts.forEach((post: any) => {
-        const px = toSvgX(post.x ?? sx);
-        const py = toSvgY(post.y ?? sy);
-        els.push(drawCircleFilled(px, py, 3, '#333', '#000', 1));
+        els.push(drawCircleFilled(toSvgX(post.x ?? sx), toSvgY(post.y ?? sy), 2, '#222', '#000', 0.8));
       });
     } else {
-      // Approximate post positions from spacing
-      const postSpacingM = cadFence?.postSpacingM ?? 2.44;
-      const postSpacingFt = metersToFt(postSpacingM);
-      const nPosts = Math.round(lenFt / postSpacingFt) + 1;
+      const postSpacingFt = metersToFt(cadFence?.postSpacingM ?? 2.44);
+      const nPosts = Math.max(2, Math.round(lenFt / postSpacingFt) + 1);
       for (let p = 0; p < nPosts; p++) {
-        const t  = nPosts > 1 ? p / (nPosts - 1) : 0;
-        const px = x1 + t * (x2 - x1);
-        const py = y1 + t * (y2 - y1);
-        els.push(drawCircleFilled(px, py, 3, '#333', '#000', 1));
+        const t = nPosts > 1 ? p / (nPosts - 1) : 0;
+        els.push(drawCircleFilled(x1 + t * (x2 - x1), y1 + t * (y2 - y1), 2, '#222', '#000', 0.8));
       }
     }
 
-    // Segment label — midpoint, outside line
-    const mx  = (x1 + x2) / 2;
-    const my  = (y1 + y2) / 2;
-    const ang = Math.atan2(y2 - y1, x2 - x1);
-    const perpX = -Math.sin(ang) * 14;
-    const perpY =  Math.cos(ang) * 14;
+    // Segment angle (deg) for rotated annotations; keep the label text upright
+    const angDeg = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+    let labelAng = angDeg;
+    if (labelAng > 90 || labelAng < -90) labelAng += 180;
 
-    // Colored badge background
-    const badgeW = 56, badgeH = 12;
-    els.push(`<rect x="${(mx + perpX - badgeW / 2).toFixed(1)}"
-      y="${(my + perpY - badgeH / 2).toFixed(1)}"
-      width="${badgeW}" height="${badgeH}"
-      fill="${color}" rx="2" opacity="0.85"/>`);
+    // Parallel LENGTH dimension on the −n side of the band
+    const dimOff = BAND + 15;
+    const da1x = x1 - nx * dimOff, da1y = y1 - ny * dimOff;
+    const da2x = x2 - nx * dimOff, da2y = y2 - ny * dimOff;
+    els.push(`<line x1="${(x1 - nx * (BAND + 2)).toFixed(1)}" y1="${(y1 - ny * (BAND + 2)).toFixed(1)}" x2="${(da1x - nx * 2).toFixed(1)}" y2="${(da1y - ny * 2).toFixed(1)}" stroke="#c00" stroke-width="0.6"/>`);
+    els.push(`<line x1="${(x2 - nx * (BAND + 2)).toFixed(1)}" y1="${(y2 - ny * (BAND + 2)).toFixed(1)}" x2="${(da2x - nx * 2).toFixed(1)}" y2="${(da2y - ny * 2).toFixed(1)}" stroke="#c00" stroke-width="0.6"/>`);
+    els.push(`<line x1="${da1x.toFixed(1)}" y1="${da1y.toFixed(1)}" x2="${da2x.toFixed(1)}" y2="${da2y.toFixed(1)}" stroke="#c00" stroke-width="0.9"/>`);
+    els.push(drawArrowhead(da1x, da1y, angDeg, 5, '#c00'));
+    els.push(drawArrowhead(da2x, da2y, angDeg + 180, 5, '#c00'));
+    els.push(drawText((da1x + da2x) / 2 - nx * 6, (da1y + da2y) / 2 - ny * 6, ftToFtIn(lenFt), {
+      anchor: 'middle', fontSize: 6.5, fill: '#c00', fontWeight: 'bold', rotate: labelAng,
+    }));
 
-    els.push(drawText(mx + perpX, my + perpY + 3.5,
-      `${segLabel}: ${ftToFtIn(lenFt)} / ${panCount}p`, {
-        anchor: 'middle', fontSize: 6.5, fill: '#fff', fontWeight: 'bold',
-      }));
+    // Colored segment badge on the +n side (id + panel count)
+    const badgeOff = BAND + 13;
+    const bmx = (x1 + x2) / 2 + nx * badgeOff;
+    const bmy = (y1 + y2) / 2 + ny * badgeOff;
+    const badgeW = 54, badgeH = 12;
+    els.push(`<rect x="${(bmx - badgeW / 2).toFixed(1)}" y="${(bmy - badgeH / 2).toFixed(1)}" width="${badgeW}" height="${badgeH}" fill="${color}" rx="2" opacity="0.9"/>`);
+    els.push(drawText(bmx, bmy + 3.5, `${segLabel} · ${panCount}p`, {
+      anchor: 'middle', fontSize: 6.5, fill: '#fff', fontWeight: 'bold',
+    }));
   });
+
+  // ── Overall bounding dimension (extent along the longer axis) ──
+  // Label must match what the line MEASURES: for a single straight run the
+  // bounding extent IS the total run; for a multi-segment (L / U) run the
+  // bounding width/depth is NOT the summed length, so label it as extent.
+  const single = segments.length === 1;
+  if (Math.max(drawnWpx, drawnHpx) > 50) {
+    if (drawnWpx >= drawnHpx) {
+      const oy  = originYb + BAND + 34;
+      const ox1 = originX, ox2 = originX + drawnWpx;
+      const lbl = single ? `TOTAL RUN: ${ftToFtIn(totalLengthFt)}` : `OVERALL W: ${ftToFtIn(spanXft)}`;
+      els.push(`<line x1="${ox1.toFixed(1)}" y1="${oy.toFixed(1)}" x2="${ox2.toFixed(1)}" y2="${oy.toFixed(1)}" stroke="#036" stroke-width="1.3"/>`);
+      els.push(`<line x1="${ox1.toFixed(1)}" y1="${(oy - 4).toFixed(1)}" x2="${ox1.toFixed(1)}" y2="${(oy + 4).toFixed(1)}" stroke="#036" stroke-width="1"/>`);
+      els.push(`<line x1="${ox2.toFixed(1)}" y1="${(oy - 4).toFixed(1)}" x2="${ox2.toFixed(1)}" y2="${(oy + 4).toFixed(1)}" stroke="#036" stroke-width="1"/>`);
+      els.push(drawArrowhead(ox1, oy, 0, 6, '#036'));
+      els.push(drawArrowhead(ox2, oy, 180, 6, '#036'));
+      els.push(drawText((ox1 + ox2) / 2, oy - 4, lbl, {
+        anchor: 'middle', fontSize: 7.5, fill: '#036', fontWeight: 'bold',
+      }));
+    } else {
+      const ox  = originX - BAND - 30;
+      const oy1 = originYb, oy2 = originYb - drawnHpx;
+      const lbl = single ? `TOTAL RUN: ${ftToFtIn(totalLengthFt)}` : `OVERALL D: ${ftToFtIn(spanYft)}`;
+      els.push(`<line x1="${ox.toFixed(1)}" y1="${oy1.toFixed(1)}" x2="${ox.toFixed(1)}" y2="${oy2.toFixed(1)}" stroke="#036" stroke-width="1.3"/>`);
+      els.push(drawArrowhead(ox, oy1, -90, 6, '#036'));
+      els.push(drawArrowhead(ox, oy2, 90, 6, '#036'));
+      els.push(drawText(ox - 4, (oy1 + oy2) / 2, lbl, {
+        anchor: 'middle', fontSize: 7.5, fill: '#036', fontWeight: 'bold', rotate: -90,
+      }));
+    }
+  }
+
+  // For a multi-segment run, print the summed length as a clear note in the
+  // (usually empty) top-left corner — the bounding dim above only measures one
+  // axis of an L/U-shaped run, so the summed run length needs its own callout.
+  if (!single) {
+    els.push(drawText(dz.x + 4, dz.y + 14, `TOTAL RUN (ALL SEGMENTS): ${ftToFtIn(totalLengthFt)}`, {
+      anchor: 'start', fontSize: 8, fill: '#036', fontWeight: 'bold',
+    }));
+  }
 
   // ── Gate openings ──
   const gates = cadFence?.gateOpenings ?? layout.fenceGateOpenings ?? [];
@@ -275,7 +353,11 @@ export function drawFencePlan(
 
   // Segment rows
   segments.forEach((seg: any, i: number) => {
-    const lenFt    = seg.lengthFt ?? metersToFt(seg.lengthM ?? 0);
+    // Same geometry-derived length fallback as the drawing (never 0 when the
+    // segment spans real start/end coords).
+    const _sx = seg.startX ?? seg.startPoint?.x ?? 0, _sy = seg.startY ?? seg.startPoint?.y ?? 0;
+    const _ex = seg.endX ?? seg.endPoint?.x ?? 0,     _ey = seg.endY ?? seg.endPoint?.y ?? 0;
+    const lenFt    = seg.lengthFt ?? (seg.lengthM != null ? metersToFt(seg.lengthM) : metersToFt(Math.hypot(_ex - _sx, _ey - _sy)));
     const panCount = seg.panelCount ?? 0;
     const azDeg    = (seg.azimuth ?? 0).toFixed(0);
     const segLabel = seg.label ?? seg.id ?? `S${i + 1}`;
