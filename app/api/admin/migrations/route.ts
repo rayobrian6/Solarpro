@@ -65,6 +65,11 @@ import {
   computeExecutionDigest,
   assessExecutionEligibility,
 } from '@/lib/migrations/executionReview';
+import {
+  canonicalizeExecutionBatch,
+  computeExecutionBatchDigest,
+  batchExecutionOrder,
+} from '@/lib/migrations/executionBatch';
 import { generateBaselineEvidence } from '@/lib/migrations/baselineEvidence';
 import { buildOperatorReadiness } from '@/lib/migrations/operatorReadiness';
 import {
@@ -199,6 +204,8 @@ export async function POST(req: NextRequest) {
     'enable-execution-temporary', // mutation: bounded activation window (TOTP)
     'prepare-execution-single', // read-only: reviewed execution payload + digest
     'execute-reviewed-single',  // mutation: run ONE migration (canonical runner)
+    'prepare-execution-batch',  // read-only: reviewed batch (canonical order + digest)
+    'execute-reviewed-batch',   // mutation: run selected batch, stop-on-first-failure
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -256,11 +263,13 @@ export async function POST(req: NextRequest) {
   const isRecordBatch = action === 'record-baseline-batch';
   const isPrepareExec = action === 'prepare-execution-single';
   const isExecuteReviewed = action === 'execute-reviewed-single';
-  const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec;
+  const isPrepareExecBatch = action === 'prepare-execution-batch';
+  const isExecuteReviewedBatch = action === 'execute-reviewed-batch';
+  const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
   let migrationAction: MigrationAction;
-  if (isExecute || isExecutionActivation || isExecuteReviewed) {
+  if (isExecute || isExecutionActivation || isExecuteReviewed || isExecuteReviewedBatch) {
     migrationAction = 'execute';
   } else if (isBaselineMutation || isBootstrap || isRecordBatch) {
     migrationAction = 'bootstrap';
@@ -271,7 +280,7 @@ export async function POST(req: NextRequest) {
   // Operator-console surface is super_admin-only (matches the page's access
   // model). The read-only operator actions need an explicit gate because
   // authorizeMigration('inspect') otherwise permits plain 'admin'.
-  if ((isOperatorReadonly || isBootstrap || isRecordBatch || isExecuteReviewed) && adminUser.role !== 'super_admin') {
+  if ((isOperatorReadonly || isBootstrap || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch) && adminUser.role !== 'super_admin') {
     return NextResponse.json(
       { success: false, error: `Action '${action}' requires super_admin role.` },
       { status: 403 },
@@ -286,7 +295,7 @@ export async function POST(req: NextRequest) {
   // - TOTP_INVALID: code doesn't match → retry allowed
   // - TOTP_REPLAY: time-step already consumed → must wait for next step
   let totpVerified = false;
-  if (isExecute || isExecutionActivation || isBootstrap || isRecordBatch || isExecuteReviewed) {
+  if (isExecute || isExecutionActivation || isBootstrap || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
         { success: false, error: 'A fresh TOTP code is required for this action. Provide it in the "totpCode" field.' },
@@ -747,6 +756,148 @@ export async function POST(req: NextRequest) {
         runHistory: runHistory.map((r) => ({ status: r.status, executionId: r.execution_id, completedAt: r.completed_at, errorCode: r.error_code })),
         relock: { relocked: relock, lifecycleState: lifecycleAfter },
       }, { status: verifiedSuccess ? 200 : 409 });
+    }
+
+    if (isPrepareExecBatch || isExecuteReviewedBatch) {
+      // ── Reviewed BATCH execution (Commit 6) ─────────────────────────────
+      // Secondary to single execution (proven in Commit 5). The client selects
+      // identifiers ONLY; the server canonicalizes to manifest order and binds a
+      // batch digest. Execution runs in canonical order and STOPS ON THE FIRST
+      // FAILURE; remaining migrations stay pending; auto-relock afterward. There
+      // is no unreviewed "run everything".
+      const rawIds = Array.isArray(body?.identifiers) ? body.identifiers : null;
+      if (!rawIds || rawIds.length === 0) {
+        return NextResponse.json({ success: false, error: '"identifiers" (non-empty array) is required.' }, { status: 400 });
+      }
+      const selectedIdentifiers = rawIds.filter((x: unknown): x is string => typeof x === 'string');
+
+      const env = getCurrentEnvironment();
+      const isProd = env === 'production';
+      const manifest = discoverMigrationFiles();
+      const serverEntries = manifest.files.map((f, i) => ({
+        identifier: f.identifier, filename: f.filename,
+        checksumSha256: f.checksumSha256, transactionMode: f.transactionMode, order: i,
+      }));
+
+      let batch;
+      try {
+        batch = canonicalizeExecutionBatch({ environment: env, serverEntries, selectedIdentifiers });
+      } catch (e) {
+        return NextResponse.json({ success: false, error: (e as Error).message }, { status: 400 });
+      }
+      const batchDigest = computeExecutionBatchDigest(batch);
+      const order = batchExecutionOrder(batch);
+
+      // Per-entry live eligibility (same rules as single).
+      const activation = await readExecutionActivation();
+      const allowedEnvs = (process.env.MIGRATION_RUN_ALLOWED_ENVS ?? '')
+        .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const prodAllowed = process.env.MIGRATION_ALLOW_PRODUCTION_EXECUTION === 'true';
+      let stateSnapshot: Awaited<ReturnType<typeof inspectMigrationState>> | null = null;
+      try { stateSnapshot = await inspectMigrationState(); } catch { /* no ledger */ }
+      const eligibilityFor = async (id: string) => {
+        const f = manifest.files.find((x) => x.identifier === id)!;
+        const baselineRow = await readBaselineReconciliation(id).catch(() => null);
+        return assessExecutionEligibility({
+          foundInManifest: true,
+          currentStatus: (stateSnapshot?.ledgerRows[id]?.status ?? null) as any,
+          hasChecksumConflict: stateSnapshot?.conflicts.some((c) => c.identifier === id) ?? false,
+          transactionMode: f.transactionMode,
+          baselineStatus: (baselineRow?.reconciliation_status ?? null) as any,
+          hasValidActivationWindow: activation.active,
+          environmentAllowed: allowedEnvs.includes(env),
+          isProduction: isProd,
+          productionExecutionAllowed: prodAllowed,
+        });
+      };
+
+      if (isPrepareExecBatch) {
+        const entries = [];
+        for (const id of order) {
+          const e = await eligibilityFor(id);
+          entries.push({ identifier: id, eligible: e.eligible, blockReasons: e.blockReasons });
+        }
+        return NextResponse.json({
+          success: true,
+          action: 'prepare-execution-batch',
+          environment: env,
+          digest: batchDigest,
+          order,
+          entries,
+          allEligible: entries.every((e) => e.eligible),
+        });
+      }
+
+      // ── execute-reviewed-batch — super_admin + fresh TOTP verified above ──
+      const reason = (body?.reason as string | undefined)?.trim();
+      const confirmedDigest = typeof body?.confirmedDigest === 'string' ? body.confirmedDigest : '';
+      if (!reason) return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.' }, { status: 400 });
+      if (!confirmedDigest) return NextResponse.json({ success: false, error: '"confirmedDigest" (from prepare-execution-batch) is required.' }, { status: 400 });
+      if (batchDigest !== confirmedDigest) {
+        return NextResponse.json({
+          success: false, action: 'execute-reviewed-batch',
+          error: 'DIGEST_MISMATCH: the selection or a migration changed since preparation. Re-prepare and confirm again.',
+          expectedDigest: batchDigest,
+        }, { status: 409 });
+      }
+      if (isProd && (body?.productionConfirmation as string | undefined) !== 'production') {
+        return NextResponse.json({ success: false, error: 'Production execution requires productionConfirmation === "production".' }, { status: 400 });
+      }
+      if (!activation.active) {
+        return NextResponse.json({ success: false, action: 'execute-reviewed-batch', error: 'INELIGIBLE: NO_ACTIVE_WINDOW' }, { status: 409 });
+      }
+
+      // Run in canonical order; STOP ON FIRST FAILURE.
+      const results: Array<{ identifier: string; status: string; verified: boolean; executionId?: string; errorCode?: string | null; blockReasons?: string[] }> = [];
+      let stopped = false;
+      for (const id of order) {
+        if (stopped) { results.push({ identifier: id, status: 'not_run', verified: false }); continue; }
+        const elig = await eligibilityFor(id);
+        if (!elig.eligible) {
+          results.push({ identifier: id, status: 'blocked', verified: false, blockReasons: elig.blockReasons });
+          stopped = true;
+          continue;
+        }
+        await runSinglePendingMigration(id, { dryRun: true, authorization: auth } as RunSingleMigrationOptions);
+        const exec = await runSinglePendingMigration(id, { dryRun: false, authorization: auth } as RunSingleMigrationOptions);
+        const ledgerRow = await readLedgerRow(id).catch(() => null);
+        const verified = ledgerRow?.status === 'applied';
+        results.push({ identifier: id, status: verified ? 'applied' : 'failed', verified, executionId: exec.executionId, errorCode: exec.errorCode });
+        if (!verified) stopped = true;
+        // Refresh snapshot so subsequent eligibility sees the just-applied state.
+        try { stateSnapshot = await inspectMigrationState(); } catch { /* ignore */ }
+      }
+
+      const appliedCount = results.filter((r) => r.status === 'applied').length;
+      const failedEntry = results.find((r) => r.status === 'failed' || r.status === 'blocked');
+      const allApplied = appliedCount === order.length;
+
+      // Auto-relock after the batch (success or failure).
+      const relock = await disableExecution(adminUser.id, `auto-relock after reviewed batch execution (${appliedCount}/${order.length})`).catch(() => false);
+      const lifecycleAfter = (await getGovernanceLifecycleState()) ?? 'UNBOOTSTRAPPED';
+      // Remaining pending (not applied) after the batch.
+      let remainingPending: string[] = [];
+      try { remainingPending = (await inspectMigrationState()).pending; } catch { /* ignore */ }
+
+      emitAuditEvent({
+        type: allApplied ? 'migration.run.completed' : 'migration.run.failed',
+        actorType: 'human', actorId: adminUser.id, environment: env,
+        executionId: null, migrationIdentifier: null, filename: null,
+        details: { reviewedBatch: true, digest: batchDigest, reason, order, appliedCount, total: order.length, results, relock, lifecycleAfter },
+      });
+
+      return NextResponse.json({
+        success: allApplied,
+        action: 'execute-reviewed-batch',
+        digest: batchDigest,
+        verifiedFrom: 'ledger+run_history',
+        appliedCount,
+        total: order.length,
+        stoppedAt: failedEntry?.identifier ?? null,
+        results,
+        remainingPending,
+        relock: { relocked: relock, lifecycleState: lifecycleAfter },
+      }, { status: allApplied ? 200 : 409 });
     }
 
     // ── Baseline control plane (MIGRATION-GOV-11, Phase 1A.2) ──────────────
