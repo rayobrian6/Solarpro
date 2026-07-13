@@ -43,6 +43,7 @@ import {
 } from '../callouts';
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { getMountingSystemById } from '../../mounting-hardware-db';
 
 // ── ARRAY COLORS (one per array, wraps) ──────────────────────────────────────
 const ARRAY_COLORS = [
@@ -51,6 +52,53 @@ const ARRAY_COLORS = [
 ];
 function arrayColor(i: number): string {
   return ARRAY_COLORS[i % ARRAY_COLORS.length];
+}
+
+// ── Ground mount-system name resolution (STEP 9 cross-contamination block) ────
+// A ground sheet must NEVER brand the project-wide ROOF racking. project
+// .mountingSystem is a flat scalar that carries the roof racking on hybrid
+// sets (Stowell PV-3G printed "SYSTEM: ROOF TECH RT-MINI" / "TORQUE TUBE/RAIL
+// — ROOF TECH RT-MINI"). Mirror the fence template's resolveFenceMountName:
+// trust an explicit ground mountingSystemId, else a ground-sounding scalar,
+// else fall back to a generic ground display keyed off the pile structure —
+// but drop any roof/fence brand that leaked through the scalar.
+const NON_GROUND_MOUNT_RE =
+  /roof\s?tech|rt[-\s]?mini|iron\s?ridge|ironridge|unirac|snapnrack|snap\s?n\s?rack|quick\s?mount|s-5|xr\s?\d|ecofoot|flashfoot|solfence|solar\s?fence|comp\s?rafter|tile\s?hook/i;
+
+function groundDisplayFor(structureType?: string): string {
+  const st = String(structureType ?? '').toLowerCase();
+  if (st.includes('helical'))  return 'GROUND-MOUNT STEEL RACKING (HELICAL PILE)';
+  if (st.includes('ballast'))  return 'GROUND-MOUNT STEEL RACKING (BALLASTED)';
+  if (st.includes('concrete')) return 'GROUND-MOUNT STEEL RACKING (CONCRETE PIER)';
+  return 'GROUND-MOUNT STEEL RACKING (DRIVEN PILE)';
+}
+
+/** Resolve the ground-racking display name — never a roof/fence mount that
+ *  leaked through the flat project scalars. Always returns UPPERCASE. */
+function resolveGroundMountName(
+  project: Record<string, unknown> | undefined | null,
+  structureType?: string,
+): string {
+  const sel = project?.mountingSystemId
+    ? getMountingSystemById(String(project.mountingSystemId))
+    : undefined;
+  if (sel && sel.category === 'ground_mount')
+    return `${sel.manufacturer} ${sel.model}`.toUpperCase();
+  if (sel) return groundDisplayFor(structureType);              // non-ground id ⇒ contamination
+  const name = String(project?.mountingSystem ?? '').trim();
+  if (name && NON_GROUND_MOUNT_RE.test(name))
+    return groundDisplayFor(structureType);                     // roof/fence brand by name
+  return name ? name.toUpperCase() : groundDisplayFor(structureType);
+}
+
+/** Human-facing array label — strip internal/synthetic ids (gps-array,
+ *  gps2array, default, bare numbers, uuid-ish) so they never hit the drawing. */
+function arrayLabel(arr: any, i: number): string {
+  const raw = String(arr?.id ?? '').trim();
+  const internal =
+    !raw ||
+    /gps|array|layout|default|row|col|^\d+$|[0-9a-f]{8}|-/i.test(raw);
+  return internal ? `ARRAY ${i + 1}` : raw.toUpperCase();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,186 +143,159 @@ export function drawGroundArray(
   const dz = zones.draw;
   const margin = 24;
 
-  // ── Compute panel dimensions from CAD or defaults ──
-  // Use first array's panel info if available, else standard 66"x40"
+  // ── Panel dimensions (fallback only; real modules carry their own dims) ──
   const firstArr: any = arrays[0];
   const cadPanels = firstArr?._cadPanels ?? firstArr?.panels ?? [];
-  const panelWFt  = cadPanels[0]?.widthM  != null
-    ? metersToFt(cadPanels[0].widthM)
-    : (input.project?.panelLengthIn ?? 66) / 12;
-  const panelHFt  = cadPanels[0]?.heightM != null
-    ? metersToFt(cadPanels[0].heightM)
-    : (input.project?.panelWidthIn ?? 40) / 12;
+  const pWmDefault = cadPanels[0]?.widthM  ?? (input.project?.panelLengthIn ?? 66) * 0.0254;
+  const pHmDefault = cadPanels[0]?.heightM ?? (input.project?.panelWidthIn  ?? 40) * 0.0254;
 
-  // ── Compute bounding box of all arrays ──
-  // Each array has origin (X/Y) and dimensions (rows × panelsPerRow)
-  let globalMinX = Infinity, globalMaxX = -Infinity;
-  let globalMinY = Infinity, globalMaxY = -Infinity;
-
-  arrays.forEach((arr: any) => {
+  // ── Collect the REAL module rectangles (meters, top-left) from CAD ──
+  // CAD is the source of truth: draw each array's actual panels, never a
+  // re-synthesized sliver grid. Fall back to a computed grid only when the
+  // array carries no panels (raw layout.groundArrays without a CAD solve).
+  type Rect = { x: number; y: number; w: number; h: number };
+  function panelRectsFor(arr: any): Rect[] {
+    const panels: any[] = arr?._cadPanels ?? arr?.panels
+      ?? (arr?._cadRows ?? arr?.rows ?? []).flatMap((r: any) => r?.panels ?? []);
+    if (panels.length > 0) {
+      return panels.map((p: any) => ({
+        x: p.x, y: p.y,
+        w: p.widthM  ?? pWmDefault,
+        h: p.heightM ?? pHmDefault,
+      }));
+    }
     const ox    = arr._cadOriginX ?? arr.originX ?? 0;
     const oy    = arr._cadOriginY ?? arr.originY ?? 0;
     const rows  = arr.rowCount ?? arr.dimensions?.rowCount ?? 1;
     const ppr   = arr.panelsPerRow ?? arr.dimensions?.panelsPerRow ?? 1;
-    const rowSp = arr.rowSpacingFt != null ? arr.rowSpacingFt
-                : (arr.rowSpacingM != null ? metersToFt(arr.rowSpacingM) : 8);
-
-    const arrWFt = ppr   * panelWFt * metersToFt(1);   // convert correctly
-    const arrHFt = rows  * rowSp;
-
-    // Use meters directly for bounding (origin is in meters)
-    const arrWM = ppr  * (cadPanels[0]?.widthM  ?? 0.305 * (panelWFt / metersToFt(1)));
-    const arrHM = rows * (arr.rowSpacingM ?? 2.5);
-
-    globalMinX = Math.min(globalMinX, ox);
-    globalMaxX = Math.max(globalMaxX, ox + arrWM);
-    globalMinY = Math.min(globalMinY, oy);
-    globalMaxY = Math.max(globalMaxY, oy + arrHM);
-  });
-
-  // Fallback for simple (no-origin) arrays
-  if (!isFinite(globalMinX)) {
-    globalMinX = 0; globalMaxX = 50;
-    globalMinY = 0; globalMaxY = 30;
+    const rowSp = arr.rowSpacingM ?? 2.5;
+    const rects: Rect[] = [];
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < ppr; c++)
+        rects.push({ x: ox + c * (pWmDefault + 0.02), y: oy + r * rowSp, w: pWmDefault, h: pHmDefault });
+    return rects;
   }
 
-  const spanXm = (globalMaxX - globalMinX) || 30;
-  const spanYm = (globalMaxY - globalMinY) || 20;
+  const arrayRects: Rect[][] = arrays.map(panelRectsFor);
 
-  const scaleX = (dz.width  - 2 * margin) / (spanXm * metersToFt(1));
-  const scaleY = (dz.height - 2 * margin) / (spanYm * metersToFt(1));
-  const scale  = Math.min(scaleX, scaleY);   // px per foot
+  // ── Global bounding box of every real module (meters) ──
+  let gMinX = Infinity, gMaxX = -Infinity, gMinY = Infinity, gMaxY = -Infinity;
+  for (const rects of arrayRects) for (const r of rects) {
+    gMinX = Math.min(gMinX, r.x);   gMaxX = Math.max(gMaxX, r.x + r.w);
+    gMinY = Math.min(gMinY, r.y);   gMaxY = Math.max(gMaxY, r.y + r.h);
+  }
+  if (!isFinite(gMinX)) { gMinX = 0; gMaxX = 15; gMinY = 0; gMaxY = 5; }
 
-  const toSvgX = (xM: number) =>
-    dz.x + margin + (xM - globalMinX) * metersToFt(1) * scale;
-  const toSvgY = (yM: number) =>
-    dz.y + dz.height - margin - (yM - globalMinY) * metersToFt(1) * scale;
+  const spanXft = Math.max((gMaxX - gMinX) * metersToFt(1), 1);
+  const spanYft = Math.max((gMaxY - gMinY) * metersToFt(1), 1);
 
-  // ── Draw property setback boundary (dashed) ──
+  // ── Auto-fit + CENTER within the draw zone (kills the corner-cram) ──
+  const scale      = Math.min((dz.width - 2 * margin) / spanXft,
+                              (dz.height - 2 * margin) / spanYft);   // px per ft
+  const contentWpx = spanXft * scale;
+  const contentHpx = spanYft * scale;
+  const offX = dz.x + (dz.width  - contentWpx) / 2;
+  const offY = dz.y + (dz.height - contentHpx) / 2;
+
+  const toSvgX = (xM: number) => offX + (xM - gMinX) * metersToFt(1) * scale;
+  const toSvgY = (yM: number) => offY + (yM - gMinY) * metersToFt(1) * scale;
+
+  // ── Property setback boundary (dashed) around the actual array field ──
   const sbPx = setbackFt * scale;
-  if (sbPx > 0 && sbPx < dz.width / 2) {
-    els.push(`<rect
-      x="${(dz.x + margin - sbPx).toFixed(1)}"
-      y="${(dz.y + margin - sbPx).toFixed(1)}"
-      width="${((dz.width - 2 * margin) + 2 * sbPx).toFixed(1)}"
-      height="${((dz.height - 2 * margin) + 2 * sbPx).toFixed(1)}"
-      fill="none" class="line-setbk"/>`);
-    els.push(drawText(
-      dz.x + margin + 4, dz.y + margin - sbPx - 4,
+  if (sbPx > 1) {
+    els.push(`<rect x="${(offX - sbPx).toFixed(1)}" y="${(offY - sbPx).toFixed(1)}" width="${(contentWpx + 2 * sbPx).toFixed(1)}" height="${(contentHpx + 2 * sbPx).toFixed(1)}" fill="none" class="line-setbk"/>`);
+    els.push(drawText(offX - sbPx + 3, offY - sbPx - 4,
       `${setbackFt}' SETBACK (TYP.)`, {
         anchor: 'start', fontSize: 7, fill: '#cc0000', fontWeight: 'bold',
       }));
   }
 
-  // ── STEP 6: Draw each array independently (segment engine) ──
+  // ── STEP 6: Draw each array (CAD-driven, clean top-down) ──
   arrays.forEach((arr: any, ai: number) => {
-    const ox    = arr._cadOriginX ?? arr.originX ?? (ai * 20);
-    const oy    = arr._cadOriginY ?? arr.originY ?? 0;
-    const rows  = arr.rowCount ?? arr.dimensions?.rowCount ?? 1;
-    const ppr   = arr.panelsPerRow ?? arr.dimensions?.panelsPerRow ?? 1;
-    const rowSp = arr.rowSpacingM ?? 2.5;   // meters
+    const rects = arrayRects[ai];
+    if (rects.length === 0) return;
+    const color = arrayColor(ai);
     const tilt  = arr.tiltDeg ?? 20;
     const az    = arr.azimuth ?? 180;
-    const color = arrayColor(ai);
-    const arrId = arr.id ?? `ARR-${ai + 1}`;
 
-    // Panel dimensions in meters
-    const pWm   = cadPanels[0]?.widthM  ?? 1.7;
-    const pHm   = cadPanels[0]?.heightM ?? 1.0;
+    // Array bbox (meters)
+    let aMinX = Infinity, aMaxX = -Infinity, aMinY = Infinity, aMaxY = -Infinity;
+    for (const r of rects) {
+      aMinX = Math.min(aMinX, r.x);  aMaxX = Math.max(aMaxX, r.x + r.w);
+      aMinY = Math.min(aMinY, r.y);  aMaxY = Math.max(aMaxY, r.y + r.h);
+    }
 
-    // ── Draw piles (larger, more visible) ──
-    const nPiles = ppr + 1;
-    const pileSpacingM = arr.pileSpacingM ?? pWm;
-    for (let r = 0; r < rows; r++) {
-      for (let p = 0; p < nPiles; p++) {
-        const pileX = ox + p * pileSpacingM;
-        const pileY = oy + r * rowSp;
-        const px    = toSvgX(pileX);
-        const py    = toSvgY(pileY);
-        // Outer circle (concrete footing indicator) — concrete gradient
-        els.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="7" fill="url(#concrete-grad)" stroke="#666" stroke-width="1.2"/>`);
-        // Inner pile cross section — steel gradient
-        els.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3.5" fill="url(#pile-steel)" stroke="#333" stroke-width="0.8"/>`);
-        // Cross mark
-        els.push(`<line x1="${(px-3).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(px+3).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#fff" stroke-width="0.8"/>`);
-        els.push(`<line x1="${px.toFixed(1)}" y1="${(py-3).toFixed(1)}" x2="${px.toFixed(1)}" y2="${(py+3).toFixed(1)}" stroke="#fff" stroke-width="0.8"/>`);
+    // Group modules into rows by Y (5cm bins) for pile placement + row labels
+    const rowMap = new Map<number, Rect[]>();
+    for (const r of rects) {
+      const k = Math.round(r.y * 20);
+      let band = rowMap.get(k);
+      if (!band) { band = []; rowMap.set(k, band); }
+      band.push(r);
+    }
+    const rowBands = [...rowMap.values()].sort(
+      (a, b) => Math.min(...a.map(r => r.y)) - Math.min(...b.map(r => r.y)));
+
+    // ── Modules: clean flat CAD rectangles (no photoreal glass gradient) ──
+    for (const r of rects) {
+      const x = toSvgX(r.x), y = toSvgY(r.y);
+      const w = Math.max(r.w * metersToFt(1) * scale, 3);
+      const h = Math.max(r.h * metersToFt(1) * scale, 2);
+      els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="#cfe0f4" stroke="${color}" stroke-width="0.9"/>`);
+      if (h > 6) {
+        els.push(`<line x1="${x.toFixed(1)}" y1="${(y + h / 2).toFixed(1)}" x2="${(x + w).toFixed(1)}" y2="${(y + h / 2).toFixed(1)}" stroke="${color}" stroke-width="0.35" opacity="0.5"/>`);
       }
     }
 
-    // ── Draw panel rows ──
-    const cadRowData = arr._cadRows ?? arr.rows ?? [];
-    for (let r = 0; r < rows; r++) {
-      const rowY    = oy + r * rowSp;
-      const rowData = cadRowData[r];
-      const nPanels = rowData?.panelCount ?? ppr;
-
-      for (let p = 0; p < nPanels; p++) {
-        const panX = ox + p * pWm;
-        const panY = rowY;
-        const px   = toSvgX(panX);
-        const py   = toSvgY(panY);
-        const pw   = Math.max(pWm * metersToFt(1) * scale - 1, 4);
-        const ph   = Math.max(pHm * metersToFt(1) * scale - 1, 3);
-
-        // Panel body — dark blue PV module with glass gradient
-        els.push(`<rect x="${px.toFixed(1)}" y="${(py - ph).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="url(#panel-glass)" stroke="#0a1e4a" stroke-width="0.9" opacity="0.92" rx="0.5"/>`);
-        // Aluminum frame border
-        els.push(`<rect x="${(px + 1).toFixed(1)}" y="${(py - ph + 1).toFixed(1)}" width="${(pw - 2).toFixed(1)}" height="${(ph - 2).toFixed(1)}" fill="none" stroke="rgba(180,210,240,0.6)" stroke-width="0.7"/>`);
-
-        // Glass reflection highlight
-        if (pw > 12 && ph > 8) {
-          const rw5 = pw * 0.42, rh5 = ph * 0.42;
-          els.push(`<rect x="${(px+1.5).toFixed(1)}" y="${(py - ph + 1.5).toFixed(1)}" width="${rw5.toFixed(1)}" height="${rh5.toFixed(1)}" fill="url(#panel-reflect)" rx="0.5"/>`);
-        }
-        // Cell lines (3 horizontal busbars)
-        if (ph > 8) {
-          const cellH = (ph - 2) / 3;
-          for (let c = 1; c < 3; c++) {
-            els.push(`<line x1="${(px+1).toFixed(1)}" y1="${(py - ph + 1 + c * cellH).toFixed(1)}" x2="${(px+pw-1).toFixed(1)}" y2="${(py - ph + 1 + c * cellH).toFixed(1)}" stroke="rgba(147,197,253,0.4)" stroke-width="0.5"/>`);
-          }
-        }
-        // Cell lines (6 vertical)
-        if (pw > 10) {
-          const cellW = (pw - 2) / 6;
-          for (let c = 1; c < 6; c++) {
-            els.push(`<line x1="${(px + 1 + c * cellW).toFixed(1)}" y1="${(py-ph+1).toFixed(1)}" x2="${(px + 1 + c * cellW).toFixed(1)}" y2="${(py-1).toFixed(1)}" stroke="rgba(147,197,253,0.35)" stroke-width="0.4"/>`);
-          }
-        }
+    // ── Piles UNDER the modules (drawn on top so they read through the array):
+    //    a foundation line at each row's center, at pile O.C. spacing. ──
+    const pileSpM = arr.pileSpacingM ?? (pWmDefault * 2);
+    rowBands.forEach((band) => {
+      let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+      for (const r of band) {
+        bMinX = Math.min(bMinX, r.x);       bMaxX = Math.max(bMaxX, r.x + r.w);
+        bMinY = Math.min(bMinY, r.y);       bMaxY = Math.max(bMaxY, r.y + r.h);
       }
+      const cyM   = (bMinY + bMaxY) / 2;         // pile line at the row band center
+      const spanM = bMaxX - bMinX;
+      const nGaps = Math.max(1, Math.round(spanM / pileSpM));
+      const py    = toSvgY(cyM);
+      // faint torque-tube / foundation beam under the row
+      els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${py.toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#555" stroke-width="0.7" stroke-dasharray="3,2" opacity="0.7"/>`);
+      for (let i = 0; i <= nGaps; i++) {
+        const px = toSvgX(bMinX + (spanM * i) / nGaps);
+        els.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="2.4" fill="#4a4a4a" stroke="#fff" stroke-width="0.7"/>`);
+      }
+    });
 
-      // Row label (right of row)
-      const rowLabelX = toSvgX(ox + nPanels * pWm) + 4;
-      const rowLabelY = toSvgY(rowY) - (pHm * metersToFt(1) * scale / 2);
-      els.push(drawText(rowLabelX, rowLabelY, `R${r + 1}`, {
-        anchor: 'start', fontSize: 6, fill: color,
-      }));
-    }
+    // ── Row labels (left of each band) ──
+    rowBands.forEach((band, ri) => {
+      const bMinY = Math.min(...band.map(r => r.y));
+      const bMaxY = Math.max(...band.map(r => r.y + r.h));
+      const bMinX = Math.min(...band.map(r => r.x));
+      els.push(drawText(toSvgX(bMinX) - 5, (toSvgY(bMinY) + toSvgY(bMaxY)) / 2 + 2,
+        `R${ri + 1}`, { anchor: 'end', fontSize: 6.5, fill: color, fontWeight: 'bold' }));
+    });
 
-    // ── Tilt indicator (triangle showing tilt direction) ──
-    const tiltX  = toSvgX(ox + ppr * pWm / 2);
-    const tiltY  = toSvgY(oy - rowSp * 0.3);
-    const tiltPts: Array<[number, number]> = [
-      [tiltX - 12, tiltY + 8],
-      [tiltX,      tiltY - 8],
-      [tiltX + 12, tiltY + 8],
-    ];
-    els.push(drawPolygon(tiltPts, '#ff6600', 'line-hidden'));
-    els.push(drawText(tiltX, tiltY + 18, `${tilt}° TILT`, {
+    // ── Tilt / azimuth marker (above the array, pointing downslope) ──
+    const midXm = (aMinX + aMaxX) / 2;
+    const tX = toSvgX(midXm), tY = toSvgY(aMinY) - 12;
+    els.push(drawPolygon([[tX - 9, tY - 6], [tX + 9, tY - 6], [tX, tY + 4]], '#ff6600', 'line-hidden'));
+    els.push(drawText(tX, tY - 9, `${tilt}° / ${compassDir(az)}`, {
       anchor: 'middle', fontSize: 6.5, fill: '#ff6600', fontWeight: 'bold',
     }));
 
-    // ── Array label badge ──
-    const arrLabelX = toSvgX(ox + ppr * pWm / 2);
-    const arrLabelY = toSvgY(oy + rows * rowSp) + 14;
-    const badgeW    = 60;
-    els.push(`<rect x="${(arrLabelX - badgeW / 2).toFixed(1)}"
-      y="${(arrLabelY - 7).toFixed(1)}"
-      width="${badgeW}" height="12"
-      fill="${color}" rx="2" opacity="0.85"/>`);
-    els.push(drawText(arrLabelX, arrLabelY + 2.5,
-      `${arrId}: ${ppr}×${rows}`, {
-        anchor: 'middle', fontSize: 7, fill: '#fff', fontWeight: 'bold',
-      }));
+    // ── Array label badge (clean — friendly label, consistent counts) ──
+    const rowCount = rowBands.length;
+    const ppr      = Math.max(...rowBands.map(b => b.length));
+    const label    = arrayLabel(arr, ai);
+    const bText    = `${label} — ${rowCount} ROW${rowCount > 1 ? 'S' : ''} × ${ppr}`;
+    const bW       = Math.max(bText.length * 4.4 + 10, 60);
+    const bX       = toSvgX(midXm), bY = toSvgY(aMaxY) + 12;
+    els.push(`<rect x="${(bX - bW / 2).toFixed(1)}" y="${(bY - 8).toFixed(1)}" width="${bW.toFixed(1)}" height="13" fill="${color}" rx="2" opacity="0.9"/>`);
+    els.push(drawText(bX, bY + 1.5, bText, {
+      anchor: 'middle', fontSize: 7, fill: '#fff', fontWeight: 'bold',
+    }));
   });
 
   // ── North arrow ──
@@ -282,48 +303,20 @@ export function drawGroundArray(
 
   // ── Scale bar ──
   const scaleBarFt = 20;
-  const scaleBarPx = scaleBarFt * scale;
   els.push(drawScaleBar(zones.dims.left + 4, H - zones.dims.bottom + 28,
-    Math.max(Math.round(scaleBarPx), 20), `0    ${scaleBarFt} FT`));
+    Math.max(Math.round(scaleBarFt * scale), 20), `0    ${scaleBarFt} FT`));
 
-  // ── DIMENSION HIERARCHY ──
-  // Only if arrays have meaningful coordinate spread
-  if (isFinite(globalMinX) && spanXm > 0) {
-    const totalWFt = spanXm * metersToFt(1);
-    const totalHFt = spanYm * metersToFt(1);
-
-    // L1 — Overall array field width (bottom)
-    els.push(drawOverallDimension(
-      toSvgX(globalMinX),
-      toSvgX(globalMaxX),
-      dz.y + dz.height + 8,
-      20,
-      ftToFtIn(totalWFt) + ' ARRAY FIELD'
+  // ── DIMENSION HIERARCHY (real array-field extent) ──
+  els.push(drawOverallDimension(
+    toSvgX(gMinX), toSvgX(gMaxX),
+    offY + contentHpx + 10, 18,
+    ftToFtIn(spanXft) + ' ARRAY FIELD'
+  ));
+  if (spanYft > 5) {
+    els.push(drawVerticalDimension(
+      offX - 12, toSvgY(gMaxY), toSvgY(gMinY),
+      14, ftToFtIn(spanYft) + ' DEPTH'
     ));
-
-    // L1 — Overall array depth (left side, vertical)
-    if (totalHFt > 5) {
-      els.push(drawVerticalDimension(
-        dz.x - 16,
-        toSvgY(globalMaxY),
-        toSvgY(globalMinY),
-        14,
-        ftToFtIn(totalHFt) + ' DEPTH'
-      ));
-    }
-
-    // L2 — Row spacing (first array, first two rows)
-    if (arrays.length > 0 && arrays[0]?.rowSpacingM) {
-      const arr0: any  = arrays[0];
-      const ox0 = arr0._cadOriginX ?? arr0.originX ?? 0;
-      const oy0 = arr0._cadOriginY ?? arr0.originY ?? 0;
-      const rowSp0 = arr0.rowSpacingM ?? 2.5;
-      const rsX = toSvgX(ox0 + (arr0.dimensions?.panelsPerRow ?? 1) * (cadPanels[0]?.widthM ?? 1.7) + 1);
-      els.push(drawLinearDimension(
-        rsX, rsX,
-        toSvgY(oy0), 0, ''   // placeholder — TODO: better row spacing dim
-      ));
-    }
   }
 
   // ── Data zone — array schedule (STEP 8: ground-only data) ──
@@ -355,8 +348,10 @@ export function drawGroundArray(
     const ppr   = arr.panelsPerRow ?? arr.dimensions?.panelsPerRow ?? '?';
     const tilt  = (arr.tiltDeg ?? 20).toFixed(0);
     const az    = (arr.azimuth ?? 180).toFixed(0);
-    const arrId = arr.id ?? `A${i + 1}`;
-    const bg    = i % 2 === 0 ? '#fff' : '#f5f5f5';
+    // Short, clean tag — never leak an internal id (gps-array, default, …).
+    const rawName = arrayLabel(arr, i);
+    const arrId   = /^ARRAY /.test(rawName) ? `A${i + 1}` : rawName.slice(0, 6);
+    const bg      = i % 2 === 0 ? '#fff' : '#f5f5f5';
 
     els.push(drawRectFilled(dZone.x, schedY, dZone.width, 11, bg, '#ddd', 0.5));
     els.push(`<rect x="${dZone.x + 1}" y="${schedY + 2}" width="6" height="7"
@@ -441,14 +436,23 @@ export function drawGroundStructural(
   const rowSpacingFt  = firstArr.rowSpacingFt ?? metersToFt(firstArr.rowSpacingM ?? 2.5);
   const gcInch        = firstArr.groundClearanceIn ?? (firstArr.groundClearanceM ?? 0.3) * 39.3701;
   const gcFt          = gcInch / 12;
-  const structureType = (firstArr.structureType ?? 'FIXED-TILT').toUpperCase();
+  // Structure type reads as a clean label ("DRIVEN PILE", not "DRIVEN_PILE").
+  const structureType = String(firstArr.structureType ?? 'FIXED-TILT')
+    .replace(/[_-]+/g, ' ').trim().toUpperCase();
 
   // Panel dimensions
   const panelLenIn  = project?.panelLengthIn ?? 66;
   const panelWidIn  = project?.panelWidthIn  ?? 40;
   const panelLenFt  = panelLenIn / 12;
   const panelWidFt  = panelWidIn / 12;
-  const mountSys    = (project?.mountingSystem || 'IRONRIDGE IFM').toUpperCase();
+  // STEP 9 cross-contamination block: a GROUND sheet must never brand the
+  // project-wide ROOF racking. The flat project.mountingSystem scalar leaked
+  // "ROOF TECH RT-MINI" onto PV-3G ("SYSTEM: …" + "TORQUE TUBE/RAIL — …") on
+  // hybrid sets; resolve a real GROUND racking name (or generic ground rack).
+  const mountSys    = resolveGroundMountName(
+    project as unknown as Record<string, unknown>,
+    firstArr?.structureType,
+  );
   // Same wind chain as the fence template (Wave 6.2): engineering → canonical
   // site wind (compliance structural) → AHJ → 115 (ASCE minimum; the old 90
   // fallback printed beside a 115-mph FENCE DATA table on hybrid sets).
