@@ -260,7 +260,7 @@ function LoginForm() {
               <div className="relative">
                 <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
-                  name="email" type="email" value={form.email} onChange={handleChange}
+                  name="email" type="text" value={form.email} onChange={handleChange}
                   placeholder="you@company.com" autoComplete="email"
                   className="w-full bg-slate-900/60 border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/30 transition-all"
                 />
