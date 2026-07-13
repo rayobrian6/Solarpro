@@ -4340,10 +4340,12 @@ function EngineeringPageInner() {
       // key while the other subs get seeded ON TOP (double-counted project).
       // Only reachable when userHasEditedInverters === false (guard above);
       // the locked case surfaces the explicit header action instead.
-      if (fleetDiag.degenerate?.degenerate) {
-        console.log('[SMART DEFAULTS per-sub] degenerate single fleet detected — auto-splitting per sub-system');
-        if (rebuildFleetsPerSub('auto')) return;
-      }
+      // Wave 6 — any hybrid fleet that doesn't match the design layout (a
+      // degenerate whole-project fleet OR any per-sub fleet ≠ its stamp count) is
+      // owned by the dedicated hybrid self-heal effect below. Defer to it so we
+      // never seed defaults ON TOP of a mismatched fleet (double-count) and never
+      // double-fire rebuildFleetsPerSub from two effects.
+      if (fleetDiag.suspect) return;
       const _sdFb = toSubSystemKey(config.systemType);
       const _sdPart = partitionFleet(config.inverters as any[], _sdFb);
       const _sdDabs = (config as any).defaultsAppliedBySubSystem ?? {};
@@ -4527,6 +4529,11 @@ function EngineeringPageInner() {
     if (currentProjectId && !isHydrated) return;
     if (!sizingAutoApply) return;
     if (!sizingRecommendation) return;
+    // Wave 6 — HYBRID systems never use the whole-project applySizingRecommendation
+    // auto path: it sizes the ENTIRE array as one fleet and force-stamps it onto a
+    // single sub-system (the "ground fleet = 81 panels / roof dropped" corruption).
+    // Per-sub fleet integrity is owned by the dedicated hybrid self-heal effect below.
+    if (subSystemCounts.isHybrid) return;
     // Compute the mismatch FIRST so the user-intent locks below can tell a
     // STALE/broken layout (must re-sync) apart from a pure model preference.
     const rec = sizingRecommendation;
@@ -4606,6 +4613,42 @@ function EngineeringPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks, isHydrated, currentProjectId]);
 
+  // ─── Wave 6 — HYBRID FLEET SELF-HEAL (design is the source of truth) ─────────
+  // When a hybrid layout's per-sub fleets don't match the design (e.g. a saved
+  // config where the ecosystem picker stamped all 81 panels onto the GROUND fleet
+  // and dropped ROOF), rebuild each PRESENT sub's fleet scoped to ITS OWN layout
+  // count — preserving each sub's chosen equipment (buildSubFleetForKey reads
+  // subSystems[key]). This is the SINGLE owner of hybrid fleet integrity:
+  //   • the whole-project auto-apply watchers above bail for hybrids;
+  //   • the smart-defaults effect defers its hybrid branch to here.
+  // It's a structural-integrity heal — a fleet cannot carry more panels than the
+  // design physically places — NOT a preference override, so it runs even under
+  // the internal user-intent flags. It RESPECTS the explicit field locks and
+  // manual mode (auto-heal must not fight the user). Loop-safe via a
+  // per-design-signature ref: at most one heal attempt per layout signature.
+  const hybridHealSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (currentProjectId && !isHydrated) return;
+    if (!subSystemCounts.isHybrid) return;
+    if (!fleetDiag.suspect) return;
+    // Distinguish SEEDING an empty design (nothing to override → always OK, even
+    // in manual mode) from HEALING an existing wrong fleet (a real user config →
+    // respect manual mode + the explicit field locks so we never fight the user).
+    const _fb = toSubSystemKey(config.systemType);
+    const _part = partitionFleet(config.inverters as any[], _fb);
+    const hasExistingFleet = subSystemCounts.present.some(k => fleetPanelTotal(_part[k] ?? []) > 0);
+    if (hasExistingFleet) {
+      if (controlMode === 'manual') return;                    // manual → explicit "Rebuild fleets" button
+      if (configLocks.inverter || configLocks.strings) return; // explicit field lock wins
+    }
+    const sig = `${systemPanelCount}|${subSystemCounts.roof},${subSystemCounts.ground},${subSystemCounts.fence}`;
+    if (hybridHealSigRef.current === sig) return;              // already attempted for this design
+    hybridHealSigRef.current = sig;
+    console.log('🩹 [HYBRID SELF-HEAL] per-sub fleets ≠ design layout — rebuilding per sub-system', sig, { hasExistingFleet, controlMode });
+    rebuildFleetsPerSub('auto');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated, currentProjectId, subSystemCounts, fleetDiag.suspect, systemPanelCount, controlMode, configLocks, config.systemType, config.inverters]);
+
      // ─── Phase 14.2 — HARD DC/AC ERROR AUTO-HEAL ─────────────────────────────────
      // When validationResult contains DC_AC_RATIO_AC_EXCEEDS_DC (ratio < 1.0) AND
      // the sizing engine has a recommendation, we override the userHasEditedInverters
@@ -4618,6 +4661,10 @@ function EngineeringPageInner() {
        if (currentProjectId && !isHydrated) return;
        if (!validationResult) return;
        if (!sizingRecommendation) return;
+       // Wave 6 — hybrid DC/AC is evaluated per sub-system; the whole-project
+       // applySizingRecommendation would corrupt the per-sub fleets. The dedicated
+       // hybrid self-heal owns fleet integrity for hybrids.
+       if (subSystemCounts.isHybrid) return;
        const hasHardDcAcError = validationResult.errors.some(
          e => e.code === 'DC_AC_RATIO_AC_EXCEEDS_DC',
        );
@@ -10966,20 +11013,36 @@ function EngineeringPageInner() {
                       <div className="grid grid-cols-2 gap-2.5">
                         <div>
                           <label className="eng-label">System Type</label>
-                          <select
-                            value={config.systemType}
-                            onChange={e => {
-                              if (e.target.value === 'fence' && !canSolFence) return; // silently block; UI shows disabled
-                              updateConfig({ systemType: e.target.value as any });
-                            }}
-                            className="eng-select"
-                          >
-                            <option value="roof">Roof Mount</option>
-                            <option value="ground">Ground Mount</option>
-                            <option value="fence" disabled={!canSolFence}>
-                              Solar Fence{!canSolFence ? ' 🔒 Contractor' : ''}
-                            </option>
-                          </select>
+                          {subSystemCounts.isHybrid ? (
+                            // Hybrid design → the flat systemType scalar is only the
+                            // downstream PRIMARY mirror; showing one option ("Solar
+                            // Fence") for a roof+ground+fence system is misleading.
+                            // Read-only hybrid badge + per-sub breakdown (label only —
+                            // the underlying config.systemType scalar is untouched).
+                            <div className="eng-select flex items-center justify-between !cursor-default" title="Multi-system design from Design Studio — equipment is set per sub-system below">
+                              <span className="font-extrabold text-amber-300">Hybrid</span>
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                {subSystemCounts.present.map(k =>
+                                  `${k.charAt(0).toUpperCase()}${k.slice(1)} ${subSystemCounts[k]}`
+                                ).join(' · ')}
+                              </span>
+                            </div>
+                          ) : (
+                            <select
+                              value={config.systemType}
+                              onChange={e => {
+                                if (e.target.value === 'fence' && !canSolFence) return; // silently block; UI shows disabled
+                                updateConfig({ systemType: e.target.value as any });
+                              }}
+                              className="eng-select"
+                            >
+                              <option value="roof">Roof Mount</option>
+                              <option value="ground">Ground Mount</option>
+                              <option value="fence" disabled={!canSolFence}>
+                                Solar Fence{!canSolFence ? ' 🔒 Contractor' : ''}
+                              </option>
+                            </select>
+                          )}
                         </div>
                         <div>
                           <label className="eng-label">Utility Meter</label>
@@ -10988,7 +11051,9 @@ function EngineeringPageInner() {
                           </select>
                         </div>
                         <div className="col-span-2">
-                          <label className="eng-label">Mounting System</label>
+                          <label className="eng-label">
+                            Mounting System{subSystemCounts.isHybrid ? ' — project default (set per sub-system below)' : ''}
+                          </label>
                           <select value={config.mountingId} onChange={e => updateConfig({ mountingId: e.target.value })} className="eng-select">
                             {ALL_MOUNTING_SYSTEMS.map(m => <option key={m.id} value={m.id}>{m.manufacturer} {m.model}</option>)}
                           </select>
