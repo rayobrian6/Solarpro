@@ -43,7 +43,19 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     const first = (lbl.lines[0] || '').trim().toUpperCase();
     const signal = SIGNALS.includes(first) ? first : '';
     const title = signal ? '' : (lbl.lines[0] || '');
-    const rest = lbl.lines.slice(1);
+    // Some dataset labels carry ONLY a title line (the marking wording), which
+    // renders a dark title bar over an EMPTY white body (e.g. the L-18 GEC
+    // placard "GROUNDING ELECTRODE CONDUCTOR — DO NOT DISCONNECT"). Supply real
+    // body copy so the placard reads as a complete label, not a blank card.
+    const BODY_FALLBACK: Record<string, string[]> = {
+      'grounding-electrode-conductor-marking': [
+        'DO NOT DISCONNECT OR REMOVE.',
+        'Bonds the PV system to the building grounding electrode system.',
+        'Green / green-yellow identification per NEC 250.119; sized per NEC 250.66 / 690.47.',
+      ],
+    };
+    const _rest0 = lbl.lines.slice(1);
+    const rest = _rest0.length ? _rest0 : (BODY_FALLBACK[lbl.refId] ?? []);
 
     // NEC-mandated white-on-red decals: rapid shutdown, PV power source,
     // disconnect + shock labels. These are solid reflective red by code.
@@ -268,11 +280,30 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   const mainA = project.mainPanelAmps || 200;
   const _str0 = system.inverters?.[0]?.strings?.[0];
   const _panelVoc = eq.panelVoc || project.panelVoc || _str0?.panelVoc || 0;
-  const maxDcV = isMicro
-    ? 'N/A — MICROINVERTER (MODULE-LEVEL DC ONLY)'
-    : (_str0?.panelCount && _panelVoc
-        ? `${Math.round(_panelVoc * 1.25 * _str0.panelCount)} V DC`
-        : (_panelVoc ? `${Math.round(_panelVoc * 1.25)} V DC` : '____ V DC'));
+  // SYSTEMIC ROOT #1: on a hybrid the whole system is NOT microinverter — the
+  // string/optimizer subs carry real series DC. "MAX DC SYSTEM VOLTAGE" is the
+  // largest cold-corrected string Voc across those subs, never "N/A" (which
+  // reads the roof-micro winner as the whole system).
+  const _hybridMaxDcV = (() => {
+    if (!auth.isHybrid) return null;
+    const vals: number[] = [];
+    for (const inv of system.inverters ?? []) {
+      if (String(inv.type || '').toLowerCase().includes('micro')) continue;
+      for (const s of inv.strings ?? []) {
+        const voc = s.panelVoc || 0;
+        const n = s.panelCount || 0;
+        if (voc > 0 && n > 0) vals.push(Math.round(voc * 1.25 * n));
+      }
+    }
+    return vals.length ? Math.max(...vals) : null;
+  })();
+  const maxDcV = _hybridMaxDcV != null
+    ? `${_hybridMaxDcV} V DC`
+    : (isMicro
+        ? 'N/A — MICROINVERTER (MODULE-LEVEL DC ONLY)'
+        : (_str0?.panelCount && _panelVoc
+            ? `${Math.round(_panelVoc * 1.25 * _str0.panelCount)} V DC`
+            : (_panelVoc ? `${Math.round(_panelVoc * 1.25)} V DC` : '____ V DC')));
   const interType = isSupply
     ? 'SUPPLY-SIDE TAP — NEC 705.11'
     : `LOAD-SIDE BACK-FED BREAKER${acOcpd ? ` (${acOcpd}A)` : ''} — NEC 705.12`;
@@ -297,7 +328,26 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
       loc: d.mounting === 'wall' ? 'Wall-mounted — AC aggregation / monitoring / disconnect' : 'At the point of interconnection',
     });
   }
-  discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
+  // SYSTEMIC ROOT #1: one inverter directory row PER SUB (roof micros ×roofN,
+  // ground string ×1, fence optimizer-inverter ×1) — never a single
+  // "MICROINVERTERS (×91)" row that reads the roof brand across the whole
+  // hybrid. Each row carries the sub's OWN equipment + its OWN AC nameplate.
+  if (auth.isHybrid) {
+    for (const sub of auth.subSystems) {
+      const se = sub.equipment;
+      const subAcKw = (sub.acSubFeeder.currentA * 240) / 1000;
+      const nm = `${se.inverterManufacturer} ${se.inverterModel}`.trim();
+      const subLabel = sub.key.toUpperCase();
+      if (sub.isMicro) {
+        discos.push({ name: `MICROINVERTERS — ${subLabel} (×${sub.deviceCount})`, rating: `${subAcKw.toFixed(1)} kW AC · ${nm}`.trim(), loc: 'On the array — one per module' });
+      } else {
+        const word = sub.topology === 'OPTIMIZER' ? 'INVERTER (OPTIMIZER)' : 'INVERTER';
+        discos.push({ name: `${word} — ${subLabel}`, rating: `${subAcKw.toFixed(1)} kW AC · ${nm}`.trim(), loc: `${sub.key} sub-system — at the inverter location` });
+      }
+    }
+  } else {
+    discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
+  }
   if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: bos.brains ? `Hosted by the ${bos.brains.model}` : 'Adjacent to the PV AC disconnect' });
   if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
 

@@ -2050,7 +2050,18 @@ function generateBOMV4PerSubSystem(
         log.push({ stageId: 'inverter', category: 'string_inverter', item: `${s.invDb.manufacturer} ${s.invDb.model}`,
           quantity: 1, derivedFrom: `${key} sub-system (equipment-db fallback)`, formula: '1', necReference: 'NEC 690' });
       } else {
-        warnings.push(`${key} sub-system has no resolvable inverterId (${eq.inverterId ?? 'none'}) — no inverter line emitted.`);
+        // Neither registry hit — but the sub HAS a string/optimizer topology, so
+        // its inverter must still appear on the schedule (a permit BOM that omits
+        // the ground/fence inverter is worse than a brand-only "specify model"
+        // line). Emit a TBD inverter under the sub's ecosystem brand rather than
+        // dropping it — mirrors the Stage-1 TBD-panel behavior.
+        const invCat = s.norm === 'STRING_WITH_OPTIMIZER' ? 'string_inverter' : 'string_inverter';
+        push(key, addItem('inverter', invCat, s.brand, 'Inverter (specify model)', 'INV-TBD',
+          `${s.norm === 'STRING_WITH_OPTIMIZER' ? 'Optimizer-string' : 'String'} inverter — ${key} sub-system (model unresolved — verify equipment id)`,
+          1, 'ea', 'NEC 690', `${key} sub-system`, '1 per sub-system', true));
+        log.push({ stageId: 'inverter', category: invCat, item: `${s.brand} Inverter (TBD)`,
+          quantity: 1, derivedFrom: `${key} sub-system (id unresolved)`, formula: '1', necReference: 'NEC 690' });
+        warnings.push(`${key} sub-system has no resolvable inverterId (${eq.inverterId ?? 'none'}) — emitted a brand-only TBD inverter line.`);
       }
     }
 

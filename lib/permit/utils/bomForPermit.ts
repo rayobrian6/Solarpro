@@ -39,8 +39,14 @@ import {
   type EquipmentRegistryEntry,
 } from '@/lib/equipment-registry-v4';
 import { necNextStandardOcpd } from './helpers';
-import { buildConductorAuthority } from './conductorAuthority';
+import { buildConductorAuthority, type ConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
+import { MICROINVERTERS, STRING_INVERTERS, SOLAR_PANELS } from '@/lib/equipment-db';
+import {
+  SOLFENCE_MOUNTING_ID,
+  type SubSystemEquipment,
+  type SubSystemKey,
+} from '@/lib/system/subSystemEquipment';
 import { buildCanonical } from './canonical';
 import { buildStructuralInputForPermit, buildSubSystemStructuralInputs } from './structuralInput';
 import { resolveArrayStructuralLayout } from './arrayLayout';
@@ -330,6 +336,94 @@ function buildFallbackBOM(input: PermitInput, cad: CADModel): PermitBOMItem[] {
   return items;
 }
 
+// ── Hybrid per-sub equipment map (SYSTEMIC ROOT #1) ───────────
+// generateBOMV4 already owns a correct per-sub path (generateBOMV4PerSubSystem)
+// that runs Stages 1–3 PER SUB — but it only fires when the caller hands it a
+// `subSystemEquipment` map with N>1 entries. Until now bomForPermit never built
+// one, so every hybrid fell through to the legacy single-fleet path: one
+// inverter line (the roof brand) × the PROJECT panel total → "91 Enphase
+// micros", one 91-device trunk, one whole-system combiner. This builder derives
+// the map from the per-sub conductor authority so the engine emits each sub's
+// OWN inverter (roof→micros×roof, ground→1 string, fence→optimizers×fence +
+// inverter) at its OWN count, and scopes the micro cabling/caps to the roof sub.
+
+const _norm = (s?: string | null) => (s ?? '').toLowerCase().trim();
+
+/** Resolve an equipment-db / V4-registry id from a make+model, so the per-sub
+ *  engine prints the REAL device instead of a TBD line. Prefers the sub's own
+ *  project.subSystems id when the payload carries one. Undefined ⇒ engine falls
+ *  back to the sub's ecosystemBrand + topology (still correct count/topology). */
+function resolveInverterIdFromNames(mfr: string, model: string, isMicro: boolean): string | undefined {
+  if (_norm(model) === '' || _norm(model) === '—') return undefined;
+  const v4 = resolveRegistryEntry(model, mfr);
+  if (v4) return v4.id;
+  const nm = _norm(model), nf = _norm(mfr);
+  const pool = (isMicro ? MICROINVERTERS : STRING_INVERTERS) as Array<{ id: string; manufacturer?: string; model?: string }>;
+  const hit = pool.find(e => (!nf || _norm(e.manufacturer).includes(nf) || nf.includes(_norm(e.manufacturer)))
+    && (_norm(e.model).includes(nm) || nm.includes(_norm(e.model))));
+  return hit?.id;
+}
+
+function resolvePanelIdFromNames(mfr: string, model: string): string | undefined {
+  if (_norm(model) === '' || _norm(model) === '—') return undefined;
+  const v4 = resolveRegistryEntry(model, mfr);
+  if (v4) return v4.id;
+  const nm = _norm(model), nf = _norm(mfr);
+  const hit = (SOLAR_PANELS as Array<{ id: string; manufacturer?: string; model?: string }>).find(e =>
+    (!nf || _norm(e.manufacturer).includes(nf) || nf.includes(_norm(e.manufacturer)))
+    && (_norm(e.model).includes(nm) || nm.includes(_norm(e.model))));
+  return hit?.id;
+}
+
+/** One SubSystemEquipment map from the per-sub conductor authority — the input
+ *  generateBOMV4's hybrid path consumes. Only built when the authority is
+ *  hybrid (N>1 subs); single-system jobs keep the byte-identical legacy path. */
+function buildSubSystemEquipmentMap(
+  input: PermitInput,
+  auth: ConductorAuthority,
+): Partial<Record<SubSystemKey, SubSystemEquipment>> {
+  const project = input.project as PermitInput['project'] & {
+    subSystems?: Record<string, { inverterId?: string; panelId?: string; optimizerId?: string;
+      mountingId?: string; ecosystemBrand?: string; topology?: string }>;
+    mountingSystemId?: string; rackingId?: string; optimizerPeripheralId?: string;
+    roofType?: string; trenchRunLengthFt?: number; conduitType?: string;
+  };
+  const nowIso = '2026-07-13T00:00:00.000Z'; // deterministic; the map is transient input, never persisted
+  const map: Partial<Record<SubSystemKey, SubSystemEquipment>> = {};
+
+  for (const sub of auth.subSystems) {
+    const key = sub.key;
+    const pm = project.subSystems?.[key];
+    const topo: SubSystemEquipment['topology'] =
+      sub.topology === 'MICRO' ? 'micro' : sub.topology === 'OPTIMIZER' ? 'optimizer' : 'string';
+    const e = sub.equipment;
+
+    map[key] = {
+      key,
+      topology: topo,
+      inverterId: pm?.inverterId ?? resolveInverterIdFromNames(e.inverterManufacturer, e.inverterModel, sub.isMicro),
+      panelId: pm?.panelId ?? resolvePanelIdFromNames(e.panelManufacturer, e.panelModel),
+      optimizerId: pm?.optimizerId ?? (topo === 'optimizer' ? project.optimizerPeripheralId : undefined),
+      ecosystemBrand: pm?.ecosystemBrand
+        ?? (e.inverterManufacturer !== '—' ? e.inverterManufacturer.toLowerCase() : undefined),
+      // Fence ALWAYS mounts on SolFence (contract §1.1); roof/ground take the
+      // project-wide racking. Never clone the roof racking onto the fence.
+      mountingId: key === 'fence'
+        ? SOLFENCE_MOUNTING_ID
+        : (pm?.mountingId ?? project.rackingId ?? project.mountingSystemId ?? undefined),
+      roofType: key === 'roof' ? (project.roofType || undefined) : undefined,
+      trenchRunLengthFt: key !== 'roof' ? (project.trenchRunLengthFt || undefined) : undefined,
+      env: {
+        rooftopTempAdderC: key === 'roof' ? 30 : 0,
+        ...(project.conduitType ? { conduitType: project.conduitType } : {}),
+      },
+      source: 'engineering',
+      updatedAt: nowIso,
+    };
+  }
+  return map;
+}
+
 // ── Main entry point ──────────────────────────────────────────
 /**
  * Generate a full BOM for the permit pipeline.
@@ -377,6 +471,15 @@ export function generateBOMForPermit(
   const backfeedAmps = _auth.acFeeder.ocpdAmps ?? necNextStandardOcpd(acOutputAmps * 1.25);
   const isMicro      = (system.topology || '').toLowerCase() === 'micro' ||
                        firstInv?.type === 'micro';
+  // SYSTEMIC ROOT #1 — hybrid BOM routes through generateBOMV4's per-sub path so
+  // each sub bills its OWN inverter at its OWN count (kills "91 Enphase micros").
+  // Only built for genuine hybrids (N>1 subs) AND when the CAD carries the
+  // section split the engine apportions modules by; single-system jobs keep the
+  // byte-identical legacy path (Wave-0 goldens pin it).
+  const _perSubEquipment = (_auth.isHybrid && _auth.subSystems.length > 1 && cad.hybrid)
+    ? buildSubSystemEquipmentMap(input, _auth)
+    : undefined;
+  const _isPerSubHybrid = !!_perSubEquipment;
 
   const stringCount   = system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1;
   const inverterCount = isMicro ? totalPanels : (system.inverters?.length || 1);
@@ -523,6 +626,9 @@ export function generateBOMForPermit(
           ground: cad.hybrid.sections.find(sec => sec.key === 'ground')?.totalPanels ?? 0,
           fence:  cad.hybrid.sections.find(sec => sec.key === 'fence')?.totalPanels ?? 0,
         } : undefined,
+        // Wave 2c per-sub map — flips generateBOMV4 to its hybrid path (Stages
+        // 1–3 per sub, one Stage-4 service set). Absent for single-system jobs.
+        subSystemEquipment:  _perSubEquipment,
         spliceAtRows:        project.spliceAtRows,
         // Permit SCHED lists INSTALLED materials only — truck-stock extras are
         // an engineering/crew view, not a permit submittal line.
@@ -587,8 +693,12 @@ export function generateBOMForPermit(
   // SCHED / E-1 print). Drop any registry-derived combiner/gateway line (which
   // could be a stale 4C, or MISSING entirely for IQ8H/IQ8A/IQ8AC) and emit the
   // resolved device, so the BOM can never disagree with the sheets.
+  // The per-sub hybrid path (generateBOMV4PerSubSystem) already emits the
+  // integrated combiner/gateway PER BRAND GROUP with each group's REAL branch
+  // count — running the whole-system reconciler on top would double-emit a
+  // 91-device combiner. Skip it when the per-sub path handled the BOM.
   const bosPlan = buildIntegratedEquipment(input, cad);
-  if (bosPlan.devices.length) {
+  if (!_isPerSubHybrid && bosPlan.devices.length) {
     merged = merged.filter(it => it.category !== 'combiner' && it.category !== 'gateway');
     for (const d of bosPlan.devices) {
       const isGw = d.kind === 'gateway';
