@@ -206,6 +206,12 @@ export async function POST(req: NextRequest) {
   // each request is treated as a distinct attempt.
   const rawIdemKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
   const idempotencyKey = rawIdemKey.length > 0 && rawIdemKey.length <= 200 ? rawIdemKey : correlationId;
+  // Typed production confirmation — case/whitespace-insensitive so browser
+  // auto-capitalization ("Production") does not silently block a legitimate
+  // operator. The gate still requires the operator to type the word.
+  const productionConfirmed =
+    typeof body?.productionConfirmation === 'string' &&
+    body.productionConfirmation.trim().toLowerCase() === 'production';
   const logGov = (msg: string, extra: Record<string, unknown> = {}) => {
     // eslint-disable-next-line no-console
     console.info(`[migrations] ${correlationId} action=${action ?? '?'} actor=${adminUser.id.slice(0, 8)}… ${msg}`, extra);
@@ -471,7 +477,7 @@ export async function POST(req: NextRequest) {
         );
       }
       if (getCurrentEnvironment() === 'production'
-          && (body?.productionConfirmation as string | undefined) !== 'production') {
+          && !productionConfirmed) {
         return NextResponse.json(
           { success: false, error: 'Production bootstrap requires productionConfirmation === "production".', correlationId },
           { status: 400 },
@@ -599,7 +605,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.', correlationId }, { status: 400 });
       }
       const env = getCurrentEnvironment();
-      if (env === 'production' && (body?.productionConfirmation as string | undefined) !== 'production') {
+      if (env === 'production' && !productionConfirmed) {
         return NextResponse.json({ success: false, error: 'Production targeted recovery requires productionConfirmation === "production".', correlationId }, { status: 400 });
       }
 
@@ -848,7 +854,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.' }, { status: 400 });
       }
       if (getCurrentEnvironment() === 'production'
-          && (body?.productionConfirmation as string | undefined) !== 'production') {
+          && !productionConfirmed) {
         return NextResponse.json(
           { success: false, error: 'Production activation requires productionConfirmation === "production".' },
           { status: 400 },
@@ -947,7 +953,7 @@ export async function POST(req: NextRequest) {
       if (!confirmedDigest) {
         return NextResponse.json({ success: false, error: '"confirmedDigest" (from prepare-execution-single) is required.' }, { status: 400 });
       }
-      if (isProd && (body?.productionConfirmation as string | undefined) !== 'production') {
+      if (isProd && !productionConfirmed) {
         return NextResponse.json({ success: false, error: 'Production execution requires productionConfirmation === "production".' }, { status: 400 });
       }
       // Rebuilt-and-verified digest (the target file/checksum/env cannot have
@@ -1092,7 +1098,7 @@ export async function POST(req: NextRequest) {
           expectedDigest: batchDigest,
         }, { status: 409 });
       }
-      if (isProd && (body?.productionConfirmation as string | undefined) !== 'production') {
+      if (isProd && !productionConfirmed) {
         return NextResponse.json({ success: false, error: 'Production execution requires productionConfirmation === "production".' }, { status: 400 });
       }
       if (!activation.active) {

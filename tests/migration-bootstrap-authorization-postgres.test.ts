@@ -274,4 +274,42 @@ describeOrSkip('Bootstrap authorization scoping — real Postgres', () => {
       expect(JSON.stringify(vbody)).not.toMatch(/allowlist|Production migration execution is disabled/i);
     }
   });
+
+  // 8 ─ Typed production confirmation is case/whitespace-insensitive.
+  describe('production confirmation normalization', () => {
+    async function bootstrapWithConfirmation(confirmation: unknown): Promise<{ status: number; body: any }> {
+      const { POST } = await import('../app/api/admin/migrations/route');
+      const res = await POST(makePost({ action: 'bootstrap', reason: 'confirmation test', totpCode: await code(), productionConfirmation: confirmation }) as any);
+      return { status: res.status, body: await res.json() };
+    }
+
+    it.each([
+      ['production', 'exact lowercase'],
+      ['Production', 'browser-capitalized'],
+      ['PRODUCTION', 'all caps'],
+      ['  production  ', 'surrounding whitespace'],
+      ['  Production\t', 'mixed case + whitespace'],
+    ])('accepts %j (%s) in production', async (confirmation) => {
+      setEnv({ vercelEnv: 'production', allowlist: '', allowProd: false });
+      const { status, body } = await bootstrapWithConfirmation(confirmation);
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+    });
+
+    it('denies incorrect confirmation values (400) without consuming a TOTP', async () => {
+      setEnv({ vercelEnv: 'production', allowlist: '', allowProd: false });
+      const { POST } = await import('../app/api/admin/migrations/route');
+      // Each bad value returns 400 BEFORE the TOTP is verified/consumed, so the
+      // same fresh code can be reused across all of them.
+      const sharedCode = await code();
+      for (const bad of ['prod', 'yes', '', 'productionn', 'produc tion', 'confirm', 'PRODUCTION!']) {
+        const res = await POST(makePost({ action: 'bootstrap', reason: 'bad confirm', totpCode: sharedCode, productionConfirmation: bad }) as any);
+        expect(res.status, `value ${JSON.stringify(bad)} should be denied`).toBe(400);
+        expect((await res.json()).error).toMatch(/productionConfirmation/i);
+      }
+      // The rejected attempts did not bootstrap the ledger.
+      const life = await rawExec(`SELECT count(*)::int AS n FROM information_schema.tables WHERE table_name='schema_migrations' AND table_schema='${TEST_SCHEMA}'`);
+      expect(life[0].n).toBe(0);
+    });
+  });
 });

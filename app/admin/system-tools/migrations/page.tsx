@@ -105,7 +105,9 @@ export default function MigrationConsolePage() {
   // ── Mutation modal submit ──
   const submitModal = useCallback(async () => {
     if (!modal) return;
-    if (modal.needsProd && prodConfirm !== 'production') return;
+    // Case/whitespace-insensitive so a browser-capitalized "Production" is not a
+    // silent dead-end. The gate still requires typing the word.
+    if (modal.needsProd && prodConfirm.trim().toLowerCase() !== 'production') return;
     // Immediate, synchronous re-entry guard (see submittingRef).
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -117,7 +119,7 @@ export default function MigrationConsolePage() {
         : `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     setBusy('mutation');
     try {
-      await modal.run({ totpCode: totp.trim(), reason: reason.trim(), productionConfirmation: modal.needsProd ? prodConfirm.trim() : undefined, idempotencyKey });
+      await modal.run({ totpCode: totp.trim(), reason: reason.trim(), productionConfirmation: modal.needsProd ? prodConfirm.trim().toLowerCase() : undefined, idempotencyKey });
     } finally {
       submittingRef.current = false;
       setBusy(null); setModal(null); setTotp(''); setReason(''); setProdConfirm('');
@@ -364,11 +366,11 @@ export default function MigrationConsolePage() {
             <input value={totp} onChange={(e) => setTotp(e.target.value)} inputMode="numeric" className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 mb-3 text-sm font-mono tracking-widest" placeholder="123456" />
             {modal.needsProd && (<>
               <label className="block text-xs text-slate-400 mb-1">Type <code>production</code> to confirm</label>
-              <input value={prodConfirm} onChange={(e) => setProdConfirm(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 mb-3 text-sm" placeholder="production" />
+              <input value={prodConfirm} onChange={(e) => setProdConfirm(e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 mb-3 text-sm" placeholder="production" />
             </>)}
             <div className="flex justify-end gap-2">
               <button onClick={() => setModal(null)} className="px-3 py-1.5 rounded bg-slate-700 text-sm">Cancel</button>
-              <button disabled={busy === 'mutation' || !reason.trim() || totp.trim().length < 6 || (modal.needsProd && prodConfirm !== 'production')} onClick={submitModal} className={btnDanger}>Confirm</button>
+              <button disabled={busy === 'mutation' || !reason.trim() || totp.trim().length < 6 || (modal.needsProd && prodConfirm.trim().toLowerCase() !== 'production')} onClick={submitModal} className={btnDanger}>Confirm</button>
             </div>
           </div>
         </div>
