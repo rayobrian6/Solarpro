@@ -26,6 +26,69 @@ import { groundCAD } from './ground/groundCAD';
 import { fenceCAD }  from './fence/fenceCAD';
 import { buildSystemDefinition } from '@/lib/system';
 import { partitionSubSystems, classifyPanel, type SubSystem } from '@/lib/permit/utils/subSystems';
+import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+
+/** CADModel.hybrid.sections[].equipment shape (contract §1.3, types.ts). */
+type HybridSectionEquipment = NonNullable<
+  NonNullable<CADModel['hybrid']>['sections'][number]['equipment']
+>;
+
+/**
+ * ROOT-CAUSE FIX (Stowell v3 "48 × 0W · Inverter · 0.0A"): the hybrid section
+ * `equipment` carriage is DOCUMENTED (types.ts §1.3) as "Populated from the
+ * subsystem's own SubSystemEquipment entry" — but the section-push below never
+ * wrote it, so `cad.hybrid.sections[key].equipment` (carriage #3 of the permit
+ * resolver, lib/permit/utils/helpers.ts resolveEquipmentBySubSystem) was ALWAYS
+ * undefined. A sub with no tagged inverter fleet and no threaded project.subSystems
+ * id-map then resolved to '—'/0 per lane. This enriches the sub's own
+ * SubSystemEquipment entry (panelId/inverterId/topology) via the equipment DB into
+ * the section carriage so every hybrid lane prints its REAL per-sub equipment.
+ * Returns undefined when the sub carries no equipment ids (the fail-loud path
+ * downstream then shows "⚠ INVERTER NOT SELECTED", never a fabricated default).
+ */
+function buildSectionEquipment(
+  input: PermitInputShape,
+  key: 'roof' | 'ground' | 'fence',
+): HybridSectionEquipment | undefined {
+  const map = (input.project as { subSystems?: Record<string, {
+    panelId?: string; inverterId?: string; topology?: string;
+  }> } | undefined)?.subSystems;
+  const entry = map?.[key];
+  if (!entry || (!entry.panelId && !entry.inverterId)) return undefined;
+
+  const out: HybridSectionEquipment = {};
+
+  if (entry.panelId) {
+    const p = getPanelById(entry.panelId) as
+      { model?: string; watts?: number; voc?: number; isc?: number } | undefined;
+    if (p) {
+      if (p.model) out.panelModel = p.model;
+      if (typeof p.watts === 'number' && p.watts > 0) out.panelWatts = p.watts;
+      if (typeof p.voc === 'number' && p.voc > 0) out.voc = p.voc;
+      if (typeof p.isc === 'number' && p.isc > 0) out.isc = p.isc;
+    }
+  }
+
+  if (entry.inverterId) {
+    const micro = getMicroinverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputW?: number } | undefined;
+    const str = micro ? undefined : (getInverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputKw?: number } | undefined);
+    const dev = micro ?? str;
+    if (dev) {
+      if (dev.manufacturer) out.inverterMfr = dev.manufacturer;
+      if (dev.model) out.inverterModel = dev.model;
+      out.topology = micro ? 'micro'
+        : (entry.topology === 'optimizer' ? 'optimizer' : 'string');
+      const kw = micro
+        ? (micro.acOutputW ? micro.acOutputW / 1000 : 0)
+        : (str?.acOutputKw ?? 0);
+      if (kw > 0) out.acKwPerDevice = kw;
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 // ── Hybrid (multi-system) support — Phase 1 ─────────────────────────
 // A design may contain roof + ground + fence panels in ONE project.
@@ -173,6 +236,11 @@ export function generateCADLayout(input: PermitInputShape): CADModel {
         key: sub.key,
         originLat: _oLat, originLng: _oLng,
         totalPanels: m.totalPanels, dcKw: m.totalDcKw,
+        // §1.3 per-sub equipment carriage — enriched from the sub's own
+        // SubSystemEquipment entry (input.project.subSystems[key]). Was NEVER
+        // written before → carriage #3 always empty → hybrid lanes printed
+        // '—'/0. Omitted (undefined) when the sub selected no equipment.
+        equipment: buildSectionEquipment(input, sub.key),
         // Real designed positions — the site-plan overlay draws these, NOT the
         // solver's synthesized geometry (which is not registered to the design).
         panels: (sub.panels as any[])

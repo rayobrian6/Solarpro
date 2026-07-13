@@ -6,6 +6,32 @@
 import type { PermitInput, ResolvedEquipment } from '../types';
 import { SOLAR_PANELS, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 
+// ═══════════════════════════════════════════════════════════════
+// FAIL-LOUD unselected-inverter marker (permit integrity)
+// ───────────────────────────────────────────────────────────────
+// resolveEquipmentBySubSystem returns inverterModel '—' when a sub genuinely
+// has NO inverter selected in ANY carriage. The planset must NEVER silently
+// fabricate a default inverter ('Inverter' / 'MICROINVERTER'): the SLD lane
+// nameplate + E-1/SCHED rows must show a visible red warning so the operator
+// selects the missing equipment before submitting. Display layers (sldAdapter,
+// sld-professional-renderer) emit + colorize this marker; the resolver keeps
+// its '—' sentinel unchanged so numeric consumers are unaffected.
+// ═══════════════════════════════════════════════════════════════
+export const INVERTER_UNSELECTED = '⚠ INVERTER NOT SELECTED';
+
+/** Build the per-sub fail-loud inverter marker, e.g.
+ *  '⚠ INVERTER NOT SELECTED — PV-ROOF'. Bare marker when no key is given. */
+export function unselectedInverterLabel(key?: string | null): string {
+  const k = key ? String(key).trim().toUpperCase() : '';
+  return k ? `${INVERTER_UNSELECTED} — PV-${k}` : INVERTER_UNSELECTED;
+}
+
+/** True when a model string is the fail-loud unselected-inverter marker (any
+ *  variant), so display layers can detect + colorize it. */
+export function isInverterUnselectedMarker(model?: string | null): boolean {
+  return !!model && model.includes('INVERTER NOT SELECTED');
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 // SYSTEM TYPE RESOLVER

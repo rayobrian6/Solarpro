@@ -18,7 +18,7 @@
 // ============================================================
 
 import type { RunSegment, MicroBranch } from './computed-system';
-import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
+import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
 import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
@@ -846,7 +846,8 @@ function renderInverterBox(
   manufacturer: string, model: string,
   acKw: number, acAmps: number,
   topologyLabel: string, mpptAllocation: string,
-  calloutN: number
+  calloutN: number,
+  unselected = false
 ): {svg: string; lx: number; rx: number;
     dcInX: number; dcInY: number; acOutX: number; acOutY: number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['inverter'] = 200×170
@@ -883,12 +884,14 @@ function renderInverterBox(
     }
   }
 
-  // Manufacturer + model labels below
+  // Manufacturer + model labels below. FAIL-LOUD: an unselected inverter draws
+  // the full '⚠ INVERTER NOT SELECTED — PV-<KEY>' marker in red (never
+  // truncated, no kW/A row) so it's impossible to miss on the E-1 nameplate.
   const mfgLabel = manufacturer ? `${manufacturer}` : '';
-  const mdlLabel = model ? model.substring(0, 18) : '';
+  const mdlLabel = unselected ? model : (model ? model.substring(0, 18) : '');
   p.push(txt(cx, by2+H2+9,  mfgLabel, {sz: F.sub,   anc: 'middle', italic: true}));
-  p.push(txt(cx, by2+H2+18, mdlLabel, {sz: F.label,  anc: 'middle', bold: true}));
-  p.push(txt(cx, by2+H2+27, acKw > 0 ? `${acKw} kW / ${acAmps}A` : '', {sz: F.tiny, anc: 'middle'}));
+  p.push(txt(cx, by2+H2+18, mdlLabel, {sz: F.label,  anc: 'middle', bold: true, ...(unselected ? {fill: '#C62828'} : {})}));
+  p.push(txt(cx, by2+H2+27, (!unselected && acKw > 0) ? `${acKw} kW / ${acAmps}A` : '', {sz: F.tiny, anc: 'middle'}));
   if (mpptAllocation) {
     p.push(txt(cx, by2+H2+36, `MPPT: ${mpptAllocation}`, {sz: F.tiny, anc: 'middle', fill: '#555'}));
     if (typeof console !== 'undefined') {
@@ -1797,7 +1800,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // For string/optimizer: show module count + string layout + optimizer count
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
-    parts.push(txt(pvCX, pvCY+pvH/2+18, `${md} × ${esc(input.inverterModel)}`, {sz:F.tiny, anc:'middle'}));
+    const _invUn = isInverterUnselectedMarker(input.inverterModel);
+    parts.push(txt(pvCX, pvCY+pvH/2+18,
+      _invUn ? esc(input.inverterModel) : `${md} × ${esc(input.inverterModel)}`,
+      {sz:F.tiny, anc:'middle', ...(_invUn ? {fill:'#C62828', bold:true} : {})}));
   } else {
     const _ns  = input.totalStrings || 1;
     const _pps = input.panelsPerString ?? Math.round(input.totalModules / Math.max(_ns, 1));
@@ -1973,12 +1979,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const tl = (input.ecosystemTopology === 'optimizer' || input.topologyType === 'STRING_WITH_OPTIMIZER' || input.topologyType === 'OPTIMIZER')
       ? 'STRING + OPTIMIZER'
       : 'STRING INVERTER';
+    const _invUnSingle = isInverterUnselectedMarker(input.inverterModel);
     const invBox = renderInverterBox(
       invCX, invCY,
-      input.inverterManufacturer, input.inverterModel,
+      _invUnSingle ? '' : input.inverterManufacturer, input.inverterModel,
       input.acOutputKw, input.acOutputAmps,
       tl, input.mpptAllocation ?? '',
-      4
+      4, _invUnSingle
     );
     parts.push(invBox.svg);
     invRX = invBox.acOutX;  // Use AC output terminal X as the right-side connection point
@@ -3035,12 +3042,18 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     const modules = b.totalModules ?? 0;
     const watts = b.panelWatts ?? 0;
     const panelModel = b.panelModel && b.panelModel !== '—' ? b.panelModel : (watts ? `${watts}W MODULE` : 'PV MODULE');
-    const invMfr = b.inverterManufacturer && b.inverterManufacturer !== '—' ? b.inverterManufacturer : '';
-    // Field-accuracy rule: never print the placeholder word "Inverter" as if it
-    // were a model — an unresolved model degrades to the topology device name.
-    const invModel = b.inverterModel && b.inverterModel !== '—' && b.inverterModel !== 'Inverter'
-      ? b.inverterModel
-      : (g.topo === 'MICRO' ? 'MICROINVERTER' : g.topo === 'OPTIMIZER' ? 'STRING INVERTER + OPTIMIZERS' : 'STRING INVERTER');
+    // FAIL-LOUD (permit integrity): a genuinely unselected inverter renders a
+    // visible red '⚠ INVERTER NOT SELECTED — PV-<KEY>' marker — NEVER a
+    // fabricated model or a silent topology-name substitution (which would let
+    // an incomplete design ship). A resolved model prints as-is.
+    const _invRaw = b.inverterModel;
+    const invUnselected = !_invRaw || _invRaw === '—' || _invRaw === 'Inverter'
+      || isInverterUnselectedMarker(_invRaw);
+    const invUnMfr = invUnselected ? '' : (b.inverterManufacturer && b.inverterManufacturer !== '—' ? b.inverterManufacturer : '');
+    const invMfr = invUnMfr;
+    const invModel = invUnselected
+      ? (isInverterUnselectedMarker(_invRaw) ? _invRaw! : unselectedInverterLabel(b.key))
+      : _invRaw!;
     const laneLabel = b.label ?? `${b.key.toUpperCase()} — ${modules} × ${panelModel}`;
     const laneAcAmps = b.acOutputAmps ?? Math.round(((b.acOutputKw ?? 0) * 1000) / 240);
     const laneOcpd = b.acOCPD ?? necNextStandardOcpd(laneAcAmps * 1.25) ?? 20;
@@ -3059,7 +3072,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     parts.push(txt(g.xPV, laneY+pvH/2+9, esc(panelModel), {sz:F.tiny, anc:'middle', italic:true}));
     if (g.topo === 'MICRO') {
       const md = b.deviceCount ?? modules;
-      parts.push(txt(g.xPV, laneY+pvH/2+18, `${md} × ${esc(invModel)}`, {sz:F.tiny, anc:'middle'}));
+      parts.push(txt(g.xPV, laneY+pvH/2+18,
+        invUnselected ? esc(invModel) : `${md} × ${esc(invModel)}`,
+        {sz:F.tiny, anc:'middle', ...(invUnselected ? {fill:'#C62828', bold:true} : {})}));
     } else {
       const ns = b.totalStrings || 1;
       const pps = b.panelsPerString ?? Math.round(modules / Math.max(ns, 1));
@@ -3097,7 +3112,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     } else if (g.topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
       const invBox = renderInverterBox(g.xMid1, laneY, invMfr, invModel,
         b.acOutputKw ?? 0, laneAcAmps,
-        g.topo === 'OPTIMIZER' ? 'STRING + OPTIMIZER' : 'STRING INVERTER', '', ++calloutN);
+        g.topo === 'OPTIMIZER' ? 'STRING + OPTIMIZER' : 'STRING INVERTER', '', ++calloutN, invUnselected);
       parts.push(invBox.svg);
       parts.push(txt(g.xMid1, laneY + SLD_SYMBOL_MAP['inverter'].height/2 + 45, 'INTEGRATED DC DISCONNECT — NEC 690.15', {sz:F.tiny, anc:'middle', italic:true}));
       {
@@ -3125,7 +3140,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
         parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_DCDS`, pvPt.x, y, dcIn.x, y, run, lines, true, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'), lines));
       }
       const invBox = renderInverterBox(g.xMid2, laneY, invMfr, invModel,
-        b.acOutputKw ?? 0, laneAcAmps, 'STRING INVERTER', '', ++calloutN);
+        b.acOutputKw ?? 0, laneAcAmps, 'STRING INVERTER', '', ++calloutN, invUnselected);
       parts.push(invBox.svg);
       {
         const run = laneRun(b, 'DC_DISCO_TO_INV_RUN');

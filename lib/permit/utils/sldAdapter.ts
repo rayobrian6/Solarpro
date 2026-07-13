@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { renderSLDProfessional, normalizeSourceBranches, type SLDProfessionalInput, type SLDSourceBranch } from '@/lib/sld-professional-renderer';
-import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery } from './helpers';
+import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery, unselectedInverterLabel, isInverterUnselectedMarker } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
@@ -57,7 +57,9 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const panelIsc   = eq.panelIsc || project.panelIsc || 0;
 
   // ── Inverter specs ──
-  const inverterModel = eq.inverterModel !== '—' ? eq.inverterModel : 'Inverter';
+  // FAIL-LOUD (permit integrity): a genuinely unselected inverter shows a red
+  // '⚠ INVERTER NOT SELECTED — PV-<KEY>' marker, never a fabricated 'Inverter'.
+  const inverterModel = eq.inverterModel !== '—' ? eq.inverterModel : unselectedInverterLabel(systemType);
   const inverterMfr   = eq.inverterManufacturer !== '—' ? eq.inverterManufacturer : '';
 
   // ── Electrical values from compliance/project ──
@@ -211,6 +213,16 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const _sources = buildSourceBranchesFromAuthority(_auth, input);
   if (_sources && _sources.length > 1) {
     sldInput.sources = _sources;
+    // On the hybrid multi-lane path the TOP-LEVEL inverter fields are a title-
+    // block summary only — each lane renders (and fail-louds) its OWN inverter.
+    // getEquipmentContext has no single project-wide winner for a hybrid, so it
+    // returns '—' and line ~62 turned that into a per-ROOF "not selected" marker.
+    // That is a FALSE alarm at the summary level (the lanes are the authority),
+    // so neutralize it — but keep any REAL resolved summary model as-is.
+    if (isInverterUnselectedMarker(sldInput.inverterModel)) {
+      sldInput.inverterModel = 'PER ARRAY — SEE SCHEDULE';
+      sldInput.inverterManufacturer = '';
+    }
     // Multi-lane contract: backfeedAmps = authoritative TOTAL = Σ per-lane
     // per-physical-inverter rounded OCPDs + battery bus impact (§1.7). The
     // stored project.backfeedBreakerA is a single-system figure and must not
@@ -295,7 +307,9 @@ export function buildSourceBranchesFromAuthority(
       panelVoc: eq.panelVoc || undefined,
       panelIsc: eq.panelIsc || undefined,
       inverterManufacturer: eq.inverterManufacturer !== '—' ? eq.inverterManufacturer : '',
-      inverterModel: eq.inverterModel !== '—' ? eq.inverterModel : 'Inverter',
+      // FAIL-LOUD: per-sub unselected inverter → red '⚠ INVERTER NOT SELECTED —
+      // PV-<KEY>' marker instead of a fabricated 'Inverter' default.
+      inverterModel: eq.inverterModel !== '—' ? eq.inverterModel : unselectedInverterLabel(sub.key),
       inverterCount: sub.isMicro ? undefined : Math.max(1,
         inverters.filter(inv => (isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey : primaryKey) === sub.key).length),
       acKwPerDevice: eq.inverterAcOutputKw || undefined,
@@ -366,7 +380,8 @@ export function buildSourceBranchesFromComputedMulti(
       panelVoc: cs.panelSpec?.panelVoc,
       panelIsc: cs.panelSpec?.panelIsc,
       inverterManufacturer: cs.inverterSpec?.manufacturer ?? '',
-      inverterModel: cs.inverterSpec?.model ?? 'Inverter',
+      // FAIL-LOUD: computed sub with no inverter spec → red unselected marker.
+      inverterModel: cs.inverterSpec?.model ?? unselectedInverterLabel(key),
       acKwPerDevice: cs.isMicro && cs.microDeviceCount > 0
         ? Math.round((cs.totalAcKw / cs.microDeviceCount) * 1000) / 1000
         : cs.inverterSpec?.acOutput?.ratedKw,
