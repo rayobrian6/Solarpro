@@ -116,6 +116,9 @@ export interface SheetComposition {
   dataRows: DataRow[];
   /** callout schedule items */
   callouts: CalloutItem[];
+  /** optional GENERAL NOTES rendered below the callout schedule to fill the
+   *  data column (kept out of the callout list so bubbles stay drawing-linked) */
+  generalNotes?: string[];
   /** validation: what must be present */
   requires: string[];
 }
@@ -617,6 +620,17 @@ function groundComposition(
     dataTitle:      isPlan ? 'ARRAY DATA' : 'STRUCTURAL DATA',
     dataRows,
     callouts,
+    generalNotes:   isPlan
+      ? [
+          'Array is ground-mounted on a driven-steel-pile foundation — no concrete unless refusal cannot be met; field-verify refusal depth.',
+          `Module rows at ${d.tiltDeg}° fixed tilt, azimuth ${d.azimuthDeg}° (${azLabel(d.azimuthDeg)}); verify inter-row shading at winter solstice for the ${d.rowSpacingFt}' O.C. spacing.`,
+          `Maintain ${d.setbackFt}' minimum setback from all property lines and the ${d.groundClearIn}" minimum ground clearance below the lowest module edge.`,
+          'Bond all module frames, rails and pile caps to the equipment grounding conductor per NEC 690.43 / 250.—see PV-3 for the grounding schedule.',
+          'Racking, clamps and fasteners installed per the manufacturer\'s ICC-ES report and stamped structural details; torque to spec.',
+          `Design loads: ${d.windSpeedMph} MPH Vult wind (ASCE 7-22)${d.snowPsf > 0 ? `, ${d.snowPsf} PSF ground snow` : ''}; foundation embedment per the project geotechnical report.`,
+          'All dimensions are approximate / NTS — field-verify pile locations, row spacing and grades prior to installation.',
+        ]
+      : undefined,
     requires:       isPlan
       ? ['ground', 'ground.arrays']
       : ['ground', 'ground.arrays', 'ground.arrays[0].pileDepthM'],

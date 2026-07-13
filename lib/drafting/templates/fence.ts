@@ -356,8 +356,8 @@ export function drawFencePlan(
     const clrPx   = clrFt * vft;
     const panelPx = panelHtFt * vft;
     const embedPx = embedFt * vft;
-    const bayPx   = Math.min(postSpFt * vft, secW * 0.34);
-    const cx      = secX + secW * 0.50;
+    const bayPx   = Math.min(postSpFt * vft, secW * 0.30);
+    const cx      = secX + secW * 0.34;
     const leftPost = cx - bayPx / 2, rightPost = cx + bayPx / 2;
     const postTopY = grade - clrPx - panelPx - 8;
     const panTop   = grade - clrPx - panelPx;
@@ -392,7 +392,38 @@ export function drawFencePlan(
     els.push(`<line x1="${leftPost.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${leftPost.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#036" stroke-width="0.8"/>`);
     els.push(`<line x1="${rightPost.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${rightPost.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#036" stroke-width="0.8"/>`);
     els.push(drawText(cx, dy - 3, `${postSpFt.toFixed(0)}' O.C.`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#036' }));
-    els.push(drawText(secX + secW / 2, secY + secH - 1,
+
+    // Left: overall post-length dimension (above-grade + embed), fills left third
+    const totalPostFt = (grade - postTopY) / vft + embedFt;
+    const xL = leftPost - 34;
+    els.push(`<line x1="${xL.toFixed(1)}" y1="${postTopY.toFixed(1)}" x2="${xL.toFixed(1)}" y2="${(grade + embedPx).toFixed(1)}" stroke="#333" stroke-width="0.8"/>`);
+    els.push(`<line x1="${(xL - 4).toFixed(1)}" y1="${postTopY.toFixed(1)}" x2="${(xL + 4).toFixed(1)}" y2="${postTopY.toFixed(1)}" stroke="#333" stroke-width="0.8"/>`);
+    els.push(`<line x1="${(xL - 4).toFixed(1)}" y1="${(grade + embedPx).toFixed(1)}" x2="${(xL + 4).toFixed(1)}" y2="${(grade + embedPx).toFixed(1)}" stroke="#333" stroke-width="0.8"/>`);
+    els.push(drawText(xL - 6, (postTopY + grade + embedPx) / 2, `${totalPostFt.toFixed(1)}' POST L.`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#333', rotate: -90 }));
+
+    // Right: FENCE SECTION NOTES panel, fills the right third
+    const npX = secX + secW * 0.54;
+    const npW = secX + secW - 16 - npX;
+    const npTop = innerTop + 4;
+    els.push(drawRectFilled(npX, npTop, npW, 13, '#1a2332', '#1a2332', 0));
+    els.push(drawText(npX + 6, npTop + 9.3, 'FENCE SECTION NOTES', { anchor: 'start', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+    const secNotes = [
+      `Modules mounted 90° VERTICAL, side-by-side — ${panelHtFt.toFixed(1)}' panel height above grade.`,
+      `${rails}-rail SolFence vertical section system; posts @ ${postSpFt.toFixed(0)}' O.C.`,
+      `Foundation: 2-3/8" dia. driven steel pile, ${embedFt.toFixed(1)}' min embedment — NO concrete.`,
+      'Field-verify post size + driven depth to refusal per geotech.',
+      'Bond all posts, rails + frames to EGC — min #6 AWG Cu (NEC 250.166).',
+      'Wind design per ASCE 7-22; verify exposure category on site.',
+      'All dimensions NTS — verify in field.',
+    ];
+    let sny = npTop + 20;
+    secNotes.forEach((n, i) => {
+      els.push(drawText(npX + 5, sny + 6, `${i + 1}.`, { anchor: 'start', fontSize: 6.3, fontWeight: 'bold', fill: '#1a2332' }));
+      els.push(drawText(npX + 15, sny + 6, n, { anchor: 'start', fontSize: 6.3, fill: '#333' }));
+      sny += 13;
+    });
+
+    els.push(drawText(secX + secW * 0.34, secY + secH - 1,
       'DRIVEN STEEL POST — NO CONCRETE · MODULES 90° VERTICAL · FIELD-VERIFY EMBEDMENT', {
         anchor: 'middle', fontSize: 6.3, fill: '#888', italic: true }));
   }

@@ -646,6 +646,16 @@ export function composeDrawPage(
     `</div>`
   ).join('');
 
+  // ── General notes (fills the data column below the callout schedule) ────────
+  const generalNotesHtml = (comp.generalNotes && comp.generalNotes.length > 0)
+    ? `<div class="draw-zone-hdr" style="flex-shrink:0;margin-top:6px;">GENERAL NOTES</div>
+       <div style="padding:3px 5px;font-size:7px;line-height:1.5;">
+         ${comp.generalNotes.map((n, i) =>
+           `<div style="display:flex;gap:5px;margin-bottom:2px;"><span style="font-weight:700;">${i + 1}.</span><span>${escapeH(n)}</span></div>`
+         ).join('')}
+       </div>`
+    : '';
+
   // ── Secondary view strip (bottom of draw zone) ─────────────────────────────
   // Use secondaryHeader from composition (system-specific label)
   const secHeader = escapeH(comp.secondaryHeader ?? 'SECONDARY VIEW');
@@ -686,6 +696,7 @@ export function composeDrawPage(
             <div style="padding:0;font-size:7px;overflow:auto;">
               ${calloutsHtml}
             </div>
+            ${generalNotesHtml}
           </div>
         </div>
       </div>
