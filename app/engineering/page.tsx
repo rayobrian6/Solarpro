@@ -4146,7 +4146,7 @@ function EngineeringPageInner() {
   // Equipment choices are honored per key: subSystems[key] map entry first,
   // then the degenerate fleet's own primary inverter/panel (Ray's IQ8+ carries
   // over to all three subs), then per-sub brand defaults.
-  const rebuildFleetsPerSub = (trigger: 'auto' | 'manual'): boolean => {
+  const rebuildFleetsPerSub = (trigger: 'auto' | 'manual', forceBrand?: string): boolean => {
     if (!subSystemCounts.isHybrid || subSystemCounts.present.length === 0) return false;
     const fb = toSubSystemKey(config.systemType);
     const part = partitionFleet(config.inverters as any[], fb);
@@ -4158,11 +4158,23 @@ function EngineeringPageInner() {
     const seeded: SeededSubFleet[] = [];
     for (const key of subSystemCounts.present) {
       const entry = mapNow[key];
-      const built = buildSubFleetForKey(key, subSystemCounts[key], {
-        inverterId: entry?.inverterId ?? degPrimary?.inverterId,
+      // forceBrand (ecosystem pick) → apply the picked brand to this sub and
+      // ignore its existing inverter so the brand's sub-appropriate inverter is
+      // chosen. No forceBrand (self-heal / manual rebuild) → keep the sub's own
+      // chosen equipment.
+      let built = buildSubFleetForKey(key, subSystemCounts[key], {
+        inverterId: forceBrand ? undefined : (entry?.inverterId ?? degPrimary?.inverterId),
         panelId:    entry?.panelId ?? degPrimary?.strings?.[0]?.panelId,
-        brand:      entry?.ecosystemBrand,
+        brand:      forceBrand ?? entry?.ecosystemBrand,
       });
+      // If the picked ecosystem can't serve this sub (e.g. EcoFlow on a roof
+      // micro sub), fall back to the sub's sensible default brand — never leave
+      // a present sub broken/empty just because the ecosystem doesn't cover it.
+      if (!built && forceBrand) {
+        built = buildSubFleetForKey(key, subSystemCounts[key], {
+          panelId: entry?.panelId ?? degPrimary?.strings?.[0]?.panelId,
+        });
+      }
       if (built) seeded.push(built);
     }
     if (seeded.length === 0) return false;
@@ -7104,10 +7116,22 @@ function EngineeringPageInner() {
       logDecision('Auto Fix', 'Enabled Rapid Shutdown (NEC 690.12 required for rooftop arrays)', 'auto');
     }
 
+    // Wave 6 — HYBRID: the whole-project feasibility fix below (single totalPanels
+    // + config.inverters[0], flat rebuild of every inverter) collapses the per-sub
+    // fleets. Auto-Fix heals a hybrid per sub-system instead — each sub re-sized to
+    // its OWN layout count, equipment choices preserved.
+    if (subSystemCounts.isHybrid) {
+      if (fleetDiag.suspect) {
+        rebuildFleetsPerSub('manual');
+        logDecision('Auto-Fix', 'Hybrid — rebuilt fleets per sub-system (' +
+          subSystemCounts.present.map(k => `${k}=${subSystemCounts[k]}`).join(', ') + ')', 'auto');
+      }
+    }
     // ── Phase 13.7: Feasibility-driven electrical string fix ─────────────────
     // Only attempt for non-micro topologies. Micro systems do not have
-    // string configurations to fix via the feasibility engine.
-    if (!cs.isMicro) {
+    // string configurations to fix via the feasibility engine. (Hybrids handled
+    // per sub-system just above — excluded here to avoid a whole-project rebuild.)
+    if (!cs.isMicro && !subSystemCounts.isHybrid) {
       // Gather panel electrical specs from the current configuration.
       const fixFirstStr = config.inverters[0]?.strings[0];
       const fixPanelData = fixFirstStr?.panelId
@@ -10010,6 +10034,33 @@ function EngineeringPageInner() {
                           wouldClobber.push(`battery (currently: ${config.batteryId})`);
                         }
                         const applyEcosystemAfterConfirm = () => {
+                          // ── Wave 6 — HYBRID: apply the ecosystem PER SUB-SYSTEM ──────────
+                          // The whole-project path below rebuilds inverters[0] and fires the
+                          // whole-project sizing recommendation, which on a hybrid stamps the
+                          // entire array onto ONE sub (ground=81, roof dropped, ghost 98).
+                          // Instead rebuild every present sub's fleet with the picked brand,
+                          // each scoped to its OWN layout count (roof-appropriate default when
+                          // the brand can't serve a sub). Battery is POI-level → still applied.
+                          if (subSystemCounts.isHybrid) {
+                            updateConfig({
+                              ecosystemBrand: payload.brand,
+                              ...(payload.selections.batteryId && batteryEnabled
+                                ? {
+                                    batteryId: updates.batteryId, batteryCount: updates.batteryCount,
+                                    batteryBrand: updates.batteryBrand, batteryModel: updates.batteryModel,
+                                    batteryKwh: updates.batteryKwh,
+                                  }
+                                : {}),
+                            } as any);
+                            const ok = rebuildFleetsPerSub('manual', payload.brand);
+                            setAutoLoadBanner(
+                              ok
+                                ? `✓ Applied ${payload.brand.toUpperCase()} ecosystem across ${subSystemCounts.present.length} sub-systems — each fleet sized to its layout. Manual per-sub dropdowns remain editable below.`
+                                : `✓ Applied ${payload.brand.toUpperCase()} ecosystem. Manual dropdowns remain editable below.`
+                            );
+                            setTimeout(() => setAutoLoadBanner(null), 6000);
+                            return;
+                          }
                           // Lock to prevent auto-sizing engine from overwriting ecosystem selection
                           updates.userHasEditedInverters = true;
                           // v61.6 Phase 5: After ecosystem apply changes inverterId, the existing
@@ -10087,8 +10138,13 @@ function EngineeringPageInner() {
                       />
                     ) : null}
 
-                    {/* Sizing Recommendation */}
-                    {sizingRecommendation && !sizingDismissed ? (
+                    {/* Sizing Recommendation — WHOLE-PROJECT sizing engine. Hidden
+                        for HYBRIDS: a whole-project recommendation would propose
+                        collapsing the per-sub fleets into one, and applying it
+                        re-corrupts the design (ground=81, roof dropped). Hybrid
+                        fleet mismatches surface via the per-sub "Rebuild fleets
+                        per sub-system" action in the Inverters & Strings header. */}
+                    {sizingRecommendation && !sizingDismissed && !subSystemCounts.isHybrid ? (
                       <SizingRecommendation
                         sizing={sizingRecommendation}
                         current={sizingCurrentSnapshot}
@@ -10119,6 +10175,9 @@ function EngineeringPageInner() {
                         complianceStatus={compliance.overallStatus ?? rulesResult?.overallStatus ?? null}
                         sizingRecommendation={sizingRecommendation}
                         onApplySizingFix={(rec) => {
+                          // Hybrids never apply a whole-project sizing fix (it would
+                          // collapse the per-sub fleets); heal per sub-system instead.
+                          if (subSystemCounts.isHybrid) { rebuildFleetsPerSub('manual'); return; }
                           applySizingRecommendation(rec);
                         }}
                         selectedLayoutCandidate={sizingRecommendation?.selectedLayoutCandidate ?? null}
