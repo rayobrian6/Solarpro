@@ -155,25 +155,34 @@ export function drawGroundArray(
   // array carries no panels (raw layout.groundArrays without a CAD solve).
   type Rect = { x: number; y: number; w: number; h: number };
   function panelRectsFor(arr: any): Rect[] {
+    const rowsN = arr.rowCount ?? arr.dimensions?.rowCount ?? 0;
+    const pprN  = arr.panelsPerRow ?? arr.dimensions?.panelsPerRow ?? 0;
+    // PREFER a normalized rowCount × panelsPerRow grid — the reliable values the
+    // ARRAY SCHEDULE + sheet header already state ("2 ROWS × 8"). Real per-panel
+    // CAD coords for a ground array can be a staggered/diagonal sequence (NOT a
+    // clean rectangle); drawing those raw produced a garbage cascade + a bogus
+    // "16 ROWS × 1" badge. The plan view is a schematic "field-verify" layout, so
+    // a clean grid is both correct and consistent with the schedule/header.
+    if (rowsN > 0 && pprN > 0) {
+      const ox    = arr._cadOriginX ?? arr.originX ?? 0;
+      const oy    = arr._cadOriginY ?? arr.originY ?? 0;
+      const rowSp = arr.rowSpacingM ?? Math.max(pHmDefault * 1.15, 1.6);
+      const colSp = pWmDefault + 0.03;
+      const rects: Rect[] = [];
+      for (let r = 0; r < rowsN; r++)
+        for (let c = 0; c < pprN; c++)
+          rects.push({ x: ox + c * colSp, y: oy + r * rowSp, w: pWmDefault, h: pHmDefault });
+      return rects;
+    }
+    // Fallback: raw panels only when no declared grid is available.
     const panels: any[] = arr?._cadPanels ?? arr?.panels
       ?? (arr?._cadRows ?? arr?.rows ?? []).flatMap((r: any) => r?.panels ?? []);
     if (panels.length > 0) {
       return panels.map((p: any) => ({
-        x: p.x, y: p.y,
-        w: p.widthM  ?? pWmDefault,
-        h: p.heightM ?? pHmDefault,
+        x: p.x, y: p.y, w: p.widthM ?? pWmDefault, h: p.heightM ?? pHmDefault,
       }));
     }
-    const ox    = arr._cadOriginX ?? arr.originX ?? 0;
-    const oy    = arr._cadOriginY ?? arr.originY ?? 0;
-    const rows  = arr.rowCount ?? arr.dimensions?.rowCount ?? 1;
-    const ppr   = arr.panelsPerRow ?? arr.dimensions?.panelsPerRow ?? 1;
-    const rowSp = arr.rowSpacingM ?? 2.5;
-    const rects: Rect[] = [];
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < ppr; c++)
-        rects.push({ x: ox + c * (pWmDefault + 0.02), y: oy + r * rowSp, w: pWmDefault, h: pHmDefault });
-    return rects;
+    return [{ x: 0, y: 0, w: pWmDefault, h: pHmDefault }];
   }
 
   const arrayRects: Rect[][] = arrays.map(panelRectsFor);
