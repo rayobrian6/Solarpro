@@ -224,11 +224,18 @@ export async function buildOperatorReadiness(operator: {
       blockers.push('Execution is flagged enabled without a bounded window (legacy/indefinite) — this fails closed. Temporarily enable execution to get a valid window.');
     }
   }
-  if (!allowedEnvs.includes(environment)) {
-    blockers.push(`This environment ("${environment}") is not in MIGRATION_RUN_ALLOWED_ENVS. Execution is blocked here (dry-run still allowed).`);
+  // The execution allowlist + production two-key are the ACTUAL-EXECUTION gate.
+  // They do NOT gate bootstrap or baseline governance, so only surface them once
+  // the operator has reached the execution stage (baseline verified / execution
+  // enabled). Presenting them earlier made it look like an execution-only env
+  // gate was blocking bootstrap, which it must not.
+  const atExecutionStage =
+    lifecycleState === 'BASELINE_VERIFIED' || lifecycleState === 'EXECUTION_ENABLED';
+  if (atExecutionStage && !allowedEnvs.includes(environment)) {
+    blockers.push(`This environment ("${environment}") is not in MIGRATION_RUN_ALLOWED_ENVS. Migration EXECUTION is blocked here (bootstrap, baseline, and dry-run are unaffected).`);
   }
-  if (isProduction && process.env.MIGRATION_ALLOW_PRODUCTION_EXECUTION !== 'true') {
-    blockers.push('Production execution is disabled by default (MIGRATION_ALLOW_PRODUCTION_EXECUTION is not "true").');
+  if (atExecutionStage && isProduction && process.env.MIGRATION_ALLOW_PRODUCTION_EXECUTION !== 'true') {
+    blockers.push('Production migration EXECUTION is disabled by default (MIGRATION_ALLOW_PRODUCTION_EXECUTION is not "true"). This gates running migrations only — not bootstrap or baseline.');
   }
 
   // Next action: the first thing standing between the operator and a run.

@@ -294,8 +294,19 @@ export function authorizeMigration(params: {
     }
   }
 
-  // Environment checks only apply to mutating actions (non-dry-run execute/bootstrap).
-  if (!dryRun && (action === 'execute' || action === 'bootstrap')) {
+  // Environment allowlist + production two-key are the ACTUAL-EXECUTION gate.
+  // They apply ONLY to `execute` (running numbered migrations, and enabling the
+  // bounded execution window that permits a run). They MUST NOT apply to the
+  // `bootstrap` governance action — bootstrap creates the ledger tables and
+  // records/verifies the historical baseline; it runs no numbered SQL and never
+  // executes a migration. Gating governance initialization behind an
+  // execution-only allowlist made a fresh (e.g. production) environment
+  // impossible to bootstrap — a governance dead-end. Bootstrap's own bar
+  // (super_admin + fresh TOTP + reason + typed production confirmation + audit +
+  // idempotency) is enforced by the route branch, not here. (MIGRATION-GOV: the
+  // execution gate is scoped to execution; bootstrap is not weakened — it simply
+  // is not an execution.)
+  if (!dryRun && action === 'execute') {
     const allowedEnvs = getAllowedEnvs();
     if (!allowedEnvs.includes(environment)) {
       return {
