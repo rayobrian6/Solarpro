@@ -830,10 +830,12 @@ describe('Phase 1A: Runner execution model', () => {
   });
 
   it('verifyFreshTotp does not persist the TOTP code itself (only hashed time-step)', () => {
-    // The recordTotpUse function hashes (user_id, time_step), not the code.
+    // Matched-step computation lives in verifyTotpStepValidity (validity-only,
+    // no ledger write); verifyFreshTotp records the accepted time-step, never
+    // the code. The code is compared in-memory only and is never passed to
+    // recordTotpUse.
     expect(runnerSrc).toContain('matchedStep');
-    // The code is compared in-memory only; it should not be passed to recordTotpUse.
-    expect(runnerSrc).toMatch(/recordTotpUse\(adminUserId,\s*matchedStep/);
+    expect(runnerSrc).toMatch(/recordTotpUse\(adminUserId,\s*validity\.timeStep/);
   });
 });
 
@@ -2470,36 +2472,40 @@ describe('Phase 1A.2: TOTP exact matched-step recording (MIGRATION-GOV-17)', () 
 
   // ── Exact matched-step recording ──
 
-  it('verifyFreshTotp computes matchedStep from the EXACT stepTime that matched', () => {
-    // The code must compute matchedStep from the stepTime variable (the
-    // time that produced the matching code), NOT from the current server time.
-    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
-    expect(fnSection).toContain('matchedStep = Math.floor(stepTime / 1000 / TOTP_PERIOD_SECONDS)');
+  // Matched-step COMPUTATION now lives in verifyTotpStepValidity (validity-only,
+  // no ledger write). verifyFreshTotp delegates to it, then records the exact
+  // accepted step. Behavior is unchanged and additionally covered by the
+  // real-Postgres suite tests/migration-bootstrap-totp-replay-postgres.test.ts.
+  const validitySection = runnerSrc.split('export async function verifyTotpStepValidity')[1] ?? '';
+
+  it('verifyTotpStepValidity computes matchedStep from the EXACT stepTime that matched', () => {
+    // matchedStep must come from the stepTime that produced the matching code,
+    // NOT from the current server time.
+    expect(validitySection).toContain('matchedStep = Math.floor(stepTime / 1000 / TOTP_PERIOD_SECONDS)');
   });
 
-  it('verifyFreshTotp iterates the ±1 window (delta 0, ±1)', () => {
-    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
-    expect(fnSection).toContain('TOTP_WINDOW_STEPS');
-    expect(fnSection).toContain('delta === 0');
-    expect(fnSection).toContain('[-1, 1]');
+  it('verifyTotpStepValidity iterates the ±1 window (delta 0, ±1)', () => {
+    expect(validitySection).toContain('TOTP_WINDOW_STEPS');
+    expect(validitySection).toContain('delta === 0');
+    expect(validitySection).toContain('[-1, 1]');
   });
 
-  it('verifyFreshTotp records the matchedStep (not current server step) in recordTotpUse', () => {
-    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
-    // recordTotpUse must be called with matchedStep, not a separate current-step variable.
-    expect(fnSection).toContain('recordTotpUse(adminUserId, matchedStep, executionId)');
+  it('verifyFreshTotp records the accepted matched-step (not current server step) in recordTotpUse', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1]?.split('export async function verifyTotpStepValidity')[0] ?? '';
+    // recordTotpUse is called with the accepted validity.timeStep — the exact
+    // matched step returned by verifyTotpStepValidity — not a current-step var.
+    expect(fnSection).toContain('recordTotpUse(adminUserId, validity.timeStep, executionId)');
   });
 
-  it('verifyFreshTotp returns matchedStep in the TOTP_REPLAY denial result', () => {
-    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
+  it('verifyFreshTotp returns the accepted step in the TOTP_REPLAY denial result', () => {
+    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1]?.split('export async function verifyTotpStepValidity')[0] ?? '';
     const replaySection = fnSection.split('TOTP_REPLAY')[1] ?? '';
-    expect(replaySection).toContain('timeStep: matchedStep');
+    expect(replaySection).toContain('timeStep: validity.timeStep');
   });
 
-  it('verifyFreshTotp returns matchedStep in the verified=true result', () => {
-    const fnSection = runnerSrc.split('export async function verifyFreshTotp')[1] ?? '';
-    // After successful verification, timeStep should be the matchedStep.
-    const verifiedSection = fnSection.split('verified: true')[1] ?? '';
+  it('verifyTotpStepValidity returns matchedStep in the verified=true result', () => {
+    // The accepted step returned to callers IS the matched step.
+    const verifiedSection = validitySection.split('verified: true')[1] ?? '';
     expect(verifiedSection).toContain('timeStep: matchedStep');
   });
 

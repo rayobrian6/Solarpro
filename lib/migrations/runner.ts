@@ -409,31 +409,69 @@ export async function verifyFreshTotp(
   code: string,
   executionId: string | null = null,
 ): Promise<VerifyFreshTotpResult> {
+  // Phase 1: pure validity (MFA enrolled + code matches a step in the window).
+  const validity = await verifyTotpStepValidity(adminUserId, code);
+  if (!validity.verified || validity.timeStep === null) {
+    return { verified: false, deniedReason: validity.deniedReason, timeStep: validity.timeStep };
+  }
+
+  // Phase 2: legacy (user_id, time_step) single-use replay ledger. Retained for
+  // the execution/activation paths and their tests. The corrected bootstrap
+  // path does NOT use this — it reserves an idempotent, action-scoped,
+  // release-on-failure record via lib/migrations/governedTotpAction.ts so that
+  // (a) duplicate concurrent requests collapse instead of colliding, and (b) a
+  // failed attempt never burns the operator's next code.
+  const firstUse = await recordTotpUse(adminUserId, validity.timeStep, executionId);
+  if (!firstUse) {
+    return { verified: false, deniedReason: 'TOTP_REPLAY', timeStep: validity.timeStep };
+  }
+
+  return { verified: true, deniedReason: null, timeStep: validity.timeStep };
+}
+
+/**
+ * Result of a PURE TOTP-code validity check — MFA enrollment + the accepted
+ * time-step — WITHOUT touching any replay ledger. Splitting validity from
+ * consumption lets a caller authorize (env allowlist, role) BEFORE it commits
+ * the single-use record, so a code is never burned by a request that is
+ * rejected before it mutates anything.
+ */
+export interface TotpStepValidity {
+  verified: boolean;
+  deniedReason: 'MFA_NOT_ENABLED' | 'TOTP_INVALID' | null;
+  /** The accepted time-step (floor(ms/1000/30)) — this is the exact step a
+   *  caller must record to the replay ledger. Null when not verified. */
+  timeStep: number | null;
+}
+
+/**
+ * Verify a TOTP code's validity for a human admin — FAIL-CLOSED — and return
+ * the accepted time-step. This performs NO ledger write: it neither consumes
+ * nor replays. It uses the frozen lib/mfa.ts crypto exclusively.
+ *
+ * Window/clock: matches lib/mfa.ts — the current server-clock step (Date.now())
+ * plus ±TOTP_WINDOW_STEPS (one 30s step) of skew tolerance, scanned from the
+ * current step outward so the freshest matching step is the one returned (and
+ * therefore the one written to the replay ledger).
+ */
+export async function verifyTotpStepValidity(
+  adminUserId: string,
+  code: string,
+): Promise<TotpStepValidity> {
   // Resolve enrollment from the CANONICAL account record (users.mfa_enabled +
   // users.mfa_secret_encrypted) — the exact source the Settings Security page
-  // and app/api/auth/mfa/verify use. Previously this read a non-canonical
-  // `admin_users.totp_secret_encrypted` table that no migration creates, so in
-  // production it always resolved to "not enrolled" and blocked every account.
+  // and app/api/auth/mfa/verify use.
   const enrollment = await getMfaEnrollment(adminUserId);
 
-  // FAIL-CLOSED: If the account is not MFA-enrolled, DENY migration execution.
-  // A human operator who has not enrolled in MFA cannot execute schema
-  // migrations. This was previously a fail-open waiver (return true), which
-  // allowed migrations without MFA — a security regression (MIGRATION-GOV-05).
+  // FAIL-CLOSED: an operator who has not enrolled in MFA cannot run migrations.
   if (!enrollment.enrolled || !enrollment.secretEncrypted) {
-    return {
-      verified: false,
-      deniedReason: 'MFA_NOT_ENABLED',
-      timeStep: null,
-    };
+    return { verified: false, deniedReason: 'MFA_NOT_ENABLED', timeStep: null };
   }
 
   const secret = decryptTOTPSecret(enrollment.secretEncrypted);
   const now = Date.now();
 
-  // Find the matching time-step by checking the ±1 window (same logic as
-  // verifyTOTPCode, but we also need the matched step for replay tracking).
-  // We iterate from the current step outward to prefer the freshest match.
+  // Find the matching time-step within the ±1 window, preferring the freshest.
   let matchedStep: number | null = null;
   for (let delta = 0; delta <= TOTP_WINDOW_STEPS; delta++) {
     for (const sign of delta === 0 ? [1] : [-1, 1]) {
@@ -447,35 +485,13 @@ export async function verifyFreshTotp(
     if (matchedStep !== null) break;
   }
 
-  // If no matching code in the window, the code is invalid.
-  // We do NOT record the time-step — a failed auth must not consume a valid
-  // code. The user can retry.
   if (matchedStep === null) {
-    return {
-      verified: false,
-      deniedReason: 'TOTP_INVALID',
-      timeStep: null,
-    };
+    // Invalid code (wrong code or skew beyond the window). No ledger write, so
+    // a failed auth never consumes a still-valid code.
+    return { verified: false, deniedReason: 'TOTP_INVALID', timeStep: null };
   }
 
-  // TOTP REPLAY PREVENTION: Record this (user_id, time_step) pair. If it was
-  // already used (ON CONFLICT DO NOTHING returns no rows), this is a replay
-  // — the same 30-second code was already consumed for a prior migration
-  // mutation. Reject it. The user must wait for the next time-step.
-  const firstUse = await recordTotpUse(adminUserId, matchedStep, executionId);
-  if (!firstUse) {
-    return {
-      verified: false,
-      deniedReason: 'TOTP_REPLAY',
-      timeStep: matchedStep,
-    };
-  }
-
-  return {
-    verified: true,
-    deniedReason: null,
-    timeStep: matchedStep,
-  };
+  return { verified: true, deniedReason: null, timeStep: matchedStep };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

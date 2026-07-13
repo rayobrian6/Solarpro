@@ -17,6 +17,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Json = Record<string, any>;
 
+// A mutation runner receives the confirmed TOTP/reason plus a per-submission
+// idempotency key. Duplicate concurrent requests that share this key collapse
+// to one server-side mutation and one idempotent response.
+type MutationRunParams = { totpCode: string; reason: string; productionConfirmation?: string; idempotencyKey: string };
+
 const API = '/api/admin/migrations';
 
 async function call(action: string, body: Json = {}): Promise<Json> {
@@ -44,10 +49,14 @@ export default function MigrationConsolePage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   // Mutation modal (TOTP + reason + optional production confirmation).
-  const [modal, setModal] = useState<{ title: string; run: (p: { totpCode: string; reason: string; productionConfirmation?: string }) => Promise<void>; needsProd: boolean } | null>(null);
+  const [modal, setModal] = useState<{ title: string; run: (p: MutationRunParams) => Promise<void>; needsProd: boolean } | null>(null);
   const [totp, setTotp] = useState('');
   const [reason, setReason] = useState('');
   const [prodConfirm, setProdConfirm] = useState('');
+  // Synchronous in-flight guard. State updates (setBusy) are async and only
+  // disable the button on the NEXT render, leaving a window where a fast double
+  // click fires the same mutation twice. This ref blocks re-entry immediately.
+  const submittingRef = useRef(false);
 
   // Baseline evidence + reviewed batch.
   const [evidence, setEvidence] = useState<Json | null>(null);
@@ -97,16 +106,26 @@ export default function MigrationConsolePage() {
   const submitModal = useCallback(async () => {
     if (!modal) return;
     if (modal.needsProd && prodConfirm !== 'production') return;
+    // Immediate, synchronous re-entry guard (see submittingRef).
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    // One idempotency key per confirmed submission — stable across any
+    // accidental duplicate send of THIS click.
+    const idempotencyKey =
+      (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+        ? crypto.randomUUID()
+        : `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     setBusy('mutation');
     try {
-      await modal.run({ totpCode: totp.trim(), reason: reason.trim(), productionConfirmation: modal.needsProd ? prodConfirm.trim() : undefined });
+      await modal.run({ totpCode: totp.trim(), reason: reason.trim(), productionConfirmation: modal.needsProd ? prodConfirm.trim() : undefined, idempotencyKey });
     } finally {
+      submittingRef.current = false;
       setBusy(null); setModal(null); setTotp(''); setReason(''); setProdConfirm('');
       await refresh();
     }
   }, [modal, totp, reason, prodConfirm, refresh]);
 
-  const openMutation = (title: string, needsProd: boolean, runner: (p: { totpCode: string; reason: string; productionConfirmation?: string }) => Promise<void>) =>
+  const openMutation = (title: string, needsProd: boolean, runner: (p: MutationRunParams) => Promise<void>) =>
     setModal({ title, needsProd, run: runner });
 
   // ── Evidence + baseline batch ──
@@ -133,9 +152,9 @@ export default function MigrationConsolePage() {
 
   const recordBatch = () => {
     if (!batchDigest) return;
-    openMutation('Record baseline batch', !!readiness?.isProduction, async ({ totpCode, reason, productionConfirmation }) => {
+    openMutation('Record baseline batch', !!readiness?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
       const selected = Object.entries(reviews).filter(([, v]) => v.selected).map(([identifier, v]) => ({ identifier, status: v.status, notes: v.notes }));
-      const r = await call('record-baseline-batch', { reviews: selected, confirmedDigest: batchDigest, reason, totpCode, productionConfirmation });
+      const r = await call('record-baseline-batch', { reviews: selected, confirmedDigest: batchDigest, reason, totpCode, productionConfirmation, idempotencyKey });
       logMsg(`Record baseline batch: ${r.success ? `recorded ${r.recorded}` : r.error}`, !!r.success);
     });
   };
@@ -207,9 +226,10 @@ export default function MigrationConsolePage() {
         {/* Bootstrap */}
         {(!rd?.ledgerExists || rd?.lifecycleState === 'UNBOOTSTRAPPED') && (
           <Card title="1 · Bootstrap governance" desc="Create the ledger tables. Idempotent. No migration SQL runs.">
-            <button disabled={!!busy} onClick={() => openMutation('Bootstrap migration governance', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation }) => {
-              const r = await call('bootstrap', { totpCode, reason, productionConfirmation });
-              logMsg(`Bootstrap: ${r.success ? (r.alreadyExisted ? 'already existed' : 'created') : r.error}`, !!r.success);
+            <button disabled={!!busy} onClick={() => openMutation('Bootstrap migration governance', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
+              const r = await call('bootstrap', { totpCode, reason, productionConfirmation, idempotencyKey });
+              const cid = r.correlationId ? ` [${r.correlationId}]` : '';
+              logMsg(`Bootstrap: ${r.success ? (r.alreadyExisted ? 'already existed' : 'created') : r.error}${cid}`, !!r.success);
             })} className={btn}>Bootstrap…</button>
           </Card>
         )}
@@ -240,13 +260,13 @@ export default function MigrationConsolePage() {
               <span className="text-sm">Activation: <b className={rd?.activation?.active ? 'text-emerald-300' : 'text-slate-400'}>{activationLabel}</b></span>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
-              <button disabled={!!busy} onClick={() => openMutation('Temporarily enable execution', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation }) => {
-                const r = await call('enable-execution-temporary', { totpCode, reason, productionConfirmation, durationMinutes: 10 });
+              <button disabled={!!busy} onClick={() => openMutation('Temporarily enable execution', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
+                const r = await call('enable-execution-temporary', { totpCode, reason, productionConfirmation, durationMinutes: 10, idempotencyKey });
                 logMsg(`Enable execution: ${r.success ? `${r.grantedMinutes}m window` : r.error}`, !!r.success);
               })} className={btn}>Enable 10 min…</button>
               {rd?.activation?.active && (
-                <button disabled={!!busy} onClick={() => openMutation('Disable execution', false, async ({ totpCode, reason }) => {
-                  const r = await call('disable-execution', { totpCode, reason });
+                <button disabled={!!busy} onClick={() => openMutation('Disable execution', false, async ({ totpCode, reason, idempotencyKey }) => {
+                  const r = await call('disable-execution', { totpCode, reason, idempotencyKey });
                   logMsg(`Disable execution: ${r.success ? 'relocked' : r.error}`, !!r.success);
                 })} className={btnAlt}>Disable now…</button>
               )}
@@ -357,7 +377,7 @@ function Card({ title, desc, children }: { title: string; desc: string; children
 // execute (TOTP-confirmed), with the result verified from the ledger.
 function SingleExecution({ readiness, logMsg, refresh, openMutation }: {
   readiness: Json; logMsg: (m: string, ok: boolean) => void; refresh: () => Promise<void>;
-  openMutation: (title: string, needsProd: boolean, run: (p: { totpCode: string; reason: string; productionConfirmation?: string }) => Promise<void>) => void;
+  openMutation: (title: string, needsProd: boolean, run: (p: MutationRunParams) => Promise<void>) => void;
 }) {
   const [identifier, setIdentifier] = useState('');
   const [prep, setPrep] = useState<Json | null>(null);
@@ -370,8 +390,8 @@ function SingleExecution({ readiness, logMsg, refresh, openMutation }: {
 
   const execute = () => {
     if (!prep?.digest) return;
-    openMutation(`Execute migration ${prep.identifier}`, !!readiness?.isProduction, async ({ totpCode, reason, productionConfirmation }) => {
-      const r = await call('execute-reviewed-single', { identifier: prep.identifier, confirmedDigest: prep.digest, reason, totpCode, productionConfirmation });
+    openMutation(`Execute migration ${prep.identifier}`, !!readiness?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
+      const r = await call('execute-reviewed-single', { identifier: prep.identifier, confirmedDigest: prep.digest, reason, totpCode, productionConfirmation, idempotencyKey });
       logMsg(`Execute ${prep.identifier}: ${r.success ? `APPLIED (ledger=${r.ledger?.status})` : (r.error || 'failed')} · relock=${r.relock?.lifecycleState ?? '—'}`, !!r.success);
       setPrep(null); setIdentifier('');
       await refresh();

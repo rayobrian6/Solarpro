@@ -38,10 +38,17 @@ import {
   runSinglePendingMigration,
   authorizeMigration,
   verifyFreshTotp,
+  verifyTotpStepValidity,
   isLegacyInlineEnabled,
   isLegacySystemToolsRunEnabled,
   getCurrentEnvironment,
 } from '@/lib/migrations/runner';
+import {
+  generateCorrelationId,
+  beginGovernedAction,
+  completeGovernedAction,
+  failGovernedAction,
+} from '@/lib/migrations/governedTotpAction';
 import { validateMigrationManifest, discoverMigrationFiles } from '@/lib/migrations/manifest';
 import {
   emitAuditEvent,
@@ -181,6 +188,20 @@ export async function POST(req: NextRequest) {
   const totpCode = body?.totpCode as string | undefined;
   const limit = body?.limit as number | undefined;
 
+  // Sanitized per-request correlation id. Logged on every governed branch so a
+  // duplicate submission (same idempotencyKey, different correlationId) is
+  // provable from the logs. NEVER contains the TOTP code or any secret.
+  const correlationId = generateCorrelationId();
+  // Client-supplied idempotency key (one per confirmed submission). Duplicate
+  // concurrent requests share it and collapse onto a single mutation; absent it,
+  // each request is treated as a distinct attempt.
+  const rawIdemKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
+  const idempotencyKey = rawIdemKey.length > 0 && rawIdemKey.length <= 200 ? rawIdemKey : correlationId;
+  const logGov = (msg: string, extra: Record<string, unknown> = {}) => {
+    // eslint-disable-next-line no-console
+    console.info(`[migrations] ${correlationId} action=${action ?? '?'} actor=${adminUser.id.slice(0, 8)}… ${msg}`, extra);
+  };
+
   // Validate action.
   const validActions = [
     'inspect',
@@ -294,8 +315,14 @@ export async function POST(req: NextRequest) {
   // - MFA_NOT_ENABLED: user has no MFA secret → DENIED (not waived)
   // - TOTP_INVALID: code doesn't match → retry allowed
   // - TOTP_REPLAY: time-step already consumed → must wait for next step
+  // NOTE: `bootstrap` is deliberately EXCLUDED here. Its TOTP is verified and
+  // consumed inside its own branch AFTER authorizeMigration, via the idempotent,
+  // action-scoped, release-on-failure reservation (governedTotpAction). Consuming
+  // it here — before authorization and with no idempotency — was the root cause
+  // of the "new code still says already used" replay: an authorization rejection
+  // or a losing duplicate burned the step while the real error was hidden.
   let totpVerified = false;
-  if (isExecute || isExecutionActivation || isBootstrap || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch) {
+  if (isExecute || isExecutionActivation || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
         { success: false, error: 'A fresh TOTP code is required for this action. Provide it in the "totpCode" field.' },
@@ -417,41 +444,128 @@ export async function POST(req: NextRequest) {
     }
 
     if (isBootstrap) {
-      // Create the ledger tables (idempotent). super_admin + fresh TOTP +
-      // reason enforced above; authorizeMigration enforced env allowlist +
-      // production two-key. Production also requires typed env confirmation.
+      // Create the ledger tables (idempotent). super_admin enforced above;
+      // authorizeMigration (run already) enforced env allowlist + production
+      // two-key WITHOUT consuming any TOTP. Now: validate cheap inputs, verify
+      // TOTP *validity*, reserve ONE idempotent attempt, run, and settle.
       const reason = (body?.reason as string | undefined)?.trim();
       if (!reason) {
         return NextResponse.json(
-          { success: false, error: 'A non-empty "reason" is required for bootstrap.' },
+          { success: false, error: 'A non-empty "reason" is required for bootstrap.', correlationId },
           { status: 400 },
         );
       }
       if (getCurrentEnvironment() === 'production'
           && (body?.productionConfirmation as string | undefined) !== 'production') {
         return NextResponse.json(
-          { success: false, error: 'Production bootstrap requires productionConfirmation === "production".' },
+          { success: false, error: 'Production bootstrap requires productionConfirmation === "production".', correlationId },
           { status: 400 },
         );
       }
-      const result = await bootstrapMigrationLedger('human', adminUser.id);
+      if (!totpCode || typeof totpCode !== 'string') {
+        return NextResponse.json(
+          { success: false, error: 'A fresh TOTP code is required for bootstrap. Provide it in the "totpCode" field.', correlationId },
+          { status: 403 },
+        );
+      }
+
+      // ── TOTP validity (no ledger write; a failed auth never burns a code) ──
+      const validity = await verifyTotpStepValidity(adminUser.id, totpCode);
+      if (!validity.verified || validity.timeStep === null) {
+        const reasonMessages: Record<string, string> = {
+          MFA_NOT_ENABLED: 'MFA is not enabled for this account. Migration execution requires MFA enrollment. Enable MFA in your account settings and retry.',
+          TOTP_INVALID: 'TOTP verification failed. The code is invalid or expired. Generate a fresh code and retry.',
+        };
+        const message = validity.deniedReason ? (reasonMessages[validity.deniedReason] ?? 'TOTP verification failed.') : 'TOTP verification failed.';
+        emitAuditEvent({
+          type: 'migration.mfa.denied', actorType: 'human', actorId: adminUser.id,
+          environment: getCurrentEnvironment(), executionId: null, migrationIdentifier: null,
+          filename: null, details: { deniedReason: validity.deniedReason, correlationId },
+        });
+        logGov('bootstrap TOTP invalid', { deniedReason: validity.deniedReason });
+        return NextResponse.json(
+          { success: false, error: message, deniedReason: validity.deniedReason, correlationId },
+          { status: 403 },
+        );
+      }
+
+      // ── Reserve exactly ONE bootstrap attempt for this accepted step ──
+      const begin = await beginGovernedAction({
+        userId: adminUser.id, actionKey: 'bootstrap', timeStep: validity.timeStep,
+        idempotencyKey, correlationId,
+      });
+
+      if (begin.outcome === 'REPLAY') {
+        emitAuditEvent({
+          type: 'migration.mfa.replay_detected', actorType: 'human', actorId: adminUser.id,
+          environment: getCurrentEnvironment(), executionId: null, migrationIdentifier: null,
+          filename: null, details: { deniedReason: 'TOTP_REPLAY', timeStep: validity.timeStep, correlationId },
+        });
+        logGov('bootstrap TOTP replay denied', { timeStep: validity.timeStep });
+        return NextResponse.json(
+          { success: false, error: 'This TOTP code has already been used for a migration mutation. Wait for the next 30-second time-step and generate a new code.', deniedReason: 'TOTP_REPLAY', correlationId },
+          { status: 403 },
+        );
+      }
+
+      if (begin.outcome === 'IDEMPOTENT') {
+        // A duplicate of THIS submission. Return the winning request's actual
+        // result verbatim — this is what stops a duplicate from masking the
+        // first request's real error behind a spurious replay.
+        const stored = begin.stored;
+        const body2 = (stored.body && typeof stored.body === 'object')
+          ? { ...(stored.body as Record<string, unknown>), idempotentReplay: true, correlationId }
+          : stored.body;
+        logGov('bootstrap idempotent duplicate collapsed', { httpStatus: stored.httpStatus });
+        return NextResponse.json(body2, { status: stored.httpStatus });
+      }
+
+      // ── PROCEED: run the mutation, then settle the reservation ──
+      logGov('bootstrap proceeding', { timeStep: validity.timeStep });
+      const consume = async (httpStatus: number, respBody: Record<string, unknown>, ok: boolean) => {
+        const settled = { ...respBody, correlationId };
+        try {
+          if (ok) {
+            await completeGovernedAction(adminUser.id, 'bootstrap', validity.timeStep!, { httpStatus, body: settled });
+          } else {
+            // Release-on-failure: a failed bootstrap must not burn the next code.
+            await failGovernedAction(adminUser.id, 'bootstrap', validity.timeStep!, { httpStatus, body: settled });
+          }
+        } catch { /* settling is best-effort; never mask the real response */ }
+        return NextResponse.json(settled, { status: httpStatus });
+      };
+
+      let result: { success: boolean; alreadyExisted: boolean; error?: string };
+      try {
+        result = await bootstrapMigrationLedger('human', adminUser.id);
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        emitAuditEvent({
+          type: 'migration.bootstrap.failed', actorType: 'human', actorId: adminUser.id,
+          environment: getCurrentEnvironment(), executionId: null, migrationIdentifier: null,
+          filename: null, details: { reason, viaOperatorConsole: true, error: errMsg, correlationId },
+        });
+        logGov('bootstrap threw — reservation released', { error: errMsg });
+        return await consume(500, {
+          success: false, action: 'bootstrap', alreadyExisted: false, error: errMsg,
+          lifecycleState: (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED',
+        }, false);
+      }
+
       emitAuditEvent({
         type: result.success ? 'migration.bootstrap.completed' : 'migration.bootstrap.failed',
-        actorType: 'human',
-        actorId: adminUser.id,
-        environment: getCurrentEnvironment(),
-        executionId: null,
-        migrationIdentifier: null,
-        filename: null,
-        details: { reason, alreadyExisted: result.alreadyExisted, viaOperatorConsole: true, error: result.error ?? null },
+        actorType: 'human', actorId: adminUser.id, environment: getCurrentEnvironment(),
+        executionId: null, migrationIdentifier: null, filename: null,
+        details: { reason, alreadyExisted: result.alreadyExisted, viaOperatorConsole: true, error: result.error ?? null, correlationId },
       });
-      return NextResponse.json({
+      logGov(result.success ? 'bootstrap completed' : 'bootstrap failed', { alreadyExisted: result.alreadyExisted, error: result.error ?? null });
+      return await consume(result.success ? 200 : 500, {
         success: result.success,
         action: 'bootstrap',
         alreadyExisted: result.alreadyExisted,
         error: result.error ?? undefined,
         lifecycleState: (await getGovernanceLifecycleState()) ?? 'UNBOOTSTRAPPED',
-      }, { status: result.success ? 200 : 500 });
+      }, result.success);
     }
 
     if (isPrepareBatch || isRecordBatch) {
