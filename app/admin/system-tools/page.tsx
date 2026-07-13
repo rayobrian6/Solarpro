@@ -192,15 +192,29 @@ export default function SystemToolsPage() {
         })}
       </div>
 
-      {/* Run Migration Section */}
-      <div className="rounded-xl border border-white/10 bg-white/2 p-5 space-y-4">
+      {/* Canonical migration console pointer — the legacy runner below is
+          permanently locked (MIGRATION-GOV-13). All migration execution now
+          happens in the governed operator console. */}
+      <a href="/admin/system-tools/migrations"
+         className="block rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 hover:bg-emerald-500/15 transition-colors">
+        <div className="flex items-center gap-3">
+          <Shield size={18} className="text-emerald-400" />
+          <div>
+            <div className="font-semibold text-white text-sm">Migration Operator Console →</div>
+            <div className="text-xs text-emerald-200/80">Run migrations through the governed workflow (bootstrap, baseline, bounded activation, reviewed execution). The legacy runner below is permanently locked.</div>
+          </div>
+        </div>
+      </a>
+
+      {/* Run Migration Section (LEGACY — permanently 423-locked) */}
+      <div className="rounded-xl border border-white/10 bg-white/2 p-5 space-y-4 opacity-70">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
             <Database size={18} className="text-blue-400" />
           </div>
           <div>
-            <div className="font-semibold text-white text-sm">Run Database Migration</div>
-            <div className="text-xs text-slate-400">Execute a SQL migration file against the production database</div>
+            <div className="font-semibold text-white text-sm">Run Database Migration <span className="text-[10px] text-red-300 border border-red-500/40 rounded px-1 py-0.5 ml-1">LEGACY · LOCKED</span></div>
+            <div className="text-xs text-slate-400">Permanently disabled (MIGRATION-GOV-13). Use the Migration Operator Console above.</div>
           </div>
         </div>
 
