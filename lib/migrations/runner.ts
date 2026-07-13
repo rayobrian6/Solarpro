@@ -35,6 +35,7 @@ import {
   MigrationActorType,
   RunPendingMigrationsOptions,
   RunSingleMigrationOptions,
+  TargetedExecutionPermit,
   MigrationStatus,
   MigrationLedgerRow,
   MigrationGovernanceLifecycle,
@@ -359,6 +360,39 @@ export function authorizeMigration(params: {
     environment,
     dryRun,
   };
+}
+
+/**
+ * The hard allowlist of migration identifiers that may be run via a bounded
+ * TARGETED recovery permit (bypassing the global EXECUTION_ENABLED window).
+ * This is intentionally a single-purpose escape hatch — currently only the
+ * Nearmap proximity-index migration (108), whose dependency (102) is already
+ * applied in production. NOTHING else — not 102, not any historical migration,
+ * not "all pending" — can be run through the targeted path.
+ */
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['108']);
+
+/** Maximum lifetime of a targeted execution permit (the bounded window). */
+export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Validate a bounded targeted execution permit for an EXACT identifier.
+ * Fail-closed: a permit is valid ONLY when it is present, names the exact
+ * identifier being executed, that identifier is on the hard allowlist, and the
+ * permit is within its bounded (non-negative, capped) lifetime.
+ */
+export function isTargetedPermitValid(
+  permit: TargetedExecutionPermit | undefined,
+  identifier: string,
+): boolean {
+  if (!permit) return false;
+  if (permit.identifier !== identifier) return false;
+  if (!TARGETED_RECOVERY_ALLOWLIST.has(identifier)) return false;
+  if (!(typeof permit.ttlMs === 'number') || permit.ttlMs <= 0 || permit.ttlMs > MAX_TARGETED_PERMIT_TTL_MS) return false;
+  if (typeof permit.issuedAtMs !== 'number') return false;
+  const age = Date.now() - permit.issuedAtMs;
+  if (age < 0 || age > permit.ttlMs) return false;
+  return true;
 }
 
 /**
@@ -996,7 +1030,33 @@ async function runSinglePendingMigrationInternal(
   // execution-permitting state (EXECUTION_ENABLED only).
   // Dry-run is exempt \u2014 it never mutates the database (MIGRATION-GOV-02,
   // MIGRATION-GOV-09 Phase 1A.2).
-  if (!dryRun) {
+  //
+  // TARGETED RECOVERY EXCEPTION: a valid bounded permit for THIS exact
+  // (allowlisted) identifier authorizes execution WITHOUT the global
+  // EXECUTION_ENABLED window. It does NOT flip the lifecycle, so ordinary
+  // run-single / run-pending and re-running already-applied migrations remain
+  // blocked. The bypass is durably audited so it is never silent. This branch
+  // exists ONLY in single-migration execution \u2014 the batch runner has no such
+  // exception.
+  const targetedOk = !dryRun && isTargetedPermitValid(options.targetedPermit, identifier);
+  if (targetedOk) {
+    emitAuditEvent({
+      type: 'migration.governance.state_change',
+      actorType: authorization.actorType,
+      actorId: authorization.actorId,
+      environment,
+      executionId,
+      migrationIdentifier: identifier,
+      filename: file?.filename ?? '',
+      details: {
+        targetedRecoveryPermit: true,
+        identifier,
+        reason: options.targetedPermit?.reason ?? null,
+        note: 'Bounded single-migration permit authorized execution without a global EXECUTION_ENABLED window.',
+      },
+    });
+  }
+  if (!dryRun && !targetedOk) {
     const gate = await assertExecutionPermitted(false);
     if (!gate.permitted) {
       emitAuditEvent({

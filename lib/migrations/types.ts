@@ -543,6 +543,30 @@ export interface RunPendingMigrationsOptions {
 }
 
 /**
+ * A bounded, SINGLE-migration execution permit for the targeted recovery path.
+ *
+ * It authorizes execution of exactly ONE identifier WITHOUT flipping the global
+ * governance lifecycle to EXECUTION_ENABLED. This is deliberately narrower than
+ * the ordinary activation window: a global window would also permit "run all
+ * pending" and re-running already-applied migrations, which the targeted
+ * recovery must never allow. The permit is time-bounded (the "bounded activation
+ * window") and is validated by the runner against a hard allowlist of
+ * targeted-recoverable identifiers. Everything else — advisory lock, checksum,
+ * ledger, run-history, durable audit — runs through the canonical runner
+ * unchanged.
+ */
+export interface TargetedExecutionPermit {
+  /** The single migration identifier this permit authorizes (e.g. '108'). */
+  identifier: string;
+  /** Epoch ms the permit was issued. */
+  issuedAtMs: number;
+  /** Bounded lifetime in ms (the activation window). */
+  ttlMs: number;
+  /** Human-readable reason, for the durable audit record. */
+  reason: string;
+}
+
+/**
  * Options for running a single pending migration.
  */
 export interface RunSingleMigrationOptions {
@@ -550,6 +574,13 @@ export interface RunSingleMigrationOptions {
   dryRun: boolean;
   /** The authorization context. */
   authorization: MigrationAuthorization;
+  /**
+   * Optional bounded, single-migration permit that authorizes execution WITHOUT
+   * the global EXECUTION_ENABLED lifecycle window — used ONLY by the targeted
+   * recovery path, and ONLY for its exact (allowlisted) identifier. When absent
+   * or invalid, the ordinary EXECUTION_ENABLED gate applies unchanged.
+   */
+  targetedPermit?: TargetedExecutionPermit;
 }
 
 /**

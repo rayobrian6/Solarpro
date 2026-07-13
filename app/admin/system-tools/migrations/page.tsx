@@ -221,6 +221,33 @@ export default function MigrationConsolePage() {
         </div>
       </section>
 
+      {/* Targeted Nearmap recovery (current priority) */}
+      <section className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
+        <div className="flex items-center gap-3 mb-1">
+          <h2 className="text-lg font-semibold text-white">Targeted Nearmap recovery — migration 108</h2>
+          <Pill ok={null}>SCOPED</Pill>
+        </div>
+        <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
+          Targeted Nearmap recovery only. Historical baseline remains incomplete.
+        </div>
+        <p className="text-xs text-slate-400 mb-3">
+          Runs <b>only</b> migration 108 (the <code>nearmap_ai_cache_lat_lng_idx</code> proximity index) through the canonical
+          runner under a bounded, 108-scoped permit. Server-side it verifies migration 102 is already applied (table +
+          <code> lat</code>/<code>lng</code> columns present), that the index is absent, and that 108 is idempotent and
+          non-destructive. It does <b>not</b> run 102, does <b>not</b> run any other migration, and does <b>not</b> mark the
+          historical baseline verified. Requires super_admin + MFA + fresh TOTP + reason + typed production confirmation +
+          production allowlist + <code>MIGRATION_ALLOW_PRODUCTION_EXECUTION=true</code>.
+        </p>
+        <button disabled={!!busy} onClick={() => openMutation('Execute targeted Nearmap recovery (migration 108)', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
+          const r = await call('execute-nearmap-108', { totpCode, reason, productionConfirmation, idempotencyKey });
+          const cid = r.correlationId ? ` [${r.correlationId}]` : '';
+          const detail = r.success
+            ? (r.alreadyApplied ? 'index already present (no-op)' : `APPLIED · index=${r.indexPresentAfter ? 'present' : '?'} · relock=${r.relock?.lifecycleState ?? '—'}`)
+            : (r.error || 'failed');
+          logMsg(`Nearmap 108: ${detail}${cid}`, !!r.success);
+        })} className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-sm font-medium">Run migration 108…</button>
+      </section>
+
       {/* Step actions */}
       <section className="grid md:grid-cols-2 gap-4 mb-4">
         {/* Bootstrap */}
