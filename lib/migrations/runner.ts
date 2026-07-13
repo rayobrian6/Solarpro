@@ -67,6 +67,7 @@ import {
 } from './ledger';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { generateTOTPCode, decryptTOTPSecret } from '@/lib/mfa';
+import { getMfaEnrollment } from '@/lib/mfaEnrollment';
 import { AdminUser } from '@/lib/adminAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,17 +409,18 @@ export async function verifyFreshTotp(
   code: string,
   executionId: string | null = null,
 ): Promise<VerifyFreshTotpResult> {
-  const sql = neon(process.env.DATABASE_URL!);
-  const rows = await sql`
-    SELECT totp_secret_encrypted FROM admin_users WHERE id = ${adminUserId} LIMIT 1
-  `;
-  const row = rows[0];
+  // Resolve enrollment from the CANONICAL account record (users.mfa_enabled +
+  // users.mfa_secret_encrypted) — the exact source the Settings Security page
+  // and app/api/auth/mfa/verify use. Previously this read a non-canonical
+  // `admin_users.totp_secret_encrypted` table that no migration creates, so in
+  // production it always resolved to "not enrolled" and blocked every account.
+  const enrollment = await getMfaEnrollment(adminUserId);
 
-  // FAIL-CLOSED: If the user has no MFA secret, DENY migration execution.
+  // FAIL-CLOSED: If the account is not MFA-enrolled, DENY migration execution.
   // A human operator who has not enrolled in MFA cannot execute schema
   // migrations. This was previously a fail-open waiver (return true), which
   // allowed migrations without MFA — a security regression (MIGRATION-GOV-05).
-  if (!row || !row.totp_secret_encrypted) {
+  if (!enrollment.enrolled || !enrollment.secretEncrypted) {
     return {
       verified: false,
       deniedReason: 'MFA_NOT_ENABLED',
@@ -426,7 +428,7 @@ export async function verifyFreshTotp(
     };
   }
 
-  const secret = decryptTOTPSecret(row.totp_secret_encrypted);
+  const secret = decryptTOTPSecret(enrollment.secretEncrypted);
   const now = Date.now();
 
   // Find the matching time-step by checking the ±1 window (same logic as

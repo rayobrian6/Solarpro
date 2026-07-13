@@ -191,16 +191,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `;
 
-// DDL for admin_users table (required by verifyFreshTotp for TOTP secret lookup).
-// This is a minimal table with only the columns needed by the migration
-// governance TOTP verification path.
+// DDL for the canonical `users` table. verifyFreshTotp + readiness resolve MFA
+// enrollment from users.mfa_enabled + users.mfa_secret_encrypted (the same
+// record the Settings Security page uses) — not the non-canonical admin_users
+// table that no migration creates.
 const ADMIN_USERS_DDL = `
-CREATE TABLE IF NOT EXISTS admin_users (
+CREATE TABLE IF NOT EXISTS users (
   id                       TEXT PRIMARY KEY,
   name                     TEXT NOT NULL DEFAULT 'Test Admin',
   email                    TEXT NOT NULL,
   role                     TEXT NOT NULL DEFAULT 'super_admin',
-  totp_secret_encrypted    TEXT,
+  mfa_secret_encrypted     TEXT,
   mfa_enabled              BOOLEAN NOT NULL DEFAULT FALSE
 );
 `;
@@ -379,7 +380,7 @@ describeOrSkip('Phase 1A.3: End-to-End Migration Governance Validation (GOV-19, 
         await client.query(stmt);
       }
 
-      // Create the admin_users table (required by verifyFreshTotp).
+      // Create the canonical users table (verifyFreshTotp MFA lookup).
       const adminStatements = ADMIN_USERS_DDL.split(';')
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
@@ -1614,9 +1615,9 @@ describeOrSkip('Phase 1A.3: End-to-End Migration Governance Validation (GOV-19, 
     it('verifyFreshTotp denies when user has no MFA secret (fail-closed)', async () => {
       const { verifyFreshTotp } = await import('../lib/migrations/runner');
 
-      // Insert an admin user without a TOTP secret
+      // Insert a user without an MFA secret (users table)
       await rawExec(`
-        INSERT INTO admin_users (id, email, totp_secret_encrypted, mfa_enabled)
+        INSERT INTO users (id, email, mfa_secret_encrypted, mfa_enabled)
         VALUES ('admin-no-mfa', 'nomfa@example.com', NULL, false)
       `);
 
@@ -1638,13 +1639,13 @@ describeOrSkip('Phase 1A.3: End-to-End Migration Governance Validation (GOV-19, 
       const { verifyFreshTotp } = await import('../lib/migrations/runner');
       const { encryptTOTPSecret } = await import('../lib/mfa');
 
-      // Insert an admin user with a properly encrypted TOTP secret.
+      // Insert a user with a properly encrypted MFA secret (users table).
       // The production code uses MFA_ENCRYPTION_KEY to decrypt the secret.
       // We use encryptTOTPSecret (from the FROZEN lib/mfa.ts) to create a
       // valid encrypted secret with the test MFA_ENCRYPTION_KEY.
       const encryptedSecret = encryptTOTPSecret('JBSWY3DPEHPK3PXP');
       await rawExec(`
-        INSERT INTO admin_users (id, email, totp_secret_encrypted, mfa_enabled)
+        INSERT INTO users (id, email, mfa_secret_encrypted, mfa_enabled)
         VALUES ('admin-with-mfa', 'mfa@example.com', '${encryptedSecret}', true)
       `);
 

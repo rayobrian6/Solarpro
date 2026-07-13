@@ -18,7 +18,7 @@
 // - The operator identity, role, and environment are all server-derived by the
 //   caller (the route) and passed in — never client-claimed.
 
-import { neon } from '@neondatabase/serverless';
+import { isMfaEnrolled } from '@/lib/mfaEnrollment';
 import { discoverMigrationFiles } from './manifest';
 import {
   inspectMigrationState,
@@ -65,8 +65,9 @@ export interface OperatorReadiness {
   isProduction: boolean;
   operatorId: string | null;
   operatorRole: string | null;
-  /** Whether the operator can pass the migration TOTP gate (admin_users has an
-   *  encrypted TOTP secret). Boolean signal only — never the secret. */
+  /** Whether the operator can pass the migration TOTP gate — resolved from the
+   *  canonical users.mfa_enabled + users.mfa_secret_encrypted (same record the
+   *  Settings Security page uses). Boolean signal only — never the secret. */
   mfaEnrolled: boolean;
   /** Whether production execution is unlocked by env (two-key). */
   productionExecutionAllowedByEnv: boolean;
@@ -105,27 +106,12 @@ export interface OperatorReadiness {
   canExecuteNow: boolean;
 }
 
-function getRawSql() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL not set');
-  return neon(url);
-}
-
-/** Read the MFA gate signal for the operator — mirrors verifyFreshTotp's source
- *  (admin_users.totp_secret_encrypted). Read-only, never decrypts, never
- *  returns the secret. Returns false on any error (fail-closed signal). */
+/** Read the MFA gate signal for the operator from the CANONICAL enrollment
+ *  source (users.mfa_enabled + users.mfa_secret_encrypted) — the exact record
+ *  the Settings Security page and the migration fresh-TOTP gate use. Read-only,
+ *  never decrypts, never returns the secret. Returns false on any error. */
 async function readMfaEnrolled(operatorId: string | null): Promise<boolean> {
-  if (!operatorId) return false;
-  try {
-    const sql = getRawSql();
-    const rows = (await sql`
-      SELECT (totp_secret_encrypted IS NOT NULL) AS enrolled
-      FROM admin_users WHERE id = ${operatorId} LIMIT 1
-    `) as Array<{ enrolled: boolean }>;
-    return Boolean(rows[0]?.enrolled);
-  } catch {
-    return false;
-  }
+  return isMfaEnrolled(operatorId);
 }
 
 function getAllowedEnvs(): string[] {
@@ -164,6 +150,15 @@ export async function buildOperatorReadiness(operator: {
 
   const lifecycleState: MigrationGovernanceLifecycle | 'UNBOOTSTRAPPED' =
     lifecycleRaw ?? 'UNBOOTSTRAPPED';
+
+  // Diagnosis-only, sanitized: confirm the canonical MFA lookup resolved for
+  // this operator on the deployed environment. Truncated id; NO secret.
+  console.log('[migration-readiness] mfa-check', JSON.stringify({
+    operatorId: operator.id ? `${String(operator.id).slice(0, 8)}…` : null,
+    role: operator.role,
+    mfaEnrolled,
+    lifecycleState,
+  }));
 
   // Canonical activation snapshot (single source: ledger.readExecutionActivation).
   const act = await readExecutionActivation().catch(() => null);

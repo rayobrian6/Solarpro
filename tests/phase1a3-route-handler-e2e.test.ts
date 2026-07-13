@@ -130,7 +130,7 @@ const describeOrSkip = HAS_TEST_DB ? describe : describe.skip;
 const TEST_MFA_ENCRYPTION_KEY = '8fBSXkP+QbS3JtJ9wT1xJtRRbjpJjJ+bc0NwCBl+yP8=';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DDL for audit_log and admin_users tables (required by the route handler's
+// DDL for audit_log and users tables (required by the route handler's
 // audit persistence and TOTP verification paths).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -157,13 +157,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `;
 
+// Canonical account table. The migration fresh-TOTP gate + readiness now resolve
+// MFA enrollment from users.mfa_enabled + users.mfa_secret_encrypted (the exact
+// columns the Settings Security page uses), so the harness seeds `users`.
 const ADMIN_USERS_DDL = `
-CREATE TABLE IF NOT EXISTS admin_users (
+CREATE TABLE IF NOT EXISTS users (
   id                       TEXT PRIMARY KEY,
   name                     TEXT NOT NULL DEFAULT 'Test Admin',
   email                    TEXT NOT NULL,
   role                     TEXT NOT NULL DEFAULT 'super_admin',
-  totp_secret_encrypted    TEXT,
+  mfa_secret_encrypted     TEXT,
   mfa_enabled              BOOLEAN NOT NULL DEFAULT FALSE
 );
 `;
@@ -303,7 +306,7 @@ async function insertAdminWithMfa(
   const { encryptTOTPSecret } = await import('../lib/mfa');
   const encryptedSecret = encryptTOTPSecret(secret);
   await rawExec(`
-    INSERT INTO admin_users (id, email, totp_secret_encrypted, mfa_enabled)
+    INSERT INTO users (id, email, mfa_secret_encrypted, mfa_enabled)
     VALUES ('${userId}', '${userId}@example.com', '${encryptedSecret}', true)
   `);
 }
@@ -632,7 +635,7 @@ describeOrSkip('Phase 1A.3: Route-Handler E2E — Auth, Role, MFA, TOTP, Audit, 
       setMockAdminUser(SUPER_ADMIN);
       // Insert the admin user without a TOTP secret
       await rawExec(`
-        INSERT INTO admin_users (id, email, totp_secret_encrypted, mfa_enabled)
+        INSERT INTO users (id, email, mfa_secret_encrypted, mfa_enabled)
         VALUES ('test-super-admin', 'super@example.com', NULL, false)
       `);
       const { POST } = await import('../app/api/admin/migrations/route');
@@ -728,7 +731,7 @@ describeOrSkip('Phase 1A.3: Route-Handler E2E — Auth, Role, MFA, TOTP, Audit, 
     it('persists audit event when MFA is not enabled (migration_mfa_denied)', async () => {
       setMockAdminUser(SUPER_ADMIN);
       await rawExec(`
-        INSERT INTO admin_users (id, email, totp_secret_encrypted, mfa_enabled)
+        INSERT INTO users (id, email, mfa_secret_encrypted, mfa_enabled)
         VALUES ('test-super-admin', 'super@example.com', NULL, false)
       `);
       const { POST } = await import('../app/api/admin/migrations/route');
@@ -1378,7 +1381,7 @@ describeOrSkip('Phase 1A.3: Route-Handler E2E — Auth, Role, MFA, TOTP, Audit, 
     it('MFA denial response does not leak the TOTP secret or encryption key', async () => {
       setMockAdminUser(SUPER_ADMIN);
       await rawExec(`
-        INSERT INTO admin_users (id, email, totp_secret_encrypted, mfa_enabled)
+        INSERT INTO users (id, email, mfa_secret_encrypted, mfa_enabled)
         VALUES ('test-super-admin', 'super@example.com', NULL, false)
       `);
       const { POST } = await import('../app/api/admin/migrations/route');

@@ -987,44 +987,22 @@ function NotificationsPanel() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function MigrateButton() {
-  const [status, setStatus] = React.useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [results, setResults] = React.useState<string[]>([]);
-
-  async function runMigration() {
-    setStatus('running');
-    setResults([]);
-    try {
-      const res = await fetch('/api/migrate', { method: 'POST' });
-      const json = await res.json();
-      if (json.success) {
-        setStatus('done');
-        setResults(json.results || ['Migration complete']);
-      } else {
-        setStatus('error');
-        setResults([json.error || 'Migration failed']);
-      }
-    } catch (e: unknown) {
-      setStatus('error');
-      setResults([(e as Error).message || 'Network error']);
-    }
-  }
-
+  // The legacy /api/migrate runner is permanently locked (MIGRATION-GOV-13).
+  // Migrations are now run through the governed operator console. Send the
+  // operator there instead of POSTing to the dead endpoint.
   return (
     <div>
-      <button
-        onClick={runMigration}
-        disabled={status === 'running'}
-        className={`btn-sm flex items-center gap-2 ${status === 'running' ? 'opacity-60 cursor-not-allowed btn-secondary' : status === 'done' ? 'btn-secondary' : 'btn-primary'}`}
+      <a
+        href="/admin/system-tools/migrations"
+        className="btn-sm btn-primary inline-flex items-center gap-2"
       >
-        {status === 'running' ? <><Loader2 size={12} className="animate-spin" /> Running...</> : status === 'done' ? <><CheckCircle size={12} /> Done</> : <><Rocket size={12} /> Run Database Migration</>}
-      </button>
-      {results.length > 0 ? (
-        <div className="mt-3 bg-slate-900 rounded-xl p-3 max-h-48 overflow-y-auto">
-          {results.map((r, i) => (
-            <div key={i} className="text-xs font-mono text-slate-300 py-0.5">{r}</div>
-          ))}
-        </div>
-      ) : null}
+        <Rocket size={12} /> Open Migration Operator Console
+      </a>
+      <p className="mt-2 text-xs text-slate-400">
+        The old in-place migration runner is permanently disabled. Migrations now run
+        through the governed console (bootstrap, baseline, bounded activation, reviewed
+        execution). Super_admin access required.
+      </p>
     </div>
   );
 }
