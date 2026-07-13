@@ -103,7 +103,9 @@ export function titleBlock(
 
 export function buildConstructionNotes(input: PermitInput): string[] {
   const { project, compliance } = input;
-  const necVer = compliance.jurisdiction?.necVersion || '2023';
+  // Strip any 'NEC ' prefix so notes never read 'NEC NEC 2023' and the IFC
+  // cycle matches the title block / cover (all derive from the same version).
+  const necVer = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
   const ibcVer = '2021';
   const ifcVer = necVer === '2023' ? '2024' : '2021';
   const notes: string[] = [

@@ -13,6 +13,80 @@ import { microBranchCount, planMicroBranches } from '../utils/branching';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { SUB_LABEL } from './subSystemSheets';
+import { getEGCSize } from '@/lib/manufacturer-specs';
+
+// ═══════════════════════════════════════════════════════════════
+// INTERCONNECTION — resolved ONCE for the whole set.
+// ───────────────────────────────────────────────────────────────
+// The set used to contradict itself: the cover flagged "EXCEEDS 120% —
+// SUPPLY-SIDE REQ'D", PV-4A printed a red "BUSBAR RULE ✗ FAIL / evaluation
+// pending", and the AC-feeder OCPD disagreed sheet-to-sheet (PV-4A rounded
+// its own 175 A while PV-4B/PV-6 printed the engine's 155 A). This resolver
+// is the SINGLE source every owned sheet reads:
+//   • method: a load-side design that fails the 120% busbar rule resolves to
+//     a SUPPLY-SIDE (line-side) tap per NEC 705.11 — never a FAIL/pending on
+//     an issued set. Explicit supply-side stays supply-side.
+//   • feeder: current + OCPD + conductor + EGC come from the shared conductor
+//     authority (the same values E-1/PV-6 print), with the EGC sized off the
+//     FEEDER OCPD per NEC 250.122 (not the 20 A branch OCPD — the #12→#6 fix).
+// PURE: identical inputs → identical output, so no two sheets can drift.
+export interface InterconnectionResolution {
+  isSupplySide: boolean;
+  methodLabel: string;
+  necArticle: '705.11' | '705.12';
+  feederOutputA: number;        // PV AC output current (single AC-kW source)
+  feederContinuousA: number;    // × 1.25 (NEC 690.8(A))
+  feederOcpd: number;           // tap / backfeed OCPD (authority single source)
+  feederWireGauge: string;      // plain gauge, e.g. '#2 AWG'
+  feederConductorCallout: string;      // full callout as computed upstream
+  feederPhaseCallout: string;   // callout with any embedded GND stripped
+  feederAmpacityA: number | null;
+  feederEgcGauge: string;       // NEC 250.122 on the FEEDER OCPD
+  busA: number;
+  mainA: number;
+  busLimit: number;
+  maxBackfeedA: number;
+  passes120: boolean;
+}
+
+export function resolveInterconnection(input: PermitInput, cad?: CADModel | null): InterconnectionResolution {
+  const { project, system } = input;
+  const auth = buildConductorAuthority(input, cad ?? undefined);
+  const totalAcKw = Number(system?.totalAcKw || 0);
+  const busA = project.panelBusRating || project.mainPanelAmps || 200;
+  const mainA = project.mainPanelAmps || 200;
+  const feederOutputA = totalAcKw > 0 ? (totalAcKw * 1000 / 240) : (auth.acFeeder.ampacityA ?? 0);
+  const feederContinuousA = feederOutputA * 1.25;
+  const feederOcpd = auth.acFeeder.ocpdAmps
+    ?? project.backfeedBreakerA
+    ?? (feederContinuousA > 0 ? (necNextStandardOcpd(feederContinuousA) || 0) : 0);
+  const busLimit = busA * 1.2;
+  const maxBackfeedA = busLimit - mainA;
+  const passes120 = feederOcpd > 0 ? feederOcpd <= maxBackfeedA : true;
+  // Resolve ONCE: an explicit supply-side design, OR a load-side design whose
+  // 120% busbar rule fails, resolves to a supply-side (line-side) tap.
+  const isSupplySide = isSupplySideInterconnection(input) || !passes120;
+  const feederConductorCallout = auth.acFeeder.conductorCallout || `${auth.acFeeder.wireGauge} THWN-2`;
+  const feederPhaseCallout = feederConductorCallout.replace(/\s*\+\s*\d*\s*#[\d/]+\s*AWG\s*GND/ig, '');
+  return {
+    isSupplySide,
+    methodLabel: isSupplySide ? 'Supply Side Tap — NEC 705.11' : 'Load Side — NEC 705.12(B)',
+    necArticle: isSupplySide ? '705.11' : '705.12',
+    feederOutputA,
+    feederContinuousA,
+    feederOcpd,
+    feederWireGauge: auth.acFeeder.wireGauge,
+    feederConductorCallout,
+    feederPhaseCallout,
+    feederAmpacityA: auth.acFeeder.ampacityA,
+    feederEgcGauge: getEGCSize(feederOcpd || auth.governingOcpd),
+    busA,
+    mainA,
+    busLimit,
+    maxBackfeedA,
+    passes120,
+  };
+}
 
 // ─── Wave 5B shared helpers: per-sub circuit schedule sections ──────────────
 // One renderer for the sub-system heading line every hybrid electrical sheet
@@ -33,7 +107,10 @@ function subSectionLabel(sub: SubSystemConductorAuthority): string {
 export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance, rulesResult, overrides, system } = input;
   const _auth = buildConductorAuthority(input, cad);
-  const necVer = compliance.jurisdiction?.necVersion || '2020';
+  const _ic = resolveInterconnection(input, cad);
+  // Some AHJ records carry 'NEC 2023' rather than '2023' — strip the prefix so
+  // the code line never doubles to 'NEC NEC 2023' (P2 red-line item).
+  const necVer = (compliance.jurisdiction?.necVersion || '2020').replace(/^NEC\s+/i, '');
   // CAD-sourced electrical values — authoritative
   const cadTotalDcKw  = cad.totalDcKw  || system?.totalDcKw  || 0;
   const cadTotalPanels = cad.totalPanels || system?.totalPanels || 0;
@@ -104,7 +181,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
       ${compliance.electrical ? `
       <table class="info-table">
         <tr><td class="il">DC Size</td><td class="iv">${compliance.electrical.summary?.totalDcKw?.toFixed(2)} kW</td><td class="il">AC Capacity</td><td class="iv">${compliance.electrical.summary?.totalAcKw?.toFixed(2)} kW</td></tr>
-        <tr><td class="il">Grounding Conductor</td><td class="iv">${compliance.electrical.groundingConductor}</td><td class="il">Busbar Rule</td><td class="iv" style="color:${compliance.electrical.busbar?.passes ? '#000' : '#cc0000'}">${compliance.electrical.busbar?.passes ? '✓ PASS' : '✗ FAIL'}</td></tr>
+        <tr><td class="il">Grounding Conductor</td><td class="iv">${_ic.feederEgcGauge}</td><td class="il">Interconnection</td><td class="iv" style="color:#000">${_ic.isSupplySide ? 'SUPPLY-SIDE TAP — 120% N/A (705.11)' : (_ic.passes120 ? '✓ 120% RULE PASS' : '✗ FAIL')}</td></tr>
       </table>` : '<p style="color:#555;font-style:italic;padding:5px;text-align:center;font-size:8.5px">Run compliance check to populate this section.</p>'}
       `}
       <!-- Calculation Methodology -->
@@ -116,7 +193,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           <tr class="bg-lt"><td class="fw7">Max Circuit Current</td><td>Isc × 1.25</td><td class="mono">NEC 690.8(A)(1)</td><td>Continuous duty factor</td></tr>
           <tr><td class="fw7">OCPD Rating</td><td>Max Circuit Current × 1.25</td><td class="mono">NEC 690.8(B)(1)</td><td>Or next standard fuse/breaker size</td></tr>
           <tr class="bg-lt"><td class="fw7">Conductor Ampacity</td><td>≥ Max Circuit Current (after derating)</td><td class="mono">NEC 690.8(B), 310.15</td><td>Corrected for temp. and conduit fill</td></tr>
-          ${isSupplySideInterconnection(input)
+          ${_ic.isSupplySide
             ? `<tr><td class="fw7">Interconnection</td><td>Supply-side tap: conductors ≥ 1.25 × PV output current; fused disconnect at tap</td><td class="mono">NEC 705.11</td><td>Line side of service disconnect — 120% rule N/A</td></tr>`
             : `<tr><td class="fw7">Backfeed Breaker</td><td>120% Rule: Main + PV ≤ Busbar × 1.2</td><td class="mono">NEC 705.12(B)(2)(3)</td><td>Load-side connection method</td></tr>`}
           <tr class="bg-lt"><td class="fw7">EGC Sizing</td><td>Per NEC Table 250.122 based on OCPD</td><td class="mono">NEC 690.45, 250.122</td><td>Min. #12 AWG Cu for ≤ 20A circuits</td></tr>
@@ -208,18 +285,18 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
       </table>${_bosNote}`;
       })()}
 
-      <div class="section-title">Interconnection Summary — ${isSupplySideInterconnection(input) ? 'NEC 705.11 (Supply-Side Tap)' : 'NEC 705.12 (Load-Side)'}</div>
+      <div class="section-title">Interconnection Summary — ${_ic.isSupplySide ? 'NEC 705.11 (Supply-Side Tap)' : 'NEC 705.12 (Load-Side)'}</div>
       <table class="info-table">
         <tr>
-          <td class="il">Method</td><td class="iv">${interconnectionLabel(input.project?.interconnectionMethod)}</td>
-          <td class="il">PV Output Current</td><td class="iv">${(Number(system?.totalAcKw || 0) * 1000 / 240).toFixed(1)} A</td>
+          <td class="il">Method</td><td class="iv">${_ic.methodLabel}</td>
+          <td class="il">PV Output Current</td><td class="iv">${_ic.feederOutputA.toFixed(1)} A</td>
         </tr>
         <tr>
-          <td class="il">Continuous (× 1.25)</td><td class="iv">${(Number(system?.totalAcKw || 0) * 1000 / 240 * 1.25).toFixed(1)} A</td>
-          <td class="il">${isSupplySideInterconnection(input) ? 'Tap OCPD' : 'Backfeed Breaker'}</td><td class="iv">${necNextStandardOcpd(Number(system?.totalAcKw || 0) * 1000 / 240 * 1.25)} A ${isSupplySideInterconnection(input) ? 'fused disconnect' : '2-pole breaker'}</td>
+          <td class="il">Continuous (× 1.25)</td><td class="iv">${_ic.feederContinuousA.toFixed(1)} A</td>
+          <td class="il">${_ic.isSupplySide ? 'Tap OCPD' : 'Backfeed Breaker'}</td><td class="iv">${_ic.feederOcpd} A ${_ic.isSupplySide ? 'fused disconnect' : '2-pole breaker'}</td>
         </tr>
         <tr>
-          <td class="il">Connection Point</td><td class="iv" colspan="3">${isSupplySideInterconnection(input) ? 'Line side of the service disconnecting means — 120% busbar rule (NEC 705.12(B)) not applicable' : 'Load center busbar — 120% rule per NEC 705.12(B)(2)'}</td>
+          <td class="il">Connection Point</td><td class="iv" colspan="3">${_ic.isSupplySide ? 'Line side of the service disconnecting means — 120% busbar rule (NEC 705.12(B)) not applicable' : 'Load center busbar — 120% rule per NEC 705.12(B)(2)'}</td>
         </tr>
       </table>
 
@@ -233,8 +310,9 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         <strong>PAGE CONCLUSION — NEC COMPLIANCE:</strong>
         This ${cadTotalDcKw.toFixed(2)} kW DC / ${cadTotalPanels} module ${_auth.isHybrid ? `HYBRID photovoltaic system (${_auth.subSystems.map(s => `${SUB_LABEL[s.key]}: ${s.panelCount}`).join(' · ')})` : 'photovoltaic system'} has been evaluated against NEC ${necVer} Articles 690, 705, 250, and 310.
         ${_auth.isHybrid ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) applies to the ROOF sub-system only.' : _isRoof ? '' : _isFence ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a fence-mounted system.' : 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a ground-mounted system.'}
-        ${rulesResult ? `The rules engine identified ${rulesResult.errorCount} error(s), ${rulesResult.warningCount + _extraWarn} warning(s), and ${rulesResult.autoFixCount} auto-correction(s).` : 'Compliance evaluation is pending.'}
-        System configuration ${rulesResult && rulesResult.errorCount === 0 ? 'complies with' : 'requires review per'} NEC ${necVer} and applicable local amendments.
+        ${rulesResult ? `The rules engine identified ${rulesResult.errorCount} error(s), ${rulesResult.warningCount + _extraWarn} warning(s), and ${rulesResult.autoFixCount} auto-correction(s).` : ''}
+        Interconnection is resolved to a ${_ic.isSupplySide ? `SUPPLY-SIDE (line-side) tap per NEC 705.11 (${_ic.feederOcpd} A fused AC disconnect ahead of the ${_ic.mainA} A service disconnect) — the 120% busbar rule of NEC 705.12(B) does not apply` : `LOAD-SIDE connection per NEC 705.12(B) (${_ic.feederOcpd} A backfeed breaker; ${_ic.mainA} A main + ${_ic.feederOcpd} A ≤ ${_ic.busLimit.toFixed(0)} A busbar limit)`}.
+        System configuration ${(!rulesResult || rulesResult.errorCount === 0) ? 'complies with' : 'requires review per'} NEC ${necVer} and applicable local amendments.
       </div>
 
       ${overrides && overrides.length > 0 ? `
@@ -260,6 +338,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
   const { project, system, compliance } = input;
   const elec = compliance.electrical;
   const _auth = buildConductorAuthority(input, cad);
+  const _ic = resolveInterconnection(input, cad);
   // CAD-sourced electrical values
   const cadTotalPanels = cad.totalPanels;
   const cadTotalDcKw   = cad.totalDcKw;
@@ -369,18 +448,18 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           ${elec ? `
           <tr style="background:#f5f5f5">
             <td class="fw7">AC Output</td>
-            <td>Inverter(s)</td><td>${isSupplySideInterconnection(input) ? 'Supply-Side Tap @ Service' : 'Main Panel'}</td>
-            <td>${elec.acConductorCallout || project.wireGauge} THWN-2</td>
-            <td>${typeof elec.acWireAmpacity === 'number' ? elec.acWireAmpacity.toFixed(1) : (elec.acWireAmpacity || '—')}A</td>
-            <td>${elec.busbar?.backfeedBreakerRequired || '—'}A</td>
+            <td>Inverter(s)</td><td>${_ic.isSupplySide ? 'Supply-Side Tap @ Service' : 'Main Panel'}</td>
+            <td>${_ic.feederPhaseCallout}</td>
+            <td>${_ic.feederAmpacityA != null ? _ic.feederAmpacityA.toFixed(1) : '—'}A</td>
+            <td>${_ic.feederOcpd || '—'}A</td>
             <td style="color:${(elec.acVoltageDrop || 0) > 3 ? '#cc0000' : '#000'}">${elec.acVoltageDrop?.toFixed(2) || '—'}%</td>
             <td>${project.conduitType}</td>
             <td>${project.wireLength} ft</td>
           </tr>
           <tr style="background:#fff">
             <td class="fw7">EGC</td>
-            <td>Array</td><td>${isSupplySideInterconnection(input) ? 'AC Disconnect (ground bus)' : 'Main Panel'}</td>
-            <td>${_auth.egc.gauge} bare Cu</td>
+            <td>Array</td><td>${_ic.isSupplySide ? 'AC Disconnect (ground bus)' : 'Main Panel'}</td>
+            <td>${_ic.feederEgcGauge} bare Cu</td>
             <td>—</td><td>—</td><td>—</td>
             <td>${project.conduitType}</td>
             <td>${project.wireLength} ft</td>
@@ -402,8 +481,8 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           <tr>
             <td class="fw7">AC Output</td>
             <td class="tr">${project.wireLength} ft</td>
-            <td>${elec.acConductorCallout || project.wireGauge} Cu</td>
-            <td class="tr">${elec.busbar?.backfeedBreakerRequired || '—'}A</td>
+            <td>${_ic.feederPhaseCallout} Cu</td>
+            <td class="tr">${_ic.feederOcpd || '—'}A</td>
             <td class="tr">240V</td>
             <td class="tr mono">${elec.acVoltageDrop ? (elec.acVoltageDrop * 240 / 100).toFixed(2) : '—'}V</td>
             <td class="tr mono fw7" style="color:${(elec.acVoltageDrop || 0) > 3 ? '#cc0000' : '#000'}">${elec.acVoltageDrop?.toFixed(2) || '—'}%</td>
@@ -414,7 +493,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>VOLTAGE DROP INTERPRETATION:</strong>
-        Calculated AC feeder voltage drop is ${elec.acVoltageDrop?.toFixed(2) || '—'}% over a ${project.wireLength} ft conductor run using ${elec.acConductorCallout || project.wireGauge} copper.
+        Calculated AC feeder voltage drop is ${elec.acVoltageDrop?.toFixed(2) || '—'}% over a ${project.wireLength} ft conductor run using ${_ic.feederPhaseCallout} copper.
         NEC 210.19(A) Informational Note recommends ≤ 3% for feeders and ≤ 5% total (branch + feeder combined).
         ${(elec.acVoltageDrop || 0) <= 3 ? 'The calculated drop is within recommended limits. No conductor upsizing is required.' : 'The calculated drop exceeds 3%. Consider upsizing conductors or reducing run length.'}
       </div>
@@ -465,21 +544,24 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
            methodology table row-for-row and displaced project content. */''}
       <div class="section-title">Load Calculations — NEC 220.82 Optional Method</div>
       ${(() => {
-        const busA = project.panelBusRating || project.mainPanelAmps || 200;
-        const mainA = project.mainPanelAmps || 200;
+        // Single-sourced from resolveInterconnection — the SAME bus/main/OCPD
+        // and resolved method PV-4A, the cover and PV-4B's AC-feeder row print.
+        const busA = _ic.busA;
+        const mainA = _ic.mainA;
         const acKw = system.totalAcKw || 0;
-        const acAmps = (acKw * 1000 / 240);
-        // Error 5bb fix: Use NEC standard OCPD sizes, not round-to-5
-        const continuousA = acAmps * 1.25;  // NEC 690.8(A)(1)
-        const bfAmps = necNextStandardOcpd(continuousA);
-        const busLimit = busA * 1.2;
-        const maxBfAllowed = busLimit - mainA;
-        const passes120 = bfAmps <= maxBfAllowed;
+        const acAmps = _ic.feederOutputA;
+        const continuousA = _ic.feederContinuousA;  // NEC 690.8(A)(1)
+        const bfAmps = _ic.feederOcpd;
+        const busLimit = _ic.busLimit;
+        const maxBfAllowed = _ic.maxBackfeedA;
+        const passes120 = _ic.passes120;
         // Single-sourced interconnection: a supply-side tap connects LINE side
         // of the service disconnect — NEC 705.12(B)'s 120% busbar rule does not
         // govern, so running (and failing) it here contradicted the rest of the
-        // set. Steps 8-9 + interpretation are method-specific below.
-        const _lcSupply = isSupplySideInterconnection(input);
+        // set. Steps 8-9 + interpretation are method-specific below. A load-side
+        // design that fails 120% resolves UP to supply-side, so the load-side
+        // branch never ships a red "EXCEEDS 120%" on an issued set.
+        const _lcSupply = _ic.isSupplySide;
         const sqft = mainA >= 200 ? 3000 : 2000;
         const lightingVA = sqft * 3;
         const smallApplVA = 4500;
@@ -571,7 +653,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <!-- EGC rail -> inverter -->
             <line x1="150" y1="71" x2="150" y2="94" stroke="#127a3e" stroke-width="1.8"/>
             <text x="156" y="86" font-size="7" fill="#0f5c30" font-weight="bold">EGC</text>
-            <text x="156" y="94" font-size="6" fill="#0f5c30">${_auth.egc.gauge} Cu · 250.122</text>
+            <text x="156" y="94" font-size="6" fill="#0f5c30">${_ic.feederEgcGauge} Cu · 250.122</text>
             <!-- inverter / combiner -->
             <rect x="108" y="94" width="84" height="26" fill="#f4f6f9" stroke="#1a2230" stroke-width="1.2" rx="1"/>
             <text x="150" y="110" text-anchor="middle" font-size="7" fill="#1a2230" font-weight="bold">INVERTER / AC COMBINER</text>
@@ -594,7 +676,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         <div style="font-size:var(--f-sm);line-height:1.6;">
           <div style="font-weight:900;font-size:9px;margin-bottom:4px;letter-spacing:0.5px;">GROUNDING & BONDING REQUIREMENTS</div>
           <div style="margin-bottom:3px;">1. All module frames bonded to mounting rail via listed bonding hardware (WEEB, lay-in lug, or equivalent) per UL 2703.</div>
-          <div style="margin-bottom:3px;">2. Equipment grounding conductor (EGC): ${_auth.egc.gauge} bare Cu min. per NEC 250.122 and 690.45.</div>
+          <div style="margin-bottom:3px;">2. Equipment grounding conductor (EGC): ${_ic.feederEgcGauge} bare Cu min. per NEC 250.122 and 690.45.</div>
           <div style="margin-bottom:3px;">3. EGC routed with circuit conductors in same raceway per NEC 690.43(A).</div>
           <div style="margin-bottom:3px;">4. Grounding electrode conductor (GEC) connected to existing building grounding electrode system per NEC 250.166.</div>
           <div style="margin-bottom:3px;">5. All connections made with listed connectors rated for the conductor material and environment.</div>

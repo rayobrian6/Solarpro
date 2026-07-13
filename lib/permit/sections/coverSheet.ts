@@ -14,6 +14,7 @@ import { equipmentDatasheetIndexRows } from './datasheetAppendix';
 import { buildSheetManifest } from '../sheetManifest';
 import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE, SUB_LABEL } from './subSystemSheets';
 import { hybridSubmissionGate } from './hybridReadiness';
+import { resolveInterconnection } from './electricalPages';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -29,7 +30,11 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const { project, system, compliance } = input;
 
   // ── Jurisdiction / code versions ──────────────────────────────────────────
-  const necVer  = compliance.jurisdiction?.necVersion || '2020';
+  // Strip any 'NEC ' prefix (some AHJ records carry 'NEC 2023' not '2023') so
+  // the code line never doubles to 'NEC NEC 2023' AND the IFC cycle derives the
+  // same way the title block does (cover printed IFC 2021 while the title block
+  // printed IFC 2024 because the un-stripped compare fell through to else).
+  const necVer  = (compliance.jurisdiction?.necVersion || '2020').replace(/^NEC\s+/i, '');
   const ibcVer  = '2021';
   const ifcVer  = necVer === '2023' ? '2024' : '2021';
   const state   = compliance.jurisdiction?.state || '';
@@ -77,12 +82,15 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     : null;
 
   // ── Interconnection ───────────────────────────────────────────────────────
-  const interconn = project.interconnectionMethod
-    ? interconnectionLabel(project.interconnectionMethod)
-    : '';
-  // Single-sourced supply-side flag (resolved compliance first, project field
-  // second). The 120% math above ONLY applies to load-side connections.
-  const isSupplySide = isSupplySideInterconnection(input);
+  // Resolved ONCE (shared with PV-4A/PV-4B via resolveInterconnection): a
+  // load-side design that fails the 120% busbar rule resolves to a supply-side
+  // (line-side) tap. The cover's 705.x row, SCOPE step 5 and SYSTEM SUMMARY
+  // backfeed line now read the SAME method every electrical sheet prints —
+  // never "supply-side required" on the cover while PV-4A draws a load-side
+  // breaker, and never a red FAIL/QA flag on an issued set.
+  const _ic = resolveInterconnection(input, cad);
+  const isSupplySide = _ic.isSupplySide;
+  const interconn = _ic.methodLabel;
 
   // ── Battery ───────────────────────────────────────────────────────────────
   const hasBattery    = hasRealBattery(project);
@@ -311,25 +319,29 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     _isRoofCover ? infoRow('ROOF PITCH',         pitch) : '',
     _isRoofCover ? infoRow('NO. OF LAYERS',      roofLayers ? `${roofLayers}` : '') : '',
     _isRoofCover ? infoRow('ROOF FRAMING',       rafterSize && rafterSpacing ? `${rafterSize} @ ${rafterSpacing}" O.C.` : rafterSize || '') : '',
-    // System-type label row (fence / ground / roof)
-    !_isRoofCover ? infoRow('SYSTEM TYPE',       displaySystemTypeShort(_coverSysTypeCheck)) : '',
+    // System-type label row. A hybrid cover must NOT inherit the primary sub's
+    // single label ("SYSTEM TYPE: SOLAR FENCE" on a roof+ground+fence set) — it
+    // states the multi-system structure and suppresses the fence-only params.
+    _coverHybrid ? infoRow('SYSTEM TYPE',        `HYBRID — ${_coverSubRows.map(r => r.label).join(' + ')}`)
+      : (!_isRoofCover ? infoRow('SYSTEM TYPE',  displaySystemTypeShort(_coverSysTypeCheck)) : ''),
     infoRow('STORIES',            stories ? `${stories}` : ''),
     infoRow('ROOF LOAD',          _isRoofCover && roofLoadPsf ? `${roofLoadPsf} PSF` : ''),
     infoRow('WIND SPEED',         windSpeedMph ? `${windSpeedMph} MPH` : ''),
     infoRow('WIND EXPOSURE',      windExposure ? `CAT. ${windExposure}` : ''),
     infoRow('GROUND SNOW LOAD',   snowPsf !== '' ? `${snowPsf} PSF` : ''),
     infoRow('SEISMIC DESIGN CAT.',seismic ? `CAT. ${seismic}` : ''),
-    // Fence-specific design criteria (only shown for solar_fence)
-    (isFence(_coverSysTypeCheck) && cad.fence?.postSpacingM)
+    // Fence-specific design criteria — only on a PURE solar_fence cover, never
+    // on a hybrid (the fence params belong on the per-sub PV-1F sheet there).
+    (!_coverHybrid && isFence(_coverSysTypeCheck) && cad.fence?.postSpacingM)
       ? infoRow('POST SPACING', `${(cad.fence.postSpacingM * 3.28084).toFixed(1)}' O.C.`)
       : '',
-    (isFence(_coverSysTypeCheck) && cad.fence?.postEmbedM)
+    (!_coverHybrid && isFence(_coverSysTypeCheck) && cad.fence?.postEmbedM)
       ? infoRow('POST EMBEDMENT', `${(cad.fence.postEmbedM * 3.28084).toFixed(1)} ft MIN.`)
       : '',
-    (isFence(_coverSysTypeCheck) && cad.fence?.panelHeightM)
+    (!_coverHybrid && isFence(_coverSysTypeCheck) && cad.fence?.panelHeightM)
       ? infoRow('PANEL HEIGHT', `${(cad.fence.panelHeightM * 39.3701).toFixed(0)}" ABOVE GRADE`)
       : '',
-    isFence(_coverSysTypeCheck)
+    (!_coverHybrid && isFence(_coverSysTypeCheck))
       ? infoRow('FENCE TYPE', 'SOLAR FENCE ARRAY')
       : '',
   ].join('');
@@ -556,7 +568,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
           <div class="sec-hdr">ENGINEERING SUMMARY</div>
           <div class="sec-body" style="font-size:var(--f-md);line-height:1.45;padding:var(--xs);">
             ${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}, designed per
-            NEC ${compliance?.jurisdiction?.necVersion || '2020'}, ASCE 7-22, IBC ${ibcVer}, and applicable local amendments.
+            NEC ${necVer}, ASCE 7-22, IBC ${ibcVer}, and applicable local amendments.
             Issued for permit review — requires PE review and wet stamp before AHJ submission.
           </div>
         </div>
