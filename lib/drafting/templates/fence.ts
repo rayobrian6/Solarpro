@@ -146,16 +146,21 @@ export function drawFencePlan(
   // to the tighter axis, then CENTER the drawn extent in BOTH axes: a single
   // straight run has ~0 height and previously pinned to the bottom edge, which
   // is exactly the "85% dead canvas" Ray flagged.
-  const padPx    = 54;
-  const availW   = Math.max(80, dz.width  - 2 * padPx);
-  const availH   = Math.max(80, dz.height - 2 * padPx);
+  // The fence run is long + thin, so the top-down alone can only ever be a
+  // ribbon. Confine it to the UPPER ~46% of the draw zone; the lower half
+  // carries a TYPICAL FENCE SECTION so the sheet fills instead of leaving a
+  // hairline in ~75% white (Ray's flag). planZone = the top-down's own zone.
+  const planZone = { x: dz.x, y: dz.y, width: dz.width, height: Math.round(dz.height * 0.34) };
+  const padPx    = 40;
+  const availW   = Math.max(80, planZone.width  - 2 * padPx);
+  const availH   = Math.max(70, planZone.height - 2 * padPx);
   const fitScale = Math.min(availW / (spanXft || 1), availH / (spanYft || 1));
   const scale    = Math.min(fitScale, 24);   // px per foot (cap so a short run isn't blown up huge)
 
   const drawnWpx = spanXft * scale;
   const drawnHpx = spanYft * scale;
-  const originX  = dz.x + (dz.width  - drawnWpx) / 2;   // left edge of content
-  const originYb = dz.y + (dz.height + drawnHpx) / 2;   // bottom edge of content (svg y grows down)
+  const originX  = planZone.x + (planZone.width  - drawnWpx) / 2;   // left edge of content
+  const originYb = planZone.y + (planZone.height + drawnHpx) / 2;   // vertical center of the plan zone
 
   const toSvgX = (xM: number) => originX  + (xM - minX) * mToFt * scale;
   const toSvgY = (yM: number) => originYb - (yM - minY) * mToFt * scale;
@@ -317,14 +322,80 @@ export function drawFencePlan(
     });
   }
 
-  // ── North arrow ──
-  els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
-
-  // ── Scale bar ──
+  // ── North arrow + scale bar (kept inside the plan zone, upper half) ──
+  els.push(drawNorthArrow(planZone.x + planZone.width - 22, planZone.y + 20, 20));
   const scaleBarFt = 20;
-  const scaleBarPx = scaleBarFt * scale;
-  els.push(drawScaleBar(zones.dims.left + 4, H - zones.dims.bottom + 28,
-    Math.round(scaleBarPx), `0    ${scaleBarFt} FT`));
+  els.push(drawScaleBar(planZone.x + 6, planZone.y + planZone.height - 8,
+    Math.round(scaleBarFt * scale), `0    ${scaleBarFt} FT`));
+
+  // ── TYPICAL FENCE SECTION — fills the lower half of the draw zone ───────────
+  // A real cross-section (driven post + 90° vertical modules + embedment) gives
+  // the sheet vertical content instead of a thin run floating in white.
+  {
+    const postSpFt  = metersToFt(cadFence?.postSpacingM ?? 2.44);
+    const embedFt   = metersToFt(cadFence?.postEmbedM   ?? 0.91);
+    const panelHtFt = metersToFt(cadFence?.panelHeightM ?? 1.83);
+    const rails     = Math.max(1, cadFence?.railCount ?? 2);
+    const clrFt     = 0.5;
+
+    const secX = dz.x, secW = dz.width;
+    const secY = dz.y + dz.height * 0.37;
+    const secH = dz.height - (secY - dz.y) - 6;
+
+    els.push(drawRectFilled(secX, secY, secW, 13, '#1a2332', '#1a2332', 0));
+    els.push(drawText(secX + 6, secY + 9.3,
+      `TYPICAL FENCE SECTION — VERTICAL MODULES · DRIVEN POST @ ${postSpFt.toFixed(0)}' O.C.`, {
+        anchor: 'start', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+
+    const innerTop = secY + 13;
+    const grade    = innerTop + (secH - 13) * 0.58;
+    const vft = Math.min(
+      (grade - innerTop - 18) / (panelHtFt + clrFt + 0.5),
+      (secY + secH - grade - 20) / (embedFt + 0.3),
+      22);
+    const clrPx   = clrFt * vft;
+    const panelPx = panelHtFt * vft;
+    const embedPx = embedFt * vft;
+    const bayPx   = Math.min(postSpFt * vft, secW * 0.34);
+    const cx      = secX + secW * 0.50;
+    const leftPost = cx - bayPx / 2, rightPost = cx + bayPx / 2;
+    const postTopY = grade - clrPx - panelPx - 8;
+    const panTop   = grade - clrPx - panelPx;
+
+    // Grade line + hatch
+    els.push(`<line x1="${(secX + 20).toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(secX + secW - 24).toFixed(1)}" y2="${grade.toFixed(1)}" stroke="#6b4a2a" stroke-width="1.8"/>`);
+    for (let i = 0; i < 22; i++) {
+      const gx = secX + 24 + i * ((secW - 48) / 22);
+      els.push(`<line x1="${gx.toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(gx - 5).toFixed(1)}" y2="${(grade + 6).toFixed(1)}" stroke="#6b4a2a" stroke-width="0.5"/>`);
+    }
+    // Posts: above grade (solid steel) + below grade (dashed embed)
+    for (const px of [leftPost, rightPost]) {
+      els.push(`<rect x="${(px - 2.6).toFixed(1)}" y="${postTopY.toFixed(1)}" width="5.2" height="${(grade - postTopY).toFixed(1)}" fill="#8a8a8a" stroke="#333" stroke-width="1"/>`);
+      els.push(`<rect x="${(px - 2.6).toFixed(1)}" y="${grade.toFixed(1)}" width="5.2" height="${embedPx.toFixed(1)}" fill="#707070" stroke="#333" stroke-width="1" stroke-dasharray="4,2"/>`);
+    }
+    // Vertical PV module panel between posts + rail lines
+    els.push(`<rect x="${(leftPost + 4).toFixed(1)}" y="${panTop.toFixed(1)}" width="${(bayPx - 8).toFixed(1)}" height="${panelPx.toFixed(1)}" fill="#cfe0f4" stroke="#1a4a8a" stroke-width="1.3"/>`);
+    for (let r = 1; r < rails; r++) {
+      const ry = panTop + (panelPx * r) / rails;
+      els.push(`<line x1="${(leftPost + 4).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${(rightPost - 4).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="#1a4a8a" stroke-width="0.5" opacity="0.5"/>`);
+    }
+    // Wind arrow
+    const wY = (panTop + grade) / 2;
+    els.push(`<line x1="${(rightPost + 44).toFixed(1)}" y1="${wY.toFixed(1)}" x2="${(rightPost + 10).toFixed(1)}" y2="${wY.toFixed(1)}" stroke="#c00" stroke-width="1.6"/>`);
+    els.push(drawArrowhead(rightPost + 10, wY, 180, 6, '#c00'));
+    els.push(drawText(rightPost + 48, wY - 3, 'WIND', { anchor: 'start', fontSize: 6.5, fontWeight: 'bold', fill: '#c00' }));
+    // Dimensions
+    els.push(drawText(leftPost - 9, (panTop + grade - clrPx) / 2, `${panelHtFt.toFixed(1)}' PANEL`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#1a4a8a', rotate: -90 }));
+    els.push(drawText(rightPost + 10, grade + embedPx / 2, `${embedFt.toFixed(1)}' EMBED`, { anchor: 'start', fontSize: 6.8, fontWeight: 'bold', fill: '#333' }));
+    const dy = grade + embedPx + 13;
+    els.push(`<line x1="${leftPost.toFixed(1)}" y1="${dy.toFixed(1)}" x2="${rightPost.toFixed(1)}" y2="${dy.toFixed(1)}" stroke="#036" stroke-width="0.9"/>`);
+    els.push(`<line x1="${leftPost.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${leftPost.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#036" stroke-width="0.8"/>`);
+    els.push(`<line x1="${rightPost.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${rightPost.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#036" stroke-width="0.8"/>`);
+    els.push(drawText(cx, dy - 3, `${postSpFt.toFixed(0)}' O.C.`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#036' }));
+    els.push(drawText(secX + secW / 2, secY + secH - 1,
+      'DRIVEN STEEL POST — NO CONCRETE · MODULES 90° VERTICAL · FIELD-VERIFY EMBEDMENT', {
+        anchor: 'middle', fontSize: 6.3, fill: '#888', italic: true }));
+  }
 
   // ── Data zone — segment schedule (STEP 8: fence-specific only) ──
   const dZone = zones.data;

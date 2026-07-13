@@ -80,7 +80,11 @@ export function getLayoutForSystem(
 // Tall canvas for proper above-grade + below-grade structure.
 
 function fenceLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones {
-  const H = CANVAS_ELEV_H;   // 520 — fence always uses tall canvas
+  // PLAN (top-down) uses a TALL canvas (840 ≈ 1.26 aspect) so it fills the
+  // sheet's draw zone instead of a 520 (2.04) strip that letterboxed with a
+  // blank band below. The extra height carries the TYPICAL FENCE SECTION under
+  // the thin top-down run (drawFencePlan). Elevation/structural keep 520.
+  const H = viewType === 'plan' ? 840 : CANVAS_ELEV_H;
   const W = CANVAS_W;
 
   // Dimension margins
