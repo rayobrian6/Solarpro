@@ -510,12 +510,27 @@ function resolveBrand(
   input: SizingInput,
   warnings: SizingWarning[],
 ): BrandProfile {
-  // Priority 1: explicit brand id
   const explicit = getBrandProfile(input.selectedBrand);
+  const inferred = getBrandProfileByInverterId(input.selectedInverterId);
+
+  // Priority 0 (defense-in-depth): a CONCRETE inverter id beats a contradicting
+  // brand label. When both resolve to DIFFERENT brands, the installer's actual
+  // inverter wins — a stale/incoherent ecosystemBrand can never silently re-tier
+  // the sizing to the wrong brand. This is the single structural gate that makes
+  // the "Enphase inverter, EcoFlow brand → floods to EcoFlow" class impossible.
+  if (explicit && inferred && explicit.id !== inferred.id) {
+    warnings.push({
+      severity: 'warning',
+      code: 'BRAND_INVERTER_MISMATCH',
+      message: `Selected brand ${explicit.displayName} does not include inverter ${input.selectedInverterId}; sizing uses the inverter's brand ${inferred.displayName}.`,
+    });
+    return inferred;
+  }
+
+  // Priority 1: explicit brand id
   if (explicit) return explicit;
 
   // Priority 2: infer from selected inverter id
-  const inferred = getBrandProfileByInverterId(input.selectedInverterId);
   if (inferred) return inferred;
 
   // Priority 3: recommended for this system type

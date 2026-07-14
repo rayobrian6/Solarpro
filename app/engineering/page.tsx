@@ -4237,10 +4237,17 @@ function EngineeringPageInner() {
       // ignore its existing inverter so the brand's sub-appropriate inverter is
       // chosen. No forceBrand (self-heal / manual rebuild) → keep the sub's own
       // chosen equipment.
+      // Brand is DERIVED from the sub's own inverter, never from the stored
+      // ecosystemBrand tag (which can go stale and contradict the inverter — the
+      // root of the EcoFlow flood: a roof of Enphase micros carried a stale
+      // ecosystemBrand='ecoflow' and every rebuild re-sized it to EcoFlow). Only
+      // fall back to the stored tag when the sub has no inverter to derive from.
+      const _subInvId = entry?.inverterId ?? degPrimary?.inverterId;
+      const _derivedBrand = _subInvId ? getBrandProfileByInverterId(_subInvId)?.id : undefined;
       let built = buildSubFleetForKey(key, subSystemCounts[key], {
-        inverterId: forceBrand ? undefined : (entry?.inverterId ?? degPrimary?.inverterId),
+        inverterId: forceBrand ? undefined : _subInvId,
         panelId:    entry?.panelId ?? degPrimary?.strings?.[0]?.panelId,
-        brand:      forceBrand ?? entry?.ecosystemBrand,
+        brand:      forceBrand ?? _derivedBrand ?? entry?.ecosystemBrand,
       });
       // If the picked ecosystem can't serve this sub (e.g. EcoFlow on a roof
       // micro sub), fall back to the sub's sensible default brand — never leave
