@@ -20,6 +20,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel, CADSystemType } from '@/lib/cad/types';
 import { classifyPanel, isSubSystemKey, type SubSystemKey } from '../utils/subSystems';
+import { getInverterById, getMicroinverterById, getPanelById } from '@/lib/equipment-db';
 
 /** Sub key → canonical CAD system type (drives sheet composition/validation). */
 export const SUB_KEY_TO_CAD_TYPE: Record<SubSystemKey, CADSystemType> = {
@@ -190,10 +191,42 @@ export function subScopedInput(input: PermitInput, cad: CADModel, key: SubSystem
         ? (input.system.totalDcKw * totalPanels) / input.system.totalPanels
         : 0));
 
+  // LEAK FIX (Ray — fence STRING LEGEND showed roof+ground+fence strings): when
+  // the sub has NO tagged inverter, DO NOT fall back to the whole fleet (that
+  // enumerates every sub's strings on this sub's sheet). Synthesize the sub's
+  // OWN inverter from the §1.1 equipment-authority map (project.subSystems[key])
+  // — the SAME source the permit E-1 resolves through — scoped to THIS sub only.
+  const _mapEntry = (input.project as {
+    subSystems?: Record<string, { inverterId?: string; topology?: string; panelId?: string }> }
+  )?.subSystems?.[key];
+  let scopedInverters = subInverters;
+  if (subInverters.length === 0 && _mapEntry?.inverterId && totalPanels > 0) {
+    const _micro = getMicroinverterById(_mapEntry.inverterId) as { manufacturer?: string; model?: string; acOutputW?: number } | undefined;
+    const _str = _micro ? undefined : getInverterById(_mapEntry.inverterId) as { manufacturer?: string; model?: string; acOutputKw?: number } | undefined;
+    const _dev = _micro ?? _str;
+    if (_dev) {
+      const _panel = (_mapEntry.panelId ? getPanelById(_mapEntry.panelId) : undefined) as
+        { manufacturer?: string; model?: string; watts?: number; voc?: number; isc?: number } | undefined;
+      scopedInverters = [{
+        subSystemKey: key,
+        manufacturer: _dev.manufacturer ?? '', model: _dev.model ?? '',
+        type: _micro ? 'micro' : (_mapEntry.topology === 'optimizer' ? 'optimizer' : 'string'),
+        acOutputKw: _micro ? ((_micro.acOutputW ?? 0) / 1000) : (_str?.acOutputKw ?? 0),
+        strings: [{
+          subSystemKey: key, panelCount: totalPanels,
+          panelManufacturer: _panel?.manufacturer,
+          panelModel: _panel?.model ?? sec?.equipment?.panelModel,
+          panelWatts: nameplateW || _panel?.watts,
+          panelVoc: _panel?.voc, panelIsc: _panel?.isc,
+        }],
+      }] as unknown as typeof subInverters;
+    }
+  }
+
   // Scoped AC kW: micro fleets carry PER-UNIT acOutputKw (× the sub's own
   // modules); string/optimizer fleets carry per-inverter output.
   let totalAcKw = 0;
-  for (const inv of subInverters) {
+  for (const inv of scopedInverters) {
     const rec = inv as { acOutputKw?: number; type?: string };
     const per = Number(rec.acOutputKw) || 0;
     totalAcKw += rec.type === 'micro' ? per * totalPanels : per;
@@ -210,7 +243,9 @@ export function subScopedInput(input: PermitInput, cad: CADModel, key: SubSystem
       totalPanels,
       totalDcKw,
       ...(totalAcKw > 0 ? { totalAcKw } : {}),
-      inverters: subInverters.length ? subInverters : allInverters,
+      // Scoped to THIS sub (tagged fleet, else synthesized from the map) — never
+      // the whole fleet, so the sheet's strings/legend can't leak other subs.
+      inverters: scopedInverters,
       // Project totals for project-wide chrome (title block) — subset totals
       // above are for the sheet body only.
       _projectTotalDcKw: input.system?.totalDcKw,
