@@ -5,6 +5,7 @@
 
 import type { PermitInput, ResolvedEquipment } from '../types';
 import { SOLAR_PANELS, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import { effectiveInverterSubKey } from './subSystems';
 
 // ═══════════════════════════════════════════════════════════════
 // FAIL-LOUD unselected-inverter marker (permit integrity)
@@ -450,7 +451,11 @@ export function resolveEquipmentBySubSystem(
   cad?: HybridEquipmentCarrier | null,
 ): ResolvedEquipment {
   const inverters = input.system?.inverters ?? [];
-  const tagged = inverters.filter(inv => (inv as { subSystemKey?: string }).subSystemKey === key);
+  // Effective tag: the inverter's own subSystemKey, or (when a reload dropped it)
+  // the majority subSystemKey of its strings. Recovers the sub instead of
+  // collapsing to '—'/"INVERTER NOT SELECTED". No fallback here — an inverter
+  // with NO per-sub signal must not be claimed by every lane.
+  const tagged = inverters.filter(inv => effectiveInverterSubKey(inv as { subSystemKey?: unknown; strings?: Array<{ subSystemKey?: unknown }> }) === key);
   const section = cad?.hybrid?.sections?.find(s => s.key === key);
   const canonSubs = (input.project?._canonical as
     { subSystems?: Array<{ key: string; panels?: Array<{ wattage?: number }> }> } | undefined)?.subSystems;

@@ -18,6 +18,7 @@
 
 import type { CanonicalSysType } from '../types';
 import type { SubSystemKey } from '@/lib/system/subSystemEquipment';
+import { isSubSystemKey as _isKey } from '@/lib/system/subSystemEquipment';
 
 // Wave 1 (per-subsystem equipment contract §1.1/§1.2): the canonical
 // declarations live in lib/system/subSystemEquipment.ts (dependency-free,
@@ -104,4 +105,32 @@ export function partitionSubSystems<P extends SubSystemPanel>(panels: P[]): SubS
 /** True when the panels span more than one system type. */
 export function isHybrid(panels: SubSystemPanel[]): boolean {
   return partitionSubSystems(panels).length > 1;
+}
+
+/**
+ * The sub-system an inverter belongs to — robust to a dropped inverter-level
+ * tag. Prefer the inverter's own `subSystemKey`; else fall back to the majority
+ * `subSystemKey` of its STRINGS (the granular per-panel truth); else the
+ * caller's fallback (the primary sub). A Design-Studio round-trip / reload can
+ * rebuild the inverter wrapper and drop its tag while the strings keep theirs —
+ * without this, every hybrid lane collapses to '—' and E-1 prints "INVERTER NOT
+ * SELECTED" even though the strings still name their sub. Single source of
+ * truth: the strings, not a second inverter-level copy that can go missing.
+ */
+export function effectiveInverterSubKey(
+  inv: { subSystemKey?: unknown; strings?: Array<{ subSystemKey?: unknown } | null | undefined> } | null | undefined,
+  fallback?: SubSystemKey,
+): SubSystemKey | undefined {
+  if (inv && _isKey(inv.subSystemKey)) return inv.subSystemKey;
+  const tally = new Map<SubSystemKey, number>();
+  for (const s of inv?.strings ?? []) {
+    const k = s?.subSystemKey;
+    if (_isKey(k)) tally.set(k, (tally.get(k) ?? 0) + 1);
+  }
+  let best: SubSystemKey | undefined;
+  let bestN = 0;
+  for (const [k, n] of tally) if (n > bestN) { best = k; bestN = n; }
+  // No signal at all → fallback (caller's primary sub) or undefined so an
+  // unsignaled inverter is NOT claimed by every lane.
+  return best ?? fallback;
 }

@@ -24,7 +24,7 @@ import { necNextStandardOcpd, resolveEquipmentBySubSystem } from './helpers';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { balancedBranchSizes, microBranchCount, planMicroBranches, type BranchPlanPanel } from './branching';
-import { partitionSubSystems, toSubSystemKey, isSubSystemKey, type SubSystemKey, type SubSystemPanel } from './subSystems';
+import { partitionSubSystems, toSubSystemKey, isSubSystemKey, effectiveInverterSubKey, type SubSystemKey, type SubSystemPanel } from './subSystems';
 
 export type ConductorTopology = 'MICRO' | 'STRING' | 'OPTIMIZER';
 
@@ -325,8 +325,11 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
   const primaryKey = orderedKeys[0];
   // Tag rule (§1.5): tagged inverters belong to their tag; untagged inverters
   // inherit the PRIMARY sub (deterministic roof>ground>fence — never a vote).
+  // Effective key: own tag → majority string tag (survives a reload that drops
+  // the inverter-level tag) → primary sub. Keeps dcStrings + AC-feeder grouping
+  // aligned with the equipment resolver's effective-tag logic.
   const effKey = (inv: any): SubSystemKey =>
-    isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey : primaryKey;
+    effectiveInverterSubKey(inv, primaryKey) ?? primaryKey;
 
   const subSystems: SubSystemConductorAuthority[] = orderedKeys.map((key) => {
     const subPanels = (partition.find(s => s.key === key)?.panels ?? []) as unknown as BranchPlanPanel[];
