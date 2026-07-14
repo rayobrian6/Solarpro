@@ -4885,11 +4885,13 @@ function EngineeringPageInner() {
     );
     if (allAligned) return;
 
-    // v61.3 P-11 FIX: respect controlMode — in manual mode the user has
-    // full authority over panel selection; only warn, never auto-heal.
-    if (controlMode === 'manual') {
+    // Control-mode contract (lib/solardog/controlMode.ts): only AUTO may
+    // silently override equipment. In GUIDED and MANUAL the user has authority
+    // over panel selection — warn/suggest, never silently swap (this silent
+    // panel swap in guided was part of Ray's "some fields save, some revert").
+    if (controlMode !== 'auto') {
       console.warn(
-        '[v61.3 P-11] Panel compat mismatch detected but controlMode=manual — skipping auto-heal.',
+        `[v61.3 P-11] Panel compat mismatch detected but controlMode=${controlMode} — skipping silent auto-heal.`,
         { original: compat.originalPanelId, effective: target },
       );
       return;
@@ -10353,10 +10355,13 @@ function EngineeringPageInner() {
                             `Manual dropdowns remain editable below.`
                           );
                           setTimeout(() => setAutoLoadBanner(null), 6000);
-                          // v61.3 P-09 FIX: ecosystem apply changes inverterId/type but leaves
-                          // strings[] stale. In auto/free control mode, immediately rebuild strings
-                          // via the sizing recommendation so the STRINGS/ARRAYS section is never stale.
-                          if (controlMode !== 'manual' && sizingAutoApply) {
+                          // v61.3 P-09: ecosystem apply changes inverterId/type but leaves
+                          // strings[] stale. Only AUTO may silently rebuild strings via the
+                          // (whole-project) sizing recommendation — in GUIDED/MANUAL the user
+                          // approves via the visible per-sub controls, never a silent rebuild
+                          // (guided's silent rebuild was part of the "some fields revert" class,
+                          // and on hybrids the whole-project rebuild re-corrupts per-sub fleets).
+                          if (controlMode === 'auto' && sizingAutoApply) {
                             setTimeout(() => {
                               if (sizingRecommendation) {
                                 setConfig(prev => ({ ...prev, userHasEditedInverters: false }));
