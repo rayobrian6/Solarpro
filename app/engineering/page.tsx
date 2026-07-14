@@ -2557,6 +2557,24 @@ function EngineeringPageInner() {
   const [sldSvg, setSldSvg] = useState<string | null>(null);
   const [sldLoading, setSldLoading] = useState(false);
   const [sldError, setSldError] = useState<string | null>(null);
+  // Invalidate the cached SLD whenever the equipment it depicts changes, so a
+  // stale SLD (e.g. cached before an inverter re-pick) can never be shown in the
+  // SLD tab or embedded into the plan set as "INVERTER NOT SELECTED". A null
+  // cache forces a fresh render on next view / plan-set.
+  const _sldEquipSig = JSON.stringify({
+    inv: (config?.inverters ?? []).map((i: any) => [i.subSystemKey, i.inverterId, i.type,
+      (i.strings ?? []).reduce((s: number, x: any) => s + (x.panelCount || 0), 0)]),
+    sub: (config as any)?.subSystems,
+    ic: config?.interconnectionMethod, bat: [config?.batteryId, config?.batteryCount],
+    st: config?.systemType,
+  });
+  const _sldSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (_sldSigRef.current !== null && _sldSigRef.current !== _sldEquipSig) {
+      setSldSvg(prev => (prev ? null : prev)); // equipment changed → stale SLD dropped
+    }
+    _sldSigRef.current = _sldEquipSig;
+  }, [_sldEquipSig]);
   // BUG 4 FIX: SLD Zoom state
   const [sldZoom, setSldZoom] = useState(1);
   const [sldPan, setSldPan] = useState({ x: 0, y: 0 });
@@ -8151,15 +8169,19 @@ function EngineeringPageInner() {
       // lanes can't be built keeps the passthrough suppressed — the permit
       // engine's own generateLiveSLD renders E-1 multi-lane server-side.
       const _sldPassthroughOk = !subSystemCounts.isHybrid || !!hybridSldSources;
-      let activeSldSvg = _sldPassthroughOk ? sldSvg : null;
-      if (!activeSldSvg && _sldPassthroughOk) {
-        console.log('[handleGeneratePlanSet] sldSvg is null — auto-fetching SLD before plan-set...');
+      // STALE-CACHE FIX (Ray, hybrid planset showed "INVERTER NOT SELECTED" on
+      // all 3 lanes AFTER re-picking equipment): the session-cached sldSvg is a
+      // snapshot from the last "Generate SLD" click and goes stale the moment
+      // equipment changes. The plan set is a FINAL deliverable — always render a
+      // FRESH SLD from current config, never embed the session cache.
+      let activeSldSvg: string | null = null;
+      if (_sldPassthroughOk) {
+        console.log('[handleGeneratePlanSet] rendering FRESH SLD from current config for plan-set...');
         activeSldSvg = await fetchSLDSvg();
         if (activeSldSvg) {
           setSldSvg(activeSldSvg);
-          console.log('[handleGeneratePlanSet] SLD auto-fetched successfully for plan-set');
         } else {
-          console.warn('[handleGeneratePlanSet] SLD auto-fetch returned null — E-1 will use fallback renderer');
+          console.warn('[handleGeneratePlanSet] SLD fetch returned null — E-1 will use fallback renderer');
         }
       }
       if (subSystemCounts.isHybrid && !_sldPassthroughOk) {
