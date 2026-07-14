@@ -13,6 +13,7 @@ import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
+import { getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 
 /**
@@ -378,11 +379,29 @@ export interface ComputedMultiSourceView {
  */
 export function buildSourceBranchesFromComputedMulti(
   multi: ComputedMultiSourceView,
+  // §1.1 equipment-authority map (config.subSystems). When the computed
+  // per-sub `inverterSpec` is null (the compute engine didn't resolve the
+  // sub's inverter), fall back to the sub's OWN map inverterId — the SAME
+  // authority the permit E-1 resolves through — so a hybrid lane never
+  // renders "INVERTER NOT SELECTED" while the map holds a real inverter.
+  subMap?: Partial<Record<SubSystemKey, { inverterId?: string; topology?: string; panelId?: string }>>,
 ): SLDSourceBranch[] | undefined {
   const branches: SLDSourceBranch[] = [];
   for (const key of multi.subSystemKeys) {
     const cs = multi.subSystems[key];
     if (!cs || !(cs.totalPanels > 0)) continue;
+    // Map-authority equipment fallback (used only when the computed spec is absent).
+    const _mapId = subMap?.[key]?.inverterId;
+    const _mapMicro = _mapId ? getMicroinverterById(_mapId) : undefined;
+    const _mapStr = (!_mapMicro && _mapId) ? getInverterById(_mapId) : undefined;
+    const _mapInv = (_mapMicro ?? _mapStr) as { manufacturer?: string; model?: string; integratedDcDisconnect?: boolean } | undefined;
+    const _mapTopo = subMap?.[key]?.topology;
+    const _isMicro   = cs.inverterSpec ? cs.isMicro     : (!!_mapMicro || _mapTopo === 'micro');
+    const _isOpt     = cs.inverterSpec ? cs.isOptimizer : (_mapTopo === 'optimizer');
+    const _invMfr    = cs.inverterSpec?.manufacturer ?? _mapInv?.manufacturer ?? '';
+    const _invModel  = cs.inverterSpec?.model ?? _mapInv?.model ?? unselectedInverterLabel(key);
+    const _integDc   = cs.inverterSpec ? (cs.isOptimizer || undefined)
+                                       : (((_mapStr as any)?.integratedDcDisconnect === true) || _mapTopo === 'optimizer' || undefined);
     const feeder: RunSegment | undefined = cs.runs?.find(r =>
       String(r.id) === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
     const panelModel = cs.panelSpec
@@ -393,20 +412,20 @@ export function buildSourceBranchesFromComputedMulti(
     branches.push({
       key,
       label: `${key.toUpperCase()} — ${cs.totalPanels} × ${panelModel}`,
-      topologyType: cs.isMicro ? 'MICROINVERTER' : cs.isOptimizer ? 'STRING_WITH_OPTIMIZER' : 'STRING_INVERTER',
+      topologyType: _isMicro ? 'MICROINVERTER' : _isOpt ? 'STRING_WITH_OPTIMIZER' : 'STRING_INVERTER',
       systemType: key,
       totalModules: cs.totalPanels,
-      totalStrings: cs.isMicro ? 0 : cs.stringCount,
-      panelsPerString: cs.isMicro ? undefined : cs.panelsPerString,
+      totalStrings: _isMicro ? 0 : cs.stringCount,
+      panelsPerString: _isMicro ? undefined : cs.panelsPerString,
       panelModel,
       panelWatts: cs.panelSpec?.panelWatts
         ?? (cs.totalPanels > 0 ? Math.round((cs.totalDcKw * 1000) / cs.totalPanels) : undefined),
       panelVoc: cs.panelSpec?.panelVoc,
       panelIsc: cs.panelSpec?.panelIsc,
-      inverterManufacturer: cs.inverterSpec?.manufacturer ?? '',
-      // FAIL-LOUD: computed sub with no inverter spec → red unselected marker.
-      inverterModel: cs.inverterSpec?.model ?? unselectedInverterLabel(key),
-      acKwPerDevice: cs.isMicro && cs.microDeviceCount > 0
+      inverterManufacturer: _invMfr,
+      // Resolves through the §1.1 map authority before the fail-loud marker.
+      inverterModel: _invModel,
+      acKwPerDevice: _isMicro && cs.microDeviceCount > 0
         ? Math.round((cs.totalAcKw / cs.microDeviceCount) * 1000) / 1000
         : cs.inverterSpec?.acOutput?.ratedKw,
       acOutputKw: cs.totalAcKw,
@@ -418,12 +437,12 @@ export function buildSourceBranchesFromComputedMulti(
       // impact). The POI total comes from the AGGREGATE via input.backfeedAmps
       // — lanes only display their contribution.
       backfeedAmps: cs.backfeedBreakerAmps || undefined,
-      dcOCPD: cs.isMicro ? undefined : (cs.strings?.[0]?.ocpdAmps || undefined),
-      integratedDcDisconnect: cs.isOptimizer || undefined,
-      optimizerQty: cs.isOptimizer ? cs.totalPanels : undefined,
+      dcOCPD: _isMicro ? undefined : (cs.strings?.[0]?.ocpdAmps || undefined),
+      integratedDcDisconnect: _integDc,
+      optimizerQty: _isOpt ? cs.totalPanels : undefined,
       rapidShutdownIntegrated: key === 'roof' ? undefined : false,
-      deviceCount: cs.isMicro ? cs.microDeviceCount : undefined,
-      microBranches: cs.isMicro ? cs.microBranches : undefined,
+      deviceCount: _isMicro ? cs.microDeviceCount : undefined,
+      microBranches: _isMicro ? cs.microBranches : undefined,
       runs: cs.runs,
     });
   }

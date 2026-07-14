@@ -3176,8 +3176,8 @@ function EngineeringPageInner() {
   const hybridSldSources = useMemo<SLDSourceBranch[] | null>(() => {
     if (!subSystemCounts.isHybrid) return null;
     if (computedMulti.subSystemKeys.length <= 1) return null; // degenerate/whole-fleet pass — not lane-splittable yet
-    return buildSourceBranchesFromComputedMulti(computedMulti) ?? null;
-  }, [subSystemCounts.isHybrid, computedMulti]);
+    return buildSourceBranchesFromComputedMulti(computedMulti, (config as any).subSystems) ?? null;
+  }, [subSystemCounts.isHybrid, computedMulti, (config as any).subSystems]);
 
   // Wave 3.7 — namespaced-run-id-tolerant lookup (parseRunId): at N=1 ids are
   // bare (legacy, byte-identical); at N>1 per-sub runs are `${key}:`-prefixed
