@@ -4825,6 +4825,71 @@ function EngineeringPageInner() {
   // pass summary, the subSystems[key] equipment record, and per-sub pickers
   // (panel re-pins ONLY this sub's strings via applyPanelToEngineeringConfig;
   // mounting writes the map entry). Single-system projects never render this.
+  // ── Wave 6 W2 — PER-SUB recommendation engine ──────────────────────────────
+  // Size each PRESENT sub independently (its own count + brand + panel) and diff
+  // against its current fleet. Surfaced in the per-sub header; apply routes through
+  // rebuildSubFleet (this sub only). For hybrids this replaces the whole-project
+  // recommendation (hidden) — recommendations + marginal/MPPT warnings become
+  // per-sub, so a "14.9% headroom" flag attaches to the sub it's actually about.
+  type SubRec = {
+    recInvId: string; recModel: string; recCount: number; recTopology: string;
+    recStrings: number[]; differs: boolean; marginal: string | null; ok: boolean;
+  };
+  const subSystemRecommendations = useMemo<Partial<Record<SubSystemKey, SubRec>>>(() => {
+    const out: Partial<Record<SubSystemKey, SubRec>> = {};
+    if (!subSystemCounts.isHybrid) return out;
+    const _fb = toSubSystemKey(config.systemType);
+    const part = partitionFleet(config.inverters as any[], _fb);
+    const subMap = ((config as any).subSystems ?? {}) as Record<string, any>;
+    for (const key of subSystemCounts.present) {
+      const count = subSystemCounts[key];
+      if (count <= 0) continue;
+      const fleet = (part[key] ?? []) as InverterConfig[];
+      const entry = subMap[key] ?? {};
+      const panelId = entry.panelId ?? fleet[0]?.strings?.[0]?.panelId;
+      const panel = panelId ? (getPanelById(panelId) as any) : null;
+      const brand = entry.ecosystemBrand
+        ?? (fleet[0] ? getBrandProfileByInverterId(fleet[0].inverterId)?.id : undefined);
+      let rec: SystemSizingResult | null = null;
+      try {
+        rec = sizeSystemFromBrand({
+          systemType: key,
+          panelCount: count,
+          panelWattage: panel?.watts ?? 400,
+          ...(panelId ? { panelId } : {}),
+          selectedBrand: brand,
+          batteryEnabled: false,
+        } as any);
+      } catch { rec = null; }
+      if (!rec || !rec.inverterModels?.[0]) continue;
+      const recInvId = rec.inverterModels[0].equipmentDbId;
+      const recCount = Math.max(1, rec.inverterCount);
+      const recStrings = rec.strings.map((s: any) => s.panelCount as number).sort((a, b) => b - a);
+      const curInvId = fleet[0]?.inverterId ?? '';
+      const curCount = fleet.length;
+      const curStrings = fleet.flatMap(i => i.strings.map(s => s.panelCount)).sort((a, b) => b - a);
+      const differs = !!curInvId && (
+        curInvId !== recInvId || curCount !== recCount ||
+        curStrings.length !== recStrings.length ||
+        curStrings.some((n, i) => n !== recStrings[i])
+      );
+      const pc = rec.panelCompatibility;
+      const marginal = pc && (pc.status === 'marginal' || pc.status === 'incompatible') ? pc.reason : null;
+      out[key] = {
+        recInvId,
+        recModel: ((getInvById(recInvId, (rec.topology === 'micro' ? 'micro' : 'string') as InverterType) as any)?.model) ?? recInvId,
+        recCount,
+        recTopology: rec.topology,
+        recStrings,
+        differs,
+        marginal,
+        ok: !!curInvId && !differs && !marginal,
+      };
+    }
+    return out;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subSystemCounts, config.inverters, config.systemType, (config as any).subSystems]);
+
   const renderSubSystemHeader = (key: SubSystemKey) => {
     const entry = (((config as any).subSystems ?? {})[key] ?? {}) as Record<string, any>;
     const _fbH = toSubSystemKey(config.systemType);
@@ -4872,6 +4937,41 @@ function EngineeringPageInner() {
             </button>
           ) : null}
         </div>
+        {/* Wave 6 W2 — per-sub recommendation / marginal warning (this sub only) */}
+        {(() => {
+          const r = subSystemRecommendations[key];
+          if (!r) return null;
+          if (r.marginal) {
+            return (
+              <div className="mt-1.5 flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded px-2 py-1">
+                <span aria-hidden>⚠</span><span>{r.marginal}</span>
+              </div>
+            );
+          }
+          if (r.differs) {
+            return (
+              <div className="mt-1.5 flex items-center gap-2 text-[10px] bg-sky-500/10 border border-sky-500/25 rounded px-2 py-1">
+                <span className="text-sky-300 font-semibold">
+                  💡 Recommended: {r.recModel}{r.recCount > 1 ? ` ×${r.recCount}` : ''}
+                  {r.recStrings.length ? ` · ${r.recStrings.length} string${r.recStrings.length === 1 ? '' : 's'} (${r.recStrings.join('/')})` : ''}
+                </span>
+                <button
+                  onClick={() => rebuildSubFleet(key, { inverterId: r.recInvId })}
+                  className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/25 text-sky-200 hover:bg-sky-500/40 transition-colors shrink-0"
+                  title={`Apply the recommended inverter to the ${key.toUpperCase()} sub-system only`}
+                >Apply</button>
+              </div>
+            );
+          }
+          if (r.ok) {
+            return (
+              <div className="mt-1.5 text-[10px] text-emerald-400/80 flex items-center gap-1">
+                <span aria-hidden>✓</span><span>Optimally sized for this sub-system</span>
+              </div>
+            );
+          }
+          return null;
+        })()}
         <div className="mt-1.5 grid grid-cols-2 md:grid-cols-3 gap-2">
           <div>
             <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Panel — this sub-system</label>
