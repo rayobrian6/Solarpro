@@ -4720,13 +4720,21 @@ function EngineeringPageInner() {
     if (!fleetDiag.suspect) return;
     // Distinguish SEEDING an empty design (nothing to override → always OK, even
     // in manual mode) from HEALING an existing wrong fleet (a real user config →
-    // respect manual mode + the explicit field locks so we never fight the user).
+    // respect the control-mode contract so we never silently fight the user).
     const _fb = toSubSystemKey(config.systemType);
     const _part = partitionFleet(config.inverters as any[], _fb);
     const hasExistingFleet = subSystemCounts.present.some(k => fleetPanelTotal(_part[k] ?? []) > 0);
     if (hasExistingFleet) {
-      if (controlMode === 'manual') return;                    // manual → explicit "Rebuild fleets" button
-      if (configLocks.inverter || configLocks.strings) return; // explicit field lock wins
+      // Control-mode contract (lib/solardog/controlMode.ts): only AUTO may
+      // silently override equipment. GUIDED/MANUAL must SUGGEST — the visible
+      // "Rebuild fleets per sub-system" button IS that suggestion — never a
+      // silent heal. BUG (Ray, hybrid inverter revert): unlocking the inverter
+      // in GUIDED dropped the field-lock guard below, and because the mode was
+      // 'guided' (not 'manual') the old `=== 'manual'` check let the heal run and
+      // flood every sub with the primary sub's ecosystem (systemType=fence →
+      // EcoFlow onto roof/ground). Bail for anything but AUTO.
+      if (controlMode !== 'auto') return;                      // guided/manual → explicit "Rebuild fleets" button
+      if (configLocks.inverter || configLocks.strings) return; // explicit field lock wins (auto + lock)
     }
     const sig = `${systemPanelCount}|${subSystemCounts.roof},${subSystemCounts.ground},${subSystemCounts.fence}`;
     if (hybridHealSigRef.current === sig) return;              // already attempted for this design
