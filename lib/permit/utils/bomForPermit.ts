@@ -41,6 +41,7 @@ import {
 import { necNextStandardOcpd } from './helpers';
 import { buildConductorAuthority, type ConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
+import { buildHybridAcCollection } from './sldAdapter';
 import { MICROINVERTERS, STRING_INVERTERS, SOLAR_PANELS } from '@/lib/equipment-db';
 import {
   SOLFENCE_MOUNTING_ID,
@@ -481,6 +482,12 @@ export function generateBOMForPermit(
     : undefined;
   const _isPerSubHybrid = !!_perSubEquipment;
 
+  // Stage D — the hybrid AC collection (per-source combiners → ONE shared AC
+  // combiner panel → ONE system disconnect) from the SAME resolver E-1 draws.
+  // Null for single-system. Feeds both the V4 disconnect rating (below) and the
+  // shared-panel BOM line (step 5c) so BOM/SCHED/E-1 print identical hardware.
+  const _acCollection = buildHybridAcCollection(input, cad);
+
   const stringCount   = system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1;
   const inverterCount = isMicro ? totalPanels : (system.inverters?.length || 1);
   const deviceCount   = isMicro ? totalPanels : undefined;
@@ -643,6 +650,9 @@ export function generateBOMForPermit(
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,
+        // Stage D — hybrid system AC disconnect single-sourced to E-1's
+        // Σ-backfeed rating (undefined for single-system → legacy kW basis).
+        systemAcDisconnectA: _acCollection?.disconnectA,
         dcOCPD:              necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.25 * 1.25),
         jurisdiction:        compliance.jurisdiction?.ahj,
         requiresACDisconnect:    project.acDisconnect !== false,
@@ -717,6 +727,34 @@ export function generateBOMForPermit(
         required: true,
       });
     }
+  }
+
+  // ── 5c. Shared AC combiner panel (hybrid) — Stage D ──────
+  // E-1 (renderSLDMultiLane) draws every PV source landing on ONE shared AC
+  // combiner panel busbar → ONE system disconnect. The BOM/SCHED were blind to
+  // that panel (they listed only the per-brand IQ Combiners + the aggregate
+  // disconnect). Emit it from the SAME resolver the diagram uses so the sheets
+  // list exactly what the SLD shows. Reuses _acCollection (hoisted above).
+  const _sharedPanel = _acCollection?.sharedPanel;
+  if (_sharedPanel) {
+    merged.push({
+      stageId: 'ac',
+      stageLabel: STAGE_LABELS['ac'],
+      category: 'combiner',
+      manufacturer: _sharedPanel.brand,
+      model: _sharedPanel.model,
+      partNumber: _sharedPanel.partNumber || '—',
+      quantity: 1,
+      unit: 'ea',
+      description:
+        `Shared AC combiner panel — ${_sharedPanel.busbarA}A busbar / ${_sharedPanel.mainOcpdA}A main OCPD. ` +
+        `All ${_acCollection!.perSource.length} PV sources land here on backfed OCPDs → one ` +
+        `${_acCollection!.disconnectA}A system AC disconnect (NEC 705.12(B)).`,
+      necReference: _sharedPanel.necRefs?.[0] ?? 'NEC 705.12(B)',
+      derivedFrom: 'hybrid AC collection (E-1 single source)',
+      required: true,
+    });
+    log.push(`[bomForPermit] shared AC combiner panel: ${_sharedPanel.model} (${_sharedPanel.busbarA}A busbar, ${_acCollection!.perSource.length} sources)`);
   }
 
   // ── 6. Sort by stageId ordinal ───────────────────────────

@@ -148,6 +148,12 @@ export interface BOMGenerationInputV4 {
   backfeedAmps: number;
   acOCPD: number;
   dcOCPD: number;
+  /** Hybrid only: the system AC-disconnect rating from the shared AC-collection
+   *  (Σ per-source backfeed OCPD → next standard, the SAME value E-1 draws).
+   *  When set, the per-sub Stage-4 disconnect sizes to this instead of the
+   *  aggregate-kW×1.25 basis, so BOM/SCHED/E-1 print the identical rating.
+   *  Undefined ⇒ legacy kW basis (single-system stays byte-identical). */
+  systemAcDisconnectA?: number;
   acVoltage?: number;         // AC system voltage (default: 240V)
   dcVoltage?: number;         // DC string voltage (default: 400V)
   phases?: number;            // 1 or 3 phase (default: 1)
@@ -2401,7 +2407,14 @@ function generateBOMV4PerSubSystem(
     const nextFuse = (a: number) => STD_FUSE_SIZES.find(f => f >= a) ?? Math.ceil(a / 10) * 10;
     const nextEnclosure = (a: number) => STD_ENCLOSURES.find(e => e >= a) ?? Math.ceil(a / 100) * 100;
     const fuseAmps = isFusedDisc ? nextFuse(acRequiredAmps) : null;
-    const enclosureRequirement = isFusedDisc ? (fuseAmps ?? acRequiredAmps) : acRequiredAmps;
+    // Stage D — single-source the system disconnect to E-1: when the hybrid AC
+    // collection supplies a Σ-backfeed rating, size the enclosure to it so the
+    // BOM/SCHED disconnect equals the rating E-1 draws (NEC 705.12(B)). The fuse
+    // (supply-side) still sizes from the tap requirement. Undefined ⇒ kW basis.
+    const _targetDiscA = input.systemAcDisconnectA;
+    const enclosureRequirement = isFusedDisc
+      ? (fuseAmps ?? acRequiredAmps)
+      : (_targetDiscA ?? acRequiredAmps);
     const acDiscAmps = nextEnclosure(enclosureRequirement);
     const fusedPartNumMap: Record<number, string> = { 30: 'DPF221RP', 60: 'DPF222RP', 100: 'DPF222RB', 200: 'DPF224RB' };
     const acDiscPartNum = isFusedDisc ? (fusedPartNumMap[acDiscAmps] ?? `DPF-${acDiscAmps}A`) : `DU${acDiscAmps}RB`;
@@ -2411,8 +2424,11 @@ function generateBOMV4PerSubSystem(
       `${acDiscAmps}A ${discTypeLabel} AC Disconnect`, acDiscPartNum,
       `${acDiscAmps}A ${discTypeLabel} AC disconnect — NEC 690.14` +
         (isFusedDisc ? ` / NEC 705.11 supply-side (fuse: ${fuseAmps}A)` : ' / NEC 705.12 load-side'),
-      1, 'ea', 'NEC 690.14', 'perSystem (aggregate of all sub-systems)',
-      `nextEnclosure(${acRequiredAmps.toFixed(1)}A × 1.25) = ${acDiscAmps}A`, true));
+      1, 'ea', 'NEC 690.14',
+      _targetDiscA && !isFusedDisc ? 'hybrid AC collection (Σ backfeed OCPD — matches E-1)' : 'perSystem (aggregate of all sub-systems)',
+      _targetDiscA && !isFusedDisc
+        ? `Σ source backfeed OCPD = ${_targetDiscA}A → ${acDiscAmps}A enclosure (matches E-1)`
+        : `nextEnclosure(${acRequiredAmps.toFixed(1)}A × 1.25) = ${acDiscAmps}A`, true));
     if (isFusedDisc && fuseAmps !== null) {
       push(undefined, addItem('ac', 'fuse', 'Littelfuse', `${fuseAmps}A Class RK5 Fuse`,
         `LLNRK${fuseAmps}SP`, `${fuseAmps}A 250V Class RK5 time-delay fuse — 2 per fused disconnect (NEC 690.9)`,
@@ -2424,7 +2440,9 @@ function generateBOMV4PerSubSystem(
       necReference: 'NEC 690.14' });
     complianceNotes.push(
       `NEC 690.14 / NEC 705.60: 1× ${acDiscAmps}A ${discTypeLabel} disconnect — ` +
-      `${acContCurrent.toFixed(1)}A aggregate output × 1.25 = ${acRequiredAmps.toFixed(1)}A → ${acDiscAmps}A enclosure` +
+      (_targetDiscA && !isFusedDisc
+        ? `Σ per-source backfeed OCPD = ${_targetDiscA}A → ${acDiscAmps}A enclosure (single system disconnect after the shared AC combiner panel — matches E-1)`
+        : `${acContCurrent.toFixed(1)}A aggregate output × 1.25 = ${acRequiredAmps.toFixed(1)}A → ${acDiscAmps}A enclosure`) +
       (isFusedDisc ? ` + ${fuseAmps}A fuse (NEC 705.11 supply-side)` : ' (NEC 705.12 load-side)')
     );
   }

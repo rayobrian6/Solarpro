@@ -5,7 +5,8 @@
 
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
-import { renderSLDProfessional, normalizeSourceBranches, type SLDProfessionalInput, type SLDSourceBranch } from '@/lib/sld-professional-renderer';
+import { renderSLDProfessional, normalizeSourceBranches, acCollectionFromLanes, type SLDProfessionalInput, type SLDSourceBranch } from '@/lib/sld-professional-renderer';
+import type { HybridAcCollectionPlan } from '@/lib/equipment/integratedBos';
 import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd, hasRealBattery, unselectedInverterLabel, isInverterUnselectedMarker } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
@@ -335,6 +336,24 @@ export function buildSourceBranchesFromAuthority(
         : undefined,
     };
   });
+}
+
+/**
+ * Wave 6 (Stage D) — resolve the hybrid AC-collection plan for the permit BOM /
+ * Equipment Schedule from the SAME lanes E-1 draws. Returns the per-source
+ * combiners, the ONE shared AC combiner panel every source lands on, and the
+ * ONE system disconnect — so the BOM lists exactly what the SLD shows.
+ * Returns null for single-system inputs (no shared panel; the legacy per-system
+ * combiner/disconnect lines already cover them, byte-identical).
+ */
+export function buildHybridAcCollection(
+  input: PermitInput,
+  cad?: CADModel | null,
+): HybridAcCollectionPlan | null {
+  const auth = buildConductorAuthority(input, cad ?? undefined);
+  const lanes = buildSourceBranchesFromAuthority(auth, input);
+  if (!lanes || lanes.length < 2) return null;
+  return acCollectionFromLanes(lanes);
 }
 
 // ─── PAGE PATH — computedMulti.subSystems → SLDSourceBranch[] ────────────────

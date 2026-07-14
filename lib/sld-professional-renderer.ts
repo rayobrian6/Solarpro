@@ -27,7 +27,7 @@ import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
 import { resolveDeviceIllustration } from './sld-device-illustrations';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
-import { resolveHybridAcCollection } from '@/lib/equipment/integratedBos';
+import { resolveHybridAcCollection, type HybridAcCollectionPlan } from '@/lib/equipment/integratedBos';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
@@ -2932,6 +2932,32 @@ function laneTopology(b: SLDSourceBranch): 'MICRO' | 'OPTIMIZER' | 'STRING' {
   return 'STRING';
 }
 
+/** A lane's backfeed OCPD (A) — the single basis the AC-collection uses to size
+ *  the shared panel busbar + system disconnect. */
+function laneBackfeedA(b: SLDSourceBranch): number {
+  return b.backfeedAmps ?? b.acOCPD ?? necNextStandardOcpd((b.acOutputAmps ?? 0) * 1.25) ?? 0;
+}
+
+/**
+ * Wave 6 — SINGLE SOURCE for the hybrid AC-collection architecture: per-source
+ * brand combiner/OCPD → ONE shared AC combiner panel → ONE system disconnect.
+ * E-1 (renderSLDMultiLane) DRAWS this; the permit BOM / SCHED helper reads the
+ * SAME function (via sldAdapter.buildHybridAcCollection) so the sheets can never
+ * disagree with the diagram about the shared panel, its busbar rating, or the
+ * single disconnect. Map lanes → HybridSourceInput here and nowhere else.
+ */
+export function acCollectionFromLanes(lanes: SLDSourceBranch[]): HybridAcCollectionPlan {
+  return resolveHybridAcCollection(lanes.map(b => ({
+    key: b.key,
+    inverterManufacturer: b.inverterManufacturer ?? '',
+    inverterModel: b.inverterModel ?? '',
+    isMicro: laneTopology(b) === 'MICRO',
+    branchCount: b.microBranches?.length ?? b.totalStrings ?? 1,
+    deviceCount: b.deviceCount ?? b.totalModules ?? 0,
+    backfeedA: laneBackfeedA(b),
+  })));
+}
+
 function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[]): string {
   console.log(`[SLD MULTI-LANE ACTIVE] wave5a lanes=${lanes.length} keys=${lanes.map(l => l.key).join('+')}`);
 
@@ -2968,16 +2994,10 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     || (lanes.reduce((s, b) => s + laneBackfeed(b), 0) + (input.batteryBackfeedA ?? 0));
 
   // ── Wave 6 — hybrid AC collection: per-source combiner/OCPD → ONE shared AC
-  //    combiner panel → ONE system disconnect (replaces a disconnect per lane). ──
-  const acCollection = resolveHybridAcCollection(lanes.map(b => ({
-    key: b.key,
-    inverterManufacturer: b.inverterManufacturer ?? '',
-    inverterModel: b.inverterModel ?? '',
-    isMicro: laneTopology(b) === 'MICRO',
-    branchCount: b.microBranches?.length ?? b.totalStrings ?? 1,
-    deviceCount: b.deviceCount ?? b.totalModules ?? 0,
-    backfeedA: laneBackfeed(b),
-  })));
+  //    combiner panel → ONE system disconnect (replaces a disconnect per lane).
+  //    Single-sourced via acCollectionFromLanes so BOM/SCHED read the identical
+  //    shared panel + disconnect (lib/permit/utils/sldAdapter.buildHybridAcCollection). ──
+  const acCollection = acCollectionFromLanes(lanes);
   const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
   const totalAcKw = Number(input.acOutputKw) || lanes.reduce((s, b) => s + (b.acOutputKw ?? 0), 0);
   const dcKw = lanes.reduce((s, b) => s + ((b.totalModules ?? 0) * (b.panelWatts ?? 0)) / 1000, 0)
