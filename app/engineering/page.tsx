@@ -4271,6 +4271,17 @@ function EngineeringPageInner() {
     const seeded: SeededSubFleet[] = [];
     for (const key of subSystemCounts.present) {
       const entry = mapNow[key];
+      // Surgical heal (flood guard): leave a HEALTHY sub untouched — its fleet
+      // already covers its layout stamp AND carries its map-identity inverter.
+      // Only rebuild subs that actually drifted (e.g. fence 45 ≠ layout 17), so
+      // re-syncing one sub never re-splits the others' strings or risks touching
+      // their equipment. forceBrand (deliberate ecosystem pick) always applies.
+      if (!forceBrand) {
+        const _fleet = (part[key] ?? []) as InverterConfig[];
+        const _countOk = fleetPanelTotal(_fleet as any[]) === subSystemCounts[key];
+        const _invOk = !entry?.inverterId || (_fleet[0] as any)?.inverterId === entry.inverterId;
+        if (_fleet.length > 0 && _countOk && _invOk) continue;
+      }
       // forceBrand (ecosystem pick) → apply the picked brand to this sub and
       // ignore its existing inverter so the brand's sub-appropriate inverter is
       // chosen. No forceBrand (self-heal / manual rebuild) → keep the sub's own
