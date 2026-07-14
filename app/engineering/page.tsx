@@ -10248,10 +10248,79 @@ function EngineeringPageInner() {
                       {config.inverters.length > 0 ? (
                         <div className="mb-4 p-3 rounded-xl bg-slate-900/60 border border-slate-700/40">
                           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-                            {cs.isMicro ? 'AC Branch Layout' : 'String Layout'}
+                            {subSystemCounts.isHybrid ? 'Array Layout — by Sub-System' : cs.isMicro ? 'AC Branch Layout' : 'String Layout'}
                           </div>
                           <div className="space-y-1.5">
-                            {cs.isMicro ? (
+                            {subSystemCounts.isHybrid ? (
+                              /* Wave 6 W1 — HYBRID: group the layout BY SUB-SYSTEM
+                                 (roof > ground > fence), each block labeled with its
+                                 sub + inverter model + module count so it's obvious
+                                 which strings land on roof / ground / fence. */
+                              (() => {
+                                const _fbSL = toSubSystemKey(config.systemType);
+                                const _partSL = partitionFleet(config.inverters as any[], _fbSL);
+                                const _keysSL = (['roof', 'ground', 'fence'] as const).filter(k =>
+                                  subSystemCounts.present.includes(k) || ((_partSL[k]?.length ?? 0) > 0));
+                                const _subColor: Record<string, string> = { roof: 'text-sky-400', ground: 'text-emerald-400', fence: 'text-violet-400' };
+                                const _subBg: Record<string, string> = { roof: 'bg-sky-500/40 border-sky-500/20', ground: 'bg-emerald-500/40 border-emerald-500/20', fence: 'bg-violet-500/40 border-violet-500/20' };
+                                const _maxP = 25;
+                                return _keysSL.map(k => {
+                                  const fleet = (_partSL[k] ?? []) as InverterConfig[];
+                                  const subCount = subSystemCounts[k];
+                                  const firstInv = fleet[0];
+                                  const invModel = firstInv ? ((getInvById(firstInv.inverterId, firstInv.type) as any)?.model ?? firstInv.inverterId) : null;
+                                  const isMicroSub = firstInv?.type === 'micro';
+                                  const colorCls = _subColor[k]; const bgCls = _subBg[k];
+                                  return (
+                                    <div key={k} className="pb-2 mb-2 border-b border-slate-800/60 last:border-0 last:mb-0 last:pb-0">
+                                      <div className={`text-[10px] font-black uppercase tracking-wide mb-1.5 flex items-center gap-2 flex-wrap ${colorCls}`}>
+                                        <span>{k}</span>
+                                        <span className="text-slate-500 font-semibold normal-case">
+                                          {subCount} modules{invModel ? ` · ${invModel}` : ''}{fleet.length > 1 ? ` · ${fleet.length} ${isMicroSub ? 'micro fleets' : 'inverters'}` : ''}
+                                        </span>
+                                      </div>
+                                      {fleet.length === 0 ? (
+                                        <div className="text-[10px] text-amber-400 italic pl-1">No inverter fleet yet — pick one below.</div>
+                                      ) : (
+                                        <div className="space-y-1.5">
+                                          {fleet.map((inv, ii) => {
+                                            const _sorted = [...inv.strings].sort((a, b) => b.panelCount - a.panelCount);
+                                            const _invPanels = inv.strings.reduce((s, st) => s + st.panelCount, 0);
+                                            return (
+                                              <div key={inv.id}>
+                                                {fleet.length > 1 ? (
+                                                  <div className={`text-[9px] font-bold uppercase tracking-wide mb-0.5 opacity-80 ${colorCls}`}>
+                                                    Inverter {ii + 1} · {inv.strings.length} {isMicroSub ? 'branch' : 'string'}{inv.strings.length === 1 ? '' : 's'} · {_invPanels}p
+                                                  </div>
+                                                ) : null}
+                                                <div className="space-y-1.5">
+                                                  {_sorted.map((str, si) => {
+                                                    const panel = getPanelById(str.panelId);
+                                                    const kw = (str.panelCount * (panel?.watts || 400) / 1000);
+                                                    return (
+                                                      <div key={str.id} className="flex items-center gap-2">
+                                                        <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>{isMicroSub ? 'MOD' : `S${si + 1}`}</span>
+                                                        <div className="flex gap-0.5 flex-1">
+                                                          {Array.from({ length: Math.min(str.panelCount, _maxP) }, (_, pi) => (
+                                                            <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
+                                                          ))}
+                                                          {str.panelCount > _maxP ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxP}</span> : null}
+                                                        </div>
+                                                        <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
+                                                      </div>
+                                                    );
+                                                  })}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                });
+                              })()
+                            ) : cs.isMicro ? (
                               /* Micro branch bars */
                               Array.from({ length: Math.min(cs.acBranchCount, 8) }, (_, bi) => {
                                 const devPerBranch = cs.microDeviceCount > 0 ? Math.ceil(cs.microDeviceCount / cs.acBranchCount) : 0;
