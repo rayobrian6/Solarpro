@@ -565,6 +565,10 @@ export async function POST(req: NextRequest) {
     // The renderer displays them — no re-calculation.
     const elecInput: ElectricalSheetInput = {
       tb:                    { ...tb, sheetTitle: 'Electrical / SLD', sheetNumber: 'E-1' },
+      // Single source of truth for E-1: embed the professional SLD the client
+      // already rendered (was destructured then dropped — the plan-set drew its
+      // own single-lane, hybrid-blind SLD instead, the data breach Ray flagged).
+      existingSldSvg,
       // Module specs (for display/fallback)
       moduleVoc,
       moduleIsc,
