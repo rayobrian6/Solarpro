@@ -89,22 +89,26 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
 
   GROUND_MOUNT: {
     sectionTitle: 'Ground Mount Foundation System',
+    // Design Studio ground mounts are Speck PLP POWER DRIVE™ (driven I-beam pylon
+    // + strongback + PX rail, single-strut cantilever) — the reality engine
+    // (lib/3d/ground/groundMountRealityEngine.ts, SP3284 RevE). Was hardcoded to
+    // Unirac RM10, which contradicted the studio the ground designer is built on.
     racking: {
-      rackingBrand:   'Unirac',
-      rackingModel:   'RM10 Ground Mount System',
-      railMaterial:   'Hot-Dip Galvanized Steel',
+      rackingBrand:   'PLP (Preformed Line Products)',
+      rackingModel:   'POWER DRIVE Driven Pylon System',
+      railMaterial:   'Hot-Dip Galvanized Steel (I-beam pylon + PX rail)',
       hardware:       'Stainless Steel Grade 316 fasteners',
-      attachmentType: 'Driven Pier / Helical Anchor',
-      attachmentNote: 'Adjustable tilt 10°–30°, galvanized steel piers',
-      tiltRange:      '10°–30° adjustable',
-      warranty:       '10-year product warranty',
-      certifications: 'UL 2703, IBC, ASCE 7',
+      attachmentType: 'Driven I-beam Pylon — single-strut cantilever',
+      attachmentNote: 'One pylon per bay, driven to refusal — no concrete',
+      tiltRange:      'Fixed tilt (per design)',
+      warranty:       '25-year product warranty',
+      certifications: 'ICC-ES ESR-3895, UL 2703, ASCE 7-22',
     },
     attachmentCards: [
       {
         label:    'Standard Soil',
-        hardware: 'Unirac RM10 driven pier system',
-        note:     'Galvanized steel piers, adjustable tilt 10°–30°',
+        hardware: 'Speck PLP POWER DRIVE™ driven pylon',
+        note:     'Driven I-beam pylons, one per bay @ ~20 ft O.C. — no concrete',
         icon:     '🌱',
       },
       {

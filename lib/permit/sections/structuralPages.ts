@@ -1037,10 +1037,10 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
     const arrayWidthFt  = cadArrWidthM ? cadArrWidthM * 3.28084 : Math.ceil(totalPanels * 1.1);
     const conduitFt     = Math.ceil(arrayWidthFt + 20); // array width + 20ft run to inverter
 
-    const pileLabel = structType === 'concrete_pier' ? 'Concrete Piers' : 'Driven Piles';
+    const pileLabel = structType === 'concrete_pier' ? 'Concrete Piers' : 'Driven Pylons';
     const pileDesc  = structType === 'concrete_pier'
       ? 'Concrete form tube, rebar cage, 3000 psi min.'
-      : 'Unirac RM10 Driven Pier — Hot-Dip Galvanized Steel, driven to refusal';
+      : 'Speck PLP POWER DRIVE™ Driven I-beam Pylon — Hot-Dip Galvanized Steel, driven to refusal';
 
     let html = '<div class="section-title">Ground Mount Hardware Schedule</div>';
     html += '<table class="equip-table">';
@@ -1050,23 +1050,23 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
           + '<td>' + pileSpacingFt + 'ft spacing, ' + pileEmbedFt + 'ft embed</td>'
           + '<td class="tr">' + qty('pile') + '</td><td>' + unitOf('pile') + '</td>'
           + '<td style="font-size:7px;color:#555">structural-engine: pilesPerRow × 2 rows</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">Cross Beams</td><td>Unirac RM10 Cross Beam — Hot-Dip Galvanized Steel</td>'
-          + '<td>1 per pile pair</td>'
+    html += '<tr class="bg-lt"><td class="fw7">Strongbacks</td><td>Speck PLP POWER DRIVE™ Strongback — Hot-Dip Galvanized Steel</td>'
+          + '<td>1 per pylon</td>'
           + '<td class="tr">' + qty('beam') + '</td><td>' + unitOf('beam') + '</td>'
-          + '<td style="font-size:7px;color:#555">pileCount / 2</td></tr>';
-    html += '<tr><td class="fw7">Racking Rails</td><td>Unirac RM10 Ground Mount Rail — Hot-Dip Galvanized Steel, 14ft sections</td>'
-          + '<td>2 rails per row, span per pile spacing</td>'
+          + '<td style="font-size:7px;color:#555">1 per pylon</td></tr>';
+    html += '<tr><td class="fw7">PX Rails</td><td>Speck PLP POWER DRIVE™ PX Rail — Hot-Dip Galvanized Steel, 14ft sections</td>'
+          + '<td>2 rails per row, span per pylon spacing</td>'
           + '<td class="tr">' + qty('rail') + '</td><td>' + unitOf('rail') + '</td>'
           + '<td style="font-size:7px;color:#555">railsPerRow × rowCount ÷ 14ft sections</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">Rail Splices</td><td>Unirac RM10 Rail Splice — SS Grade 316</td>'
+    html += '<tr class="bg-lt"><td class="fw7">Rail Splices</td><td>Speck PLP POWER DRIVE™ Rail Splice — SS Grade 316</td>'
           + '<td>1 per rail section junction</td>'
           + '<td class="tr">' + qty('rail_splice') + '</td><td>' + unitOf('rail_splice') + '</td>'
           + '<td style="font-size:7px;color:#555">structural-engine calc</td></tr>';
-    html += '<tr><td class="fw7">Mid Clamps</td><td>Unirac RM10 Mid Clamp — Aluminum, SS Grade 316</td>'
+    html += '<tr><td class="fw7">Mid Clamps</td><td>Speck PLP POWER DRIVE™ Mid Clamp — Aluminum, SS Grade 316</td>'
           + '<td>1 per panel junction per rail, UL 2703</td>'
           + '<td class="tr">' + qty('mid_clamp') + '</td><td>' + unitOf('mid_clamp') + '</td>'
           + '<td style="font-size:7px;color:#555">array-geometry: (panelsPerRow-1) × rails</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">End Clamps</td><td>Unirac RM10 End Clamp — Aluminum, SS Grade 316</td>'
+    html += '<tr class="bg-lt"><td class="fw7">End Clamps</td><td>Speck PLP POWER DRIVE™ End Clamp — Aluminum, SS Grade 316</td>'
           + '<td>2 per rail end (row edge), UL 2703</td>'
           + '<td class="tr">' + qty('end_clamp') + '</td><td>' + unitOf('end_clamp') + '</td>'
           + '<td style="font-size:7px;color:#555">2 end clamps per rail</td></tr>';

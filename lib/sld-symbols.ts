@@ -185,25 +185,28 @@ function cpDot(x: number, y: number, domain: string): string {
 // ─── PV Module Helper (single module) ────────────────────────────────────────
 // Returns SVG for one PV module at (x,y) with size (w×h)
 function pvModule(x: number, y: number, w: number, h: number): string {
+  // CAD line-art PV module for the single-line diagram — white glazing, black
+  // aluminum frame, thin gray cell grid. NOT a glossy blue product render.
   const parts: string[] = [];
+  const BLACK = '#111', GRID = '#9ca3af';
   // Aluminum frame
-  parts.push(p_rect(x, y, w, h, { fill: T.PANEL_FRAME, stroke: T.CAB_EDGE, sw: 1.5, r: 2 }));
-  // Dark blue module face (inset 3px)
+  parts.push(p_rect(x, y, w, h, { fill: '#ffffff', stroke: BLACK, sw: 1.5 }));
+  // Glazing (inset 3px)
   const fi = 3;
-  parts.push(p_rect(x+fi, y+fi, w-fi*2, h-fi*2, { fill: T.PANEL_FILL, stroke: T.PANEL_GRID, sw: 1, r: 1 }));
+  parts.push(p_rect(x+fi, y+fi, w-fi*2, h-fi*2, { fill: '#ffffff', stroke: BLACK, sw: 0.6 }));
   // Cell grid: 3 columns × 5 rows
   const cols = 3; const rows = 5;
   const cw = (w-fi*2) / cols;
   const ch = (h-fi*2) / rows;
   for (let c = 1; c < cols; c++) {
-    parts.push(p_line(x+fi+c*cw, y+fi, x+fi+c*cw, y+h-fi, { stroke: T.PANEL_GRID, sw: 0.7 }));
+    parts.push(p_line(x+fi+c*cw, y+fi, x+fi+c*cw, y+h-fi, { stroke: GRID, sw: 0.5 }));
   }
   for (let r = 1; r < rows; r++) {
-    parts.push(p_line(x+fi, y+fi+r*ch, x+w-fi, y+fi+r*ch, { stroke: T.PANEL_GRID, sw: 0.7 }));
+    parts.push(p_line(x+fi, y+fi+r*ch, x+w-fi, y+fi+r*ch, { stroke: GRID, sw: 0.5 }));
   }
   // Junction box nub (small rect on bottom center)
   const jw = 10; const jh = 5;
-  parts.push(p_rect(x+w/2-jw/2, y+h-1, jw, jh, { fill: T.CAB_FILL, stroke: T.CAB_EDGE, sw: 1, r: 1 }));
+  parts.push(p_rect(x+w/2-jw/2, y+h-1, jw, jh, { fill: '#ffffff', stroke: BLACK, sw: 1 }));
   return parts.join('');
 }
 

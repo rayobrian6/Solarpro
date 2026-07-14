@@ -488,10 +488,10 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   // Calculation: pilesPerRow = ceil(arrayWidth / pileSpacing) + 1, × 2 rows
   log.push(`Piles: ${g.pileCount} (${g.structureType}, ${g.pileSpacingFt.toFixed(1)}ft spacing, ${g.pileEmbedmentFt.toFixed(1)}ft embed)`);
 
-  const pileLabel = g.structureType === 'helical_pile' ? 'Helical Anchor' : 'Driven Pier';
+  const pileLabel = g.structureType === 'helical_pile' ? 'Helical Anchor' : 'Driven I-beam Pylon';
   items.push(mkItem('structural', 'pile', rack.rackingBrand,
     `${rack.rackingModel} ${pileLabel}`,
-    g.structureType === 'helical_pile' ? 'UNIRAC-RM10-HELICAL' : 'UNIRAC-RM10-DRIVEN',
+    g.structureType === 'helical_pile' ? 'PLP-PD-PYLON-HELICAL' : 'PLP-PD-PYLON-W6',
     `${rack.attachmentType} — ${g.pileSpacingFt.toFixed(1)}ft spacing, ${g.pileEmbedmentFt.toFixed(1)}ft embedment (${rack.railMaterial})`,
     g.pileCount, 'ea',
     `structural-engine: pilesPerRow × 2 rows (${g.pileSpacingFt.toFixed(1)}ft spacing)`,
@@ -504,8 +504,8 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   const pilesPerRow = Math.ceil(g.pileCount / 2);
   log.push(`Cross beams: ${pilesPerRow} (1 per pile pair)`);
 
-  items.push(mkItem('structural', 'beam', rack.rackingBrand, `${rack.rackingModel} Cross Beam`,
-    'UNIRAC-RM10-BEAM',
+  items.push(mkItem('structural', 'beam', rack.rackingBrand, `${rack.rackingModel} Strongback`,
+    'PLP-PD-STRONGBACK',
     `Cross beam connecting front/back piles — 1 per pile pair (${rack.railMaterial})`,
     pilesPerRow, 'ea',
     `pileCount / 2 = ${pilesPerRow}`,
@@ -522,8 +522,8 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   const totalRailSections = railSectionsPerRun * totalRails;
   log.push(`Rails: ${totalRails} rails × ${railLengthFt.toFixed(1)}ft = ${totalRailSections} sections`);
 
-  items.push(mkItem('structural', 'rail', rack.rackingBrand, `${rack.rackingModel} Rail (${railSectionFt}ft)`,
-    'UNIRAC-RM10-RAIL',
+  items.push(mkItem('structural', 'rail', rack.rackingBrand, `${rack.rackingModel} PX Rail (${railSectionFt}ft)`,
+    'PLP-PD-PXRAIL',
     `Ground mount rail — ${rack.railMaterial}, ${g.railsPerRow} per row × ${g.rowCount} rows, ${railLengthFt.toFixed(1)}ft each`,
     totalRailSections, 'ea',
     `array-geometry: ${g.railsPerRow} railsPerRow × ${g.rowCount} rows ÷ ${railSectionFt}ft sections`,
@@ -537,7 +537,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`Rail splices: ${totalSplices} (${splicesPerRail} per rail × ${totalRails} rails)`);
 
   items.push(mkItem('structural', 'rail_splice', rack.rackingBrand, `${rack.rackingModel} Rail Splice`,
-    'UNIRAC-RM10-SPLICE',
+    'PLP-PD-RAILSPLICE',
     `Rail splice — connects ${railSectionFt}ft rail sections (${rack.hardware})`,
     totalSplices, 'ea',
     `structural-engine: max(0, ${railSectionsPerRun}-1) × ${totalRails} rails`,
@@ -553,7 +553,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`Mid clamps: ${totalMidClamps} (${midClampsPerRail}/rail × ${totalRails} rails)`);
 
   items.push(mkItem('structural', 'mid_clamp', rack.rackingBrand, `${rack.rackingModel} Mid Clamp`,
-    'UNIRAC-RM10-MIDCLAMP',
+    'PLP-PD-MIDCLAMP',
     `Mid clamp — 1 per panel junction per rail (${rack.hardware})`,
     totalMidClamps, 'ea',
     `array-geometry: (panelsPerRow-1) × railsPerRow × rowCount`,
@@ -566,7 +566,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`End clamps: ${totalEndClamps} (2/rail × ${totalRails} rails)`);
 
   items.push(mkItem('structural', 'end_clamp', rack.rackingBrand, `${rack.rackingModel} End Clamp`,
-    'UNIRAC-RM10-ENDCLAMP',
+    'PLP-PD-ENDCLAMP',
     `End clamp — 2 per rail (left + right) (${rack.hardware})`,
     totalEndClamps, 'ea',
     `array-geometry: 2 × ${totalRails} rails`,
@@ -589,7 +589,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`Bonding clips: ${input.moduleCount} (UL 2703, 1 per panel)`);
 
   items.push(mkItem('structural', 'bonding_clip', rack.rackingBrand, `${rack.rackingModel} Bonding Clip`,
-    'UNIRAC-RM10-BOND',
+    'PLP-PD-BONDCLIP',
     `Bonding clip — UL 2703, 1 per panel`,
     input.moduleCount, 'ea',
     `structural-engine: 1 per module`,

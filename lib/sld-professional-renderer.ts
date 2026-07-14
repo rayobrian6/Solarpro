@@ -372,22 +372,23 @@ function embedSymbol(id: string, cx: number, cy: number, slotW: number, slotH: n
 
 // PV Module symbol v2: realistic solar cell with cell grid (hybrid realism v3.0)
 function pvModuleSymbol(cx: number, cy: number, w = 28, h = 20): string {
-  const PV_FILL  = '#1A237E'; // deep navy — PV cell
-  const PV_FRAME = '#37474F'; // charcoal frame
+  // Standard schematic PV-module symbol (IEC-style): framed rectangle with a
+  // thin cell grid and a diagonal "sun-ray" arrow. Monochrome CAD line-art —
+  // NOT a glossy product render (this is an engineering single-line diagram).
   const bx = cx - w/2, by = cy - h/2;
   const parts: string[] = [];
-  // Frame + cell background
-  parts.push(rect(bx, by, w, h, {fill: PV_FILL, stroke: PV_FRAME, sw: SW_MED}));
-  // Cell grid — 3x2 subdivisions
+  // Module frame — white glazing, black aluminum frame
+  parts.push(rect(bx, by, w, h, {fill: '#ffffff', stroke: BLK, sw: SW_MED}));
+  // Cell grid — 3x2 subdivisions, thin gray CAD lines
   const cw = w / 3, ch = h / 2;
-  for (let r = 0; r < 2; r++) {
-    for (let c = 0; c < 3; c++) {
-      parts.push(rect(bx + c*cw + 1, by + r*ch + 1, cw - 2, ch - 2,
-        {fill: '#283593', stroke: '#FFFFFF', sw: 0.4}));
-    }
-  }
-  // Diagonal shine line
-  parts.push(ln(bx+3, by+3, bx+w-5, by+5, {stroke:'#5C6BC0', sw: 0.5}));
+  for (let c = 1; c < 3; c++) parts.push(ln(bx + c*cw, by + 1, bx + c*cw, by + h - 1, {stroke:'#9ca3af', sw: 0.4}));
+  parts.push(ln(bx + 1, by + ch, bx + w - 1, by + ch, {stroke:'#9ca3af', sw: 0.4}));
+  // Diagonal sun-ray arrow (the standard PV cell mark)
+  const ax0 = bx + w*0.62, ay0 = by - h*0.28, ax1 = bx + w*0.34, ay1 = by + h*0.30;
+  parts.push(ln(ax0, ay0, ax1, ay1, {stroke: BLK, sw: 0.7}));
+  const ang = Math.atan2(ay1 - ay0, ax1 - ax0);
+  const ah = 3.2;
+  parts.push(`<path d="M${ax1.toFixed(1)},${ay1.toFixed(1)} L${(ax1 - ah*Math.cos(ang - 0.4)).toFixed(1)},${(ay1 - ah*Math.sin(ang - 0.4)).toFixed(1)} M${ax1.toFixed(1)},${ay1.toFixed(1)} L${(ax1 - ah*Math.cos(ang + 0.4)).toFixed(1)},${(ay1 - ah*Math.sin(ang + 0.4)).toFixed(1)}" stroke="${BLK}" stroke-width="0.7" fill="none"/>`);
   return parts.join('');
 }
 
@@ -3404,6 +3405,24 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     parts.push(txt(legX+44, ly+3, item.label, {sz:F.tiny}));
   });
 
+  // ── Reclaim the empty conduit-schedule void (Ray 2026-07-14, fill the page) ──
+  // For hybrids the per-run conductor schedule lives on PV-4A/PV-4B, so the
+  // full-height CONDUIT & CONDUCTOR SCHEDULE box below renders empty — ~23% of
+  // the sheet as white. When there are no runs to list, grow the three summary
+  // panels to fill the band (taller, readable rows) and drop a slim reference
+  // bar instead of the giant empty table. Local overrides only — single-lane
+  // renderSLDProfessional keeps the global constants untouched.
+  const _condRunsPre: RunSegment[] = (input.runs && input.runs.length > 0)
+    ? input.runs
+    : lanes.flatMap(b => (b.runs ?? []) as RunSegment[]);
+  const _condEmpty = _condRunsPre.filter(r => !String(r.id).endsWith('MSP_TO_UTILITY_RUN')).length === 0;
+  const CONDBAR_H = 34;
+  const mCALC_H  = _condEmpty ? (H - MAR - CALC_Y - 8 - CONDBAR_H) : CALC_H;
+  const mSCHED_Y = _condEmpty ? (H - MAR - CONDBAR_H) : (CALC_Y + mCALC_H + 8);
+  const mSCHED_H = _condEmpty ? CONDBAR_H : (H - MAR - mSCHED_Y);
+  const mRowCap  = _condEmpty ? 999 : 13;  // uncapped → rows spread to fill the taller box
+  const pFont    = _condEmpty ? F.seg : F.tiny;   // larger, readable text in the filled panels
+
   // ── CALCULATION PANELS ────────────────────────────────────────────────────
   const cW = Math.floor(DW/3) - 4;
   const topoShort = (t: 'MICRO'|'OPTIMIZER'|'STRING') =>
@@ -3411,7 +3430,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
   // Panel 1 — per-lane source summary
   const p1x = DX;
-  parts.push(rect(p1x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p1x, CALC_Y, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(rect(p1x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
   parts.push(txt(p1x+cW/2, CALC_Y+10, 'PV SOURCE LANES', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const p1rows: [string,string][] = lanes.flatMap((b, i): [string,string][] => {
@@ -3430,17 +3449,17 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       [`  AC / OCPD`, `${laneKw > 0 ? `${laneKw.toFixed(2)} kW` : '— kW'} · ${b.acWireGauge ?? '—'} · ${b.acOCPD ?? '—'}A`],
     ];
   });
-  const p1rh = Math.min(13, (CALC_H-17)/Math.max(p1rows.length, 1));
+  const p1rh = Math.min(mRowCap, (mCALC_H-17)/Math.max(p1rows.length, 1));
   p1rows.forEach(([l,v],i) => {
     const ry = CALC_Y+19+i*p1rh;
     if (i%2===1) parts.push(rect(p1x, ry-p1rh+2, cW, p1rh, {fill:LGY, stroke:'none', sw:0}));
-    parts.push(txt(p1x+4, ry, l, {sz:F.tiny}));
-    parts.push(txt(p1x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true}));
+    parts.push(txt(p1x+4, ry, l, {sz:pFont}));
+    parts.push(txt(p1x+cW-4, ry, v, {sz:pFont, anc:'end', bold:true}));
   });
 
   // Panel 2 — POI / NEC 705.12(B) (aggregator-owned, exactly ONE check — I-6)
   const p2x = DX+cW+4;
-  parts.push(rect(p2x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p2x, CALC_Y, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(rect(p2x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
   parts.push(txt(p2x+cW/2, CALC_Y+10, 'POINT OF INTERCONNECTION — NEC 705.12(B)', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const _busAmps = input.panelBusRating ?? input.mainPanelAmps;
@@ -3465,18 +3484,18 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     ]),
     ['Basis', 'Σ per-inverter rounded OCPDs'],
   ];
-  const p2rh = Math.min(13, (CALC_H-17)/p2rows.length);
+  const p2rh = Math.min(mRowCap, (mCALC_H-17)/p2rows.length);
   p2rows.forEach(([l,v],i) => {
     const ry = CALC_Y+19+i*p2rh;
     if (i%2===1) parts.push(rect(p2x, ry-p2rh+2, cW, p2rh, {fill:LGY, stroke:'none', sw:0}));
-    parts.push(txt(p2x+4, ry, l, {sz:F.tiny}));
+    parts.push(txt(p2x+4, ry, l, {sz:pFont}));
     const isPF = v.includes('✓')||v.includes('✗');
-    parts.push(txt(p2x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true, fill: isPF ? (v.includes('✓')?PASS:FAIL) : BLK}));
+    parts.push(txt(p2x+cW-4, ry, v, {sz:pFont, anc:'end', bold:true, fill: isPF ? (v.includes('✓')?PASS:FAIL) : BLK}));
   });
 
   // Panel 3 — equipment schedule (shared POI gear once — I-6)
   const p3x = DX+(cW+4)*2;
-  parts.push(rect(p3x, CALC_Y, cW, CALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p3x, CALC_Y, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(rect(p3x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
   parts.push(txt(p3x+cW/2, CALC_Y+10, 'EQUIPMENT SCHEDULE', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const p3rows: [string,string][] = [
@@ -3489,33 +3508,15 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     ['Battery Storage', input.hasBattery ? esc(input.batteryModel || input.batteryBrand || 'YES') : 'NONE'],
     ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity', input.batteryKwhLabel || `${input.batteryKwh} kWh`] as [string,string]] : []),
   ];
-  const p3rh = Math.min(12, (CALC_H-17)/p3rows.length);
+  const p3rh = Math.min(mRowCap, (mCALC_H-17)/p3rows.length);
   p3rows.forEach(([l,v],i) => {
     const ry = CALC_Y+19+i*p3rh;
     if (i%2===1) parts.push(rect(p3x, ry-p3rh+2, cW, p3rh, {fill:LGY, stroke:'none', sw:0}));
-    parts.push(txt(p3x+4, ry, l, {sz:F.tiny}));
-    parts.push(txt(p3x+cW-4, ry, v, {sz:F.tiny, anc:'end', bold:true}));
+    parts.push(txt(p3x+4, ry, l, {sz:pFont}));
+    parts.push(txt(p3x+cW-4, ry, v, {sz:pFont, anc:'end', bold:true}));
   });
 
   // ── CONDUIT & CONDUCTOR SCHEDULE (namespaced run ids → R:/G:/F:) ──────────
-  parts.push(rect(DX, SCHED_Y, DW, SCHED_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
-  parts.push(rect(DX, SCHED_Y, DW, 14, {fill:BLK, sw:0}));
-  parts.push(txt(DX+6, SCHED_Y+10, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9 TABLE 1 (PER SUB-SYSTEM)', {sz:F.hdr, bold:true, fill:WHT}));
-  const sCols = [
-    {label:'RUN ID',w:0.09},{label:'FROM',w:0.10},{label:'TO',w:0.10},
-    {label:'CONDUCTORS',w:0.27},{label:'CONDUIT',w:0.10},{label:'FILL %',w:0.06},
-    {label:'AMPACITY',w:0.07},{label:'OCPD',w:0.06},{label:'V-DROP %',w:0.07},
-    {label:'LENGTH',w:0.05},{label:'PASS',w:0.03},
-  ];
-  const hY = SCHED_Y+24;
-  const rH = 13;
-  let cx2 = DX;
-  sCols.forEach(col => {
-    parts.push(txt(cx2+3, hY, col.label, {sz:F.tiny, bold:true}));
-    parts.push(ln(cx2, SCHED_Y+14, cx2, SCHED_Y+SCHED_H, {sw:SW_HAIR}));
-    cx2 += col.w*DW;
-  });
-  parts.push(ln(DX, hY+2, DX+DW, hY+2, {sw:SW_THIN}));
   const schedRuns: RunSegment[] = (input.runs && input.runs.length > 0)
     ? input.runs
     : lanes.flatMap(b => (b.runs ?? []).map(r => ({ ...r, id: `${b.key}:${r.id}` as RunSegment['id'] })));
@@ -3546,28 +3547,53 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
         pass: r.overallPass ?? true,
       };
     });
-  const maxRows = Math.floor((SCHED_H-30)/rH);
-  schedRows.slice(0, maxRows).forEach((row, ri) => {
-    const ry = hY+4+(ri+1)*rH;
-    if (ri%2===1) parts.push(rect(DX, ry-rH+2, DW, rH, {fill:LGY, stroke:'none', sw:0}));
-    const pc = row.pass ? PASS : FAIL;
-    const vals = [
-      row.id, row.from, row.to, row.conductors, row.conduit,
-      row.fill>0?`${row.fill.toFixed(1)}%`:(row.conduit==='OPEN AIR'?'N/A':'—'),
-      row.amp>0?`${row.amp}A`:'—',
-      row.ocpd>0?`${row.ocpd}A`:'—',
-      row.vdrop>0?`${row.vdrop.toFixed(2)}%`:'—',
-      row.len>0?`${row.len} FT`:'—',
-      row.pass ? '✓ PASS' : '✗ FAIL',
+  if (_condEmpty) {
+    // No per-run rows on E-1 (hybrids carry them on PV-4A/PV-4B) — a slim
+    // reference bar instead of a page-height empty grid. The panels above have
+    // already expanded to fill the reclaimed band.
+    parts.push(rect(DX, mSCHED_Y, DW, mSCHED_H, {fill:BLK, sw:0}));
+    parts.push(txt(DX+8, mSCHED_Y+13, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CH. 9 TABLE 1 (PER SUB-SYSTEM)', {sz:F.hdr, bold:true, fill:WHT}));
+    parts.push(txt(DX+DW-8, mSCHED_Y+13, 'FULL PER-SUB-SYSTEM CONDUCTOR SCHEDULE → SEE PV-4A / PV-4B', {sz:F.sub, bold:true, anc:'end', fill:'#ffd24d'}));
+    parts.push(txt(DX+8, mSCHED_Y+26, 'Feeder & OCPD summary per sub-system in the E-1 SOURCE SUMMARY below · conductors sized to NEC 310.15 / Chapter 9.', {sz:F.tiny, fill:'#cfd3da'}));
+  } else {
+    parts.push(rect(DX, mSCHED_Y, DW, mSCHED_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+    parts.push(rect(DX, mSCHED_Y, DW, 14, {fill:BLK, sw:0}));
+    parts.push(txt(DX+6, mSCHED_Y+10, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9 TABLE 1 (PER SUB-SYSTEM)', {sz:F.hdr, bold:true, fill:WHT}));
+    const sCols = [
+      {label:'RUN ID',w:0.09},{label:'FROM',w:0.10},{label:'TO',w:0.10},
+      {label:'CONDUCTORS',w:0.27},{label:'CONDUIT',w:0.10},{label:'FILL %',w:0.06},
+      {label:'AMPACITY',w:0.07},{label:'OCPD',w:0.06},{label:'V-DROP %',w:0.07},
+      {label:'LENGTH',w:0.05},{label:'PASS',w:0.03},
     ];
-    let cx3 = DX;
-    sCols.forEach((col,ci) => {
-      parts.push(txt(cx3+3, ry, String(vals[ci]??''), {sz:F.tiny, fill:ci===10?pc:BLK, bold:ci===10}));
-      cx3 += col.w*DW;
+    const hY = mSCHED_Y+24;
+    const rH = 13;
+    let cx2 = DX;
+    sCols.forEach(col => {
+      parts.push(txt(cx2+3, hY, col.label, {sz:F.tiny, bold:true}));
+      parts.push(ln(cx2, mSCHED_Y+14, cx2, mSCHED_Y+mSCHED_H, {sw:SW_HAIR}));
+      cx2 += col.w*DW;
     });
-  });
-  if (schedRows.length === 0) {
-    parts.push(txt(DX+8, hY+18, 'PER-SUB-SYSTEM CONDUCTOR SCHEDULE — SEE PV-4A / PV-4B', {sz:F.tiny, italic:true, fill:'#555'}));
+    parts.push(ln(DX, hY+2, DX+DW, hY+2, {sw:SW_THIN}));
+    const maxRows = Math.floor((mSCHED_H-30)/rH);
+    schedRows.slice(0, maxRows).forEach((row, ri) => {
+      const ry = hY+4+(ri+1)*rH;
+      if (ri%2===1) parts.push(rect(DX, ry-rH+2, DW, rH, {fill:LGY, stroke:'none', sw:0}));
+      const pc = row.pass ? PASS : FAIL;
+      const vals = [
+        row.id, row.from, row.to, row.conductors, row.conduit,
+        row.fill>0?`${row.fill.toFixed(1)}%`:(row.conduit==='OPEN AIR'?'N/A':'—'),
+        row.amp>0?`${row.amp}A`:'—',
+        row.ocpd>0?`${row.ocpd}A`:'—',
+        row.vdrop>0?`${row.vdrop.toFixed(2)}%`:'—',
+        row.len>0?`${row.len} FT`:'—',
+        row.pass ? '✓ PASS' : '✗ FAIL',
+      ];
+      let cx3 = DX;
+      sCols.forEach((col,ci) => {
+        parts.push(txt(cx3+3, ry, String(vals[ci]??''), {sz:F.tiny, fill:ci===10?pc:BLK, bold:ci===10}));
+        cx3 += col.w*DW;
+      });
+    });
   }
 
   // ── Artifact version stamp + title block ─────────────────────────────────

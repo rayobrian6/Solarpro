@@ -329,16 +329,20 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
 
   const arr0        = cad.ground?.arrays?.[0];
   const pileDepth   = arr0 ? (arr0.pileDepthM * 3.281).toFixed(1) : '5.0';
-  const pileSpacing = arr0 ? (arr0.pileSpacingM * 3.281).toFixed(1) : '8.0';
+  // Speck PLP places ONE driven I-beam pylon per bay at ~20 ft O.C. (engine
+  // PLP_BAY_SPAN_M). Honor a stored spacing only if it is a plausible PLP bay
+  // span (≥ 15 ft); a legacy ~8 ft generic default does not describe PLP.
+  const _rawPylonSp = arr0 ? arr0.pileSpacingM * 3.281 : 0;
+  const pileSpacing = (_rawPylonSp >= 15 ? _rawPylonSp : 20).toFixed(0);
   const groundClr   = arr0 ? (arr0.groundClearanceM * 39.37).toFixed(0) : '12';
   const tiltDeg     = arr0?.tiltDeg || 20;
-  const structType  = arr0?.structureType || 'driven steel pipe pile';
+  const structType  = 'Driven I-beam pylon (Speck PLP)';
   const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
   // Per-sub letter (hybrid): never certify the project-wide (roof) racking
   // string on the ground letter — see fence letter note.
   const mountSys    = opts?.subKey
-    ? 'Ground Mount Racking System'
-    : (project._canonical?.mountSystem || project.mountingSystem || 'Ground Mount Racking System');
+    ? 'Speck PLP POWER DRIVE™ Ground Mount'
+    : (project._canonical?.mountSystem || project.mountingSystem || 'Speck PLP POWER DRIVE™ Ground Mount');
   const _eqGround   = opts?.subKey ? resolveEquipmentBySubSystem(input, opts.subKey, cad) : null;
 
   return `
@@ -361,14 +365,14 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
             <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
             <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = _eqGround ?? getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—').join(' ') || '—'; })()}</td></tr>
             <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${mountSys}</td></tr>
-            <tr><td class="il">Array Tilt</td><td class="iv">${tiltDeg}°</td><td class="il">Foundation</td><td class="iv">Pile / pier</td></tr>
+            <tr><td class="il">Array Tilt</td><td class="iv">${tiltDeg}°</td><td class="il">Foundation</td><td class="iv">Driven pylon (PLP)</td></tr>
           </table>
 
           <div class="section-title">Ground Mount Construction</div>
           <table class="info-table" class="mb-xs">
-            <tr><td class="il">Foundation Type</td><td class="iv">${structType}</td><td class="il">Pile Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
+            <tr><td class="il">Foundation Type</td><td class="iv">${structType}</td><td class="il">Pylon Embed</td><td class="iv">${pileDepth} ft min.</td></tr>
             <tr><td class="il">Ground Clearance</td><td class="iv">${groundClr}" min.</td><td class="il">Tilt Angle</td><td class="iv">${tiltDeg}°</td></tr>
-            <tr><td class="il">Pile Spacing</td><td class="iv">${pileSpacing} ft O.C.</td><td class="il">Hardware</td><td class="iv">Galvanized / Stainless Steel</td></tr>
+            <tr><td class="il">Pylon Spacing</td><td class="iv">${pileSpacing} ft O.C. (1/bay)</td><td class="il">Hardware</td><td class="iv">Galvanized / Stainless Steel</td></tr>
             <tr><td class="il">Wind Code</td><td class="iv">ASCE 7-22 §27 + §29.4</td><td class="il">Exposure</td><td class="iv">Category ${exposure}</td></tr>
           </table>
         </div>
@@ -377,9 +381,9 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
           <div class="section-title">Structural Analysis Results (ASCE 7-22)</div>
           <table class="info-table" class="mb-xs">
             ${_peSiteLoading(input)}
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Pile/Pier Capacity Analysis</td></tr>
-            <tr><td class="il">Net Uplift / Pile</td><td class="iv">${uplift} lbs</td><td class="il">Pile Lateral Capacity</td><td class="iv">Per geotechnical report</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= MIN_ATTACHMENT_SF ? '#000' : '#cc0000'};">${safetyFact} (ASD basis — min. ${MIN_ATTACHMENT_SF.toFixed(1)} req.)</td><td class="il">Pile Embedment Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Pylon Capacity Analysis</td></tr>
+            <tr><td class="il">Net Uplift / Pylon</td><td class="iv">${uplift} lbs</td><td class="il">Pylon Lateral Capacity</td><td class="iv">Per geotechnical report</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= MIN_ATTACHMENT_SF ? '#000' : '#cc0000'};">${safetyFact} (ASD basis — min. ${MIN_ATTACHMENT_SF.toFixed(1)} req.)</td><td class="il">Pylon Embedment Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 §2.4 — ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 §27</td></tr>
           </table>
@@ -390,13 +394,13 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
               <div class="f-xs" style="line-height:1.6;">
                 I, the undersigned, a licensed Professional Engineer in the State of <strong>${state}</strong>,
                 hereby certify that I have reviewed the structural design of the above-described ground-mounted
-                solar photovoltaic array installation and determined that the <strong>proposed ground mount
-                pile/pier foundation system is adequate to support the loads imposed by the proposed ground-mounted
-                PV array</strong>, based on the structural analysis performed in accordance with
-                <strong>ASCE 7-22 §27</strong>, <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
+                solar photovoltaic array installation and determined that the <strong>proposed driven-pylon
+                (Speck PLP POWER DRIVE™) foundation system is adequate to support the loads imposed by the
+                proposed ground-mounted PV array</strong>, based on the structural analysis performed in accordance
+                with <strong>ASCE 7-22 §27</strong>, <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
               </div>
               <div class="f-sm mt-xs" style="line-height:1.6;">
-                Pile embedment depth, pile capacity, and foundation system design are confirmed adequate to resist
+                Pylon embedment depth, pylon capacity, and foundation system design are confirmed adequate to resist
                 wind uplift and lateral loads at the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
                 per ASCE 7-22 §27. Ground snow load per ASCE 7-22 §7 (slope reduction factor per array tilt angle
                 of ${tiltDeg}°). Geotechnical conditions shall be confirmed by a licensed geotechnical engineer.

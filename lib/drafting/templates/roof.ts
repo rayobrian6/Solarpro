@@ -151,9 +151,12 @@ export function drawRoofPlan(
   const mountSys    = ((((project as any)._canonical?.mountSystem as string)
     || project.mountingSystem
     || 'IRONRIDGE XR100')).toUpperCase();
-  // rail-less systems (RT-Mini etc.) draw per-module mounts; railed systems
-  // draw the two row rails + feet at framing crossings
-  const isRailless  = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(mountSys);
+  // Genuinely rail-less products (RT-APEX / E Mount AIR / explicit "rail-less" /
+  // S-5 / EcoFasten) draw per-module direct mounts. Everything else — INCLUDING
+  // Roof Tech RT-MINI, which is an L-FOOT + RAIL base, NOT rail-less (Ray ruling;
+  // BOM orders rails + T-bolts for it; see bom-engine-v4.ts:310, sheetComposition
+  // .ts:647) — is RAILED: continuous row rails on feet at framing crossings.
+  const isRailless  = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(mountSys);
   const roofType    = (project.roofType       || 'SHINGLE').toUpperCase();
   const condType    = (project.conduitType    || 'EMT').toUpperCase();
   const panelWatts  = engineering.panelWatts || 0;
@@ -165,9 +168,9 @@ export function drawRoofPlan(
   const attachSp    = (project as any).resolvedAttachSpacingIn
     || project.attachmentSpacing
     || 48;
-  // RT-Mini (rail-less) mounts run 48" O.C. STAGGERED (Ray 2026-07-08) — feet
-  // share rafters at 4 ft O.C., not one per module. The drawn feet + the
-  // attachment callout both use this so the plan matches the field/labor.
+  // Railed systems (incl. RT-MINI) run RAIL FEET @ 48" O.C. STAGGERED — feet
+  // share rafters at 4 ft O.C. under a continuous rail, NOT one per module. The
+  // drawn feet + the attachment callout both use this so the plan matches labor.
   const railFootOcIn = 48;
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
   // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
@@ -421,8 +424,16 @@ export function drawRoofPlan(
   // fence. Their projected extents are unioned into the fit basis (below) so
   // computeFitWindow's zoom caps can never clip them like mere context.
   // (_hyb was built — and plan-rotated — in the global-rotation block above.)
-  const _hLngs = _hyb ? _hyb.allPts.map(p => p.lng) : [];
-  const _hLats = _hyb ? _hyb.allPts.map(p => p.lat) : [];
+  // FIT BASIS = roof + GROUND only (Ray 2026-07-14: "roof+ground hero, fence as
+  // inset/ref"). The ground array sits adjacent to the house (~30-60 ft); the
+  // fence run is often 100+ ft away (Stowell: ~124 ft), and unioning it into the
+  // window ballooned the fit to ~4× the roof, shrinking the roof into a corner
+  // with a dead yard of white between (no parcel data to fill it). The fence is
+  // still SHOWN — as a compact SITE KEY inset (below) — so all variety reads
+  // without the balloon. Ground points only feed the window; fence does not.
+  const _gPts = _hyb ? _hyb.ground.flatMap(g => g.ring) : [];
+  const _hLngs = _gPts.map(p => p.lng);
+  const _hLats = _gPts.map(p => p.lat);
   const subjMinLng = _hLngs.length ? Math.min(minLng, ..._hLngs) : minLng;
   const subjMaxLng = _hLngs.length ? Math.max(maxLng, ..._hLngs) : maxLng;
   const subjMinLat = _hLats.length ? Math.min(minLat, ..._hLats) : minLat;
@@ -505,33 +516,24 @@ export function drawRoofPlan(
     }
   }
 
-  // ── HYBRID overlay layer: ground arrays + fence on the same site plan ──────
+  // ── HYBRID overlay layer: GROUND arrays drawn to-scale on the site plan ─────
+  // (Fence is NOT drawn to-scale here — it sits 100+ ft off and ballooned the
+  // window; it renders in the SITE KEY inset below. Ray 2026-07-14.)
   if (_hyb) {
     const hEls: string[] = [];
     for (const g of _hyb.ground) {
       const pts = g.ring.map(p => `${toX(p.lng).toFixed(1)},${toY(p.lat).toFixed(1)}`).join(' ');
-      hEls.push(`<polygon points="${pts}" fill="#2b6cb0" fill-opacity="0.12" stroke="#2b6cb0" stroke-width="1.6"/>`);
-      for (const [a, b] of g.rowLines) {
-        hEls.push(`<line x1="${toX(a.lng).toFixed(1)}" y1="${toY(a.lat).toFixed(1)}" x2="${toX(b.lng).toFixed(1)}" y2="${toY(b.lat).toFixed(1)}" stroke="#2b6cb0" stroke-width="1"/>`);
+      hEls.push(`<polygon points="${pts}" fill="#2b6cb0" fill-opacity="0.14" stroke="#2b6cb0" stroke-width="1.6"/>`);
+      // Per-module cell divisions so the array reads as a real N-up array.
+      for (const [a, b] of [...g.rowLines, ...g.cellLines]) {
+        hEls.push(`<line x1="${toX(a.lng).toFixed(1)}" y1="${toY(a.lat).toFixed(1)}" x2="${toX(b.lng).toFixed(1)}" y2="${toY(b.lat).toFixed(1)}" stroke="#2b6cb0" stroke-width="0.8"/>`);
       }
-      hEls.push(`<text x="${toX(g.labelPt.lng).toFixed(1)}" y="${toY(g.labelPt.lat).toFixed(1)}" font-size="8" font-weight="bold" fill="#2b6cb0" text-anchor="middle">${g.label}</text>`);
-    }
-    for (const fShape of _hyb.fence) {
-      const [a, b] = fShape.line;
-      const fax = toX(a.lng), fay = toY(a.lat), fbx = toX(b.lng), fby = toY(b.lat);
-      hEls.push(`<line x1="${fax.toFixed(1)}" y1="${fay.toFixed(1)}" x2="${fbx.toFixed(1)}" y2="${fby.toFixed(1)}" stroke="#1a7a3a" stroke-width="3.2" stroke-linecap="round"/>`);
-      // Label ALONG the line (road-label treatment), just above it at 38% from
-      // the a-end — the horizontal midpoint label ran under the top-right
-      // LEGEND box whenever the fence's far end reached that corner.
-      const flx = fax + (fbx - fax) * 0.38, fly = fay + (fby - fay) * 0.38;
-      let fAng = Math.atan2(fby - fay, fbx - fax) * 180 / Math.PI;
-      if (fAng > 90) fAng -= 180; else if (fAng < -90) fAng += 180;   // never upside-down
-      hEls.push(`<text x="${flx.toFixed(1)}" y="${(fly - 5).toFixed(1)}" transform="rotate(${fAng.toFixed(1)} ${flx.toFixed(1)} ${fly.toFixed(1)})" font-size="8" font-weight="bold" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">${fShape.label}</text>`);
+      if (g.label) hEls.push(`<text x="${toX(g.labelPt.lng).toFixed(1)}" y="${toY(g.labelPt.lat).toFixed(1)}" font-size="8" font-weight="bold" fill="#2b6cb0" text-anchor="middle" stroke="#fff" stroke-width="2.4" paint-order="stroke">${g.label}</text>`);
     }
     if (hEls.length) {
       els.push(`<g class="pv2-hybrid">${hEls.join('')}</g>`);
       _siteLegend.push({ swatch: '#2b6cb0', label: 'Ground-mount array (see ground sheets)' });
-      _siteLegend.push({ swatch: '#1a7a3a', label: 'Solar fence run (see fence sheets)' });
+      if (_hyb.fence.length) _siteLegend.push({ swatch: '#1a7a3a', label: 'Solar fence run (see fence sheets)' });
     }
   }
 
@@ -793,13 +795,12 @@ export function drawRoofPlan(
       els.push(`<rect x="${(px - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
     } else {
       // ── System-aware rail + foot logic ──
-      // RAIL-LESS (RT-Mini etc.): 4 mounts under the module's long-side frame
-      // edges at the quarter points, X SNAPPED to the framing grid (mounts
-      // bolt into rafters/chords — feet floating between framing lines was
-      // the "doesn't make sense" read).
-      // RAILED (IronRidge etc.): two rail lines at 25/75% of module height
-      // (adjacent modules' segments join into continuous row rails) + one
-      // foot per rail snapped to the nearest framing line.
+      // RAILED (RT-MINI, IronRidge, most): continuous row rails + feet at framing
+      // crossings — drawn in the per-plane pass AFTER this loop (so rails run the
+      // full row and feet land on rafters at O.C., not one per module).
+      // RAIL-LESS (RT-APEX / E Mount AIR / S-5 / EcoFasten): 4 direct mounts under
+      // the module's long-side frame edges at the quarter points, X SNAPPED to the
+      // framing grid (mounts bolt into rafters/chords).
       const hostIdx = hostPlaneIdx(p);
       const grid = hostIdx >= 0 ? framingGrids[hostIdx] : null;
       const snapX = (x: number): number => {
@@ -810,15 +811,13 @@ export function drawRoofPlan(
       const fy1 = y0 + ph * 0.25, fy2 = y0 + ph * 0.75;
       let hardware = '';
       if (isRailless) {
-        // RT-Mini feet are NOT per-module — they share rafters at 4 ft O.C.,
-        // staggered. Drawn in a per-plane pass AFTER this loop (Ray 2026-07-08).
+        // Rail-less: 4 direct mounts at the module's frame quarter points.
+        const mx1 = snapX(x0 + pw * 0.25), mx2 = snapX(x0 + pw * 0.75);
+        for (const mxp of [mx1, mx2]) for (const myp of [fy1, fy2]) {
+          hardware += `<rect x="${(mxp - 1.4).toFixed(1)}" y="${(myp - 1.4).toFixed(1)}" width="2.8" height="2.8" fill="#2a5db0" stroke="#173a7a" stroke-width="0.4"/>`;
+        }
       } else {
-        const fxc = snapX(px);
-        hardware =
-          `<line x1="${x0.toFixed(1)}" y1="${fy1.toFixed(1)}" x2="${(x0 + pw).toFixed(1)}" y2="${fy1.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>` +
-          `<line x1="${x0.toFixed(1)}" y1="${fy2.toFixed(1)}" x2="${(x0 + pw).toFixed(1)}" y2="${fy2.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>` +
-          `<circle cx="${fxc.toFixed(1)}" cy="${fy1.toFixed(1)}" r="1.1" fill="#2a5db0"/>` +
-          `<circle cx="${fxc.toFixed(1)}" cy="${fy2.toFixed(1)}" r="1.1" fill="#2a5db0"/>`;
+        // Railed: continuous rails + rafter feet drawn in the per-plane pass below.
       }
       els.push(
         `${gOpen}` +
@@ -838,7 +837,7 @@ export function drawRoofPlan(
   // of the end panel must be ≤ 18" or that panel droops; if no rafter falls within
   // 18" of the edge, a DECK-MOUNTED foot (open ◻ marker) is added there instead.
   let _deckMountUsed = false;
-  if (isRailless && !isBranchColorMode) {
+  if (!isRailless && !isBranchColorMode) {
     const FT = scale;                       // 1 ft in px (1 fake-degree unit = 1 ft)
     const quarterUp = panLenPx * 0.25;      // rail at 25% down from top / up from bottom
     const cantMaxPx = 1.5 * FT;             // 18" max overhang from outer foot to panel end
@@ -1366,12 +1365,12 @@ export function drawRoofPlan(
           ],
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
-      ...(isRailless
+      ...(!isRailless
         ? [
-            `3B. MOUNTS @ ${railFootOcIn}" O.C. STAGGERED, ON`,
-            '   RAFTERS, AT 25%/75% OF MODULE.',
-            '   END OVERHANG ≤ 18" — DECK-MOUNT (◻)',
-            '   WHERE NO RAFTER FALLS IN RANGE.',
+            `3B. RAILS ON FEET @ ${railFootOcIn}" O.C. STAGGERED,`,
+            '   FEET ON RAFTERS; RAILS AT 25%/75% OF',
+            '   MODULE. END OVERHANG ≤ 18" — DECK-MOUNT',
+            '   (◻) WHERE NO RAFTER FALLS IN RANGE.',
           ]
         : []),
       ...(_encroachCount > 0
@@ -1494,7 +1493,7 @@ export function drawRoofPlan(
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
-      ...(isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${railFootOcIn}" O.C.` }] : []),
+      ...(!isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${railFootOcIn}" O.C.` }] : [{ swatch: `<rect x="4" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/><rect x="9" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/>`, label: 'DIRECT-ATTACH MOUNTS (RAIL-LESS)' }]),
       ...(_deckMountUsed ? [{ swatch: `<rect x="4.5" y="-2.5" width="5" height="5" fill="#fff" stroke="#b45309" stroke-width="1"/>`, label: 'DECK-MOUNTED FOOT (NO RAFTER)' }] : []),
       ...(_encroachCount > 0 ? [{
         swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
@@ -1597,9 +1596,9 @@ export function drawRoofPlan(
     // (N) attachments — BELOW the overall-dimension band (dim owns
     // roofMaxY+24..+40; the callout used to print through the dim line)
     txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 48, 'start',
-      [isRailless
-        ? `(N) ${mountSys} ATTACHMENTS @ ${railFootOcIn}" O.C. STAGGERED`
-        : `(N) ${mountSys} ATTACHMENTS @ ${attachSp}" O.C.`,
+      [!isRailless
+        ? `(N) ${mountSys} RAIL FEET @ ${railFootOcIn}" O.C. STAGGERED`
+        : `(N) ${mountSys} DIRECT MOUNTS @ ${attachSp}" O.C.`,
        `INTO FRAMING — SEE PV-3`],
       botP.x - 2, botP.y + 4);
   }
@@ -1659,6 +1658,99 @@ export function drawRoofPlan(
       }));
   }
 
+  // ── SITE KEY inset (PV-1 hybrid) ────────────────────────────────────────────
+  // The main plan frames roof+ground large (fence sits 100+ ft off and would
+  // balloon the window). This compact locator shows ALL systems in true relative
+  // position so a plan checker sees the whole property at a glance, and points to
+  // the fence/ground detail sheets. Ray 2026-07-14: "roof+ground hero, fence as
+  // inset/ref". Fills the otherwise-empty lower-right of the draw zone.
+  if (!isBranchColorMode && _hyb && (_hyb.ground.length || _hyb.fence.length)) {
+    const bw = 316, bh = 328;
+    const bx = W - zones.dims.right - bw - 8;
+    // Centered in the right-side void (between the to-scale ground overlay above
+    // and the sheet bottom) so the residual white is balanced, not pooled on top.
+    const by = Math.round((zones.dims.top + (H - zones.dims.bottom) - bh) / 2) + 40;
+    const mapH = 190;                         // mini-map band height; table below
+    const ins: string[] = [];
+    ins.push(`<g class="pv1-sitekey">`);
+    ins.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
+    ins.push(`<rect x="${bx}" y="${by}" width="${bw}" height="15" fill="#111"/>`);
+    ins.push(`<text x="${bx + 8}" y="${by + 11}" font-size="8" font-weight="700" fill="#fff" letter-spacing="0.4">SITE KEY — SYSTEM LOCATOR · NTS</text>`);
+    // Combined bbox (rotated fake-deg) of roof + ground + fence.
+    const kpts: Array<{ lat: number; lng: number }> = [
+      { lat: minLat, lng: minLng }, { lat: maxLat, lng: maxLng },
+      ..._hyb.ground.flatMap(g => g.ring),
+      ..._hyb.fence.flatMap(f => [f.line[0], f.line[1]]),
+    ];
+    const kLng = kpts.map(p => p.lng), kLat = kpts.map(p => p.lat);
+    const kMinLng = Math.min(...kLng), kMaxLng = Math.max(...kLng);
+    const kMinLat = Math.min(...kLat), kMaxLat = Math.max(...kLat);
+    const kSpanLng = (kMaxLng - kMinLng) || 1, kSpanLat = (kMaxLat - kMinLat) || 1;
+    const pad = 14;
+    const cw = bw - 2 * pad, chh = mapH - pad;
+    const ksc = Math.min(cw / kSpanLng, chh / kSpanLat) * 0.9;
+    const kox = bx + pad + (cw - kSpanLng * ksc) / 2;
+    const koy = by + 15 + (pad / 2) + (chh - kSpanLat * ksc) / 2;
+    const kx = (lng: number) => kox + (lng - kMinLng) * ksc;
+    const ky = (lat: number) => koy + (kMaxLat - lat) * ksc;
+    // House / roof footprint (roof plan bbox proxy).
+    const hx = kx(minLng), hy = ky(maxLat);
+    const hw = (maxLng - minLng) * ksc, hh = (maxLat - minLat) * ksc;
+    ins.push(`<rect x="${hx.toFixed(1)}" y="${hy.toFixed(1)}" width="${hw.toFixed(1)}" height="${hh.toFixed(1)}" fill="#d9dee6" stroke="#333" stroke-width="1"/>`);
+    ins.push(`<text x="${(hx + hw / 2).toFixed(1)}" y="${(hy + hh / 2 + 2).toFixed(1)}" font-size="6.5" font-weight="700" fill="#222" text-anchor="middle">ROOF PV</text>`);
+    // Ground arrays.
+    for (const g of _hyb.ground) {
+      const pp = g.ring.map(p => `${kx(p.lng).toFixed(1)},${ky(p.lat).toFixed(1)}`).join(' ');
+      ins.push(`<polygon points="${pp}" fill="#2b6cb0" fill-opacity="0.2" stroke="#2b6cb0" stroke-width="1.2"/>`);
+    }
+    if (_hyb.ground.length) {
+      const gc = _hyb.ground.flatMap(g => g.ring);
+      const gcx = gc.reduce((s, p) => s + kx(p.lng), 0) / gc.length;
+      const gcy = Math.min(...gc.map(p => ky(p.lat))) - 3;
+      ins.push(`<text x="${gcx.toFixed(1)}" y="${gcy.toFixed(1)}" font-size="6.2" font-weight="700" fill="#2b6cb0" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">GROUND</text>`);
+    }
+    // Fence run.
+    for (const f of _hyb.fence) {
+      const [a, b] = f.line;
+      ins.push(`<line x1="${kx(a.lng).toFixed(1)}" y1="${ky(a.lat).toFixed(1)}" x2="${kx(b.lng).toFixed(1)}" y2="${ky(b.lat).toFixed(1)}" stroke="#1a7a3a" stroke-width="3" stroke-linecap="round"/>`);
+      const mx = (kx(a.lng) + kx(b.lng)) / 2, my = (ky(a.lat) + ky(b.lat)) / 2;
+      ins.push(`<text x="${mx.toFixed(1)}" y="${(my - 4).toFixed(1)}" font-size="6.2" font-weight="700" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">FENCE</text>`);
+    }
+    // North arrow (top-right of the mini-map) — same rotation as the main rose.
+    const nax = bx + bw - 18, nay = by + 34, nrot = northArrowRotationDeg(planRotDeg);
+    ins.push(`<g transform="rotate(${nrot.toFixed(1)} ${nax} ${nay})"><line x1="${nax}" y1="${nay + 8}" x2="${nax}" y2="${nay - 8}" stroke="#111" stroke-width="1"/><path d="M${nax},${nay - 10} L${nax - 3},${nay - 4} L${nax + 3},${nay - 4} Z" fill="#111"/><text x="${nax}" y="${nay - 12}" font-size="5.5" font-weight="700" text-anchor="middle" fill="#111">N</text></g>`);
+    // ── System-locator table (fills the lower half with useful content) ─────────
+    const cnt = (s?: string) => (s?.match(/(\d+)\s*MOD/)?.[1]) ?? '—';
+    const gCount = cnt(_hyb.ground.map(g => g.label).find(Boolean));
+    const fLabel = _hyb.fence[0]?.label ?? '';
+    const fCount = cnt(fLabel);
+    const fLen = fLabel.match(/·\s*([^·]+L\.F\.)/)?.[1]?.trim() ?? '';
+    const rows: Array<[string, string, string]> = [
+      ['ROOF PV', String(totalPanels || _drawnPanels), 'PV-1 · PV-3'],
+      ...(gCount !== '—' ? [['GROUND', gCount, 'PV-1G · PV-3G'] as [string, string, string]] : []),
+      ...(fCount !== '—' ? [['FENCE', `${fCount}${fLen ? ' · ' + fLen : ''}`, 'PV-1F · PV-1BF'] as [string, string, string]] : []),
+    ];
+    const tX = bx + 10, tW = bw - 20;
+    let tY = by + mapH + 6;
+    const colM = tX + 92, colS = tX + 150;
+    ins.push(`<rect x="${tX}" y="${tY}" width="${tW}" height="13" fill="#111"/>`);
+    ins.push(`<text x="${tX + 5}" y="${tY + 9.5}" font-size="6.2" font-weight="700" fill="#fff">SYSTEM</text>`);
+    ins.push(`<text x="${colM}" y="${tY + 9.5}" font-size="6.2" font-weight="700" fill="#fff">MODULES</text>`);
+    ins.push(`<text x="${colS}" y="${tY + 9.5}" font-size="6.2" font-weight="700" fill="#fff">DETAIL SHEETS</text>`);
+    tY += 13;
+    rows.forEach((r, i) => {
+      if (i % 2) ins.push(`<rect x="${tX}" y="${tY}" width="${tW}" height="14" fill="#f1f3f6"/>`);
+      ins.push(`<text x="${tX + 5}" y="${tY + 9.5}" font-size="6.4" font-weight="700" fill="#111">${r[0]}</text>`);
+      ins.push(`<text x="${colM}" y="${tY + 9.5}" font-size="6.4" fill="#111">${r[1]}</text>`);
+      ins.push(`<text x="${colS}" y="${tY + 9.5}" font-size="6.4" fill="#111">${r[2]}</text>`);
+      tY += 14;
+    });
+    ins.push(`<rect x="${tX}" y="${by + mapH + 6}" width="${tW}" height="${13 + rows.length * 14}" fill="none" stroke="#333" stroke-width="0.6"/>`);
+    ins.push(`<text x="${tX}" y="${(by + bh - 6).toFixed(1)}" font-size="5.8" fill="#666">Relative positions to scale · systems detailed on referenced sheets.</text>`);
+    ins.push(`</g>`);
+    els.push(ins.join(''));
+  }
+
   els.push(drawSVGClose());
   return els.join('');
 }
@@ -1699,7 +1791,9 @@ export function drawRoofStructural(
   const mountSys   = (((project as any)._canonical?.mountSystem as string)
     || project.mountingSystem
     || (_mSelD ? `${_mSelD.manufacturer} ${_mSelD.model}` : 'IRONRIDGE XR100')).toUpperCase();
-  const isRaillessD = /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(mountSys);
+  // RT-MINI is an L-FOOT + RAIL base (railed), NOT rail-less — only genuine
+  // rail-less products get the direct-mount detail. (Matches roof-plan + BOM.)
+  const isRaillessD = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(mountSys);
   const _fracD = (v: number) =>
     v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
   const _lagDiaD  = _mSelD?.mount?.fastenerDiameterIn ?? 0.375;

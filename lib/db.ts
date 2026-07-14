@@ -538,9 +538,9 @@ export const defaultMounting: MountingSystem[] = [
   },
   // Ground Mount
   {
-    id: 'mount-5', name: 'Unirac RM10 Ground Mount', type: 'ground',
-    pricePerWatt: 0.18, manufacturer: 'Unirac',
-    description: 'Adjustable tilt ground mount system with driven piers',
+    id: 'mount-5', name: 'PLP POWER DRIVE™ Ground Mount', type: 'ground',
+    pricePerWatt: 0.18, manufacturer: 'PLP (Preformed Line Products)',
+    description: 'Single-row driven I-beam pylon ground mount (SP3284, UL 2703) — no concrete. $/W is a planning estimate; real cost per PLP quote.',
   },
   {
     id: 'mount-6', name: 'IronRidge Ground Mount', type: 'ground',

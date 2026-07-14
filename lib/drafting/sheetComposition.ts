@@ -331,8 +331,16 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
     rowSpacingFt:  arr?.rowSpacingM             ? mToFt(arr.rowSpacingM)            : ((gArrs?.rowSpacingFt as number) || 10),
     groundClearIn: arr?.groundClearanceM        ? Math.round(arr.groundClearanceM * 39.3701) : ((gArrs?.groundClearanceIn as number) || 18),
     pileDepthFt:   arr?.pileDepthM              ? mToFt(arr.pileDepthM)             : ((gArrs?.pileDepthFt as number) || 5),
-    pileSpacingFt: arr?.pileSpacingM            ? mToFt(arr.pileSpacingM)           : ((gArrs?.pileSpacingFt as number) || 8),
-    structureType: (arr?.structureType         ?? (gArrs?.structureType as string)  ?? 'DRIVEN PILE').toString().toUpperCase().replace(/_/g,' '),
+    // Speck PLP POWER DRIVE™ places ONE driven I-beam pylon per BAY at ~20 ft O.C.
+    // (engine PLP_BAY_SPAN_M = 6.10). A legacy per-array pile-spacing scalar (often
+    // a stale ~8 ft generic default) does NOT describe PLP, so honor a stored value
+    // only when it is a plausible PLP bay span (≥ 15 ft); otherwise use the 20 ft
+    // engine standard. Keeps the PV-3G detail + STRUCTURAL DATA panel in agreement.
+    pileSpacingFt: (() => {
+      const v = arr?.pileSpacingM ? mToFt(arr.pileSpacingM) : (gArrs?.pileSpacingFt as number);
+      return (typeof v === 'number' && v >= 15) ? Math.round(v) : 20;
+    })(),
+    structureType: 'DRIVEN PYLON — PLP',
     setbackFt:     g?.setbackFt                ?? ((lay?.groundSetbackFt as number) || 5),
     windSpeedMph:  (cw?.windSpeed as number)   || (p?.ahjWindSpeedMph as number)   || 115,
     snowPsf:       (p?.ahjGroundSnowPsf as number) || 0,
@@ -567,8 +575,8 @@ function groundComposition(
       ]
     : [
         { label: 'STRUCTURE TYPE', value: d.structureType,                  bold: true },
-        { label: 'PILE DEPTH',     value: `${d.pileDepthFt}' MIN`,          bold: true, highlight: true },
-        { label: 'PILE SPACING',   value: `${d.pileSpacingFt}' O.C.` },
+        { label: 'PYLON EMBED',    value: `${d.pileDepthFt}' MIN`,          bold: true, highlight: true },
+        { label: 'PYLON SPACING',  value: `${d.pileSpacingFt}' O.C. (1/BAY)` },
         { label: 'GND CLEARANCE',  value: `${d.groundClearIn}" MIN` },
         { label: 'TILT ANGLE',     value: `${d.tiltDeg}°` },
         { label: 'WIND SPEED',     value: `${d.windSpeedMph} MPH Vult` },
@@ -583,17 +591,17 @@ function groundComposition(
         { n: 2, label: 'GROUND LINE', sub: 'grade elevation reference' },
         { n: 3, label: 'TILT INDICATOR', sub: `${d.tiltDeg}° array tilt` },
         { n: 4, label: 'SETBACK LINE', sub: `${d.setbackFt}' property setback` },
-        { n: 5, label: 'PILE LOCATION', sub: d.structureType },
+        { n: 5, label: 'PYLON LOCATION', sub: d.structureType },
         { n: 6, label: 'ROW SPACING', sub: `${d.rowSpacingFt}' O.C. — verify inter-row shading` },
-        { n: 7, label: 'PILE EMBEDMENT', sub: `${d.pileDepthFt}' min below grade — field-verify refusal` },
+        { n: 7, label: 'PYLON EMBED', sub: `${d.pileDepthFt}' min below grade — field-verify refusal` },
         { n: 8, label: 'GROUND CLEARANCE', sub: `${d.groundClearIn}" min below lowest module` },
         { n: 9, label: 'EQUIP. BONDING', sub: 'all metalwork bonded to EGC — see PV-3' },
-        { n: 10, label: 'FOUNDATION', sub: 'driven steel pile — no concrete' },
+        { n: 10, label: 'FOUNDATION', sub: 'driven I-beam pylon — no concrete' },
         { n: 11, label: 'DESIGN LOADS', sub: `${d.windSpeedMph} MPH Vult · ASCE 7-22` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: `${d.tiltDeg}° tilt` },
-        { n: 2, label: 'PILE / POST', sub: d.structureType },
+        { n: 2, label: 'PYLON / STRUT', sub: d.structureType },
         { n: 3, label: 'EMBEDMENT', sub: `${d.pileDepthFt}' min below grade` },
         { n: 4, label: 'GRADE LINE', sub: `${d.groundClearIn}" clearance min` },
       ];
@@ -615,8 +623,8 @@ function groundComposition(
     dataPct:        35,
     drawHeader:     isPlan
       ? `GROUND ARRAY PLAN — ${d.rowCount} ROWS × ${d.panelsPerRow} MOD/ROW | TILT: ${d.tiltDeg}° | AZ: ${d.azimuthDeg}° | ROW SPACING: ${d.rowSpacingFt}'`
-      : `PILE ELEVATION — ${d.structureType} | EMBED: ${d.pileDepthFt}' MIN | PILE @ ${d.pileSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`,
-    secondaryHeader: isPlan ? 'ROW SPACING DIAGRAM' : 'PIER / PILE DETAIL — NTS',
+      : `PLP PYLON ELEVATION — ${d.structureType} | EMBED: ${d.pileDepthFt}' MIN | PYLON @ ${d.pileSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`,
+    secondaryHeader: isPlan ? 'ROW SPACING DIAGRAM' : 'PLP PYLON DETAIL — NTS',
     dataTitle:      isPlan ? 'ARRAY DATA' : 'STRUCTURAL DATA',
     dataRows,
     callouts,

@@ -28,6 +28,7 @@ interface FakePt { lat: number; lng: number }
 export interface HybridGroundShape {
   ring: FakePt[];                 // outer array rectangle (closed)
   rowLines: Array<[FakePt, FakePt]>;
+  cellLines: Array<[FakePt, FakePt]>;   // per-module divisions across the row
   labelPt: FakePt;
   label: string;                  // e.g. "GROUND MOUNT — 20 MOD"
 }
@@ -81,7 +82,8 @@ function orientedRing(
   refLat: number, refLng: number,
   inflateAlongM: number, inflateAcrossM: number,
   baseOriginLat: number, baseOriginLng: number,
-): { ring: FakePt[]; topMid: FakePt } {
+  nCells = 0,
+): { ring: FakePt[]; topMid: FakePt; cellLines: Array<[FakePt, FakePt]> } {
   const th = principalAngle(local);
   const cos = Math.cos(-th), sin = Math.sin(-th);
   const rot = local.map(p => ({ x: p.x * cos - p.y * sin, y: p.x * sin + p.y * cos }));
@@ -102,7 +104,24 @@ function orientedRing(
   };
   // Label anchor: midpoint of the top (max-Y) edge, nudged 2 m out.
   const topMid = toFakePt({ x: (minX + maxX) / 2, y: maxY + 2 });
-  return { ring: corners.map(toFakePt), topMid };
+  // Per-module cell separators along the long axis so the ground array reads as
+  // a real N-up array (not a blank bar) on the site plan. Modules run along the
+  // longer edge of the oriented row bbox.
+  const cellLines: Array<[FakePt, FakePt]> = [];
+  if (nCells > 1) {
+    const alongX = (maxX - minX) >= (maxY - minY);
+    for (let i = 1; i < nCells; i++) {
+      const f = i / nCells;
+      if (alongX) {
+        const x = minX + (maxX - minX) * f;
+        cellLines.push([toFakePt({ x, y: minY }), toFakePt({ x, y: maxY })]);
+      } else {
+        const y = minY + (maxY - minY) * f;
+        cellLines.push([toFakePt({ x: minX, y }), toFakePt({ x: maxX, y })]);
+      }
+    }
+  }
+  return { ring: corners.map(toFakePt), topMid, cellLines };
 }
 
 export function buildHybridOverlays(
@@ -158,24 +177,23 @@ export function buildHybridOverlays(
     groups.clear();
     rowGroups.forEach((g, i) => groups.set(`row-${i}`, g));
     let labelPt: FakePt | null = null;
-    const rowLines: Array<[FakePt, FakePt]> = [];
-    const rings: FakePt[][] = [];
+    const rings: Array<{ ring: FakePt[]; cellLines: Array<[FakePt, FakePt]> }> = [];
     for (const grp of groups.values()) {
       const local = grp.map(p => toLocalM(p, refLat, refLng));
-      const { ring, topMid } = orientedRing(
-        local, refLat, refLng, halfLong, halfShort, baseOriginLat, baseOriginLng);
-      rings.push(ring);
+      const { ring, topMid, cellLines } = orientedRing(
+        local, refLat, refLng, halfLong, halfShort, baseOriginLat, baseOriginLng, grp.length);
+      rings.push({ ring, cellLines });
       // Northernmost group's top edge anchors the section label.
       if (!labelPt || topMid.lat > labelPt.lat) labelPt = topMid;
       out.allPts.push(...ring);
     }
     const [first, ...rest] = rings;
     out.ground.push({
-      ring: first, rowLines,
+      ring: first.ring, rowLines: [], cellLines: first.cellLines,
       labelPt: labelPt!,
       label: `GROUND MOUNT — ${gPanels.length} MOD`,
     });
-    for (const r of rest) out.ground.push({ ring: r, rowLines: [], labelPt: r[0], label: '' });
+    for (const r of rest) out.ground.push({ ring: r.ring, rowLines: [], cellLines: r.cellLines, labelPt: r.ring[0], label: '' });
   } else if (gSec && cad.ground?.arrays?.length) {
     // Legacy fallback: project the solver's local geometry via the section origin.
     legacyGround(cad, gSec, baseOriginLat, baseOriginLng, out);
@@ -227,6 +245,7 @@ export function rotateHybridOverlays(
       ...g,
       ring: g.ring.map(r),
       rowLines: g.rowLines.map(([a, b]) => [r(a), r(b)] as [FakePt, FakePt]),
+      cellLines: g.cellLines.map(([a, b]) => [r(a), r(b)] as [FakePt, FakePt]),
       labelPt: r(g.labelPt),
     })),
     fence: h.fence.map(f => ({
@@ -265,7 +284,7 @@ function legacyGround(cad: CADModel, sec: Sec, baseLat: number, baseLng: number,
     const rowLines: Array<[FakePt, FakePt]> = (arr.rows ?? []).map(r =>
       [toFake(r.x, r.y), toFake(r.x + r.widthM, r.y)] as [FakePt, FakePt]);
     out.ground.push({
-      ring, rowLines,
+      ring, rowLines, cellLines: [],
       labelPt: toFake(x0 + w / 2, y0 + d + 3),
       label: `GROUND MOUNT — ${arr.panels?.length || 0} MOD`,
     });
