@@ -3407,44 +3407,87 @@ function EngineeringPageInner() {
      // sizingRecommendation.requiredComponents (engine truth). The UI never computes
      // component quantities locally; it always reflects what sizeSystemFromBrand()
      // returned for the current brand + panel count + topology.
+     // ── Wave 6 — per-sub sizing (ONE pass), each present sub sized against its
+     // INSTALLED inverter (brand + seeded model). Feeds the multi-brand ecosystem
+     // banner + the auto-added components, so a hybrid resolves to the REAL per-sub
+     // kits — never one stale whole-project brand (EcoFlow ×2 on a 3-brand system).
+     const hybridSubSizing = useMemo<Array<{ key: SubSystemKey; curInvId: string; invMfr: string; rec: SystemSizingResult | null }>>(() => {
+       if (!subSystemCounts.isHybrid) return [];
+       const _fb = toSubSystemKey(config.systemType);
+       const part = partitionFleet(config.inverters as any[], _fb);
+       const subMap = ((config as any).subSystems ?? {}) as Record<string, any>;
+       const rows: Array<{ key: SubSystemKey; curInvId: string; invMfr: string; rec: SystemSizingResult | null }> = [];
+       for (const key of subSystemCounts.present) {
+         const count = subSystemCounts[key];
+         if (count <= 0) continue;
+         const fleet = (part[key] ?? []) as InverterConfig[];
+         const inv0 = fleet[0];
+         const curInvId = inv0?.inverterId ?? '';
+         const invMfr = inv0 ? ((getInvById(inv0.inverterId, inv0.type) as any)?.manufacturer ?? '') : '';
+         const brand = curInvId ? (getBrandProfileByInverterId(curInvId)?.id ?? subMap[key]?.ecosystemBrand) : subMap[key]?.ecosystemBrand;
+         const panelId = subMap[key]?.panelId ?? inv0?.strings?.[0]?.panelId;
+         const panel = panelId ? (getPanelById(panelId) as any) : null;
+         let rec: SystemSizingResult | null = null;
+         try {
+           rec = sizeSystemFromBrand({ systemType: key, panelCount: count, panelWattage: panel?.watts ?? 400, ...(panelId ? { panelId } : {}), selectedBrand: brand, ...(curInvId ? { selectedInverterId: curInvId } : {}), batteryEnabled: false } as any);
+         } catch { rec = null; }
+         rows.push({ key, curInvId, invMfr, rec });
+       }
+       return rows;
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, [subSystemCounts, config.inverters, config.systemType, (config as any).subSystems]);
+
+     // Per-sub brand summary for the ecosystem banner (installed-inverter mfr).
+     const hybridBrands = useMemo(() => {
+       if (!subSystemCounts.isHybrid) return null;
+       const perSub = hybridSubSizing.map(r => ({ key: r.key, brand: r.invMfr || '—' }));
+       const uniq = Array.from(new Set(perSub.map(p => p.brand).filter(b => b && b !== '—')));
+       return { perSub, uniq, isMixed: uniq.length > 1 };
+     }, [subSystemCounts.isHybrid, hybridSubSizing]);
+
+     // Phase C1 / Wave 6 — auto-added ecosystem components.
+     // HYBRID: the UNION of each sub's brand kit (per-sub requiredComponents),
+     // aggregated by equipmentDbId/category. Single-system: the whole-project
+     // sizingRecommendation.requiredComponents (unchanged).
      const displayedEcosystemComponents = useMemo(() => {
+       const enrich = (c: any, fallbackMfr: string) => {
+         const id = c.equipmentDbId;
+         let manufacturer = fallbackMfr ?? '';
+         let model = id ?? c.category;
+         let partNumber: string | undefined;
+         if (id) {
+           const gateway = getMonitoringGatewayById(id); if (gateway) { manufacturer = gateway.manufacturer; model = gateway.model; }
+           const opt = getOptimizerById(id); if (opt) { manufacturer = opt.manufacturer; model = opt.model; partNumber = (opt as any).partNumber; }
+           const micro = getMicroinverterById(id); if (micro) { manufacturer = micro.manufacturer; model = micro.model; }
+           const inv = getInverterById(id); if (inv) { manufacturer = inv.manufacturer; model = inv.model; }
+           const ev = getEVChargerById(id); if (ev) { manufacturer = ev.manufacturer; model = ev.model; partNumber = (ev as any).partNumber; }
+           const bat = getBatteryById(id); if (bat) { manufacturer = bat.manufacturer; model = bat.model; }
+         }
+         return { category: c.category, manufacturer, model, partNumber, quantity: c.qty, reason: c.note ?? c.qtyPolicy, required: c.required };
+       };
+       if (subSystemCounts.isHybrid) {
+         const agg = new Map<string, { c: any; mfr: string }>();
+         for (const row of hybridSubSizing) {
+           const comps = row.rec?.requiredComponents ?? [];
+           const mfr = row.rec?.brand?.manufacturer ?? row.invMfr ?? '';
+           for (const c of comps) {
+             if (c.qty <= 0) continue;
+             // Key by BRAND + id/category so a generic 'monitoring_gateway' from
+             // Enphase and from EcoFlow stay separate line items (don't collapse
+             // into one mislabeled row).
+             const k = `${mfr}|${c.equipmentDbId ?? c.category}`;
+             const prev = agg.get(k);
+             if (prev) { prev.c = { ...prev.c, qty: prev.c.qty + c.qty }; }
+             else { agg.set(k, { c: { ...c }, mfr }); }
+           }
+         }
+         return [...agg.values()].map(({ c, mfr }) => enrich(c, mfr));
+       }
        const comps = sizingRecommendation?.requiredComponents;
        if (!comps || comps.length === 0) return [];
-       return comps
-         .filter(c => c.qty > 0)
-         .map(c => {
-           // Enrich with manufacturer/model from equipment-db when equipmentDbId is present.
-           const id = c.equipmentDbId;
-           let manufacturer = sizingRecommendation?.brand?.manufacturer ?? '';
-           let model = id ?? c.category;
-           let partNumber: string | undefined;
-
-           if (id) {
-             const gateway = getMonitoringGatewayById(id);
-             if (gateway) { manufacturer = gateway.manufacturer; model = gateway.model; }
-             const opt = getOptimizerById(id);
-             if (opt) { manufacturer = opt.manufacturer; model = opt.model; partNumber = (opt as any).partNumber; }
-             const micro = getMicroinverterById(id);
-             if (micro) { manufacturer = micro.manufacturer; model = micro.model; }
-             const inv = getInverterById(id);
-             if (inv) { manufacturer = inv.manufacturer; model = inv.model; }
-             const ev = getEVChargerById(id);
-             if (ev) { manufacturer = ev.manufacturer; model = ev.model; partNumber = (ev as any).partNumber; }
-             const bat = getBatteryById(id);
-             if (bat) { manufacturer = bat.manufacturer; model = bat.model; }
-           }
-
-           return {
-             category: c.category,
-             manufacturer,
-             model,
-             partNumber,
-             quantity: c.qty,
-             reason: c.note ?? c.qtyPolicy,
-             required: c.required,
-           };
-         });
-     }, [sizingRecommendation]);
+       return comps.filter(c => c.qty > 0).map(c => enrich(c, sizingRecommendation?.brand?.manufacturer ?? ''));
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, [subSystemCounts.isHybrid, hybridSubSizing, sizingRecommendation]);
 
   // toSystemState: convert ProjectConfig to SystemState for API calls
   const toSystemState = useCallback(() => {
@@ -10013,15 +10056,31 @@ function EngineeringPageInner() {
                   <div className="space-y-5">
 
                     {/* Ecosystem Picker — v58.7: prominent "Change ecosystem" button for discoverability */}
-                    {(config as any).ecosystemBrand ? (
+                    {((config as any).ecosystemBrand || (subSystemCounts.isHybrid && (hybridBrands?.uniq.length ?? 0) > 0)) ? (
                       <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-slate-800/60 border border-amber-500/30">
                         <div className="flex-shrink-0 w-8 h-8 rounded-md bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
                           <Package size={16} className="text-amber-400" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm text-slate-100">
-                            <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span>
-                            <span className="text-slate-400 ml-1.5">ecosystem applied</span>
+                            {subSystemCounts.isHybrid && hybridBrands ? (
+                              hybridBrands.isMixed ? (
+                                <>
+                                  <span className="font-bold text-amber-300">Multi-brand hybrid</span>
+                                  <span className="text-slate-400 ml-1.5">— {hybridBrands.perSub.map(p => `${p.key.charAt(0).toUpperCase()}${p.key.slice(1)}: ${p.brand}`).join(' · ')}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="font-bold text-amber-300">{(hybridBrands.uniq[0] ?? '').toUpperCase()}</span>
+                                  <span className="text-slate-400 ml-1.5">ecosystem — all sub-systems</span>
+                                </>
+                              )
+                            ) : (
+                              <>
+                                <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span>
+                                <span className="text-slate-400 ml-1.5">ecosystem applied</span>
+                              </>
+                            )}
                           </div>
                           {displayedEcosystemComponents.length > 0 ? (
                             <div className="text-[11px] text-slate-500 mt-0.5">
@@ -10029,6 +10088,9 @@ function EngineeringPageInner() {
                             </div>
                           ) : null}
                         </div>
+                        {(subSystemCounts.isHybrid && hybridBrands?.isMixed) ? (
+                          <span className="flex-shrink-0 text-[10px] text-slate-500 italic self-center whitespace-nowrap">set per sub-system below</span>
+                        ) : (
                         <button
                           type="button"
                           className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
@@ -10058,6 +10120,7 @@ function EngineeringPageInner() {
                           <RefreshCw size={12} />
                           Change ecosystem
                         </button>
+                        )}
                       </div>
                     ) : (
                     <>
