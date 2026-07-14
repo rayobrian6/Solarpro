@@ -3479,7 +3479,16 @@ function EngineeringPageInner() {
          const panel = panelId ? (getPanelById(panelId) as any) : null;
          let rec: SystemSizingResult | null = null;
          try {
-           rec = sizeSystemFromBrand({ systemType: key, panelCount: count, panelWattage: panel?.watts ?? 400, ...(panelId ? { panelId } : {}), selectedBrand: brand, ...(curInvId ? { selectedInverterId: curInvId } : {}), batteryEnabled: false } as any);
+           rec = sizeSystemFromBrand({ systemType: key, panelCount: count, panelWattage: panel?.watts ?? 400,
+             // Thread the per-sub panel's electrical specs (panelId alone does NOT
+             // activate the NEC 690.7 cold-Voc clamp — the engine reads panelVoc
+             // directly) so per-sub string sizing can't exceed the inverter's DC max.
+             ...(panel?.voc ? { panelVoc: panel.voc } : {}),
+             ...(panel?.vmp ? { panelVmp: panel.vmp } : {}),
+             ...(panel?.isc ? { panelIsc: panel.isc } : {}),
+             ...(typeof panel?.tempCoeffVoc === 'number' ? { panelTempCoeffVoc: panel.tempCoeffVoc } : {}),
+             designTempMin: -10,
+             ...(panelId ? { panelId } : {}), selectedBrand: brand, ...(curInvId ? { selectedInverterId: curInvId } : {}), batteryEnabled: false } as any);
          } catch { rec = null; }
          rows.push({ key, curInvId, invMfr, rec });
        }
@@ -4161,6 +4170,17 @@ function EngineeringPageInner() {
         systemType: key,
         panelCount: subCount,
         panelWattage: _preferPanel?.watts ?? 400,
+        // Thread the PER-SUB panel's electrical specs so the NEC 690.7 cold-Voc
+        // string ceiling (voltageAwareMaxPPS) actually runs off the per-sub path.
+        // Without panelTempCoeffVoc the clamp is skipped and sizing falls back to
+        // the brand's static max-per-string — which on a 600V string inverter can
+        // silently exceed maxDcVoltage (e.g. EcoFlow static 16 vs true cold ceiling
+        // 10 for a 440W/51.2Voc panel). Resolve from the sub's OWN panel, not roof.
+        ...(_preferPanel?.voc          ? { panelVoc: _preferPanel.voc } : {}),
+        ...(_preferPanel?.vmp          ? { panelVmp: _preferPanel.vmp } : {}),
+        ...(_preferPanel?.isc          ? { panelIsc: _preferPanel.isc } : {}),
+        ...(typeof _preferPanel?.tempCoeffVoc === 'number' ? { panelTempCoeffVoc: _preferPanel.tempCoeffVoc } : {}),
+        designTempMin: -10,
         selectedBrand: seedBrand,
         ...(prefer?.inverterId ? { selectedInverterId: prefer.inverterId } : {}),
         batteryEnabled: false,
