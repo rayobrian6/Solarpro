@@ -8435,11 +8435,14 @@ function EngineeringPageInner() {
     setAiLoading(false);
   };
 
-  // Derived topology label for display
-  const topologyLabel = config.inverters[0]?.type === 'micro' ? 'MICROINVERTER'
+  // Derived topology label for display — hybrid systems mix topologies per sub,
+  // so a single 'STRING INVERTER'/'MICROINVERTER' label is wrong for them.
+  const topologyLabel = subSystemCounts.isHybrid ? 'HYBRID SYSTEM'
+    : config.inverters[0]?.type === 'micro' ? 'MICROINVERTER'
     : config.inverters[0]?.type === 'optimizer' ? 'STRING + OPTIMIZER'
     : 'STRING INVERTER';
-  const topologyColor = config.inverters[0]?.type === 'micro' ? 'text-purple-400 border-purple-500/40 bg-purple-500/10'
+  const topologyColor = subSystemCounts.isHybrid ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+    : config.inverters[0]?.type === 'micro' ? 'text-purple-400 border-purple-500/40 bg-purple-500/10'
     : config.inverters[0]?.type === 'optimizer' ? 'text-blue-400 border-blue-500/40 bg-blue-500/10'
     : 'text-amber-400 border-amber-500/40 bg-amber-500/10';
 
@@ -9421,24 +9424,27 @@ function EngineeringPageInner() {
 
                       {/* Node: Inverter */}
                       <div className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border cursor-pointer hover:brightness-110 transition-all min-w-[90px] ${
+                        subSystemCounts.isHybrid ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' :
                         _inv0?.type === 'micro' ? 'border-purple-500/40 bg-purple-500/10 text-purple-300' :
                         _inv0?.type === 'optimizer' ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' :
                         'border-amber-500/40 bg-amber-500/10 text-amber-300'
                       }`}
                         title="Inverter — click to expand Inverter config">
                         <Cpu size={18} className={
+                          subSystemCounts.isHybrid ? 'text-amber-400' :
                           _inv0?.type === 'micro' ? 'text-purple-400' :
                           _inv0?.type === 'optimizer' ? 'text-blue-400' : 'text-amber-400'
                         } />
                         <div className="text-xs font-bold text-white truncate max-w-[80px] text-center">
-                          {_invData0?.manufacturer || 'Inverter'}
+                          {subSystemCounts.isHybrid ? 'Hybrid' : (_invData0?.manufacturer || 'Inverter')}
                         </div>
                         <div className="text-[10px] text-slate-400">
-                          {_inv0?.type === 'micro' ? 'Micro' : _inv0?.type === 'optimizer' ? 'Optimizer' : 'String'}{' '}
-                          {_acKwNum > 0 ? `${_acKwNum}kW` : ''}
+                          {subSystemCounts.isHybrid
+                            ? `${subSystemCounts.present.length} sub-systems`
+                            : `${_inv0?.type === 'micro' ? 'Micro' : _inv0?.type === 'optimizer' ? 'Optimizer' : 'String'} ${_acKwNum > 0 ? `${_acKwNum}kW` : ''}`}
                         </div>
                         <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                          {_branchCount} {cs.isMicro ? 'branches' : 'strings'}
+                          {subSystemCounts.isHybrid ? (_acKwNum > 0 ? `${_acKwNum} kW AC` : 'multi-inverter') : `${_branchCount} ${cs.isMicro ? 'branches' : 'strings'}`}
                         </div>
                       </div>
 
@@ -9567,10 +9573,10 @@ function EngineeringPageInner() {
                         {compliance.jurisdiction.state} · NEC {compliance.jurisdiction.necVersion}
                       </div>
                     ) : null}
-                    {config.systemType ? (
+                    {(config.systemType || subSystemCounts.isHybrid) ? (
                       <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-300">
                         <Cpu size={11} className="text-blue-400" />
-                        {config.systemType}
+                        {subSystemCounts.isHybrid ? 'hybrid' : config.systemType}
                       </div>
                     ) : null}
                     <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
@@ -16880,9 +16886,11 @@ function EngineeringPageInner() {
               <div className={`rounded-xl border px-3 py-2.5 ${topologyColor}`}>
                 <div className="text-xs font-black tracking-wide">{topologyLabel}</div>
                 <div className="text-xs opacity-70 mt-0.5">
-                  {cs.isMicro
-                    ? `${cs.microDeviceCount} microinverter${cs.microDeviceCount !== 1 ? 's' : ''} · ${cs.acBranchCount} AC branch${cs.acBranchCount !== 1 ? 'es' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
-                    : `${config.inverters.length} inverter${config.inverters.length !== 1 ? 's' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
+                  {subSystemCounts.isHybrid
+                    ? `${subSystemCounts.present.length} sub-systems · ${subSystemCounts.present.map(k => `${k.charAt(0).toUpperCase()}${k.slice(1)} ${subSystemCounts[k]}`).join(' · ')} · ${systemPanelCount} modules`
+                    : cs.isMicro
+                      ? `${cs.microDeviceCount} microinverter${cs.microDeviceCount !== 1 ? 's' : ''} · ${cs.acBranchCount} AC branch${cs.acBranchCount !== 1 ? 'es' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
+                      : `${config.inverters.length} inverter${config.inverters.length !== 1 ? 's' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
                   }
                 </div>
                 {topologySwitching ? (
