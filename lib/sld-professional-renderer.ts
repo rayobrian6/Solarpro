@@ -3070,6 +3070,15 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const xBUI = _hasBUI ? nextCX(xMSP, 160, W_BUI) : (xMSP + 130);
   const xUtil = _hasBUI ? nextCX(xBUI, W_BUI, 120) : nextCX(xMSP, 160, 120);
   const tailY = laneYs.length ? (laneYs[0] + laneYs[laneYs.length - 1]) / 2 : laneTop;
+  // Compact AC combiner panel geometry: a proportioned box centered on tailY
+  // with the backfed breakers stacked tight — was a full-lane-height slab
+  // (~750px, dwarfing the 120px disconnect). Each lane feed steps from its lane
+  // Y into its breaker's pin Y.
+  const PANEL_PIN_GAP = 46;
+  const _pinSpan = Math.max(0, (lanes.length - 1) * PANEL_PIN_GAP);
+  const yPanelTop = tailY - _pinSpan / 2 - 42;   // header + top padding
+  const yPanelBot = tailY + _pinSpan / 2 + 26;   // bottom padding
+  const panelPinY = (i: number): number => tailY - _pinSpan / 2 + i * PANEL_PIN_GAP;
 
   let calloutN = 0;
 
@@ -3200,10 +3209,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       const run = laneRun(b, g.topo === 'MICRO' ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
       const fb = [`${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `${laneOcpd}A OCPD → PANEL`];
       const {lines} = runLines(run, fb);
-      const y = resolveSegY(feedX, xPanelInX, laneY);
-      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_PANEL`, feedX, y, xPanelInX, y, run, lines, false, 'RACEWAY'), lines));
+      const pinY = panelPinY(i);
+      const stepX = xPanelInX - 30;
+      const y = resolveSegY(feedX, stepX, laneY);
+      // main horizontal run from the lane to the panel approach, then step
+      // (vertical elbow) up/down to the breaker's compact pin Y and into the panel.
+      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_PANEL`, feedX, y, stepX, y, run, lines, false, 'RACEWAY'), lines));
+      if (Math.abs(y - pinY) > 1) parts.push(ln(stepX, y, stepX, pinY, {sw:SW_MED}));
+      parts.push(ln(stepX, pinY, xPanelInX, pinY, {sw:SW_MED}));
+      panelInputs.push({ y: pinY, ocpd: laneOcpd, tag });
     }
-    panelInputs.push({ y: laneY, ocpd: laneOcpd, tag });
   });
 
   // ── SHARED AC COMBINER PANEL → ONE SYSTEM DISCONNECT → POI ──────────────────
@@ -3211,8 +3226,8 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // aggregate PV backfeed), which feeds ONE system AC disconnect — replaces the
   // old "one AC disconnect per lane".
   {
-    const yTop = laneYs[0] - 46;
-    const yBot = laneYs[laneYs.length-1] + 46;
+    const yTop = yPanelTop;
+    const yBot = yPanelBot;
     parts.push(rect(xPanelInX, yTop, W_PANEL, yBot - yTop, {fill:'#FAFAFA', stroke:BLK, sw:SW_MED}));
     const panelName = (acCollection.sharedPanel?.model ?? 'AC COMBINER PANEL').toUpperCase();
     parts.push(txt(xPanel, yTop - 10, panelName, {sz:F.hdr, bold:true, anc:'middle'}));
