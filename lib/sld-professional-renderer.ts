@@ -27,6 +27,7 @@ import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
 import { resolveDeviceIllustration } from './sld-device-illustrations';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
+import { resolveHybridAcCollection } from '@/lib/equipment/integratedBos';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
@@ -2965,6 +2966,18 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     b.backfeedAmps ?? b.acOCPD ?? necNextStandardOcpd((b.acOutputAmps ?? 0) * 1.25) ?? 0;
   const totalBackfeedAmps = input.backfeedAmps
     || (lanes.reduce((s, b) => s + laneBackfeed(b), 0) + (input.batteryBackfeedA ?? 0));
+
+  // ── Wave 6 — hybrid AC collection: per-source combiner/OCPD → ONE shared AC
+  //    combiner panel → ONE system disconnect (replaces a disconnect per lane). ──
+  const acCollection = resolveHybridAcCollection(lanes.map(b => ({
+    key: b.key,
+    inverterManufacturer: b.inverterManufacturer ?? '',
+    inverterModel: b.inverterModel ?? '',
+    isMicro: laneTopology(b) === 'MICRO',
+    branchCount: b.microBranches?.length ?? b.totalStrings ?? 1,
+    deviceCount: b.deviceCount ?? b.totalModules ?? 0,
+    backfeedA: laneBackfeed(b),
+  })));
   const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
   const totalAcKw = Number(input.acOutputKw) || lanes.reduce((s, b) => s + (b.acOutputKw ?? 0), 0);
   const dcKw = lanes.reduce((s, b) => s + ((b.totalModules ?? 0) * (b.panelWatts ?? 0)) / 1000, 0)
@@ -3005,27 +3018,34 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
   // Pre-compute each lane's node X positions so the POI bus clears the
   // longest chain.
-  interface LaneGeom { topo: 'MICRO'|'OPTIMIZER'|'STRING'; xPV: number; xMid1: number; xMid2: number; xDisco: number; discoRX: number; }
+  interface LaneGeom { topo: 'MICRO'|'OPTIMIZER'|'STRING'; xPV: number; xMid1: number; xMid2: number; xFeedRight: number; }
   const geoms: LaneGeom[] = lanes.map((b) => {
     const topo = laneTopology(b);
     const xPV = SCH_X + LEFT_MARGIN + W_PV/2;
-    let xMid1 = 0, xMid2 = 0, xDisco = 0;
+    let xMid1 = 0, xMid2 = 0, xFeedRight = 0;
     if (topo === 'MICRO') {
-      xMid1 = nextCX(xPV, W_PV, W_COMB);          // combiner
-      xDisco = nextCX(xMid1, W_COMB, W_ACDS);
+      xMid1 = nextCX(xPV, W_PV, W_COMB);          // combiner (brand IQ Combiner)
+      xFeedRight = xMid1 + W_COMB/2;
     } else if (topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
       xMid1 = nextCX(xPV, W_PV, W_INV);           // inverter (integrated DC disco)
-      xDisco = nextCX(xMid1, W_INV, W_ACDS);
+      xFeedRight = xMid1 + W_INV/2;
     } else {
       xMid1 = nextCX(xPV, W_PV, W_DCDS);          // external DC disco
       xMid2 = nextCX(xMid1, W_DCDS, W_INV);       // inverter
-      xDisco = nextCX(xMid2, W_INV, W_ACDS);
+      xFeedRight = xMid2 + W_INV/2;
     }
-    return { topo, xPV, xMid1, xMid2, xDisco, discoRX: xDisco + W_ACDS/2 + 10 };
+    return { topo, xPV, xMid1, xMid2, xFeedRight };
   });
 
-  const xPOI = Math.max(...geoms.map(g => g.discoRX)) + 110;
+  // Shared collection stage: every lane feeds ONE AC combiner panel → ONE system
+  // AC disconnect → POI (no per-lane disconnect).
+  const W_PANEL = 140;
+  const xPanel = Math.max(...geoms.map(g => g.xFeedRight)) + 90 + W_PANEL/2;
+  const xPanelInX = xPanel - W_PANEL/2;
+  const xSingleDisco = xPanel + W_PANEL/2 + 90 + W_ACDS/2;
+  const xPOI = xSingleDisco + W_ACDS/2 + 110;
   const xMSP = xPOI + 90 + 80;                    // MSP width = 160
+  const panelInputs: Array<{ y: number; ocpd: number; tag: string }> = [];
   const _hasBUI = !!input.hasBattery;
   const xBUI = _hasBUI ? nextCX(xMSP, 160, W_BUI) : (xMSP + 130);
   const xUtil = _hasBUI ? nextCX(xBUI, W_BUI, 120) : nextCX(xMSP, 160, 120);
@@ -3096,10 +3116,11 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       const md = b.deviceCount ?? modules;
       const nb = b.microBranches?.length ?? microBranchCount(md, invModel);
       const bocpd = b.microBranches?.length ? Math.max(...b.microBranches.map(x => x.ocpdAmps)) : 20;
-      const clabel = b.combinerLabel ?? `${invMfr || 'PV'} AC Combiner`;
+      const _laneCombiner = acCollection.perSource.find(s => s.key === b.key)?.combiner;
+      const clabel = _laneCombiner ? `${_laneCombiner.brand} ${_laneCombiner.model}` : (b.combinerLabel ?? `${invMfr || 'PV'} AC Combiner`);
       const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN);
       parts.push(cr.svg);
-      parts.push(txt(g.xMid1, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
+      parts.push(txt(g.xMid1, cr.ty-8, clabel.toUpperCase(), {sz:F.hdr, bold:true, anc:'middle'}));
       // PV → combiner (branch circuits, open-air roof wiring for roof lanes)
       {
         const run = laneRun(b, 'BRANCH_RUN') ?? laneRun(b, 'ROOF_RUN');
@@ -3152,39 +3173,59 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       feedX = invBox.acOutX;
     }
 
-    // ── Lane AC disconnect ──
-    const disco = renderDisco(g.xDisco, laneY, laneOcpd, ++calloutN, isSupplySide);
-    parts.push(disco.svg);
-    parts.push(txt(g.xDisco, laneY-58, b.disconnectLabel ?? `(N) AC DISCONNECT PV-${tag}`, {sz:F.hdr, bold:true, anc:'middle'}));
+    // ── Feed this lane's AC output to the SHARED AC combiner panel ──
+    //    No per-lane disconnect: the ONE system disconnect is after the panel;
+    //    the per-source OCPD is the backfed breaker landing in the panel.
     {
       const run = laneRun(b, g.topo === 'MICRO' ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
-      const fb = [`${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `IN ${b.acConduitType ?? 'EMT'}`];
+      const fb = [`${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `${laneOcpd}A OCPD → PANEL`];
       const {lines} = runLines(run, fb);
-      const y = resolveSegY(feedX, disco.loadInX, laneY);
-      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_ACDISCO`, feedX, y, disco.loadInX, y, run, lines, false, 'RACEWAY'), lines));
+      const y = resolveSegY(feedX, xPanelInX, laneY);
+      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_PANEL`, feedX, y, xPanelInX, y, run, lines, false, 'RACEWAY'), lines));
     }
-
-    // ── Lane feeder → POI bus ──
-    {
-      const run = laneRun(b, 'DISCO_TO_METER_RUN');
-      const fb = [`${b.acWireGauge ?? '#8 AWG'} THWN-2 + EGC`, `${laneOcpd}A OCPD → POI`];
-      const {lines} = runLines(run, fb);
-      const y = resolveSegY(disco.lineOutX, xPOI, laneY);
-      parts.push(renderWireRun(buildWireRun(`LANE_${tag}_TO_POI`, disco.lineOutX, y, xPOI, y, run, lines, false, 'RACEWAY'), lines));
-      parts.push(circ(xPOI, laneY, 4, {fill:BLK, sw:0}));
-      // Contribution label BELOW the junction (above collides with the
-      // POI→MSP callout when this lane sits at the tail Y).
-      parts.push(txt(xPOI+8, laneY+20, `PV-${tag}: ${laneBackfeed(b)}A`, {sz:F.sub, bold:true, fill:'#1B5E20'}));
-    }
-
-    // Lane ground symbols (equipment grounding at the disco)
-    parts.push(gnd(g.xDisco, laneY + 70, '#2E7D32'));
-    parts.push(ln(g.xDisco, laneY + 55, g.xDisco, laneY + 70, {stroke:'#2E7D32', sw:1.0, dash:'4,3'}));
+    panelInputs.push({ y: laneY, ocpd: laneOcpd, tag });
   });
 
-  // ── POI bus (vertical) ────────────────────────────────────────────────────
-  if (laneYs.length > 1) {
-    parts.push(ln(xPOI, laneYs[0], xPOI, laneYs[laneYs.length-1], {sw:SW_BUS}));
+  // ── SHARED AC COMBINER PANEL → ONE SYSTEM DISCONNECT → POI ──────────────────
+  // Every source lands on a backfed breaker in one panel (busbar sized to the
+  // aggregate PV backfeed), which feeds ONE system AC disconnect — replaces the
+  // old "one AC disconnect per lane".
+  {
+    const yTop = laneYs[0] - 46;
+    const yBot = laneYs[laneYs.length-1] + 46;
+    parts.push(rect(xPanelInX, yTop, W_PANEL, yBot - yTop, {fill:'#FAFAFA', stroke:BLK, sw:SW_MED}));
+    const panelName = (acCollection.sharedPanel?.model ?? 'AC COMBINER PANEL').toUpperCase();
+    parts.push(txt(xPanel, yTop - 10, panelName, {sz:F.hdr, bold:true, anc:'middle'}));
+    parts.push(txt(xPanel, yTop + 14, `${acCollection.sharedPanel?.busbarA ?? totalBackfeedAmps}A BUSBAR · Σ ${totalBackfeedAmps}A`, {sz:F.tiny, anc:'middle', fill:'#555'}));
+    parts.push(callout(xPanelInX + W_PANEL - 8, yTop + 8, ++calloutN));
+    // vertical busbar inside the panel
+    parts.push(ln(xPanel, yTop + 22, xPanel, yBot - 8, {sw:SW_MED, stroke:'#777'}));
+    // per-source backfed breakers landing on the busbar
+    for (const pin of panelInputs) {
+      parts.push(circ(xPanelInX, pin.y, 4, {fill:BLK, sw:0}));
+      parts.push(rect(xPanelInX + 8, pin.y - 8, 22, 16, {fill:WHT, stroke:BLK, sw:SW_HAIR}));
+      parts.push(txt(xPanelInX + 33, pin.y + 3, `${pin.ocpd}A`, {sz:F.tiny, anc:'start', bold:true, fill:'#1B5E20'}));
+      parts.push(ln(xPanelInX + 30, pin.y, xPanel, pin.y, {sw:SW_HAIR, stroke:'#777'}));
+      parts.push(txt(xPanelInX + 10, pin.y - 12, `PV-${pin.tag}`, {sz:F.tiny, anc:'start', fill:'#555'}));
+    }
+    // panel feeder out → the ONE system AC disconnect
+    const panelOutX = xPanelInX + W_PANEL;
+    parts.push(ln(xPanel, tailY, panelOutX, tailY, {sw:SW_MED}));
+    const sysDisco = renderDisco(xSingleDisco, tailY, acCollection.disconnectA, ++calloutN, isSupplySide);
+    parts.push(sysDisco.svg);
+    parts.push(txt(xSingleDisco, tailY - 58, '(N) AC DISCONNECT — SYSTEM', {sz:F.hdr, bold:true, anc:'middle'}));
+    parts.push(gnd(xSingleDisco, tailY + 70, '#2E7D32'));
+    parts.push(ln(xSingleDisco, tailY + 55, xSingleDisco, tailY + 70, {stroke:'#2E7D32', sw:1.0, dash:'4,3'}));
+    {
+      const run = laneRun(lanes[0], 'DISCO_TO_METER_RUN');
+      const {lines:la} = runLines(run, [`${input.acWireGauge ?? '#4 AWG'} THWN-2 + EGC`, `${acCollection.disconnectA}A`]);
+      const yA = resolveSegY(panelOutX, sysDisco.loadInX, tailY);
+      parts.push(renderWireRun(buildWireRun('PANEL_TO_SYSDISCO', panelOutX, yA, sysDisco.loadInX, yA, run, la, false, 'RACEWAY'), la));
+      const {lines:lb} = runLines(run, [`${input.acWireGauge ?? '#4 AWG'} THWN-2 + EGC`, `${acCollection.disconnectA}A → POI`]);
+      const yB = resolveSegY(sysDisco.lineOutX, xPOI, tailY);
+      parts.push(renderWireRun(buildWireRun('SYSDISCO_TO_POI', sysDisco.lineOutX, yB, xPOI, yB, run, lb, false, 'RACEWAY'), lb));
+      parts.push(circ(xPOI, tailY, 4, {fill:BLK, sw:0}));
+    }
   }
   // Header sits clear ABOVE the top lane's wire callouts (which occupy
   // roughly laneY-40..laneY-8) and below the lane band label at laneY-114.
