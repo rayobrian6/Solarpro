@@ -4770,16 +4770,19 @@ function EngineeringPageInner() {
     const _part = partitionFleet(config.inverters as any[], _fb);
     const hasExistingFleet = subSystemCounts.present.some(k => fleetPanelTotal(_part[k] ?? []) > 0);
     if (hasExistingFleet) {
-      // Control-mode contract (lib/solardog/controlMode.ts): only AUTO may
-      // silently override equipment. GUIDED/MANUAL must SUGGEST — the visible
-      // "Rebuild fleets per sub-system" button IS that suggestion — never a
-      // silent heal. BUG (Ray, hybrid inverter revert): unlocking the inverter
-      // in GUIDED dropped the field-lock guard below, and because the mode was
-      // 'guided' (not 'manual') the old `=== 'manual'` check let the heal run and
-      // flood every sub with the primary sub's ecosystem (systemType=fence →
-      // EcoFlow onto roof/ground). Bail for anything but AUTO.
-      if (controlMode !== 'auto') return;                      // guided/manual → explicit "Rebuild fleets" button
-      if (configLocks.inverter || configLocks.strings) return; // explicit field lock wins (auto + lock)
+      // This is a STRUCTURAL count re-sync (a sub's fleet ≠ its layout stamp,
+      // e.g. fence 45p ≠ layout 17p) — NOT an equipment-preference override.
+      // Since the brand-derivation fix (commit a88151cf) a rebuild PRESERVES each
+      // sub's own inverter (brand comes from inverterId, never a stale tag), so
+      // re-syncing counts can no longer flood roof/ground to the fence's EcoFlow.
+      // Guided therefore auto-heals the drift (structural, not a preference) so
+      // the user never has to hit "Rebuild fleets" on every refresh. Only MANUAL
+      // (user fully authoritative) and explicit field locks defer to the button.
+      // (This intentionally supersedes the earlier f4344bb8 `!== 'auto'` bail,
+      // which was a pre-brand-fix band-aid against the flood that a88151cf killed
+      // at the source — and which was itself forcing the manual-rebuild UX.)
+      if (controlMode === 'manual') return;                    // manual → explicit "Rebuild fleets" button
+      if (configLocks.inverter || configLocks.strings) return; // explicit field lock wins
     }
     const sig = `${systemPanelCount}|${subSystemCounts.roof},${subSystemCounts.ground},${subSystemCounts.fence}`;
     if (hybridHealSigRef.current === sig) return;              // already attempted for this design
