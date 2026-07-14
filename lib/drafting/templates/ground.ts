@@ -470,9 +470,37 @@ export function drawGroundArray(
         anchor: 'start', fontSize: 6.5, fill: '#333' }));
       ny += 14;
     });
-    if (ctx) {
-      const utilSvg = drawUtilityAnalysis(ctx, rightX + 3, ny + 6, rightW - 6);
-      if (utilSvg) els.push(utilSvg);
+    {
+      // A utility-rate box is out of place on a ground SITE PLAN and rendered as
+      // a mostly-blank box (just the utility name) — the dead white Ray flagged.
+      // Fill the lower panel with a DESIGN CRITERIA block instead (legit CAD
+      // furniture: the geometry + code basis this sheet is drawn to).
+      const _tilt = Math.round(arrays[0]?.tiltDeg ?? 20);
+      const _az   = Math.round(arrays[0]?.azimuth ?? 180);
+      const _rs   = ((arrays[0]?.rowSpacingM ?? 1.6) * metersToFt(1)).toFixed(1);
+      let cy = ny + 10;
+      els.push(drawRectFilled(rightX, cy, rightW, 13, '#1a2332', '#1a2332', 0));
+      els.push(drawText(rightX + 7, cy + 9, 'DESIGN CRITERIA', {
+        anchor: 'start', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+      cy += 15;
+      const crit: Array<[string, string]> = [
+        ['Structure', 'Driven steel pile — no concrete'],
+        ['Modules', `${totalPanels} @ ${(dcKw / Math.max(1, totalPanels) * 1000).toFixed(0)}W`],
+        ['Tilt / Azimuth', `${_tilt}° / ${_az}°`],
+        ['Row spacing', `${_rs}' O.C.`],
+        ['Ground clearance', `18" min. below lowest module`],
+        ['Pile embedment', `5' min. — field-verify refusal`],
+        ['Property setback', `${setbackFt}' min. from line`],
+        ['Bonding', 'All metalwork to EGC — NEC 690.43'],
+        ['Structural loads', 'See PV-3 (ASCE 7-22 / IBC 2021)'],
+        ['Codes', 'NEC 690 · IBC 1809 · ASCE 7-22'],
+      ];
+      crit.forEach(([k, v], i) => {
+        const ry = cy + i * 13;
+        if (i % 2 === 1) els.push(drawRectFilled(rightX + 1, ry - 2, rightW - 2, 13, '#f0f3fa', '#f0f3fa', 0));
+        els.push(drawText(rightX + 6, ry + 7, k, { anchor: 'start', fontSize: 6.2, fill: '#555' }));
+        els.push(drawText(rightX + rightW - 6, ry + 7, v, { anchor: 'end', fontSize: 6.2, fill: '#1a2332', fontWeight: 'bold' }));
+      });
     }
   }
 
