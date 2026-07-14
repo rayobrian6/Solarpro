@@ -328,6 +328,28 @@ export function drawFencePlan(
   els.push(drawScaleBar(planZone.x + 6, planZone.y + planZone.height - 8,
     Math.round(scaleBarFt * scale), `0    ${scaleBarFt} FT`));
 
+  // ── Property-line + setback site context ────────────────────────────────────
+  // The top-down alone is a thin ribbon (a fence is long + shallow), floating in
+  // white. Drawing the property boundary it parallels + the setback dimension
+  // turns the hairline into a readable SITE PLAN and fills the plan zone (Ray).
+  {
+    const _sbFt = (cadFence as { setbackFt?: number } | undefined)?.setbackFt
+      ?? (layout as { fenceSetbackFt?: number }).fenceSetbackFt ?? 5;
+    const plY  = Math.max(planZone.y + 16, originYb - BAND - 46);   // property line above the run
+    const px1  = Math.max(planZone.x + 6, originX - 24);
+    const px2  = Math.min(planZone.x + planZone.width - 6, originX + drawnWpx + 24);
+    els.push(`<line x1="${px1.toFixed(1)}" y1="${plY.toFixed(1)}" x2="${px2.toFixed(1)}" y2="${plY.toFixed(1)}" stroke="#c0392b" stroke-width="1" stroke-dasharray="9,4"/>`);
+    els.push(drawText(px1 + 3, plY - 4, 'PROPERTY LINE (TYP.)', { anchor: 'start', fontSize: 6.5, fill: '#c0392b', fontWeight: 'bold' }));
+    const sbX = originX + drawnWpx * 0.28;
+    const fenceTopY = originYb - BAND;
+    if (fenceTopY - plY > 14) {
+      els.push(`<line x1="${sbX.toFixed(1)}" y1="${plY.toFixed(1)}" x2="${sbX.toFixed(1)}" y2="${fenceTopY.toFixed(1)}" stroke="#c0392b" stroke-width="0.8"/>`);
+      els.push(drawArrowhead(sbX, plY, -90, 5, '#c0392b'));
+      els.push(drawArrowhead(sbX, fenceTopY, 90, 5, '#c0392b'));
+      els.push(drawText(sbX + 4, (plY + fenceTopY) / 2 + 2, `${_sbFt}' SETBACK`, { anchor: 'start', fontSize: 6, fill: '#c0392b', fontWeight: 'bold' }));
+    }
+  }
+
   // ── TYPICAL FENCE SECTION — fills the lower half of the draw zone ───────────
   // A real cross-section (driven post + 90° vertical modules + embedment) gives
   // the sheet vertical content instead of a thin run floating in white.
