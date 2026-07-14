@@ -2459,6 +2459,38 @@ function EngineeringPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, currentProjectId, isHydrated]);
 
+  // ── Flush a PENDING autosave on unload / tab-hide ──────────────────────────
+  // The autosave is debounced 800ms. If the user picks equipment and refreshes
+  // (or navigates away) within that window, the debounced fetch is cancelled and
+  // the pick is LOST — the "I chose it, refreshed, it reverted" bug. sendBeacon
+  // fires reliably during unload, so flush the current config immediately when a
+  // save is still pending. Same payload shape + schemaVersion:2 stamp as the
+  // debounced save, so the server never re-normalizes it.
+  useEffect(() => {
+    if (!currentProjectId || !isHydrated) return;
+    const flush = () => {
+      if (!saveTimerRef.current) return;   // no pending debounced save → already persisted
+      try {
+        const _hasMap = (config as any).subSystems && Object.keys((config as any).subSystems).length > 0;
+        const _cfg = _hasMap
+          ? { ...config, schemaVersion: Math.max(2, Number((config as any).schemaVersion) || 0) }
+          : config;
+        const blob = new Blob([JSON.stringify({ projectId: currentProjectId, config: _cfg })], { type: 'application/json' });
+        navigator.sendBeacon('/api/engineering/save-config', blob);
+        if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+      } catch { /* best-effort */ }
+    };
+    const onVis = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [config, currentProjectId, isHydrated]);
+
   // ── Canonical panel reconciliation (Design→Engineering single source of truth) ──
   // projects.selected_equipment is authoritative for "which panel". When the project
   // loads (or its canonical panel changes because the Design side changed it), force
