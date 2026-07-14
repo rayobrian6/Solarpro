@@ -4156,7 +4156,13 @@ function EngineeringPageInner() {
   const buildSubFleetForKey = (
     key: SubSystemKey,
     subCount: number,
-    prefer?: { inverterId?: string; panelId?: string; brand?: string },
+    prefer?: { inverterId?: string; panelId?: string; brand?: string;
+      // Projector geometry-carry: when re-deriving a sub's fleet (heal/rebuild),
+      // preserve the existing per-string orientation/wiring/mounting instead of
+      // resetting to per-sub defaults, so a count re-sync never silently drops
+      // the user's tilt/azimuth/wire/mounting.
+      geometry?: { tilt?: number; azimuth?: number; roofType?: string;
+        mountingSystem?: string; wireGauge?: string; wireLength?: number } },
   ): SeededSubFleet | null => {
     const _sdMap = (config as any).subSystems ?? {};
     const seedBrand: string =
@@ -4194,18 +4200,19 @@ function EngineeringPageInner() {
         : 'string';
       const base = newString(0, key); // per-sub panel/mounting defaults (fence → fence panel)
       const basePanelId = prefer?.panelId ?? base.panelId;
+      const _geo = prefer?.geometry;   // carried from the existing fleet (projector)
       const buildSubString = (idx: number, panelCount: number): StringConfig =>
         _buildStrCfg({
           index:          idx,
           existingId:     `str-subdef-${key}-${Date.now()}-${idx}`,
           panelCount,
           panelId:        basePanelId,
-          tilt:           base.tilt,
-          azimuth:        base.azimuth,
-          roofType:       base.roofType as any,
-          mountingSystem: base.mountingSystem,
-          wireGauge:      base.wireGauge,
-          wireLength:     base.wireLength,
+          tilt:           _geo?.tilt           ?? base.tilt,
+          azimuth:        _geo?.azimuth         ?? base.azimuth,
+          roofType:       (_geo?.roofType       ?? base.roofType) as any,
+          mountingSystem: _geo?.mountingSystem  ?? base.mountingSystem,
+          wireGauge:      _geo?.wireGauge       ?? base.wireGauge,
+          wireLength:     _geo?.wireLength      ?? base.wireLength,
         });
       const fleet: InverterConfig[] = [];
       if (uiType === 'micro') {
@@ -4293,10 +4300,19 @@ function EngineeringPageInner() {
       // fall back to the stored tag when the sub has no inverter to derive from.
       const _subInvId = entry?.inverterId ?? degPrimary?.inverterId;
       const _derivedBrand = _subInvId ? getBrandProfileByInverterId(_subInvId)?.id : undefined;
+      // Projector geometry-carry: preserve the sub's existing per-string
+      // orientation/wiring/mounting across a count re-sync (heal/rebuild), so a
+      // fence 45→17 fix never silently resets tilt/azimuth/wire to defaults.
+      const _prevStr = (part[key]?.[0]?.strings?.[0]) as any;
+      const _prevGeo = _prevStr ? {
+        tilt: _prevStr.tilt, azimuth: _prevStr.azimuth, roofType: _prevStr.roofType,
+        mountingSystem: _prevStr.mountingSystem, wireGauge: _prevStr.wireGauge, wireLength: _prevStr.wireLength,
+      } : undefined;
       let built = buildSubFleetForKey(key, subSystemCounts[key], {
         inverterId: forceBrand ? undefined : _subInvId,
         panelId:    entry?.panelId ?? degPrimary?.strings?.[0]?.panelId,
         brand:      forceBrand ?? _derivedBrand ?? entry?.ecosystemBrand,
+        geometry:   _prevGeo,
       });
       // If the picked ecosystem can't serve this sub (e.g. EcoFlow on a roof
       // micro sub), fall back to the sub's sensible default brand — never leave
