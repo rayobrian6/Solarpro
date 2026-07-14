@@ -482,6 +482,19 @@ export function generateBOMForPermit(
     : undefined;
   const _isPerSubHybrid = !!_perSubEquipment;
 
+  // The V4 engine's per-sub hybrid path resolves EACH sub's inverter itself and
+  // does not need a registry-resolvable PRIMARY. But V4 needs *some* inverterId
+  // for its legacy-mirror field. When the project's inverters[0] misses the V4
+  // registry (common on hybrids whose first inverter is a string model), fall
+  // back to the first per-sub resolved inverterId so V4 still runs the correct
+  // per-sub BOM instead of dropping to the minimal fallback (which billed one
+  // string-inverter fleet + a kW-guess disconnect and no per-sub micros).
+  const _perSubPrimaryInvId = _perSubEquipment
+    ? (['roof', 'ground', 'fence'] as SubSystemKey[])
+        .map(k => _perSubEquipment[k]?.inverterId).find(Boolean)
+    : undefined;
+  const _v4InverterId = inverterId ?? _perSubPrimaryInvId;
+
   // Stage D — the hybrid AC collection (per-source combiners → ONE shared AC
   // combiner panel → ONE system disconnect) from the SAME resolver E-1 draws.
   // Null for single-system. Feeds both the V4 disconnect rating (below) and the
@@ -591,10 +604,10 @@ export function generateBOMForPermit(
   // ── 4. V4 BOM (electrical) ───────────────────────────────
   let v4Items: PermitBOMItem[] = [];
 
-  if (inverterId) {
+  if (_v4InverterId) {
     try {
       const v4Input: BOMGenerationInputV4 = {
-        inverterId,
+        inverterId: _v4InverterId,
         panelId,
         // Same id the STRUCTURAL path resolves (mountingSystemId) when the BOM-
         // specific rackingId is unset — otherwise Stage 5 lost its registry entry
