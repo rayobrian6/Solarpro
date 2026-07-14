@@ -580,6 +580,51 @@ export async function POST(req: NextRequest) {
       console.log('[permit/POST] inverter backfill failed (non-fatal):', (backfillErr as Error)?.message);
     }
 
+    // ─── Hybrid per-sub self-heal (permit integrity — E-1 "INVERTER NOT SELECTED") ─
+    // A Design-Studio round-trip / reload can hand the permit an in-memory config
+    // whose inverters lost their subSystemKey tags AND whose subSystems map is
+    // gone. The per-sub resolver then collapses EVERY hybrid lane to '—' — E-1
+    // prints "INVERTER NOT SELECTED" on all three (roof/ground/fence), each
+    // defaulting to a generic STRING INVERTER even for the roof micros. The saved
+    // engineering_config is authoritative and survives the round-trip in the DB,
+    // so restore the per-sub association from it: the subSystems MAP (which alone
+    // lets resolveEquipmentBySubSystem fill each lane from subSystems[key].inverterId
+    // — verified) PLUS re-tag the posted inverters by inverterId match. Fill-only:
+    // a payload that still carries tags/map is respected untouched. Non-fatal.
+    try {
+      if (projectId && isValidUUID(projectId)) {
+        const _invs = (body.system?.inverters as any[]) || [];
+        const _anyTag = _invs.some(i => i?.subSystemKey || (i?.strings || []).some((s: any) => s?.subSystemKey));
+        const _mapOk = !!(body.project as any)?.subSystems && Object.keys((body.project as any).subSystems).length > 0;
+        if ((!_anyTag || !_mapOk) && _invs.length > 0) {
+          const sql = await getDbReady();
+          const ecRows = await sql`SELECT engineering_config FROM projects WHERE id = ${projectId} LIMIT 1`;
+          const ec = ecRows[0]?.engineering_config as any;
+          const savedInvs: any[] = Array.isArray(ec?.inverters) ? ec.inverters : [];
+          if (!_mapOk && ec?.subSystems && Object.keys(ec.subSystems).length > 0) {
+            (body.project as any).subSystems = ec.subSystems;
+            console.log('[permit/POST] hybrid self-heal: restored subSystems map from engineering_config →', Object.keys(ec.subSystems).join(','));
+          }
+          if (!_anyTag && savedInvs.length > 0) {
+            const idToKey = new Map<string, string>();
+            for (const si of savedInvs) if (si?.inverterId && si?.subSystemKey) idToKey.set(String(si.inverterId), String(si.subSystemKey));
+            let _tagged = 0;
+            for (const inv of _invs) {
+              const k = inv?.inverterId ? idToKey.get(String(inv.inverterId)) : undefined;
+              if (k) {
+                inv.subSystemKey = k;
+                for (const st of (inv.strings || [])) if (st) st.subSystemKey = k;
+                _tagged++;
+              }
+            }
+            if (_tagged > 0) console.log('[permit/POST] hybrid self-heal: re-tagged', _tagged, 'inverter(s) from engineering_config by inverterId');
+          }
+        }
+      }
+    } catch (healErr) {
+      console.log('[permit/POST] hybrid self-heal skipped (non-fatal):', (healErr as Error)?.message);
+    }
+
     // ─── Auto-populate AHJ data from national database ──────────────────────
     {
       const stateFromAddr = (body.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '';
