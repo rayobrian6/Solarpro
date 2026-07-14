@@ -83,8 +83,10 @@ function fenceLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones
   // PLAN (top-down) uses a TALL canvas (840 ≈ 1.26 aspect) so it fills the
   // sheet's draw zone instead of a 520 (2.04) strip that letterboxed with a
   // blank band below. The extra height carries the TYPICAL FENCE SECTION under
-  // the thin top-down run (drawFencePlan). Elevation/structural keep 520.
-  const H = viewType === 'plan' ? 840 : CANVAS_ELEV_H;
+  // the thin top-down run (drawFencePlan). Elevation + structural grow 520→800
+  // (same letterbox fix as roof/ground): the 2.04-aspect 520 canvas left the
+  // 2-bay elevation (PV-1F) and structural detail in ~60% dead white.
+  const H = viewType === 'plan' ? 840 : 800;
   const W = CANVAS_W;
 
   // Dimension margins
@@ -128,7 +130,9 @@ function groundLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZone
   // ~48% blank sheet above/below the drawing. The extra height carries the
   // ground "split layout" the engine header promises: top-down array plan +
   // row-spacing side elevation + typical pile section, stacked (drawGroundArray).
-  const H = isPlan ? 880 : CANVAS_ELEV_H;
+  // Structural grows 520→800 (same fix as roofLayout): the 2.04-aspect 520
+  // canvas letterboxed into a tall page draw-zone, leaving ~60% dead white.
+  const H = isPlan ? 880 : (viewType === 'structural' ? 800 : CANVAS_ELEV_H);
   const W = CANVAS_W;
 
   const dimLeft   = 68;
