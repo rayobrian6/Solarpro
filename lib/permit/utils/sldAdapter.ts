@@ -320,7 +320,12 @@ export function buildSourceBranchesFromAuthority(
       acOCPD: sub.acSubFeeder.ocpdAmps ?? undefined,
       backfeedAmps: subBackfeedFromInverters(sub, inverters, primaryKey),
       dcOCPD: dcOcpds.length ? Math.max(...dcOcpds) : undefined,
-      integratedDcDisconnect: sub.topology === 'OPTIMIZER' || undefined,
+      // No external DC disconnect when the inverter integrates one (per its
+      // datasheet — Solis/EcoFlow/most modern string+hybrid units) OR for
+      // optimizer topology (the inverter carries the DC means). Data-driven
+      // from the resolved equipment, not a per-brand special case.
+      integratedDcDisconnect:
+        (sub.topology === 'OPTIMIZER' || eq.inverterIntegratedDcDisconnect === true) || undefined,
       optimizerQty: sub.topology === 'OPTIMIZER' ? sub.panelCount : undefined,
       rapidShutdownIntegrated: sub.key === 'roof' ? !!(input.project as { rapidShutdown?: boolean })?.rapidShutdown : false,
       deviceCount: sub.isMicro ? sub.deviceCount : undefined,

@@ -396,7 +396,7 @@ function fillFromEquipmentIds(
     const micro = getMicroinverterById(entry.inverterId) as
       { manufacturer?: string; model?: string; acOutputW?: number } | undefined;
     const str = micro ? undefined : getInverterById(entry.inverterId) as
-      { manufacturer?: string; model?: string; acOutputKw?: number } | undefined;
+      { manufacturer?: string; model?: string; acOutputKw?: number; integratedDcDisconnect?: boolean } | undefined;
     const dev = micro ?? str;
     if (dev) {
       if (_blankStr(out.inverterManufacturer) && dev.manufacturer) out.inverterManufacturer = dev.manufacturer;
@@ -406,6 +406,12 @@ function fillFromEquipmentIds(
         : (str?.acOutputKw ?? 0);
       if (_blankNum(out.inverterAcOutputKw) && kw > 0) out.inverterAcOutputKw = kw;
       if (_blankStr(out.inverterType)) out.inverterType = micro ? 'micro' : (entry.topology || 'string');
+      // Manufacturer install logic: a string/hybrid inverter with a factory
+      // DC disconnect is its own PV DC disconnecting means (NEC 690.15) — no
+      // separate external DC disconnect on the SLD. Micros have no DC side.
+      if (out.inverterIntegratedDcDisconnect === undefined && str?.integratedDcDisconnect !== undefined) {
+        out.inverterIntegratedDcDisconnect = str.integratedDcDisconnect;
+      }
     }
   }
   if (entry.panelId) {

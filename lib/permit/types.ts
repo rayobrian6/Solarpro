@@ -663,6 +663,11 @@ export interface ResolvedEquipment {
   inverterModel: string;
   inverterType: string;
   inverterAcOutputKw: number;
+  /** Factory-integrated DC disconnect (per the inverter datasheet). When true,
+   *  no separate external DC disconnect is drawn on the SLD / required by the
+   *  BOM — the inverter's integral switch is the PV DC disconnecting means
+   *  (NEC 690.15). Undefined ⇒ unknown → external disconnect assumed. */
+  inverterIntegratedDcDisconnect?: boolean;
 }
 
 // ─── Drawing Types ───

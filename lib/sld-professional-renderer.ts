@@ -3027,6 +3027,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const W_ACDS  = SLD_SYMBOL_MAP['ac-disconnect'].width;
   const W_COMB  = SLD_SYMBOL_MAP['ac-combiner'].width;
   const W_BUI   = SLD_SYMBOL_MAP['bui-enphase'].width;
+  const W_JB    = 64;   // roof AC junction/transition box (micro lanes)
   const WIRE_GAP = 120;
   const LEFT_MARGIN = 60;
   const nextCX = (cx: number, curW: number, nxtW: number, gap = WIRE_GAP) =>
@@ -3038,13 +3039,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
   // Pre-compute each lane's node X positions so the POI bus clears the
   // longest chain.
-  interface LaneGeom { topo: 'MICRO'|'OPTIMIZER'|'STRING'; xPV: number; xMid1: number; xMid2: number; xFeedRight: number; }
+  interface LaneGeom { topo: 'MICRO'|'OPTIMIZER'|'STRING'; xPV: number; xJbox: number; xMid1: number; xMid2: number; xFeedRight: number; }
   const geoms: LaneGeom[] = lanes.map((b) => {
     const topo = laneTopology(b);
     const xPV = SCH_X + LEFT_MARGIN + W_PV/2;
-    let xMid1 = 0, xMid2 = 0, xFeedRight = 0;
+    let xJbox = 0, xMid1 = 0, xMid2 = 0, xFeedRight = 0;
     if (topo === 'MICRO') {
-      xMid1 = nextCX(xPV, W_PV, W_COMB);          // combiner (brand IQ Combiner)
+      // Enphase SOP: AC trunk runs open-air across the array → transitions to
+      // conduit at a roof-flashed AC junction box → conduit to the IQ Combiner.
+      xJbox = nextCX(xPV, W_PV, W_JB, 90);        // AC junction/transition box
+      xMid1 = nextCX(xJbox, W_JB, W_COMB);        // combiner (brand IQ Combiner)
       xFeedRight = xMid1 + W_COMB/2;
     } else if (topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
       xMid1 = nextCX(xPV, W_PV, W_INV);           // inverter (integrated DC disco)
@@ -3054,7 +3058,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       xMid2 = nextCX(xMid1, W_DCDS, W_INV);       // inverter
       xFeedRight = xMid2 + W_INV/2;
     }
-    return { topo, xPV, xMid1, xMid2, xFeedRight };
+    return { topo, xPV, xJbox, xMid1, xMid2, xFeedRight };
   });
 
   // Shared collection stage: every lane feeds ONE AC combiner panel → ONE system
@@ -3150,13 +3154,28 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN);
       parts.push(cr.svg);
       parts.push(txt(g.xMid1, cr.ty-8, clabel.toUpperCase(), {sz:F.hdr, bold:true, anc:'middle'}));
-      // PV → combiner (branch circuits, open-air roof wiring for roof lanes)
+      // ── AC junction / transition box (Enphase SOP): the AC trunk runs
+      //    OPEN-AIR across the array, transitions to CONDUIT at a roof-flashed
+      //    junction box, then conduit to the IQ Combiner. Array → J-box (open
+      //    air) → combiner (raceway).
+      const jbW = W_JB, jbH = 52;
+      parts.push(embedSymbol('junction-box', g.xJbox, laneY, jbW, jbH));
+      parts.push(txt(g.xJbox, laneY - jbH/2 - 14, b.key === 'fence' ? 'FENCE J-BOX' : b.key === 'ground' ? 'ARRAY J-BOX' : 'ROOF J-BOX', {sz:F.sub, bold:true, anc:'middle'}));
+      parts.push(txt(g.xJbox, laneY - jbH/2 - 6, 'AC JUNCTION — NEC 690.31', {sz:F.tiny, anc:'middle', italic:true}));
+      parts.push(callout(g.xJbox + jbW/2 + 12, laneY - jbH/2 - 3, ++calloutN));
+      const _jbIn  = getAnchorPoint('junction-box', 'left',  g.xJbox, laneY, jbW, jbH);
+      const _jbOut = getAnchorPoint('junction-box', 'right', g.xJbox, laneY, jbW, jbH);
+      // PV → J-box (open-air branch circuits on roof), J-box → combiner (conduit)
       {
         const run = laneRun(b, 'BRANCH_RUN') ?? laneRun(b, 'ROOF_RUN');
         const fb = [`${nb} AC BRANCH CIRCUIT${nb>1?'S':''}`, `${b.acWireGauge ?? '#10 AWG'} THWN-2 + EGC`, b.key === 'roof' ? 'NEC 690.12 RSD' : 'AT GRADE'];
         const {lines} = runLines(run, fb);
-        const y = resolveSegY(pvPt.x, cr.lx, laneY);
-        parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_COMBINER`, pvPt.x, y, cr.lx, y, run, lines, false, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'), lines));
+        const y = resolveSegY(pvPt.x, _jbIn.x, laneY);
+        parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_JBOX`, pvPt.x, y, _jbIn.x, y, run, lines, false, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'), lines));
+      }
+      {
+        const fb = [`${b.acWireGauge ?? '#10 AWG'} THWN-2 + EGC`, `IN CONDUIT — NEC 690.31`];
+        parts.push(renderWireRun(buildWireRun(`LANE_${tag}_JBOX_TO_COMBINER`, _jbOut.x, laneY, cr.lx, laneY, undefined, fb, false, 'RACEWAY'), fb));
       }
       feedX = cr.feederOutX;
     } else if (g.topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
