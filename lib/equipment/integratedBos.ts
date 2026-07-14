@@ -175,6 +175,35 @@ export const BOS_DEVICES: BosDevice[] = [
     installComplexity: 1,
     active: true,
   },
+  // ── Shared AC COMBINER PANELS (PV subpanels) ───────────────────────────────
+  // Where multiple inverter / brand-combiner AC outputs land on a common busbar,
+  // each on its own backfed OCPD, feeding ONE system AC disconnect (a multi-brand
+  // hybrid collects here instead of running a separate disconnect per source).
+  // Sized to the aggregate PV backfeed per NEC 705.12(B) / 408. ⚠ FIELD-VERIFY SKU.
+  {
+    id: 'pv-ac-combiner-125', brand: 'Generic', model: '125A PV AC Combiner Panel',
+    kind: 'ac_combiner', integrated: { aggregation: true },
+    branchSlots: 6, maxContinuousA: 125, mainBreakerA: 125,
+    mounting: 'outdoor', outputWireGaugeMin: '#2 AWG',
+    necRefs: ['NEC 705.12(B)', 'NEC 408.36', 'NEC 690.4'],
+    installComplexity: 2, active: true,
+  },
+  {
+    id: 'pv-ac-combiner-200', brand: 'Generic', model: '200A PV AC Combiner Panel',
+    kind: 'ac_combiner', integrated: { aggregation: true },
+    branchSlots: 8, maxContinuousA: 200, mainBreakerA: 200,
+    mounting: 'outdoor', outputWireGaugeMin: '#2/0 AWG',
+    necRefs: ['NEC 705.12(B)', 'NEC 408.36', 'NEC 690.4'],
+    installComplexity: 2, active: true,
+  },
+  {
+    id: 'pv-ac-combiner-225', brand: 'Generic', model: '225A PV AC Combiner Panel',
+    kind: 'ac_combiner', integrated: { aggregation: true },
+    branchSlots: 12, maxContinuousA: 225, mainBreakerA: 225,
+    mounting: 'outdoor', outputWireGaugeMin: '#4/0 AWG',
+    necRefs: ['NEC 705.12(B)', 'NEC 408.36', 'NEC 690.4'],
+    installComplexity: 2, active: true,
+  },
 ];
 
 export function getBosDevice(id: string | undefined): BosDevice | undefined {
@@ -300,4 +329,101 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
       : undefined,
     source: 'auto',
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HYBRID AC COLLECTION — multi-brand / multi-source combining architecture.
+// Each source combines with its BRAND-APPROPRIATE device (Enphase micros → an
+// IQ Combiner; string/hybrid inverters → a backfed OCPD), then ALL sources land
+// on a shared AC combiner panel (busbar), which feeds ONE system AC disconnect
+// → point of interconnection. Replaces "one AC disconnect per lane".
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Standard OCPD / busbar ratings (A), NEC 240.6(A).
+const STD_RATINGS = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
+const nextStdRating = (a: number): number => STD_RATINGS.find(r => r >= a) ?? Math.ceil(a / 50) * 50;
+
+export interface AcCombinerPanelPlan extends ResolvedBosDevice {
+  /** Busbar continuous rating (A). */
+  busbarA: number;
+  /** Main / feeder OCPD ahead of the shared disconnect (A). */
+  mainOcpdA: number;
+  /** Backfed-breaker positions the sources land on. */
+  positions: number;
+}
+
+/** Pick the smallest AC combiner panel whose busbar covers the aggregate PV
+ *  backfeed (NEC 705.12(B) — a dedicated PV panel's busbar ≥ Σ source OCPD). */
+export function resolveAcCombinerPanel(aggregateBackfeedA: number, sourceCount = 0): AcCombinerPanelPlan | null {
+  if (aggregateBackfeedA <= 0) return null;
+  const panels = BOS_DEVICES
+    .filter(d => d.id.startsWith('pv-ac-combiner-') && d.active !== false)
+    .sort((a, b) => (a.maxContinuousA ?? 0) - (b.maxContinuousA ?? 0));
+  const pick = panels.find(p => (p.maxContinuousA ?? 0) >= aggregateBackfeedA
+    && (p.branchSlots ?? 0) >= sourceCount) ?? panels[panels.length - 1];
+  if (!pick) return null;
+  return {
+    ...resolved(pick),
+    busbarA: pick.maxContinuousA ?? aggregateBackfeedA,
+    mainOcpdA: nextStdRating(aggregateBackfeedA),
+    positions: pick.branchSlots ?? sourceCount,
+  };
+}
+
+export interface HybridSourceInput {
+  key: string;                      // 'roof' | 'ground' | 'fence'
+  inverterManufacturer: string;
+  inverterModel: string;
+  isMicro: boolean;
+  branchCount: number;              // AC branches (micro) or string count
+  deviceCount: number;              // micro device count
+  backfeedA: number;                // this source's OCPD / backfeed amps
+}
+export interface HybridSourceCombining {
+  key: string;
+  isMicro: boolean;
+  /** Micro subs: the brand combiner (IQ Combiner). String/hybrid: null → the
+   *  source's OCPD is a backfed breaker in the shared panel. */
+  combiner: ResolvedBosDevice | null;
+  /** True when the combiner already IS a disconnecting means (6C) for that lane. */
+  combinerHasDisconnect: boolean;
+  ocpdA: number;
+  branchSlotWarning?: string;
+}
+export interface HybridAcCollectionPlan {
+  perSource: HybridSourceCombining[];
+  /** Shared AC combiner panel every source lands on (null when only one source). */
+  sharedPanel: AcCombinerPanelPlan | null;
+  /** The single system AC disconnect after the shared panel (A). */
+  disconnectA: number;
+  /** Σ of all source backfeeds (A). */
+  aggregateBackfeedA: number;
+}
+
+/** Resolve the full multi-source AC collection: per-source brand combiner/OCPD →
+ *  shared AC combiner panel → one disconnect. */
+export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridAcCollectionPlan {
+  const perSource: HybridSourceCombining[] = sources.map(s => {
+    if (s.isMicro) {
+      const plan = resolveIntegratedEquipment({
+        inverterManufacturer: s.inverterManufacturer, inverterModel: s.inverterModel,
+        isMicro: true, totalDevices: s.deviceCount, branchCount: s.branchCount, hasBattery: false,
+      });
+      const combiner = plan.brains ?? plan.devices[0] ?? null;
+      return {
+        key: s.key, isMicro: true, combiner,
+        combinerHasDisconnect: !!combiner?.integrated.disconnect,
+        ocpdA: s.backfeedA, branchSlotWarning: plan.branchSlotWarning,
+      };
+    }
+    // String / hybrid inverter: no dedicated combiner — its OCPD is a backfed
+    // breaker landing directly on the shared AC combiner panel.
+    return { key: s.key, isMicro: false, combiner: null, combinerHasDisconnect: false, ocpdA: s.backfeedA };
+  });
+  const aggregateBackfeedA = sources.reduce((a, s) => a + (s.backfeedA || 0), 0);
+  const sharedPanel = sources.length > 1
+    ? resolveAcCombinerPanel(aggregateBackfeedA, sources.length)
+    : null;
+  const disconnectA = nextStdRating(aggregateBackfeedA);
+  return { perSource, sharedPanel, disconnectA, aggregateBackfeedA };
 }
