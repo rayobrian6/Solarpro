@@ -4848,8 +4848,17 @@ function EngineeringPageInner() {
       const entry = subMap[key] ?? {};
       const panelId = entry.panelId ?? fleet[0]?.strings?.[0]?.panelId;
       const panel = panelId ? (getPanelById(panelId) as any) : null;
-      const brand = entry.ecosystemBrand
-        ?? (fleet[0] ? getBrandProfileByInverterId(fleet[0].inverterId)?.id : undefined);
+      const curInvId = fleet[0]?.inverterId ?? '';
+      // Recommend WITHIN the sub's INSTALLED inverter brand — NOT a stale
+      // ecosystemBrand tag (that made a roof of Enphase micros "recommend"
+      // EcoFlow). Seed the installed model so the engine only deviates when the
+      // current inverter genuinely can't serve the sub — no topology/brand-swap
+      // nags, no string-re-split nags, no "overpower without logic". Empty subs
+      // (no installed inverter) fall back to the sub's ecosystem/default brand so
+      // the empty-state CTA can still recommend what to build.
+      const brand = curInvId
+        ? (getBrandProfileByInverterId(curInvId)?.id ?? entry.ecosystemBrand)
+        : entry.ecosystemBrand;
       let rec: SystemSizingResult | null = null;
       try {
         rec = sizeSystemFromBrand({
@@ -4858,6 +4867,7 @@ function EngineeringPageInner() {
           panelWattage: panel?.watts ?? 400,
           ...(panelId ? { panelId } : {}),
           selectedBrand: brand,
+          ...(curInvId ? { selectedInverterId: curInvId } : {}),
           batteryEnabled: false,
         } as any);
       } catch { rec = null; }
@@ -4865,14 +4875,10 @@ function EngineeringPageInner() {
       const recInvId = rec.inverterModels[0].equipmentDbId;
       const recCount = Math.max(1, rec.inverterCount);
       const recStrings = rec.strings.map((s: any) => s.panelCount as number).sort((a, b) => b - a);
-      const curInvId = fleet[0]?.inverterId ?? '';
-      const curCount = fleet.length;
-      const curStrings = fleet.flatMap(i => i.strings.map(s => s.panelCount)).sort((a, b) => b - a);
-      const differs = !!curInvId && (
-        curInvId !== recInvId || curCount !== recCount ||
-        curStrings.length !== recStrings.length ||
-        curStrings.some((n, i) => n !== recStrings[i])
-      );
+      // A recommendation only fires when the engine could NOT keep the installed
+      // inverter (it's genuinely under/over-provisioned → a DIFFERENT model of the
+      // same brand). We never nag about string re-splits or minor consolidations.
+      const differs = !!curInvId && !!recInvId && curInvId !== recInvId;
       const pc = rec.panelCompatibility;
       const marginal = pc && (pc.status === 'marginal' || pc.status === 'incompatible') ? pc.reason : null;
       out[key] = {
@@ -10377,17 +10383,47 @@ function EngineeringPageInner() {
                                   const firstInv = fleet[0];
                                   const invModel = firstInv ? ((getInvById(firstInv.inverterId, firstInv.type) as any)?.model ?? firstInv.inverterId) : null;
                                   const isMicroSub = firstInv?.type === 'micro';
+                                  const subCsK = computedMulti.subSystems[k];
                                   const colorCls = _subColor[k]; const bgCls = _subBg[k];
                                   return (
                                     <div key={k} className="pb-2 mb-2 border-b border-slate-800/60 last:border-0 last:mb-0 last:pb-0">
                                       <div className={`text-[10px] font-black uppercase tracking-wide mb-1.5 flex items-center gap-2 flex-wrap ${colorCls}`}>
                                         <span>{k}</span>
                                         <span className="text-slate-500 font-semibold normal-case">
-                                          {subCount} modules{invModel ? ` · ${invModel}` : ''}{fleet.length > 1 ? ` · ${fleet.length} ${isMicroSub ? 'micro fleets' : 'inverters'}` : ''}
+                                          {subCount} modules{invModel ? ` · ${invModel}` : ''}
+                                          {isMicroSub && subCsK ? ` · ${subCsK.acBranchCount} AC branch${subCsK.acBranchCount === 1 ? '' : 'es'}` : (!isMicroSub && fleet.length > 1 ? ` · ${fleet.length} inverters` : '')}
                                         </span>
                                       </div>
                                       {fleet.length === 0 ? (
                                         <div className="text-[10px] text-amber-400 italic pl-1">No inverter fleet yet — pick one below.</div>
+                                      ) : isMicroSub ? (
+                                        /* Micro sub → AC BRANCHES (micros have no DC strings — show the
+                                           branch layout, not one lumped module bar). */
+                                        (() => {
+                                          const _bc = Math.max(1, Math.min(subCsK?.acBranchCount ?? 1, 8));
+                                          const _dev = subCsK?.microDeviceCount ?? subCount;
+                                          const _per = _dev > 0 ? Math.ceil(_dev / _bc) : 0;
+                                          return (
+                                            <div className="space-y-1.5">
+                                              {Array.from({ length: _bc }, (_, bi) => {
+                                                const isLast = bi === _bc - 1;
+                                                const cnt = isLast ? Math.max(0, _dev - (_bc - 1) * _per) : _per;
+                                                return (
+                                                  <div key={bi} className="flex items-center gap-2">
+                                                    <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>Branch {bi + 1}</span>
+                                                    <div className="flex gap-0.5 flex-1">
+                                                      {Array.from({ length: Math.min(cnt, _maxP) }, (_, pi) => (
+                                                        <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
+                                                      ))}
+                                                      {cnt > _maxP ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{cnt - _maxP}</span> : null}
+                                                    </div>
+                                                    <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{cnt} micros</span>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          );
+                                        })()
                                       ) : (
                                         <div className="space-y-1.5">
                                           {fleet.map((inv, ii) => {
@@ -10397,7 +10433,7 @@ function EngineeringPageInner() {
                                               <div key={inv.id}>
                                                 {fleet.length > 1 ? (
                                                   <div className={`text-[9px] font-bold uppercase tracking-wide mb-0.5 opacity-80 ${colorCls}`}>
-                                                    Inverter {ii + 1} · {inv.strings.length} {isMicroSub ? 'branch' : 'string'}{inv.strings.length === 1 ? '' : 's'} · {_invPanels}p
+                                                    Inverter {ii + 1} · {inv.strings.length} string{inv.strings.length === 1 ? '' : 's'} · {_invPanels}p
                                                   </div>
                                                 ) : null}
                                                 <div className="space-y-1.5">
@@ -10406,7 +10442,7 @@ function EngineeringPageInner() {
                                                     const kw = (str.panelCount * (panel?.watts || 400) / 1000);
                                                     return (
                                                       <div key={str.id} className="flex items-center gap-2">
-                                                        <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>{isMicroSub ? 'MOD' : `S${si + 1}`}</span>
+                                                        <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>S{si + 1}</span>
                                                         <div className="flex gap-0.5 flex-1">
                                                           {Array.from({ length: Math.min(str.panelCount, _maxP) }, (_, pi) => (
                                                             <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
