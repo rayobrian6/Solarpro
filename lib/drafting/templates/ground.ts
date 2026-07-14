@@ -54,6 +54,13 @@ function arrayColor(i: number): string {
   return ARRAY_COLORS[i % ARRAY_COLORS.length];
 }
 
+// Speck PLP POWER DRIVE™ groups portrait module rows into 2-high TABLES — engine
+// PLP_ROW_COUNT (lib/3d/ground/groundMountRealityEngine.ts): "One I-beam per bay
+// at the N-S midpoint" of the TABLE, one tilted strongback per pylon carrying
+// BOTH the south and north row. The two rows of a table are adjacent (shared
+// strongback); the row-spacing gap is BETWEEN tables, not within one.
+const PLP_ROWS_PER_TABLE = 2;
+
 // ── Ground mount-system name resolution (STEP 9 cross-contamination block) ────
 // A ground sheet must NEVER brand the project-wide ROOF racking. project
 // .mountingSystem is a flat scalar that carries the roof racking on hybrid
@@ -170,10 +177,21 @@ export function drawGroundArray(
       const oy    = arr._cadOriginY ?? arr.originY ?? 0;
       const rowSp = arr.rowSpacingM ?? Math.max(pHmDefault * 1.15, 1.6);
       const colSp = pWmDefault + 0.03;
+      // Lay rows out in 2-high PLP tables: rows WITHIN a table are adjacent
+      // (shared strongback, small clamp gap), the row-spacing gap sits BETWEEN
+      // tables. The old layout put every row a full row-spacing apart, so a
+      // single 2-high table drew as two tables 5 ft apart with a pylon in the
+      // middle of each module — the "posts in the middle of a panel" bug.
+      const inTablePitch = pHmDefault + 0.04;         // adjacent rows in a table
+      const tablePitch   = PLP_ROWS_PER_TABLE * inTablePitch + rowSp;
       const rects: Rect[] = [];
-      for (let r = 0; r < rowsN; r++)
+      for (let r = 0; r < rowsN; r++) {
+        const ti = Math.floor(r / PLP_ROWS_PER_TABLE);
+        const ri = r % PLP_ROWS_PER_TABLE;
+        const rowY = oy + ti * tablePitch + ri * inTablePitch;
         for (let c = 0; c < pprN; c++)
-          rects.push({ x: ox + c * colSp, y: oy + r * rowSp, w: pWmDefault, h: pHmDefault });
+          rects.push({ x: ox + c * colSp, y: rowY, w: pWmDefault, h: pHmDefault });
+      }
       return rects;
     }
     // Fallback: raw panels only when no declared grid is available.
@@ -289,14 +307,20 @@ export function drawGroundArray(
       const PLP_BAY_SPAN_M = 6.10;    // ~20 ft between pylons (engine constant)
       const PLP_MAX_CANT_M = 1.50;    // max rail overhang past end pylon
       const PLP_CLAMP_INSET = 0.15;   // rail inset from table N/S edge (frac of depth)
-      rowBands.forEach((band) => {
+      // Group the module rows into 2-high PLP tables — ONE pylon line per table
+      // at its true N-S midpoint (the shared row seam), not one line per module
+      // row. Each table = up to PLP_ROWS_PER_TABLE consecutive row-bands.
+      const tableGroups: Rect[][] = [];
+      for (let ti = 0; ti < rowBands.length; ti += PLP_ROWS_PER_TABLE)
+        tableGroups.push(rowBands.slice(ti, ti + PLP_ROWS_PER_TABLE).flat());
+      tableGroups.forEach((band) => {
         let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
         for (const r of band) {
           bMinX = Math.min(bMinX, r.x);  bMaxX = Math.max(bMaxX, r.x + r.w);
           bMinY = Math.min(bMinY, r.y);  bMaxY = Math.max(bMaxY, r.y + r.h);
         }
         const wM = bMaxX - bMinX, depthM = bMaxY - bMinY;
-        const cyM = (bMinY + bMaxY) / 2;                    // table N-S midpoint (pylon line)
+        const cyM = (bMinY + bMaxY) / 2;                    // table N-S midpoint (pylon line = row seam)
         // Pylon E-W positions: end cantilevers ≤ PLP_MAX_CANT_M, interior bays ≤ span.
         const cant = Math.min(PLP_MAX_CANT_M, wM * 0.14);
         const innerW = Math.max(wM - 2 * cant, 0.1);
@@ -377,21 +401,23 @@ export function drawGroundArray(
   const rightW = dz.x + dz.width - rightX;
   const panelTop = vy;
 
-  // ── Viewport B: ROW SPACING — SIDE ELEVATION ────────────────────────────────
-  vpHeader(dz.x, vy, leftW, 'B · ROW SPACING — SIDE ELEVATION'); vy += VP_HDR;
+  // ── Viewport B: ARRAY SIDE ELEVATION — PLP TABLE ────────────────────────────
+  vpHeader(dz.x, vy, leftW, 'B · ARRAY SIDE ELEVATION — PLP TABLE'); vy += VP_HDR;
   const vpB = { x: dz.x, y: vy, w: leftW, h: hB }; vy += hB + VP_GAP;
   {
     const a0: any = arrays[0] ?? {};
     const rowCount  = Math.max(1, a0.rowCount ?? a0.dimensions?.rowCount ?? 2);
+    const nTables   = Math.max(1, Math.ceil(rowCount / PLP_ROWS_PER_TABLE));
     const spacingFt = (a0.rowSpacingM ?? 1.6) * metersToFt(1);
     const tilt      = a0.tiltDeg ?? 25;
     const clearFt   = (a0.groundClearanceM ?? 0.46) * metersToFt(1);
-    const showRows  = Math.min(rowCount, 4);
+    const showTables = Math.min(nTables, 3);
     const mL = 58, mR = 28;
     const baseY = vpB.y + vpB.h * 0.66;
     const avail   = vpB.w - mL - mR;
-    const pitchPx = avail / Math.max(showRows, 2);
-    const modLen  = Math.min(pitchPx * 0.82, vpB.h * 0.52, 120);
+    const pitchPx = avail / Math.max(showTables, 2);
+    // modLen = one module along the tilt; a PLP table stacks PLP_ROWS_PER_TABLE.
+    const modLen  = Math.min((pitchPx * 0.8) / PLP_ROWS_PER_TABLE, vpB.h * 0.30, 70);
     const rise    = Math.sin(tilt * Math.PI / 180) * modLen;
     const run     = Math.cos(tilt * Math.PI / 180) * modLen;
     const clrPx   = Math.min(Math.max(clearFt, 0.5) * 10, 30);
@@ -409,32 +435,49 @@ export function drawGroundArray(
     // back to ~35% of the pylon height. The module (edge view) rides the
     // strongback. NOT a front/rear A-frame. Pylon continues below grade (dashed).
     const STRUT_FRAC = 0.35;   // engine PLP_STRUT_FRAC — strut attach on pylon body
-    for (let r = 0; r < showRows; r++) {
-      const bx = vpB.x + mL + r * pitchPx, by = baseY - clrPx;   // low (south) module edge
-      const tx = bx + run, ty = by - rise;                        // high (north) module edge
-      // Pylon under ~35% along the strongback (single-strut cantilever balance point).
-      const pylonX = bx + run * STRUT_FRAC;
-      const pylonTopY = by - rise * STRUT_FRAC;                   // strongback height over the pylon
-      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${pylonX.toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="1.8"/>`);
+    const nRows = PLP_ROWS_PER_TABLE;                   // portrait rows carried per table
+    const tableRun = nRows * run, tableRise = nRows * rise;   // strongback slant span
+    // Center the table group in the available width so a single 2-high table is
+    // not marooned in the far-left corner with a long empty ground line.
+    const contentW = (showTables - 1) * pitchPx + tableRun;
+    const xStart   = vpB.x + mL + Math.max(0, (avail - contentW) / 2);
+    for (let t = 0; t < showTables; t++) {
+      const bx = xStart + t * pitchPx, by = baseY - clrPx;   // south (low) end of strongback
+      // ONE pylon per table at the array CENTER OF GRAVITY (strongback midpoint) —
+      // symmetric cantilever, matching the reality engine. The diagonal strut
+      // braces the south cantilever; pylon+strut+strongback = the PLP "4" profile.
+      const pylonX = bx + tableRun * 0.5;
+      const pylonTopY = by - tableRise * 0.5;
+      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${pylonX.toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="2.4"/>`);
+      // I-beam flange edges (twin lines) so the post reads as a W-section, not a pipe.
+      els.push(`<line x1="${(pylonX-1.6).toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${(pylonX-1.6).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="0.5"/>`);
+      els.push(`<line x1="${(pylonX+1.6).toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${(pylonX+1.6).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="0.5"/>`);
       els.push(`<line x1="${pylonX.toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${pylonX.toFixed(1)}" y2="${pileBotY.toFixed(1)}" stroke="#111" stroke-width="1.5" stroke-dasharray="3,2"/>`);
+      // KNUCKLE: tilt bracket clamping the strongback to the pylon top (slotted).
+      els.push(`<rect x="${(pylonX-3).toFixed(1)}" y="${(pylonTopY-2).toFixed(1)}" width="6" height="4" fill="#2c3444" stroke="#111" stroke-width="0.6"/>`);
       // Diagonal strut: pylon body (~35% up) → strongback south end.
       const strutBaseY = baseY - (baseY - pylonTopY) * STRUT_FRAC;
       els.push(`<line x1="${pylonX.toFixed(1)}" y1="${strutBaseY.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#44506a" stroke-width="1.3"/>`);
-      // Strongback + module (edge view) riding it.
-      els.push(`<line x1="${bx.toFixed(1)}" y1="${by.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}" stroke="#1a4a8a" stroke-width="4" stroke-linecap="round"/>`);
+      // Strongback beam (full slant), then each module (edge view) riding it.
+      els.push(`<line x1="${bx.toFixed(1)}" y1="${by.toFixed(1)}" x2="${(bx + tableRun).toFixed(1)}" y2="${(by - tableRise).toFixed(1)}" stroke="#44506a" stroke-width="2"/>`);
+      for (let m = 0; m < nRows; m++) {
+        const a = m + 0.03, b = m + 0.97;                 // small seam gap between stacked modules
+        els.push(`<line x1="${(bx + run * a).toFixed(1)}" y1="${(by - rise * a).toFixed(1)}" x2="${(bx + run * b).toFixed(1)}" y2="${(by - rise * b).toFixed(1)}" stroke="#1a4a8a" stroke-width="4" stroke-linecap="round"/>`);
+      }
     }
-    // O.C. dimension between first two rows
-    if (showRows >= 2) {
-      const dx1 = vpB.x + mL, dx2 = vpB.x + mL + pitchPx, dy = pileBotY + 12;
+    // O.C. dimension only when there are ≥2 tables to space (row-spacing gap is
+    // BETWEEN tables). A single 2-high table has no inter-row-spacing dimension.
+    if (showTables >= 2) {
+      const dx1 = xStart, dx2 = xStart + pitchPx, dy = pileBotY + 12;
       els.push(`<line x1="${dx1.toFixed(1)}" y1="${dy.toFixed(1)}" x2="${dx2.toFixed(1)}" y2="${dy.toFixed(1)}" stroke="#c00" stroke-width="0.9"/>`);
       els.push(`<line x1="${dx1.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${dx1.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#c00" stroke-width="0.8"/>`);
       els.push(`<line x1="${dx2.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${dx2.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#c00" stroke-width="0.8"/>`);
-      els.push(drawText((dx1 + dx2) / 2, dy - 3, `${spacingFt.toFixed(1)}' O.C.`, {
+      els.push(drawText((dx1 + dx2) / 2, dy - 3, `${spacingFt.toFixed(1)}' O.C. (TABLE)`, {
         anchor: 'middle', fontSize: 7, fontWeight: 'bold', fill: '#c00' }));
     }
-    els.push(drawText(vpB.x + mL + run + 6, baseY - clrPx - rise - 4, `${Math.round(tilt)}° TILT`, {
+    els.push(drawText(xStart + tableRun + 6, baseY - clrPx - tableRise - 4, `${Math.round(tilt)}° TILT`, {
       anchor: 'start', fontSize: 8, fontWeight: 'bold', fill: '#1a4a8a' }));
-    els.push(drawText(vpB.x + mL - 6, baseY - clrPx / 2 + 2, `${clearFt.toFixed(1)}' CLR`, {
+    els.push(drawText(xStart - 6, baseY - clrPx / 2 + 2, `${clearFt.toFixed(1)}' CLR`, {
       anchor: 'end', fontSize: 7, fill: '#333' }));
   }
 
@@ -669,12 +712,30 @@ export function drawGroundStructural(
   els.push(`<rect x="${(originX - pylW/2).toFixed(1)}" y="${groundY.toFixed(1)}" width="${pylW.toFixed(1)}" height="${(embedBotY - groundY).toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="0.9" stroke-dasharray="5,2"/>`);
   els.push(`<polygon points="${(originX - pylW/2).toFixed(1)},${embedBotY.toFixed(1)} ${originX.toFixed(1)},${(embedBotY + FT_PX*0.5).toFixed(1)} ${(originX + pylW/2).toFixed(1)},${embedBotY.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="0.9" stroke-dasharray="5,2"/>`);
 
-  // ── Strongback (tilted, pivots on pylon top at 35% = single-strut cantilever) ──
+  // ── Strongback (tilted) — pivots on the pylon top at the array CENTER OF
+  //    GRAVITY. Per the reality engine, the pylon rises to the strongback
+  //    centerline (sbCenterZ = panel N-S midpoint), so the strongback cantilevers
+  //    SYMMETRICALLY south and north (½ each way) — NOT 35/65 with the weight
+  //    hung off the north end. The diagonal strut braces the south cantilever;
+  //    pylon + strut + strongback read as the PLP "number 4" profile. ──
   const sdx = Math.cos(tiltRad), sdy = -Math.sin(tiltRad);   // south→north (up-right)
   const L = sbLenFt * FT_PX;
-  const southX = originX - sdx * L * 0.35, southY = pylonTopY - sdy * L * 0.35;
-  const northX = originX + sdx * L * 0.65, northY = pylonTopY + sdy * L * 0.65;
+  const southX = originX - sdx * L * 0.5, southY = pylonTopY - sdy * L * 0.5;
+  const northX = originX + sdx * L * 0.5, northY = pylonTopY + sdy * L * 0.5;
   els.push(`<line x1="${southX.toFixed(1)}" y1="${southY.toFixed(1)}" x2="${northX.toFixed(1)}" y2="${northY.toFixed(1)}" stroke="#44506a" stroke-width="3.5" stroke-linecap="round"/>`);
+
+  // ── KNUCKLE: the tilt bracket that clamps the strongback to the pylon top.
+  //    Slotted holes in the I-beam web give the up/down tilt adjustment (PLP).
+  //    Drawn as a seat plate over the pylon cap + two bolts through the flange. ──
+  const kHalf = Math.max(pylW * 0.95, 8);
+  const kSx = originX - sdx * kHalf, kSy = pylonTopY - sdy * kHalf;   // seat south end (on SB)
+  const kNx = originX + sdx * kHalf, kNy = pylonTopY + sdy * kHalf;   // seat north end (on SB)
+  const knx = -sdy, kny = sdx;                                        // SB-normal (up from top)
+  const seatH = Math.max(FT_PX * 0.12, 4);
+  els.push(`<polygon points="${kSx.toFixed(1)},${kSy.toFixed(1)} ${kNx.toFixed(1)},${kNy.toFixed(1)} ${(kNx - knx*seatH).toFixed(1)},${(kNy - kny*seatH).toFixed(1)} ${(kSx - knx*seatH).toFixed(1)},${(kSy - kny*seatH).toFixed(1)}" fill="#2c3444" stroke="#111" stroke-width="0.8"/>`);
+  // Two bolts through the pylon flange (the slotted tilt connection).
+  els.push(`<circle cx="${originX.toFixed(1)}" cy="${(pylonTopY + FT_PX*0.22).toFixed(1)}" r="1.7" fill="#fff" stroke="#111" stroke-width="0.7"/>`);
+  els.push(`<circle cx="${originX.toFixed(1)}" cy="${(pylonTopY + FT_PX*0.45).toFixed(1)}" r="1.7" fill="#fff" stroke="#111" stroke-width="0.7"/>`);
 
   // ── Single diagonal STRUT: pylon body (~35% up) → strongback south end ──
   const strutBaseY = groundY - (groundY - pylonTopY) * 0.35;
@@ -707,6 +768,28 @@ export function drawGroundStructural(
   els.push(drawText((northX + southX) / 2 + nx * 24, (northY + southY) / 2 + ny * 24, 'STRONGBACK', { anchor: 'middle', fontSize: 6.4, fill: '#44506a', fontWeight: 'bold' }));
   els.push(drawText((originX + southX) / 2 - 3, (strutBaseY + southY) / 2 + 9, 'STRUT', { anchor: 'middle', fontSize: 6, fill: '#44506a', fontWeight: 'bold' }));
   els.push(drawText(mN.x + 6, mN.y - 4, `MODULE — ${sbRows} ROW${sbRows > 1 ? 'S' : ''} · ${tiltDeg}°`, { anchor: 'start', fontSize: 6.4, fill: '#111', fontWeight: 'bold' }));
+  // KNUCKLE leader (points at the tilt bracket on the pylon top).
+  const _klx = kNx + knx * seatH, _kly = kNy + kny * seatH;
+  els.push(`<line x1="${_klx.toFixed(1)}" y1="${_kly.toFixed(1)}" x2="${(_klx + 30).toFixed(1)}" y2="${(_kly - 14).toFixed(1)}" stroke="#111" stroke-width="0.5"/>`);
+  els.push(drawText(_klx + 33, _kly - 14, 'KNUCKLE — SLOTTED TILT BRACKET', { anchor: 'start', fontSize: 6, fill: '#111', fontWeight: 'bold' }));
+
+  // ── I-BEAM cross-section detail (SECTION A-A) — makes the driven member read
+  //    unambiguously as a wide-flange W-section, not a generic round pipe. Also
+  //    fills the lower-left dead space on this sheet. ──
+  {
+    const ibx = dz.x + dz.width * 0.10;
+    const iby = groundY + Math.max(FT_PX * 1.4, 40);
+    const fw = 16, fl = 3, wh = 13, wt = 3;                 // flange width/thk, web height/thk
+    const drawIRect = (x: number, y: number, w: number, h: number) => {
+      els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
+      els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="url(#hatch-steel)"/>`);
+    };
+    drawIRect(ibx - fw / 2, iby, fw, fl);                    // top flange
+    drawIRect(ibx - wt / 2, iby + fl, wt, wh);               // web
+    drawIRect(ibx - fw / 2, iby + fl + wh, fw, fl);          // bottom flange
+    els.push(drawText(ibx, iby + fl + wh + fl + 11, 'SECTION A-A', { anchor: 'middle', fontSize: 6.4, fill: '#111', fontWeight: 'bold' }));
+    els.push(drawText(ibx, iby + fl + wh + fl + 20, 'W6×9 DRIVEN I-BEAM PYLON', { anchor: 'middle', fontSize: 6, fill: '#555' }));
+  }
 
   // Downstream aliases (load arrows + dimensions reference these).
   const panMidX = (mS.x + mN.x) / 2, panMidY = (mS.y + mN.y) / 2;
