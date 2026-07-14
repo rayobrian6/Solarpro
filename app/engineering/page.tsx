@@ -10054,6 +10054,12 @@ function EngineeringPageInner() {
                         </button>
                       </div>
                     ) : (
+                    <>
+                    {subSystemCounts.isHybrid ? (
+                      <div className="mb-2 text-[11px] leading-relaxed text-slate-400 bg-slate-800/50 border border-slate-700/50 rounded-md px-3 py-2">
+                        <span className="font-semibold text-amber-300">Hybrid design.</span> An ecosystem applies one brand across <span className="font-semibold text-slate-200">all</span> sub-systems (roof · ground · fence), each sized to its own layout. To mix brands, override the inverter per sub-system in the cards below.
+                      </div>
+                    ) : null}
                     <EcosystemPicker
                       appliedBrand={(config as any).ecosystemBrand}
                       onApply={(payload: EcosystemApplyPayload) => {
@@ -10211,6 +10217,7 @@ function EngineeringPageInner() {
                         applyEcosystemAfterConfirm();
                       }}
                     />
+                    </>
                     )}
 
                     {/* Auto-configured indicator */}
@@ -10527,7 +10534,10 @@ function EngineeringPageInner() {
                                 {renderSubSystemHeader(_emptyKey)}
                                 <div className="flex items-center gap-2 flex-wrap px-1 py-1">
                                   <span className="text-xs text-slate-500 italic">
-                                    No inverter fleet for the {_emptyKey.toUpperCase()} sub-system yet.
+                                    No inverter fleet for the {_emptyKey.toUpperCase()} sub-system yet
+                                    {subSystemRecommendations[_emptyKey]?.recModel
+                                      ? <> — recommended: <span className="text-slate-300 font-semibold not-italic">{subSystemRecommendations[_emptyKey]!.recModel}</span></>
+                                      : '.'}
                                   </span>
                                   <button
                                     onClick={() => {
