@@ -3184,6 +3184,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
         g.topo === 'OPTIMIZER' ? 'STRING + OPTIMIZER' : 'STRING INVERTER', '', ++calloutN, invUnselected);
       parts.push(invBox.svg);
       parts.push(txt(g.xMid1, laneY + SLD_SYMBOL_MAP['inverter'].height/2 + 45, 'INTEGRATED DC DISCONNECT — NEC 690.15', {sz:F.tiny, anc:'middle', italic:true}));
+      parts.push(txt(g.xMid1, laneY + SLD_SYMBOL_MAP['inverter'].height/2 + 53, 'EXTERNAL DC DISCONNECT PROVIDED WHERE REQUIRED BY AHJ', {sz:F.tiny, anc:'middle', italic:true, fill:'#666'}));
       {
         const run = laneRun(b, 'DC_STRING_RUN') ?? laneRun(b, 'DC_DISCO_TO_INV_RUN');
         const fb = [`${(b.totalStrings || 1) * 2}#10 PV WIRE`, `+ EGC`, 'NEC 690.31'];
