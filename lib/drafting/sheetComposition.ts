@@ -543,8 +543,8 @@ function fenceComposition(
     // fence were the drawn ~16' width).
     drawHeader:     isPlan
       ? `SOLAR FENCE — TYPICAL 2-BAY ELEVATION OF ${d.totalLenFt} L.F. RUN | ${d.segmentCount} SEGMENTS | POST @ ${d.postSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`
-      : `FENCE STRUCTURAL ELEVATION (TYP. 2-BAY SECTION OF ${d.totalLenFt} L.F.) — POST EMBED: ${d.embedFt}' MIN | WIND: ${d.windSpeedMph} MPH Vult | ASCE 7-22`,
-    secondaryHeader: isPlan ? 'SEGMENT PLAN — TOP VIEW' : 'FOOTING DETAIL — NTS',
+      : `FENCE STRUCTURAL DETAILS — POST EMBED: ${d.embedFt}' MIN | WIND: ${d.windSpeedMph} MPH Vult | ASCE 7-22 | ${d.totalLenFt} L.F. RUN`,
+    secondaryHeader: isPlan ? 'SEGMENT PLAN — TOP VIEW' : 'CONNECTION + FOOTING DETAILS — NTS',
     dataTitle:      isPlan ? 'FENCE DATA' : 'STRUCTURAL DATA',
     dataRows,
     callouts,

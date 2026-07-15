@@ -451,8 +451,10 @@ export function getPrimaryView(
     case 'fence_elevation':
       return drawingEngine.getStructuralFromCAD(cad, input, ctx);
     case 'fence_structural':
-      // PV-3: top-down site plan (drawFencePlan) — distinct from PV-2 elevation
-      return drawingEngine.getArrayPlanFromCAD(cad, input, ctx);
+      // PV-3F: real connection/foundation DETAILS (post footing, rail-to-post,
+      // panel clamp, bonding) — distinct from PV-1F's 2-bay elevation, and not
+      // the degenerate top-down of vertical panels.
+      return drawingEngine.getFenceDetailFromCAD(cad, input, ctx);
     // ── ROOF ─────────────────────────────────────────────────────────────
     case 'roof_plan':
       return drawingEngine.getArrayPlanFromCAD(cad, input, ctx);

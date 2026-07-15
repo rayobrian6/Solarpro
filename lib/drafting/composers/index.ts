@@ -38,7 +38,7 @@ import { drawRoofPlan, drawRoofStructural } from '../templates/roof';
 import { buildSiteContext, type SiteContext } from '../templates/roofSiteContext';
 import { classifyPanel } from '@/lib/permit/utils/subSystems';
 import { drawGroundArray, drawGroundStructural } from '../templates/ground';
-import { drawFencePlan, drawFenceElevation } from '../templates/fence';
+import { drawFencePlan, drawFenceElevation, drawFenceStructural } from '../templates/fence';
 import { safeBuildIntent } from '../designIntent';
 import type { DesignIntent } from '../designIntent';
 import { assertValidPlanSet, type SystemType } from '../validation';
@@ -369,6 +369,24 @@ export function getStructuralFromCAD(
     svgLength:  svg.length,
   });
   return svg;
+}
+
+/**
+ * PV-3F fence STRUCTURAL DETAILS (connection/foundation details) using a
+ * pre-computed CADModel. Distinct from getStructuralFromCAD (which draws the
+ * PV-1F 2-bay elevation) and getArrayPlanFromCAD (the standalone-fence site
+ * plan) — the 'fence_structural' view routes here so PV-3F is real details,
+ * not a repeat elevation or a degenerate top-down.
+ */
+export function getFenceDetailFromCAD(
+  cad: CADModel,
+  input: PermitInputShape,
+  ctx?: RenderContext | null,
+): string {
+  assertValidPlanSet(cad, cad.systemType as SystemType);
+  const dInput = adaptCADToDrafting(cad, input);
+  const intent = safeBuildIntent(dInput);
+  return drawFenceStructural(dInput, intent, cad, ctx);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
