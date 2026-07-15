@@ -1685,69 +1685,12 @@ export function drawRoofPlan(
       }));
   }
 
-  // ── SITE KEY inset (PV-1 hybrid) ────────────────────────────────────────────
-  // The main plan frames roof+ground large (fence sits 100+ ft off and would
-  // balloon the window). This compact locator shows ALL systems in true relative
-  // position so a plan checker sees the whole property at a glance, and points to
-  // the fence/ground detail sheets. Ray 2026-07-14: "roof+ground hero, fence as
-  // inset/ref". Fills the otherwise-empty lower-right of the draw zone.
+  // ── SYSTEM REFERENCE table (PV-1 hybrid) ────────────────────────────────────
+  // Compact per-system reference (module counts + which sheets detail each). NO
+  // mini-map: the roof, ground AND fence all now draw on the real plan above, so
+  // a map-on-the-map was redundant (Ray: "don't like the site key on the actual
+  // map"). Bottom-right corner, clear of the compass rose.
   if (!isBranchColorMode && _hyb && (_hyb.ground.length || _hyb.fence.length)) {
-    const bw = 288, bh = 296;
-    const bx = W - zones.dims.right - bw - 8;
-    // Ray 2026-07-14: was floated dead-center over the map. Tuck it into the
-    // BOTTOM-right corner of the plan (out of the middle) — a corner locator key
-    // reads as standard CAD furniture, not a box dumped on the aerial.
-    const by = (H - zones.dims.bottom) - bh - 34;   // clears the compass rose at the bottom-right
-    const mapH = 168;                         // mini-map band height; table below
-    const ins: string[] = [];
-    ins.push(`<g class="pv1-sitekey">`);
-    ins.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
-    ins.push(`<rect x="${bx}" y="${by}" width="${bw}" height="15" fill="#111"/>`);
-    ins.push(`<text x="${bx + 8}" y="${by + 11}" font-size="8" font-weight="700" fill="#fff" letter-spacing="0.4">SITE KEY — SYSTEM LOCATOR · NTS</text>`);
-    // Combined bbox (rotated fake-deg) of roof + ground + fence.
-    const kpts: Array<{ lat: number; lng: number }> = [
-      { lat: minLat, lng: minLng }, { lat: maxLat, lng: maxLng },
-      ..._hyb.ground.flatMap(g => g.ring),
-      ..._hyb.fence.flatMap(f => [f.line[0], f.line[1]]),
-    ];
-    const kLng = kpts.map(p => p.lng), kLat = kpts.map(p => p.lat);
-    const kMinLng = Math.min(...kLng), kMaxLng = Math.max(...kLng);
-    const kMinLat = Math.min(...kLat), kMaxLat = Math.max(...kLat);
-    const kSpanLng = (kMaxLng - kMinLng) || 1, kSpanLat = (kMaxLat - kMinLat) || 1;
-    const pad = 14;
-    const cw = bw - 2 * pad, chh = mapH - pad;
-    const ksc = Math.min(cw / kSpanLng, chh / kSpanLat) * 0.9;
-    const kox = bx + pad + (cw - kSpanLng * ksc) / 2;
-    const koy = by + 15 + (pad / 2) + (chh - kSpanLat * ksc) / 2;
-    const kx = (lng: number) => kox + (lng - kMinLng) * ksc;
-    const ky = (lat: number) => koy + (kMaxLat - lat) * ksc;
-    // House / roof footprint (roof plan bbox proxy).
-    const hx = kx(minLng), hy = ky(maxLat);
-    const hw = (maxLng - minLng) * ksc, hh = (maxLat - minLat) * ksc;
-    ins.push(`<rect x="${hx.toFixed(1)}" y="${hy.toFixed(1)}" width="${hw.toFixed(1)}" height="${hh.toFixed(1)}" fill="#d9dee6" stroke="#333" stroke-width="1"/>`);
-    ins.push(`<text x="${(hx + hw / 2).toFixed(1)}" y="${(hy + hh / 2 + 2).toFixed(1)}" font-size="6.5" font-weight="700" fill="#222" text-anchor="middle">ROOF PV</text>`);
-    // Ground arrays.
-    for (const g of _hyb.ground) {
-      const pp = g.ring.map(p => `${kx(p.lng).toFixed(1)},${ky(p.lat).toFixed(1)}`).join(' ');
-      ins.push(`<polygon points="${pp}" fill="#2b6cb0" fill-opacity="0.2" stroke="#2b6cb0" stroke-width="1.2"/>`);
-    }
-    if (_hyb.ground.length) {
-      const gc = _hyb.ground.flatMap(g => g.ring);
-      const gcx = gc.reduce((s, p) => s + kx(p.lng), 0) / gc.length;
-      const gcy = Math.min(...gc.map(p => ky(p.lat))) - 3;
-      ins.push(`<text x="${gcx.toFixed(1)}" y="${gcy.toFixed(1)}" font-size="6.2" font-weight="700" fill="#2b6cb0" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">GROUND</text>`);
-    }
-    // Fence run.
-    for (const f of _hyb.fence) {
-      const [a, b] = f.line;
-      ins.push(`<line x1="${kx(a.lng).toFixed(1)}" y1="${ky(a.lat).toFixed(1)}" x2="${kx(b.lng).toFixed(1)}" y2="${ky(b.lat).toFixed(1)}" stroke="#1a7a3a" stroke-width="3" stroke-linecap="round"/>`);
-      const mx = (kx(a.lng) + kx(b.lng)) / 2, my = (ky(a.lat) + ky(b.lat)) / 2;
-      ins.push(`<text x="${mx.toFixed(1)}" y="${(my - 4).toFixed(1)}" font-size="6.2" font-weight="700" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">FENCE</text>`);
-    }
-    // North arrow (top-right of the mini-map) — same rotation as the main rose.
-    const nax = bx + bw - 18, nay = by + 34, nrot = northArrowRotationDeg(planRotDeg);
-    ins.push(`<g transform="rotate(${nrot.toFixed(1)} ${nax} ${nay})"><line x1="${nax}" y1="${nay + 8}" x2="${nax}" y2="${nay - 8}" stroke="#111" stroke-width="1"/><path d="M${nax},${nay - 10} L${nax - 3},${nay - 4} L${nax + 3},${nay - 4} Z" fill="#111"/><text x="${nax}" y="${nay - 12}" font-size="5.5" font-weight="700" text-anchor="middle" fill="#111">N</text></g>`);
-    // ── System-locator table (fills the lower half with useful content) ─────────
     const cnt = (s?: string) => (s?.match(/(\d+)\s*MOD/)?.[1]) ?? '—';
     const gCount = cnt(_hyb.ground.map(g => g.label).find(Boolean));
     const fLabel = _hyb.fence[0]?.label ?? '';
@@ -1758,9 +1701,18 @@ export function drawRoofPlan(
       ...(gCount !== '—' ? [['GROUND', gCount, 'PV-1G · PV-3G'] as [string, string, string]] : []),
       ...(fCount !== '—' ? [['FENCE', `${fCount}${fLen ? ' · ' + fLen : ''}`, 'PV-1F · PV-1BF'] as [string, string, string]] : []),
     ];
+    const bw = 290;
+    const bh = 20 + 13 + rows.length * 14 + 8;         // title + header + rows + pad
+    const bx = W - zones.dims.right - bw - 8;
+    const by = (H - zones.dims.bottom) - bh - 34;      // bottom-right, clears the compass rose
+    const ins: string[] = [];
+    ins.push(`<g class="pv1-sitekey">`);
+    ins.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
+    ins.push(`<rect x="${bx}" y="${by}" width="${bw}" height="15" fill="#111"/>`);
+    ins.push(`<text x="${bx + 8}" y="${by + 11}" font-size="8" font-weight="700" fill="#fff" letter-spacing="0.4">SYSTEM REFERENCE</text>`);
     const tX = bx + 10, tW = bw - 20;
-    let tY = by + mapH + 6;
-    const colM = tX + 92, colS = tX + 150;
+    let tY = by + 20;
+    const colM = tX + 80, colS = tX + 150;
     ins.push(`<rect x="${tX}" y="${tY}" width="${tW}" height="13" fill="#111"/>`);
     ins.push(`<text x="${tX + 5}" y="${tY + 9.5}" font-size="6.2" font-weight="700" fill="#fff">SYSTEM</text>`);
     ins.push(`<text x="${colM}" y="${tY + 9.5}" font-size="6.2" font-weight="700" fill="#fff">MODULES</text>`);
@@ -1773,8 +1725,7 @@ export function drawRoofPlan(
       ins.push(`<text x="${colS}" y="${tY + 9.5}" font-size="6.4" fill="#111">${r[2]}</text>`);
       tY += 14;
     });
-    ins.push(`<rect x="${tX}" y="${by + mapH + 6}" width="${tW}" height="${13 + rows.length * 14}" fill="none" stroke="#333" stroke-width="0.6"/>`);
-    ins.push(`<text x="${tX}" y="${(by + bh - 6).toFixed(1)}" font-size="5.8" fill="#666">Relative positions to scale · systems detailed on referenced sheets.</text>`);
+    ins.push(`<rect x="${tX}" y="${by + 20}" width="${tW}" height="${13 + rows.length * 14}" fill="none" stroke="#333" stroke-width="0.6"/>`);
     ins.push(`</g>`);
     els.push(ins.join(''));
   }
