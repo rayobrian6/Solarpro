@@ -424,7 +424,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
     // Use the same roof renderer as PV-2, but WITH branch colors
     // (drawRoofPlan switches to "circuit layout" mode when panelColorById is present)
-    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById);
+    // Circuit sheet (PV-1B/PV-1BG/PV-1BF): pass the DC-string count + palette so
+    // the GROUND top-view colors modules by string (PV-1BG was a clone of PV-1G's
+    // physical layout). Only string systems get a string map; micro = AC branches.
+    const _groundCircuit = !_isMicro ? { strings: totalStrings, colors: stringColors } : null;
+    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById, _groundCircuit);
     if (roofSvg && roofSvg.length > 500) {
       agDrawSvg = roofSvg;
     } else {

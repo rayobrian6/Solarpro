@@ -121,8 +121,18 @@ export function drawGroundArray(
   intent?: DesignIntent | null,
   cad?: CADModel | null,
   ctx?: RenderContext | null,
+  // Circuit mode (PV-1BG): color each module by its DC string so the sheet is a
+  // real STRING MAP, not a clone of PV-1G's physical layout. `colors` is the
+  // palette the STRING LEGEND uses; `strings` is the DC string count.
+  circuit?: { strings: number; colors: string[] } | null,
 ): string {
   const { layout, engineering } = input;
+  // Even, larger-first split of N modules into k strings (row-major) — matches
+  // the balancedBranchSizes the circuit legend/schedule use.
+  const _balancedSizes = (n: number, k: number): number[] => {
+    const base = Math.floor(n / Math.max(k, 1)), rem = n % Math.max(k, 1);
+    return Array.from({ length: Math.max(k, 1) }, (_, i) => base + (i < rem ? 1 : 0));
+  };
 
   // ── STEP 4: CAD is the ONLY source of truth ──
   const cadGround = cad?.ground;
@@ -264,6 +274,20 @@ export function drawGroundArray(
         }));
     }
 
+    // Circuit mode: assign each module (row-major across all arrays) to a DC
+    // string via the balanced split, so the coloring matches the STRING LEGEND.
+    const rectString = new Map<Rect, number>();
+    if (circuit && circuit.strings > 1) {
+      const allRects: Rect[] = arrayRects.flat();
+      const sizes = _balancedSizes(allRects.length, circuit.strings);
+      let si = 0, used = 0;
+      for (const r of allRects) {
+        if (used >= (sizes[si] ?? Infinity) && si < sizes.length - 1) { si++; used = 0; }
+        rectString.set(r, si);
+        used++;
+      }
+    }
+
     // Draw each array (CAD-driven, clean top-down)
     arrays.forEach((arr: any, ai: number) => {
       const rects = arrayRects[ai];
@@ -288,14 +312,24 @@ export function drawGroundArray(
       const rowBands = [...rowMap.values()].sort(
         (a, b) => Math.min(...a.map(r => r.y)) - Math.min(...b.map(r => r.y)));
 
-      // Modules: clean flat CAD rectangles
+      // Modules: clean flat CAD rectangles (circuit mode → fill by DC string).
       for (const r of rects) {
         const x = toSvgX(r.x), y = toSvgY(r.y);
         const w = Math.max(r.w * metersToFt(1) * scale, 3);
         const h = Math.max(r.h * metersToFt(1) * scale, 2);
-        els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="#cfe0f4" stroke="${color}" stroke-width="0.9"/>`);
+        const sIdx = rectString.get(r);
+        const mColor = (circuit && sIdx != null) ? circuit.colors[sIdx % circuit.colors.length] : color;
+        const mFill  = (circuit && sIdx != null) ? mColor : '#cfe0f4';
+        const mFillOp = (circuit && sIdx != null) ? '0.20' : '1';
+        els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${mFill}" fill-opacity="${mFillOp}" stroke="${mColor}" stroke-width="0.9"/>`);
         if (h > 6) {
-          els.push(`<line x1="${x.toFixed(1)}" y1="${(y + h / 2).toFixed(1)}" x2="${(x + w).toFixed(1)}" y2="${(y + h / 2).toFixed(1)}" stroke="${color}" stroke-width="0.35" opacity="0.5"/>`);
+          els.push(`<line x1="${x.toFixed(1)}" y1="${(y + h / 2).toFixed(1)}" x2="${(x + w).toFixed(1)}" y2="${(y + h / 2).toFixed(1)}" stroke="${mColor}" stroke-width="0.35" opacity="0.5"/>`);
+        }
+        // Circuit mode: stamp the string tag (S1/S2…) on each module.
+        if (circuit && sIdx != null && h > 7 && w > 10) {
+          els.push(drawText(x + w / 2, y + h / 2 + 2.2, `S${sIdx + 1}`, {
+            anchor: 'middle', fontSize: 6, fill: mColor, fontWeight: 'bold',
+          }));
         }
       }
 

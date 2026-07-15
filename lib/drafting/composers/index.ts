@@ -239,6 +239,9 @@ export function getArrayPlanFromCAD(
   input: PermitInputShape,
   ctx?: RenderContext | null,
   panelColorById?: Map<string, string> | null,
+  // Ground circuit mode (PV-1BG): color the ground modules by DC string so the
+  // circuit sheet is a real string map, not a clone of PV-1G's physical layout.
+  groundCircuit?: { strings: number; colors: string[] } | null,
 ): string {
   console.log('[CAD COMPOSER] getArrayPlanFromCAD — using pre-resolved cad', {
     systemType:  cad.systemType,
@@ -312,7 +315,7 @@ export function getArrayPlanFromCAD(
       svg = drawFencePlan(dInput, intent, cad, ctx);
       break;
     case 'ground_mount':
-      svg = drawGroundArray(dInput, intent, cad, ctx);
+      svg = drawGroundArray(dInput, intent, cad, ctx, groundCircuit);
       break;
     case 'roof':
     default:
