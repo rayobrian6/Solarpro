@@ -535,6 +535,33 @@ export function drawRoofPlan(
       _siteLegend.push({ swatch: '#2b6cb0', label: 'Ground-mount array (see ground sheets)' });
       if (_hyb.fence.length) _siteLegend.push({ swatch: '#1a7a3a', label: 'Solar fence run (see fence sheets)' });
     }
+    // Fence DIRECTION indicator — the fence sits 100+ ft off-frame; instead of
+    // ballooning the window, point to WHERE it is with a bearing arrow at the
+    // plan edge + distance (Ray: "lost visuals on where the fence goes"). The
+    // fence itself is detailed on PV-1F.
+    if (_hyb.fence.length) {
+      const fPts = _hyb.fence.flatMap(f => [f.line[0], f.line[1]]);
+      const fLat = fPts.reduce((s, p) => s + p.lat, 0) / fPts.length;
+      const fLng = fPts.reduce((s, p) => s + p.lng, 0) / fPts.length;
+      // Arrow points toward the fence's true plan position (same frame as the
+      // ground overlay + mini-map), clamped to the draw-zone edge. Distance in
+      // real feet can't be derived here — the overlay frame is normalized, not
+      // GPS — so the label carries the fence run length + a "SEE PV-1F" pointer,
+      // not a fabricated distance.
+      const cx = dz.x + dz.width / 2, cy = dz.y + dz.height / 2;
+      let ux = toX(fLng) - cx, uy = toY(fLat) - cy;
+      const mag = Math.hypot(ux, uy) || 1; ux /= mag; uy /= mag;
+      const halfW = dz.width / 2 - 30, halfH = dz.height / 2 - 30;
+      const t = Math.min(
+        Math.abs(ux) > 1e-6 ? halfW / Math.abs(ux) : Infinity,
+        Math.abs(uy) > 1e-6 ? halfH / Math.abs(uy) : Infinity);
+      const ax = cx + ux * t, ay = cy + uy * t;
+      const a2x = ax + ux * 24, a2y = ay + uy * 24;
+      els.push(`<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${a2x.toFixed(1)}" y2="${a2y.toFixed(1)}" stroke="#1a7a3a" stroke-width="2.6"/>`);
+      els.push(`<path d="M${a2x.toFixed(1)},${a2y.toFixed(1)} L${(a2x - ux * 9 - uy * 4.5).toFixed(1)},${(a2y - uy * 9 + ux * 4.5).toFixed(1)} L${(a2x - ux * 9 + uy * 4.5).toFixed(1)},${(a2y - uy * 9 - ux * 4.5).toFixed(1)} Z" fill="#1a7a3a"/>`);
+      const fLen = _hyb.fence[0]?.label?.match(/·\s*([^·]+L\.F\.)/)?.[1]?.trim() ?? 'SOLAR FENCE';
+      els.push(`<text x="${ax.toFixed(1)}" y="${(ay - 8).toFixed(1)}" font-size="7" font-weight="bold" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2.6" paint-order="stroke">SOLAR FENCE ${fLen} → SEE PV-1F</text>`);
+    }
   }
 
   // ── Draw roof planes ──
