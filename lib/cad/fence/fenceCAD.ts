@@ -30,7 +30,7 @@ import {
 const INCHES_TO_METERS = 0.0254;
 const DEFAULT_PANEL_HEIGHT_FT = 6;    // standard fence panel height
 const DEFAULT_POST_SPACING_FT = 8;
-const DEFAULT_POST_EMBED_FT   = 3;
+const DEFAULT_POST_EMBED_FT   = 4;    // SolFence spec: 2-3/8" pipe DRIVEN 4' min (matches structural-engine SOLFENCE_MIN_DRIVEN_FT)
 const DEFAULT_RAIL_COUNT      = 2;
 const DEFAULT_PANEL_WIDTH_FT  = 3.28; // ~1m wide panels for fence
 const PANEL_GAP_M             = 0.01;
