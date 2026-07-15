@@ -1665,12 +1665,13 @@ export function drawRoofPlan(
   // the fence/ground detail sheets. Ray 2026-07-14: "roof+ground hero, fence as
   // inset/ref". Fills the otherwise-empty lower-right of the draw zone.
   if (!isBranchColorMode && _hyb && (_hyb.ground.length || _hyb.fence.length)) {
-    const bw = 316, bh = 328;
+    const bw = 288, bh = 296;
     const bx = W - zones.dims.right - bw - 8;
-    // Centered in the right-side void (between the to-scale ground overlay above
-    // and the sheet bottom) so the residual white is balanced, not pooled on top.
-    const by = Math.round((zones.dims.top + (H - zones.dims.bottom) - bh) / 2) + 40;
-    const mapH = 190;                         // mini-map band height; table below
+    // Ray 2026-07-14: was floated dead-center over the map. Tuck it into the
+    // BOTTOM-right corner of the plan (out of the middle) — a corner locator key
+    // reads as standard CAD furniture, not a box dumped on the aerial.
+    const by = (H - zones.dims.bottom) - bh - 34;   // clears the compass rose at the bottom-right
+    const mapH = 168;                         // mini-map band height; table below
     const ins: string[] = [];
     ins.push(`<g class="pv1-sitekey">`);
     ins.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
