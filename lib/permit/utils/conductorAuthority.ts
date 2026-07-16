@@ -152,7 +152,9 @@ export function wireGaugeForOcpd(ocpdAmps: number): string {
   if (ocpdAmps <= 115) return '#2 AWG';
   if (ocpdAmps <= 130) return '#1 AWG';
   if (ocpdAmps <= 150) return '#1/0 AWG';
-  return '#2/0 AWG';
+  if (ocpdAmps <= 175) return '#2/0 AWG';
+  if (ocpdAmps <= 200) return '#3/0 AWG';
+  return '#4/0 AWG'; // 230A @ 75°C — top of the residential service range
 }
 
 /** One micro branch row from a device count + per-device amps — the ONE
@@ -368,13 +370,8 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
       });
     }
 
-    const branchOcpds = isM ? microBranches.map(b => b.ocpdAmps) : dcStrings.map(s => s.ocpdAmps ?? 0);
-    const governingOcpd = branchOcpds.length ? Math.max(...branchOcpds) : 20;
-    // Per-sub EGC is always NEC 250.122 on the sub's own governing OCPD — the
-    // engine value is a whole-system figure and belongs to the aggregate.
-    const egc = { gauge: getEGCSize(governingOcpd), basisOcpd: governingOcpd, source: 'nec-250.122' as const };
-
     // Sub AC feeder — Σ of THIS sub's device/inverter output amps.
+    // (Computed BEFORE the EGC so the feeder OCPD can govern it — see below.)
     let subAcA = 0;
     if (isM) {
       subAcA = deviceCount * (perMicroA ?? 0);
@@ -386,6 +383,16 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
     }
     const subContA = subAcA * 1.25;
     const subOcpd = subAcA > 0 ? (necNextStandardOcpd(subContA) || null) : null;
+
+    // Governing OCPD for the per-sub EGC = the AC FEEDER's OCPD (it sits next
+    // to the "AC FEEDER → POI" column). The old branch-max basis broke on
+    // string subs: DC strings with ≤2 strings carry NO per-string OCPD, so
+    // max(0,0)=0 printed "GOVERNING OCPD 0A" and getEGCSize(0) → #14 AWG on a
+    // 60A-protected feeder (NEC 250.122 requires #10). Branch-level EGCs
+    // (#12 @ 20A micro branches) still live on the branch rows themselves.
+    const branchOcpds = (isM ? microBranches.map(b => b.ocpdAmps) : dcStrings.map(s => s.ocpdAmps ?? 0)).filter(n => n > 0);
+    const governingOcpd = subOcpd ?? (branchOcpds.length ? Math.max(...branchOcpds) : 20);
+    const egc = { gauge: getEGCSize(governingOcpd), basisOcpd: governingOcpd, source: 'nec-250.122' as const };
 
     return {
       key,

@@ -19,6 +19,7 @@
 
 import type { RunSegment, MicroBranch } from './computed-system';
 import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
+import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
 import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
@@ -3000,7 +3001,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   //    shared panel + disconnect (lib/permit/utils/sldAdapter.buildHybridAcCollection). ──
   const acCollection = acCollectionFromLanes(lanes);
   const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
-  const totalAcKw = Number(input.acOutputKw) || lanes.reduce((s, b) => s + (b.acOutputKw ?? 0), 0);
+  // MULTI-LANE total AC = Σ of the lanes THIS sheet draws. input.acOutputKw is
+  // the legacy single-system figure and on Stowell it lagged the design
+  // (19.39 kW / "81 A" printed beside lanes summing 34.76 kW / Σ190A OCPDs —
+  // and the service feeder "SIZED AT Σ 81A" inherited the lie). Lanes win.
+  const _laneAcKw = lanes.reduce((s, b) => s + (b.acOutputKw ?? 0), 0);
+  const totalAcKw = _laneAcKw > 0 ? _laneAcKw : (Number(input.acOutputKw) || 0);
   const dcKw = lanes.reduce((s, b) => s + ((b.totalModules ?? 0) * (b.panelWatts ?? 0)) / 1000, 0)
     || (input.totalModules * input.panelWatts) / 1000;
 
@@ -3169,13 +3175,17 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // PV → J-box (open-air branch circuits on roof), J-box → combiner (conduit)
       {
         const run = laneRun(b, 'BRANCH_RUN') ?? laneRun(b, 'ROOF_RUN');
-        const fb = [`${nb} AC BRANCH CIRCUIT${nb>1?'S':''}`, `${b.acWireGauge ?? '#10 AWG'} THWN-2 + EGC`, b.key === 'roof' ? 'NEC 690.12 RSD' : 'AT GRADE'];
+        // Branch circuits are sized to the 20A branch OCPD (#12), NOT the lane
+        // FEEDER gauge — b.acWireGauge is the 90A feeder's #3 and stamping it
+        // on the branches overstated them 3 sizes (audit 2026-07-16).
+        const fb = [`${nb} AC BRANCH CIRCUIT${nb>1?'S':''}`, `${wireGaugeForOcpd(20)} THWN-2 + EGC`, b.key === 'roof' ? 'NEC 690.12 RSD' : 'AT GRADE'];
         const {lines} = runLines(run, fb);
         const y = resolveSegY(pvPt.x, _jbIn.x, laneY);
         parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_JBOX`, pvPt.x, y, _jbIn.x, y, run, lines, false, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'), lines));
       }
       {
-        const fb = [`${b.acWireGauge ?? '#10 AWG'} THWN-2 + EGC`, `IN CONDUIT — NEC 690.31`];
+        // J-box → combiner still carries the individual 20A branch circuits.
+        const fb = [`${wireGaugeForOcpd(20)} THWN-2 + EGC`, `IN CONDUIT — NEC 690.31`];
         parts.push(renderWireRun(buildWireRun(`LANE_${tag}_JBOX_TO_COMBINER`, _jbOut.x, laneY, cr.lx, laneY, undefined, fb, false, 'RACEWAY'), fb));
       }
       feedX = cr.feederOutX;
@@ -3274,10 +3284,15 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     parts.push(ln(xSingleDisco, tailY + 55, xSingleDisco, tailY + 70, {stroke:'#2E7D32', sw:1.0, dash:'4,3'}));
     {
       const run = laneRun(lanes[0], 'DISCO_TO_METER_RUN');
-      const {lines:la} = runLines(run, [`${input.acWireGauge ?? '#4 AWG'} THWN-2 + EGC`, `${acCollection.disconnectA}A`]);
+      // System-tail conductors are protected by the tap OCPD — size them FROM
+      // it (NEC 310.16). input.acWireGauge is the legacy single-system user
+      // field; on Stowell it printed "#10 AWG ... 200A" on the Σ190A feeder
+      // (audit 2026-07-16). 200A → #3/0 Cu via wireGaugeForOcpd.
+      const _tailGauge = wireGaugeForOcpd(acCollection.disconnectA);
+      const {lines:la} = runLines(run, [`${_tailGauge} THWN-2 + EGC`, `${acCollection.disconnectA}A`]);
       const yA = resolveSegY(panelOutX, sysDisco.loadInX, tailY);
       parts.push(renderWireRun(buildWireRun('PANEL_TO_SYSDISCO', panelOutX, yA, sysDisco.loadInX, yA, run, la, false, 'RACEWAY'), la));
-      const {lines:lb} = runLines(run, [`${input.acWireGauge ?? '#4 AWG'} THWN-2 + EGC`, `${acCollection.disconnectA}A → POI`]);
+      const {lines:lb} = runLines(run, [`${_tailGauge} THWN-2 + EGC`, `${acCollection.disconnectA}A → POI`]);
       const yB = resolveSegY(sysDisco.lineOutX, xPOI, tailY);
       parts.push(renderWireRun(buildWireRun('SYSDISCO_TO_POI', sysDisco.lineOutX, yB, xPOI, yB, run, lb, false, 'RACEWAY'), lb));
       parts.push(circ(xPOI, tailY, 4, {fill:BLK, sw:0}));
@@ -3298,7 +3313,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   parts.push(mspResult.svg);
   {
     const run = findSharedRun('DISCO_TO_METER_RUN');
-    const fb = [`${input.acWireGauge ?? '#6 AWG'} THWN-2 + EGC`, `IN ${input.acConduitType ?? 'EMT'}`, `SIZED AT Σ ${Math.round(totalAcKw * 1000 / 240)}A`];
+    // Same tap-OCPD sizing as the disco segments above (was the user's legacy
+    // single-system gauge; "SIZED AT Σ" now reflects the true lane-sum amps).
+    const fb = [`${wireGaugeForOcpd(acCollection.disconnectA)} THWN-2 + EGC`, `IN ${input.acConduitType ?? 'EMT'}`, `SIZED AT Σ ${Math.round(totalAcKw * 1000 / 240)}A — ${acCollection.disconnectA}A TAP OCPD`];
     const {lines} = runLines(run, fb);
     const y = resolveSegY(xPOI, mspResult.bkfdInX, tailY);
     // POI bus → MSP backfeed terminal (jog from bus level to terminal level)
