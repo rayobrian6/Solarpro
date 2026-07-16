@@ -286,7 +286,17 @@ export function getArrayPlanFromCAD(
     ? ({ ...input,
         project: { ...(input.project ?? {}),
           panelPositions: ((input.project?.panelPositions ?? []) as any[]).filter(p => classifyPanel(p) === 'roof') },
-        system: { ...(input.system ?? {}), totalPanels: _hybRoofSec!.totalPanels, totalDcKw: _hybRoofSec!.dcKw },
+        system: { ...(input.system ?? {}), totalPanels: _hybRoofSec!.totalPanels, totalDcKw: _hybRoofSec!.dcKw,
+          // Scope inverters to the ROOF sub too — unscoped, inverters[0] was the
+          // FENCE inverter and the roof sheet's callout printed the fence panel's
+          // wattage: "(N) 54 PV MODULES (440W)" on a 405W roof (Ray, 2026-07-16).
+          // Untagged configs (single-system) pass through unchanged.
+          inverters: (() => {
+            const _all = (input.system?.inverters ?? []) as Array<{ subSystemKey?: string }>;
+            const _roof = _all.filter(i => (i.subSystemKey ?? '').startsWith('roof'));
+            return _roof.length ? _roof : _all;
+          })(),
+        },
       } as typeof input)
     : null;
 

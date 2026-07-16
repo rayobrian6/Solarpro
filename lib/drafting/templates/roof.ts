@@ -424,14 +424,15 @@ export function drawRoofPlan(
   // fence. Their projected extents are unioned into the fit basis (below) so
   // computeFitWindow's zoom caps can never clip them like mere context.
   // (_hyb was built — and plan-rotated — in the global-rotation block above.)
-  // FIT BASIS = roof + GROUND only (Ray 2026-07-14: "roof+ground hero, fence as
-  // inset/ref"). The ground array sits adjacent to the house (~30-60 ft); the
-  // fence run is often 100+ ft away (Stowell: ~124 ft), and unioning it into the
-  // window ballooned the fit to ~4× the roof, shrinking the roof into a corner
-  // with a dead yard of white between (no parcel data to fill it). The fence is
-  // still SHOWN — as a compact SITE KEY inset (below) — so all variety reads
-  // without the balloon. Ground points only feed the window; fence does not.
-  const _gPts = _hyb ? _hyb.ground.flatMap(g => g.ring) : [];
+  // FIT BASIS = roof + GROUND (+ FENCE when the site layer exists).
+  // Ray 2026-07-14 excluded the fence ("roof+ground hero") because with NO
+  // parcel data the union ballooned into a dead white yard. Ray 2026-07-16
+  // reversed it for parcel-backed sheets: "show the cached parcel from
+  // nearmap [rather] than trying to show tid bits" — with the Nearmap/GIS
+  // layer the yard is real content and the fence is subject matter ON it.
+  // Parcel-less jobs keep the old tight framing (fence = arrow only).
+  const _fFitPts = (_site && _hyb) ? _hyb.fence.flatMap(f => f.line) : [];
+  const _gPts = _hyb ? [..._hyb.ground.flatMap(g => g.ring), ..._fFitPts] : [];
   const _hLngs = _gPts.map(p => p.lng);
   const _hLats = _gPts.map(p => p.lat);
   const subjMinLng = _hLngs.length ? Math.min(minLng, ..._hLngs) : minLng;
@@ -1588,8 +1589,43 @@ export function drawRoofPlan(
       // parcel was drawn on this sheet.
       ..._siteLegend,
     ];
-    const lgW = 128, rowH = 13, lgX = W - zones.dims.right - lgW + 8, lgY = zones.dims.top + 6;
+    const lgW = 128, rowH = 13;
     const lgH = 13 + lg.length * rowH;
+    // Corner-pick the legend: the fixed top-right float sat ON TOP of the
+    // fence run on the Stowell site sheet (Ray 2026-07-16: "the legend
+    // covering where the [fence] should be"). Score each candidate corner by
+    // how many SUBJECT points (modules, ground rings, fence line, labels)
+    // fall under the panel; take the emptiest. Bottom-right is excluded —
+    // the compass rose + SYSTEM REFERENCE live there.
+    const _subjPx: Array<[number, number]> = [];
+    for (const p of regPanels as any[]) if (isFinite(p?.lng) && isFinite(p?.lat)) _subjPx.push([toX(p.lng), toY(p.lat)]);
+    if (_hyb) {
+      for (const g of _hyb.ground) for (const p of g.ring) _subjPx.push([toX(p.lng), toY(p.lat)]);
+      for (const f of _hyb.fence) {
+        for (const p of f.line) _subjPx.push([toX(p.lng), toY(p.lat)]);
+        _subjPx.push([toX(f.labelPt.lng), toY(f.labelPt.lat)]);
+        // sample along the run so a line THROUGH the corner counts, not just endpoints
+        for (let t = 0.1; t < 1; t += 0.1) {
+          _subjPx.push([
+            toX(f.line[0].lng + (f.line[1].lng - f.line[0].lng) * t),
+            toY(f.line[0].lat + (f.line[1].lat - f.line[0].lat) * t),
+          ]);
+        }
+      }
+    }
+    const _dzX0 = zones.dims.left, _dzX1 = W - zones.dims.right;
+    const _cands: Array<{ x: number; y: number; bias: number }> = [
+      { x: _dzX1 - lgW + 8,  y: zones.dims.top + 6, bias: 0 },   // TR (historic default)
+      { x: _dzX0 + 6,        y: zones.dims.top + 6, bias: 1 },   // TL
+      { x: _dzX0 + 6,        y: (H - zones.dims.bottom) - lgH - 40, bias: 2 }, // BL (above scale bar)
+    ];
+    let lgX = _cands[0].x, lgY = _cands[0].y, _bestScore = Infinity;
+    for (const c of _cands) {
+      const hits = _subjPx.reduce((n, [px, py]) =>
+        n + (px >= c.x - 6 && px <= c.x + lgW + 6 && py >= c.y - 6 && py <= c.y + lgH + 6 ? 1 : 0), 0);
+      const score = hits * 10 + c.bias;
+      if (score < _bestScore) { _bestScore = score; lgX = c.x; lgY = c.y; }
+    }
     els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="${lgH}" rx="2" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
     els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="12" fill="#000"/>`);
     els.push(drawText(lgX + lgW / 2, lgY + 8.5, 'LEGEND', { anchor: 'middle', fontSize: 6, fontWeight: 'bold', fill: '#fff', letterSpacing: 1 }));
@@ -1771,18 +1807,16 @@ export function drawRoofPlan(
     els.push(ins.join(''));
   }
 
-  // ── Fence plan-view inset (PV-1 AND PV-1B) ─────────────────────────────────
-  // Ray 2026-07-16: "can't even see the solfence from the top down on pv1...
-  // move some of the overlays to the dead space." The run itself is usually
-  // 100+ ft off-frame (only the direction arrow shows), so a self-scaled
-  // top-down strip draws in the dead space, bottom-left, clear of the
-  // SYSTEM REFERENCE table (bottom-right) and the compass rose.
-  if (_hyb && _hyb.fence.length) {
+  // ── Fence plan-view inset — PV-1B ONLY ─────────────────────────────────────
+  // PV-1B has no site layer, so the schematic strip + PV-1BF pointer is the
+  // fence's only presence there. On the SITE sheet the fence now draws in its
+  // TRUE position (fence joined the fit basis above — Ray 2026-07-16 rejected
+  // the inset there: "absolutely wrong... show the cached parcel").
+  if (isBranchColorMode && _hyb && _hyb.fence.length) {
     const fw = 300, fh = 78;
     const fx = zones.dims.left + 8;
     const fy = (H - zones.dims.bottom) - fh - 34;
-    els.push(fenceInsetSVG(_hyb.fence, { x: fx, y: fy, w: fw, h: fh },
-      isBranchColorMode ? 'PV-1BF' : 'PV-1F'));
+    els.push(fenceInsetSVG(_hyb.fence, { x: fx, y: fy, w: fw, h: fh }, 'PV-1BF'));
   }
   els.push(drawSVGClose());
   return els.join('');
