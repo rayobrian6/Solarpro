@@ -535,12 +535,43 @@ export function drawRoofPlan(
       _siteLegend.push({ swatch: '#2b6cb0', label: 'Ground-mount array (see ground sheets)' });
       if (_hyb.fence.length) _siteLegend.push({ swatch: '#1a7a3a', label: 'Solar fence run (see fence sheets)' });
     }
-    // Fence DIRECTION indicator — the fence sits 100+ ft off-frame; instead of
-    // ballooning the window, point to WHERE it is with a bearing arrow at the
-    // plan edge + distance (Ray: "lost visuals on where the fence goes"). The
-    // fence itself is detailed on PV-1F.
+    // Fence on the main plan: draw the run's VISIBLE portion (clipped to the
+    // draw zone) at its true rotated bearing. The direction arrow is only the
+    // fallback when the fence is entirely (or nearly) off-frame — its angle is
+    // direction-to-fence, NOT fence bearing, so it must never stand in for a
+    // drawable fence (that regressed the plan-rotation e2e test when the
+    // mini-map's real fence line was removed).
+    const _fenceOffFrame: typeof _hyb.fence = [];
     if (_hyb.fence.length) {
-      const fPts = _hyb.fence.flatMap(f => [f.line[0], f.line[1]]);
+      // Liang-Barsky segment/rect clip against the draw zone
+      const clipToDz = (x1: number, y1: number, x2: number, y2: number): [number, number, number, number] | null => {
+        const dx = x2 - x1, dy = y2 - y1;
+        let t0 = 0, t1 = 1;
+        const edges: Array<[number, number]> = [
+          [-dx, x1 - dz.x], [dx, dz.x + dz.width - x1],
+          [-dy, y1 - dz.y], [dy, dz.y + dz.height - y1],
+        ];
+        for (const [p, q] of edges) {
+          if (p === 0) { if (q < 0) return null; continue; }
+          const r = q / p;
+          if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+          else { if (r < t0) return null; if (r < t1) t1 = r; }
+        }
+        return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
+      };
+      for (const f of _hyb.fence) {
+        const c = clipToDz(toX(f.line[0].lng), toY(f.line[0].lat), toX(f.line[1].lng), toY(f.line[1].lat));
+        // draw only when a meaningful run is visible; tiny slivers → arrow
+        if (c && Math.hypot(c[2] - c[0], c[3] - c[1]) >= 40) {
+          els.push(`<line x1="${c[0].toFixed(1)}" y1="${c[1].toFixed(1)}" x2="${c[2].toFixed(1)}" y2="${c[3].toFixed(1)}" stroke="#1a7a3a" stroke-width="3" stroke-linecap="round"/>`);
+          els.push(`<text x="${((c[0] + c[2]) / 2).toFixed(1)}" y="${((c[1] + c[3]) / 2 - 5).toFixed(1)}" font-size="6.2" font-weight="700" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">SOLAR FENCE → SEE PV-1F</text>`);
+        } else {
+          _fenceOffFrame.push(f);
+        }
+      }
+    }
+    if (_fenceOffFrame.length) {
+      const fPts = _fenceOffFrame.flatMap(f => [f.line[0], f.line[1]]);
       const fLat = fPts.reduce((s, p) => s + p.lat, 0) / fPts.length;
       const fLng = fPts.reduce((s, p) => s + p.lng, 0) / fPts.length;
       // Arrow points toward the fence's true plan position (same frame as the
@@ -559,7 +590,7 @@ export function drawRoofPlan(
       const a2x = ax + ux * 24, a2y = ay + uy * 24;
       els.push(`<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${a2x.toFixed(1)}" y2="${a2y.toFixed(1)}" stroke="#1a7a3a" stroke-width="2.6"/>`);
       els.push(`<path d="M${a2x.toFixed(1)},${a2y.toFixed(1)} L${(a2x - ux * 9 - uy * 4.5).toFixed(1)},${(a2y - uy * 9 + ux * 4.5).toFixed(1)} L${(a2x - ux * 9 + uy * 4.5).toFixed(1)},${(a2y - uy * 9 - ux * 4.5).toFixed(1)} Z" fill="#1a7a3a"/>`);
-      const fLen = _hyb.fence[0]?.label?.match(/·\s*([^·]+L\.F\.)/)?.[1]?.trim() ?? 'SOLAR FENCE';
+      const fLen = _fenceOffFrame[0]?.label?.match(/·\s*([^·]+L\.F\.)/)?.[1]?.trim() ?? 'SOLAR FENCE';
       els.push(`<text x="${ax.toFixed(1)}" y="${(ay - 8).toFixed(1)}" font-size="7" font-weight="bold" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2.6" paint-order="stroke">SOLAR FENCE ${fLen} → SEE PV-1F</text>`);
     }
   }
