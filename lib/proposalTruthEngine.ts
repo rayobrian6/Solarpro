@@ -63526,6 +63526,11 @@ export function calculate25yrProjection(params: {
   const srecValuePerKwh = (profile.srec_available && srecValueBase && srecValueBase > 0)
     ? (srecValueBase / 1000)
     : 0;
+  // Fixed-term REC CONTRACTS pay for a set number of years, not the full 25-yr
+  // system life like an open/ongoing SREC market. Illinois Shines (Adjustable
+  // Block Program) DG is a 15-year REC contract — applying the REC price across
+  // all 25 projection years overstates the incentive by ~67% (25/15). Cap it.
+  const srecTermYears = /illinois shines|adjustable block/i.test(profile.srec_program_name || '') ? 15 : 25;
 
   // SPEC §10 HARD FAIL check
   if (
@@ -63620,8 +63625,9 @@ export function calculate25yrProjection(params: {
       : yearRemainingBill;
     remainingUtilityCost += yearRemainingWithCredit;
 
-    // SPEC §7: SREC income added to solar scenario
-    const yearSrecIncome = srecValuePerKwh * yearProduction;
+    // SPEC §7: SREC income added to solar scenario (capped to the REC contract
+    // term — e.g. Illinois Shines DG pays for 15 years, not the full 25).
+    const yearSrecIncome = i < srecTermYears ? srecValuePerKwh * yearProduction : 0;
     srecIncome25yr += yearSrecIncome;
 
     // Cumulative with-solar: solar payment (while loan active) + remaining utility

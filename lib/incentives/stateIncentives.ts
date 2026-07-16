@@ -332,9 +332,9 @@ export const STATE_INCENTIVES: Record<string, StateIncentiveProfile> = {
     incentives: [
       {
         id: 'il_shines', name: 'Illinois Shines (Adjustable Block Program)', type: 'srec',
-        valueType: 'per_kwh', value: 0.075,
+        valueType: 'per_kwh', value: 0.0808,   // ~$80.77/MWh (Group B, 0-10kW, 2026-27); exact price is group+size-tiered — see lib/incentives/illinoisShines.ts
         residential: true, commercial: true,
-        description: 'Illinois Shines provides Renewable Energy Credits (RECs) for solar. Residential systems receive upfront payment for 15 years of RECs.',
+        description: '2026-27 DG REC prices (per REC/MWh, 15-yr contract): Group A (Ameren/downstate) $70.37 · Group B (ComEd/north) $80.77 for 0-10 kW. Customer-owned residential adds a $20/REC adder (offsets the repealed federal §25D). Exact value varies by group + system size.',
         administrator: 'Illinois Power Agency',
         websiteUrl: 'https://illinoisshines.com/',
         stackable: true,

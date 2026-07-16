@@ -62,6 +62,12 @@ import {
   type PanelSpec,
 } from '../proposalTruthEngine';
 import {
+  illinoisShinesGroupForUtility,
+  illinoisShinesRecPrice,
+  IL_SHINES_PROGRAM_YEAR,
+  IL_SHINES_CUSTOMER_OWNED_ADDER,
+} from '../incentives/illinoisShines';
+import {
   resolveDefaultFencePanelSpec,
   getPanelDegradationRate,
 } from '../systemEquipmentResolver';
@@ -495,6 +501,25 @@ export function buildCanonicalProposal(
   });
 
   const utilityProfile   = builtProfile.profile;
+  // ── Illinois Shines: replace the flat per-utility REC estimate with the
+  //    accurate 2026-27 price (Group A/B × size tier) + the $20/REC customer-
+  //    owned adder (residential federal ITC/§25D is repealed for 2026+, so a
+  //    residential customer-owned project qualifies). Feeds BOTH the 25-yr
+  //    projection and the incentive/SREC summary. Off-IL or an unrecognized IL
+  //    utility (co-op/muni) keeps the profile's own estimate.
+  let effectiveUtilityProfile = utilityProfile;
+  if (utilityProfile.srec_available && utilityProfile.state === 'IL') {
+    const _ilGroup = illinoisShinesGroupForUtility(utilityProfile.utility_name);
+    if (_ilGroup) {
+      const _rec = illinoisShinesRecPrice({
+        group:           _ilGroup,
+        sizeKwAc:        resolvedSystemSizeKw / 1.2,   // DC→AC estimate for the size tier
+        customerOwned:   input.purchaseMode === 'cash' || input.purchaseMode === 'finance',
+        takesFederalItc: !!input.isCommercial,         // residential §25D repealed → false → adder eligible
+      });
+      effectiveUtilityProfile = { ...utilityProfile, srec_price_estimate: _rec.total, srec_value_estimate: _rec.total };
+    }
+  }
   const resolvedRate     = builtProfile.resolved_rate;
   const escalationRate   = utilityProfile.escalation_rate || 0.03;
 
@@ -702,7 +727,7 @@ export function buildCanonicalProposal(
     annualProductionKwh:  annualKwh,
     annualUsageKwh:       input.annualUsageKwh,
     retailRate:           resolvedRate,
-    profile:              utilityProfile,
+    profile:              effectiveUtilityProfile,
     systemCost:           effectiveFinal,
     financeTotal:         undefined,   // cash basis: netDifference independent of purchase mode
     solarAnnualPayment,
@@ -715,7 +740,7 @@ export function buildCanonicalProposal(
     annualProductionKwh:  annualKwh,
     annualUsageKwh:       input.annualUsageKwh,
     retailRate:           resolvedRate,
-    profile:              utilityProfile,
+    profile:              effectiveUtilityProfile,
     systemCost:           effectiveFinal,
     financeTotal,
     solarAnnualPayment,
@@ -834,13 +859,13 @@ export function buildCanonicalProposal(
   const incentivesAllowed = policyEffect !== 'at_risk';
   const policyMessage    = getPolicyMessage(utilityProfile);
   const netMeteringSummary = getNetMeteringSummary(utilityProfile);
-  const srecSummary      = getSrecSummary(utilityProfile, annualKwh);
+  const srecSummary      = getSrecSummary(effectiveUtilityProfile, annualKwh);
   const failsafeMessage  = getFailsafeMessage(builtProfile);
 
   const policy = {
-    srecAvailable:          utilityProfile.srec_available,
-    srecProgramName:        utilityProfile.srec_program_name,
-    srecPricePerMwh:        utilityProfile.srec_price_estimate,
+    srecAvailable:          effectiveUtilityProfile.srec_available,
+    srecProgramName:        effectiveUtilityProfile.srec_program_name,
+    srecPricePerMwh:        effectiveUtilityProfile.srec_price_estimate,
     incentivesAllowed,
     policyMessage,
     netMeteringSummary,
