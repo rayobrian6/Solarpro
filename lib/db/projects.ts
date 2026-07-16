@@ -690,6 +690,38 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   `;
 
   if (existing.length > 0) {
+    // ── Subsystem-wipe guard (2026-07-16) ─────────────────────────────────────
+    // A studio reload bug saved Stowell's hybrid layout with its 48 roof +
+    // 16 ground panels silently GONE (project_versions: 81 panels → {} →
+    // 19 fence in three saves over 3 minutes). Same fail-loud doctrine as the
+    // coords guard above: refuse any single save that makes an entire ≥4-panel
+    // subsystem vanish. One-by-one deletion still works (the last save of a
+    // shrinking subsystem sees <4 stored panels), and small arrays are exempt.
+    try {
+      const storedRows = await sql`
+        SELECT p->>'systemType' AS st, COUNT(*)::int AS n
+        FROM layouts, jsonb_array_elements(coalesce(panels, '[]'::jsonb)) p
+        WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+        GROUP BY 1
+      `;
+      const incoming = new Set((data.panels || []).map(p => ((p as { systemType?: string }).systemType ?? 'roof')));
+      const wiped = storedRows.filter((r: { st: string | null; n: number }) =>
+        (r.n ?? 0) >= 4 && !incoming.has(r.st ?? 'roof'));
+      if (wiped.length > 0) {
+        const desc = wiped.map((r: { st: string | null; n: number }) => `${r.st ?? 'roof'} (${r.n} panels)`).join(', ');
+        console.error('[LAYOUT_SUBSYSTEM_WIPE_BLOCKED]', { projectId: data.projectId, wiped: desc, incomingCount: (data.panels || []).length });
+        throw new Error(
+          `LAYOUT_SUBSYSTEM_WIPE: this save would remove the entire ${desc} sub-system in one step — ` +
+          `this is the signature of the reload data-loss bug, not a normal edit. ` +
+          `Refusing to save. If you really are removing the whole array, delete its panels in the studio first ` +
+          `(reduce it below 4 panels), then save.`,
+        );
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith('LAYOUT_SUBSYSTEM_WIPE')) throw e;
+      // census query failure must never block a legit save
+      console.warn('[LAYOUT_SUBSYSTEM_WIPE_GUARD] census failed, skipping guard:', (e as Error)?.message);
+    }
     // UPDATE existing layout
     const rows = await sql`
       UPDATE layouts SET
