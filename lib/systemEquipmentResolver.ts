@@ -50,7 +50,7 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
       attachmentType: 'Flush Mount',
       attachmentNote: 'Lag bolt into rafter with EPDM flashing',
       tiltRange:      'Follows roof pitch (0°–45°)',
-      warranty:       '10-year product warranty',
+      warranty:       '25-year product warranty', // IronRidge XR published warranty (extended 20→25yr in 2022) — was understated as 10yr; FIELD-VERIFY current docs
       certifications: 'UL 2703, IBC, ASCE 7',
     },
     attachmentCards: [

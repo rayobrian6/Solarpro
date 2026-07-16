@@ -334,25 +334,27 @@ export const STATE_INCENTIVES: Record<string, StateIncentiveProfile> = {
         id: 'il_shines', name: 'Illinois Shines (Adjustable Block Program)', type: 'srec',
         valueType: 'per_kwh', value: 0.0808,   // ~$80.77/MWh (Group B, 0-10kW, 2026-27); exact price is group+size-tiered — see lib/incentives/illinoisShines.ts
         residential: true, commercial: true,
-        description: '2026-27 DG REC prices (per REC/MWh, 15-yr contract): Group A (Ameren/downstate) $70.37 · Group B (ComEd/north) $80.77 for 0-10 kW. Customer-owned residential adds a $20/REC adder (offsets the repealed federal §25D). Exact value varies by group + system size.',
+        // Quote BOTH residential-relevant tiers — a 21 kW system prices in the
+        // 10-25 kW tier ($60.92+$20), and quoting only the 0-10 kW headline made
+        // customers recompute a contract ~$4.5k higher than the engine's correct one.
+        description: '2026-27 DG REC prices (per REC/MWh, 15-yr contract): Group A (Ameren/downstate) $70.37 (0-10 kW) / $60.92 (10-25 kW) · Group B (ComEd/north) $80.77 / $79.21. Customer-owned residential adds a $20/REC adder (offsets the repealed federal §25D). Your contract uses the tier matching your system size.',
         administrator: 'Illinois Power Agency',
         websiteUrl: 'https://illinoisshines.com/',
         stackable: true,
       },
       {
-        id: 'il_property_tax', name: 'Illinois Solar Property Tax Exemption', type: 'property_tax_exemption',
+        // 35 ILCS 200/10-5: IL's benefit is a SPECIAL ASSESSMENT (solar valued as
+        // if conventional, application required, lasts while in use) — the old
+        // "exempt for 4 years" copy was fabricated (no such statute).
+        id: 'il_property_tax', name: 'Illinois Solar Property Tax Special Assessment', type: 'property_tax_exemption',
         valueType: 'percent', value: 100,
         residential: true, commercial: false,
-        description: 'Solar energy systems exempt from property tax for 4 years.',
-        administrator: 'Illinois Department of Revenue', stackable: true,
+        description: 'Solar improvements are assessed as if conventional — no added property tax for the solar value while the system is in use (application required, 35 ILCS 200/10-5).',
+        administrator: 'County Assessor / Illinois Department of Revenue', stackable: true,
       },
-      {
-        id: 'il_sales_tax', name: 'Illinois Solar Sales Tax Exemption', type: 'sales_tax_exemption',
-        valueType: 'percent', value: 100,
-        residential: true, commercial: true,
-        description: 'Solar energy equipment exempt from state sales tax.',
-        administrator: 'Illinois Department of Revenue', stackable: true,
-      },
+      // il_sales_tax REMOVED (proposal audit 2026-07-16): Illinois has NO
+      // statewide solar sales/use-tax exemption (DSIRE lists none for IL) —
+      // this card was a false incentive claim shown to customers.
     ],
     totalResidentialValue: 'Illinois Shines REC payment (~$5,000-15,000) + tax exemptions',
     solarFriendlyRating: 5,

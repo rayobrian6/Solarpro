@@ -886,7 +886,9 @@ function PublicProposalView({
                       ${effectiveFinal.toLocaleString()}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      {purchaseMode === 'finance' ? `${financeTermYears}-yr loan` : 'One-time cost'} — you own the energy
+                      {/* This value is the SYSTEM PRICE (cash basis) — calling it the
+                          "25-yr loan" implied it was the financed total ($137k, not $59k). */}
+                      {purchaseMode === 'finance' ? `System price, financed over ${financeTermYears} yrs` : 'One-time cost'} — you own the energy
                     </div>
                   </div>
                 </div>
@@ -1128,7 +1130,7 @@ function PublicProposalView({
                 Your utility rate has been rising ~{(cp.utility.escalationRate * 100).toFixed(1)}%/year.
                 Solar locks in your energy cost today.
               </p>
-              <UtilityRateGraph utility={cp.utility} financial={cp.financial} />
+              <UtilityRateGraph utility={cp.utility} financial={cp.financial} annualProductionKwh={cp.production.annualKwh} />
             </div>
             <div data-block-id="cost-projection-chart">
               <CashFlowStoryCard
@@ -1485,7 +1487,10 @@ function PublicProposalView({
               <div className="relative flex items-end gap-1 mb-1" style={{ height: '80px' }}>
                 {cp.production.monthlyKwh.map((kwh, i) => {
                   const max = Math.max(...cp.production.monthlyKwh, 1);
-                  const barH = Math.max(2, Math.round((kwh / max) * 68));
+                  // 60px max: bar + ~16px month label must fit the 80px column —
+                  // at 68px the flexbox shrank every tall bar to one identical
+                  // height (May-Aug rendered flat despite distinct kWh).
+                  const barH = Math.max(2, Math.round((kwh / max) * 60));
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center justify-end" style={{ height: '80px' }}>
                       <div
@@ -1548,7 +1553,11 @@ function PublicProposalView({
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                  {/* Explicit even ticks — recharts' auto axis dropped an interior
+                      tick ($0/$85/$170/$340), printing a scale that reads nonlinear. */}
+                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`}
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax / 20) * 20]}
+                    ticks={(() => { const m = Math.ceil(Math.max(...monthlyBillData.map(d => d.before), 1) / 20) * 20; return [0, m / 4, m / 2, (3 * m) / 4, m]; })()} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`$${v}`, '']} />
                   <Bar dataKey="before" fill="#ef4444" radius={[3, 3, 0, 0]} name="Before Solar" opacity={0.6} />
                   <Bar dataKey="after" fill="#22c55e" radius={[3, 3, 0, 0]} name="After Solar" opacity={0.8} />
@@ -1682,7 +1691,12 @@ function PublicProposalView({
                 <div className="text-xs text-slate-500 mb-1">Your Solar Investment</div>
                 <div className="text-lg font-black text-white">${Math.round(solar_cost_total).toLocaleString()}</div>
                 <div className="text-xs text-slate-500 mt-1">
-                  {purchaseMode === 'finance' ? `${financeTermYears}-yr loan total` : 'One-time cash purchase'}
+                  {/* Value is cash-basis system price (canonical savings basis) — the
+                      old "25-yr loan total" label was false ($59,200 vs the real
+                      $137,100 financed total shown in the loan comparison table). */}
+                  {purchaseMode === 'finance'
+                    ? `System price — financed @ $${solar_payment_monthly}/mo`
+                    : 'One-time cash purchase'}
                 </div>
               </div>
 
@@ -2180,7 +2194,9 @@ function PublicProposalView({
         {/* Why Solar / Trust section */}
         <div className="proposal-sec grid grid-cols-1 md:grid-cols-3 gap-2" data-block-id="trust-performance">
           {[
-            { icon: <Shield size={20} />, title: '25-Year Warranty', desc: 'Full coverage on panels, inverter, and mounting system for complete peace of mind.' },
+            // Honest scope (audit 2026-07-16): "full coverage on panels, inverter,
+            // and mounting" was false whenever the inverter carries 10yr (SMA).
+            { icon: <Shield size={20} />, title: '25-Year Panel Warranty', desc: 'Panels carry a 25-year manufacturer warranty; inverter and racking carry their own manufacturer terms — see the equipment section.' },
             { icon: <Award size={20} />, title: 'Licensed & Insured', desc: 'Fully licensed installers with comprehensive insurance coverage on every job.' },
             { icon: <Star size={20} />, title: 'Local Expertise', desc: 'Deep knowledge of local utility rules, incentives, and permitting requirements.' },
           ].map(t => (

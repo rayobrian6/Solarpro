@@ -1803,7 +1803,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                       ${effectiveFinal.toLocaleString()}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      {purchaseMode === 'finance' ? `${financeTermYears}-yr loan` : 'One-time cost'} — you own the energy
+                      {/* Mirrors view page: cash-basis price, not the financed total. */}
+                      {purchaseMode === 'finance' ? `System price, financed over ${financeTermYears} yrs` : 'One-time cost'} — you own the energy
                     </div>
                   </div>
                 </div>
@@ -2365,7 +2366,9 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <div className="relative flex items-end gap-1 mb-1" style={{ height: '80px' }}>
                 {cp.production.monthlyKwh.map((kwh, i) => {
                   const max = Math.max(...cp.production.monthlyKwh, 1);
-                  const barH = Math.max(2, Math.round((kwh / max) * 68));
+                  // Mirrors view page: 60px so bar + label fit the 80px column
+                  // (68px flex-shrank all tall bars to one height).
+                  const barH = Math.max(2, Math.round((kwh / max) * 60));
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center justify-end" style={{ height: '80px' }}>
                       <div
@@ -2428,7 +2431,10 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                  {/* Mirrors view page: explicit even ticks (recharts dropped one). */}
+                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`}
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax / 20) * 20]}
+                    ticks={(() => { const m = Math.ceil(Math.max(...monthlyBillData.map(d => d.before), 1) / 20) * 20; return [0, m / 4, m / 2, (3 * m) / 4, m]; })()} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`$${v}`, '']} />
                   <Bar dataKey="before" fill="#ef4444" radius={[3, 3, 0, 0]} name="Before Solar" opacity={0.6} />
                   <Bar dataKey="after" fill="#22c55e" radius={[3, 3, 0, 0]} name="After Solar" opacity={0.8} />
@@ -2562,7 +2568,10 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <div className="text-xs text-slate-500 mb-1">Your Solar Investment</div>
                 <div className="text-lg font-black text-white">${Math.round(solar_cost_total).toLocaleString()}</div>
                 <div className="text-xs text-slate-500 mt-1">
-                  {purchaseMode === 'finance' ? `${financeTermYears}-yr loan total` : 'One-time cash purchase'}
+                  {/* Mirrors view page: "25-yr loan total" was false for a cash-basis value. */}
+                  {purchaseMode === 'finance'
+                    ? `System price — financed @ $${solar_payment_monthly}/mo`
+                    : 'One-time cash purchase'}
                 </div>
               </div>
 
@@ -2964,7 +2973,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
         {/* Why Solar / Trust section */}
         <div className="proposal-sec grid grid-cols-1 md:grid-cols-3 gap-2" data-block-id="trust-performance">
           {[
-            { icon: <Shield size={20} />, title: '25-Year Warranty', desc: 'Full coverage on panels, inverter, and mounting system for complete peace of mind.' },
+            // Mirrors view page: honest warranty scope (inverter/racking vary).
+            { icon: <Shield size={20} />, title: '25-Year Panel Warranty', desc: 'Panels carry a 25-year manufacturer warranty; inverter and racking carry their own manufacturer terms — see the equipment section.' },
             { icon: <Award size={20} />, title: 'Licensed & Insured', desc: 'Fully licensed installers with comprehensive insurance coverage on every job.' },
             { icon: <Star size={20} />, title: 'Local Expertise', desc: 'Deep knowledge of local utility rules, incentives, and permitting requirements.' },
           ].map(t => (

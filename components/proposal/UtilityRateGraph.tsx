@@ -15,9 +15,14 @@ import type { CanonicalUtility, CanonicalFinancial } from '@/lib/proposal/canoni
 interface UtilityRateGraphProps {
   utility: CanonicalUtility;
   financial: CanonicalFinancial;
+  /** Annual system production (kWh) — the energy the payment actually buys.
+   *  Without it the flat solar rate was computed against USAGE, which on an
+   *  oversized system (185% of usage) showed $0.309/kWh — telling the customer
+   *  solar costs 2× grid until ~2038 on the same page as a Year-7 payoff. */
+  annualProductionKwh?: number;
 }
 
-export function UtilityRateGraph({ utility, financial }: UtilityRateGraphProps) {
+export function UtilityRateGraph({ utility, financial, annualProductionKwh }: UtilityRateGraphProps) {
   const { rateHistory, rate, escalationRate, annualUsageKwh } = utility;
   const { solarPaymentMonthly } = financial;
 
@@ -31,12 +36,15 @@ export function UtilityRateGraph({ utility, financial }: UtilityRateGraphProps) 
     estimated: false,
   }));
 
-  // ── Solar flat line rate ── solarPaymentMonthly / (annualUsageKwh / 12) ───
+  // ── Solar flat line rate ── payment ÷ energy DELIVERED (production) ───────
   // Effective $/kWh the customer pays for solar (fixed, never escalates).
-  // Guard: if annualUsageKwh is 0 (edge case), show 0.
-  const monthlyUsageKwh = annualUsageKwh > 0 ? annualUsageKwh / 12 : 1;
+  // Divide by production, not usage: the payment buys every kWh the system
+  // makes. Falls back to usage only when production is unavailable.
+  const monthlyEnergyKwh = (annualProductionKwh ?? 0) > 0
+    ? (annualProductionKwh as number) / 12
+    : (annualUsageKwh > 0 ? annualUsageKwh / 12 : 1);
   const solarEffectiveRate = solarPaymentMonthly > 0
-    ? parseFloat((solarPaymentMonthly / monthlyUsageKwh).toFixed(4))
+    ? parseFloat((solarPaymentMonthly / monthlyEnergyKwh).toFixed(4))
     : 0;
 
   // ── Combine all data points for Y-axis scaling ────────────────────────────
