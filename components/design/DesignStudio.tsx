@@ -920,6 +920,13 @@ export default function DesignStudio({ project, onSave }: Props) {
   const zoomRef = useRef(zoom);
   const lastSavedPanelsRef = useRef<string>('[]');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Data-loss guard (task #3 root cause, 2026-07-16): NO save path may run
+  // before the DB restore has resolved. The autosave timer armed on MOUNT and
+  // fired 3s later — on a slow restore (cold Neon) it saved the EMPTY initial
+  // panel state over the stored layout (Stowell 07-15: 81 panels → {} → 19).
+  // The beforeunload beacon had the same hole. 'failed' keeps saves disabled
+  // too: if we couldn't READ the layout we must not risk WRITING over it.
+  const restoreStateRef = useRef<'pending' | 'done' | 'failed'>('pending');
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
   const fenceLineRef = useRef<{ lat: number; lng: number }[]>([]); // keeps fence geometry accessible in saveLayoutToDB autosave
@@ -1068,10 +1075,13 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   }, [project.id, project.systemType, buildDesignElectrical]);
 
-  // Trigger auto-save 3 seconds after panels change
+  // Trigger auto-save 3 seconds after panels change — but NEVER before the DB
+  // restore resolves (see restoreStateRef above; the timer checks at FIRE time
+  // so a restore finishing inside the 3s window isn't lost).
   useEffect(() => {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
+      if (restoreStateRef.current !== 'done') return;
       saveLayoutToDB(panels);
     }, 3000);
     return () => {
@@ -1082,6 +1092,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
     const handleBeforeUnload = () => {
+      // Same restore gate as autosave: closing the tab before the layout
+      // loaded must not beacon an empty save over the stored design.
+      if (restoreStateRef.current !== 'done') return;
       const panelList = panelsRef2.current;
       const designElectrical = designElectricalRef.current ?? undefined;
       const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
@@ -1122,6 +1135,10 @@ export default function DesignStudio({ project, onSave }: Props) {
           setRestoredPanelCount(data.data.panels.length);
           setLayoutLoadedFromDB(true);
           console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
+        } else if (data.success) {
+          // DB genuinely has no layout — seed the dedup signature so the first
+          // real edit diffs against "empty", and let saves proceed.
+          lastSavedPanelsRef.current = JSON.stringify([]) + '|' + JSON.stringify(data.data?.designElectrical ?? null);
         }
         // v63: restore the electrical design (topology / brand / modules-per-string /
         // racking / manual string-paint overrides) so the UI reflects what was saved.
@@ -1150,8 +1167,11 @@ export default function DesignStudio({ project, onSave }: Props) {
           setSolarApiStatus('idle');
           console.log('[DesignStudio] Skipping auto-detect — waiting for explicit building pick');
         }
+        restoreStateRef.current = 'done';
       } catch (e) {
-        console.error('Panel restore failed:', e);
+        console.error('Panel restore failed — saves stay DISABLED to protect the stored layout:', e);
+        restoreStateRef.current = 'failed';
+        toast.error('Could not load the saved design — saving is disabled. Reload the page to try again.');
       }
     };
     restorePanels();
