@@ -31,15 +31,43 @@ export function titleBlock(
   const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
   const apn     = project.apn || '—';
 
-  // Resolve module and inverter models for title block
-  const firstInv = system?.inverters?.[0];
-  const firstStr = firstInv?.strings?.[0];
-  const moduleModel   = firstStr?.panelModel    || project.moduleModel    || project.panelModel    || '—';
-  const moduleMfr     = firstStr?.panelManufacturer || project.moduleMfr  || '';
-  const inverterModel = firstInv?.model          || project.inverterModel || '—';
-  const inverterMfr   = firstInv?.manufacturer   || project.inverterMfr  || '';
-  const moduleDisplay   = [moduleMfr, moduleModel].filter(Boolean).join(' ') || '—';
-  const inverterDisplay = [inverterMfr, inverterModel].filter(Boolean).join(' ') || '—';
+  // Resolve module and inverter models for title block.
+  // HYBRID (Ray 2026-07-16): inverters[0] leaked whichever subsystem sorted
+  // first — the ROOF sheet's title block said "Philadelphia Solar Nexus 440W /
+  // EcoFlow" (the FENCE equipment) while its own string legend said 54×405W.
+  // With heterogeneous subsystems, list one short line per subsystem instead.
+  const _invs = system?.inverters ?? [];
+  const _subKeyOf = (o: { subSystemKey?: string } | undefined) => (o?.subSystemKey ?? '').toString();
+  const _distinctSubs = new Set(_invs.map(i => _subKeyOf(i)).filter(Boolean));
+  const _subPrefix = (k: string) =>
+    k.startsWith('roof') ? 'R' : k.startsWith('ground') ? 'G' : k.startsWith('fence') ? 'F' : k.slice(0, 1).toUpperCase();
+  let moduleDisplay: string;
+  let inverterDisplay: string;
+  if (_distinctSubs.size > 1) {
+    const modLines: string[] = [];
+    const invLines: string[] = [];
+    const seenMod = new Set<string>(); const seenInv = new Set<string>();
+    for (const inv of _invs) {
+      const k = _subKeyOf(inv); if (!k) continue;
+      const st = inv.strings?.[0];
+      const mod = [st?.panelManufacturer, st?.panelModel].filter(Boolean).join(' ');
+      const ivt = [inv.manufacturer, inv.model].filter(Boolean).join(' ');
+      const mKey = `${_subPrefix(k)}:${mod}`, iKey = `${_subPrefix(k)}:${ivt}`;
+      if (mod && !seenMod.has(mKey)) { seenMod.add(mKey); modLines.push(`${_subPrefix(k)}: ${mod}`); }
+      if (ivt && !seenInv.has(iKey)) { seenInv.add(iKey); invLines.push(`${_subPrefix(k)}: ${ivt}`); }
+    }
+    moduleDisplay   = modLines.join('<br/>') || '—';
+    inverterDisplay = invLines.join('<br/>') || '—';
+  } else {
+    const firstInv = _invs[0];
+    const firstStr = firstInv?.strings?.[0];
+    const moduleModel   = firstStr?.panelModel    || project.moduleModel    || project.panelModel    || '—';
+    const moduleMfr     = firstStr?.panelManufacturer || project.moduleMfr  || '';
+    const inverterModel = firstInv?.model          || project.inverterModel || '—';
+    const inverterMfr   = firstInv?.manufacturer   || project.inverterMfr  || '';
+    moduleDisplay   = [moduleMfr, moduleModel].filter(Boolean).join(' ') || '—';
+    inverterDisplay = [inverterMfr, inverterModel].filter(Boolean).join(' ') || '—';
+  }
   // HYBRID: sheet-scoped inputs (e.g. the roof site plan documenting only the
   // roof subset) stash the PROJECT totals — the title block is project-wide
   // chrome and must never show subset numbers (PV-1 printed "20.40 kW / 51

@@ -233,6 +233,59 @@ export function buildHybridOverlays(
 /** Rotate the hybrid overlays through the SAME global plan rotation the roof
  *  plan applies to every other layer (see roofSiteContext.computePlanTiltDeg).
  *  Pure — fresh points throughout (allPts alias ring points in the builder). */
+// ── Fence plan-view inset ────────────────────────────────────────────────────
+// The fence usually sits 100+ ft off-frame on PV-1/PV-1B, collapsing to a
+// direction arrow — Ray (2026-07-16): "can't even see the solfence from the
+// top down on pv1... move some of the overlays to the dead space." This draws
+// a self-scaled top-down strip of the run (posts @ 8' O.C., modules edge-on,
+// run dimension) as a floating panel for the sheet's dead space.
+export function fenceInsetSVG(
+  fences: HybridFenceShape[],
+  box: { x: number; y: number; w: number; h: number },
+  pointerSheet: string,
+): string {
+  if (!fences.length) return '';
+  const f = fences[0];
+  const modMatch = f.label.match(/(\d+)\s*MOD/i);
+  const lfMatch  = f.label.match(/(\d+(?:\.\d+)?)'?\s*L\.?F\.?/i);
+  const mods  = modMatch ? parseInt(modMatch[1], 10) : 0;
+  const runFt = lfMatch ? parseFloat(lfMatch[1]) : mods * 3.5;
+  if (runFt <= 0) return '';
+  const bays = Math.max(1, Math.round(runFt / 8));
+
+  const els: string[] = [];
+  const { x, y, w, h } = box;
+  // panel chrome (matches the sheet's floating LEGEND styling)
+  els.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fff" stroke="#000" stroke-width="0.9"/>`);
+  els.push(`<rect x="${x}" y="${y}" width="${w}" height="11" fill="#000"/>`);
+  els.push(`<text x="${x + w / 2}" y="${y + 8}" font-size="6" font-weight="bold" fill="#fff" text-anchor="middle" letter-spacing="1">SOLAR FENCE — PLAN VIEW (N.T.S.)</text>`);
+
+  // strip geometry: horizontal run, inset margins
+  const mL = 22, mR = 22;
+  const runY = y + h * 0.52;
+  const x0 = x + mL, x1 = x + w - mR;
+  const pxPerFt = (x1 - x0) / runFt;
+
+  // modules edge-on: one thin strip broken at posts
+  els.push(`<line x1="${x0}" y1="${runY}" x2="${x1}" y2="${runY}" stroke="#1a7a3a" stroke-width="4" stroke-linecap="butt"/>`);
+  // posts @ 8' O.C. (including both ends)
+  for (let b = 0; b <= bays; b++) {
+    const px = x0 + Math.min(b * 8, runFt) * pxPerFt;
+    els.push(`<rect x="${(px - 2).toFixed(1)}" y="${(runY - 4.5).toFixed(1)}" width="4" height="9" fill="#333"/>`);
+  }
+  // run dimension below
+  const dimY = runY + 14;
+  els.push(`<line x1="${x0}" y1="${dimY}" x2="${x1}" y2="${dimY}" stroke="#000" stroke-width="0.6"/>`);
+  els.push(`<path d="M${x0},${dimY} l5,-2.2 v4.4 Z" fill="#000"/>`);
+  els.push(`<path d="M${x1},${dimY} l-5,-2.2 v4.4 Z" fill="#000"/>`);
+  els.push(`<text x="${(x0 + x1) / 2}" y="${dimY - 2.5}" font-size="5.6" font-weight="bold" fill="#000" text-anchor="middle">${runFt}' — ${bays} BAYS @ 8' O.C. · POSTS = ▪</text>`);
+  // annotation above the strip
+  els.push(`<text x="${(x0 + x1) / 2}" y="${runY - 9}" font-size="5.4" fill="#111" text-anchor="middle">${mods} MODULES — VERTICAL BIFACIAL, EDGE-ON IN PLAN</text>`);
+  // pointer row
+  els.push(`<text x="${x + w / 2}" y="${y + h - 4}" font-size="5.4" font-weight="bold" fill="#1a7a3a" text-anchor="middle">LOCATION: SEE PLAN ARROW · DETAILS &amp; STRINGS: SEE ${pointerSheet}</text>`);
+  return els.join('');
+}
+
 export function rotateHybridOverlays(
   h: HybridOverlays,
   angleDeg: number,

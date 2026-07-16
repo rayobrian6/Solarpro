@@ -49,7 +49,7 @@ import {
   computePlanTiltDeg, choosePlanRotationDeg, rotateFakePt, rotateAzimuthDeg,
   northArrowRotationDeg, rotateSiteContext,
 } from './roofSiteContext';
-import { buildHybridOverlays, rotateHybridOverlays } from './hybridOverlay';
+import { buildHybridOverlays, rotateHybridOverlays, fenceInsetSVG } from './hybridOverlay';
 
 // Ray-cast point-in-polygon on a lat/lng ring (planar; fine at roof scale).
 function ptInLatLngRing(lat: number, lng: number, ring: Array<{ lat: number; lng: number }>): boolean {
@@ -528,7 +528,17 @@ export function drawRoofPlan(
       for (const [a, b] of [...g.rowLines, ...g.cellLines]) {
         hEls.push(`<line x1="${toX(a.lng).toFixed(1)}" y1="${toY(a.lat).toFixed(1)}" x2="${toX(b.lng).toFixed(1)}" y2="${toY(b.lat).toFixed(1)}" stroke="#2b6cb0" stroke-width="0.8"/>`);
       }
-      if (g.label) hEls.push(`<text x="${toX(g.labelPt.lng).toFixed(1)}" y="${toY(g.labelPt.lat).toFixed(1)}" font-size="8" font-weight="bold" fill="#2b6cb0" text-anchor="middle" stroke="#fff" stroke-width="2.4" paint-order="stroke">${g.label}</text>`);
+      if (g.label) {
+        // Clamp the label into the visible draw zone — PV-1B's tight array
+        // framing can push the ground array to the clipped edge, burying the
+        // label under the right sidebar (Ray: "pages getting cut off").
+        const glx = Math.min(Math.max(toX(g.labelPt.lng), dz.x + 70), dz.x + dz.width - 70);
+        const gly = Math.min(Math.max(toY(g.labelPt.lat), dz.y + 14), dz.y + dz.height - 18);
+        hEls.push(`<text x="${glx.toFixed(1)}" y="${gly.toFixed(1)}" font-size="8" font-weight="bold" fill="#2b6cb0" text-anchor="middle" stroke="#fff" stroke-width="2.4" paint-order="stroke">${g.label}</text>`);
+        if (isBranchColorMode) {
+          hEls.push(`<text x="${glx.toFixed(1)}" y="${(gly + 10).toFixed(1)}" font-size="6.2" font-weight="bold" fill="#1b5eb5" text-anchor="middle" stroke="#fff" stroke-width="2" paint-order="stroke">STRINGS: SEE PV-1BG</text>`);
+        }
+      }
     }
     if (hEls.length) {
       els.push(`<g class="pv2-hybrid">${hEls.join('')}</g>`);
@@ -1761,6 +1771,19 @@ export function drawRoofPlan(
     els.push(ins.join(''));
   }
 
+  // ── Fence plan-view inset (PV-1 AND PV-1B) ─────────────────────────────────
+  // Ray 2026-07-16: "can't even see the solfence from the top down on pv1...
+  // move some of the overlays to the dead space." The run itself is usually
+  // 100+ ft off-frame (only the direction arrow shows), so a self-scaled
+  // top-down strip draws in the dead space, bottom-left, clear of the
+  // SYSTEM REFERENCE table (bottom-right) and the compass rose.
+  if (_hyb && _hyb.fence.length) {
+    const fw = 300, fh = 78;
+    const fx = zones.dims.left + 8;
+    const fy = (H - zones.dims.bottom) - fh - 34;
+    els.push(fenceInsetSVG(_hyb.fence, { x: fx, y: fy, w: fw, h: fh },
+      isBranchColorMode ? 'PV-1BF' : 'PV-1F'));
+  }
   els.push(drawSVGClose());
   return els.join('');
 }
