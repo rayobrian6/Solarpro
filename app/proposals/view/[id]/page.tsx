@@ -922,6 +922,18 @@ function PublicProposalView({
                         Immediate monthly savings of ${Math.abs(ownership_delta_monthly)}/mo — and it grows as utility rates increase.
                       </p>
                     ) : null}
+                    {/* SREC cash context — the bill comparison above is bills-only; the REC
+                        contract is real income paid as checks (50% upfront + 6 yrs), and
+                        omitting it made "+$X/mo" contradict the SREC-driven payoff year. */}
+                    {(cp.truth25yr.srec_income_25yr ?? 0) > 0 && (cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? (
+                      <p className="text-xs mt-1.5 text-center" style={{ color: '#16a34a' }}>
+                        Bills aren&apos;t the whole story: your REC contract also pays ~${Math.round(cp.truth25yr.yearlyFlow[0].srec_income).toLocaleString()} after energization
+                        {(cp.truth25yr.yearlyFlow?.[1]?.srec_income ?? 0) > 0
+                          ? <> + ~${Math.round((cp.truth25yr.yearlyFlow[1].srec_income) / 12).toLocaleString()}/mo equivalent (paid annually) for the following 6 years</>
+                          : null}
+                        {' '}— income the monthly comparison above doesn&apos;t include.
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -1865,7 +1877,14 @@ function PublicProposalView({
                 {(proj as any)?.selectedInverter?.model || (proj as any)?.selectedInverter?.name || 'Premium grid-tie inverter'}
               </div>
               {(proj as any)?.selectedInverter?.efficiency ? (
-                <div className="text-xs text-slate-400 mt-1">{((proj as any).selectedInverter.efficiency * 100).toFixed(1)}% efficiency</div>
+                // Efficiency is stored as a FRACTION (0.965) in some records and a
+                // PERCENT (96.5) in others (equipment-db vs engineering snapshots) —
+                // blind ×100 rendered "9650.0% efficiency". Normalize: >1.5 = already %.
+                <div className="text-xs text-slate-400 mt-1">
+                  {((proj as any).selectedInverter.efficiency > 1.5
+                    ? (proj as any).selectedInverter.efficiency
+                    : (proj as any).selectedInverter.efficiency * 100).toFixed(1)}% efficiency
+                </div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
                 <CheckCircle size={10} /> 25-yr warranty

@@ -1169,7 +1169,15 @@ export default function DesignStudio({ project, onSave }: Props) {
           setSelectedPanel(d.data.panels[0]);
         }
         if (d.data.inverters.length > 0 && !project.selectedInverter) {
-          setSelectedInverter(d.data.inverters[3]); // SolarEdge default
+          // Default inverter by ID — NEVER a magic index. `inverters[3]` was
+          // commented "SolarEdge default" but the unified list reordered and
+          // index 3 became "SMA Sunny Boy 7.7-US", silently stamping a phantom
+          // SunnyBoy onto every design where no inverter was explicitly chosen
+          // (it rode into proposal snapshots — Ray caught it on a 21 kW set).
+          const _defInv = d.data.inverters.find((i: Inverter) => i.id === 'se-7600h')
+            ?? d.data.inverters.find((i: Inverter) => /solaredge/i.test((i as any).manufacturer ?? ''))
+            ?? d.data.inverters[0];
+          setSelectedInverter(_defInv);
         }
       }
     });

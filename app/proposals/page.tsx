@@ -1840,6 +1840,17 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                         Immediate monthly savings of ${Math.abs(ownership_delta_monthly)}/mo — and it grows as utility rates increase.
                       </p>
                     ) : null}
+                    {/* SREC cash context — bills-only comparison omits the REC contract
+                        (50% upfront + 6 yrs), which contradicted the SREC-driven payoff. */}
+                    {(cp.truth25yr.srec_income_25yr ?? 0) > 0 && (cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? (
+                      <p className="text-xs mt-1.5 text-center" style={{ color: '#16a34a' }}>
+                        Bills aren&apos;t the whole story: your REC contract also pays ~${Math.round(cp.truth25yr.yearlyFlow[0].srec_income).toLocaleString()} after energization
+                        {(cp.truth25yr.yearlyFlow?.[1]?.srec_income ?? 0) > 0
+                          ? <> + ~${Math.round((cp.truth25yr.yearlyFlow[1].srec_income) / 12).toLocaleString()}/mo equivalent (paid annually) for the following 6 years</>
+                          : null}
+                        {' '}— income the monthly comparison above doesn&apos;t include.
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
 
