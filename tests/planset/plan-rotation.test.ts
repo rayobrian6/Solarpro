@@ -174,6 +174,8 @@ describe('rotateSiteContext / rotateHybridOverlays', () => {
       ground: [{
         ring: rectRing(150, 40, 34, 11, 4.8),
         rowLines: [[{ lat: 38, lng: 135 }, { lat: 38, lng: 165 }]],
+        // per-module division lines (required since the PLP realism pass)
+        cellLines: [[{ lat: 36, lng: 140 }, { lat: 44, lng: 140 }]],
         labelPt: { lat: 50, lng: 150 }, label: 'GROUND MOUNT — 20 MOD',
       }],
       fence: [{
@@ -188,6 +190,8 @@ describe('rotateSiteContext / rotateHybridOverlays', () => {
     expect(segAngle(out.fence[0].line[0], out.fence[0].line[1])).toBeCloseTo(fenceBefore - 6.5, 6);
     expect(segAngle(out.ground[0].ring[0], out.ground[0].ring[1])).toBeCloseTo(slatBefore - 6.5, 6);
     expect(segAngle(out.ground[0].rowLines[0][0], out.ground[0].rowLines[0][1])).toBeCloseTo(-6.5, 6);
+    // cellLines rotate rigidly with the rest of the ground shape (was 90° before)
+    expect(segAngle(out.ground[0].cellLines[0][0], out.ground[0].cellLines[0][1])).toBeCloseTo(90 - 6.5, 6);
     // pure + identity
     expect(hyb.fence[0].line[0]).toEqual({ lat: 120, lng: 90 });
     expect(rotateHybridOverlays(hyb, 0, pivot)).toBe(hyb);
