@@ -76,6 +76,14 @@ export interface MountSpec {
   model: string;
   attachmentMethod: AttachmentMethod;
   upliftCapacityLbs: number;       // lbs per mount (ICC-ES rated)
+  // The BASIS of upliftCapacityLbs — REQUIRED for cross-brand consistency.
+  // 'ultimate'  = nominal/mean-ultimate tested value (needs Ω to reach ASD allowable)
+  // 'allowable' = ASD allowable (safety factor already applied by the mfr/ESR)
+  // The structural engine applies the code factor ONCE, keyed to this basis, so
+  // a mount rated ultimate and one rated allowable size consistently. Unset is
+  // treated CONSERVATIVELY (as ultimate needing reduction) until field-verified.
+  // See lib/structural/attachmentCapacity.ts.
+  capacityBasis?: 'ultimate' | 'allowable';
   downwardCapacityLbs: number;     // lbs per mount
   shearCapacityLbs: number;        // lbs per mount
   fastenersPerMount: number;       // lag bolts / screws per mount
@@ -209,6 +217,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'Tesla Comp Rafter Base (2023000)',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 569,        // UL 2703 component allowable, SF 2.0
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 965,      // SF 1.67
       shearCapacityLbs: 242,
       fastenersPerMount: 1,
@@ -250,6 +259,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'Tesla Tile Hook Assembly (2262305)',
       attachmentMethod: 'tile_hook',
       upliftCapacityLbs: 569,        // shared UL 2703 component allowables (Tile Appendix C not yet captured)
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 965,
       shearCapacityLbs: 242,
       fastenersPerMount: 1,
@@ -311,6 +321,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'IronRidge L-Foot',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 500,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 800,
       shearCapacityLbs: 400,
       fastenersPerMount: 1,
@@ -370,6 +381,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'IronRidge L-Foot Heavy',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 700,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1000,
       shearCapacityLbs: 600,
       fastenersPerMount: 1,
@@ -432,6 +444,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'Unirac L-Foot',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 550,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 850,
       shearCapacityLbs: 450,
       fastenersPerMount: 1,
@@ -491,6 +504,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'Unirac SME L-Foot',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 600,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 900,
       shearCapacityLbs: 500,
       fastenersPerMount: 1,
@@ -537,14 +551,18 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     mount: {
       model: 'RT-MINI',
       attachmentMethod: 'l_foot_lag',
-      // ULTIMATE basis (the engine checks capacity/demand >= 1.5 SF). Web-verified
-      // 2026-06-21 vs ESR-3575: the published ALLOWABLE for the weakest standard
-      // assembly (15/32" sheathing, 2x4 DF-L #2, 2 screws) is 613.2 lb. 900 ultimate
-      // ÷ 1.5 SF = 600 lb effective allowable ≈ the 613 ESR allowable (slightly
-      // conservative). So 900 reconciles and is safe — NOT an overstatement.
-      // Stronger framing (2x6+) has higher capacity per the ESR table; a per-assembly
-      // capacity lookup would be more precise than one number (future structural/PE).
-      upliftCapacityLbs: 900,       // ultimate, per pad — reconciles to ~600 allowable via SF (≈ ESR 613)
+      // ALLOWABLE (ASD) basis — VERIFIED 2026-07-10 against Roof Tech's PE-stamped
+      // structural letter "RT-MINI II ASCE 7-10 (KY)"
+      // (design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_10/): the max
+      // ALLOWABLE uplift for the weakest standard assembly (15/32" sheathing, 2x4
+      // DF-L #2, 2× screws) = 613.2 lb (SF already applied by the PE). Stored 600 lb
+      // = conservative round-down; matches field practice (~2 feet/panel). This
+      // SUPERSEDES the prior unverified "900 ultimate" (ESR-3575 is a flashing/
+      // water-resistance report only — it carries NO structural value). Stronger
+      // framing (2x6+) / 90mm rafter screws rate higher per the PE table; a
+      // per-assembly capacity lookup would be more precise (future PE work).
+      upliftCapacityLbs: 600,       // ASD allowable per pad (PE letter: 613.2 lb weakest assembly)
+      capacityBasis: 'allowable',
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 600,         // ≈ ESR 613 lb shear allowable basis
       fastenersPerMount: 2,
@@ -683,6 +701,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'RT-HOOK',
       attachmentMethod: 'standing_seam_clamp',
       upliftCapacityLbs: 1100,
+      capacityBasis: 'ultimate', // metal-roof clamp: mean ultimate holding strength (verify)
       downwardCapacityLbs: 1500,
       shearCapacityLbs: 700,
       fastenersPerMount: 0,
@@ -726,6 +745,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'RT-MINI-M',
       attachmentMethod: 'corrugated_clamp',
       upliftCapacityLbs: 880,
+      capacityBasis: 'ultimate', // corrugated-metal clamp: mean ultimate holding strength (verify)
       downwardCapacityLbs: 1150,
       shearCapacityLbs: 580,
       fastenersPerMount: 2,
@@ -786,6 +806,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'SnapNrack L-Foot',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 500,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 800,
       shearCapacityLbs: 400,
       fastenersPerMount: 1,
@@ -831,6 +852,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'QM-Classic',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 600,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 900,
       shearCapacityLbs: 500,
       fastenersPerMount: 1,
@@ -890,6 +912,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'QM-Tile',
       attachmentMethod: 'tile_replacement',
       upliftCapacityLbs: 700,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1000,
       shearCapacityLbs: 550,
       fastenersPerMount: 2,
@@ -952,6 +975,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'S-5! PVKIT Clamp',
       attachmentMethod: 'standing_seam_clamp',
       upliftCapacityLbs: 800,       // per clamp (varies by seam profile)
+      capacityBasis: 'ultimate', // S-5! publishes MEAN ULTIMATE holding strength; engineer applies Ω (per S-5! seam load DB)
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 600,
       fastenersPerMount: 0,         // no roof penetrations
@@ -1026,6 +1050,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'K2 L-Foot Pro',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 700,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1100,
       shearCapacityLbs: 600,
       fastenersPerMount: 1,
@@ -1071,6 +1096,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'Rock-It Gen 4',
       attachmentMethod: 'rail_less_lag',
       upliftCapacityLbs: 800,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1100,
       shearCapacityLbs: 550,
       fastenersPerMount: 2,
@@ -1132,6 +1158,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'Schletter L-Foot',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 750,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 650,
       fastenersPerMount: 1,
@@ -1177,6 +1204,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'SunModo EZ L-Foot',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 550,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 850,
       shearCapacityLbs: 450,
       fastenersPerMount: 1,
@@ -1250,6 +1278,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'DPW L-Foot',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 800,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1300,
       shearCapacityLbs: 700,
       fastenersPerMount: 1,
@@ -1522,6 +1551,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'AceClamp Corrugated',
       attachmentMethod: 'corrugated_clamp',
       upliftCapacityLbs: 600,
+      capacityBasis: 'ultimate', // metal-roof clamp: mean ultimate holding strength
       downwardCapacityLbs: 900,
       shearCapacityLbs: 500,
       fastenersPerMount: 0,         // clamp only, no penetrations
@@ -1766,6 +1796,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'UTR-100 Tile Replacement',
       attachmentMethod: 'tile_replacement',
       upliftCapacityLbs: 1200,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1800,
       shearCapacityLbs: 900,
       fastenersPerMount: 2,
@@ -1826,6 +1857,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       model: 'FlashFoot2',
       attachmentMethod: 'l_foot_lag',
       upliftCapacityLbs: 1050,
+      capacityBasis: 'allowable', // lag withdrawal from wood — published ASD allowable (NDS/ASTM D1761)
       downwardCapacityLbs: 1600,
       shearCapacityLbs: 800,
       fastenersPerMount: 1,
@@ -2204,13 +2236,14 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     id: 'sollega-fc350',
     manufacturer: 'Sollega',
     productLine: 'FastRack',
-    model: 'FastRack FC350',
+    // Corrected 2026-07-08: 'FC350' was not a real Sollega SKU; the flat-roof product is the FastRack FR510.
+    model: 'FastRack FR510',
     category: 'roof_commercial',
     systemType: 'ballasted_flat',
     compatibleRoofTypes: ['flat_tpo', 'flat_epdm', 'flat_pvc'],
     description: 'Lightweight injection-molded ballasted flat-roof system — 10-minute module installation',
     mount: {
-      model: 'FC350 Base',
+      model: 'FR510 Base',
       attachmentMethod: 'ballasted',
       upliftCapacityLbs: 0,
       downwardCapacityLbs: 0,
@@ -2589,14 +2622,16 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
   {
     id: 'pvhardware-titan',
     manufacturer: 'PV Hardware',
-    productLine: 'Titan',
-    model: 'Titan Single Axis Tracker',
+    // Corrected 2026-07-08: 'Titan' is not a PV Hardware product (Titan trackers are Axial/APA).
+    // PV Hardware's single-axis tracker line is Axone / AxoneDuo.
+    productLine: 'Axone',
+    model: 'AxoneDuo Single Axis Tracker',
     category: 'ground_mount',
     systemType: 'tracker_single_axis',
     compatibleRoofTypes: ['any'],
     description: 'Heavy-duty single-axis tracker for high-wind regions — 150 mph wind rating',
     mount: {
-      model: 'Titan Driven Pile',
+      model: 'AxoneDuo Driven Pile',
       attachmentMethod: 'driven_pile',
       upliftCapacityLbs: 20000,
       downwardCapacityLbs: 26000,

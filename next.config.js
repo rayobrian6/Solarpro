@@ -91,6 +91,30 @@ const BUILD_VERSION = versionMatch ? versionMatch[1] : 'unknown';
 
 const nextConfig = {
   reactStrictMode: true,
+  // Without this, Next 14.2+ blocks cross-origin dev requests from 127.0.0.1 vs
+  // localhost and every interactive click/input in the generator-estimator
+  // (and any other dev page that hits a same-origin /api route) appears dead.
+  // See https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  // Legacy Generator Estimator routes — pre-nest (commit 5d047a7a) shipped at
+  // /generator-estimator/* (top-level). Step 1 of the nest deleted those
+  // routes and moved them under /engineering/generator-estimator/*. Any
+  // external link / bookmark / share to the old paths now 404s. Redirect them
+  // permanently so legacy URLs auto-route to the new paths (preserves
+  // ?brand=&model=&kw= etc. via `permanent: true` 308 status — query string
+  // is forwarded by Next.js automatically).
+  async redirects() {
+    return [
+      { source: '/generator-estimator',          destination: '/engineering/generator-estimator',          permanent: true },
+      { source: '/generator-estimator/bill',     destination: '/engineering/generator-estimator/bill',     permanent: true },
+      { source: '/generator-estimator/proposal', destination: '/engineering/generator-estimator/proposal', permanent: true },
+      // NOTE: bare /proposal and /bill redirects removed (review 2026-07-04) —
+      // permanent 308s on generic top-level paths get cached by browsers and
+      // would permanently hijack those URLs from any future app route (we
+      // already ship /proposals). The pre-nest Estimator never had real
+      // routes there; stale bookmarks 404 like any other dead link.
+    ];
+  },
   // NOTE: removeConsole was removed — the SWC transform was eating multi-line
   // console.log calls (e.g. the PARSED_DATA_OBJECT log in handleBillComplete)
   // and corrupting the surrounding bill-save logic in production builds.
@@ -116,6 +140,13 @@ const nextConfig = {
       'puppeteer-core',        // Puppeteer PDF generation
       '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
     ],
+    // Ship the manufacturer-asset PNGs into the permit serverless functions so
+    // generatePermitHTML can read + base64-inline them at render time on Vercel
+    // (public/ is CDN-served, not in the function fs by default). Enables the
+    // self-contained HTML/PDF export.
+    outputFileTracingIncludes: {
+      '/api/engineering/**': ['./public/manufacturer-assets/**'],
+    },
   },
   images: {
     remotePatterns: [

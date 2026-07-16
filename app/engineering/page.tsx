@@ -1,9 +1,19 @@
 'use client';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
+import Link from 'next/link';
+import { computeSystem, type ComputedSystem, type ComputedSystemInput, type RunSegment } from '@/lib/computed-system';
+// Wave 3.7 — the page memo runs computeMultiSystem (N=1 returns plain
+// computeSystem BY REFERENCE; N>1 aggregates per-sub passes at one POI).
+import {
+  computeMultiSystem,
+  parseRunId,
+  type ComputedMultiSystem,
+  type MultiSubSystemInput,
+} from '@/lib/computed-multi-system';
 import { systemTypeToInstallationType } from '@/lib/structural/types';
 import { resolveEquipment } from '@/lib/systemEquipmentResolver';
+import { applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -21,6 +31,17 @@ import {
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
+import { buildSheetManifest } from '@/lib/permit/sheetManifest';
+// ── Wave 5A — multi-lane SLD: page-path source-branch builder + the W4B.D
+// empty-fleet synthesis helper (a present sub with an empty fleet computes
+// from ITS OWN subSystems[key] equipment, or is excluded with a visible hint
+// — never a phantom default inverter).
+import {
+  buildSourceBranchesFromComputedMulti,
+  synthesizeFleetFromSubEquipment,
+} from '@/lib/permit/utils/sldAdapter';
+import type { SLDSourceBranch } from '@/lib/sld-professional-renderer';
+import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
 
 // ── Mounting systems from the canonical mounting-hardware-db (38 systems, 24 manufacturers) ──
@@ -52,7 +73,7 @@ import { diffNormalizedInverterState } from '@/lib/system/normalizedInverter';
 // overrides user edits after that. The sizing engine remains the single
 // source of system logic — this module is pure bookkeeping + a thin call
 // to sizeSystemFromBrand() and hydration of the result into config.
-import { applySmartDefaultsOnce } from '@/lib/system/smartDefaults';
+import { applySmartDefaultsOnce, getDefaultBrand } from '@/lib/system/smartDefaults';
 // Lock Architecture — single inverter builder (v61.3).
 // All InverterConfig construction must go through this factory.
 import {
@@ -68,6 +89,33 @@ import {
   type RebuildStringsOptions as _RebuildStringsOptions,
 } from '@/lib/system/buildInverterConfig';
 import { electricallyNormalizeInverterConfig, isElectricallyInvalid } from '@/lib/system/electricalNormalize';
+// ── Wave 3 (per-subsystem equipment contract, docs/ARCHITECTURE-per-subsystem-equipment.md §3) ──
+// ensureSubSystemShape = THE one legacy-collapse rule (§1.5), applied at every
+// hydration boundary: untagged inverters inherit config.systemType (NEVER a
+// bare 'roof' default) and a missing subSystems map is synthesized from the
+// legacy flat scalars — so equipment authority lives in the map (§1.1) and a
+// per-sub staleness discard can never lose an equipment choice.
+import {
+  ensureSubSystemShape,
+  detectDegenerateSingleFleet,
+  toSubSystemKey,
+  type SubSystemKey,
+} from '@/lib/system/subSystemEquipment';
+// Wave 3 item 2 — staleness gates re-keyed PER SUB (a fence CAD edit can
+// never nuke roof engineering) + fleet primitives for sub-scoped watchers.
+import {
+  gateStaleFleetPerSub,
+  gateInactiveInverterPerSub,
+  presentStampKeys,
+} from '@/lib/system/subSystemStaleness';
+import {
+  fleetKeys,
+  fleetPanelTotal,
+  inverterFleetKey,
+  partitionFleet,
+  replaceSubFleet,
+  stampFleet,
+} from '@/lib/system/subSystemFleet';
 // Cast wrappers: builder types use wide `string` for roofType; page uses a
 // narrow RoofType union. Since the page's RoofType is a strict subset of
 // string, the cast is always safe. These wrappers are the ONLY call sites
@@ -182,145 +230,19 @@ type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' 
 type SystemType = 'roof' | 'ground' | 'fence';
 type TabId = 'config' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
 
-interface StringConfig {
-  id: string;
-  label: string;
-  panelCount: number;
-  panelId: string;
-  tilt: number;
-  azimuth: number;
-  roofType: RoofType;
-  mountingSystem: string;
-  wireGauge: string;
-  wireLength: number;
-  ocpdOverride?: number;
-  ocpdOverrideAcknowledged?: boolean;
-}
+// Wave 1 (docs/ARCHITECTURE-per-subsystem-equipment.md §1.3): the ProjectConfig
+// family is REUNIFIED — canonical declarations live in lib/engineering-helpers.ts;
+// this page aliases them (type-level only, shapes unchanged + additive
+// subSystems / defaultsAppliedBySubSystem / schemaVersion / subSystemKey fields).
+type StringConfig = import('@/lib/engineering-helpers').StringConfig;
 
-interface InverterConfig {
-  id: string;
-  inverterId: string;
-  type: InverterType;
-  strings: StringConfig[];
-  // User-controlled ratio overrides — override registry defaults
-  deviceRatioOverride?: number;   // micro: modules per microinverter; optimizer: optimizers per module
-  modulesPerString?: number;      // string: modules per string (informational, used for string count display)
-  stringsPerInverter?: number;    // string: strings per inverter (informational)
-  // v58.6: For optimizer topology, peripheral optimizer ID (e.g. 'se-p505') stored separately
-  // from inverterId (which holds the central string inverter, e.g. 'se-11400h').
-  // inverterId -> brand inference + sizing engine
-  // optimizerPeripheralId -> BOM Stage 1 optimizer line items
-  optimizerPeripheralId?: string;
-}
+type InverterConfig = import('@/lib/engineering-helpers').InverterConfig;
 
-interface ProjectConfig {
-  projectName: string;
-  clientName: string;
-  address: string;
-  state: string;          // Explicit state code (e.g. 'CA', 'TX') — overrides address parsing
-  city: string;           // City name — used for AHJ city-level overrides
-  county: string;         // County name — used for AHJ county-level overrides
-  designer: string;
-  date: string;
-  systemType: SystemType;
-  inverters: InverterConfig[];
-  batteryBrand: string;
-  batteryModel: string;
-  batteryCount: number;
-  batteryKwh: number;
-  batteryId: string;        // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
-  generatorId: string;      // equipment-db generator ID
-  generatorWireLength: number;  // ft — distance from generator to ATS (user-configurable)
-  trenchRunLengthFt?: number;   // ft — ground/fence array → service trench distance (user-input; adds to DC run + underground conduit)
-  atsId: string;            // equipment-db ATS ID
-  backupInterfaceId: string; // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, etc.)
-  mainPanelAmps: number;
-  mainPanelBrand: string;
-  utilityMeter: string;
-  acDisconnect: boolean;
-  dcDisconnect: boolean;
-  productionMeter: boolean;
-  rapidShutdown: boolean;
-  roofType: RoofType;
-  mountingId: string;
-  wireGauge: string;
-  conduitType: string;
-  wireLength: number;
-  windSpeed: number;
-  windExposure: 'B' | 'C' | 'D';
-  groundSnowLoad: number;
-  roofPitch: number;
-  rafterSpacing: number;
-  rafterSpan: number;
-  rafterSize: string;
-  rafterSpecies: string;
-  framingType: 'truss' | 'rafter' | 'unknown';  // V3 structural engine
-  meanRoofHeight?: number;              // ft — mean height of eave to ridge midpoint (ASCE 7 Kz)
-  panelOrientation?: 'portrait' | 'landscape';  // V3 array geometry
-  attachmentSpacing: number;
-  railSpacing: number;           // inches — distance between rail rows (row-to-row)
-  // Layout fields (Phase 3 - Future Layout Engine)
-  rowCount?: number;
-  columnCount?: number;
-  layoutOrientation?: 'portrait' | 'landscape';
-  panelCoordinates?: Array<{ x: number; y: number; row: number; col: number; }>;
-  notes: string;
-  // Interconnection method
-  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE';
-  panelBusRating: number;        // Bus bar rating (may differ from mainPanelAmps)
-  // Utility + AHJ (persisted to project, used by interconnection + compliance)
-  utilityId: string;             // e.g. 'ameren', 'comed', 'pge' — '' = auto/unknown
-  ahjId: string;                 // e.g. 'il-icc', 'manual' — '' = auto
-  // v44.0 optional fields — site geometry, equipment locations, mounting hardware, contractor
-  roofWidth?: number;            // approximate roof width (ft) — for A-1 site layout
-  roofLength?: number;           // approximate roof length ridge-to-eave (ft) — for A-1
-  inverterLocation?: string;     // e.g. 'Garage wall, south side'
-  disconnectLocation?: string;   // e.g. 'Adjacent to inverter'
-  meterLocation?: string;        // e.g. 'North exterior wall'
-  mainPanelLocation?: string;    // e.g. 'Garage, east wall'
-  railType?: string;             // e.g. 'IronRidge XR-100'
-  flashingType?: string;         // e.g. 'Flashed L-Foot'
-  lagBoltSize?: string;          // e.g. '5/16" × 3"'
-  sheathingType?: string;        // e.g. '7/16" OSB'
-  contractorLicense?: string;    // contractor license number
-  electricalLicense?: string;    // electrical contractor license number
-  ownerPhone?: string;           // owner contact phone
-  ownerEmail?: string;           // owner contact email
-  zip?: string;                  // ZIP code — used for AHJ lookup
-  apn?: string;                  // Assessor Parcel Number — Error 3e fix
-  // Phase 13 — Smart Defaults sentinel + seed brand.
-  // `defaultsApplied` is set exactly ONCE by applySmartDefaultsOnce() and
-  // must remain true until the user explicitly resets the system (via the
-  // reset hook clearDefaultsAppliedFlag). It blocks the defaults layer
-  // from ever overriding user edits after the first bootstrap.
-  // `selectedBrand` records the seed brand chosen by the defaults layer
-  // (only when the user had not already picked one). The user may freely
-  // overwrite it later; defaults will NOT re-fire on brand changes.
-  defaultsApplied?: boolean;
-  selectedBrand?: string;
-  // Phase 13.1 — USER INTENT LOCK.
-  // Set to `true` the moment the user touches ANY inverter / string field
-  // (model, count, layout, topology). Once this flag is on:
-  //   - Smart defaults (smartDefaults.useEffect) is a hard no-op.
-  //   - Auto-apply of the sizing recommendation is a hard no-op.
-  // Only an explicit user action flips it off again:
-  //   - Clicking "Apply Recommendation" (user has now adopted the system's
-  //     plan as-is — treat it as no longer "edited away from rec").
-  //   - "Reset System" (clearDefaultsAppliedFlag + clear inverters).
-  // NON-NEGOTIABLE: the sizing engine MAY still compute a recommendation
-  // for display, but it MUST NOT mutate the user's config once this lock
-  // is engaged. Source of truth is always the user config.
-  userHasEditedInverters?: boolean;
-  // v61.7 — CONFIG OVERWRITE KILL SWITCH.
-  // Set to `true` after any explicit user action (Apply Recommendation, manual edit,
-  // smart-defaults bootstrap). When true, ALL automatic config mutations are BLOCKED:
-  //   - CAD sync will only update panel count, never rearrange strings
-  //   - AUTO-APPLY is a hard no-op
-  //   - HARD DC/AC AUTO-HEAL is disabled (warning only)
-  //   - Ecosystem apply is blocked
-  // Only an explicit user action (Apply Recommendation, Reset System) may change inverters.
-  isUserControlled?: boolean;
-}
+// Phase 13 smart-defaults sentinel, Phase 13.1 USER INTENT LOCK
+// (userHasEditedInverters) and v61.7 CONFIG OVERWRITE KILL SWITCH
+// (isUserControlled) semantics are documented on the canonical declaration in
+// lib/engineering-helpers.ts — behavior is unchanged; only the declaration moved.
+type ProjectConfig = import('@/lib/engineering-helpers').ProjectConfig;
 
 interface ComplianceResult {
   overallStatus: 'PASS' | 'WARNING' | 'FAIL' | null;
@@ -449,11 +371,119 @@ function reconcileFencePanels(
   return changed ? reconciled : inverters;
 }
 
+// ── Wave 3.3 (contract §3 Wave 3 item 3 — sync-pipeline watcher scope) ──────
+/**
+ * Rebuild ONE sub's fleet to a new panel count using that fleet's OWN
+ * equipment (its inverter model / panel / topology) — never a project-wide
+ * winner or inverters[0]-of-the-project (I-3). Mirrors the legacy panel-count
+ * fix branches (micro single-string update / sizing-engine regroup / capped
+ * even-split fallback), but per fleet. Returns null when nothing sensible can
+ * be built — the caller keeps the old fleet.
+ */
+function rebuildFleetForCount(
+  fleet: InverterConfig[],
+  key: SubSystemKey,
+  targetCount: number,
+  selectedBrand: string | undefined,
+): InverterConfig[] | null {
+  const inv0 = fleet[0];
+  if (!inv0 || targetCount <= 0) return null;
+  const baseStr = inv0.strings[0];
+
+  // Micro: update the single string's total panel count — never N×1 strings.
+  if (inv0.type === 'micro') {
+    const newStr = _buildStrCfg({
+      index:      0,
+      existingId: baseStr?.id,
+      panelCount: targetCount,
+      panelId:    baseStr?.panelId,
+      wireGauge:  baseStr?.wireGauge,
+    });
+    return [_buildInvCfg({
+      existingId:   inv0.id,
+      inverterId:   inv0.inverterId,
+      type:         inv0.type,
+      strings:      [newStr],
+      subSystemKey: key,
+    } as any)];
+  }
+
+  // String / optimizer / hybrid: this sub's own sizing pass.
+  const panel = SOLAR_PANELS.find((pp: any) => pp.id === baseStr?.panelId) as any;
+  let engStrings: Array<{ panelCount: number; inverterIndex?: number }> | null = null;
+  try {
+    const input: Parameters<typeof sizeSystemFromBrand>[0] = {
+      systemType:        key,
+      panelCount:        targetCount,
+      panelWattage:      panel?.watts ?? 400,
+      panelVoc:          panel?.voc ?? 49.6,
+      panelTempCoeffVoc: panel?.tempCoeffVoc ?? -0.27,
+      designTempMin:     -10,
+      optimizerMaxOutputCurrent: 15.0,
+    };
+    if (inv0.inverterId)     input.selectedInverterId = inv0.inverterId;
+    else if (selectedBrand)  input.selectedBrand      = selectedBrand;
+    const result = sizeSystemFromBrand(input);
+    if (result.strings.length > 0 && result.topology !== 'micro') engStrings = result.strings;
+  } catch { /* fall through to even split */ }
+  if (!engStrings) {
+    const pps = Math.min(targetCount, 14);
+    const sc  = Math.max(1, Math.ceil(targetCount / pps));
+    engStrings = Array.from({ length: sc }, (_, i) => ({
+      panelCount: i === sc - 1 ? targetCount - pps * (sc - 1) : pps,
+      inverterIndex: 0,
+    }));
+  }
+  const byInv = new Map<number, Array<{ panelCount: number }>>();
+  for (const s of engStrings) {
+    const idx = s.inverterIndex ?? 0;
+    if (!byInv.has(idx)) byInv.set(idx, []);
+    byInv.get(idx)!.push(s);
+  }
+  const invCount = Math.max(1, byInv.size);
+  const out: InverterConfig[] = [];
+  for (let idx = 0; idx < invCount; idx++) {
+    const shell = fleet[idx] ?? inv0;
+    const assigned = byInv.get(idx) ?? [];
+    if (assigned.length === 0) { out.push(shell); continue; }
+    const newStrings = assigned.map((s, si) => {
+      const existing = shell.strings[si] ?? shell.strings[0];
+      return _buildStrCfg({
+        index:          si,
+        panelCount:     s.panelCount,
+        panelId:        existing?.panelId,
+        existingId:     existing?.id ?? `str-sub-sync-${key}-${idx}-${si}`,
+        label:          existing?.label,
+        tilt:           existing?.tilt,
+        azimuth:        existing?.azimuth,
+        roofType:       existing?.roofType as any,
+        mountingSystem: existing?.mountingSystem,
+        wireGauge:      existing?.wireGauge,
+        wireLength:     existing?.wireLength,
+      });
+    });
+    out.push(_buildInvCfg({
+      existingId:            shell.id,
+      inverterId:            shell.inverterId,
+      type:                  shell.type,
+      strings:               newStrings,
+      optimizerPeripheralId: (shell as any).optimizerPeripheralId,
+      deviceRatioOverride:   (shell as any).deviceRatioOverride,
+      subSystemKey:          key,
+    } as any));
+  }
+  return out;
+}
+
 function newString(idx: number, sysType?: string): StringConfig {
   return { id: `str-${Date.now()}-${idx}`, label: `String ${idx + 1}`, panelCount: 10, panelId: defaultPanelForSystemType(sysType), tilt: 20, azimuth: 180, roofType: 'shingle', mountingSystem: 'ironridge-xr100', wireGauge: '#10 AWG', wireLength: 50 };
 }
 
-function newInverter(type: InverterType, sysType?: string): InverterConfig {
+function newInverter(
+  type: InverterType,
+  sysType?: string,
+  opts?: { subSystemKey?: SubSystemKey; panelCount?: number; panelId?: string },
+): InverterConfig {
   // Use correct default inverterId per type — prevents cross-type ID mismatch.
   // v47.358: 'ecoflow' topology defaults to PowerOcean 10kW (middle tier).
   let defaultId: string;
@@ -467,11 +497,28 @@ function newInverter(type: InverterType, sysType?: string): InverterConfig {
     defaultId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
   }
   // v61.3: route through central builder — guarantees metadata invariants.
-  const firstString = newString(0, sysType);
+  const base = newString(0, sysType);
+  const firstString = (opts?.subSystemKey || opts?.panelCount !== undefined || opts?.panelId)
+    ? _buildStrCfg({
+        index:          0,
+        systemType:     sysType,
+        existingId:     base.id,
+        panelCount:     opts?.panelCount ?? base.panelCount,
+        panelId:        opts?.panelId ?? base.panelId,
+        tilt:           base.tilt,
+        azimuth:        base.azimuth,
+        roofType:       base.roofType as any,
+        mountingSystem: base.mountingSystem,
+        wireGauge:      base.wireGauge,
+        wireLength:     base.wireLength,
+        subSystemKey:   opts?.subSystemKey,
+      })
+    : base;
   return _buildInvCfg({
     inverterId: defaultId,
     type,
     strings: [firstString],
+    subSystemKey: opts?.subSystemKey,
   });
 }
 
@@ -1001,6 +1048,11 @@ function EngineeringPageInner() {
   // Hoisted here from its original (~line 3130) location so the panel count
   // resolver can run during the same render pass as totalPanels.
   const [projectLayout, setProjectLayout] = useState<any>(null);
+  // Canonical design panel id (projects.selected_equipment) from the loaded project.
+  // Single source of truth for "which panel" — the effect below forces the config
+  // onto it so a panel changed in Design reconciles into Engineering.
+  const [canonicalPanelId, setCanonicalPanelId] = useState<string | null>(null);
+  const appliedCanonPanelRef = useRef<string | null>(null);
   const [projectAutoLoaded, setProjectAutoLoaded] = useState(false);
   const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -1062,6 +1114,8 @@ function EngineeringPageInner() {
           return;
         }
         const p = data.data;
+        // Canonical panel (projects.selected_equipment) — authoritative "which panel".
+        setCanonicalPanelId((p.selectedPanel?.id as string | undefined) ?? null);
         const seed = p.engineeringSeed;
         const layout = p.layout;
         // STEP 4 -- LOADED PROJECT LAYOUT LOGGING
@@ -1527,39 +1581,90 @@ function EngineeringPageInner() {
         const expectedHydrationPanelCount: number =
           _hydLayoutPanelCount > 0 ? _hydLayoutPanelCount : _hydSeedPanelCount;
 
-                const savedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
+        // Wave 3.1 — CAD-side systemType fallback for the §1.5 inherit chain
+        // (config.systemType ?? cad.systemType ?? 'roof'). Used by every
+        // hydration-boundary ensureSubSystemShape call in this effect.
+        const _cadSystemTypeForTags: string | null =
+          (p.systemType as string | undefined) ?? ((layout as any)?.systemType as string | undefined) ?? null;
+        // Wave 4B.A — per-sub layout stamp counts (§1.1 membership authority),
+        // hoisted ABOVE the ensureSubSystemShape boundary so the legacy-collapse
+        // rule sees the 3-key partition and never synthesizes a single
+        // winner-vote bucket on a hybrid (Ray's {fence: …}-only map bug). The
+        // same classification subSystemCounts uses (unstamped panels ⇒ roof).
+        const _hydExpectedBySub: Partial<Record<SubSystemKey, number>> = (() => {
+          const counts: Record<SubSystemKey, number> = { roof: 0, ground: 0, fence: 0 };
+          for (const pnl of (((layout as any)?.panels ?? []) as Array<{ systemType?: string; placementType?: string }>)) {
+            counts[toSubSystemKey(pnl?.systemType ?? pnl?.placementType)]++;
+          }
+          return counts;
+        })();
+        const _hydPresentKeys = presentStampKeys(_hydExpectedBySub);
+        const _rawSavedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
+        // Wave 3.1 — TAG AT THE SOURCE (contract §1.5/§3-Wave-3 item 1): the DB
+        // config is normalized through ensureSubSystemShape BEFORE the staleness
+        // gates below, so (a) every inverter/string carries a subSystemKey tag
+        // (inherited from systemType — never a bare 'roof' default), and (b) the
+        // subSystems equipment map exists — meaning a gate that discards a stale
+        // fleet can never lose the equipment CHOICE (it survives in the map, §1.1).
+        const savedConfig: Partial<ProjectConfig> | undefined =
+          _rawSavedConfig && Object.keys(_rawSavedConfig).length > 0
+            ? (ensureSubSystemShape(_rawSavedConfig as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as Partial<ProjectConfig>)
+            : _rawSavedConfig;
         console.log('[HYDRATION] p.engineeringConfig:', savedConfig ? `${Object.keys(savedConfig).length} keys` : 'null/undefined');
         // v61.8 PRIMARY FIX: Panel count mismatch gate.
         // If savedConfig.inverters totals a panel count different from the
         // authoritative project panel count, the saved inverter layout is STALE
         // (auto-saved before CAD loaded, likely from newString() default panelCount:10).
         // Discard only the stale inverter fields + locks. Preserve all other saved fields.
+        //
+        // Wave 3.2 (contract §3 Wave 3 item 2): the gate is re-keyed PER SUB.
+        // With ≥2 subsystems stamped on the layout, each sub's fleet is compared
+        // against ITS OWN stamped panel count and only MISMATCHED fleets are
+        // discarded — a fence CAD edit can never nuke roof engineering. The
+        // equipment CHOICE always survives in savedConfig.subSystems (§1.1),
+        // which was synthesized at the hydration boundary above and is never
+        // touched by this gate. Single-sub projects take the legacy-total path
+        // with a decision IDENTICAL to the historical gate (I-10).
+        const _hydFallbackKey: SubSystemKey = toSubSystemKey(
+          (savedConfig as any)?.systemType ?? _cadSystemTypeForTags ?? 'roof',
+        );
+        const _hydMultiSub = _hydPresentKeys.length > 1;
         if (
           savedConfig &&
           Array.isArray((savedConfig as any).inverters) &&
           expectedHydrationPanelCount > 0
         ) {
-          const _savedInvTotal: number = ((savedConfig as any).inverters as any[]).reduce(
-            (s: number, inv: any) =>
-              s + ((inv.strings ?? []) as any[]).reduce(
-                (s2: number, str: any) => s2 + (str.panelCount ?? 0), 0
-              ),
-            0
-          );
-          if (_savedInvTotal > 0 && _savedInvTotal !== expectedHydrationPanelCount) {
+          const _pcGate = gateStaleFleetPerSub({
+            inverters: (savedConfig as any).inverters as any[],
+            expectedBySub: _hydExpectedBySub,
+            expectedTotal: expectedHydrationPanelCount,
+            fallbackKey: _hydFallbackKey,
+          });
+          if (_pcGate.anyDiscarded) {
             console.warn(
               '[HYDRATION STALE CONFIG DISCARD]',
               '\n  projectId:', projectId,
+              '\n  mode:', _pcGate.mode,
               '\n  expectedPanelCount:', expectedHydrationPanelCount,
-              '\n  savedInverterPanelTotal:', _savedInvTotal,
-              '\n  reason: saved inverter panel total does not match authoritative project panel count',
-              '\n  action: discarded savedConfig.inverters and cleared user lock/default stamp'
+              '\n  expectedBySub:', JSON.stringify(_hydExpectedBySub),
+              '\n  discardedSubSystems:', _pcGate.discardedKeys.join(', '),
+              '\n  reason: saved inverter panel total does not match authoritative panel count (per-sub at N>1)',
+              '\n  action: discarded the mismatched fleet(s) + cleared user lock/default stamp; equipment choices survive in subSystems map'
             );
-            // Discard only stale inverter layout + locks that protect it.
-            // All other fields (wire settings, mounting, utility, etc.) are preserved.
-            delete (savedConfig as any).inverters;
+            if (_pcGate.keptInverters.length > 0) {
+              (savedConfig as any).inverters = _pcGate.keptInverters;
+            } else {
+              delete (savedConfig as any).inverters;
+            }
             delete (savedConfig as any).isUserControlled;
             delete (savedConfig as any).defaultsApplied;
+            // Per-sub re-seed eligibility: a discarded sub may be re-defaulted
+            // by per-sub smart defaults; matched subs keep their stamp.
+            if (_pcGate.mode === 'per-sub' && (savedConfig as any).defaultsAppliedBySubSystem) {
+              const _dabs = { ...(savedConfig as any).defaultsAppliedBySubSystem };
+              for (const k of _pcGate.discardedKeys) delete _dabs[k];
+              (savedConfig as any).defaultsAppliedBySubSystem = _dabs;
+            }
           }
         }
 
@@ -1573,28 +1678,46 @@ function EngineeringPageInner() {
           Array.isArray((savedConfig as any).inverters) &&
           (savedConfig as any).inverters.length > 0
         ) {
-          const _savedPrimaryInvId: string = (savedConfig as any).inverters[0]?.inverterId ?? '';
-          const _savedEqEntry = STRING_INVERTERS.find(x => x.id === _savedPrimaryInvId);
-          // v61.13: also discard when the ID is not found in STRING_INVERTERS at all but
-          // matches a known-inactive legacy prefix — covers the escape hatch where
-          // _savedEqEntry is undefined (ID was fully removed from equipment-db).
-          const _isKnownInactiveLegacy = !_savedEqEntry && (
-            _savedPrimaryInvId.startsWith('ecoflow-power-ocean-') ||
-            _savedPrimaryInvId.startsWith('ecoflow-powerocean-')
+          // Wave 3.2 — per-sub at N>1: each fleet's PRIMARY inverter is checked;
+          // only the fleet(s) with a dead SKU are discarded (legacy behavior —
+          // inverters[0] check, discard all — is byte-identical at ≤1 fleet).
+          const _isStaleInvId = (id: string): boolean => {
+            const entry = STRING_INVERTERS.find(x => x.id === id);
+            // v61.13: also discard when the ID is not found in STRING_INVERTERS at all but
+            // matches a known-inactive legacy prefix — covers the escape hatch where
+            // the entry is undefined (ID was fully removed from equipment-db).
+            const knownInactiveLegacy = !entry && (
+              id.startsWith('ecoflow-power-ocean-') ||
+              id.startsWith('ecoflow-powerocean-')
+            );
+            return (entry ? entry.active === false : false) || knownInactiveLegacy;
+          };
+          const _invGate = gateInactiveInverterPerSub(
+            (savedConfig as any).inverters as any[],
+            _hydFallbackKey,
+            _isStaleInvId,
           );
-          if ((_savedEqEntry && _savedEqEntry.active === false) || _isKnownInactiveLegacy) {
+          if (_invGate.anyDiscarded) {
             console.warn(
               '[HYDRATION STALE INVERTER DISCARD]',
               '\n  projectId:', projectId,
-              '\n  inverterId:', _savedPrimaryInvId,
-              '\n  reason:', _isKnownInactiveLegacy
-                ? 'saved inverterId matches known-inactive legacy prefix (not found in equipment-db)'
-                : 'saved inverterId is active:false in equipment-db (deactivated SKU)',
-              '\n  action: discarded savedConfig.inverters and cleared user lock/default stamp'
+              '\n  mode:', _invGate.mode,
+              '\n  discardedSubSystems:', _invGate.discardedKeys.join(', '),
+              '\n  reason: fleet primary inverterId is active:false / known-inactive legacy SKU',
+              '\n  action: discarded the stale fleet(s) and cleared user lock/default stamp'
             );
-            delete (savedConfig as any).inverters;
+            if (_invGate.keptInverters.length > 0) {
+              (savedConfig as any).inverters = _invGate.keptInverters;
+            } else {
+              delete (savedConfig as any).inverters;
+            }
             delete (savedConfig as any).isUserControlled;
             delete (savedConfig as any).defaultsApplied;
+            if (_invGate.mode === 'per-sub' && (savedConfig as any).defaultsAppliedBySubSystem) {
+              const _dabs2 = { ...(savedConfig as any).defaultsAppliedBySubSystem };
+              for (const k of _invGate.discardedKeys) delete _dabs2[k];
+              (savedConfig as any).defaultsAppliedBySubSystem = _dabs2;
+            }
           }
         }
 
@@ -1610,7 +1733,19 @@ function EngineeringPageInner() {
         // committed config ALWAYS equal the single-source-of-truth allocator
         // output, for any brand and panel count. Guided/manual modes are left
         // untouched (the user curates those via the recommendation panel / edits).
+        // Wave 3.2 — the heal below rebuilds strings from ONE whole-project
+        // sizeSystemFromBrand pass, which is meaningless (and destructive)
+        // across ≥2 subsystems. At N>1 it is SKIPPED (protective no-op: the
+        // config loads exactly as saved; per-sub sizing belongs to the per-sub
+        // watchers/defaults). Single-sub behavior is unchanged.
+        const _hydMultiFleet =
+          _hydMultiSub ||
+          fleetKeys((savedConfig as any)?.inverters as any[], _hydFallbackKey).length > 1;
+        if (_hydMultiFleet && p.controlMode === 'auto') {
+          console.log('[HYDRATION STRING-DISTRIBUTION HEAL] skipped — multi-subsystem project (per-sub authority owns string layout)');
+        }
         if (
+          !_hydMultiFleet &&
           p.controlMode === 'auto' &&
           savedConfig &&
           Array.isArray((savedConfig as any).inverters) &&
@@ -1744,7 +1879,8 @@ function EngineeringPageInner() {
                     strings:    inv.strings.slice(0, target) as any,
                     optimizerPeripheralId: inv.optimizerPeripheralId,
                     deviceRatioOverride:   inv.deviceRatioOverride,
-                  });
+                    subSystemKey: inv.subSystemKey, // Wave 3.3: rebuild never strips the tag
+                  } as any);
                 } else {
                   // v61.3/v61.5: use central builder for padded strings + rebuild inverter metadata
                   const extra = Array.from({ length: target - inv.strings.length }, (_: any, k: number) =>
@@ -1767,7 +1903,8 @@ function EngineeringPageInner() {
                     strings:    [...inv.strings, ...extra] as any,
                     optimizerPeripheralId: inv.optimizerPeripheralId,
                     deviceRatioOverride:   inv.deviceRatioOverride,
-                  });
+                    subSystemKey: inv.subSystemKey, // Wave 3.3: rebuild never strips the tag
+                  } as any);
                 }
               });
 
@@ -1794,7 +1931,10 @@ function EngineeringPageInner() {
                     ? _savedSinglePc !== expectedHydrationPanelCount  // semantic mismatch (preferred)
                     : _savedSinglePc > 20                             // fallback when no reference count yet
                 );
-              const _isCorrupt = _isNx1Corrupt || _is1xNCorrupt;
+              // Wave 3.2 — the corruption rebuild below is a whole-fleet
+              // sizeSystemFromBrand pass; at N>1 subsystems it is skipped
+              // (per-sub authority owns each fleet's layout).
+              const _isCorrupt = (_isNx1Corrupt || _is1xNCorrupt) && !_hydMultiFleet;
               if (_isCorrupt) {
                 const _corruptLabel = _is1xNCorrupt
                   ? `1×${_allStrings[0]?.panelCount ?? '?'} (single over-sized string)`
@@ -1878,7 +2018,11 @@ function EngineeringPageInner() {
             // v61.6 Electrical Integrity: also detect + repair 1×N electrical violations
             // (e.g. strings:[{panelCount:44}] for a Solis inverter with maxPanelsPerString=13).
             const _metaNorm = normalizeInverterConfig(merged);
-            return electricallyNormalizeInverterConfig(_metaNorm).config;
+            const _elecNorm = electricallyNormalizeInverterConfig(_metaNorm).config;
+            // Wave 3.1 — hydration boundary (savedConfig commit): re-stamp tags +
+            // guarantee the subSystems map after the normalizers (idempotent).
+            // Wave 4B.A — presentKeys: hybrid partitions synthesize per-key.
+            return ensureSubSystemShape(_elecNorm as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as ProjectConfig;
           });
         } else if (Object.keys(patches).length > 0) {
           // No saved config — use seed patches as before
@@ -1890,7 +2034,11 @@ function EngineeringPageInner() {
             // v61.4 Hydration Lock: normalise seed patches inverters too.
             // v61.6 Electrical Integrity: repair 1×N violations in seed patches.
             const _metaNorm2 = normalizeInverterConfig(merged);
-            return electricallyNormalizeInverterConfig(_metaNorm2).config;
+            const _elecNorm2 = electricallyNormalizeInverterConfig(_metaNorm2).config;
+            // Wave 3.1 — hydration boundary (seed / no-seed / design-handoff
+            // patches all funnel through here): tag + synthesize the map.
+            // Wave 4B.A — presentKeys: hybrid partitions synthesize per-key.
+            return ensureSubSystemShape(_elecNorm2 as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as ProjectConfig;
           });
         }
 
@@ -1908,7 +2056,11 @@ function EngineeringPageInner() {
                 // v61.6 Electrical Integrity: also repair 1×N violations.
                 setConfig(prev => {
                   const _metaMerge = normalizeInverterConfig({ ...prev, ...localConfig });
-                  return electricallyNormalizeInverterConfig(_metaMerge).config;
+                  const _elecMerge = electricallyNormalizeInverterConfig(_metaMerge).config;
+                  // Wave 3.1 — hydration boundary (localStorage restore can
+                  // resurrect PRE-migration snapshots): tag + synthesize the map.
+                  // Wave 4B.A — presentKeys: hybrid partitions synthesize per-key.
+                  return ensureSubSystemShape(_elecMerge as any, { cadSystemType: _cadSystemTypeForTags, presentKeys: _hydPresentKeys }) as unknown as ProjectConfig;
                 });
               }
             }
@@ -2182,7 +2334,15 @@ function EngineeringPageInner() {
             const merged = { ...prev, ...patches };
             // Phase 11: reconciliation removed from hydration path.
             // Mismatches are surfaced via SizingRecommendation panel.
-            return merged;
+            // Wave 3.1 — hydration boundary (reverse hydration from a generated
+            // file's engineering_run): tag inverters + synthesize the map so a
+            // restored fence/ground run never collapses to default-roof tags.
+            // Wave 4B.A — presentKeys from the live layout partition (only
+            // effective when the layout is already hydrated AND hybrid).
+            return ensureSubSystemShape(merged as any, {
+              cadSystemType: (run.systemType as string | undefined) ?? (snap.systemType as string | undefined) ?? null,
+              presentKeys: subSystemCounts.present as SubSystemKey[],
+            }) as unknown as ProjectConfig;
           });
         }
 
@@ -2261,10 +2421,21 @@ function EngineeringPageInner() {
     saveTimerRef.current = setTimeout(async () => {
       try {
         let resBody: unknown;
+        // Wave 3.5 (contract §1.3/§3 item 5): a config carrying a subSystems
+        // map is a v2 envelope — stamp schemaVersion: 2 so the save route
+        // never mistakes this client for a stale-whitelist writer (the
+        // old-client re-normalization path stays reserved for actual old
+        // clients). Flat mirrors are NEVER computed client-side — storage
+        // derives them from the map at N>1 (§1.4 single-writer rule).
+        const _saveHasMap =
+          (config as any).subSystems && Object.keys((config as any).subSystems).length > 0;
+        const _savePayloadConfig = _saveHasMap
+          ? { ...config, schemaVersion: Math.max(2, Number((config as any).schemaVersion) || 0) }
+          : config;
         const res = await fetch('/api/engineering/save-config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId: currentProjectId, config }),
+          body: JSON.stringify({ projectId: currentProjectId, config: _savePayloadConfig }),
         });
         try { resBody = await res.clone().json(); } catch { resBody = null; }
         console.log('[AUTO-SAVE] status:', res.status, 'body:', resBody);
@@ -2287,6 +2458,63 @@ function EngineeringPageInner() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, currentProjectId, isHydrated]);
+
+  // ── Flush a PENDING autosave on unload / tab-hide ──────────────────────────
+  // The autosave is debounced 800ms. If the user picks equipment and refreshes
+  // (or navigates away) within that window, the debounced fetch is cancelled and
+  // the pick is LOST — the "I chose it, refreshed, it reverted" bug. sendBeacon
+  // fires reliably during unload, so flush the current config immediately when a
+  // save is still pending. Same payload shape + schemaVersion:2 stamp as the
+  // debounced save, so the server never re-normalizes it.
+  useEffect(() => {
+    if (!currentProjectId || !isHydrated) return;
+    const flush = () => {
+      if (!saveTimerRef.current) return;   // no pending debounced save → already persisted
+      try {
+        const _hasMap = (config as any).subSystems && Object.keys((config as any).subSystems).length > 0;
+        const _cfg = _hasMap
+          ? { ...config, schemaVersion: Math.max(2, Number((config as any).schemaVersion) || 0) }
+          : config;
+        const blob = new Blob([JSON.stringify({ projectId: currentProjectId, config: _cfg })], { type: 'application/json' });
+        navigator.sendBeacon('/api/engineering/save-config', blob);
+        if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+      } catch { /* best-effort */ }
+    };
+    const onVis = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [config, currentProjectId, isHydrated]);
+
+  // ── Canonical panel reconciliation (Design→Engineering single source of truth) ──
+  // projects.selected_equipment is authoritative for "which panel". When the project
+  // loads (or its canonical panel changes because the Design side changed it), force
+  // every string onto that panel — ABOVE the saved engineering_config, which may hold
+  // an older panel. Runs once per distinct canonical id (ref-guarded), so in-session
+  // engineering panel edits — which flow to canonical via the save-config write-back —
+  // are not fought. Only acts on a real, resolvable equipment-db panel.
+  // Wave 3.3 (watcher 1/7, contract I-4): at N>1 fleets the canonical
+  // selected_equipment panel is the PRIMARY mirror (§1.4 roof > ground >
+  // fence) — it re-pins ONLY the primary sub's strings, never another sub's.
+  // Composite ref-guard (`${key}:${id}`) so cross-sub loops can't ping-pong.
+  useEffect(() => {
+    const canonId = canonicalPanelId;
+    if (!canonId) return;
+    const _cpFallbackKey = toSubSystemKey(config.systemType);
+    const _cpKeys = fleetKeys(config.inverters, _cpFallbackKey);
+    const _cpScopeKey: SubSystemKey | undefined = _cpKeys.length > 1 ? _cpKeys[0] : undefined;
+    const _cpRefKey = `${_cpScopeKey ?? 'all'}:${canonId}`;
+    if (appliedCanonPanelRef.current === _cpRefKey) return;
+    if (!SOLAR_PANELS.find(pp => pp.id === canonId)) return;
+    appliedCanonPanelRef.current = _cpRefKey;
+    setConfig(prev => (applyPanelToEngineeringConfig(prev, canonId, _cpScopeKey) as unknown as ProjectConfig | null) ?? prev);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonicalPanelId, config.inverters, config.systemType]);
 
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
@@ -2329,6 +2557,24 @@ function EngineeringPageInner() {
   const [sldSvg, setSldSvg] = useState<string | null>(null);
   const [sldLoading, setSldLoading] = useState(false);
   const [sldError, setSldError] = useState<string | null>(null);
+  // Invalidate the cached SLD whenever the equipment it depicts changes, so a
+  // stale SLD (e.g. cached before an inverter re-pick) can never be shown in the
+  // SLD tab or embedded into the plan set as "INVERTER NOT SELECTED". A null
+  // cache forces a fresh render on next view / plan-set.
+  const _sldEquipSig = JSON.stringify({
+    inv: (config?.inverters ?? []).map((i: any) => [i.subSystemKey, i.inverterId, i.type,
+      (i.strings ?? []).reduce((s: number, x: any) => s + (x.panelCount || 0), 0)]),
+    sub: (config as any)?.subSystems,
+    ic: config?.interconnectionMethod, bat: [config?.batteryId, config?.batteryCount],
+    st: config?.systemType,
+  });
+  const _sldSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (_sldSigRef.current !== null && _sldSigRef.current !== _sldEquipSig) {
+      setSldSvg(prev => (prev ? null : prev)); // equipment changed → stale SLD dropped
+    }
+    _sldSigRef.current = _sldEquipSig;
+  }, [_sldEquipSig]);
   // BUG 4 FIX: SLD Zoom state
   const [sldZoom, setSldZoom] = useState(1);
   const [sldPan, setSldPan] = useState({ x: 0, y: 0 });
@@ -2445,6 +2691,78 @@ function EngineeringPageInner() {
     });
   }, [projectLayout, totalPanels, config]);
   const systemPanelCount = resolvedPanelCount.value;
+
+  // ── HYBRID partition (roof/ground/fence) from per-panel design stamps ──────
+  // The engineering pipeline historically treated the whole project as ONE
+  // config.systemType: a 51-roof/26-ground/17-fence design got fence structural
+  // for all 94 modules and a BOM of 94 fence sections (Stowell). Partition once
+  // here; the structural payload, BOM payload, and the Structural/Mounting tabs
+  // all consume it. Empty/unstamped layouts collapse to a single legacy bucket.
+  const subSystemCounts = useMemo(() => {
+    const counts = { roof: 0, ground: 0, fence: 0 };
+    const panels = (projectLayout?.panels ?? []) as Array<{ systemType?: string; placementType?: string }>;
+    for (const p of panels) {
+      const st = String(p.systemType ?? p.placementType ?? '').toLowerCase();
+      if (st === 'fence' || st === 'solar_fence') counts.fence++;
+      else if (st === 'ground' || st === 'ground_mount') counts.ground++;
+      else counts.roof++;
+    }
+    const present = (['roof', 'ground', 'fence'] as const).filter(k => counts[k] > 0);
+    return { ...counts, present, isHybrid: present.length > 1 };
+  }, [projectLayout]);
+
+  // ── Wave 4B.B — fleet-shape diagnostics for hybrid layouts ─────────────────
+  // `degenerate` = the pre-contract whole-project single fleet (Ray's one
+  // 85-panel IQ8+ string tagged 'fence' on a 48/20/17 partition). Such a fleet
+  // must never be partitioned into per-sub engine inputs (item D) and is the
+  // auto-split trigger (item B). `suspect` is broader: ANY present sub whose
+  // fleet panel total disagrees with its stamp count — gates the explicit
+  // "Rebuild fleets per sub-system" action in the Inverters & Strings header.
+  const fleetDiag = useMemo(() => {
+    if (!subSystemCounts.isHybrid) {
+      return { degenerate: null as ReturnType<typeof detectDegenerateSingleFleet> | null, suspect: false };
+    }
+    const fb = toSubSystemKey(config.systemType);
+    const stamps = { roof: subSystemCounts.roof, ground: subSystemCounts.ground, fence: subSystemCounts.fence };
+    const degenerate = detectDegenerateSingleFleet(config.inverters as any[], fb, stamps);
+    const part = partitionFleet(config.inverters as any[], fb);
+    const suspect = degenerate.degenerate ||
+      subSystemCounts.present.some(k => fleetPanelTotal(part[k] ?? []) !== subSystemCounts[k]);
+    return { degenerate, suspect };
+  }, [config.inverters, config.systemType, subSystemCounts]);
+
+  // ── Wave 5A / W4B.D must-fix — per-sub fleet plan for the hybrid compute ───
+  // A PRESENT sub whose partitioned fleet is EMPTY must never compute as a
+  // phantom default inverter (the SE7600H class). DECISION (documented):
+  //   1. If config.subSystems[key] carries an inverterId → synthesize a
+  //      one-inverter fleet from the sub's OWN equipment record (§1.1: the
+  //      map is the equipment authority) and compute normally;
+  //   2. otherwise EXCLUDE the sub from the aggregate numbers and surface a
+  //      visible per-sub hint (Diagram tab) until equipment is picked/split.
+  const hybridFleetPlan = useMemo(() => {
+    if (!subSystemCounts.isHybrid || fleetDiag.degenerate?.degenerate) return null;
+    const fb = toSubSystemKey(config.systemType);
+    const part = partitionFleet(config.inverters as any[], fb);
+    const subMap = ((config as any).subSystems ?? {}) as Record<string, { inverterId?: string; topology?: string; panelId?: string }>;
+    const fleets: Partial<Record<SubSystemKey, InverterConfig[]>> = {};
+    const synthesized: SubSystemKey[] = [];
+    const excluded: SubSystemKey[] = [];
+    for (const key of subSystemCounts.present) {
+      const fleet = (part[key] ?? []) as InverterConfig[];
+      if (fleet.length > 0) { fleets[key] = fleet; continue; }
+      const synth = synthesizeFleetFromSubEquipment(key, subMap[key], subSystemCounts[key]);
+      if (synth) {
+        fleets[key] = synth as unknown as InverterConfig[];
+        synthesized.push(key);
+        console.warn(`[hybridFleetPlan] '${key}' fleet empty — computing from subSystems.${key} equipment (${subMap[key]?.inverterId})`);
+      } else {
+        excluded.push(key);
+        console.warn(`[hybridFleetPlan] '${key}' fleet empty and no subSystems.${key}.inverterId — EXCLUDED from aggregate (no phantom default)`);
+      }
+    }
+    return { fleets, synthesized, excluded };
+  }, [subSystemCounts, fleetDiag, config]);
+
   const totalWatts = config.inverters.reduce((sum, inv) =>
     sum + inv.strings.reduce((s2, str) => {
       const panel = getPanelById(str.panelId);
@@ -2469,8 +2787,33 @@ function EngineeringPageInner() {
   // ── ComputedSystem: centralized calculation engine ─────────────────────────
   // All modules (SLD, BoM, Electrical, Conduit, Permit) read from this object.
   // Recomputes whenever config changes.
-  const computedSystem = useMemo<ComputedSystem>(() => {
-    const firstInv = config.inverters[0];
+  //
+  // Wave 3.7 (contract §3 Wave 3 item 7): the memo now runs through
+  // computeMultiSystem. At N=1 subsystems it returns the plain computeSystem
+  // output BY REFERENCE (I-1: bare run ids, byte-identical aggregate); at N>1
+  // it runs one engine pass per sub — each with its OWN fleet / panel count /
+  // topology / rooftopTempAdderC / geometry-derived run lengths — and
+  // aggregates at ONE POI (§1.7: shared service runs emitted once, summed
+  // per-inverter backfeed, per-sub run ids namespaced `${key}:`).
+  const computedMulti = useMemo<ComputedMultiSystem>(() => {
+    // ── One sub's ComputedSystemInput, built from ITS OWN fleet (I-3) ──────
+    //  fleet         — the sub's inverters (legacy call: the whole config)
+    //  csPanels      — authoritative panel count for the engine
+    //  geomPanels    — panel count for geometry heuristics (fence length /
+    //                  array diagonal / branch estimates)
+    //  systemTypeStr — drives run-length geometry + rooftop adder + the
+    //                  SolFence equipment-schedule row
+    //  includePoi    — battery/generator/ATS/backup-interface devices are
+    //                  POI-level; they ride the PRIMARY sub's input exactly
+    //                  once (I-6), never every sub's.
+    const buildCsInputFor = (
+      fleet: InverterConfig[],
+      csPanels: number,
+      geomPanels: number,
+      systemTypeStr: string | undefined,
+      includePoi: boolean,
+    ): ComputedSystemInput => {
+    const firstInv = fleet[0];
     const firstStr = firstInv?.strings[0];
     const invData = firstInv ? getInvById(firstInv.inverterId, firstInv.type) as any : null;
     const panelData = firstStr ? getPanelById(firstStr.panelId) as any : null;
@@ -2508,7 +2851,7 @@ function EngineeringPageInner() {
       // back to the config-derived totalPanels only when no authoritative
       // source is available. This keeps ComputedSystem consistent with
       // the sizing engine and the UI card display.
-      totalPanels: systemPanelCount > 0 ? systemPanelCount : totalPanels,
+      totalPanels: csPanels,
       panelWatts: panelData?.watts ?? 400,
       panelVoc: panelData?.voc ?? 41.6,
       panelIsc: panelData?.isc ?? 12.26,
@@ -2523,7 +2866,7 @@ function EngineeringPageInner() {
       inverterModel: invData?.model ?? (topology === 'micro' ? 'IQ8+' : 'SE7600H'),
       inverterAcKw: invData?.acOutputKw ?? (invData?.acOutputW ? invData.acOutputW / 1000 : topology === 'micro' ? 0.290 : 7.6), // v58.4: fallback 0.295->0.290 (IQ8+ datasheet max continuous = 290VA)
       // C7 fix: physical inverter count so multi-inverter AC current / OCPD / schedule qty are sized for ALL units, not just the primary.
-      inverterCount: topology === 'micro' ? 1 : Math.max(1, config.inverters.length),
+      inverterCount: topology === 'micro' ? 1 : Math.max(1, fleet.length),
       inverterMaxDcV: invData?.maxDcVoltage ?? (topology === 'micro' ? 60 : 600),
       inverterMpptVmin: invData?.mpptVoltageMin ?? (topology === 'micro' ? 16 : 100),
       inverterMpptVmax: invData?.mpptVoltageMax ?? (topology === 'micro' ? 60 : 480),
@@ -2541,7 +2884,8 @@ function EngineeringPageInner() {
       // Using 95°C here causes massive over-derating (factor 0.41) → wrong wire gauges.
       ambientTempC: Math.min((compliance.autoDetected as any)?.designTempMax ?? 40, 40),
       // Rooftop temp adder: 30°C for roof (NEC 310.15), 0°C for fence/ground (no rooftop heat)
-      rooftopTempAdderC: config.systemType === 'roof' ? 30 : 0,
+      // Wave 3.7 / I-7: per-SUB at N>1 — the sub's own type, never the project's.
+      rooftopTempAdderC: systemTypeStr === 'roof' ? 30 : 0,
       // System-type-aware run lengths — ESTIMATED from panel count + layout heuristics
       // derivedFrom: 'estimated-geometry' (not CAD model)
       // v47.432: CAD-based version historically lived in bom-unified.ts (deleted Stage 8.1)
@@ -2549,8 +2893,8 @@ function EngineeringPageInner() {
       // Ground: array footprint → diagonal from array width × depth
       // Roof: standard defaults (attic/roof routing to inverter/MSP)
       runLengths: (() => {
-        const isFence = config.systemType === 'fence';
-        const isGround = config.systemType === 'ground';
+        const isFence = systemTypeStr === 'fence';
+        const isGround = systemTypeStr === 'ground';
         const userDcLen = firstStr?.wireLength ?? config.wireLength;
 
         if (isFence) {
@@ -2565,13 +2909,13 @@ function EngineeringPageInner() {
           //   Legacy deriveWiring() defaults: micro -> 2ft/panel DC, string -> 3ft/panel DC
           //   (source bom-unified.ts deleted in v47.432 Stage 8.1)
           const panelWidthFt = 3.72;    // resolveDefaultFencePanelSpec(): 1.133m
-          const estFenceLenFt = totalPanels * panelWidthFt;
+          const estFenceLenFt = geomPanels * panelWidthFt;
           const isMicroTopo = firstInv?.type === 'micro';
           // Per-branch trunk cable: fence length ÷ estimated branch count
           // Branch count estimate: ceil(panels / 16) for micro, ceil(panels/stringSize) for string
           const estBranches = isMicroTopo
-            ? Math.max(1, Math.ceil(totalPanels / 16))   // ~16 micros per branch @240V
-            : Math.max(1, config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || 1);
+            ? Math.max(1, Math.ceil(geomPanels / 16))   // ~16 micros per branch @240V
+            : Math.max(1, fleet.reduce((s, inv) => s + inv.strings.length, 0) || 1);
           const branchRunFt = Math.ceil(estFenceLenFt / estBranches);
           return {
             DC_STRING_RUN:         userDcLen ?? 15,          // fence: short DC home run (panels at ground level)
@@ -2597,15 +2941,15 @@ function EngineeringPageInner() {
           //   Legacy defaults: string -> 3ft/panel DC + 2x diagonal, micro -> 2ft/panel + 1.5x diagonal
           //   (source bom-unified.ts deleted in v47.432 Stage 8.1)
           const panelWidthIn = 41.7;
-          const panelsPerRow = Math.ceil(totalPanels / Math.max(1, config.rowCount ?? 1));
+          const panelsPerRow = Math.ceil(geomPanels / Math.max(1, config.rowCount ?? 1));
           const arrayWidthFt = (panelsPerRow * panelWidthIn) / 12;
           const rowDepthFt = (config.rowCount ?? 1) * 12;
           const diagonalFt = Math.sqrt(arrayWidthFt * arrayWidthFt + rowDepthFt * rowDepthFt);
           const isMicroTopo = firstInv?.type === 'micro';
           // Per-branch run: diagonal ÷ branch count (each branch covers a section of the array)
           const estBranches = isMicroTopo
-            ? Math.max(1, Math.ceil(totalPanels / 16))
-            : Math.max(1, config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || 1);
+            ? Math.max(1, Math.ceil(geomPanels / 16))
+            : Math.max(1, fleet.reduce((s, inv) => s + inv.strings.length, 0) || 1);
           const branchRunFt = Math.ceil(diagonalFt / estBranches);
           // DC string run: array width ÷ strings (for string inverter) or 5ft for micro
           const dcRunFt = isMicroTopo ? 5 : Math.max(15, Math.min(Math.ceil(arrayWidthFt / estBranches), 80));
@@ -2643,84 +2987,218 @@ function EngineeringPageInner() {
       mainPanelBrand: config.mainPanelBrand ?? 'Square D',
       panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
       interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
-      systemType: config.systemType,   // adds the SolFence mounting row to the equipment schedule for fence
+      systemType: systemTypeStr as ComputedSystemInput['systemType'],   // adds the SolFence mounting row to the equipment schedule for fence
 
-      branchCount: topology === 'micro' ? Math.ceil(totalPanels / (modulesPerDevice * branchLimit)) : undefined,
+      branchCount: topology === 'micro' ? Math.ceil(geomPanels / (modulesPerDevice * branchLimit)) : undefined,
       // B1 FIX: Pass the actual string count from config.inverters so computeSystem()
       // uses the user's layout rather than auto-calculating from NEC 690.7 physics.
       // Without this, the UI SLD display shows a different string count than the
       // user's applied configuration (e.g. 3 physics-derived strings vs 2 user strings).
       // Only applies to string/optimizer/hybrid topology — micro has no DC strings.
       totalStrings: topology !== 'micro'
-        ? config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || undefined
+        ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
         : undefined,
-      // v61.7: Pass actual per-string panel counts from config.inverters[].strings so
+      // v61.7: Pass actual per-string panel counts from the fleet's strings so
       // computeSystem() performs NEC 690.7 Voc checks on the REAL string lengths,
       // not on equally-divided totalPanels/totalStrings. Prevents false Voc violations.
       configStringPanelCounts: topology !== 'micro'
-        ? config.inverters.flatMap(inv => inv.strings.map(s => s.panelCount))
+        ? fleet.flatMap(inv => inv.strings.map(s => s.panelCount))
         : undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
       // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading
-      batteryIds: config.batteryId ? [config.batteryId] : [],
+      // Wave 3.7 / I-6: POI-level devices ride the PRIMARY sub's input exactly once.
+      batteryIds: includePoi && config.batteryId ? [config.batteryId] : [],
       // BUILD v24: Battery/Generator/ATS NEC-sized segment inputs
-      batteryBackfeedA: config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
-      batteryContinuousOutputA: config.batteryId
+      batteryBackfeedA: includePoi && config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
+      batteryContinuousOutputA: includePoi && config.batteryId
         ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
         : undefined,
-      generatorOutputBreakerA: config.generatorId
+      generatorOutputBreakerA: includePoi && config.generatorId
         ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
         : undefined,
-      generatorKw: config.generatorId
+      generatorKw: includePoi && config.generatorId
         ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })()
         : undefined,
-      atsAmpRating: config.atsId
+      atsAmpRating: includePoi && config.atsId
         ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
         : undefined,
-      backupInterfaceMaxA: (() => {
+      backupInterfaceMaxA: !includePoi ? undefined : (() => {
         const _atsId = config.atsId?.toLowerCase() ?? '';
         const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
         const _resolvedBuiId = config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : '');
         const _bi = _resolvedBuiId ? getBackupInterfaceById(_resolvedBuiId) : undefined;
         return _bi?.maxContinuousOutputA ?? undefined;
       })(),
-      hasEnphaseIQSC3: (() => {
+      hasEnphaseIQSC3: !includePoi ? undefined : (() => {
         const buiId = config.backupInterfaceId?.toLowerCase() ?? '';
         const atsId = config.atsId?.toLowerCase() ?? '';
         return buiId.includes('iq-system-controller-3') || buiId.includes('iq-sc3') || buiId.includes('iqsc3')
           || atsId.includes('enphase-iq-sc3') || atsId.includes('enphase-iq-system-controller');
       })(),
       // Equipment IDs — for equipment schedule display
-      generatorId:    config.generatorId || undefined,
-      atsId:          config.atsId || undefined,
-      backupInterfaceId: (() => {
+      generatorId:    includePoi ? (config.generatorId || undefined) : undefined,
+      atsId:          includePoi ? (config.atsId || undefined) : undefined,
+      backupInterfaceId: !includePoi ? undefined : (() => {
         const _atsId = config.atsId?.toLowerCase() ?? '';
         const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
         return config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : undefined);
       })(),
       // Derived labels for equipment schedule fallback
-      generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })() : undefined,
-      generatorModel: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? undefined; })() : undefined,
-      atsBrand:       config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? undefined; })() : undefined,
-      atsModel:       config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? undefined; })() : undefined,
-      backupInterfaceBrand: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.manufacturer ?? undefined; })() : undefined,
-      backupInterfaceModel: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.model ?? undefined; })() : undefined,
-      batteryCount:   config.batteryCount || undefined,
+      generatorBrand: includePoi && config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })() : undefined,
+      generatorModel: includePoi && config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? undefined; })() : undefined,
+      atsBrand:       includePoi && config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? undefined; })() : undefined,
+      atsModel:       includePoi && config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? undefined; })() : undefined,
+      backupInterfaceBrand: includePoi && config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.manufacturer ?? undefined; })() : undefined,
+      backupInterfaceModel: includePoi && config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.model ?? undefined; })() : undefined,
+      batteryCount:   includePoi ? (config.batteryCount || undefined) : undefined,
+    };
+    return input;
     };
 
+    const _fbKey = toSubSystemKey(config.systemType);
+    const _present = subSystemCounts.present;
+
+    // ── N ≤ 1 subsystems: EXACTLY the legacy input, through the N=1 identity
+    // path of computeMultiSystem (returns plain computeSystem by reference —
+    // I-1: bare run ids, unsuffixed tags, byte-identical serialization).
+    if (_present.length <= 1) {
+      const onlyKey: SubSystemKey = _present[0] ?? _fbKey;
+      const input = buildCsInputFor(
+        config.inverters,
+        systemPanelCount > 0 ? systemPanelCount : totalPanels,
+        totalPanels,
+        config.systemType,
+        true,
+      );
+      try {
+        return computeMultiSystem([{ ...input, subSystemKey: onlyKey }]);
+      } catch (e) {
+        console.error('ComputedSystem error:', e);
+        // Return a minimal safe object on error
+        return computeMultiSystem([{
+          ...input,
+          totalPanels: Math.max(1, systemPanelCount > 0 ? systemPanelCount : totalPanels),
+          subSystemKey: onlyKey,
+        }]);
+      }
+    }
+
+    // ── Wave 4B.D — degenerate whole-project fleet guard. Partitioning would
+    // hand the ONE tagged sub the whole fleet at a fraction of its panels
+    // (Ray live: the 85-panel IQ8+ fleet tagged 'fence' computed at the 17
+    // fence-stamped modules ⇒ "17 microinverters · 2 AC branches"), while the
+    // other present subs computed over EMPTY fleets ⇒ phantom default string
+    // inverters inflating/warping the aggregate AC kW. Until the fleet is
+    // split per sub (4B.B auto-split or the header action), run ONE honest
+    // whole-fleet pass: deviceCount=85, branches=ceil(85/13)=7 for a single
+    // IQ8+ fleet, and the header AC kW equals the fleet's real output.
+    if (fleetDiag.degenerate?.degenerate) {
+      const degKey = fleetDiag.degenerate.key ?? _fbKey;
+      console.warn(
+        '[ComputedMultiSystem] degenerate single fleet (' + fleetDiag.degenerate.fleetPanelTotal +
+        "p under '" + degKey + "' on a hybrid layout) — ONE whole-fleet pass until fleets are split per sub",
+      );
+      const input = buildCsInputFor(
+        config.inverters,
+        systemPanelCount > 0 ? systemPanelCount : totalPanels,
+        totalPanels,
+        degKey,
+        true,
+      );
+      return computeMultiSystem([{ ...input, subSystemKey: degKey }]);
+    }
+
+    // ── N > 1: one engine pass per PRESENT sub (layouts.panels stamps are the
+    // membership authority, §1.1), aggregated at ONE POI (§1.7 / I-6).
+    // Wave 5A / W4B.D: fleets come from hybridFleetPlan — empty fleets are
+    // synthesized from subSystems[key] equipment or the sub is EXCLUDED
+    // (visible hint in the Diagram tab) — never a phantom default inverter.
+    const _subMapForCompute = ((config as any).subSystems ?? {}) as Record<string, any>;
+    const _plan = hybridFleetPlan;
+    const _computeKeys = _present.filter(k => !(_plan?.excluded ?? []).includes(k));
+    if (_computeKeys.length === 0) {
+      // Every present sub is equipment-less — legacy whole-project fallback.
+      const input = buildCsInputFor(
+        config.inverters,
+        systemPanelCount > 0 ? systemPanelCount : totalPanels,
+        totalPanels,
+        config.systemType,
+        true,
+      );
+      return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
+    }
+    const inputs: MultiSubSystemInput[] = _computeKeys.map((key, i) => {
+      const fleet = (_plan?.fleets[key]
+        ?? partitionFleet(config.inverters as any[], _fbKey)[key]
+        ?? []) as InverterConfig[];
+      const subCount = subSystemCounts[key];
+      return {
+        ...buildCsInputFor(fleet, subCount, subCount, key, i === 0),
+        subSystemKey: key,
+        // Addendum B ruling 1 metadata only (ONE combinable trench, conduits
+        // stay per-subsystem) — the sub's own value first, flat as fallback.
+        trenchRunLengthFt: key !== 'roof'
+          ? (_subMapForCompute[key]?.trenchRunLengthFt ?? config.trenchRunLengthFt ?? undefined)
+          : undefined,
+      };
+    });
     try {
-      return computeSystem(input);
+      return computeMultiSystem(inputs, {
+        mainPanelAmps: config.mainPanelAmps ?? 200,
+        busRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+        interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+      });
     } catch (e) {
-      console.error('ComputedSystem error:', e);
-      // Return a minimal safe object on error
-      return computeSystem({ ...input, totalPanels: Math.max(1, systemPanelCount > 0 ? systemPanelCount : totalPanels) });
+      console.error('ComputedMultiSystem error (hybrid) — falling back to whole-project aggregate:', e);
+      const input = buildCsInputFor(
+        config.inverters,
+        Math.max(1, systemPanelCount > 0 ? systemPanelCount : totalPanels),
+        totalPanels,
+        config.systemType,
+        true,
+      );
+      return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, totalPanels, systemPanelCount, compliance.autoDetected]);
+  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag, hybridFleetPlan]);
+
+  const computedSystem = computedMulti.aggregate;
 
   // Shorthand aliases from ComputedSystem
   const cs = computedSystem;
+
+  // ── Wave 5A — multi-lane SLD sources (Diagram tab / SLD route payload) ─────
+  // Built from computedMulti.subSystems (each lane = that sub's OWN engine
+  // pass). null ⇒ the Diagram tab keeps the hybrid banner as the FALLBACK
+  // (I-8: never a plausible-wrong single-lane sheet); a real branch set ⇒ the
+  // tab fetches a genuine multi-lane render from /api/engineering/sld.
+  const hybridSldSources = useMemo<SLDSourceBranch[] | null>(() => {
+    if (!subSystemCounts.isHybrid) return null;
+    if (computedMulti.subSystemKeys.length <= 1) return null; // degenerate/whole-fleet pass — not lane-splittable yet
+    return buildSourceBranchesFromComputedMulti(computedMulti, (config as any).subSystems) ?? null;
+  }, [subSystemCounts.isHybrid, computedMulti, (config as any).subSystems]);
+
+  // Wave 3.7 — namespaced-run-id-tolerant lookup (parseRunId): at N=1 ids are
+  // bare (legacy, byte-identical); at N>1 per-sub runs are `${key}:`-prefixed
+  // and the FIRST base-id match wins — the fixed roof > ground > fence concat
+  // order makes that the PRIMARY sub's run. Shared service runs stay bare.
+  const csRun = (baseId: string): RunSegment | undefined =>
+    cs.runs?.find((r: RunSegment) => parseRunId(String(r.id)).baseId === baseId);
+
+  // Wave 3.7 — passthrough view for routes/payloads that expect BARE run ids
+  // (SLD route fallback, BOM route, save-outputs). At N>1: the PRIMARY sub's
+  // runs re-keyed to base ids + the shared service runs. N=1: cs.runs as-is.
+  const legacyRunsView = (): RunSegment[] => {
+    if (computedMulti.subSystemKeys.length <= 1) return cs.runs ?? [];
+    const primary = computedMulti.primaryKey;
+    return (cs.runs ?? []).flatMap((r: RunSegment) => {
+      const parsed = parseRunId(String(r.id));
+      if (parsed.subSystem === null) return [r];
+      if (parsed.subSystem === primary) return [{ ...r, id: parsed.baseId }];
+      return [];
+    });
+  };
 
   // ──────────────────────────────────────────────────────────────────
   // v61.7 — STRING PIPELINE GUARDRAIL
@@ -2730,6 +3208,9 @@ function EngineeringPageInner() {
   // ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') return;
+    // Wave 3.7 — the aggregate's strings span multiple subs at N>1; the
+    // 1:1 config-vs-cs comparison below is a single-system invariant only.
+    if (computedMulti.subSystemKeys.length > 1) return;
     if (!Array.isArray(cs.strings) || cs.strings.length === 0) return;
     if (cs.isMicro) return; // micro has no DC strings
 
@@ -2976,44 +3457,96 @@ function EngineeringPageInner() {
      // sizingRecommendation.requiredComponents (engine truth). The UI never computes
      // component quantities locally; it always reflects what sizeSystemFromBrand()
      // returned for the current brand + panel count + topology.
+     // ── Wave 6 — per-sub sizing (ONE pass), each present sub sized against its
+     // INSTALLED inverter (brand + seeded model). Feeds the multi-brand ecosystem
+     // banner + the auto-added components, so a hybrid resolves to the REAL per-sub
+     // kits — never one stale whole-project brand (EcoFlow ×2 on a 3-brand system).
+     const hybridSubSizing = useMemo<Array<{ key: SubSystemKey; curInvId: string; invMfr: string; rec: SystemSizingResult | null }>>(() => {
+       if (!subSystemCounts.isHybrid) return [];
+       const _fb = toSubSystemKey(config.systemType);
+       const part = partitionFleet(config.inverters as any[], _fb);
+       const subMap = ((config as any).subSystems ?? {}) as Record<string, any>;
+       const rows: Array<{ key: SubSystemKey; curInvId: string; invMfr: string; rec: SystemSizingResult | null }> = [];
+       for (const key of subSystemCounts.present) {
+         const count = subSystemCounts[key];
+         if (count <= 0) continue;
+         const fleet = (part[key] ?? []) as InverterConfig[];
+         const inv0 = fleet[0];
+         const curInvId = inv0?.inverterId ?? '';
+         const invMfr = inv0 ? ((getInvById(inv0.inverterId, inv0.type) as any)?.manufacturer ?? '') : '';
+         const brand = curInvId ? (getBrandProfileByInverterId(curInvId)?.id ?? subMap[key]?.ecosystemBrand) : subMap[key]?.ecosystemBrand;
+         const panelId = subMap[key]?.panelId ?? inv0?.strings?.[0]?.panelId;
+         const panel = panelId ? (getPanelById(panelId) as any) : null;
+         let rec: SystemSizingResult | null = null;
+         try {
+           rec = sizeSystemFromBrand({ systemType: key, panelCount: count, panelWattage: panel?.watts ?? 400,
+             // Thread the per-sub panel's electrical specs (panelId alone does NOT
+             // activate the NEC 690.7 cold-Voc clamp — the engine reads panelVoc
+             // directly) so per-sub string sizing can't exceed the inverter's DC max.
+             ...(panel?.voc ? { panelVoc: panel.voc } : {}),
+             ...(panel?.vmp ? { panelVmp: panel.vmp } : {}),
+             ...(panel?.isc ? { panelIsc: panel.isc } : {}),
+             ...(typeof panel?.tempCoeffVoc === 'number' ? { panelTempCoeffVoc: panel.tempCoeffVoc } : {}),
+             designTempMin: -10,
+             ...(panelId ? { panelId } : {}), selectedBrand: brand, ...(curInvId ? { selectedInverterId: curInvId } : {}), batteryEnabled: false } as any);
+         } catch { rec = null; }
+         rows.push({ key, curInvId, invMfr, rec });
+       }
+       return rows;
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, [subSystemCounts, config.inverters, config.systemType, (config as any).subSystems]);
+
+     // Per-sub brand summary for the ecosystem banner (installed-inverter mfr).
+     const hybridBrands = useMemo(() => {
+       if (!subSystemCounts.isHybrid) return null;
+       const perSub = hybridSubSizing.map(r => ({ key: r.key, brand: r.invMfr || '—' }));
+       const uniq = Array.from(new Set(perSub.map(p => p.brand).filter(b => b && b !== '—')));
+       return { perSub, uniq, isMixed: uniq.length > 1 };
+     }, [subSystemCounts.isHybrid, hybridSubSizing]);
+
+     // Phase C1 / Wave 6 — auto-added ecosystem components.
+     // HYBRID: the UNION of each sub's brand kit (per-sub requiredComponents),
+     // aggregated by equipmentDbId/category. Single-system: the whole-project
+     // sizingRecommendation.requiredComponents (unchanged).
      const displayedEcosystemComponents = useMemo(() => {
+       const enrich = (c: any, fallbackMfr: string) => {
+         const id = c.equipmentDbId;
+         let manufacturer = fallbackMfr ?? '';
+         let model = id ?? c.category;
+         let partNumber: string | undefined;
+         if (id) {
+           const gateway = getMonitoringGatewayById(id); if (gateway) { manufacturer = gateway.manufacturer; model = gateway.model; }
+           const opt = getOptimizerById(id); if (opt) { manufacturer = opt.manufacturer; model = opt.model; partNumber = (opt as any).partNumber; }
+           const micro = getMicroinverterById(id); if (micro) { manufacturer = micro.manufacturer; model = micro.model; }
+           const inv = getInverterById(id); if (inv) { manufacturer = inv.manufacturer; model = inv.model; }
+           const ev = getEVChargerById(id); if (ev) { manufacturer = ev.manufacturer; model = ev.model; partNumber = (ev as any).partNumber; }
+           const bat = getBatteryById(id); if (bat) { manufacturer = bat.manufacturer; model = bat.model; }
+         }
+         return { category: c.category, manufacturer, model, partNumber, quantity: c.qty, reason: c.note ?? c.qtyPolicy, required: c.required };
+       };
+       if (subSystemCounts.isHybrid) {
+         const agg = new Map<string, { c: any; mfr: string }>();
+         for (const row of hybridSubSizing) {
+           const comps = row.rec?.requiredComponents ?? [];
+           const mfr = row.rec?.brand?.manufacturer ?? row.invMfr ?? '';
+           for (const c of comps) {
+             if (c.qty <= 0) continue;
+             // Key by BRAND + id/category so a generic 'monitoring_gateway' from
+             // Enphase and from EcoFlow stay separate line items (don't collapse
+             // into one mislabeled row).
+             const k = `${mfr}|${c.equipmentDbId ?? c.category}`;
+             const prev = agg.get(k);
+             if (prev) { prev.c = { ...prev.c, qty: prev.c.qty + c.qty }; }
+             else { agg.set(k, { c: { ...c }, mfr }); }
+           }
+         }
+         return [...agg.values()].map(({ c, mfr }) => enrich(c, mfr));
+       }
        const comps = sizingRecommendation?.requiredComponents;
        if (!comps || comps.length === 0) return [];
-       return comps
-         .filter(c => c.qty > 0)
-         .map(c => {
-           // Enrich with manufacturer/model from equipment-db when equipmentDbId is present.
-           const id = c.equipmentDbId;
-           let manufacturer = sizingRecommendation?.brand?.manufacturer ?? '';
-           let model = id ?? c.category;
-           let partNumber: string | undefined;
-
-           if (id) {
-             const gateway = getMonitoringGatewayById(id);
-             if (gateway) { manufacturer = gateway.manufacturer; model = gateway.model; }
-             const opt = getOptimizerById(id);
-             if (opt) { manufacturer = opt.manufacturer; model = opt.model; partNumber = (opt as any).partNumber; }
-             const micro = getMicroinverterById(id);
-             if (micro) { manufacturer = micro.manufacturer; model = micro.model; }
-             const inv = getInverterById(id);
-             if (inv) { manufacturer = inv.manufacturer; model = inv.model; }
-             const ev = getEVChargerById(id);
-             if (ev) { manufacturer = ev.manufacturer; model = ev.model; partNumber = (ev as any).partNumber; }
-             const bat = getBatteryById(id);
-             if (bat) { manufacturer = bat.manufacturer; model = bat.model; }
-           }
-
-           return {
-             category: c.category,
-             manufacturer,
-             model,
-             partNumber,
-             quantity: c.qty,
-             reason: c.note ?? c.qtyPolicy,
-             required: c.required,
-           };
-         });
-     }, [sizingRecommendation]);
+       return comps.filter(c => c.qty > 0).map(c => enrich(c, sizingRecommendation?.brand?.manufacturer ?? ''));
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, [subSystemCounts.isHybrid, hybridSubSizing, sizingRecommendation]);
 
   // toSystemState: convert ProjectConfig to SystemState for API calls
   const toSystemState = useCallback(() => {
@@ -3117,15 +3650,20 @@ function EngineeringPageInner() {
 
   // Snapshot of current config for diffing.
     // v58.0 — Canonical AC output kW.
-    // Always prefer sizingRecommendation (engine truth) over totalInverterKw
-    // (which reads config.inverters and may reflect stale model/count).
-    // Used by Electrical tab, Engineering Summary, and DC/AC ratio display.
+    // Wave 4B.D — was: "always prefer sizingRecommendation over
+    // totalInverterKw". That made the Electrical-tab hero show the
+    // RECOMMENDED fleet's output (e.g. 85 × IQ8A 0.349 = 29.66 kW) while the
+    // System Config header showed the COMMITTED fleet (85 × IQ8+ 0.290 =
+    // 24.65 kW) — Ray's cross-tab AC kW drift. Per the v61.2 single-source
+    // rule the display mode decides: 'recommended' reads the engine proposal,
+    // 'current' reads the committed config (recommendation only as fallback
+    // when the config carries no inverters yet).
     const _recInverterAcKw = sizingRecommendation
       ? sizingRecommendation.inverterModels.reduce((s, m) => s + m.acKw * m.qty, 0)
       : 0;
-    const canonicalAcKw = _recInverterAcKw > 0
+    const canonicalAcKw = displayMode === 'recommended' && _recInverterAcKw > 0
       ? _recInverterAcKw
-      : Number(totalInverterKw);
+      : (Number(totalInverterKw) > 0 ? Number(totalInverterKw) : _recInverterAcKw);
 
   // ─── v61.2 SINGLE SOURCE OF TRUTH ──────────────────────────────────────────
   // ALL UI components read from displayConfig — never mix sources.
@@ -3500,16 +4038,72 @@ function EngineeringPageInner() {
         if (!prev.batteryCount || prev.batteryCount < 1) patch.batteryCount = 1;
       } else if (rec.battery && rec.battery.equipmentDbId) {
         // No user battery yet — adopt the engine's sized battery as the seed.
+        // Wave 3.6 (contract §3 Wave 3 item 6 — the battery-reverts fix):
+        //  • batteryKwh is PER-UNIT by contract (legacy batteryKwh IS
+        //    per-unit; the page multiplies by batteryCount for totals).
+        //    rec.battery.installedKwh is the TOTAL — stuffing it into the
+        //    per-unit field was the 5P×2→3T×3 disease's kWh ratchet.
+        //  • batteryModel is a MODEL string, never an equipment-db id.
+        const _adoptBat = getBatteryById(rec.battery.equipmentDbId);
+        const _adoptUnits = Math.max(1, rec.battery.moduleCount || 1);
         patch.batteryId = rec.battery.equipmentDbId;
-        patch.batteryCount = rec.battery.moduleCount;
-        patch.batteryKwh = rec.battery.installedKwh;
-        patch.batteryBrand = rec.brand.manufacturer;
-        patch.batteryModel = rec.battery.equipmentDbId;
+        patch.batteryCount = _adoptUnits;
+        patch.batteryKwh = _adoptBat?.usableCapacityKwh
+          ?? (rec.battery.installedKwh > 0 ? rec.battery.installedKwh / _adoptUnits : 0);
+        patch.batteryBrand = _adoptBat?.manufacturer ?? rec.brand.manufacturer;
+        patch.batteryModel = _adoptBat?.model ?? rec.battery.equipmentDbId;
       } else {
         // No user battery and the engine sized none — leave cleared.
         patch.batteryId = '';
         patch.batteryCount = 0;
         patch.batteryKwh = 0;
+      }
+
+      // ── Wave 3.3 (contract §3 Wave 3 item 3 — the auto-apply/DC-AC-heal
+      // writer): the rebuilt fleet is scoped to ONE sub. The recommendation
+      // is computed for the PRIMARY sub (§1.4 fixed roof > ground > fence),
+      // so at N>1 fleets it replaces ONLY the primary fleet in place —
+      // every other sub's inverters keep their object references (I-4:
+      // an auto-apply can never nuke fence/ground engineering). At ≤1
+      // fleet this is the legacy whole-config path (fleet == everything),
+      // with the tag stamped so the fleet stays addressable.
+      const _asFallbackKey = toSubSystemKey(prev.systemType);
+      const _asKeys = fleetKeys(prev.inverters as any[], _asFallbackKey);
+      const _asScopeKey: SubSystemKey = _asKeys.length > 0 ? _asKeys[0] : _asFallbackKey;
+      patch.inverters = (_asKeys.length > 1
+        ? replaceSubFleet(prev.inverters as any[], _asScopeKey, newInverters as any[], _asFallbackKey)
+        : stampFleet(newInverters as any[], _asScopeKey)) as unknown as InverterConfig[];
+      // Equipment authority (§1.1): reflect the sub's inverter choice into
+      // subSystems[key] so it survives fleet regeneration. Only when the map
+      // already exists (hydration synthesizes it; watchers never invent it).
+      const _asMapPrev = (prev as any).subSystems as Record<string, any> | undefined;
+      if (_asMapPrev && Object.keys(_asMapPrev).length > 0) {
+        (patch as any).subSystems = {
+          ..._asMapPrev,
+          [_asScopeKey]: {
+            ...(_asMapPrev[_asScopeKey] ?? {}),
+            key: _asScopeKey,
+            inverterId: primaryModel.equipmentDbId,
+            topology: uiType === 'micro' ? 'micro' : uiType === 'optimizer' ? 'optimizer' : 'string',
+            ecosystemBrand: rec.brand.id,
+            // Wave 3.6 — battery mirrored into the map with PER-UNIT
+            // semantics (batteryKwhPerUnit by construction, §1.2):
+            //   adopt   → id + count + per-unit kWh (patch.batteryKwh IS per-unit)
+            //   clear   → batteryId: null (explicit), count 0, kWh dropped
+            //   preserve→ map battery untouched (user's choice is authoritative)
+            ...(patch.batteryId !== undefined
+              ? (patch.batteryId
+                  ? {
+                      batteryId: patch.batteryId,
+                      batteryCount: patch.batteryCount,
+                      batteryKwhPerUnit: patch.batteryKwh,
+                    }
+                  : { batteryId: null, batteryCount: 0, batteryKwhPerUnit: undefined })
+              : {}),
+            source: 'engineering',
+            updatedAt: new Date().toISOString(),
+          },
+        };
       }
 
       return { ...prev, ...patch };
@@ -3551,8 +4145,339 @@ function EngineeringPageInner() {
   // seed `selectedBrand`. All downstream hooks (sizing recommendation,
   // validation, auto-apply) continue to run normally over the patched
   // config, because we stay on the existing pipeline.
+
+  // ── Wave 4B.B — ONE per-sub fleet builder, shared by the Wave 3.4 per-sub
+  // smart defaults (auto seed) and the explicit "Rebuild fleets per
+  // sub-system" action. Pure w.r.t. state: returns the built fleet or null.
+  type SeededSubFleet = {
+    key: SubSystemKey; fleet: InverterConfig[]; inverterId: string;
+    topology: 'string' | 'micro' | 'optimizer'; brand: string; panelId?: string;
+  };
+  const buildSubFleetForKey = (
+    key: SubSystemKey,
+    subCount: number,
+    prefer?: { inverterId?: string; panelId?: string; brand?: string;
+      // Projector geometry-carry: when re-deriving a sub's fleet (heal/rebuild),
+      // preserve the existing per-string orientation/wiring/mounting instead of
+      // resetting to per-sub defaults, so a count re-sync never silently drops
+      // the user's tilt/azimuth/wire/mounting.
+      geometry?: { tilt?: number; azimuth?: number; roofType?: string;
+        mountingSystem?: string; wireGauge?: string; wireLength?: number } },
+  ): SeededSubFleet | null => {
+    const _sdMap = (config as any).subSystems ?? {};
+    const seedBrand: string =
+      prefer?.brand
+      ?? _sdMap[key]?.ecosystemBrand
+      ?? (prefer?.inverterId ? getBrandProfileByInverterId(prefer.inverterId)?.id : undefined)
+      ?? getDefaultBrand(key);
+    try {
+      const _preferPanel = prefer?.panelId ? (SOLAR_PANELS.find(p => p.id === prefer.panelId) as any) : null;
+      const rec = sizeSystemFromBrand({
+        systemType: key,
+        panelCount: subCount,
+        panelWattage: _preferPanel?.watts ?? 400,
+        // Thread the PER-SUB panel's electrical specs so the NEC 690.7 cold-Voc
+        // string ceiling (voltageAwareMaxPPS) actually runs off the per-sub path.
+        // Without panelTempCoeffVoc the clamp is skipped and sizing falls back to
+        // the brand's static max-per-string — which on a 600V string inverter can
+        // silently exceed maxDcVoltage (e.g. EcoFlow static 16 vs true cold ceiling
+        // 10 for a 440W/51.2Voc panel). Resolve from the sub's OWN panel, not roof.
+        ...(_preferPanel?.voc          ? { panelVoc: _preferPanel.voc } : {}),
+        ...(_preferPanel?.vmp          ? { panelVmp: _preferPanel.vmp } : {}),
+        ...(_preferPanel?.isc          ? { panelIsc: _preferPanel.isc } : {}),
+        ...(typeof _preferPanel?.tempCoeffVoc === 'number' ? { panelTempCoeffVoc: _preferPanel.tempCoeffVoc } : {}),
+        designTempMin: -10,
+        selectedBrand: seedBrand,
+        ...(prefer?.inverterId ? { selectedInverterId: prefer.inverterId } : {}),
+        batteryEnabled: false,
+      });
+      const primaryModel = rec.inverterModels[0];
+      if (!primaryModel) return null;
+      const uiType: InverterType =
+        rec.topology === 'hybrid' ? (rec.brand.id === 'ecoflow' ? 'ecoflow' : 'hybrid')
+        : rec.topology === 'micro' ? 'micro'
+        : rec.topology === 'optimizer' ? 'optimizer'
+        : 'string';
+      const base = newString(0, key); // per-sub panel/mounting defaults (fence → fence panel)
+      const basePanelId = prefer?.panelId ?? base.panelId;
+      const _geo = prefer?.geometry;   // carried from the existing fleet (projector)
+      const buildSubString = (idx: number, panelCount: number): StringConfig =>
+        _buildStrCfg({
+          index:          idx,
+          existingId:     `str-subdef-${key}-${Date.now()}-${idx}`,
+          panelCount,
+          panelId:        basePanelId,
+          tilt:           _geo?.tilt           ?? base.tilt,
+          azimuth:        _geo?.azimuth         ?? base.azimuth,
+          roofType:       (_geo?.roofType       ?? base.roofType) as any,
+          mountingSystem: _geo?.mountingSystem  ?? base.mountingSystem,
+          wireGauge:      _geo?.wireGauge       ?? base.wireGauge,
+          wireLength:     _geo?.wireLength      ?? base.wireLength,
+        });
+      const fleet: InverterConfig[] = [];
+      if (uiType === 'micro') {
+        const actualPanelCount = rec.input.panelCount > 0 ? rec.input.panelCount : rec.microDeviceCount;
+        fleet.push(_buildInvCfg({
+          existingId: `inv-subdef-${key}-${Date.now()}`,
+          inverterId: primaryModel.equipmentDbId,
+          type: 'micro',
+          strings: [buildSubString(0, actualPanelCount)],
+          subSystemKey: key,
+        } as any));
+      } else {
+        const byInv = new Map<number, typeof rec.strings>();
+        for (const s of rec.strings) {
+          const idx = s.inverterIndex ?? 0;
+          if (!byInv.has(idx)) byInv.set(idx, []);
+          byInv.get(idx)!.push(s);
+        }
+        for (let idx = 0; idx < Math.max(1, rec.inverterCount); idx++) {
+          const assigned = byInv.get(idx) ?? [];
+          const invStrings = assigned.length > 0
+            ? assigned.map((s, i) => buildSubString(i, s.panelCount))
+            : [buildSubString(0, 0)];
+          fleet.push(_buildInvCfg({
+            existingId: `inv-subdef-${key}-${Date.now()}-${idx}`,
+            inverterId: primaryModel.equipmentDbId,
+            type: uiType,
+            strings: invStrings,
+            subSystemKey: key,
+          } as any));
+        }
+      }
+      return {
+        key,
+        fleet,
+        inverterId: primaryModel.equipmentDbId,
+        topology: uiType === 'micro' ? 'micro' : uiType === 'optimizer' ? 'optimizer' : 'string',
+        brand: rec.brand.id,
+        panelId: basePanelId,
+      };
+    } catch (err) {
+      console.warn(`[PER-SUB FLEET BUILD] sizing failed for '${key}' (brand ${seedBrand}):`, err);
+      return null;
+    }
+  };
+
+  // ── Wave 4B.B — split a degenerate whole-project fleet into per-sub fleets.
+  // 'auto'   = smart-defaults path (userHasEditedInverters === false only);
+  // 'manual' = the explicit header action (the click IS the user approval —
+  //            fires regardless of the user-intent lock, and re-locks after).
+  // Equipment choices are honored per key: subSystems[key] map entry first,
+  // then the degenerate fleet's own primary inverter/panel (Ray's IQ8+ carries
+  // over to all three subs), then per-sub brand defaults.
+  const rebuildFleetsPerSub = (trigger: 'auto' | 'manual', forceBrand?: string): boolean => {
+    if (!subSystemCounts.isHybrid || subSystemCounts.present.length === 0) return false;
+    const fb = toSubSystemKey(config.systemType);
+    const part = partitionFleet(config.inverters as any[], fb);
+    const mapNow = ((config as any).subSystems ?? {}) as Record<string, any>;
+    const degPrimary = fleetDiag.degenerate?.degenerate
+      ? (part[fleetDiag.degenerate.key!]?.[0] as InverterConfig | undefined)
+      : undefined;
+
+    const seeded: SeededSubFleet[] = [];
+    for (const key of subSystemCounts.present) {
+      const entry = mapNow[key];
+      // Surgical heal (flood guard): leave a HEALTHY sub untouched — its fleet
+      // already covers its layout stamp AND carries its map-identity inverter.
+      // Only rebuild subs that actually drifted (e.g. fence 45 ≠ layout 17), so
+      // re-syncing one sub never re-splits the others' strings or risks touching
+      // their equipment. forceBrand (deliberate ecosystem pick) always applies.
+      if (!forceBrand) {
+        const _fleet = (part[key] ?? []) as InverterConfig[];
+        const _countOk = fleetPanelTotal(_fleet as any[]) === subSystemCounts[key];
+        const _invOk = !entry?.inverterId || (_fleet[0] as any)?.inverterId === entry.inverterId;
+        if (_fleet.length > 0 && _countOk && _invOk) continue;
+      }
+      // forceBrand (ecosystem pick) → apply the picked brand to this sub and
+      // ignore its existing inverter so the brand's sub-appropriate inverter is
+      // chosen. No forceBrand (self-heal / manual rebuild) → keep the sub's own
+      // chosen equipment.
+      // Brand is DERIVED from the sub's own inverter, never from the stored
+      // ecosystemBrand tag (which can go stale and contradict the inverter — the
+      // root of the EcoFlow flood: a roof of Enphase micros carried a stale
+      // ecosystemBrand='ecoflow' and every rebuild re-sized it to EcoFlow). Only
+      // fall back to the stored tag when the sub has no inverter to derive from.
+      const _subInvId = entry?.inverterId ?? degPrimary?.inverterId;
+      const _derivedBrand = _subInvId ? getBrandProfileByInverterId(_subInvId)?.id : undefined;
+      // Projector geometry-carry: preserve the sub's existing per-string
+      // orientation/wiring/mounting across a count re-sync (heal/rebuild), so a
+      // fence 45→17 fix never silently resets tilt/azimuth/wire to defaults.
+      const _prevStr = (part[key]?.[0]?.strings?.[0]) as any;
+      const _prevGeo = _prevStr ? {
+        tilt: _prevStr.tilt, azimuth: _prevStr.azimuth, roofType: _prevStr.roofType,
+        mountingSystem: _prevStr.mountingSystem, wireGauge: _prevStr.wireGauge, wireLength: _prevStr.wireLength,
+      } : undefined;
+      let built = buildSubFleetForKey(key, subSystemCounts[key], {
+        inverterId: forceBrand ? undefined : _subInvId,
+        panelId:    entry?.panelId ?? degPrimary?.strings?.[0]?.panelId,
+        brand:      forceBrand ?? _derivedBrand ?? entry?.ecosystemBrand,
+        geometry:   _prevGeo,
+      });
+      // If the picked ecosystem can't serve this sub (e.g. EcoFlow on a roof
+      // micro sub), fall back to the sub's sensible default brand — never leave
+      // a present sub broken/empty just because the ecosystem doesn't cover it.
+      if (!built && forceBrand) {
+        built = buildSubFleetForKey(key, subSystemCounts[key], {
+          panelId: entry?.panelId ?? degPrimary?.strings?.[0]?.panelId,
+        });
+      }
+      if (built) seeded.push(built);
+    }
+    if (seeded.length === 0) return false;
+
+    setConfig(prev => {
+      const fb2 = toSubSystemKey(prev.systemType);
+      let inverters = prev.inverters;
+      const nowIso = new Date().toISOString();
+      const dabsNext: Record<string, boolean> = { ...((prev as any).defaultsAppliedBySubSystem ?? {}) };
+      const mapNext: Record<string, any> = { ...((prev as any).subSystems ?? {}) };
+      for (const s of seeded) {
+        inverters = replaceSubFleet(inverters as any[], s.key, s.fleet as any[], fb2) as unknown as InverterConfig[];
+        dabsNext[s.key] = true;
+        mapNext[s.key] = {
+          ...(mapNext[s.key] ?? {}),
+          key: s.key,
+          inverterId: s.inverterId,
+          topology: s.topology,
+          ecosystemBrand: s.brand,
+          ...(s.panelId ? { panelId: s.panelId } : {}),
+          source: trigger === 'manual' ? 'engineering' : 'defaults',
+          updatedAt: nowIso,
+        };
+      }
+      const builtTotal = fleetPanelTotal(inverters as any[]);
+      const countOk = systemPanelCount > 0 && builtTotal === systemPanelCount;
+      if (!countOk) {
+        console.warn('[REBUILD FLEETS PER SUB] built total (' + builtTotal + ') !== systemPanelCount (' + systemPanelCount + ')');
+      }
+      return {
+        ...prev,
+        inverters,
+        defaultsApplied: true,
+        defaultsAppliedBySubSystem: dabsNext,
+        subSystems: mapNext,
+        // manual = explicit user decision → re-lock; auto = defaults semantics
+        ...(trigger === 'manual'
+          ? { userHasEditedInverters: true, isUserControlled: countOk }
+          : { isUserControlled: countOk }),
+      } as ProjectConfig;
+    });
+    logDecision(
+      'Rebuild fleets per sub-system',
+      subSystemCounts.present.map(k => `${k}=${subSystemCounts[k]}`).join(', ') +
+        (fleetDiag.degenerate?.degenerate
+          ? ` (split from one ${fleetDiag.degenerate.fleetPanelTotal}-panel '${fleetDiag.degenerate.key}' fleet)`
+          : ''),
+      trigger === 'manual' ? 'manual' : 'auto',
+    );
+    return true;
+  };
+
+  // ── Rebuild ONE sub-system's fleet (I-4 write scope) ───────────────────────
+  // The sub-header "Inverter — this sub-system" picker and the empty-fleet
+  // "Build fleet" button both land here: size a fleet for `key` around the
+  // preferred model (brand sizing first, manual chunking as fallback), then
+  // replaceSubFleet — every other sub's inverters stay untouched by reference.
+  const rebuildSubFleet = (key: SubSystemKey, prefer?: { inverterId?: string }): boolean => {
+    const count = Math.max(1, subSystemCounts[key]);
+    const entry = (((config as any).subSystems ?? {})[key] ?? {}) as Record<string, any>;
+    const wantId = prefer?.inverterId;
+
+    let fleet: InverterConfig[] | null = null;
+    let pickedId = wantId ?? '';
+    let topology: string = 'string';
+    let panelId: string | undefined = entry.panelId;
+    let brand: string | undefined;
+
+    const built = buildSubFleetForKey(key, count, {
+      ...(wantId ? { inverterId: wantId } : {}),
+      ...(entry.panelId ? { panelId: entry.panelId } : {}),
+    });
+    if (built && (!wantId || built.inverterId === wantId)) {
+      fleet = built.fleet;
+      pickedId = built.inverterId;
+      topology = built.topology;
+      panelId = built.panelId ?? panelId;
+      brand = built.brand;
+    } else if (wantId) {
+      // Brand sizing couldn't honor this exact model — build the fleet
+      // directly around it so the user's pick ALWAYS wins.
+      const isMicro = MICROINVERTERS.some(m => m.id === wantId);
+      const uiType: InverterType = isMicro ? 'micro' : wantId.startsWith('ecoflow-') ? 'ecoflow' : 'string';
+      const base = newString(0, key);
+      const effPanelId = entry.panelId ?? base.panelId;
+      const mkStr = (idx: number, panelCount: number) => _buildStrCfg({
+        index:          idx,
+        existingId:     `str-subpick-${key}-${Date.now()}-${idx}`,
+        panelCount,
+        panelId:        effPanelId,
+        tilt:           base.tilt,
+        azimuth:        base.azimuth,
+        roofType:       base.roofType as any,
+        mountingSystem: base.mountingSystem,
+        wireGauge:      base.wireGauge,
+        wireLength:     base.wireLength,
+        subSystemKey:   key,
+      });
+      const strings = isMicro
+        ? [mkStr(0, count)]
+        : (() => {
+            const n = Math.max(1, Math.ceil(count / 12));
+            const per = Math.floor(count / n);
+            const extra = count - per * n;
+            return Array.from({ length: n }, (_, i) => mkStr(i, per + (i < extra ? 1 : 0)));
+          })();
+      fleet = [_buildInvCfg({
+        existingId: `inv-subpick-${key}-${Date.now()}`,
+        inverterId: wantId,
+        type: uiType,
+        strings,
+        subSystemKey: key,
+      })];
+      pickedId = wantId;
+      topology = isMicro ? 'micro' : 'string';
+      panelId = effPanelId;
+    }
+    if (!fleet || fleet.length === 0) return false;
+
+    setConfig(prev => {
+      const fb = toSubSystemKey(prev.systemType);
+      const mapPrev = ((prev as any).subSystems ?? {}) as Record<string, any>;
+      return {
+        ...prev,
+        inverters: replaceSubFleet(prev.inverters as any[], key, fleet as any[], fb) as unknown as InverterConfig[],
+        subSystems: {
+          ...mapPrev,
+          [key]: {
+            ...(mapPrev[key] ?? {}),
+            key,
+            inverterId: pickedId,
+            topology,
+            ...(brand ? { ecosystemBrand: brand } : {}),
+            ...(panelId ? { panelId } : {}),
+            source: 'engineering',
+            updatedAt: new Date().toISOString(),
+          },
+        },
+        userHasEditedInverters: true,
+        isUserControlled: true,
+      } as ProjectConfig;
+    });
+    logDecision(
+      `Rebuild ${key} fleet`,
+      `${count} modules → ${pickedId} (${topology})`,
+      'manual',
+    );
+    return true;
+  };
+
   useEffect(() => {
-    if (config.defaultsApplied) return;
+    // Wave 3.4 (contract §3 Wave 3 item 4): at N>1 stamped subsystems the
+    // legacy whole-project sentinel no longer gates — each sub has its OWN
+    // once-only gate (defaultsAppliedBySubSystem[key]) and its own sizing
+    // pass; the per-sub branch below owns the hybrid path entirely.
+    if (config.defaultsApplied && !subSystemCounts.isHybrid) return;
     if (systemPanelCount <= 0) return;
     // Phase 13.1 — USER INTENT LOCK. Belt-and-suspenders: even if the
     // `defaultsApplied` sentinel somehow got cleared, never reapply
@@ -3560,6 +4485,93 @@ function EngineeringPageInner() {
     if (config.userHasEditedInverters || config.isUserControlled) {
       console.log('[CONFIG OVERWRITE BLOCKED] SMART DEFAULTS blocked —', config.isUserControlled ? 'isUserControlled=true' : 'userHasEditedInverters=true');
       return;
+    }
+
+    // ── Wave 3.4 — PER-SUB smart defaults (hybrid layouts) ──────────────────
+    // sizeSystemFromBrand × PRESENT subs (partition = layouts.panels stamps),
+    // getDefaultBrand(key) per sub, defaultsAppliedBySubSystem gate per key.
+    // A sub that already has equipment (map entry ids, or a live fleet) is
+    // NEVER re-defaulted; seeding writes ONLY that sub's fleet + map entry.
+    if (subSystemCounts.isHybrid) {
+      // Wave 4B.B — degenerate whole-project fleet (one untagged single-key
+      // fleet covering ≈ the project total): SPLIT it per sub instead of
+      // seeding around it — otherwise the 85-panel fleet survives under one
+      // key while the other subs get seeded ON TOP (double-counted project).
+      // Only reachable when userHasEditedInverters === false (guard above);
+      // the locked case surfaces the explicit header action instead.
+      // Wave 6 — any hybrid fleet that doesn't match the design layout (a
+      // degenerate whole-project fleet OR any per-sub fleet ≠ its stamp count) is
+      // owned by the dedicated hybrid self-heal effect below. Defer to it so we
+      // never seed defaults ON TOP of a mismatched fleet (double-count) and never
+      // double-fire rebuildFleetsPerSub from two effects.
+      if (fleetDiag.suspect) return;
+      const _sdFb = toSubSystemKey(config.systemType);
+      const _sdPart = partitionFleet(config.inverters as any[], _sdFb);
+      const _sdDabs = (config as any).defaultsAppliedBySubSystem ?? {};
+      const _sdMap = (config as any).subSystems ?? {};
+      const _sdIsPlaceholderFleet = (fleet: InverterConfig[]): boolean =>
+        fleet.length === 1 &&
+        (fleet[0].strings?.length ?? 0) === 1 &&
+        ((fleet[0].strings[0]?.panelCount ?? 0) === 0 || fleet[0].strings[0]?.panelCount === 10);
+      const _sdToSeed = subSystemCounts.present.filter(key => {
+        if (_sdDabs[key]) return false;                              // per-key once-only gate
+        const entry = _sdMap[key];
+        if (entry && (entry.inverterId || entry.panelId)) return false; // sub already has equipment
+        const fleet = (_sdPart[key] ?? []) as InverterConfig[];
+        const effFleet = _sdIsPlaceholderFleet(fleet) ? [] : fleet;
+        return effFleet.length === 0;                                // only equipment-less subs
+      });
+      if (_sdToSeed.length === 0) return;
+
+      // Wave 4B.B — building extracted to buildSubFleetForKey (shared with the
+      // explicit "Rebuild fleets per sub-system" action). Defaults path passes
+      // NO preferences beyond the map's brand ⇒ identical seeding to Wave 3.4.
+      const _sdSeeded: SeededSubFleet[] = [];
+      for (const key of _sdToSeed) {
+        const built = buildSubFleetForKey(key, subSystemCounts[key], {
+          brand: _sdMap[key]?.ecosystemBrand,
+        });
+        if (built) _sdSeeded.push(built);
+      }
+      if (_sdSeeded.length === 0) return;
+      console.log('✅ [SMART DEFAULTS per-sub] seeded:',
+        _sdSeeded.map(s => `${s.key}=${subSystemCounts[s.key]}×(${s.brand})`).join(', '));
+
+      setConfig(prev => {
+        const fb = toSubSystemKey(prev.systemType);
+        let inverters = prev.inverters;
+        const nowIso = new Date().toISOString();
+        const dabsNext: Record<string, boolean> = { ...((prev as any).defaultsAppliedBySubSystem ?? {}) };
+        const mapNext: Record<string, any> = { ...((prev as any).subSystems ?? {}) };
+        for (const s of _sdSeeded) {
+          inverters = replaceSubFleet(inverters as any[], s.key, s.fleet as any[], fb) as unknown as InverterConfig[];
+          dabsNext[s.key] = true;
+          mapNext[s.key] = {
+            ...(mapNext[s.key] ?? {}),
+            key: s.key,
+            inverterId: s.inverterId,
+            topology: s.topology,
+            ecosystemBrand: s.brand,
+            ...(s.panelId ? { panelId: s.panelId } : {}),
+            source: 'defaults',
+            updatedAt: nowIso,
+          };
+        }
+        const builtTotal = fleetPanelTotal(inverters as any[]);
+        const countOk = systemPanelCount > 0 && builtTotal === systemPanelCount;
+        if (!countOk) {
+          console.warn('[SMART DEFAULTS per-sub] built total (' + builtTotal + ') !== systemPanelCount (' + systemPanelCount + ') — NOT stamping isUserControlled');
+        }
+        return {
+          ...prev,
+          inverters,
+          defaultsApplied: true,
+          defaultsAppliedBySubSystem: dabsNext,
+          subSystems: mapNext,
+          isUserControlled: countOk,
+        } as ProjectConfig;
+      });
+      return; // hybrid path complete — never fall through to the whole-project pass
     }
 
     const primary = config.inverters[0];
@@ -3641,13 +4653,19 @@ function EngineeringPageInner() {
         ...prev,
         inverters: hydratedInverters,
         defaultsApplied: true,
+        // Wave 3.4 — forward-consistent per-key stamp on the single-sub path
+        // too, so a later hybridization never re-defaults this sub.
+        defaultsAppliedBySubSystem: {
+          ...((prev as any).defaultsAppliedBySubSystem ?? {}),
+          [toSubSystemKey(prev.systemType)]: true,
+        },
         isUserControlled: _sdCountOk,
         // Only stamp selectedBrand when defaults picked one (user hadn't).
         ...(result.patch.selectedBrand ? { selectedBrand: result.patch.selectedBrand } : {}),
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemPanelCount, config.defaultsApplied, config.userHasEditedInverters]);
+  }, [systemPanelCount, config.defaultsApplied, config.userHasEditedInverters, subSystemCounts]);
 
   // Auto-apply watcher (opt-in). Fires only when:
   //   1. sizingAutoApply === true
@@ -3660,8 +4678,21 @@ function EngineeringPageInner() {
   // NOT treated as drifted vs a sizing result reporting 36 microinverters.
   // Before this fix, auto-apply for Enphase ran every render in a loop.
   useEffect(() => {
+    // Wave 3.6 — HYDRATION-COMPLETE GATE (contract §3 Wave 3 item 6): this
+    // watcher writes equipment AND battery fields via applySizingRecommendation.
+    // Mid-hydration, prev.batteryId is still empty, so a pre-hydration fire
+    // adopted the engine's battery over the user's saved one — the
+    // 5P×2 → 3T×3 disease (batteryModel flipped to an id, count 2→3, TOTAL
+    // kWh stuffed into the per-unit field). Never fire before the project's
+    // saved config has landed. (Projectless scratch usage is unaffected.)
+    if (currentProjectId && !isHydrated) return;
     if (!sizingAutoApply) return;
     if (!sizingRecommendation) return;
+    // Wave 6 — HYBRID systems never use the whole-project applySizingRecommendation
+    // auto path: it sizes the ENTIRE array as one fleet and force-stamps it onto a
+    // single sub-system (the "ground fleet = 81 panels / roof dropped" corruption).
+    // Per-sub fleet integrity is owned by the dedicated hybrid self-heal effect below.
+    if (subSystemCounts.isHybrid) return;
     // Compute the mismatch FIRST so the user-intent locks below can tell a
     // STALE/broken layout (must re-sync) apart from a pure model preference.
     const rec = sizingRecommendation;
@@ -3739,7 +4770,54 @@ function EngineeringPageInner() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks]);
+  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks, isHydrated, currentProjectId]);
+
+  // ─── Wave 6 — HYBRID FLEET SELF-HEAL (design is the source of truth) ─────────
+  // When a hybrid layout's per-sub fleets don't match the design (e.g. a saved
+  // config where the ecosystem picker stamped all 81 panels onto the GROUND fleet
+  // and dropped ROOF), rebuild each PRESENT sub's fleet scoped to ITS OWN layout
+  // count — preserving each sub's chosen equipment (buildSubFleetForKey reads
+  // subSystems[key]). This is the SINGLE owner of hybrid fleet integrity:
+  //   • the whole-project auto-apply watchers above bail for hybrids;
+  //   • the smart-defaults effect defers its hybrid branch to here.
+  // It's a structural-integrity heal — a fleet cannot carry more panels than the
+  // design physically places — NOT a preference override, so it runs even under
+  // the internal user-intent flags. It RESPECTS the explicit field locks and
+  // manual mode (auto-heal must not fight the user). Loop-safe via a
+  // per-design-signature ref: at most one heal attempt per layout signature.
+  const hybridHealSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (currentProjectId && !isHydrated) return;
+    if (!subSystemCounts.isHybrid) return;
+    if (!fleetDiag.suspect) return;
+    // Distinguish SEEDING an empty design (nothing to override → always OK, even
+    // in manual mode) from HEALING an existing wrong fleet (a real user config →
+    // respect the control-mode contract so we never silently fight the user).
+    const _fb = toSubSystemKey(config.systemType);
+    const _part = partitionFleet(config.inverters as any[], _fb);
+    const hasExistingFleet = subSystemCounts.present.some(k => fleetPanelTotal(_part[k] ?? []) > 0);
+    if (hasExistingFleet) {
+      // This is a STRUCTURAL count re-sync (a sub's fleet ≠ its layout stamp,
+      // e.g. fence 45p ≠ layout 17p) — NOT an equipment-preference override.
+      // Since the brand-derivation fix (commit a88151cf) a rebuild PRESERVES each
+      // sub's own inverter (brand comes from inverterId, never a stale tag), so
+      // re-syncing counts can no longer flood roof/ground to the fence's EcoFlow.
+      // Guided therefore auto-heals the drift (structural, not a preference) so
+      // the user never has to hit "Rebuild fleets" on every refresh. Only MANUAL
+      // (user fully authoritative) and explicit field locks defer to the button.
+      // (This intentionally supersedes the earlier f4344bb8 `!== 'auto'` bail,
+      // which was a pre-brand-fix band-aid against the flood that a88151cf killed
+      // at the source — and which was itself forcing the manual-rebuild UX.)
+      if (controlMode === 'manual') return;                    // manual → explicit "Rebuild fleets" button
+      if (configLocks.inverter || configLocks.strings) return; // explicit field lock wins
+    }
+    const sig = `${systemPanelCount}|${subSystemCounts.roof},${subSystemCounts.ground},${subSystemCounts.fence}`;
+    if (hybridHealSigRef.current === sig) return;              // already attempted for this design
+    hybridHealSigRef.current = sig;
+    console.log('🩹 [HYBRID SELF-HEAL] per-sub fleets ≠ design layout — rebuilding per sub-system', sig, { hasExistingFleet, controlMode });
+    rebuildFleetsPerSub('auto');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated, currentProjectId, subSystemCounts, fleetDiag.suspect, systemPanelCount, controlMode, configLocks, config.systemType, config.inverters]);
 
      // ─── Phase 14.2 — HARD DC/AC ERROR AUTO-HEAL ─────────────────────────────────
      // When validationResult contains DC_AC_RATIO_AC_EXCEEDS_DC (ratio < 1.0) AND
@@ -3748,8 +4826,15 @@ function EngineeringPageInner() {
      // corrects a hard electrical constraint violation. The system cannot permit export
      // while DC/AC < 1.0; auto-healing prevents the "screaming errors, no solution" UX.
      useEffect(() => {
+       // Wave 3.6 — hydration-complete gate (same battery-writer rationale as
+       // the auto-apply watcher above): never heal against a half-hydrated config.
+       if (currentProjectId && !isHydrated) return;
        if (!validationResult) return;
        if (!sizingRecommendation) return;
+       // Wave 6 — hybrid DC/AC is evaluated per sub-system; the whole-project
+       // applySizingRecommendation would corrupt the per-sub fleets. The dedicated
+       // hybrid self-heal owns fleet integrity for hybrids.
+       if (subSystemCounts.isHybrid) return;
        const hasHardDcAcError = validationResult.errors.some(
          e => e.code === 'DC_AC_RATIO_AC_EXCEEDS_DC',
        );
@@ -3780,7 +4865,7 @@ function EngineeringPageInner() {
        });
        applySizingRecommendation(sizingRecommendation);
        // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, [validationResult, sizingRecommendation, config.userHasEditedInverters]);
+     }, [validationResult, sizingRecommendation, config.userHasEditedInverters, isHydrated, currentProjectId]);
 
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -3813,18 +4898,30 @@ function EngineeringPageInner() {
     const target = compat.effectivePanelId;
     if (!target) return;
 
+    // Wave 3.3 (watcher 6/7): the gate's verdict came from the PRIMARY sub's
+    // brand/panel pairing, so at N>1 fleets the heal reads and writes ONLY
+    // the primary fleet — a roof-brand incompatibility can never rewrite the
+    // fence sub's panel (I-4). At ≤1 fleet: legacy whole-config behavior.
+    const _pcFallbackKey = toSubSystemKey(config.systemType);
+    const _pcFleetKeys = fleetKeys(config.inverters, _pcFallbackKey);
+    const _pcScopeKey: SubSystemKey | null = _pcFleetKeys.length > 1 ? _pcFleetKeys[0] : null;
+    const _pcInScope = (inv: { subSystemKey?: SubSystemKey }): boolean =>
+      !_pcScopeKey || inverterFleetKey(inv as any, _pcFallbackKey) === _pcScopeKey;
+
     // Does the current config already reflect the swap? If every string
-    // on every inverter is already on the target panel, we are done.
+    // on every IN-SCOPE inverter is already on the target panel, we are done.
     const allAligned = config.inverters.every(inv =>
-      inv.strings.every(s => s.panelId === target),
+      !_pcInScope(inv as any) || inv.strings.every(s => s.panelId === target),
     );
     if (allAligned) return;
 
-    // v61.3 P-11 FIX: respect controlMode — in manual mode the user has
-    // full authority over panel selection; only warn, never auto-heal.
-    if (controlMode === 'manual') {
+    // Control-mode contract (lib/solardog/controlMode.ts): only AUTO may
+    // silently override equipment. In GUIDED and MANUAL the user has authority
+    // over panel selection — warn/suggest, never silently swap (this silent
+    // panel swap in guided was part of Ray's "some fields save, some revert").
+    if (controlMode !== 'auto') {
       console.warn(
-        '[v61.3 P-11] Panel compat mismatch detected but controlMode=manual — skipping auto-heal.',
+        `[v61.3 P-11] Panel compat mismatch detected but controlMode=${controlMode} — skipping silent auto-heal.`,
         { original: compat.originalPanelId, effective: target },
       );
       return;
@@ -3842,7 +4939,9 @@ function EngineeringPageInner() {
 
     setConfig(prev => ({
       ...prev,
-      inverters: prev.inverters.map(inv => ({
+      // Wave 3.3: only IN-SCOPE (primary-fleet) inverters are rewritten at
+      // N>1; other subs' inverters keep their object references untouched.
+      inverters: prev.inverters.map(inv => (!_pcInScope(inv as any) ? inv : {
         ...inv,
         strings: inv.strings.map(s =>
           s.panelId === target ? s : { ...s, panelId: target }
@@ -3862,6 +4961,259 @@ function EngineeringPageInner() {
 
   const updateConfig = (patch: Partial<ProjectConfig>) => setConfig(prev => ({ ...prev, ...patch }));
 
+  // ── Wave 4B.C — per-sub equipment writer (§1.1 equipment authority): every
+  // hybrid picker writes config.subSystems[key], NEVER raw index math. The
+  // flat mirror stays derived elsewhere (§1.4 single-writer rule).
+  const updateSubSystemEquip = (key: SubSystemKey, patch: Record<string, any>) => {
+    setConfig(prev => ({
+      ...prev,
+      subSystems: {
+        ...((prev as any).subSystems ?? {}),
+        [key]: {
+          ...(((prev as any).subSystems ?? {})[key] ?? {}),
+          key,
+          ...patch,
+          source: 'engineering',
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    } as ProjectConfig));
+  };
+
+  // ── Wave 4B.C — per-sub section header for the Inverters & Strings card
+  // (hybrid only). Shows the sub's stamp count vs fleet total, its engine
+  // pass summary, the subSystems[key] equipment record, and per-sub pickers
+  // (panel re-pins ONLY this sub's strings via applyPanelToEngineeringConfig;
+  // mounting writes the map entry). Single-system projects never render this.
+  // ── Wave 6 W2 — PER-SUB recommendation engine ──────────────────────────────
+  // Size each PRESENT sub independently (its own count + brand + panel) and diff
+  // against its current fleet. Surfaced in the per-sub header; apply routes through
+  // rebuildSubFleet (this sub only). For hybrids this replaces the whole-project
+  // recommendation (hidden) — recommendations + marginal/MPPT warnings become
+  // per-sub, so a "14.9% headroom" flag attaches to the sub it's actually about.
+  type SubRec = {
+    recInvId: string; recModel: string; recCount: number; recTopology: string;
+    recStrings: number[]; differs: boolean; marginal: string | null; ok: boolean;
+  };
+  const subSystemRecommendations = useMemo<Partial<Record<SubSystemKey, SubRec>>>(() => {
+    const out: Partial<Record<SubSystemKey, SubRec>> = {};
+    if (!subSystemCounts.isHybrid) return out;
+    const _fb = toSubSystemKey(config.systemType);
+    const part = partitionFleet(config.inverters as any[], _fb);
+    const subMap = ((config as any).subSystems ?? {}) as Record<string, any>;
+    for (const key of subSystemCounts.present) {
+      const count = subSystemCounts[key];
+      if (count <= 0) continue;
+      const fleet = (part[key] ?? []) as InverterConfig[];
+      const entry = subMap[key] ?? {};
+      const panelId = entry.panelId ?? fleet[0]?.strings?.[0]?.panelId;
+      const panel = panelId ? (getPanelById(panelId) as any) : null;
+      const curInvId = fleet[0]?.inverterId ?? '';
+      // Recommend WITHIN the sub's INSTALLED inverter brand — NOT a stale
+      // ecosystemBrand tag (that made a roof of Enphase micros "recommend"
+      // EcoFlow). Seed the installed model so the engine only deviates when the
+      // current inverter genuinely can't serve the sub — no topology/brand-swap
+      // nags, no string-re-split nags, no "overpower without logic". Empty subs
+      // (no installed inverter) fall back to the sub's ecosystem/default brand so
+      // the empty-state CTA can still recommend what to build.
+      const brand = curInvId
+        ? (getBrandProfileByInverterId(curInvId)?.id ?? entry.ecosystemBrand)
+        : entry.ecosystemBrand;
+      let rec: SystemSizingResult | null = null;
+      try {
+        rec = sizeSystemFromBrand({
+          systemType: key,
+          panelCount: count,
+          panelWattage: panel?.watts ?? 400,
+          ...(panelId ? { panelId } : {}),
+          selectedBrand: brand,
+          ...(curInvId ? { selectedInverterId: curInvId } : {}),
+          batteryEnabled: false,
+        } as any);
+      } catch { rec = null; }
+      if (!rec || !rec.inverterModels?.[0]) continue;
+      const recInvId = rec.inverterModels[0].equipmentDbId;
+      const recCount = Math.max(1, rec.inverterCount);
+      const recStrings = rec.strings.map((s: any) => s.panelCount as number).sort((a, b) => b - a);
+      // A recommendation only fires when the engine could NOT keep the installed
+      // inverter (it's genuinely under/over-provisioned → a DIFFERENT model of the
+      // same brand). We never nag about string re-splits or minor consolidations.
+      const differs = !!curInvId && !!recInvId && curInvId !== recInvId;
+      const pc = rec.panelCompatibility;
+      const marginal = pc && (pc.status === 'marginal' || pc.status === 'incompatible') ? pc.reason : null;
+      out[key] = {
+        recInvId,
+        recModel: ((getInvById(recInvId, (rec.topology === 'micro' ? 'micro' : 'string') as InverterType) as any)?.model) ?? recInvId,
+        recCount,
+        recTopology: rec.topology,
+        recStrings,
+        differs,
+        marginal,
+        ok: !!curInvId && !differs && !marginal,
+      };
+    }
+    return out;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subSystemCounts, config.inverters, config.systemType, (config as any).subSystems]);
+
+  const renderSubSystemHeader = (key: SubSystemKey) => {
+    const entry = (((config as any).subSystems ?? {})[key] ?? {}) as Record<string, any>;
+    const _fbH = toSubSystemKey(config.systemType);
+    const fleet = (partitionFleet(config.inverters as any[], _fbH)[key] ?? []) as InverterConfig[];
+    const fleetTotal = fleetPanelTotal(fleet as any[]);
+    const stampCount = subSystemCounts[key];
+    const subCs = computedMulti.subSystems[key];
+    const tone = key === 'roof'
+      ? 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+      : key === 'ground'
+        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+        : 'border-amber-500/40 bg-amber-500/10 text-amber-300';
+    const effPanelId: string = entry.panelId ?? fleet[0]?.strings?.[0]?.panelId ?? '';
+    const effInverterId: string = fleet[0]?.inverterId ?? entry.inverterId ?? '';
+    const mountOpts = key === 'ground'
+      ? ALL_MOUNTING_SYSTEMS.filter(s => s.category === 'ground_mount' || s.category === 'tracker')
+      : key === 'roof'
+        ? ALL_MOUNTING_SYSTEMS.filter(s => String(s.category).startsWith('roof'))
+        : ALL_MOUNTING_SYSTEMS.filter(s =>
+            String(s.category).includes('fence') || String(s.systemType).includes('fence'));
+    return (
+      <div className={`rounded-lg border px-3 py-2 ${tone}`}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-black uppercase tracking-wider">{key}</span>
+          <span className="text-[10px] font-mono text-slate-400">{stampCount} modules (layout)</span>
+          {fleet.length > 0 && fleetTotal !== stampCount ? (
+            <span className="text-[10px] text-red-400 font-bold" title="This sub's inverter fleet does not cover its stamped module count — use Rebuild fleets per sub-system">
+              ⚠ fleet {fleetTotal}p ≠ layout {stampCount}p
+            </span>
+          ) : null}
+          {subCs ? (
+            <span className="text-[10px] font-mono text-slate-400 ml-auto">
+              {subCs.isMicro
+                ? `${subCs.microDeviceCount} micros · ${subCs.acBranchCount} branch${subCs.acBranchCount === 1 ? '' : 'es'} · ${subCs.totalAcKw?.toFixed(2)} kW AC`
+                : `${subCs.totalAcKw?.toFixed(2)} kW AC`}
+            </span>
+          ) : null}
+          {fleet.length > 0 && !fleet.some(i => i.type === 'micro') ? (
+            <button
+              onClick={() => addInverter('string', key)}
+              className="text-[10px] px-1.5 py-0.5 rounded border border-slate-600/60 text-slate-300 hover:text-white hover:bg-slate-700/40 transition-colors"
+              title={`Add another string inverter to the ${key.toUpperCase()} sub-system (sized to its uncovered modules)`}
+            >
+              + Inverter
+            </button>
+          ) : null}
+        </div>
+        {/* Wave 6 W2 — per-sub recommendation / marginal warning (this sub only) */}
+        {(() => {
+          const r = subSystemRecommendations[key];
+          if (!r) return null;
+          if (r.marginal) {
+            return (
+              <div className="mt-1.5 flex items-start gap-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded px-2 py-1">
+                <span aria-hidden>⚠</span><span>{r.marginal}</span>
+              </div>
+            );
+          }
+          if (r.differs) {
+            return (
+              <div className="mt-1.5 flex items-center gap-2 text-[10px] bg-sky-500/10 border border-sky-500/25 rounded px-2 py-1">
+                <span className="text-sky-300 font-semibold">
+                  💡 Recommended: {r.recModel}{r.recCount > 1 ? ` ×${r.recCount}` : ''}
+                  {r.recStrings.length ? ` · ${r.recStrings.length} string${r.recStrings.length === 1 ? '' : 's'} (${r.recStrings.join('/')})` : ''}
+                </span>
+                <button
+                  onClick={() => rebuildSubFleet(key, { inverterId: r.recInvId })}
+                  className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/25 text-sky-200 hover:bg-sky-500/40 transition-colors shrink-0"
+                  title={`Apply the recommended inverter to the ${key.toUpperCase()} sub-system only`}
+                >Apply</button>
+              </div>
+            );
+          }
+          if (r.ok) {
+            return (
+              <div className="mt-1.5 text-[10px] text-emerald-400/80 flex items-center gap-1">
+                <span aria-hidden>✓</span><span>Optimally sized for this sub-system</span>
+              </div>
+            );
+          }
+          return null;
+        })()}
+        <div className="mt-1.5 grid grid-cols-2 md:grid-cols-3 gap-2">
+          <div>
+            <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Panel — this sub-system</label>
+            <select
+              value={effPanelId}
+              onChange={e => {
+                const pid = e.target.value;
+                if (!pid) return;
+                updateSubSystemEquip(key, { panelId: pid });
+                // I-4: re-pin ONLY this sub's strings (untagged inherit §1.5).
+                setConfig(prev =>
+                  (applyPanelToEngineeringConfig(prev as any, pid, key) as unknown as ProjectConfig | null) ?? prev);
+              }}
+              className="eng-select text-[11px] py-1"
+            >
+              {effPanelId === '' ? <option value="">Select panel…</option> : null}
+              {SOLAR_PANELS.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.manufacturer} {p.model} ({p.watts}W)</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Inverter — this sub-system</label>
+            <select
+              value={effInverterId}
+              onChange={e => {
+                const iid = e.target.value;
+                if (!iid || iid === effInverterId) return;
+                // Rebuild THIS sub's fleet around the picked model, sized to
+                // its stamped module count. Other subs are never touched.
+                const ok = rebuildSubFleet(key, { inverterId: iid });
+                if (!ok) console.warn(`[SUB INVERTER PICK] could not build a ${key} fleet around ${iid}`);
+              }}
+              className="eng-select text-[11px] py-1"
+              title={`Picking a model rebuilds the ${key.toUpperCase()} inverter fleet sized to its ${stampCount} modules — other sub-systems are untouched`}
+            >
+              {effInverterId === '' ? <option value="">Select inverter…</option> : null}
+              <optgroup label="Microinverters">
+                {MICROINVERTERS.map((m: any) => (
+                  <option key={m.id} value={m.id}>{m.manufacturer} {m.model} ({m.acOutputW}W)</option>
+                ))}
+              </optgroup>
+              <optgroup label="String / Hybrid inverters">
+                {STRING_INVERTERS.filter((i: any) => i.active !== false).map((i: any) => (
+                  <option key={i.id} value={i.id}>{i.manufacturer} {i.model} ({i.acOutputKw}kW)</option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+          <div>
+            <label className="text-[9px] uppercase tracking-wide text-slate-500 font-bold block mb-0.5">Mounting — this sub-system</label>
+            {mountOpts.length > 0 ? (
+              <select
+                value={entry.mountingId ?? ''}
+                onChange={e => updateSubSystemEquip(key, { mountingId: e.target.value || undefined })}
+                className="eng-select text-[11px] py-1"
+              >
+                <option value="">Project default{config.mountingId ? ` (${ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.model ?? config.mountingId})` : ''}</option>
+                {mountOpts.map(s => <option key={s.id} value={s.id}>{s.manufacturer} {s.model}</option>)}
+              </select>
+            ) : (
+              <div className="text-[11px] text-slate-400 px-2 py-1 rounded bg-slate-800/50 border border-slate-700/50">
+                SolFence rack sections (fixed for fence sub-systems)
+              </div>
+            )}
+          </div>
+        </div>
+        {entry.batteryId ? (
+          <div className="text-[10px] text-slate-400 mt-1">
+            Battery (POI-level): {entry.batteryId} ×{entry.batteryCount ?? 1}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   // Phase 13.1 — USER INTENT LOCK helper.
   // Stamps `userHasEditedInverters: true` on every inverter / string
   // mutation. Once set, this lock blocks Smart Defaults re-entry AND
@@ -3871,8 +5223,44 @@ function EngineeringPageInner() {
   // v61.7: Every user edit stamps both flags to engage the kill switch.
   const LOCK = { userHasEditedInverters: true as const, isUserControlled: true as const };
 
-  const addInverter = (type: InverterType) => {
-    console.log('🔒 [USER EDIT] addInverter(', type, ') — engaging user lock');
+  const addInverter = (type: InverterType, subKey?: SubSystemKey | null) => {
+    console.log('🔒 [USER EDIT] addInverter(', type, ', sub:', subKey ?? '(project)', ') — engaging user lock');
+    if (subSystemCounts.isHybrid && subKey) {
+      // ── Hybrid + sub-scoped add (I-4 write scope) ─────────────────────────
+      // micro → replace ONLY this sub's fleet with one micro sized to its
+      // stamp count; string/optimizer/ecoflow → append ONE stamped inverter
+      // sized to the sub's uncovered module deficit (never another sub's).
+      setConfig(prev => {
+        const fb = toSubSystemKey(prev.systemType);
+        const part = partitionFleet(prev.inverters as any[], fb);
+        const subFleet = (part[subKey] ?? []) as InverterConfig[];
+        const subStamp = subSystemCounts[subKey];
+        const subPanelId = ((prev as any).subSystems?.[subKey]?.panelId as string | undefined)
+          ?? subFleet[0]?.strings?.[0]?.panelId;
+        if (type === 'micro') {
+          const inv = newInverter('micro', subKey, {
+            subSystemKey: subKey,
+            panelCount: subStamp > 0 ? subStamp : (fleetPanelTotal(subFleet as any[]) || 20),
+            panelId: subPanelId,
+          });
+          setExpandedInv(inv.id);
+          return {
+            ...prev,
+            inverters: replaceSubFleet(prev.inverters as any[], subKey, [inv] as any[], fb) as unknown as InverterConfig[],
+            ...LOCK,
+          };
+        }
+        const deficit = Math.max(1, subStamp - fleetPanelTotal(subFleet as any[]));
+        const inv = newInverter(type, subKey, {
+          subSystemKey: subKey,
+          panelCount: deficit,
+          panelId: subPanelId,
+        });
+        setExpandedInv(inv.id);
+        return { ...prev, inverters: [...prev.inverters, inv], ...LOCK };
+      });
+      return;
+    }
     if (type === 'micro') {
       // MICRO: replace ALL existing inverters with a single micro entry.
       // B5 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
@@ -3948,6 +5336,7 @@ function EngineeringPageInner() {
                 azimuth:        currentStrings[0]?.azimuth,
                 roofType:       (currentStrings[0] as any)?.roofType,
                 mountingSystem: (currentStrings[0] as any)?.mountingSystem,
+                subSystemKey:   (currentStrings[0] as any)?.subSystemKey ?? (i as any).subSystemKey,
               })
             );
             updated.strings = [...currentStrings, ...extra];
@@ -3973,6 +5362,7 @@ function EngineeringPageInner() {
               azimuth:        s.azimuth,
               roofType:       (s as any).roofType,
               mountingSystem: (s as any).mountingSystem,
+              subSystemKey:   (s as any).subSystemKey ?? (i as any).subSystemKey,
             })
           );
         }
@@ -3987,6 +5377,10 @@ function EngineeringPageInner() {
           strings:               updated.strings as StringConfig[],
           optimizerPeripheralId: (updated as any).optimizerPeripheralId,
           deviceRatioOverride:   (updated as any).deviceRatioOverride,
+          // Contract §1.1 (I-2): the sub-system tag must survive EVERY rebuild.
+          // Without this, any card edit untags the inverter and partitionFleet
+          // dumps it into the fallback sub — the card visibly jumps groups.
+          subSystemKey:          (updated as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4014,6 +5408,7 @@ function EngineeringPageInner() {
           azimuth:        baseStr?.azimuth,
           roofType:       (baseStr as any)?.roofType,
           mountingSystem: (baseStr as any)?.mountingSystem,
+          subSystemKey:   (baseStr as any)?.subSystemKey ?? (i as any).subSystemKey,
         });
         // v61.5: rebuild through _buildInvCfg to update stringsPerInverter metadata
         return _buildInvCfg({
@@ -4023,6 +5418,7 @@ function EngineeringPageInner() {
           strings:    [...i.strings, newStr] as StringConfig[],
           optimizerPeripheralId: (i as any).optimizerPeripheralId,
           deviceRatioOverride:   (i as any).deviceRatioOverride,
+          subSystemKey:          (i as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4045,6 +5441,7 @@ function EngineeringPageInner() {
           strings:    newStrings as StringConfig[],
           optimizerPeripheralId: (i as any).optimizerPeripheralId,
           deviceRatioOverride:   (i as any).deviceRatioOverride,
+          subSystemKey:          (i as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4071,6 +5468,7 @@ function EngineeringPageInner() {
             azimuth:        patched.azimuth,
             roofType:       (patched as any).roofType,
             mountingSystem: (patched as any).mountingSystem,
+            subSystemKey:   (patched as any).subSystemKey ?? (i as any).subSystemKey,
           });
         });
         // v61.5: rebuild the inverter wrapper to update modulesPerString metadata
@@ -4081,6 +5479,7 @@ function EngineeringPageInner() {
           strings:    newStrings as StringConfig[],
           optimizerPeripheralId: (i as any).optimizerPeripheralId,
           deviceRatioOverride:   (i as any).deviceRatioOverride,
+          subSystemKey:          (i as any).subSystemKey,
         });
       }),
       ...LOCK,
@@ -4093,22 +5492,81 @@ function EngineeringPageInner() {
   };
 
   // Topology switch: calls API to propagate ecosystem when inverter type changes
-  const handleTopologySwitch = useCallback(async (invId: string, newType: InverterType, newInverterId: string) => {
+  // Hybrid (subKey passed from the card's sub-group): the switch is scoped to
+  // THAT sub-system's fleet only — a micro collapse on the ROOF card must never
+  // touch the ground/fence fleets (I-4 write scope).
+  const handleTopologySwitch = useCallback(async (invId: string, newType: InverterType, newInverterId: string, subKey?: SubSystemKey | null) => {
     // DIAGNOSTIC LOG 1
     const newTopo = newType === 'micro' ? 'MICRO' : newType === 'optimizer' ? 'STRING_OPTIMIZER' : 'STRING';
-    console.log('Topology switched:', newTopo, '| inverter:', newInverterId, '| type:', newType);
+    console.log('Topology switched:', newTopo, '| inverter:', newInverterId, '| type:', newType, '| sub:', subKey ?? '(whole project)');
 
     // USER INTENT LOCK — a topology switch is an explicit user edit, so
     // engage the lock for both branches (micro + non-micro).
     console.log('🔒 [USER EDIT] handleTopologySwitch — engaging user lock');
 
-    // When switching to micro: REPLACE ALL inverters with a single micro entry
+    // When switching to micro: REPLACE the fleet with a single micro entry.
+    // Scope: the card's sub-system in hybrid, the whole project otherwise.
     // B4 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
     // config fallback) over the stale config-derived sum. When CAD placed 36 panels
     // but the string config shows 20, the micro entry must use 36.
     const authoritativeCountForMicro = systemPanelCount > 0 ? systemPanelCount : undefined;
     if (newType === 'micro') {
       setConfig(prev => {
+        const fb = toSubSystemKey(prev.systemType);
+        const targetInv = prev.inverters.find(i => i.id === invId);
+        const scopeKey: SubSystemKey | null = subSystemCounts.isHybrid
+          ? (subKey ?? inverterFleetKey(targetInv as any, fb))
+          : null;
+        if (scopeKey) {
+          // ── Hybrid: collapse ONLY this sub's fleet, sized to ITS stamp count ──
+          const part = partitionFleet(prev.inverters as any[], fb);
+          const subFleet = (part[scopeKey] ?? []) as InverterConfig[];
+          const subStamp = subSystemCounts[scopeKey];
+          const subPanels = subStamp > 0 ? subStamp : (fleetPanelTotal(subFleet as any[]) || 20);
+          console.log(`Micro topology (hybrid): collapsing '${scopeKey}' fleet only, panels=`, subPanels);
+          const firstSubStr = subFleet[0]?.strings[0] ?? newString(0, scopeKey);
+          const microSubStr = _buildStrCfg({
+            index:          0,
+            systemType:     scopeKey,
+            panelCount:     subPanels,
+            panelId:        firstSubStr.panelId,
+            existingId:     firstSubStr.id,
+            tilt:           firstSubStr.tilt,
+            azimuth:        firstSubStr.azimuth,
+            roofType:       firstSubStr.roofType as any,
+            mountingSystem: firstSubStr.mountingSystem,
+            wireGauge:      firstSubStr.wireGauge,
+            wireLength:     firstSubStr.wireLength,
+            subSystemKey:   scopeKey,
+          });
+          const microSubInv = _buildInvCfg({
+            inverterId: newInverterId,
+            type: 'micro',
+            strings: [microSubStr],
+            existingId: invId,
+            subSystemKey: scopeKey,
+          });
+          const inverters = replaceSubFleet(prev.inverters as any[], scopeKey, [microSubInv] as any[], fb) as unknown as InverterConfig[];
+          // §1.1: the subSystems map is the equipment authority — keep it in step.
+          const mapPrev = ((prev as any).subSystems ?? {}) as Record<string, any>;
+          return {
+            ...prev,
+            inverters,
+            subSystems: {
+              ...mapPrev,
+              [scopeKey]: {
+                ...(mapPrev[scopeKey] ?? {}),
+                key: scopeKey,
+                inverterId: newInverterId,
+                topology: 'micro',
+                source: 'engineering',
+                updatedAt: new Date().toISOString(),
+              },
+            },
+            userHasEditedInverters: true,
+          } as ProjectConfig;
+        }
+        // ── Single-system: legacy whole-project collapse ──
         const configDerivedTotal = prev.inverters.reduce(
           (sum, i) => sum + i.strings.reduce((s, str) => s + str.panelCount, 0), 0
         ) || 20;
@@ -4139,8 +5597,16 @@ function EngineeringPageInner() {
       });
     } else {
       // Update local config immediately for string/optimizer. updateInverter
-      // already engages the lock internally.
+      // already engages the lock internally (and now preserves subSystemKey).
       updateInverter(invId, { type: newType, inverterId: newInverterId });
+      // Hybrid: keep the sub's equipment record (§1.1 authority) in step so
+      // synthesized fleets / plansets never see a stale topology or model.
+      if (subKey) {
+        updateSubSystemEquip(subKey, {
+          inverterId: newInverterId,
+          topology: newType === 'optimizer' ? 'optimizer' : 'string',
+        });
+      }
     }
     // v57.5 — Record topology change for audit banner
     setTopologyChangeLog(prev => [
@@ -4183,7 +5649,8 @@ function EngineeringPageInner() {
     } finally {
       setTopologySwitching(false);
     }
-  }, [engineeringMode, toSystemState, updateInverter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engineeringMode, toSystemState, updateInverter, subSystemCounts]);
 
   const buildCalcPayload = useCallback(() => {
     const electricalInverters = config.inverters.map(inv => {
@@ -4443,10 +5910,38 @@ function EngineeringPageInner() {
             })();
             return { fenceHeightFt, fenceLengthFt, postSpacingFt: 8, groundClearanceFt: 2 / 12 };
           })() : {}),
+          // ── HYBRID: per-subsystem structural runs (roof + ground + fence) ──
+          // Without this the whole 94-module project got ONE analyzeFenceSystem
+          // pass; the roof and ground subsets had NO structural analysis at all.
+          ...(subSystemCounts.isHybrid ? {
+            subSystems: subSystemCounts.present.map(key => {
+              const M2FT = 3.28084;
+              if (key === 'fence') {
+                // Fence-subset length from the fence panels themselves (panel
+                // width × count — the project fenceLine is NULL on hybrids).
+                const _fp0 = config.inverters[0]?.strings[0];
+                const _pd0 = _fp0?.panelId ? (SOLAR_PANELS as any[]).find((p: any) => p.id === _fp0.panelId) : null;
+                const _panelWidFt = ((_pd0?.width ?? 41.0) / 12);
+                return { key, panelCount: subSystemCounts.fence,
+                  fenceLengthFt: Math.ceil(subSystemCounts.fence * _panelWidFt * 1.05) };
+              }
+              if (key === 'ground') {
+                const _gRows = new Set(
+                  ((projectLayout?.panels ?? []) as any[])
+                    .filter(pp => String(pp.systemType ?? pp.placementType ?? '').toLowerCase().startsWith('ground'))
+                    .map(pp => String(pp.layoutId ?? pp.arrayId ?? pp.arrayRow ?? pp.row ?? '0')));
+                return { key, panelCount: subSystemCounts.ground,
+                  groundTiltDeg: (projectLayout as any)?.groundTilt ?? 25,
+                  groundAzimuth: (projectLayout as any)?.groundAzimuth ?? 180,
+                  rowCount: _gRows.size > 1 ? _gRows.size : undefined };
+              }
+              return { key, panelCount: subSystemCounts.roof };
+            }),
+          } : {}),
         };
       })(),
     };
-  }, [config, totalPanels, sizingRecommendation, projectLayout]);
+  }, [config, totalPanels, sizingRecommendation, projectLayout, subSystemCounts]);
 
   // ── saveEngineeringOutputs: persist live engine state to project_files ──────
   const saveEngineeringOutputs = useCallback(async (calcData: any) => {
@@ -4469,11 +5964,11 @@ function EngineeringPageInner() {
             panelsPerString: calcData?.stringConfig?.panelsPerString ?? (firstStr?.panelCount ?? 0),
             stringVoc:       calcData?.stringConfig?.stringVoc ?? null,
             stringIsc:       calcData?.stringConfig?.stringIsc ?? null,
-            dcWireGauge:     computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
-            dcConduitSize:   computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.conduitSize ?? '3/4" EMT',
+            dcWireGauge:     csRun('DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
+            dcConduitSize:   csRun('DC_STRING_RUN')?.conduitSize ?? '3/4" EMT',
             dcDisconnect:    `${calcData?.acSizing?.ocpdAmps ?? 15}A, 600VDC`,
-            acWireGauge:     computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
-            acConduitSize:   computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.conduitSize ?? '1" EMT',
+            acWireGauge:     csRun('DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
+            acConduitSize:   csRun('DISCO_TO_METER_RUN')?.conduitSize ?? '1" EMT',
             acBreaker:       calcData?.acSizing?.ocpdAmps ?? null,
             mainPanelBus:    config.panelBusRating ?? 200,
             backfeedBreaker: calcData?.interconnection?.backfeedAmps ?? calcData?.acSizing?.ocpdAmps ?? null,
@@ -4508,7 +6003,7 @@ function EngineeringPageInner() {
           utility:           config.utilityId ?? null,
           estimatedFee:      calcData?.jurisdiction?.estimatedPermitFee ?? null,
         },
-        runs:                computedSystem.runs ?? [],
+        runs:                legacyRunsView(),
         // ── Reverse hydration fields ──────────────────────────────────────────
         address:             config.address ?? null,
         utilityId:           config.utilityId ?? null,
@@ -4642,7 +6137,13 @@ function EngineeringPageInner() {
         // V3 and V4 share identical output field names, so the same transform works
         // sourced from V4. (UNIFIED-ENGINE-DESIGN-SPEC.md Step 5.)
         try {
-          const v4s = calcData.structural;
+          const v4sRaw = calcData.structural;
+          const _subs = v4sRaw?.subSystems as Record<string, any> | undefined;
+          // HYBRID: the top-level scalars must render the ROOF subset — the
+          // legacy scalar result is the winner-type run (fence on Stowell),
+          // whose roof fields are empty. Fence/ground cards bind to their own
+          // sub-results below; kept on .subSystems.
+          const v4s = (_subs?.roof && _subs.roof.status) ? _subs.roof : v4sRaw;
           if (v4s?.status) {
             const ra = v4s.rafterAnalysis;
             const ml = v4s.mountLayout;
@@ -4659,8 +6160,12 @@ function EngineeringPageInner() {
               // Fence (SolFence) structural — carries the real post embedment /
               // overturning / wind from analyzeFence so the Structural tab can show
               // it instead of the stubbed roof rafter rows.
-              fenceMountAnalysis: v4s.fenceMountAnalysis,
+              fenceMountAnalysis: _subs?.fence?.fenceMountAnalysis ?? v4sRaw.fenceMountAnalysis,
               engineered:         v4s.engineered,
+              // HYBRID: keyed per-subsystem V4 results (roof/ground/fence) —
+              // the Structural tab renders one card per present subsystem.
+              subSystems:      _subs,
+              subSystemMeta:   v4sRaw.subSystemMeta,
               // Native V4 top-level fields — the "Structural Compliance" card
               // (page.tsx ~9792) reads native names (totalSystemWeightLbs,
               // addedDeadLoadPsf, wind.netUpliftPressurePsf, snow.roofSnowLoadPsf).
@@ -4723,8 +6228,14 @@ function EngineeringPageInner() {
                 existingRoofDeadLoad:  15,
                 totalRoofDeadLoad:     (v4s.addedDeadLoadPsf ?? 0) + 15,
               },
-              errors:          v4s.errors,
-              warnings:        v4s.warnings,
+              // Merge sub-system findings so a fence/ground FAIL still surfaces
+              // in overall status even when the scalars display the roof subset.
+              errors:          _subs
+                ? [...new Set([...(v4sRaw.errors ?? []), ...Object.values(_subs).flatMap((s: any) => s?.errors ?? [])])]
+                : v4s.errors,
+              warnings:        _subs
+                ? [...new Set([...(v4sRaw.warnings ?? []), ...Object.values(_subs).flatMap((s: any) => s?.warnings ?? [])])]
+                : v4s.warnings,
               recommendations: v4s.recommendations,
             };
             // Auto-update framing type if detected
@@ -4849,8 +6360,8 @@ function EngineeringPageInner() {
       const designTempMin = cs.designTempMin;
       const acOutputKw = cs.totalAcKw || invData?.acOutputKw || (invData?.acOutputW / 1000) || 7.6;
       // Get wire gauges from ComputedSystem runs
-      const csAcRun = cs.runs.find(r => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
-      const csDcRun = cs.runs.find(r => r.id === (cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN'));
+      const csAcRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
+      const csDcRun = csRun(cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN');
       // For micro: ALWAYS use cs.runs — never fall back to config.wireGauge (which is string-inverter only)
       const csAcWireGauge = csAcRun?.wireGauge
         || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
@@ -5006,13 +6517,20 @@ function EngineeringPageInner() {
           generatorOutputBreakerA: config.generatorId
             ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
             : undefined,
-          // Pass ComputedSystem.runs as single source of truth for conduit schedule
-          runs:           cs.runs,
+          // Pass ComputedSystem.runs as single source of truth for conduit schedule.
+          // Wave 5A: with source lanes the route renders MULTI-LANE and accepts
+          // the aggregate's NAMESPACED `${sub}:` run ids as-is; the legacy
+          // single-lane path keeps the bare-id primary-sub view.
+          runs:           hybridSldSources ? (cs.runs ?? []) : legacyRunsView(),
+          // Wave 5A — hybrid source lanes + the §1.7 aggregate total (Σ
+          // per-physical-inverter rounded OCPDs + battery bus impact).
+          sources:        hybridSldSources ?? undefined,
+          backfeedAmps:   hybridSldSources ? cs.backfeedBreakerAmps : undefined,
           // Microinverter branch data — for per-branch SLD drawing
           microBranches:     cs.isMicro ? cs.microBranches : undefined,
-          branchWireGauge:   cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.wireGauge : undefined,
-          branchConduitSize: cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.conduitSize : undefined,
-          branchOcpdAmps:    cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.ocpdAmps : undefined,
+          branchWireGauge:   cs.isMicro ? csRun('BRANCH_RUN')?.wireGauge : undefined,
+          branchConduitSize: cs.isMicro ? csRun('BRANCH_RUN')?.conduitSize : undefined,
+          branchOcpdAmps:    cs.isMicro ? csRun('BRANCH_RUN')?.ocpdAmps : undefined,
           // AP Systems / manufacturer branch limits
           inverterModulesPerDevice: invData?.modulesPerDevice ?? 1,
           inverterBranchLimit:      invData?.branchLimit ?? 16,
@@ -5058,6 +6576,16 @@ function EngineeringPageInner() {
 
   // ── V4 SLD fetch (uses /api/engineering/sld — professional renderer) ──────────
   const fetchSLD = async () => {
+    // Wave 5A / I-8: hybrids render a REAL multi-lane SLD when source lanes
+    // can be built from computedMulti. The banner remains ONLY as the
+    // fallback (degenerate whole-fleet pass, equipment-less subs) — never a
+    // plausible-wrong single-lane sheet, never a silent nothing.
+    if (subSystemCounts.isHybrid && !hybridSldSources) {
+      setSldSvg(null);
+      setSldError(null);
+      console.log('[SLD] hybrid project without usable source lanes — Diagram tab shows the hybrid banner (I-8 fallback)');
+      return;
+    }
     setSldLoading(true);
     setSldError(null);
     try {
@@ -5222,7 +6750,7 @@ function EngineeringPageInner() {
         // FIX: csAcOcpd was only defined in the SLD callback - define it here too
         // Derive AC OCPD: prefer ComputedSystem runs → compliance acSizing → formula fallback
         const csAcOcpdBom: number = (() => {
-          const acRun = cs.runs?.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+          const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
           if (acRun?.ocpdAmps) return acRun.ocpdAmps;
           const compOcpd = (compliance.electrical as any)?.acSizing?.ocpd
             || (compliance.electrical as any)?.acSizing?.ocpdAmps;
@@ -5292,27 +6820,27 @@ function EngineeringPageInner() {
           })(),
           systemKw:         parseFloat(totalKw),
           dcWireGauge:      (() => {
-            const dcRun = cs.runs.find(r => r.id === (cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN'));
+            const dcRun = csRun(cs.isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN');
             return dcRun?.wireGauge || firstStr?.wireGauge || '#10 AWG';
           })(),
           // Use ComputedSystem wire gauges — single source of truth
           // For micro: ALWAYS use cs.runs — never fall back to config.wireGauge
           acWireGauge:      (() => {
-            const acRun = cs.runs.find(r => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+            const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
             return acRun?.wireGauge
               || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
           })(),
           // Ground/fence arrays sit away from the house: add the user-input trench
           // run length to the DC home run (drives wire footage + NEC 300.5 conduit).
-          dcWireLength:     (firstStr?.wireLength || cs.runs.find(r => r.id === 'DC_STRING_RUN')?.onewayLengthFt || 50)
+          dcWireLength:     (firstStr?.wireLength || csRun('DC_STRING_RUN')?.onewayLengthFt || 50)
                               + ((config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0),
-          acWireLength:     config.wireLength || cs.runs.find(r => r.id === 'DISCO_TO_METER_RUN')?.onewayLengthFt || 50,
+          acWireLength:     config.wireLength || csRun('DISCO_TO_METER_RUN')?.onewayLengthFt || 50,
           // Trench length for the NEC 300.5 underground conduit line (ground/fence).
           trenchRunLengthFt: (config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0,
           conduitType:      config.conduitType,
           // Use ComputedSystem conduit size
           conduitSizeInch:  (() => {
-            const acRun = cs.runs.find(r => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+            const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
             return (acRun?.conduitSize || (compliance.electrical as any)?.acSizing?.conduitSize || '3/4"').replace('"','');
           })(),
           roofType:         isRoofSystem ? config.roofType : 'none',
@@ -5340,17 +6868,28 @@ function EngineeringPageInner() {
           rowCount:         config.rowCount,
           columnCount:      config.columnCount,
           layoutOrientation: config.layoutOrientation,
+          // Trunk-cable install logic: distinct sub-arrays (design arrayId/planeId
+          // from the CAD placed panels) force one bridge splice pair per gap;
+          // spliceAtRows = installer cut-at-rows preference (default = cheapest
+          // option: continuous cable + service loop).
+          subArrayCount:    (() => {
+            const panels = (projectLayout?.panels ?? []) as Array<{ arrayId?: string; planeId?: string }>;
+            if (panels.length === 0) return undefined;
+            return new Set(panels.map(p => String(p.arrayId ?? p.planeId ?? '0'))).size;
+          })(),
+          spliceAtRows:     config.spliceAtRows === true,
           // Interconnection method — controls whether backfed breaker appears in BOM
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
-          runs:             cs.runs,
+          runs:             legacyRunsView(),
           // Pass ComputedSystem.bomQuantities for EXACT match with summary card quantities
           bomQuantities:    cs.bomQuantities,
           // Generator / ATS / BUI — for BOM line items
-          generatorId:      config.generatorId || undefined,
-          atsId:            config.atsId || undefined,
-          backupInterfaceId: config.backupInterfaceId || undefined,
+          generatorId:          config.generatorId || undefined,
+          atsId:                config.atsId || undefined,
+          backupInterfaceId:    config.backupInterfaceId || undefined,
+          generatorWireLength:  config.generatorWireLength || undefined,
           generatorKw:      config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })() : undefined,
           atsAmpRating:     config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })() : undefined,
           backupInterfaceMaxA: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.maxContinuousOutputA ?? undefined; })() : undefined,
@@ -5363,15 +6902,21 @@ function EngineeringPageInner() {
           // MASTER TASK NOTE: This is best-effort estimation. When CAD geometry is
           // available server-side, use extractStructuralInputFromCAD() instead.
           // derivedFrom: 'estimated-ui-defaults' (not CAD geometry)
-          fenceData: config.systemType === 'fence' ? (() => {
+          // HYBRID: partition counts drive the server's per-subsystem structural
+          // branches + the NEC 690.12 RSD roof-subset qty in generateBOMV4.
+          subSystemCounts: subSystemCounts.isHybrid
+            ? { roof: subSystemCounts.roof, ground: subSystemCounts.ground, fence: subSystemCounts.fence }
+            : undefined,
+          fenceData: (config.systemType === 'fence' || subSystemCounts.fence > 0) ? (() => {
             // fenceCAD.ts defaults: 8ft post spacing, 3ft embed, 2 rails
             const panelWidthFt = 3.28;    // ~1m panel width (fenceCAD DEFAULT_PANEL_WIDTH_FT)
             const panelHeightFt = 5.5;    // ~1.676m panel height
             const postSpacingFt = 8;      // DEFAULT_POST_SPACING_FT from fenceCAD.ts
             const postEmbedFt = 3;        // DEFAULT_POST_EMBED_FT from fenceCAD.ts
             const railCount = 2;          // DEFAULT_RAIL_COUNT from fenceCAD.ts
-            // Estimate fence length from panel count: each panel ~3.28ft wide
-            const totalFenceLengthFt = totalPanels * panelWidthFt;
+            // Estimate fence length from the FENCE SUBSET (hybrid: 17, not 94)
+            const _fencePanels = subSystemCounts.fence > 0 ? subSystemCounts.fence : totalPanels;
+            const totalFenceLengthFt = _fencePanels * panelWidthFt;
             // Posts: ceil(length / spacing) + 1 per segment (assume 1 segment for simple calc)
             const totalPosts = Math.ceil(totalFenceLengthFt / postSpacingFt) + 1;
             // Fence segments from projectLayout if available
@@ -5387,7 +6932,10 @@ function EngineeringPageInner() {
               segmentCount: fenceSegments,
               gateCount: 0,                     // gate data from CAD if available
               gateWidthsFt: [] as number[],
-              solarSectionCount: totalPanels,
+              // 1:1 panel:section was the $61.8k Stowell lie (a 6' section holds
+              // 2 panels) — the server now derives sections from fencePanelCount.
+              fencePanelCount: _fencePanels,
+              solarSectionCount: 0,
               vinylSectionCount: 0,
               panelWidthFt,
               panelHeightFt,
@@ -5399,14 +6947,23 @@ function EngineeringPageInner() {
           // falls back to mounting system defaults. When CAD geometry is available
           // server-side, use extractStructuralInputFromCAD() instead.
           // derivedFrom: 'compliance-structural + mounting-system-defaults'
-          groundData: config.systemType === 'ground' ? (() => {
+          groundData: (config.systemType === 'ground' || subSystemCounts.ground > 0) ? (() => {
             const gma = (compliance.structural as any)?.groundMountAnalysis;
             const mountSys = ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId);
             const gm = mountSys?.groundMount as any;
             const pileSpacingFt = gma?.pileSpacingFt ?? gm?.pileSpacingFt ?? 10;
             const pileEmbedFt = gma?.pileEmbedmentFt ?? gm?.pileEmbedmentFt ?? 4;
-            const rowCount = config.rowCount ?? 1;
-            const panelsPerRow = Math.ceil(totalPanels / rowCount);
+            const _groundPanels = subSystemCounts.ground > 0 ? subSystemCounts.ground : totalPanels;
+            // Real row count from the designed layout (one layoutId per placed
+            // ground row) — config.rowCount defaulted to 1, which shaped the
+            // ground BOM as a single 26-panel row (22 piers / 14 rails) instead
+            // of the designed 2×13 (Stowell CSV, Ray 2026-07-11).
+            const _groundRowKeys = new Set(
+              ((projectLayout?.panels ?? []) as any[])
+                .filter(pp => String(pp.systemType ?? pp.placementType ?? '').toLowerCase().startsWith('ground'))
+                .map(pp => String(pp.layoutId ?? pp.arrayId ?? pp.arrayRow ?? pp.row ?? '0')));
+            const rowCount = _groundRowKeys.size > 1 ? _groundRowKeys.size : (config.rowCount ?? 1);
+            const panelsPerRow = Math.ceil(_groundPanels / rowCount);
             const panelWidthIn = 41.7;  // default panel width in inches
             const arrayWidthFt = (panelsPerRow * panelWidthIn) / 12;
             const pilesPerRow = Math.ceil(arrayWidthFt / pileSpacingFt) + 1;
@@ -5420,6 +6977,22 @@ function EngineeringPageInner() {
               arrayWidthFt,
               railsPerRow: 2,           // standard from array-geometry.ts
               groundClearanceFt: 2,     // 0.6096m default from CAD types
+            };
+          })() : undefined,
+
+          // HYBRID: roof-subset racking quantities from the per-sub structural
+          // run — without these the V4 racking stage emits nothing on a
+          // fence-typed hybrid (attachmentCount/railSections were sent as 0).
+          roofData: (subSystemCounts.isHybrid && subSystemCounts.roof > 0) ? (() => {
+            const roofSub = (compliance.structural as any)?.subSystems?.roof;
+            const ml = roofSub?.mountLayout;
+            const rb = roofSub?.rackingBOM;
+            if (!ml?.mountCount) return undefined;
+            return {
+              panelCount: subSystemCounts.roof,
+              attachmentCount: ml.mountCount,
+              railSections: rb?.rails?.qty ?? undefined,
+              mountingSystemId: config.mountingId || undefined,
             };
           })() : undefined,
 
@@ -5558,18 +7131,22 @@ function EngineeringPageInner() {
     return () => { if (calcDebounceRef.current) clearTimeout(calcDebounceRef.current); };
   }, [config]);
 
-  // Auto-refresh SLD whenever compliance data updates AND an SLD was already generated
-  // This ensures string config changes flow through to the diagram automatically
+  // Auto-propagate the SLD: keep the single-line diagram current as the design
+  // changes — no manual "Generate SLD" click needed. Fires when the SLD tab is
+  // open (incl. the first time) and whenever the equipment/strings/compliance
+  // change while viewing it. Debounced; guarded on a real system. Plan-set export
+  // fetches the SLD separately, so we only auto-refresh for the live preview here.
   const sldAutoRefDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!sldSvg) return; // Only auto-refresh if SLD was already generated once
+    if (activeTab !== 'diagram') return;
+    if (!(totalPanels > 0)) return;
     if (sldAutoRefDebounce.current) clearTimeout(sldAutoRefDebounce.current);
     sldAutoRefDebounce.current = setTimeout(() => {
       fetchSLD();
-    }, 1200);
+    }, 900);
     return () => { if (sldAutoRefDebounce.current) clearTimeout(sldAutoRefDebounce.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compliance]);
+  }, [activeTab, compliance, config.inverters, config.batteryId, config.mountingId, totalPanels]);
 
   const handlePrint = () => window.print();
 
@@ -5805,10 +7382,22 @@ function EngineeringPageInner() {
       logDecision('Auto Fix', 'Enabled Rapid Shutdown (NEC 690.12 required for rooftop arrays)', 'auto');
     }
 
+    // Wave 6 — HYBRID: the whole-project feasibility fix below (single totalPanels
+    // + config.inverters[0], flat rebuild of every inverter) collapses the per-sub
+    // fleets. Auto-Fix heals a hybrid per sub-system instead — each sub re-sized to
+    // its OWN layout count, equipment choices preserved.
+    if (subSystemCounts.isHybrid) {
+      if (fleetDiag.suspect) {
+        rebuildFleetsPerSub('manual');
+        logDecision('Auto-Fix', 'Hybrid — rebuilt fleets per sub-system (' +
+          subSystemCounts.present.map(k => `${k}=${subSystemCounts[k]}`).join(', ') + ')', 'auto');
+      }
+    }
     // ── Phase 13.7: Feasibility-driven electrical string fix ─────────────────
     // Only attempt for non-micro topologies. Micro systems do not have
-    // string configurations to fix via the feasibility engine.
-    if (!cs.isMicro) {
+    // string configurations to fix via the feasibility engine. (Hybrids handled
+    // per sub-system just above — excluded here to avoid a whole-project rebuild.)
+    if (!cs.isMicro && !subSystemCounts.isHybrid) {
       // Gather panel electrical specs from the current configuration.
       const fixFirstStr = config.inverters[0]?.strings[0];
       const fixPanelData = fixFirstStr?.panelId
@@ -5983,6 +7572,17 @@ function EngineeringPageInner() {
     const layoutIsFence = layoutType === 'solar_fence' || layoutType === 'fence' || hasFenceGeometry;
     const configIsFence = config.systemType === 'fence';
 
+    // Wave 3.3 (watcher 7/7): on a HYBRID layout (≥2 stamped subsystems) the
+    // flat systemType is the PRIMARY mirror (§1.4 roof > ground > fence) —
+    // fence geometry must NOT flip the whole project to 'fence' (that would
+    // hand roof modules fence structural/BOM/RSD authority). Single-system
+    // fence projects heal exactly as before.
+    if (subSystemCounts.isHybrid) {
+      if (layoutIsFence && !configIsFence) {
+        console.log('[FENCE WATCHER] hybrid layout — systemType stays the primary mirror; fence sub handled per-sub');
+      }
+      return;
+    }
     // Job 1 (kept): auto-heal systemType when the layout says fence (by type OR by
     // persisted fence geometry) but config says roof. DATA-INTEGRITY fix — the
     // user's intent (system is a fence) is already expressed by the layout.
@@ -5999,6 +7599,7 @@ function EngineeringPageInner() {
     projectLayout?.type,
     projectLayout?.systemType,
     projectLayout?.fenceLine,
+    subSystemCounts.isHybrid,
   ]);
   const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
   const [planSetError, setPlanSetError] = useState<string | null>(null);
@@ -6088,7 +7689,54 @@ function EngineeringPageInner() {
         // if the total changed — NEVER rearrange strings via sizing engine.
         // This prevents CAD sync from overwriting a user-configured string layout.
         const _cadUserLocked = !!(config.isUserControlled || config.userHasEditedInverters);
-        if (layout.panelCount > 0 && (currentTotal !== layout.panelCount || (!_cadUserLocked && _is1xNState))) {
+        // ── Wave 3.3 (watcher: sync-pipeline panel-count fix, re-keyed per sub) ──
+        // At ≥2 fleets/subsystems the whole-fleet rebuild below is DISABLED and
+        // replaced by per-sub reconciliation: each fleet is compared against ITS
+        // OWN layout stamp count and only mismatched fleets are rebuilt with that
+        // sub's own equipment (I-4: a fence count change never rebuilds roof).
+        const _spFallbackKey = toSubSystemKey(config.systemType);
+        const _spMultiSub =
+          subSystemCounts.isHybrid || fleetKeys(config.inverters as any[], _spFallbackKey).length > 1;
+        if (_spMultiSub && layout.panelCount > 0) {
+          if (subSystemCounts.present.length === 0) {
+            console.log('[EngineeringPage] PANEL COUNT FIX (per-sub) skipped — multi-sub fleet but layout stamps not loaded yet');
+          } else if (_cadUserLocked) {
+            const _lockedMismatches = subSystemCounts.present.filter(k => {
+              const fleet = partitionFleet(config.inverters as any[], _spFallbackKey)[k] ?? [];
+              return fleet.length > 0 && fleetPanelTotal(fleet) !== subSystemCounts[k];
+            });
+            if (_lockedMismatches.length > 0) {
+              console.log('[EngineeringPage] PANEL COUNT FIX (per-sub) skipped — user-controlled config; mismatched subs:', _lockedMismatches.join(', '));
+            }
+          } else {
+            const _spPart = partitionFleet(config.inverters as any[], _spFallbackKey);
+            const _spRebuilds: Array<{ key: SubSystemKey; fleet: InverterConfig[] }> = [];
+            for (const key of subSystemCounts.present) {
+              const fleet = (_spPart[key] ?? []) as InverterConfig[];
+              if (fleet.length === 0) continue; // per-sub smart defaults own seeding
+              const expected = subSystemCounts[key];
+              if (expected <= 0 || fleetPanelTotal(fleet as any[]) === expected) continue;
+              const rebuilt = rebuildFleetForCount(fleet, key, expected, config.selectedBrand);
+              if (rebuilt) _spRebuilds.push({ key, fleet: rebuilt });
+            }
+            if (_spRebuilds.length > 0) {
+              console.log('[EngineeringPage] PANEL COUNT FIX (per-sub):',
+                _spRebuilds.map(r => `${r.key}→${subSystemCounts[r.key]}`).join(', '));
+              setConfig(prev => {
+                const fb = toSubSystemKey(prev.systemType);
+                let inverters = prev.inverters;
+                for (const r of _spRebuilds) {
+                  inverters = replaceSubFleet(inverters as any[], r.key, r.fleet as any[], fb) as unknown as InverterConfig[];
+                }
+                return { ...prev, inverters };
+              });
+              setTimeout(() => {
+                console.log('[EngineeringPage] Auto-recalculating after per-sub panel count sync');
+                runCalc();
+              }, 400);
+            }
+          }
+        } else if (layout.panelCount > 0 && (currentTotal !== layout.panelCount || (!_cadUserLocked && _is1xNState))) {
             if (_is1xNState && !_cadUserLocked) {
               console.log('[EngineeringPage] PANEL COUNT FIX (1×N redistribution): 1 string with', _allCurrentStrings[0]?.panelCount, 'panels → redistributing via sizing engine');
             } else if (currentTotal !== layout.panelCount) {
@@ -6365,6 +8013,14 @@ function EngineeringPageInner() {
           roofPitch: config.roofPitch,
           rafterSize: config.rafterSize,
           rafterSpacing: config.rafterSpacing,
+          // Framing type + span were never threaded into the permit payload —
+          // the planset's structural engine received nothing, coerced to
+          // worst-case stick rafter @ 12 ft assumed, and printed DO-NOT-ISSUE
+          // letters on trussed houses (Ray, 2026-07-06). 'unknown' lets the
+          // engine auto-detect (24" O.C. → truss) with a provenance note.
+          framingType: config.framingType || 'unknown',
+          rafterSpan: config.rafterSpan || undefined,
+          rafterSpecies: config.rafterSpecies || undefined,
           attachmentSpacing: config.attachmentSpacing,
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
@@ -6373,8 +8029,11 @@ function EngineeringPageInner() {
           // batteryEnabled). The permit's equipment legend keys off batteryCount>0, so a
           // stale config.batteryCount (e.g. an old ecosystem auto-add) must be zeroed here
           // when the toggle is off — otherwise a phantom battery renders across the planset.
-          batteryBrand: batteryEnabled ? config.batteryBrand : undefined,
-          batteryModel: batteryEnabled ? config.batteryModel : undefined,
+          // Brand/model resolved from batteryId when the string fields are empty —
+          // config.batteryBrand/Model stay '' on the pick-by-id flow, which shipped
+          // PV-5's L-8 BESS placard as "Manufacturer: — / Model: —".
+          batteryBrand: batteryEnabled ? (config.batteryBrand || (config.batteryId ? (getBatteryById(config.batteryId)?.manufacturer ?? '') : '')) : undefined,
+          batteryModel: batteryEnabled ? (config.batteryModel || (config.batteryId ? (getBatteryById(config.batteryId)?.model ?? '') : '')) : undefined,
           batteryCount: batteryEnabled ? config.batteryCount : 0,
           batteryKwh:   batteryEnabled ? config.batteryKwh : 0,
           batteryBackfeedA: batteryEnabled ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
@@ -6387,6 +8046,9 @@ function EngineeringPageInner() {
           zip: config.zip || '',
           county: config.county || '',
           apn: config.apn || undefined,    // Error 3e fix: pass APN from config
+          // §1.1 equipment authority map — id-based per-sub fallback for the
+          // server's resolveEquipmentBySubSystem (survives untagged fleets).
+          subSystems: (config as any).subSystems || undefined,
           panelVoc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.voc : undefined; })(),
           panelIsc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.isc : undefined; })(),
           panelWeightLbs: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.weightLbs : undefined; })(),
@@ -6421,12 +8083,19 @@ function EngineeringPageInner() {
               type: inv.type, acOutputKw: invData?.acOutputKw || (invData?.acOutputW/1000) || 0,
               maxDcVoltage: invData?.maxDcVoltage || 480, efficiency: invData?.efficiency || 97,
               ulListing: invData?.ulListing || 'UL 1741',
+              // Contract §1.3 permit carriage: WITHOUT the tag, the server's
+              // resolveEquipmentBySubSystem sees zero tagged inverters and every
+              // hybrid lane resolves to '—'/0 — E-1 prints "48 × 0W · Inverter"
+              // and SCHED prints 0.0A branch amps (Stowell v3 audit root cause).
+              ...(inv.subSystemKey ? { subSystemKey: inv.subSystemKey } : {}),
+              inverterId: inv.inverterId,
               strings: inv.strings.map(str => {
                 const panel = getPanelById(str.panelId) as any;
                 return { label: str.label, panelCount: str.panelCount,
                   panelManufacturer: panel?.manufacturer || '', panelModel: panel?.model || '',
                   panelWatts: panel?.watts || 400, panelVoc: panel?.voc || 41.6,
-                  panelIsc: panel?.isc || 12.26, wireGauge: str.wireGauge, wireLength: str.wireLength };
+                  panelIsc: panel?.isc || 12.26, wireGauge: str.wireGauge, wireLength: str.wireLength,
+                  ...((str as any).subSystemKey ? { subSystemKey: (str as any).subSystemKey } : {}) };
               }),
             };
           }),
@@ -6547,16 +8216,28 @@ function EngineeringPageInner() {
       // Ensure we have the accurate SLD before building the plan set.
       // If sldSvg is null (user hasn't clicked Generate SLD this session),
       // fetch it now so E-1 always uses renderSLDProfessional(), never the fallback.
-      let activeSldSvg = sldSvg;
-      if (!activeSldSvg) {
-        console.log('[handleGeneratePlanSet] sldSvg is null — auto-fetching SLD before plan-set...');
+      // Wave 5A / I-8: hybrids WITH usable source lanes attach a genuine
+      // multi-lane SVG (fetchSLDSvg now sends sources); only a hybrid whose
+      // lanes can't be built keeps the passthrough suppressed — the permit
+      // engine's own generateLiveSLD renders E-1 multi-lane server-side.
+      const _sldPassthroughOk = !subSystemCounts.isHybrid || !!hybridSldSources;
+      // STALE-CACHE FIX (Ray, hybrid planset showed "INVERTER NOT SELECTED" on
+      // all 3 lanes AFTER re-picking equipment): the session-cached sldSvg is a
+      // snapshot from the last "Generate SLD" click and goes stale the moment
+      // equipment changes. The plan set is a FINAL deliverable — always render a
+      // FRESH SLD from current config, never embed the session cache.
+      let activeSldSvg: string | null = null;
+      if (_sldPassthroughOk) {
+        console.log('[handleGeneratePlanSet] rendering FRESH SLD from current config for plan-set...');
         activeSldSvg = await fetchSLDSvg();
         if (activeSldSvg) {
           setSldSvg(activeSldSvg);
-          console.log('[handleGeneratePlanSet] SLD auto-fetched successfully for plan-set');
         } else {
-          console.warn('[handleGeneratePlanSet] SLD auto-fetch returned null — E-1 will use fallback renderer');
+          console.warn('[handleGeneratePlanSet] SLD fetch returned null — E-1 will use fallback renderer');
         }
+      }
+      if (subSystemCounts.isHybrid && !_sldPassthroughOk) {
+        console.warn('[handleGeneratePlanSet] hybrid project without usable source lanes — client SLD passthrough suppressed (I-8); permit engine owns E-1 handling');
       }
 
       // Gather all system data
@@ -6567,7 +8248,7 @@ function EngineeringPageInner() {
 
       // Build strings array for plan set — use computedSystem.strings (engine output) when available
       const csStrings = cs.strings ?? [];
-      const csDcRun   = cs.runMap?.['DC_STRING_RUN'] ?? cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN');
+      const csDcRun   = csRun('DC_STRING_RUN');
       const planStrings = csStrings.length > 0
         ? csStrings.map((s: any, i: number) => ({
             id:          `S${i + 1}`,
@@ -6651,20 +8332,16 @@ function EngineeringPageInner() {
         // cs = computedSystem from useMemo above — already called computeSystem()
         // Use cs.runMap / cs.runs for wire gauges; cs.acOcpdAmps / cs.backfeedBreakerAmps for OCPDs.
         strings: planStrings,
-        dcWireGauge:          (cs.runMap?.['DC_STRING_RUN'] as any)?.wireGauge
-                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.wireGauge
+        dcWireGauge:          (csRun('DC_STRING_RUN') as any)?.wireGauge
                                 ?? config.wireGauge
                                 ?? '#10 AWG',
-        dcConduitType:        (cs.runMap?.['DC_STRING_RUN'] as any)?.conduitSize
-                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.conduitSize
+        dcConduitType:        (csRun('DC_STRING_RUN') as any)?.conduitSize
                                 ?? config.conduitType
                                 ?? '3/4" EMT',
-        acWireGauge:          (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.wireGauge
-                                ?? (cs.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN') as any)?.wireGauge
+        acWireGauge:          (csRun('DISCO_TO_METER_RUN') as any)?.wireGauge
                                 ?? compliance.electrical?.acWireGauge
                                 ?? '#8 AWG',
-        acConduitType:        (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.conduitSize
-                                ?? (cs.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN') as any)?.conduitSize
+        acConduitType:        (csRun('DISCO_TO_METER_RUN') as any)?.conduitSize
                                 ?? config.conduitType
                                 ?? '1" EMT',
         dcDisconnectAmps:     (csStrings[0] as any)?.ocpdAmps
@@ -6688,9 +8365,8 @@ function EngineeringPageInner() {
         interconnectionMethod: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'Supply-Side Tap' : 'Backfeed Breaker',
         rapidShutdownRequired: config.rapidShutdown,
         rapidShutdownDevice:  config.inverters[0]?.type === 'micro' ? 'Enphase IQ RSD (integrated)' : 'Tigo RSS / SolarEdge SafeDC',
-        groundWireGauge:      (cs.runMap?.['DC_STRING_RUN'] as any)?.egcGauge
-                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.egcGauge
-                                ?? (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.egcGauge
+        groundWireGauge:      (csRun('DC_STRING_RUN') as any)?.egcGauge
+                                ?? (csRun('DISCO_TO_METER_RUN') as any)?.egcGauge
                                 ?? '#10 AWG',
         // Battery
         hasBattery: config.batteryCount > 0 && !!config.batteryId,
@@ -6880,11 +8556,14 @@ function EngineeringPageInner() {
     setAiLoading(false);
   };
 
-  // Derived topology label for display
-  const topologyLabel = config.inverters[0]?.type === 'micro' ? 'MICROINVERTER'
+  // Derived topology label for display — hybrid systems mix topologies per sub,
+  // so a single 'STRING INVERTER'/'MICROINVERTER' label is wrong for them.
+  const topologyLabel = subSystemCounts.isHybrid ? 'HYBRID SYSTEM'
+    : config.inverters[0]?.type === 'micro' ? 'MICROINVERTER'
     : config.inverters[0]?.type === 'optimizer' ? 'STRING + OPTIMIZER'
     : 'STRING INVERTER';
-  const topologyColor = config.inverters[0]?.type === 'micro' ? 'text-purple-400 border-purple-500/40 bg-purple-500/10'
+  const topologyColor = subSystemCounts.isHybrid ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+    : config.inverters[0]?.type === 'micro' ? 'text-purple-400 border-purple-500/40 bg-purple-500/10'
     : config.inverters[0]?.type === 'optimizer' ? 'text-blue-400 border-blue-500/40 bg-blue-500/10'
     : 'text-amber-400 border-amber-500/40 bg-amber-500/10';
 
@@ -7271,10 +8950,18 @@ function EngineeringPageInner() {
                   }
                   setSaveState('saving');
                   try {
+                    // Wave 3.5 — manual save carries the same v2 envelope as auto-save.
+                    const _manualHasMap =
+                      (config as any).subSystems && Object.keys((config as any).subSystems).length > 0;
                     const res = await fetch('/api/engineering/save-config', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ projectId: currentProjectId, config }),
+                      body: JSON.stringify({
+                        projectId: currentProjectId,
+                        config: _manualHasMap
+                          ? { ...config, schemaVersion: Math.max(2, Number((config as any).schemaVersion) || 0) }
+                          : config,
+                      }),
                     });
                     const body = await res.json();
                     console.log('[MANUAL SAVE] status:', res.status, 'body:', body);
@@ -7793,7 +9480,7 @@ function EngineeringPageInner() {
                   </div>
 
                   {/* KPI row */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
                     <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-4 py-3 text-center">
                       <div className="text-2xl font-black text-amber-400 tabular-nums">{totalKw}</div>
                       <div className="text-xs text-slate-500 mt-0.5">kW DC</div>
@@ -7817,6 +9504,19 @@ function EngineeringPageInner() {
                           : '—'}
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">BOM Cost</div>
+                    </div>
+                    {/* Hardware $/W — DC watts basis (before labor) */}
+                    <div className={`rounded-xl border px-4 py-3 text-center ${
+                      bomPricing?.pricingApplied
+                        ? 'bg-emerald-500/10 border-emerald-500/30'
+                        : 'bg-slate-900/60 border-slate-700/50'
+                    }`}>
+                      <div className={`text-2xl font-black tabular-nums ${bomPricing?.pricingApplied ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {bomPricing?.pricingApplied && Number(totalKw) > 0
+                          ? `$${(bomPricing.totalBomCost / (Number(totalKw) * 1000)).toFixed(2)}`
+                          : '—'}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-0.5">$/W hardware</div>
                     </div>
                   </div>
 
@@ -7845,24 +9545,27 @@ function EngineeringPageInner() {
 
                       {/* Node: Inverter */}
                       <div className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border cursor-pointer hover:brightness-110 transition-all min-w-[90px] ${
+                        subSystemCounts.isHybrid ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' :
                         _inv0?.type === 'micro' ? 'border-purple-500/40 bg-purple-500/10 text-purple-300' :
                         _inv0?.type === 'optimizer' ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' :
                         'border-amber-500/40 bg-amber-500/10 text-amber-300'
                       }`}
                         title="Inverter — click to expand Inverter config">
                         <Cpu size={18} className={
+                          subSystemCounts.isHybrid ? 'text-amber-400' :
                           _inv0?.type === 'micro' ? 'text-purple-400' :
                           _inv0?.type === 'optimizer' ? 'text-blue-400' : 'text-amber-400'
                         } />
                         <div className="text-xs font-bold text-white truncate max-w-[80px] text-center">
-                          {_invData0?.manufacturer || 'Inverter'}
+                          {subSystemCounts.isHybrid ? 'Hybrid' : (_invData0?.manufacturer || 'Inverter')}
                         </div>
                         <div className="text-[10px] text-slate-400">
-                          {_inv0?.type === 'micro' ? 'Micro' : _inv0?.type === 'optimizer' ? 'Optimizer' : 'String'}{' '}
-                          {_acKwNum > 0 ? `${_acKwNum}kW` : ''}
+                          {subSystemCounts.isHybrid
+                            ? `${subSystemCounts.present.length} sub-systems`
+                            : `${_inv0?.type === 'micro' ? 'Micro' : _inv0?.type === 'optimizer' ? 'Optimizer' : 'String'} ${_acKwNum > 0 ? `${_acKwNum}kW` : ''}`}
                         </div>
                         <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                          {_branchCount} {cs.isMicro ? 'branches' : 'strings'}
+                          {subSystemCounts.isHybrid ? (_acKwNum > 0 ? `${_acKwNum} kW AC` : 'multi-inverter') : `${_branchCount} ${cs.isMicro ? 'branches' : 'strings'}`}
                         </div>
                       </div>
 
@@ -7882,7 +9585,7 @@ function EngineeringPageInner() {
                         <div className="text-xs font-bold text-white">AC Run</div>
                         <div className="text-[10px] text-slate-400">
                           {(() => {
-                            const acRun = cs.runs.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+                            const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
                             return acRun?.wireGauge || config.wireGauge || '—';
                           })()}
                           {' · '}{config.wireLength}ft
@@ -7991,10 +9694,10 @@ function EngineeringPageInner() {
                         {compliance.jurisdiction.state} · NEC {compliance.jurisdiction.necVersion}
                       </div>
                     ) : null}
-                    {config.systemType ? (
+                    {(config.systemType || subSystemCounts.isHybrid) ? (
                       <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-300">
                         <Cpu size={11} className="text-blue-400" />
-                        {config.systemType}
+                        {subSystemCounts.isHybrid ? 'hybrid' : config.systemType}
                       </div>
                     ) : null}
                     <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
@@ -8347,7 +10050,7 @@ function EngineeringPageInner() {
                           <span className="text-slate-500">Wire:</span>
                           <span className="text-blue-400 font-bold">
                             {(() => {
-                              const acRun = cs.runs.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+                              const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
                               return acRun?.wireGauge || config.wireGauge || '—';
                             })()}
                           </span>
@@ -8401,7 +10104,7 @@ function EngineeringPageInner() {
                           </label>
                           <div className="eng-auto-field" title="Auto-calculated from ComputedSystem (NEC 310.16 / NEC 690.8). Not user-editable.">
                             {(() => {
-                              const acRun = cs.runs.find((r: any) => r.id === (cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN'));
+                              const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
                               const gauge = acRun?.wireGauge
                                 || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
                               return `${gauge} THWN-2`;
@@ -8480,15 +10183,31 @@ function EngineeringPageInner() {
                   <div className="space-y-5">
 
                     {/* Ecosystem Picker — v58.7: prominent "Change ecosystem" button for discoverability */}
-                    {(config as any).ecosystemBrand ? (
+                    {((config as any).ecosystemBrand || (subSystemCounts.isHybrid && (hybridBrands?.uniq.length ?? 0) > 0)) ? (
                       <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-slate-800/60 border border-amber-500/30">
                         <div className="flex-shrink-0 w-8 h-8 rounded-md bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
                           <Package size={16} className="text-amber-400" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm text-slate-100">
-                            <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span>
-                            <span className="text-slate-400 ml-1.5">ecosystem applied</span>
+                            {subSystemCounts.isHybrid && hybridBrands ? (
+                              hybridBrands.isMixed ? (
+                                <>
+                                  <span className="font-bold text-amber-300">Multi-brand hybrid</span>
+                                  <span className="text-slate-400 ml-1.5">— {hybridBrands.perSub.map(p => `${p.key.charAt(0).toUpperCase()}${p.key.slice(1)}: ${p.brand}`).join(' · ')}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="font-bold text-amber-300">{(hybridBrands.uniq[0] ?? '').toUpperCase()}</span>
+                                  <span className="text-slate-400 ml-1.5">ecosystem — all sub-systems</span>
+                                </>
+                              )
+                            ) : (
+                              <>
+                                <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span>
+                                <span className="text-slate-400 ml-1.5">ecosystem applied</span>
+                              </>
+                            )}
                           </div>
                           {displayedEcosystemComponents.length > 0 ? (
                             <div className="text-[11px] text-slate-500 mt-0.5">
@@ -8496,6 +10215,9 @@ function EngineeringPageInner() {
                             </div>
                           ) : null}
                         </div>
+                        {(subSystemCounts.isHybrid && hybridBrands?.isMixed) ? (
+                          <span className="flex-shrink-0 text-[10px] text-slate-500 italic self-center whitespace-nowrap">set per sub-system below</span>
+                        ) : (
                         <button
                           type="button"
                           className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
@@ -8525,8 +10247,15 @@ function EngineeringPageInner() {
                           <RefreshCw size={12} />
                           Change ecosystem
                         </button>
+                        )}
                       </div>
                     ) : (
+                    <>
+                    {subSystemCounts.isHybrid ? (
+                      <div className="mb-2 text-[11px] leading-relaxed text-slate-400 bg-slate-800/50 border border-slate-700/50 rounded-md px-3 py-2">
+                        <span className="font-semibold text-amber-300">Hybrid design.</span> An ecosystem applies one brand across <span className="font-semibold text-slate-200">all</span> sub-systems (roof · ground · fence), each sized to its own layout. To mix brands, override the inverter per sub-system in the cards below.
+                      </div>
+                    ) : null}
                     <EcosystemPicker
                       appliedBrand={(config as any).ecosystemBrand}
                       onApply={(payload: EcosystemApplyPayload) => {
@@ -8607,6 +10336,33 @@ function EngineeringPageInner() {
                           wouldClobber.push(`battery (currently: ${config.batteryId})`);
                         }
                         const applyEcosystemAfterConfirm = () => {
+                          // ── Wave 6 — HYBRID: apply the ecosystem PER SUB-SYSTEM ──────────
+                          // The whole-project path below rebuilds inverters[0] and fires the
+                          // whole-project sizing recommendation, which on a hybrid stamps the
+                          // entire array onto ONE sub (ground=81, roof dropped, ghost 98).
+                          // Instead rebuild every present sub's fleet with the picked brand,
+                          // each scoped to its OWN layout count (roof-appropriate default when
+                          // the brand can't serve a sub). Battery is POI-level → still applied.
+                          if (subSystemCounts.isHybrid) {
+                            updateConfig({
+                              ecosystemBrand: payload.brand,
+                              ...(payload.selections.batteryId && batteryEnabled
+                                ? {
+                                    batteryId: updates.batteryId, batteryCount: updates.batteryCount,
+                                    batteryBrand: updates.batteryBrand, batteryModel: updates.batteryModel,
+                                    batteryKwh: updates.batteryKwh,
+                                  }
+                                : {}),
+                            } as any);
+                            const ok = rebuildFleetsPerSub('manual', payload.brand);
+                            setAutoLoadBanner(
+                              ok
+                                ? `✓ Applied ${payload.brand.toUpperCase()} ecosystem across ${subSystemCounts.present.length} sub-systems — each fleet sized to its layout. Manual per-sub dropdowns remain editable below.`
+                                : `✓ Applied ${payload.brand.toUpperCase()} ecosystem. Manual dropdowns remain editable below.`
+                            );
+                            setTimeout(() => setAutoLoadBanner(null), 6000);
+                            return;
+                          }
                           // Lock to prevent auto-sizing engine from overwriting ecosystem selection
                           updates.userHasEditedInverters = true;
                           // v61.6 Phase 5: After ecosystem apply changes inverterId, the existing
@@ -8629,10 +10385,13 @@ function EngineeringPageInner() {
                             `Manual dropdowns remain editable below.`
                           );
                           setTimeout(() => setAutoLoadBanner(null), 6000);
-                          // v61.3 P-09 FIX: ecosystem apply changes inverterId/type but leaves
-                          // strings[] stale. In auto/free control mode, immediately rebuild strings
-                          // via the sizing recommendation so the STRINGS/ARRAYS section is never stale.
-                          if (controlMode !== 'manual' && sizingAutoApply) {
+                          // v61.3 P-09: ecosystem apply changes inverterId/type but leaves
+                          // strings[] stale. Only AUTO may silently rebuild strings via the
+                          // (whole-project) sizing recommendation — in GUIDED/MANUAL the user
+                          // approves via the visible per-sub controls, never a silent rebuild
+                          // (guided's silent rebuild was part of the "some fields revert" class,
+                          // and on hybrids the whole-project rebuild re-corrupts per-sub fleets).
+                          if (controlMode === 'auto' && sizingAutoApply) {
                             setTimeout(() => {
                               if (sizingRecommendation) {
                                 setConfig(prev => ({ ...prev, userHasEditedInverters: false }));
@@ -8657,6 +10416,7 @@ function EngineeringPageInner() {
                         applyEcosystemAfterConfirm();
                       }}
                     />
+                    </>
                     )}
 
                     {/* Auto-configured indicator */}
@@ -8684,8 +10444,13 @@ function EngineeringPageInner() {
                       />
                     ) : null}
 
-                    {/* Sizing Recommendation */}
-                    {sizingRecommendation && !sizingDismissed ? (
+                    {/* Sizing Recommendation — WHOLE-PROJECT sizing engine. Hidden
+                        for HYBRIDS: a whole-project recommendation would propose
+                        collapsing the per-sub fleets into one, and applying it
+                        re-corrupts the design (ground=81, roof dropped). Hybrid
+                        fleet mismatches surface via the per-sub "Rebuild fleets
+                        per sub-system" action in the Inverters & Strings header. */}
+                    {sizingRecommendation && !sizingDismissed && !subSystemCounts.isHybrid ? (
                       <SizingRecommendation
                         sizing={sizingRecommendation}
                         current={sizingCurrentSnapshot}
@@ -8716,6 +10481,9 @@ function EngineeringPageInner() {
                         complianceStatus={compliance.overallStatus ?? rulesResult?.overallStatus ?? null}
                         sizingRecommendation={sizingRecommendation}
                         onApplySizingFix={(rec) => {
+                          // Hybrids never apply a whole-project sizing fix (it would
+                          // collapse the per-sub fleets); heal per sub-system instead.
+                          if (subSystemCounts.isHybrid) { rebuildFleetsPerSub('manual'); return; }
                           applySizingRecommendation(rec);
                         }}
                         selectedLayoutCandidate={sizingRecommendation?.selectedLayoutCandidate ?? null}
@@ -8730,7 +10498,47 @@ function EngineeringPageInner() {
                           <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+14 Models</span>
                         </h3>
                         <div className="flex gap-2">
-                          {(['string', 'micro', 'optimizer'] as InverterType[]).map(t => {
+                          {/* Wave 4B.B — hybrid fleet-shape mismatch: explicit split action.
+                              Shown when ≥2 sub-systems are stamped on the layout but the
+                              inverter fleet does not match the per-sub panel partition
+                              (e.g. one 85-panel fleet on a 48/20/17 roof/ground/fence
+                              project). The click IS the user approval — it rebuilds one
+                              fleet per present sub-system and logs the decision. */}
+                          {subSystemCounts.isHybrid && fleetDiag.suspect ? (
+                            <button
+                              onClick={() => {
+                                const parts = subSystemCounts.present
+                                  .map(k => `${k.toUpperCase()} ${subSystemCounts[k]}`).join(' · ');
+                                setConfirmDialog({
+                                  message: `Rebuild fleets per sub-system?\n\n` +
+                                    `This hybrid project spans ${parts} modules, but the current ` +
+                                    `inverter fleet does not match that partition` +
+                                    (fleetDiag.degenerate?.degenerate
+                                      ? ` (one ${fleetDiag.degenerate.fleetPanelTotal}-panel fleet covers the whole project under '${fleetDiag.degenerate.key}').`
+                                      : `.`) +
+                                    `\n\nThis rebuilds ONE fleet per sub-system, keeping your ` +
+                                    `equipment choices (inverter model / panel) per sub where known. ` +
+                                    `Click OK to rebuild.`,
+                                  onConfirm: () => {
+                                    const ok = rebuildFleetsPerSub('manual');
+                                    setAutoLoadBanner(ok
+                                      ? `✓ Fleets rebuilt per sub-system — ${parts}.`
+                                      : `⚠ Could not rebuild fleets — see console for the per-sub sizing error.`);
+                                    setTimeout(() => setAutoLoadBanner(null), 6000);
+                                  },
+                                });
+                              }}
+                              className="btn-secondary btn-sm text-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20"
+                              title="The inverter fleet does not match the roof/ground/fence panel partition — rebuild one fleet per sub-system"
+                            >
+                              <AlertTriangle size={11} /> Rebuild fleets per sub-system
+                            </button>
+                          ) : null}
+                          {/* Hybrid: whole-project add buttons are hidden — they cannot
+                              know WHICH sub-system the inverter is for (and a global
+                              micro add collapses every sub's fleet). Each sub-group
+                              carries its own scoped affordances instead. */}
+                          {!subSystemCounts.isHybrid ? (['string', 'micro', 'optimizer'] as InverterType[]).map(t => {
                             const hasMicro = config.inverters.some(i => i.type === 'micro');
                             if (t === 'micro' && hasMicro) return null;
                             return (
@@ -8738,7 +10546,7 @@ function EngineeringPageInner() {
                                 <Plus size={11} /> {t === 'string' ? 'String Inv.' : t === 'micro' ? 'Microinverter' : 'Optimizer'}
                               </button>
                             );
-                          })}
+                          }) : null}
                         </div>
                       </div>
 
@@ -8746,10 +10554,109 @@ function EngineeringPageInner() {
                       {config.inverters.length > 0 ? (
                         <div className="mb-4 p-3 rounded-xl bg-slate-900/60 border border-slate-700/40">
                           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">
-                            {cs.isMicro ? 'AC Branch Layout' : 'String Layout'}
+                            {subSystemCounts.isHybrid ? 'Array Layout — by Sub-System' : cs.isMicro ? 'AC Branch Layout' : 'String Layout'}
                           </div>
                           <div className="space-y-1.5">
-                            {cs.isMicro ? (
+                            {subSystemCounts.isHybrid ? (
+                              /* Wave 6 W1 — HYBRID: group the layout BY SUB-SYSTEM
+                                 (roof > ground > fence), each block labeled with its
+                                 sub + inverter model + module count so it's obvious
+                                 which strings land on roof / ground / fence. */
+                              (() => {
+                                const _fbSL = toSubSystemKey(config.systemType);
+                                const _partSL = partitionFleet(config.inverters as any[], _fbSL);
+                                const _keysSL = (['roof', 'ground', 'fence'] as const).filter(k =>
+                                  subSystemCounts.present.includes(k) || ((_partSL[k]?.length ?? 0) > 0));
+                                const _subColor: Record<string, string> = { roof: 'text-sky-400', ground: 'text-emerald-400', fence: 'text-violet-400' };
+                                const _subBg: Record<string, string> = { roof: 'bg-sky-500/40 border-sky-500/20', ground: 'bg-emerald-500/40 border-emerald-500/20', fence: 'bg-violet-500/40 border-violet-500/20' };
+                                const _maxP = 25;
+                                return _keysSL.map(k => {
+                                  const fleet = (_partSL[k] ?? []) as InverterConfig[];
+                                  const subCount = subSystemCounts[k];
+                                  const firstInv = fleet[0];
+                                  const invModel = firstInv ? ((getInvById(firstInv.inverterId, firstInv.type) as any)?.model ?? firstInv.inverterId) : null;
+                                  const isMicroSub = firstInv?.type === 'micro';
+                                  const subCsK = computedMulti.subSystems[k];
+                                  const colorCls = _subColor[k]; const bgCls = _subBg[k];
+                                  return (
+                                    <div key={k} className="pb-2 mb-2 border-b border-slate-800/60 last:border-0 last:mb-0 last:pb-0">
+                                      <div className={`text-[10px] font-black uppercase tracking-wide mb-1.5 flex items-center gap-2 flex-wrap ${colorCls}`}>
+                                        <span>{k}</span>
+                                        <span className="text-slate-500 font-semibold normal-case">
+                                          {subCount} modules{invModel ? ` · ${invModel}` : ''}
+                                          {isMicroSub && subCsK ? ` · ${subCsK.acBranchCount} AC branch${subCsK.acBranchCount === 1 ? '' : 'es'}` : (!isMicroSub && fleet.length > 1 ? ` · ${fleet.length} inverters` : '')}
+                                        </span>
+                                      </div>
+                                      {fleet.length === 0 ? (
+                                        <div className="text-[10px] text-amber-400 italic pl-1">No inverter fleet yet — pick one below.</div>
+                                      ) : isMicroSub ? (
+                                        /* Micro sub → AC BRANCHES (micros have no DC strings — show the
+                                           branch layout, not one lumped module bar). */
+                                        (() => {
+                                          const _bc = Math.max(1, Math.min(subCsK?.acBranchCount ?? 1, 8));
+                                          const _dev = subCsK?.microDeviceCount ?? subCount;
+                                          const _per = _dev > 0 ? Math.ceil(_dev / _bc) : 0;
+                                          return (
+                                            <div className="space-y-1.5">
+                                              {Array.from({ length: _bc }, (_, bi) => {
+                                                const isLast = bi === _bc - 1;
+                                                const cnt = isLast ? Math.max(0, _dev - (_bc - 1) * _per) : _per;
+                                                return (
+                                                  <div key={bi} className="flex items-center gap-2">
+                                                    <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>Branch {bi + 1}</span>
+                                                    <div className="flex gap-0.5 flex-1">
+                                                      {Array.from({ length: Math.min(cnt, _maxP) }, (_, pi) => (
+                                                        <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
+                                                      ))}
+                                                      {cnt > _maxP ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{cnt - _maxP}</span> : null}
+                                                    </div>
+                                                    <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{cnt} micros</span>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          );
+                                        })()
+                                      ) : (
+                                        <div className="space-y-1.5">
+                                          {fleet.map((inv, ii) => {
+                                            const _sorted = [...inv.strings].sort((a, b) => b.panelCount - a.panelCount);
+                                            const _invPanels = inv.strings.reduce((s, st) => s + st.panelCount, 0);
+                                            return (
+                                              <div key={inv.id}>
+                                                {fleet.length > 1 ? (
+                                                  <div className={`text-[9px] font-bold uppercase tracking-wide mb-0.5 opacity-80 ${colorCls}`}>
+                                                    Inverter {ii + 1} · {inv.strings.length} string{inv.strings.length === 1 ? '' : 's'} · {_invPanels}p
+                                                  </div>
+                                                ) : null}
+                                                <div className="space-y-1.5">
+                                                  {_sorted.map((str, si) => {
+                                                    const panel = getPanelById(str.panelId);
+                                                    const kw = (str.panelCount * (panel?.watts || 400) / 1000);
+                                                    return (
+                                                      <div key={str.id} className="flex items-center gap-2">
+                                                        <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>S{si + 1}</span>
+                                                        <div className="flex gap-0.5 flex-1">
+                                                          {Array.from({ length: Math.min(str.panelCount, _maxP) }, (_, pi) => (
+                                                            <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
+                                                          ))}
+                                                          {str.panelCount > _maxP ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxP}</span> : null}
+                                                        </div>
+                                                        <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
+                                                      </div>
+                                                    );
+                                                  })}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                });
+                              })()
+                            ) : cs.isMicro ? (
                               /* Micro branch bars */
                               Array.from({ length: Math.min(cs.acBranchCount, 8) }, (_, bi) => {
                                 const devPerBranch = cs.microDeviceCount > 0 ? Math.ceil(cs.microDeviceCount / cs.acBranchCount) : 0;
@@ -8825,7 +10732,73 @@ function EngineeringPageInner() {
                       ) : null}
 
                       <div className="space-y-3">
-                        {config.inverters.map((inv, invIdx) => {
+                        {/* Wave 4B.C — hybrid: cards grouped per sub-system in fixed
+                            roof > ground > fence order under a per-sub header (fleet
+                            from partitionFleet, equipment from subSystems[key] — never
+                            raw index math). Single-system: the flat legacy list,
+                            pixel-identical. */}
+                        {(subSystemCounts.isHybrid
+                          ? (() => {
+                              const _fbL = toSubSystemKey(config.systemType);
+                              const _partL = partitionFleet(config.inverters as any[], _fbL);
+                              const _keysL = (['roof', 'ground', 'fence'] as const).filter(k =>
+                                subSystemCounts.present.includes(k) || ((_partL[k]?.length ?? 0) > 0));
+                              return _keysL.flatMap(k => {
+                                const fleet = (_partL[k] ?? []) as InverterConfig[];
+                                return fleet.length === 0
+                                  ? [{ inv: null as InverterConfig | null, subKey: k as SubSystemKey | null, subFirst: true }]
+                                  : fleet.map((fv, fi) => ({ inv: fv as InverterConfig | null, subKey: k as SubSystemKey | null, subFirst: fi === 0 }));
+                              });
+                            })()
+                          : config.inverters.map(fv => ({ inv: fv as InverterConfig | null, subKey: null as SubSystemKey | null, subFirst: false }))
+                        ).map(({ inv: _rowInv, subKey: _rowSubKey, subFirst: _rowSubFirst }, invIdx) => {
+                          if (!_rowInv) {
+                            // Present sub with no fleet yet (post-discard / pre-seed).
+                            // Give the user REAL affordances here — the sub-header
+                            // inverter picker and these buttons all write ONLY this
+                            // sub's fleet (I-4), so none of them can nuke another sub.
+                            const _emptyKey = _rowSubKey!;
+                            return (
+                              <React.Fragment key={`subhdr-empty-${_emptyKey}`}>
+                                {renderSubSystemHeader(_emptyKey)}
+                                <div className="flex items-center gap-2 flex-wrap px-1 py-1">
+                                  <span className="text-xs text-slate-500 italic">
+                                    No inverter fleet for the {_emptyKey.toUpperCase()} sub-system yet
+                                    {subSystemRecommendations[_emptyKey]?.recModel
+                                      ? <> — recommended: <span className="text-slate-300 font-semibold not-italic">{subSystemRecommendations[_emptyKey]!.recModel}</span></>
+                                      : '.'}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      const ok = rebuildSubFleet(_emptyKey);
+                                      setAutoLoadBanner(ok
+                                        ? `✓ ${_emptyKey.toUpperCase()} fleet built — ${subSystemCounts[_emptyKey]} modules.`
+                                        : `⚠ Could not auto-build the ${_emptyKey.toUpperCase()} fleet — pick an inverter model in the ${_emptyKey.toUpperCase()} header instead.`);
+                                      setTimeout(() => setAutoLoadBanner(null), 6000);
+                                    }}
+                                    className="text-[11px] px-2 py-1 rounded border border-amber-500/50 text-amber-300 hover:bg-amber-500/20 transition-colors font-semibold"
+                                    title={`Auto-size an inverter fleet for the ${_emptyKey.toUpperCase()} sub-system's ${subSystemCounts[_emptyKey]} modules using its default brand`}
+                                  >
+                                    ⚡ Build fleet ({subSystemCounts[_emptyKey]} modules)
+                                  </button>
+                                  <button
+                                    onClick={() => addInverter('string', _emptyKey)}
+                                    className="text-[11px] px-2 py-1 rounded border border-slate-600/60 text-slate-300 hover:bg-slate-700/40 transition-colors"
+                                  >
+                                    + String inverter
+                                  </button>
+                                  <button
+                                    onClick={() => addInverter('micro', _emptyKey)}
+                                    className="text-[11px] px-2 py-1 rounded border border-slate-600/60 text-slate-300 hover:bg-slate-700/40 transition-colors"
+                                  >
+                                    + Microinverter
+                                  </button>
+                                </div>
+                              </React.Fragment>
+                            );
+                          }
+                          const inv = _rowInv;
+                          const _cardCs = (_rowSubKey ? computedMulti.subSystems[_rowSubKey] : null) ?? cs;
                           const invData = getInvById(inv.inverterId, inv.type) as any;
                           const invList = inv.type === 'micro'
                             ? MICROINVERTERS
@@ -8836,7 +10809,9 @@ function EngineeringPageInner() {
                                 ? STRING_INVERTERS.filter(i => !i.id.startsWith('ecoflow-'))
                                 : STRING_INVERTERS.filter(i => !i.id.startsWith('ecoflow-'));
                           return (
-                            <div key={inv.id} className="border border-slate-700/50 rounded-xl overflow-hidden">
+                            <React.Fragment key={inv.id}>
+                            {_rowSubFirst && _rowSubKey ? renderSubSystemHeader(_rowSubKey) : null}
+                            <div className="border border-slate-700/50 rounded-xl overflow-hidden">
                               <div className="flex items-center gap-3 p-4 bg-slate-800/40 cursor-pointer hover:bg-slate-800/60 transition-colors"
                                 onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)}>
                                 <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-black text-xs flex-shrink-0">{invIdx + 1}</div>
@@ -8863,7 +10838,7 @@ function EngineeringPageInner() {
                                     })()) : null}
                                     {inv.type === 'micro' ? (
                                       <span className="ml-1 text-purple-400 font-semibold">
-                                        · {cs.microDeviceCount} microinverters · {cs.acBranchCount} AC branch{cs.acBranchCount > 1 ? 'es' : ''}
+                                        · {_cardCs.microDeviceCount} microinverters · {_cardCs.acBranchCount} AC branch{_cardCs.acBranchCount > 1 ? 'es' : ''}
                                       </span>
                                     ) : null}
                                   </div>
@@ -8902,7 +10877,7 @@ function EngineeringPageInner() {
                                             // Clear ecosystemBrand when user manually switches topology
                                             // so the EcosystemPicker reappears for the new topology type
                                             updateConfig({ ecosystemBrand: undefined } as any);
-                                            handleTopologySwitch(inv.id, t, defaultId);
+                                            handleTopologySwitch(inv.id, t, defaultId, _rowSubKey);
                                           }
                                         }}
                                         title={desc}
@@ -8921,7 +10896,12 @@ function EngineeringPageInner() {
                                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                     <div className="md:col-span-2">
                                       <label className="eng-label">Inverter Model</label>
-                                      <select value={inv.inverterId} onChange={e => updateInverter(inv.id, { inverterId: e.target.value })}
+                                      <select value={inv.inverterId} onChange={e => {
+                                        updateInverter(inv.id, { inverterId: e.target.value });
+                                        // Wave 4B.C — hybrid: the sub's equipment authority (§1.1)
+                                        // follows the fleet pick; never raw index math.
+                                        if (_rowSubKey) updateSubSystemEquip(_rowSubKey, { inverterId: e.target.value });
+                                      }}
                                         className="eng-select text-xs px-2 py-1.5">
                                         {invList.map(i => <option key={i.id} value={i.id}>{(i as any).isNew ? '🆕 ' : ''}{i.manufacturer} {i.model}{(inv.type === 'string' || inv.type === 'ecoflow' || inv.type === 'hybrid' || inv.type === 'optimizer') ? ` (${(i as any).acOutputKw}kW)` : ` (${(i as any).acOutputW}W)`}</option>)}
                                       </select>
@@ -9172,6 +11152,7 @@ function EngineeringPageInner() {
                                 </div>
                               ) : null}
                             </div>
+                            </React.Fragment>
                           );
                         })}
                       </div>
@@ -9392,6 +11373,34 @@ function EngineeringPageInner() {
                           ) : null}
                         </div>
 
+                          {/* v50.x: Generator Estimator entry-points — nest the moved
+                              tool under Engineering per JAMES
+                              (Quinn dispatch 2026-07-02). Three buttons inside this
+                              panel — no new TabId — link to:
+                                Size Generator     /engineering/generator-estimator
+                                Parse Bill         /engineering/generator-estimator/bill
+                                Build Proposal     /engineering/generator-estimator/proposal */}
+                          <div className="flex flex-wrap items-center gap-2 mb-3 -mt-1">
+                            <Link
+                              href="/engineering/generator-estimator"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 transition-colors"
+                            >
+                              <Wrench size={11} /> Size Generator →
+                            </Link>
+                            <Link
+                              href="/engineering/generator-estimator/bill"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:bg-blue-500/20 transition-colors"
+                            >
+                              <Zap size={11} /> Parse Bill →
+                            </Link>
+                            <Link
+                              href="/engineering/generator-estimator/proposal"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                            >
+                              <FileText size={11} /> Build Proposal →
+                            </Link>
+                          </div>
+
                           {/* Generator OFF state */}
                           {!config.generatorId && !config.atsId ? (
                             /* Compact single row — no dead space */
@@ -9446,7 +11455,7 @@ function EngineeringPageInner() {
                                 onChange={e => updateConfig({ generatorWireLength: Math.max(5, +e.target.value) })}
                                 className="eng-input" />
                               {config.generatorWireLength ? ((() => {
-                                const genRun = cs.runs?.find((r: any) => r.id === 'GENERATOR_TO_ATS_RUN');
+                                const genRun = csRun('GENERATOR_TO_ATS_RUN');
                                 if (!genRun) return null;
                                 return (
                                   <div className="mt-1.5 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 flex flex-wrap gap-3">
@@ -9471,20 +11480,36 @@ function EngineeringPageInner() {
                       <div className="grid grid-cols-2 gap-2.5">
                         <div>
                           <label className="eng-label">System Type</label>
-                          <select
-                            value={config.systemType}
-                            onChange={e => {
-                              if (e.target.value === 'fence' && !canSolFence) return; // silently block; UI shows disabled
-                              updateConfig({ systemType: e.target.value as any });
-                            }}
-                            className="eng-select"
-                          >
-                            <option value="roof">Roof Mount</option>
-                            <option value="ground">Ground Mount</option>
-                            <option value="fence" disabled={!canSolFence}>
-                              Solar Fence{!canSolFence ? ' 🔒 Contractor' : ''}
-                            </option>
-                          </select>
+                          {subSystemCounts.isHybrid ? (
+                            // Hybrid design → the flat systemType scalar is only the
+                            // downstream PRIMARY mirror; showing one option ("Solar
+                            // Fence") for a roof+ground+fence system is misleading.
+                            // Read-only hybrid badge + per-sub breakdown (label only —
+                            // the underlying config.systemType scalar is untouched).
+                            <div className="eng-select flex items-center justify-between !cursor-default" title="Multi-system design from Design Studio — equipment is set per sub-system below">
+                              <span className="font-extrabold text-amber-300">Hybrid</span>
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                {subSystemCounts.present.map(k =>
+                                  `${k.charAt(0).toUpperCase()}${k.slice(1)} ${subSystemCounts[k]}`
+                                ).join(' · ')}
+                              </span>
+                            </div>
+                          ) : (
+                            <select
+                              value={config.systemType}
+                              onChange={e => {
+                                if (e.target.value === 'fence' && !canSolFence) return; // silently block; UI shows disabled
+                                updateConfig({ systemType: e.target.value as any });
+                              }}
+                              className="eng-select"
+                            >
+                              <option value="roof">Roof Mount</option>
+                              <option value="ground">Ground Mount</option>
+                              <option value="fence" disabled={!canSolFence}>
+                                Solar Fence{!canSolFence ? ' 🔒 Contractor' : ''}
+                              </option>
+                            </select>
+                          )}
                         </div>
                         <div>
                           <label className="eng-label">Utility Meter</label>
@@ -9493,7 +11518,9 @@ function EngineeringPageInner() {
                           </select>
                         </div>
                         <div className="col-span-2">
-                          <label className="eng-label">Mounting System</label>
+                          <label className="eng-label">
+                            Mounting System{subSystemCounts.isHybrid ? ' — project default (set per sub-system below)' : ''}
+                          </label>
                           <select value={config.mountingId} onChange={e => updateConfig({ mountingId: e.target.value })} className="eng-select">
                             {ALL_MOUNTING_SYSTEMS.map(m => <option key={m.id} value={m.id}>{m.manufacturer} {m.model}</option>)}
                           </select>
@@ -10478,7 +12505,21 @@ function EngineeringPageInner() {
                   different analysis not yet implemented — so for those mount types the numbers below
                   are roof-based PLACEHOLDERS. Surface that clearly so no one submits them as
                   engineered for permit. */}
-              {config.systemType && config.systemType !== 'roof' ? (
+              {subSystemCounts.isHybrid ? (
+                <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4 flex items-start gap-3">
+                  <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-200 leading-relaxed">
+                    <div className="font-bold text-amber-300 mb-1 uppercase tracking-wide">
+                      Hybrid design — each sub-system analyzed separately
+                    </div>
+                    This project spans {subSystemCounts.present.map(k => `${subSystemCounts[k]} ${k}`).join(' + ')} modules.
+                    The roof analysis below covers the {subSystemCounts.roof}-module roof subset (ASCE 7-22 roof zones,
+                    rafter/lag attachment). The SOL Fence and ground-mount panels are ESTIMATES — not engineered until a
+                    licensed structural PE reviews them.
+                  </div>
+                </div>
+              ) : null}
+              {!subSystemCounts.isHybrid && config.systemType && config.systemType !== 'roof' ? (
                 <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 flex items-start gap-3">
                   <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" />
                   <div className="text-xs text-red-200 leading-relaxed">
@@ -10504,7 +12545,7 @@ function EngineeringPageInner() {
                 </div>
               ) : null}
               {/* ══════════ SOL FENCE STRUCTURAL (analyzeFence) ══════════ */}
-              {config.systemType === 'fence' && (compliance.structural as any)?.fenceMountAnalysis ? (() => {
+              {(config.systemType === 'fence' || subSystemCounts.fence > 0) && (compliance.structural as any)?.fenceMountAnalysis ? (() => {
                 const fm = (compliance.structural as any).fenceMountAnalysis;
                 const cell = (label: string, value: string, sub: string) => (
                   <div className="rounded-lg border border-purple-500/30 bg-slate-900/40 p-2.5">
@@ -10517,7 +12558,7 @@ function EngineeringPageInner() {
                   <div className="rounded-xl border border-purple-500/40 bg-purple-500/5 p-4 mb-5">
                     <div className="flex items-center gap-2 mb-3">
                       <Wind size={14} className="text-purple-300" />
-                      <span className="text-sm font-bold text-purple-100">SOL Fence Structural — freestanding-wall wind → post embedment</span>
+                      <span className="text-sm font-bold text-purple-100">SOL Fence Structural — freestanding-wall wind → post embedment{typeof fm.panelCount === 'number' ? ` · ${fm.panelCount} modules` : ''}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-mono ml-auto">ASCE 7-22 §29 · IBC 1807.3</span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -10545,8 +12586,39 @@ function EngineeringPageInner() {
                   </div>
                 );
               })() : null}
+              {/* ══════════ GROUND MOUNT STRUCTURAL (per-subsystem, hybrid) ══════════ */}
+              {(subSystemCounts.ground > 0 && (compliance.structural as any)?.subSystems?.ground?.groundMountAnalysis) ? (() => {
+                const gm = (compliance.structural as any).subSystems.ground.groundMountAnalysis;
+                const cell = (label: string, value: string, sub: string) => (
+                  <div className="rounded-lg border border-emerald-500/30 bg-slate-900/40 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-emerald-300/80">{label}</div>
+                    <div className="text-sm font-bold text-white">{value}</div>
+                    <div className="text-[10px] text-slate-400">{sub}</div>
+                  </div>
+                );
+                return (
+                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Wind size={14} className="text-emerald-300" />
+                      <span className="text-sm font-bold text-emerald-100">Ground Mount Structural — pile embedment · {subSystemCounts.ground} modules</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-mono ml-auto ${gm.passes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/15 text-red-300 border border-red-500/30'}`}>{gm.passes ? 'PASS' : 'CHECK'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                      {cell('Piles', `${gm.pileCount}`, `@ ${gm.pileSpacingFt} ft spacing`)}
+                      {cell('Embedment', `${gm.pileEmbedmentFt.toFixed(1)} ft`, 'driven pile min')}
+                      {cell('Uplift / Pile', `${Math.round(gm.upliftPerPileLbs)} lb`, `SF ${gm.safetyFactorUplift.toFixed(2)}`)}
+                      {cell('Lateral / Pile', `${Math.round(gm.lateralPerPileLbs)} lb`, `down ${Math.round(gm.downwardPerPileLbs)} lb · SF ${gm.safetyFactorDownward.toFixed(2)}`)}
+                    </div>
+                    {(gm.notes ?? []).slice(0, 3).map((n: string, i: number) => (
+                      <div key={i} className="text-[11px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+                        <span className="text-emerald-300 mt-0.5 shrink-0">→</span><span>{n}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })() : null}
               {/* ══════════ STRUCTURAL INTEGRITY HERO (roof/ground only — a fence uses the SOL Fence panel above) ══════════ */}
-              {config.systemType !== 'fence' ? (
+              {(config.systemType !== 'fence' || subSystemCounts.roof > 0) ? (
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
 <div className="flex items-center gap-2 mb-4">
                   <Wind size={14} className="text-amber-400" />
@@ -10565,8 +12637,10 @@ function EngineeringPageInner() {
                     <div className="text-[10px] text-slate-500 mt-0.5">psf Snow</div>
                   </div>
                   <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-3 py-2.5 text-center">
-                    <div className="text-xl font-black text-white tabular-nums">{totalPanels}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Panels</div>
+                    {/* Wave 4B.E — hybrid: this hero covers the ROOF SUBSET (per the
+                        banner above), never the whole-project module count. */}
+                    <div className="text-xl font-black text-white tabular-nums">{subSystemCounts.isHybrid ? subSystemCounts.roof : totalPanels}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{subSystemCounts.isHybrid ? 'Roof Panels' : 'Panels'}</div>
                   </div>
                   <div className="rounded-xl bg-slate-900/60 border border-emerald-500/20 px-3 py-2.5 text-center">
                     <div className="text-xl font-black text-emerald-400 tabular-nums">{config.roofPitch ?? 'N/A'}</div>
@@ -10607,7 +12681,7 @@ function EngineeringPageInner() {
                     <input type="number" value={config.groundSnowLoad} onChange={e => updateConfig({ groundSnowLoad: +e.target.value })}
                       className="eng-input" />
                   </div>
-                  {config.systemType !== 'fence' ? (<>
+                  {(config.systemType !== 'fence' || subSystemCounts.roof > 0) ? (<>
                   <div>
                     <label className="eng-label">Roof Pitch (degrees)</label>
                     <input type="number" min={0} max={60} value={config.roofPitch} onChange={e => updateConfig({ roofPitch: +e.target.value })}
@@ -10647,7 +12721,7 @@ function EngineeringPageInner() {
                 </div>
               </div>
               {/* Roof framing / roof racking / roof structural results — not applicable to a fence (SOL Fence panel above covers it) */}
-              {config.systemType !== 'fence' ? (<>
+              {(config.systemType !== 'fence' || subSystemCounts.roof > 0) ? (<>
               <div className="eng-panel">
                 <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight"><Ruler size={14} className="text-amber-400" /> Roof Framing</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -11322,6 +13396,53 @@ function EngineeringPageInner() {
               </div>
             ) : (
               <div className="max-w-none space-y-4">
+                {/* Wave 5A / I-8 — HYBRID: with usable source lanes the tab
+                    fetches a REAL multi-lane render (one lane per sub-system,
+                    one POI, one service tail). This banner is now ONLY the
+                    fallback for hybrids whose lanes can't be built (degenerate
+                    whole-project fleet, equipment-less subs) — never a
+                    plausible-wrong single-lane sheet, never a silent nothing. */}
+                {subSystemCounts.isHybrid && !hybridSldSources ? (
+                  <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4 flex items-start gap-3">
+                    <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-200 leading-relaxed">
+                      <div className="font-bold text-amber-300 mb-1 uppercase tracking-wide">
+                        Hybrid design — source lanes not ready
+                      </div>
+                      This project spans {subSystemCounts.present.map(k => `${subSystemCounts[k]} ${k}`).join(' + ')} modules,
+                      but per-sub-system source lanes can&apos;t be built yet
+                      {fleetDiag.degenerate?.degenerate
+                        ? ' — one whole-project inverter fleet still covers every sub-system. Use "Rebuild fleets per sub-system" in Inverters & Strings, then regenerate.'
+                        : ' — at least one sub-system has no usable per-sub equipment/fleet. Pick equipment for each sub-system, then regenerate.'}
+                      {' '}The electrical math (backfeed, conductor schedules) above and in the plan set already
+                      aggregates every sub-system correctly. <span className="font-semibold text-amber-100">Do not
+                      submit a single-lane SLD for this hybrid design.</span>
+                    </div>
+                  </div>
+                ) : null}
+                {subSystemCounts.isHybrid && hybridSldSources ? (
+                  <div className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2.5 flex items-center gap-2 text-xs text-blue-300">
+                    <GitBranch size={14} className="shrink-0" />
+                    <span>
+                      Hybrid multi-source SLD — {hybridSldSources.length} lanes
+                      ({hybridSldSources.map(b => b.key).join(' + ')}) joining at one point of interconnection;
+                      120% check uses the summed per-inverter backfeed ({cs.backfeedBreakerAmps}A).
+                    </span>
+                  </div>
+                ) : null}
+                {/* W4B.D hint — present subs excluded from the aggregate because
+                    they have neither a fleet nor subSystems[key] equipment. */}
+                {(hybridFleetPlan?.excluded?.length ?? 0) > 0 ? (
+                  <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 flex items-center gap-2 text-xs text-amber-300">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span>
+                      {hybridFleetPlan!.excluded.map(k => `${k} (${subSystemCounts[k]} modules)`).join(', ')} excluded from
+                      the aggregate numbers — no inverter assigned. Pick equipment for
+                      {' '}{hybridFleetPlan!.excluded.join(' + ')} in System Config to include
+                      {hybridFleetPlan!.excluded.length > 1 ? ' them' : ' it'}.
+                    </span>
+                  </div>
+                ) : null}
                 {/* ══ SLD HERO ══════════════════════════════════════════════════ */}
                 <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
 <div className="flex items-center justify-between gap-4 mb-4">
@@ -11429,14 +13550,17 @@ function EngineeringPageInner() {
                                 inverterModel: (() => { const inv = config.inverters[0]; const d = getInvById(inv?.inverterId, inv?.type) as any; return d?.model || (computedSystem.isMicro ? 'IQ8+' : 'SE7600H'); })(),
                                 acOutputKw: Number(totalInverterKw),
                                 acOutputAmps: Math.round(Number(totalInverterKw) * 1000 / 240),
-                                acOCPD: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
-                                backfeedAmps: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
+                                acOCPD: csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
+                                // Wave 5A: hybrids export the aggregate §1.7 total (Σ per-inverter OCPDs + battery)
+                                backfeedAmps: hybridSldSources
+                                  ? cs.backfeedBreakerAmps
+                                  : (csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5),
                                 panelModel: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.model || 'Solar Panel'; })(),
                                 panelWatts: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.watts || 400; })(),
                                 panelVoc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.voc || 41.6; })(),
                                 panelIsc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.isc || 12.26; })(),
-                                dcWireGauge: computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
-                                acWireGauge: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
+                                dcWireGauge: csRun('DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
+                                acWireGauge: csRun('DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
                                 acConduitType: config.conduitType ?? 'EMT',
                                 dcConduitType: config.conduitType ?? 'EMT',
                                 acWireLength: config.wireLength ?? 60,
@@ -11465,10 +13589,12 @@ function EngineeringPageInner() {
                                 })(),
                                 deviceCount: computedSystem.isMicro ? totalPanels : undefined,
                                 microBranches: computedSystem.isMicro ? computedSystem.microBranches : undefined,
-                                branchWireGauge: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.wireGauge : undefined,
-                                branchConduitSize: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.conduitSize : undefined,
-                                branchOcpdAmps: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.ocpdAmps : undefined,
-                                runs: computedSystem.runs,
+                                branchWireGauge: computedSystem.isMicro ? csRun('BRANCH_RUN')?.wireGauge : undefined,
+                                branchConduitSize: computedSystem.isMicro ? csRun('BRANCH_RUN')?.conduitSize : undefined,
+                                branchOcpdAmps: computedSystem.isMicro ? csRun('BRANCH_RUN')?.ocpdAmps : undefined,
+                                // Wave 5A: multi-lane export gets the namespaced aggregate runs + source lanes
+                                runs: hybridSldSources ? (cs.runs ?? []) : legacyRunsView(),
+                                sources: hybridSldSources ?? undefined,
                                 calcResult: compliance.electrical || null,
                                 inverterSpecs: config.inverters.map(inv => {
                                   const invData = getInvById(inv.inverterId, inv.type) as any;
@@ -12137,18 +14263,40 @@ function EngineeringPageInner() {
                 ]
               : [];
 
-            // Compute layout from structural result or config
-            const mountCount = compliance.structural?.mountLayout?.mountCount ?? compliance.structural?.rackingBOM?.mounts?.qty ?? Math.ceil(totalPanels * 2.5);
-            const mountSpacing = compliance.structural?.mountLayout?.mountSpacing ?? config.attachmentSpacing ?? 48;
-            const upliftPerMount = compliance.structural?.wind?.upliftPerAttachment ?? compliance.structural?.mountLayout?.upliftPerMount ?? 0;
-            const downwardPerMount = compliance.structural?.deadLoad?.deadLoadPerAttachment ?? compliance.structural?.mountLayout?.downwardPerMount ?? 0;
-            const railCount = compliance.structural?.rackingBOM?.rails?.qty ?? Math.ceil(totalPanels / 4) * 2;
+            // Compute layout from structural result or config.
+            // Wave 4B.E — HYBRID HONESTY:
+            //  • the residential mount math/diagram covers the ROOF SUBSET only
+            //    (compliance.structural top-level = the roof run since 07-11);
+            //    the ground diagram covers the ground subset. Never 'all 85'.
+            //  • spacing may NEVER exceed the viewed mount's rated maxSpacingIn
+            //    (the engine may have run a DIFFERENT config.mountingId than the
+            //    system being viewed here — cap + flag instead of lying).
+            //  • v4 engine emits mountSpacingIn / upliftPerMountLbs /
+            //    downwardPerMountLbs — the old field names silently fell back.
+            const _mountModuleCount = subSystemCounts.isHybrid
+              ? (mountingInstallType === 'ground'
+                  ? (subSystemCounts.ground || totalPanels)
+                  : (subSystemCounts.roof || totalPanels))
+              : totalPanels;
+            const mountCount = compliance.structural?.mountLayout?.mountCount ?? compliance.structural?.rackingBOM?.mounts?.qty ?? Math.ceil(_mountModuleCount * 2.5);
+            const _rawMountSpacing = compliance.structural?.mountLayout?.mountSpacingIn
+              ?? compliance.structural?.mountLayout?.finalSpacingIn
+              ?? compliance.structural?.mountLayout?.mountSpacing
+              ?? config.attachmentSpacing ?? 48;
+            const _viewedMaxSpacing = selectedSystem?.mount?.maxSpacingIn;
+            const mountSpacing = _viewedMaxSpacing ? Math.min(_rawMountSpacing, _viewedMaxSpacing) : _rawMountSpacing;
+            const mountSpacingWasCapped = _viewedMaxSpacing != null && _rawMountSpacing > _viewedMaxSpacing;
+            const upliftPerMount = compliance.structural?.wind?.upliftPerAttachment ?? compliance.structural?.mountLayout?.upliftPerMountLbs ?? compliance.structural?.mountLayout?.upliftPerMount ?? 0;
+            const downwardPerMount = compliance.structural?.deadLoad?.deadLoadPerAttachment ?? compliance.structural?.mountLayout?.downwardPerMountLbs ?? compliance.structural?.mountLayout?.downwardPerMount ?? 0;
+            const railCount = compliance.structural?.rackingBOM?.rails?.qty ?? Math.ceil(_mountModuleCount / 4) * 2;
             const safetyFactor = compliance.structural?.attachment?.safetyFactor ?? compliance.structural?.mountLayout?.safetyFactor ?? 0;
 
             // SVG mount spacing diagram
             const MountSpacingDiagram = () => {
               const [diagramView, setDiagramView] = React.useState<'layout'|'section'|'iso'>('layout');
-              const attachSpIn  = compliance.structural?.attachment?.attachmentSpacing ?? compliance.structural?.mountLayout?.mountSpacingIn ?? mountSpacing;
+              // Wave 4B.E — spacing may never exceed the VIEWED mount's rated max.
+              const _attachSpInRaw = compliance.structural?.attachment?.attachmentSpacing ?? compliance.structural?.mountLayout?.mountSpacingIn ?? mountSpacing;
+              const attachSpIn  = _viewedMaxSpacing ? Math.min(_attachSpInRaw, _viewedMaxSpacing) : _attachSpInRaw;
               const railSpIn    = compliance.structural?.attachment?.railSpacing ?? 64;
               const upliftLbs   = compliance.structural?.wind?.upliftPerAttachment ?? upliftPerMount;
               const deadLbs     = compliance.structural?.deadLoad?.deadLoadPerAttachment ?? downwardPerMount;
@@ -12166,8 +14314,16 @@ function EngineeringPageInner() {
                 const panelWidPx = (compliance.structural?.arrayGeometry?.panelWidthIn  ?? 41) * SCALE;
                 const attachSpPx = Math.max(30, attachSpIn * SCALE);
                 const gapPx = 4;
-                const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(totalPanels))));
-                const rows = Math.min(3, Math.max(1, Math.ceil(totalPanels / cols)));
+                // Wave 4B.E — grid from the REAL roof-subset array geometry when the
+                // structural run carries it; the drawn grid is capped for space and
+                // flagged as a SECTION when smaller than the real array.
+                const _geomCols = compliance.structural?.arrayGeometry?.colCount as number | undefined;
+                const _geomRows = compliance.structural?.arrayGeometry?.rowCount as number | undefined;
+                const cols = Math.min(4, Math.max(2, _geomCols ?? Math.ceil(Math.sqrt(_mountModuleCount))));
+                const rows = Math.min(3, Math.max(1, _geomRows ?? Math.ceil(_mountModuleCount / cols)));
+                const _realCols = _geomCols ?? cols;
+                const _realRows = _geomRows ?? rows;
+                const _isSection = _realCols > cols || _realRows > rows;
                 const marginL = 56; const marginT = 28;
                 const svgW = marginL + cols * (panelLenPx + gapPx) + 60;
                 const svgH = marginT + rows * (panelWidPx + 22) + 72;
@@ -12211,7 +14367,7 @@ function EngineeringPageInner() {
                       </pattern>
                     </defs>
                     <text x={svgW/2} y={11} textAnchor="middle" fill="#94a3b8" fontSize="8" fontWeight="bold" fontFamily="monospace">
-                      TOP-DOWN ARRAY LAYOUT — {cols}×{rows} ({totalPanels} MODULES){isRtMini ? ' · STAGGERED FEET' : ''}
+                      TOP-DOWN ARRAY LAYOUT — {_realCols}×{_realRows} ({_mountModuleCount}{subSystemCounts.isHybrid ? ' ROOF' : ''} MODULES){_isSection ? ' · SECTION SHOWN' : ''}{isRtMini ? ' · STAGGERED FEET' : ''}
                     </text>
                     {rafterXs.map((rx,i)=>(
                       <line key={`rf-${i}`} x1={rx} y1={marginT-8} x2={rx} y2={svgH-42}
@@ -12561,7 +14717,7 @@ function EngineeringPageInner() {
                     ) : null}
                   </div>
                   {/* ══════════ SOL FENCE MOUNTING (real SolFence system, not a roof picker) ══════════ */}
-                  {config.systemType === 'fence' ? (() => {
+                  {(config.systemType === 'fence' || subSystemCounts.fence > 0) ? (() => {
                     const eq = resolveEquipment('fence');
                     const rk = eq.racking;
                     const spec = (label: string, value: string) => (
@@ -12602,8 +14758,8 @@ function EngineeringPageInner() {
                       </div>
                     );
                   })() : null}
-                  {/* Roof/ground mounting picker — not applicable to a fence (the SOL Fence panel above covers it) */}
-                  {config.systemType !== 'fence' ? (<>
+                  {/* Roof/ground mounting picker — shown whenever roof/ground panels exist (hybrid-aware) */}
+                  {(config.systemType !== 'fence' || subSystemCounts.roof > 0 || subSystemCounts.ground > 0) ? (<>
                   {/* Search bar + roof type indicator */}
                   <div className="flex items-center gap-3 mb-3">
                     <div className="flex-1 relative">
@@ -12694,7 +14850,7 @@ function EngineeringPageInner() {
                 </div>
 
                 {/* ── Selected System Spec Panel ── */}
-                {selectedSystem && config.systemType !== 'fence' ? (
+                {selectedSystem && (config.systemType !== 'fence' || subSystemCounts.roof > 0 || subSystemCounts.ground > 0) ? (
                   <div className="eng-panel">
                     <div className="flex items-start justify-between mb-4">
                       <div>
@@ -12864,7 +15020,7 @@ function EngineeringPageInner() {
                 ) : null}
 
                 {/* Layout diagrams + load analysis + BOM preview + code refs — roof/ground/commercial only, not a fence */}
-                {config.systemType !== 'fence' ? (<>
+                {(config.systemType !== 'fence' || subSystemCounts.roof > 0 || subSystemCounts.ground > 0) ? (<>
                 {/* ── Real-Time Layout Visualization ── */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* Mount Spacing Diagram */}
@@ -12881,18 +15037,31 @@ function EngineeringPageInner() {
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {mountingInstallType === 'residential' && <>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Mount Count</div><div className="text-white font-bold">{mountCount}</div></div>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Mount Spacing</div><div className="text-amber-300 font-bold">{mountSpacing}"</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2">
+                          <div className="text-slate-500">Mount Spacing</div>
+                          <div className="text-amber-300 font-bold">{mountSpacing}"{_viewedMaxSpacing ? <span className="text-slate-500 font-normal"> / max {_viewedMaxSpacing}"</span> : null}</div>
+                          {mountSpacingWasCapped ? (
+                            <div className="text-[10px] text-red-400 font-bold" title="The structural run produced a wider spacing than this mount's rated maximum (it likely ran a different mount) — displayed spacing is capped at the rated max.">
+                              ⚠ capped at rated max (calc gave {_rawMountSpacing}")
+                            </div>
+                          ) : null}
+                        </div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Rail Count</div><div className="text-white font-bold">{railCount}</div></div>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Safety Factor</div><div className={`font-bold ${safetyFactor >= 2 ? 'text-emerald-400' : safetyFactor >= 1.5 ? 'text-amber-400' : 'text-red-400'}`}>{safetyFactor > 0 ? safetyFactor.toFixed(2) : '—'}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2">
+                          <div className="text-slate-500">Safety Factor</div>
+                          <div className={`font-bold ${safetyFactor >= 2 ? 'text-emerald-400' : safetyFactor >= 1.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {safetyFactor > 0 ? safetyFactor.toFixed(2) : '—'}{safetyFactor > 0 && safetyFactor < 1 ? ' — FAIL' : ''}
+                          </div>
+                        </div>
                       </>}
                       {mountingInstallType === 'commercial' && <>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Blocks/Module</div><div className="text-purple-300 font-bold">{(compliance.structural as any)?.ballastAnalysis?.blocksPerModule ?? selectedSystem?.ballast?.minBlocksPerModule ?? '—'}</div></div>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Blocks</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.totalBallastBlocks ?? (totalPanels * (selectedSystem?.ballast?.minBlocksPerModule ?? 2))}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Blocks</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.totalBallastBlocks ?? (_mountModuleCount * (selectedSystem?.ballast?.minBlocksPerModule ?? 2))}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Ballast</div><div className="text-purple-300 font-bold">{(compliance.structural as any)?.ballastAnalysis?.ballastWeightLbs ? `${(compliance.structural as any).ballastAnalysis.ballastWeightLbs.toLocaleString()} lbs` : '—'}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Roof Load</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.roofLoadPsf ? `${(compliance.structural as any).ballastAnalysis.roofLoadPsf.toFixed(1)} psf` : '—'}</div></div>
                       </>}
                       {mountingInstallType === 'ground' && <>
-                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Count</div><div className="text-green-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileCount ?? Math.ceil(totalPanels / 4)}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Count</div><div className="text-green-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileCount ?? (compliance.structural as any)?.subSystems?.ground?.groundMountAnalysis?.pileCount ?? Math.ceil(_mountModuleCount / 4)}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Spacing</div><div className="text-white font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileSpacingFt ?? selectedSystem?.groundMount?.pileSpacingFt ?? '—'}ft</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Uplift/Pile</div><div className="text-red-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.upliftPerPileLbs ? `${(compliance.structural as any).groundMountAnalysis.upliftPerPileLbs.toFixed(0)} lbs` : '—'}</div></div>
                         <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Safety Factor</div><div className={`font-bold ${((compliance.structural as any)?.groundMountAnalysis?.safetyFactorUplift ?? 0) >= 2 ? 'text-emerald-400' : 'text-amber-400'}`}>{(compliance.structural as any)?.groundMountAnalysis?.safetyFactorUplift?.toFixed(2) ?? '—'}</div></div>
@@ -13118,23 +15287,41 @@ function EngineeringPageInner() {
                 </a>
               </div>
             ) : (() => {
-              const _sheets = [
-                { label: 'PV-0  Cover Sheet',                         done: true },
-                { label: 'PV-1  Site Plan',                           done: !!config.address },
-                { label: 'PV-2  Roof Plan — Module Layout & Fire Setbacks', done: !!(projectLayout?.panels?.length > 0) },
-                { label: 'PV-2B  Array Geometry & String Layout',     done: !!(projectLayout?.panels?.length > 0) },
-                { label: 'PV-3  Attachment Detail — Mounting & Cross-Section', done: true },
-                { label: 'PV-4A  NEC Compliance Sheet',               done: !!compliance.electrical },
-                { label: 'PV-4B  Conductor & Conduit Schedule',       done: true },
-                { label: 'PV-4C  Structural Calculation Sheet',       done: !!compliance.structural },
-                { label: 'PV-5  Warning Labels & Required Placards',  done: true },
-                { label: 'SCHED  Equipment Schedule',                 done: totalPanels > 0 },
-                { label: 'APP-A  Equipment Specification Reference',  done: true },
-                { label: 'CERT  Engineer Certification',              done: !!config.designer },
-                { label: 'PE-1  PE Structural Letter of Compliance',  done: true },
-                { label: 'E-1  Single-Line Electrical Diagram',       done: true },
-                { label: 'APP-CAD  CAD Preview Appendix — Non-Authoritative', done: !!(projectLayout?.panels?.length > 0) },
-              ];
+              // Sheet list derived from the SAME manifest the generator + cover
+              // index use, so order/count match the actual package. The set is
+              // dynamic: manufacturer datasheet (DS-n) pages are added per selected
+              // equipment that has a datasheet on file, so page count varies per job.
+              const _dsRefs: { id: string; title: string }[] = [];
+              const _pushDs = (t: string, hit: { imageUrl: string | null } | null) => {
+                if (hit?.imageUrl) _dsRefs.push({ id: `DS-${_dsRefs.length + 1}`, title: `MANUFACTURER DATASHEET — ${t}` });
+              };
+              _pushDs('PV MODULE', getManufacturerAsset(config.inverters?.[0]?.strings?.[0]?.panelId, 'module_spec'));
+              const _invId = config.inverters?.[0]?.inverterId;
+              _pushDs('INVERTER',
+                getManufacturerAsset(_invId, 'inverter_spec')
+                ?? getManufacturerAsset(_invId, 'microinverter_spec')
+                ?? getManufacturerAsset(_invId, 'optimizer_spec'));
+              _pushDs('BATTERY', getManufacturerAsset(config.batteryId, 'battery_spec'));
+
+              const _manifest = buildSheetManifest({
+                pv1Title: 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS',
+                pv3Title: 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION',
+                datasheets: _dsRefs,
+                // APP-CAD removed from the deliverable (Ray, 2026-07-09)
+              });
+              const _doneFor = (id: string): boolean => {
+                if (id === 'PV-1')   return !!config.address && !!(projectLayout?.panels?.length > 0);
+                if (id === 'PV-1B')  return !!(projectLayout?.panels?.length > 0);
+                if (id === 'PV-4A')  return !!compliance.electrical;
+                if (id === 'PV-4C')  return !!compliance.structural;
+                if (id === 'SCHED')  return totalPanels > 0;
+                if (id === 'CERT')   return !!config.designer;
+                return true;
+              };
+              const _sheets = _manifest.map(s => ({
+                label: `${s.id}  ${s.title.split(' — ')[0].replace(/\b\w+/g, w => w[0] + w.slice(1).toLowerCase())}`,
+                done: _doneFor(s.id),
+              }));
               const _doneCount  = _sheets.filter(s => s.done).length;
               const _readyPct   = Math.round((_doneCount / _sheets.length) * 100);
               const _compStatus = compliance.overallStatus;
@@ -13265,7 +15452,7 @@ function EngineeringPageInner() {
                         <div>
                           <h4 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
                             <Stamp size={14} className="text-amber-400" /> Permit Package Generator
-                            <span className="text-xs font-normal bg-slate-700/60 text-slate-400 border border-slate-600/50 px-2 py-0.5 rounded-full">14 Sheets</span>
+                            <span className="text-xs font-normal bg-slate-700/60 text-slate-400 border border-slate-600/50 px-2 py-0.5 rounded-full">{_sheets.length} Sheets</span>
                           </h4>
                           <p className="text-slate-400 text-xs">Full permit-ready documentation — CAD, NEC compliance, structural calcs, SLD, equipment schedule, PE letter, warning labels.</p>
                         </div>
@@ -13663,6 +15850,20 @@ function EngineeringPageInner() {
                         </button>
                       </>
                     ) : null}
+                    {/* Trunk install preference: cheapest option (continuous cable +
+                        service loop) vs cutting at row transitions (M/F splice pairs).
+                        Only meaningful for micro topologies with a trunk cable. */}
+                    {config.inverters?.[0]?.type === 'micro' && (
+                      <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none" title="Default = continuous trunk with service loops at row transitions (cheapest). Check to cut the trunk at rows instead — adds a male+female field-wireable splice pair per within-branch row transition.">
+                        <input
+                          type="checkbox"
+                          checked={config.spliceAtRows === true}
+                          onChange={e => setConfig(c => ({ ...c, spliceAtRows: e.target.checked }))}
+                          className="accent-amber-500"
+                        />
+                        Splice trunk at rows
+                      </label>
+                    )}
                     <button onClick={fetchBOM} disabled={bomLoading} className="btn-primary btn-sm">
                       <RefreshCw size={13} className={bomLoading ? 'animate-spin' : ''} />
                       {bomLoading ? 'Generating…' : bom.length > 0 ? 'Regenerate' : 'Generate BOM'}
@@ -13708,7 +15909,7 @@ function EngineeringPageInner() {
                   const totalCost = bomPricing?.totalBomCost ?? pricedItems.reduce((s: number, i: any) => s + (i.totalCost ?? 0), 0);
 
                   // ── stage grouping ──
-                  const stageOrder = ['array', 'dc', 'inverter', 'ac', 'structural', 'monitoring', 'labels'];
+                  const stageOrder = ['array', 'dc', 'inverter', 'ac', 'structural', 'monitoring', 'labels', 'truck_stock', 'tools'];
                   const stageLabels: Record<string, string> = {
                     array:      'Stage 1 — Array',
                     dc:         'Stage 2 — DC Wiring',
@@ -13717,6 +15918,8 @@ function EngineeringPageInner() {
                     structural: 'Stage 5 — Structural',
                     monitoring: 'Stage 6 — Monitoring',
                     labels:     'Stage 7 — Labels',
+                    truck_stock:'Truck Stock — Recommended Extras (not in $/W)',
+                    tools:      'Suggested Tools — This Job (advice, unpriced)',
                   };
                   const stageColors: Record<string, string> = {
                     array:      'text-amber-400  bg-amber-500/10  border-amber-500/25',
@@ -13726,6 +15929,8 @@ function EngineeringPageInner() {
                     structural: 'text-orange-400 bg-orange-500/10 border-orange-500/25',
                     monitoring: 'text-sky-400    bg-sky-500/10    border-sky-500/25',
                     labels:     'text-slate-400  bg-slate-500/10  border-slate-500/25',
+                    truck_stock:'text-yellow-400 bg-yellow-500/10 border-yellow-500/25',
+                    tools:      'text-cyan-400   bg-cyan-500/10   border-cyan-500/25',
                   };
                   const stageIconColors: Record<string, string> = {
                     array:      'bg-amber-500/15 text-amber-400',
@@ -13735,6 +15940,8 @@ function EngineeringPageInner() {
                     structural: 'bg-orange-500/15 text-orange-400',
                     monitoring: 'bg-sky-500/15 text-sky-400',
                     labels:     'bg-slate-500/15 text-slate-400',
+                    truck_stock:'bg-yellow-500/15 text-yellow-400',
+                    tools:      'bg-cyan-500/15 text-cyan-400',
                   };
 
                   // Build stage groups from bom array
@@ -13762,10 +15969,18 @@ function EngineeringPageInner() {
                           {/* Total cost */}
                           <div className="flex-1 min-w-[160px]">
                             <div className="text-xs text-slate-500 mb-0.5 uppercase tracking-widest font-semibold">Est. Hardware Cost</div>
-                            <div className="text-3xl font-black text-white tabular-nums tracking-tight">{fmtK(totalCost)}</div>
+                            <div className="flex items-baseline gap-2 flex-wrap">
+                              <div className="text-3xl font-black text-white tabular-nums tracking-tight">{fmtK(totalCost)}</div>
+                              {Number(totalKw) > 0 ? (
+                                <div className="text-lg font-black text-emerald-400 tabular-nums">
+                                  ${(totalCost / (Number(totalKw) * 1000)).toFixed(2)}<span className="text-xs text-slate-500 font-semibold">/W</span>
+                                </div>
+                              ) : null}
+                            </div>
                             <div className="text-xs text-slate-500 mt-0.5">
                               {bomPricing?.pricingApplied ? 'CED · Soligent · KWh Q1 2025' : 'Category estimates'}
                               {unpricedCount > 0 ? <span className="text-amber-400 ml-2">· {unpricedCount} unpriced</span> : null}
+                              <span className="text-slate-600 ml-2">· hardware only, before labor</span>
                             </div>
                           </div>
 
@@ -14795,9 +17010,11 @@ function EngineeringPageInner() {
               <div className={`rounded-xl border px-3 py-2.5 ${topologyColor}`}>
                 <div className="text-xs font-black tracking-wide">{topologyLabel}</div>
                 <div className="text-xs opacity-70 mt-0.5">
-                  {cs.isMicro
-                    ? `${cs.microDeviceCount} microinverter${cs.microDeviceCount !== 1 ? 's' : ''} · ${cs.acBranchCount} AC branch${cs.acBranchCount !== 1 ? 'es' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
-                    : `${config.inverters.length} inverter${config.inverters.length !== 1 ? 's' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
+                  {subSystemCounts.isHybrid
+                    ? `${subSystemCounts.present.length} sub-systems · ${subSystemCounts.present.map(k => `${k.charAt(0).toUpperCase()}${k.slice(1)} ${subSystemCounts[k]}`).join(' · ')} · ${systemPanelCount} modules`
+                    : cs.isMicro
+                      ? `${cs.microDeviceCount} microinverter${cs.microDeviceCount !== 1 ? 's' : ''} · ${cs.acBranchCount} AC branch${cs.acBranchCount !== 1 ? 'es' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
+                      : `${config.inverters.length} inverter${config.inverters.length !== 1 ? 's' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
                   }
                 </div>
                 {topologySwitching ? (

@@ -76,6 +76,12 @@ export interface StructuralBOMInput {
     vinylSectionCount: number;    // from sections.filter(s => s.type === 'vinyl').length
     panelWidthFt: number;         // from panelWidthM * 3.28084 (CADModel.panelWidthM)
     panelHeightFt: number;        // from CADFenceModel.panelHeightM * 3.28084
+    // HYBRID (P3): fence SUBSET panel count. When set, the section count derives
+    // from panels (6' config = 2 panels/section → ceil(n/2); 4' config = 1:1) and
+    // WINS over a solarSectionCount that equals the raw panel count (the client's
+    // 1-section-per-panel bug billed 94 × 2-panel sections for 94 panels = $61.8k).
+    // A genuinely physical CAD section count (< fencePanelCount) still wins.
+    fencePanelCount?: number;
   };
 }
 
@@ -117,6 +123,103 @@ export function deriveStructuralBOM(input: StructuralBOMInput): StructuralBOMRes
       log.push(`Unknown systemType: ${input.systemType} — no structural items`);
       return { items: [], systemType: input.systemType, derivationLog: log };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HYBRID (P3): PARTITION-AWARE STRUCTURAL DERIVATION
+// A hybrid project (roof + ground + fence panels in ONE project) must derive
+// EACH mount type's structural BOM from ITS OWN panel subset — the legacy
+// single-switch call billed the winning systemType for every panel (Stowell:
+// fence sections for all 94 modules, zero piles/rails).
+//
+// Partition rules:
+//   • fence branch runs when the fence subset > 0 (fencePanelCount or
+//     subSystemCounts.fence), or — legacy, no subsystem info — systemType==='fence'.
+//   • ground branch runs when subSystemCounts.ground > 0, or — legacy, no
+//     subSystemCounts — systemType==='ground'.
+//   • roof structural is NOT derived here — V4's racking stage owns it
+//     (rackingId + attachmentCount/railSections from roofData).
+// Quantities scale to the SUBSET: each branch receives the subset count as its
+// moduleCount, and the fence branch receives fencePanelCount for section math.
+// Legacy payloads (no subsystem fields) reduce to the old single-branch call.
+// ═══════════════════════════════════════════════════════════════
+
+export interface SubSystemPanelCounts { roof: number; ground: number; fence: number }
+
+export interface HybridStructuralParams {
+  /** Project's winning/legacy system type ('roof' | 'ground' | 'fence'). */
+  systemType: BOMSystemType;
+  /** TOTAL project module count (legacy fallback when no subset counts). */
+  moduleCount: number;
+  /** Per-mount-type panel partition (hybrid). Optional — legacy payloads omit. */
+  subSystemCounts?: SubSystemPanelCounts;
+  /** Fence SUBSET panel count (preferred over subSystemCounts.fence when both present). */
+  fencePanelCount?: number;
+  fence?: StructuralBOMInput['fence'];
+  ground?: StructuralBOMInput['ground'];
+}
+
+export interface HybridStructuralResult {
+  items: StructuralBOMItem[];
+  derivationLog: string[];
+  /** Which subsystem branches actually ran (for route logging/response). */
+  subsystemsRun: BOMSystemType[];
+}
+
+export function deriveStructuralBOMForSubsystems(p: HybridStructuralParams): HybridStructuralResult {
+  const items: StructuralBOMItem[] = [];
+  const derivationLog: string[] = [];
+  const subsystemsRun: BOMSystemType[] = [];
+
+  const fenceSubset  = (p.fencePanelCount !== undefined && p.fencePanelCount > 0)
+    ? p.fencePanelCount
+    : (p.subSystemCounts?.fence ?? 0);
+  const groundSubset = p.subSystemCounts?.ground ?? 0;
+  // Any subsystem partition info present? (fencePanelCount alone counts — a client
+  // may send it on a pure-fence project purely for the section-math fix.)
+  const hasFencePartition  = p.fencePanelCount !== undefined || p.subSystemCounts !== undefined;
+  const hasGroundPartition = p.subSystemCounts !== undefined;
+
+  const runFence  = !!p.fence  && (hasFencePartition  ? fenceSubset  > 0 : p.systemType === 'fence');
+  const runGround = !!p.ground && (hasGroundPartition ? groundSubset > 0 : p.systemType === 'ground');
+
+  if (runFence) {
+    const fenceModules = fenceSubset > 0 ? fenceSubset : p.moduleCount;
+    const r = deriveStructuralBOM({
+      systemType: 'fence',
+      moduleCount: fenceModules,
+      fence: {
+        ...p.fence!,
+        // Thread the subset count into the section-math fix. Legacy payloads
+        // (no partition info) leave it undefined → old behavior + per-panel guard.
+        fencePanelCount: fenceSubset > 0 ? fenceSubset : p.fence!.fencePanelCount,
+      },
+    });
+    items.push(...r.items);
+    derivationLog.push(`[fence subset: ${fenceModules} panels]`, ...r.derivationLog);
+    subsystemsRun.push('fence');
+  }
+
+  if (runGround) {
+    const groundModules = groundSubset > 0 ? groundSubset : p.moduleCount;
+    const r = deriveStructuralBOM({
+      systemType: 'ground',
+      moduleCount: groundModules,   // scales ground lugs (ceil(n/2)) + bonding clips (n)
+      ground: p.ground!,
+    });
+    items.push(...r.items);
+    derivationLog.push(`[ground subset: ${groundModules} panels]`, ...r.derivationLog);
+    subsystemsRun.push('ground');
+  }
+
+  if (!runFence && !runGround) {
+    derivationLog.push(
+      `No structural branches ran (systemType=${p.systemType}, fenceSubset=${fenceSubset}, groundSubset=${groundSubset}, ` +
+      `fenceData=${p.fence ? 'yes' : 'no'}, groundData=${p.ground ? 'yes' : 'no'})`,
+    );
+  }
+
+  return { items, derivationLog, subsystemsRun };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -172,21 +275,69 @@ function deriveFenceStructural(input: StructuralBOMInput, log: string[]): Struct
   // foundations whenever the fence also has gate openings or vinyl privacy sections,
   // which are billed separately below.)
   const lengthEstimateSections = Math.max(1, Math.ceil(f.totalFenceLengthFt / SECTION_WIDTH_FT));
-  const sectionFromCad = f.solarSectionCount > 0;
-  const sectionCount = sectionFromCad ? f.solarSectionCount : lengthEstimateSections;
-  const postCount = sectionCount + 1;
   const isTall = (f.postHeightFt ?? 6) >= 5;   // 6' config (2 panels/section) vs 4' (1/section)
+  const panelsPerSection = isTall ? 2 : 1;
+
+  // ── Section-count source resolution (HYBRID P3 fence-math fix) ──
+  // Priority:
+  //   1. fencePanelCount (fence SUBSET panels) → ceil(panels / panelsPerSection),
+  //      UNLESS the CAD solar-section count is plausibly physical (< panel count),
+  //      in which case the CAD count wins. A solarSectionCount >= fencePanelCount
+  //      is the 1-section-per-panel client bug — rejected.
+  //   2. No fencePanelCount (legacy): CAD solarSectionCount wins — but if it
+  //      EXACTLY equals moduleCount on a 6' (2-panel-per-section) config, it's a
+  //      per-panel slot count, not physical sections → halve it (log loudly).
+  //   3. No CAD sections at all → estimate from fence length.
+  const fpc = (typeof f.fencePanelCount === 'number' && Number.isFinite(f.fencePanelCount) && f.fencePanelCount > 0)
+    ? Math.ceil(f.fencePanelCount)
+    : undefined;
+  let sectionCount: number;
+  let sectionSource: string;
+  if (fpc !== undefined) {
+    const fromPanels = Math.max(1, Math.ceil(fpc / panelsPerSection));
+    if (f.solarSectionCount > 0 && f.solarSectionCount < fpc) {
+      sectionCount = f.solarSectionCount;
+      sectionSource = `CAD solar sections: ${sectionCount} (physical — < ${fpc} fence panels)`;
+      log.push(`SolFence section source: CAD solar-section count ${sectionCount} wins (plausible: < fencePanelCount ${fpc})`);
+    } else {
+      sectionCount = fromPanels;
+      sectionSource = `fencePanelCount: ceil(${fpc} / ${panelsPerSection})`;
+      if (f.solarSectionCount >= fpc && f.solarSectionCount > 0) {
+        const msg = `[FENCE BOM] solarSectionCount=${f.solarSectionCount} >= fencePanelCount=${fpc} — per-panel section count REJECTED; using ceil(${fpc}/${panelsPerSection})=${fromPanels} (${isTall ? '2 panels' : '1 panel'}/section)`;
+        console.warn(msg);
+        log.push(msg);
+      } else {
+        log.push(`SolFence section source: fencePanelCount ${fpc} → ceil(${fpc}/${panelsPerSection}) = ${fromPanels}`);
+      }
+    }
+  } else if (f.solarSectionCount > 0) {
+    if (isTall && f.solarSectionCount === input.moduleCount) {
+      sectionCount = Math.ceil(input.moduleCount / 2);
+      sectionSource = `PER-PANEL GUARD: ceil(${input.moduleCount} / 2)`;
+      const msg = `[FENCE BOM] PER-PANEL GUARD: solarSectionCount (${f.solarSectionCount}) === moduleCount (${input.moduleCount}) on a 6' 2-panel-per-section config — treating as per-panel slots, halving to ${sectionCount} sections`;
+      console.warn(msg);
+      log.push(msg);
+    } else {
+      sectionCount = f.solarSectionCount;
+      sectionSource = `CAD solar sections: ${sectionCount}`;
+    }
+  } else {
+    sectionCount = lengthEstimateSections;
+    sectionSource = `est. ceil(${f.totalFenceLengthFt.toFixed(0)}ft / ${SECTION_WIDTH_FT}ft)`;
+  }
+
+  const postCount = sectionCount + 1;
   const sectionSku = isTall ? 'SOLFENCE-SECTION-6' : 'SOLFENCE-SECTION-4';
   const sectionLabel = isTall ? "6' Tall × 8' Wide Section" : "4' Tall × 8' Wide Section";
   const postSku = isTall ? 'SOLFENCE-POST-6.5' : 'SOLFENCE-POST-4.5';
   const postLabel = isTall ? '4x4x6.5 Post' : '4x4x4.5 Post';
-  log.push(`SolFence: ${sectionCount} × ${SECTION_WIDTH_FT}ft solar sections + ${postCount} posts (${isTall ? '6ft' : '4ft'} config)${sectionFromCad ? ' [CAD solar-section count]' : ` [estimated from ${f.totalFenceLengthFt.toFixed(0)}ft length — no CAD section types]`}`);
+  log.push(`SolFence: ${sectionCount} × ${SECTION_WIDTH_FT}ft solar sections + ${postCount} posts (${isTall ? '6ft' : '4ft'} config) [${sectionSource}]`);
 
   items.push(mkItem('structural', 'fence_section', rack.rackingBrand, `SOL Fence ${sectionLabel}`,
     sectionSku,
     `Pre-built SolFence section — includes side channels + rails (${rack.railMaterial}); ${isTall ? '2' : '1'} panel slot(s) per section`,
     sectionCount, 'ea',
-    sectionFromCad ? `CAD solar sections: ${sectionCount}` : `est. ceil(${f.totalFenceLengthFt.toFixed(0)}ft / ${SECTION_WIDTH_FT}ft)`,
+    sectionSource,
     true));
 
   items.push(mkItem('structural', 'fence_post', rack.rackingBrand, `SOL Fence ${postLabel}`,
@@ -337,10 +488,10 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   // Calculation: pilesPerRow = ceil(arrayWidth / pileSpacing) + 1, × 2 rows
   log.push(`Piles: ${g.pileCount} (${g.structureType}, ${g.pileSpacingFt.toFixed(1)}ft spacing, ${g.pileEmbedmentFt.toFixed(1)}ft embed)`);
 
-  const pileLabel = g.structureType === 'helical_pile' ? 'Helical Anchor' : 'Driven Pier';
+  const pileLabel = g.structureType === 'helical_pile' ? 'Helical Anchor' : 'Driven I-beam Pylon';
   items.push(mkItem('structural', 'pile', rack.rackingBrand,
     `${rack.rackingModel} ${pileLabel}`,
-    g.structureType === 'helical_pile' ? 'UNIRAC-RM10-HELICAL' : 'UNIRAC-RM10-DRIVEN',
+    g.structureType === 'helical_pile' ? 'PLP-PD-PYLON-HELICAL' : 'PLP-PD-PYLON-W6',
     `${rack.attachmentType} — ${g.pileSpacingFt.toFixed(1)}ft spacing, ${g.pileEmbedmentFt.toFixed(1)}ft embedment (${rack.railMaterial})`,
     g.pileCount, 'ea',
     `structural-engine: pilesPerRow × 2 rows (${g.pileSpacingFt.toFixed(1)}ft spacing)`,
@@ -353,8 +504,8 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   const pilesPerRow = Math.ceil(g.pileCount / 2);
   log.push(`Cross beams: ${pilesPerRow} (1 per pile pair)`);
 
-  items.push(mkItem('structural', 'beam', rack.rackingBrand, `${rack.rackingModel} Cross Beam`,
-    'UNIRAC-RM10-BEAM',
+  items.push(mkItem('structural', 'beam', rack.rackingBrand, `${rack.rackingModel} Strongback`,
+    'PLP-PD-STRONGBACK',
     `Cross beam connecting front/back piles — 1 per pile pair (${rack.railMaterial})`,
     pilesPerRow, 'ea',
     `pileCount / 2 = ${pilesPerRow}`,
@@ -371,8 +522,8 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   const totalRailSections = railSectionsPerRun * totalRails;
   log.push(`Rails: ${totalRails} rails × ${railLengthFt.toFixed(1)}ft = ${totalRailSections} sections`);
 
-  items.push(mkItem('structural', 'rail', rack.rackingBrand, `${rack.rackingModel} Rail (${railSectionFt}ft)`,
-    'UNIRAC-RM10-RAIL',
+  items.push(mkItem('structural', 'rail', rack.rackingBrand, `${rack.rackingModel} PX Rail (${railSectionFt}ft)`,
+    'PLP-PD-PXRAIL',
     `Ground mount rail — ${rack.railMaterial}, ${g.railsPerRow} per row × ${g.rowCount} rows, ${railLengthFt.toFixed(1)}ft each`,
     totalRailSections, 'ea',
     `array-geometry: ${g.railsPerRow} railsPerRow × ${g.rowCount} rows ÷ ${railSectionFt}ft sections`,
@@ -386,7 +537,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`Rail splices: ${totalSplices} (${splicesPerRail} per rail × ${totalRails} rails)`);
 
   items.push(mkItem('structural', 'rail_splice', rack.rackingBrand, `${rack.rackingModel} Rail Splice`,
-    'UNIRAC-RM10-SPLICE',
+    'PLP-PD-RAILSPLICE',
     `Rail splice — connects ${railSectionFt}ft rail sections (${rack.hardware})`,
     totalSplices, 'ea',
     `structural-engine: max(0, ${railSectionsPerRun}-1) × ${totalRails} rails`,
@@ -402,7 +553,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`Mid clamps: ${totalMidClamps} (${midClampsPerRail}/rail × ${totalRails} rails)`);
 
   items.push(mkItem('structural', 'mid_clamp', rack.rackingBrand, `${rack.rackingModel} Mid Clamp`,
-    'UNIRAC-RM10-MIDCLAMP',
+    'PLP-PD-MIDCLAMP',
     `Mid clamp — 1 per panel junction per rail (${rack.hardware})`,
     totalMidClamps, 'ea',
     `array-geometry: (panelsPerRow-1) × railsPerRow × rowCount`,
@@ -415,7 +566,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`End clamps: ${totalEndClamps} (2/rail × ${totalRails} rails)`);
 
   items.push(mkItem('structural', 'end_clamp', rack.rackingBrand, `${rack.rackingModel} End Clamp`,
-    'UNIRAC-RM10-ENDCLAMP',
+    'PLP-PD-ENDCLAMP',
     `End clamp — 2 per rail (left + right) (${rack.hardware})`,
     totalEndClamps, 'ea',
     `array-geometry: 2 × ${totalRails} rails`,
@@ -438,7 +589,7 @@ function deriveGroundStructural(input: StructuralBOMInput, log: string[]): Struc
   log.push(`Bonding clips: ${input.moduleCount} (UL 2703, 1 per panel)`);
 
   items.push(mkItem('structural', 'bonding_clip', rack.rackingBrand, `${rack.rackingModel} Bonding Clip`,
-    'UNIRAC-RM10-BOND',
+    'PLP-PD-BONDCLIP',
     `Bonding clip — UL 2703, 1 per panel`,
     input.moduleCount, 'ea',
     `structural-engine: 1 per module`,

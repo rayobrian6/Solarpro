@@ -82,6 +82,7 @@ export {
   // CAD-model-first path (MOST PREFERRED — accepts pre-resolved CADModel)
   getArrayPlanFromCAD,
   getStructuralFromCAD,
+  getFenceDetailFromCAD,
 } from './composers';
 
 // ── Style System ─────────────────────────────────────────────
@@ -97,6 +98,7 @@ import {
   getStructuralFromPermit,
   getArrayPlanFromCAD,
   getStructuralFromCAD,
+  getFenceDetailFromCAD,
 } from './composers';
 import { resolveSystemType } from './resolver';
 import type { DraftingInput } from './types';
@@ -115,6 +117,8 @@ export const drawingEngine = {
   getArrayPlanFromCAD,
   /** PV-3: Structural SVG using pre-resolved CADModel — MOST PREFERRED (no re-run) */
   getStructuralFromCAD,
+  /** PV-3F: fence structural DETAILS (connections/foundation) using CADModel */
+  getFenceDetailFromCAD,
   /** Returns resolved system type string */
   getSystemType,
   /** Pre-flight validation — throws on bad input */

@@ -17,13 +17,26 @@ export function resolveFireSetbackIn(
   return arrayCoverageFrac > 0.33 ? 36 : (ahjRidgeSetbackIn || 18);
 }
 
-/** Plan-view array coverage fraction from CAD aggregates. */
+/** Plan-view array coverage fraction from CAD aggregates.
+ *
+ * BASIS (slope-space fix, 2026-07-12): roofPlanAreaFt2 is a PLAN area
+ * (shoelace of plan-projected vertices), so the array area must be
+ * plan-projected too — a tilted module's plan footprint is its real area
+ * x cos(pitch). Passing the pitch keeps this helper on the SAME basis as
+ * the PV-1 drawing (roof.ts), which decided 18"-vs-36" while this helper's
+ * old mixed basis (real array / plan roof) overstated coverage by
+ * 1/cos(pitch) — Stowell printed 36.4% next to a drawing that resolved
+ * 30.4% and an 18" band. pitchDeg omitted => legacy mixed-basis behavior. */
 export function arrayCoverageFrac(
   totalPanels: number,
   panelLengthIn: number,
   panelWidthIn: number,
   roofPlanAreaFt2: number,
+  pitchDeg?: number,
 ): number {
   if (!roofPlanAreaFt2 || roofPlanAreaFt2 <= 0) return 0;
-  return (totalPanels * (panelLengthIn * panelWidthIn) / 144) / roofPlanAreaFt2;
+  const cosP = typeof pitchDeg === 'number' && isFinite(pitchDeg)
+    ? Math.cos(Math.max(0, Math.min(60, pitchDeg)) * Math.PI / 180)
+    : 1;
+  return (totalPanels * (panelLengthIn * panelWidthIn) / 144) * cosP / roofPlanAreaFt2;
 }

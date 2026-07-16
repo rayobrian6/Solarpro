@@ -146,6 +146,9 @@ export function repairElectricallyInvalidInverter(
       strings,
       optimizerPeripheralId: inv.optimizerPeripheralId,
       deviceRatioOverride:   inv.deviceRatioOverride,
+      // Wave 3 (I-2 corollary): an electrical repair must never strip the
+      // subsystem tag — a healed fence fleet stays a fence fleet.
+      subSystemKey:          (inv as { subSystemKey?: 'roof' | 'ground' | 'fence' }).subSystemKey,
     });
 
   } catch (err) {
@@ -186,6 +189,8 @@ function repairByEvenSplit(inv: InverterConfig, totalPanels: number): InverterCo
     strings,
     optimizerPeripheralId: inv.optimizerPeripheralId,
     deviceRatioOverride:   inv.deviceRatioOverride,
+    // Wave 3 (I-2 corollary): repair never strips the subsystem tag.
+    subSystemKey:          (inv as { subSystemKey?: 'roof' | 'ground' | 'fence' }).subSystemKey,
   });
 }
 

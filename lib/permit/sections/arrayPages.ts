@@ -15,6 +15,8 @@ import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
+import { classifyPanel } from '../utils/subSystems';
+import { isHybridPlanset, primarySubKey, subScopedView, subScopedInput } from './subSystemSheets';
 import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
@@ -30,10 +32,15 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
   validateSheet('roof', comp);
 
   // ── Primary view via explicit dispatcher (Step 4) ─────────────────────────
-  const drawingSvg = getPrimaryView(comp.primaryView, cad, input, ctx);
+  let drawingSvg = getPrimaryView(comp.primaryView, cad, input, ctx);
   if (!drawingSvg || drawingSvg.length < 500) {
     throw new Error(`[pageRoofPlan] getPrimaryView(${comp.primaryView}) returned empty SVG`);
   }
+
+  // ── This IS the site plan now (PV-1). The standalone site sheet was folded
+  // in 2026-07-08: the roof drawing carries the integrated site context —
+  // property line, street, driveway (aerial), and service equipment — drawn
+  // by drawRoofPlan via drawSiteContextEls, matching the professional reference.
 
   // ── Secondary view (Step 6) ───────────────────────────────────────────────
   // Roof plan: no secondary strip (setbacks/obstructions integrated into primary)
@@ -41,14 +48,14 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2', 'ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-1', 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
 
 
 
-export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
   const vr = validateSheetComposition('ground_mount', cad);
   if (!vr.valid) console.warn('[pageGroundArrayPlan] CAD warnings:', vr.errors);
 
@@ -70,15 +77,15 @@ export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: 
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2', 'GROUND ARRAY PLAN', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SITE & GROUND ARRAY PLAN', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
 
 
 
-export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
-  console.log('[PLANSET ENGINE] pageFencePlan — PV-2 fence elevation is PRIMARY view');
+export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
+  console.log('[PLANSET ENGINE] pageFencePlan — PV-1 fence elevation is PRIMARY view');
   const vr = validateSheetComposition('solar_fence', cad);
   if (!vr.valid) console.warn('[pageFencePlan] CAD warnings:', vr.errors);
 
@@ -104,7 +111,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2', 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
     ${composeDrawPage(comp, primarySvg, secondarySvg)}
   </div>`;
 }
@@ -115,13 +122,13 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 // Detailed schematic showing array groupings, string assignments, row/col grid
 
 
-// PV-2B must show the STRING LAYOUT (a string-colored grouping schematic) -- a
-// DIFFERENT drawing from PV-2 s to-scale roof plan. A prior "professional CAD"
-// override here called drawingEngine.getArrayPlanFromCAD, the very renderer PV-2
-// uses via getPrimaryView(roof_plan), so PV-2 and PV-2B came out as literal
-// duplicates. Removed: PV-2B now renders its own schematicGridSvg below.
+// PV-1B must show the STRING LAYOUT (a string-colored grouping schematic) -- a
+// DIFFERENT drawing from PV-1's to-scale site & roof plan. A prior "professional CAD"
+// override here called drawingEngine.getArrayPlanFromCAD, the very renderer PV-1
+// uses via getPrimaryView(roof_plan), so PV-1 and PV-1B came out as literal
+// duplicates. Removed: PV-1B now renders its own schematicGridSvg below.
 
-export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: { sheetId?: string; titleSuffix?: string }): string {
   const { project, system } = input;
   // CAD-sourced: use cad.totalPanels as authoritative count
   const cadTotalPanels = cad.totalPanels;
@@ -288,9 +295,19 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // Wp from the SYSTEM record (kW ÷ modules), never the stale per-panel
   // wattage field — layout panels carried 440W while the set said 400W,
   // and a checker multiplies qty × Wp on page one.
+  // Wp from the sub's REAL nameplate (inverter-fleet string first, then a
+  // placed module's own wattage) — NOT kW ÷ count. Dividing the (previously
+  // prorated) per-sub kW by the module count printed 421W for a 430W module;
+  // even with the kW now correct, count-division is a lossy round-trip, so the
+  // nameplate is authoritative and kW÷count is only a last-ditch fallback.
+  const _nameplateWp =
+    Number(system.inverters?.[0]?.strings?.[0]?.panelWatts)
+    || Number(panels.find(p => Number((p as { wattage?: number }).wattage) > 0)?.wattage)
+    || 0;
   const _sysWatts = (system.totalDcKw && totalPanels)
     ? Math.round((system.totalDcKw * 1000) / totalPanels) : null;
-  const _legendWatts = _sysWatts
+  const _legendWatts = _nameplateWp
+    || _sysWatts
     || system.inverters?.[0]?.strings?.[0]?.panelWatts
     || panels[0]?.wattage || 400;
   const legendItems = _isMicro
@@ -407,7 +424,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
     // Use the same roof renderer as PV-2, but WITH branch colors
     // (drawRoofPlan switches to "circuit layout" mode when panelColorById is present)
-    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById);
+    // Circuit sheet (PV-1B/PV-1BG/PV-1BF): pass the DC-string count + palette so
+    // the GROUND top-view colors modules by string (PV-1BG was a clone of PV-1G's
+    // physical layout). Only string systems get a string map; micro = AC branches.
+    const _groundCircuit = !_isMicro ? { strings: totalStrings, colors: stringColors } : null;
+    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById, _groundCircuit);
     if (roofSvg && roofSvg.length > 500) {
       agDrawSvg = roofSvg;
     } else {
@@ -419,6 +440,16 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     agDrawSvg = schematicGridSvg;
   }
 
+  // Fire-setback numbers from the SAME rule the drawing uses \u2014 needed by the
+  // callouts below and the supplemental block further down.
+  const _fsRoofFt2Early = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _fsMeanPitch = (() => {
+    const ps = ((cad.roof?.planes ?? []) as any[]).map(x => Number(x?.pitch)).filter(v => isFinite(v));
+    return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : undefined;
+  })();
+  const _fsCovEarly = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2Early, _fsMeanPitch);
+  const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
+
   // Callout notes for data zone
   const agCalloutRows = [
     { n: 1, label: 'NEC 690.8', sub: _isMicro
@@ -426,7 +457,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         : `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
     { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${azDisplay}` },
     { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa71204.2 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
-       sub: isRoof(cadSystemType) ? 'Min 18" ridge/hip setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
+       sub: isRoof(cadSystemType) ? `${_fsInEarly}" ridge \xb7 18" hip/valley setback` : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
     { n: 4, label: 'DC Capacity', sub: `${system.totalDcKw?.toFixed(2) || '\u2014'} kW DC` },
   ].map(c =>
     `<div class="callout-row">` +
@@ -438,16 +469,17 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // System-specific supplemental data \u2014 setback text from the SAME rule the
   // drawing uses (it claimed 18" per-AHJ while PV-2 hatched 3'-0" bands).
   const _fsRoofFt2 = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
-  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2);
+  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2, _fsMeanPitch);
   const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 ${_fsIn}" ridge/hip fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
+      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
+      <div>\u2022 18" clear at hips/valleys \u2014 IFC 2021 \xa71204.2.1.2</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
       <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
-      ${_isMicro && totalStrings > 4 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner accepts 4; remaining branches land on AC subpanel, see E-1</div>` : ''}
+      ${_isMicro && totalStrings > 5 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner 6C accepts 5; remaining branches land on AC subpanel, see E-1</div>` : ''}
     </div>` :
     isFence(cadSystemType) ? `
     <div class="draw-zone-hdr">FENCE SEGMENTS</div>
@@ -477,7 +509,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2B', 'ARRAY GEOMETRY & STRING LAYOUT', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `ARRAY GEOMETRY & STRING LAYOUT${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
     <!-- PIPELINE v47.343: PV-2B now uses draw-zone/data-zone layout -->
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->
@@ -542,6 +574,47 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 // DYNAMIC PAGE ROUTERS (PV-2 and PV-3)
 // ═══════════════════════════════════════════════════════════════
 export function pageArrayPrimary(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+  // HYBRID (Phase 1): the primary sheet is the TOP-DOWN SITE PLAN — the roof
+  // plan-dominant composition whose drawing (getArrayPlanFromCAD → drawRoofPlan)
+  // overlays the ground arrays + fence runs. Rendering the winner's view instead
+  // made the whole set fence-dominated with the real site plan shrunk to an
+  // inset (Stowell). Pass a roof-typed VIEW with the roof section's origin so
+  // composition/validation and the drawing agree.
+  const _hybRoof = cad.hybrid?.sections.find(sec => sec.key === 'roof');
+  if (cad.hybrid && cad.roof && _hybRoof) {
+    // Roof-subset totals + roof-only panelPositions: this sheet documents the
+    // ROOF; ground/fence draw as labeled overlays. Project-wide data here made
+    // the sheet claim all 94 modules on IronRidge and render ground/fence
+    // panels as floating roof modules with phantom setback violations.
+    // SYSTEMIC ROOT #2: `_hybRoof.dcKw` is the CAD section's PRORATED kW
+    // (projectDcKw × roofPanels/projectPanels → 20.23 for 48×430). Use the
+    // sub's OWN modules × nameplate instead (subScopedInput computes it, Σ
+    // per module) so PV-1's header/SYSTEM DATA reads the true 20.64 SCHED shows.
+    const _roofKw = subScopedInput(input, cad, 'roof').system?.totalDcKw ?? _hybRoof.dcKw;
+    const roofView = { ...cad, systemType: 'roof' as const,
+      originLat: _hybRoof.originLat, originLng: _hybRoof.originLng,
+      totalPanels: _hybRoof.totalPanels, totalDcKw: _roofKw };
+    const roofInput = { ...input,
+      project: { ...(input.project ?? {}),
+        panelPositions: ((input.project?.panelPositions ?? []) as any[]).filter(p => classifyPanel(p) === 'roof') },
+      system: { ...(input.system ?? {}), totalPanels: _hybRoof.totalPanels, totalDcKw: _roofKw,
+        // Project totals for project-wide chrome (title block) — the subset
+        // totals above are for the sheet header/drawing only.
+        _projectTotalDcKw: input.system?.totalDcKw, _projectTotalPanels: input.system?.totalPanels },
+    } as PermitInput;
+    return pageRoofPlan(roofInput, roofView, pageNum, totalPages, ctx);
+  }
+  // HYBRID with NO roof section (ground + fence): the primary sub (fixed
+  // roof > ground > fence order) owns PV-1 — scoped, never the project-wide
+  // winner page (which would claim the other sub's modules).
+  if (cad.hybrid && isHybridPlanset(cad)) {
+    const primary = primarySubKey(cad);
+    const view = subScopedView(cad, primary);
+    const scoped = subScopedInput(input, cad, primary);
+    if (primary === 'fence')  return pageFencePlan(scoped, view, pageNum, totalPages, ctx);
+    if (primary === 'ground') return pageGroundArrayPlan(scoped, view, pageNum, totalPages, ctx);
+    return pageRoofPlan(scoped, view, pageNum, totalPages, ctx);
+  }
   // Use cad.systemType — single source of truth
   if (isFence(cad.systemType))  return pageFencePlan(input, cad, pageNum, totalPages, ctx);
   if (isGround(cad.systemType)) return pageGroundArrayPlan(input, cad, pageNum, totalPages, ctx);

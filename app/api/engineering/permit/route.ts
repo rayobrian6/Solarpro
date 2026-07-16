@@ -17,8 +17,66 @@ import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
+import { applyAerialEdgeSnapRegistration } from '@/lib/permit/utils/aerialEdgeSnap';
+import { deskewArrayToTrue } from '@/lib/permit/utils/deskewArrayToTrue';
+
+/**
+ * Attach the county-GIS parcel boundary to input.aerialData.parcel when missing
+ * (PV-2 site-context inset + PV-1 property lines read it). Non-fatal; returns
+ * null-safe when the county isn't registered or the fetch fails — property lines
+ * are then simply omitted (no fabricated lot geometry).
+ */
+async function attachParcelIfMissing(input: PermitInput): Promise<void> {
+  const aerial = (input as unknown as { aerialData?: { parcel?: unknown; siteFeatures?: unknown } }).aerialData;
+  if (!aerial) return;
+  const lat = Number(input.project?.lat), lng = Number(input.project?.lng);
+  if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) < 0.001) return;
+  const county = (input.project as { county?: string | null })?.county || null;
+  const state = (input.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || null;
+  try {
+    if (!aerial.parcel) {
+      const parcel = await fetchParcelBoundary(lat, lng, county, state);
+      if (parcel) {
+        (aerial as { parcel?: unknown }).parcel = parcel;
+        console.log('[permit] parcel boundary attached:', parcel.polygon.length, 'pts, APN', parcel.apn ?? '—');
+      }
+    }
+  } catch (e: unknown) {
+    console.warn('[permit] parcel fetch skipped (non-fatal):', (e as Error)?.message);
+  }
+  // Nearmap AI ground surfaces (REAL driveways/walks/paving/footprints) — DB-
+  // cached (migration 102) so a property costs AT MOST ONE AI parcel, ever.
+  // Preferred over OSM; when present we skip the OSM call entirely.
+  const _aerialX = aerial as { siteFeatures?: unknown; nearmapSurfaces?: unknown };
+  try {
+    if (!_aerialX.nearmapSurfaces && process.env.NEARMAP_API_KEY) {
+      const nm = await getNearmapSurfacesCached(lat, lng, 55);
+      if (nm) {
+        _aerialX.nearmapSurfaces = nm;
+        console.log('[permit] nearmap surfaces:', nm.driveways.length, 'driveways,', nm.buildings.length, 'buildings,', nm.paved.length, 'paved');
+      }
+    }
+  } catch (e: unknown) {
+    console.warn('[permit] nearmap surfaces skipped (non-fatal):', (e as Error)?.message);
+  }
+  // Real roads + surrounding building footprints (OSM) — fallback ONLY when
+  // Nearmap didn't supply surfaces. Non-fatal.
+  try {
+    if (!_aerialX.siteFeatures && !_aerialX.nearmapSurfaces) {
+      const sf = await fetchSiteFeatures(lat, lng, 160);
+      if (sf) {
+        _aerialX.siteFeatures = sf;
+        console.log('[permit] site features attached:', sf.roads.length, 'roads,', sf.buildings.length, 'buildings');
+      }
+    }
+  } catch (e: unknown) {
+    console.warn('[permit] site features skipped (non-fatal):', (e as Error)?.message);
+  }
+}
 import { detectAerialVisionObstructions } from '@/lib/aerial/aerialVisionObstructions';
 import { fetchParcelBoundary } from '@/lib/aerial/parcelBoundary';
+import { fetchSiteFeatures } from '@/lib/aerial/siteFeatures';
+import { getNearmapSurfacesCached } from '@/lib/aerial/nearmapCache';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
 
@@ -146,6 +204,15 @@ export async function GET(req: NextRequest) {
       if ((!html || isStale) && inputJson) {
         try {
           const savedInput = JSON.parse(inputJson) as PermitInput;
+          // Square the array to true lines (de-skew azimuth + grid) before
+          // anything else reads it — see utils/deskewArrayToTrue.ts.
+          deskewArrayToTrue(savedInput);
+          // Attach the county-GIS parcel boundary if the saved snapshot predates
+          // the site-context feature (non-fatal, null-safe).
+          await attachParcelIfMissing(savedInput);
+          // Google-fallback aerials need the async edge-snap registration
+          // computed before the (sync) render — see utils/aerialEdgeSnap.ts.
+          await applyAerialEdgeSnapRegistration(savedInput);
           const freshHtml = generatePermitHTML(savedInput);
           console.log(`[permit/GET] Self-heal: regenerated v${savedVerNum || 0} -> v${PLANSET_ENGINE_VERSION} from permit_input.json`, { projectId });
           html = freshHtml;
@@ -513,6 +580,51 @@ export async function POST(req: NextRequest) {
       console.log('[permit/POST] inverter backfill failed (non-fatal):', (backfillErr as Error)?.message);
     }
 
+    // ─── Hybrid per-sub self-heal (permit integrity — E-1 "INVERTER NOT SELECTED") ─
+    // A Design-Studio round-trip / reload can hand the permit an in-memory config
+    // whose inverters lost their subSystemKey tags AND whose subSystems map is
+    // gone. The per-sub resolver then collapses EVERY hybrid lane to '—' — E-1
+    // prints "INVERTER NOT SELECTED" on all three (roof/ground/fence), each
+    // defaulting to a generic STRING INVERTER even for the roof micros. The saved
+    // engineering_config is authoritative and survives the round-trip in the DB,
+    // so restore the per-sub association from it: the subSystems MAP (which alone
+    // lets resolveEquipmentBySubSystem fill each lane from subSystems[key].inverterId
+    // — verified) PLUS re-tag the posted inverters by inverterId match. Fill-only:
+    // a payload that still carries tags/map is respected untouched. Non-fatal.
+    try {
+      if (projectId && isValidUUID(projectId)) {
+        const _invs = (body.system?.inverters as any[]) || [];
+        const _anyTag = _invs.some(i => i?.subSystemKey || (i?.strings || []).some((s: any) => s?.subSystemKey));
+        const _mapOk = !!(body.project as any)?.subSystems && Object.keys((body.project as any).subSystems).length > 0;
+        if ((!_anyTag || !_mapOk) && _invs.length > 0) {
+          const sql = await getDbReady();
+          const ecRows = await sql`SELECT engineering_config FROM projects WHERE id = ${projectId} LIMIT 1`;
+          const ec = ecRows[0]?.engineering_config as any;
+          const savedInvs: any[] = Array.isArray(ec?.inverters) ? ec.inverters : [];
+          if (!_mapOk && ec?.subSystems && Object.keys(ec.subSystems).length > 0) {
+            (body.project as any).subSystems = ec.subSystems;
+            console.log('[permit/POST] hybrid self-heal: restored subSystems map from engineering_config →', Object.keys(ec.subSystems).join(','));
+          }
+          if (!_anyTag && savedInvs.length > 0) {
+            const idToKey = new Map<string, string>();
+            for (const si of savedInvs) if (si?.inverterId && si?.subSystemKey) idToKey.set(String(si.inverterId), String(si.subSystemKey));
+            let _tagged = 0;
+            for (const inv of _invs) {
+              const k = inv?.inverterId ? idToKey.get(String(inv.inverterId)) : undefined;
+              if (k) {
+                inv.subSystemKey = k;
+                for (const st of (inv.strings || [])) if (st) st.subSystemKey = k;
+                _tagged++;
+              }
+            }
+            if (_tagged > 0) console.log('[permit/POST] hybrid self-heal: re-tagged', _tagged, 'inverter(s) from engineering_config by inverterId');
+          }
+        }
+      }
+    } catch (healErr) {
+      console.log('[permit/POST] hybrid self-heal skipped (non-fatal):', (healErr as Error)?.message);
+    }
+
     // ─── Auto-populate AHJ data from national database ──────────────────────
     {
       const stateFromAddr = (body.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '';
@@ -639,6 +751,24 @@ export async function POST(req: NextRequest) {
     console.log('[permit/POST] aerialData.imageBase64:', aerialData.imageBase64 ? `YES (${aerialData.imageBase64.length} chars)` : 'NO');
     console.log('[permit/POST] aerialData.roofSegments:', aerialData.roofSegments?.length ?? 0);
     console.log('[permit/POST] aerialData.error:', aerialData.error || 'none');
+    // County-GIS parcel boundary for the PV-2 site-context inset (+ PV-1 property
+    // lines). Uses the accurate (re-geocoded) center. Null-safe when the county
+    // isn't registered — property lines are then omitted (no fabricated lot).
+    if (aerialData && !(aerialData as { parcel?: unknown }).parcel
+        && isFinite(_centerLat) && isFinite(_centerLng) && Math.abs(_centerLat) > 0.001) {
+      try {
+        const _stateP = body.project?.state || (body.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || null;
+        const _parcel = await fetchParcelBoundary(_centerLat, _centerLng, body.project?.county || null, _stateP);
+        if (_parcel) {
+          (aerialData as { parcel?: unknown }).parcel = _parcel;
+          console.log('[permit/POST] parcel boundary:', _parcel.polygon.length, 'pts, APN', _parcel.apn ?? '—');
+        }
+      } catch (e: unknown) { console.warn('[permit/POST] parcel fetch skipped (non-fatal):', (e as Error)?.message); }
+    }
+    // NOTE: site-context surfaces (Nearmap AI / OSM) are fetched LATER, AFTER the
+    // aerial re-center (which replaces enrichedBody.aerialData) — see below. If
+    // fetched here they'd be wiped by that re-assignment (the bug that dropped
+    // driveways/buildings from PV-2 while the re-fetched parcel survived).
     const enrichedBody: PermitInput = { ...body, aerialData };
 
     // ── Fetch latest stored SLD SVG for this project ──────────────────────
@@ -1098,6 +1228,38 @@ export async function POST(req: NextRequest) {
       console.log('[parcel] lookup skipped:', (parcelErr as Error)?.message);
     }
 
+    // ── Site-context ground surfaces for the PV-2 site plan ───────────────────
+    // Fetched HERE (after the aerial re-center replaced aerialData, and next to
+    // the re-fetched parcel) so they actually survive to the render. Nearmap AI
+    // (REAL driveways/walks/paving/footprints, DB-cached ≤1 parcel/property) is
+    // preferred; OSM roads/buildings are the fallback when Nearmap is absent.
+    {
+      const _slat = Number(enrichedBody.project?.lat), _slng = Number(enrichedBody.project?.lng);
+      const _ax = enrichedBody.aerialData as { siteFeatures?: unknown; nearmapSurfaces?: unknown } | undefined;
+      if (_ax && isFinite(_slat) && isFinite(_slng) && Math.abs(_slat) > 0.001) {
+        if (!_ax.nearmapSurfaces && process.env.NEARMAP_API_KEY) {
+          try {
+            const _nm = await getNearmapSurfacesCached(_slat, _slng, 55);
+            if (_nm) {
+              _ax.nearmapSurfaces = _nm;
+              console.log('[permit/POST] nearmap surfaces:', _nm.driveways.length, 'driveways,', _nm.buildings.length, 'buildings,', _nm.paved.length, 'paved');
+            } else {
+              console.log('[permit/POST] nearmap surfaces: none (fetch returned null)');
+            }
+          } catch (e: unknown) { console.warn('[permit/POST] nearmap surfaces skipped:', (e as Error)?.message); }
+        }
+        if (!_ax.siteFeatures && !_ax.nearmapSurfaces) {
+          try {
+            const _sf = await fetchSiteFeatures(_slat, _slng, 160);
+            if (_sf) {
+              _ax.siteFeatures = _sf;
+              console.log('[permit/POST] site features (OSM fallback):', _sf.roads.length, 'roads,', _sf.buildings.length, 'buildings');
+            }
+          } catch (e: unknown) { console.warn('[permit/POST] site features skipped:', (e as Error)?.message); }
+        }
+      }
+    }
+
     // ── Survey-photo GPS hints → PV-1 equipment markers (tier 1) ──────────────
     // SurveyV2 photo capture samples device geolocation at snap time (mig 099).
     // A meter/main-panel photo GPS pins the equipment to the correct wall, so
@@ -1202,6 +1364,17 @@ export async function POST(req: NextRequest) {
         console.log('[permit/obstructions] aerial vision sweep skipped:', (visErr as Error)?.message);
       }
     }
+
+    // Google-fallback aerials: compute the design→imagery edge-snap shift
+    // before the (sync) render. The shift lands in aerialData.registrationShift
+    // and is persisted with the permit_input.json snapshot below (the GET
+    // self-heal recomputes it anyway).
+    // Square the array to true lines (de-skew per-plane azimuth + grid noise)
+    // before rendering AND before the snapshot is saved, so every sheet draws
+    // the arrays on true horizontal/vertical lines — see deskewArrayToTrue.ts.
+    deskewArrayToTrue(enrichedBody);
+
+    await applyAerialEdgeSnapRegistration(enrichedBody);
 
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });

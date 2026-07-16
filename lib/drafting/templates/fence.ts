@@ -43,6 +43,28 @@ import {
 } from '../callouts';
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { getMountingSystemById } from '../../mounting-hardware-db';
+
+// Wave 6.1 (punch 1a) — canonical fence-system display name. Fence racking is
+// ALWAYS SolFence (equipment-db 'solfence-8ft'; bom-system-profiles rackingBrand
+// 'SolFence'); a fence sheet must never brand the project-wide ROOF racking
+// (legacy config.mountingId contamination — Stowell PV-1F printed
+// "FENCE SYSTEM: ROOF TECH RT-MINI" / "RAIL ×2 — ROOF TECH RT-MINI").
+const SOLFENCE_DISPLAY = 'SOLFENCE VERTICAL SECTION SYSTEM';
+const NON_FENCE_MOUNT_RE = /roof\s?tech|rt[-\s]?mini|ironridge|unirac|snapnrack|quick\s?mount|s-5|xr\d|ground\s?mount|iron\s?ridge/i;
+
+/** Resolve the fence-system display name from the sub's own equipment —
+ *  never from a roof/ground mounting that leaked through the flat scalars. */
+function resolveFenceMountName(project: Record<string, unknown> | undefined | null): string {
+  const sel = project?.mountingSystemId
+    ? getMountingSystemById(String(project.mountingSystemId))
+    : undefined;
+  if (sel && sel.category === 'solar_fence') return `${sel.manufacturer} ${sel.model}`;
+  if (sel) return SOLFENCE_DISPLAY;                          // non-fence id ⇒ contamination
+  const name = String(project?.mountingSystem ?? '').trim();
+  if (name && NON_FENCE_MOUNT_RE.test(name)) return SOLFENCE_DISPLAY; // roof brand by name
+  return name || 'SOLAR FENCE SYSTEM';
+}
 
 // ── SEGMENT COLORS (one per segment, wraps) ──────────────────────────────────
 const SEG_COLORS = [
@@ -94,9 +116,8 @@ export function drawFencePlan(
   els.push(drawTitleBar(W, 'SOLAR FENCE — SITE PLAN (TOP-DOWN)', 'SCALE: AS SHOWN'));
 
   const dz = zones.draw;
-  const margin = 28;
 
-  // ── Compute bounding box of all segments ──
+  // ── Compute bounding box of all segments (local meters) ──
   const allX: number[] = [];
   const allY: number[] = [];
 
@@ -115,19 +136,37 @@ export function drawFencePlan(
   const minY = Math.min(...allY);
   const maxY = Math.max(...allY);
 
-  const spanX = (maxX - minX) * metersToFt(1) || 1;
-  const spanY = (maxY - minY) * metersToFt(1) || 1;
+  const mToFt   = metersToFt(1);
+  const spanXft = (maxX - minX) * mToFt;
+  const spanYft = (maxY - minY) * mToFt;
 
-  const scaleX = (dz.width  - 2 * margin) / spanX;
-  const scaleY = (dz.height - 2 * margin) / spanY;
-  const scale  = Math.min(scaleX, scaleY);
+  // ── AUTO-FIT + CENTER (kill the corner-of-empty-canvas look) ──
+  // Reserve padding for the module band, the parallel per-segment length dims
+  // and the overall run dimension so nothing clips at the draw-zone edges. Fit
+  // to the tighter axis, then CENTER the drawn extent in BOTH axes: a single
+  // straight run has ~0 height and previously pinned to the bottom edge, which
+  // is exactly the "85% dead canvas" Ray flagged.
+  // The fence run is long + thin, so the top-down alone can only ever be a
+  // ribbon. Confine it to the UPPER ~46% of the draw zone; the lower half
+  // carries a TYPICAL FENCE SECTION so the sheet fills instead of leaving a
+  // hairline in ~75% white (Ray's flag). planZone = the top-down's own zone.
+  const planZone = { x: dz.x, y: dz.y, width: dz.width, height: Math.round(dz.height * 0.34) };
+  const padPx    = 40;
+  const availW   = Math.max(80, planZone.width  - 2 * padPx);
+  const availH   = Math.max(70, planZone.height - 2 * padPx);
+  const fitScale = Math.min(availW / (spanXft || 1), availH / (spanYft || 1));
+  const scale    = Math.min(fitScale, 24);   // px per foot (cap so a short run isn't blown up huge)
 
-  const toSvgX = (xM: number) =>
-    dz.x + margin + (xM - minX) * metersToFt(1) * scale;
-  const toSvgY = (yM: number) =>
-    dz.y + dz.height - margin - (yM - minY) * metersToFt(1) * scale;
+  const drawnWpx = spanXft * scale;
+  const drawnHpx = spanYft * scale;
+  const originX  = planZone.x + (planZone.width  - drawnWpx) / 2;   // left edge of content
+  const originYb = planZone.y + (planZone.height + drawnHpx) / 2;   // vertical center of the plan zone
 
-  // ── Draw each segment (STEP 6: per-segment, not blob) ──
+  const toSvgX = (xM: number) => originX  + (xM - minX) * mToFt * scale;
+  const toSvgY = (yM: number) => originYb - (yM - minY) * mToFt * scale;
+
+  // ── Draw each segment: module band + module ticks + colored run + parallel dim ──
+  const BAND = 11;   // half-height (px) of the top-view module band
   segments.forEach((seg: any, i: number) => {
     const sx = seg.startX ?? seg.startPoint?.x ?? 0;
     const sy = seg.startY ?? seg.startPoint?.y ?? 0;
@@ -138,57 +177,129 @@ export function drawFencePlan(
     const x2 = toSvgX(ex), y2 = toSvgY(ey);
 
     const color    = segColor(i);
-    const lenFt    = seg.lengthFt ?? metersToFt(seg.lengthM ?? 0);
+    // Length label must match the line we draw: prefer an explicit length field,
+    // else derive it from the segment's own start/end geometry (never 0 when the
+    // run clearly spans a distance — the "0'-0" while the line is 63'" bug).
+    const geomLenFt = metersToFt(Math.hypot(ex - sx, ey - sy));
+    const lenFt    = seg.lengthFt ?? (seg.lengthM != null ? metersToFt(seg.lengthM) : geomLenFt);
     const panCount = seg.panelCount ?? 0;
     const segLabel = seg.label ?? seg.id ?? `SEG-${i + 1}`;
 
-    // Segment line (thick — represents fence run)
-    els.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}"
-      x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
-      stroke="${color}" stroke-width="3.5" stroke-linecap="round"/>`);
+    // Unit vectors: along-run (ux,uy) and perpendicular (nx,ny)
+    const segPx = Math.hypot(x2 - x1, y2 - y1) || 1;
+    const ux = (x2 - x1) / segPx, uy = (y2 - y1) / segPx;
+    const nx = -uy, ny = ux;
 
-    // Post dots along segment
-    const posts: Array<{ x: number; y: number }> =
-      seg.posts ?? seg._cadPosts ?? [];
+    // Module band — thin rectangle centred on the run (panels seen top-down)
+    const p1x = x1 + nx * BAND, p1y = y1 + ny * BAND;
+    const p2x = x2 + nx * BAND, p2y = y2 + ny * BAND;
+    const p3x = x2 - nx * BAND, p3y = y2 - ny * BAND;
+    const p4x = x1 - nx * BAND, p4y = y1 - ny * BAND;
+    els.push(`<polygon points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)} ${p3x.toFixed(1)},${p3y.toFixed(1)} ${p4x.toFixed(1)},${p4y.toFixed(1)}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="1"/>`);
 
-    if (posts.length > 0) {
-      posts.forEach((post: any) => {
-        const px = toSvgX(post.x ?? sx);
-        const py = toSvgY(post.y ?? sy);
-        els.push(drawCircleFilled(px, py, 3, '#333', '#000', 1));
-      });
-    } else {
-      // Approximate post positions from spacing
-      const postSpacingM = cadFence?.postSpacingM ?? 2.44;
-      const postSpacingFt = metersToFt(postSpacingM);
-      const nPosts = Math.round(lenFt / postSpacingFt) + 1;
-      for (let p = 0; p < nPosts; p++) {
-        const t  = nPosts > 1 ? p / (nPosts - 1) : 0;
-        const px = x1 + t * (x2 - x1);
-        const py = y1 + t * (y2 - y1);
-        els.push(drawCircleFilled(px, py, 3, '#333', '#000', 1));
-      }
+    // Module ticks — divide the run into panelCount cells (module boundaries)
+    const cells = Math.max(panCount, 1);
+    for (let c = 0; c <= cells; c++) {
+      const t   = c / cells;
+      const cxp = x1 + (x2 - x1) * t;
+      const cyp = y1 + (y2 - y1) * t;
+      const isEnd = c === 0 || c === cells;
+      const tk   = isEnd ? BAND : BAND * 0.82;
+      els.push(`<line x1="${(cxp + nx * tk).toFixed(1)}" y1="${(cyp + ny * tk).toFixed(1)}" x2="${(cxp - nx * tk).toFixed(1)}" y2="${(cyp - ny * tk).toFixed(1)}" stroke="${color}" stroke-width="${isEnd ? 1.4 : 0.7}"/>`);
     }
 
-    // Segment label — midpoint, outside line
-    const mx  = (x1 + x2) / 2;
-    const my  = (y1 + y2) / 2;
-    const ang = Math.atan2(y2 - y1, x2 - x1);
-    const perpX = -Math.sin(ang) * 14;
-    const perpY =  Math.cos(ang) * 14;
+    // Colored fence centreline (the run itself)
+    els.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="2.4" stroke-linecap="round"/>`);
 
-    // Colored badge background
-    const badgeW = 56, badgeH = 12;
-    els.push(`<rect x="${(mx + perpX - badgeW / 2).toFixed(1)}"
-      y="${(my + perpY - badgeH / 2).toFixed(1)}"
-      width="${badgeW}" height="${badgeH}"
-      fill="${color}" rx="2" opacity="0.85"/>`);
+    // ── Posts at SECTION JOINTS — physical SolFence install logic ─────────────
+    // SolFence ships pre-built ~8'-wide sections that carry 2 panels each and
+    // span BETWEEN two 4×4 posts. A post therefore lands at every section
+    // boundary — which is a panel EDGE — and NEVER in the middle of a panel.
+    // Posts = sections + 1. Deriving post positions from the module grid (not a
+    // free-running O.C. spacing) guarantees they sit on module boundaries.
+    const postSpacingFt = metersToFt(cadFence?.postSpacingM ?? 2.44);   // ~8' section
+    const panelWidthFt  = cells > 0 ? lenFt / cells : lenFt;
+    const panelsPerSection = Math.max(1, Math.round(postSpacingFt / Math.max(panelWidthFt, 0.1)));
+    const postCells: number[] = [];
+    for (let c = 0; c <= cells; c += panelsPerSection) postCells.push(c);
+    if (postCells[postCells.length - 1] !== cells) postCells.push(cells);   // always cap the run end
+    const postSq = 3;   // 4×4 post drawn as a small square straddling the run line
+    postCells.forEach(c => {
+      const t   = cells > 0 ? c / cells : 0;
+      const pxp = x1 + (x2 - x1) * t;
+      const pyp = y1 + (y2 - y1) * t;
+      els.push(`<rect x="${(pxp - postSq).toFixed(1)}" y="${(pyp - postSq).toFixed(1)}" width="${postSq * 2}" height="${postSq * 2}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
+      els.push(`<rect x="${(pxp - postSq).toFixed(1)}" y="${(pyp - postSq).toFixed(1)}" width="${postSq * 2}" height="${postSq * 2}" fill="url(#hatch-steel)"/>`);
+    });
 
-    els.push(drawText(mx + perpX, my + perpY + 3.5,
-      `${segLabel}: ${ftToFtIn(lenFt)} / ${panCount}p`, {
-        anchor: 'middle', fontSize: 6.5, fill: '#fff', fontWeight: 'bold',
-      }));
+    // Segment angle (deg) for rotated annotations; keep the label text upright
+    const angDeg = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+    let labelAng = angDeg;
+    if (labelAng > 90 || labelAng < -90) labelAng += 180;
+
+    // Parallel LENGTH dimension on the −n side of the band
+    const dimOff = BAND + 15;
+    const da1x = x1 - nx * dimOff, da1y = y1 - ny * dimOff;
+    const da2x = x2 - nx * dimOff, da2y = y2 - ny * dimOff;
+    els.push(`<line x1="${(x1 - nx * (BAND + 2)).toFixed(1)}" y1="${(y1 - ny * (BAND + 2)).toFixed(1)}" x2="${(da1x - nx * 2).toFixed(1)}" y2="${(da1y - ny * 2).toFixed(1)}" stroke="#c00" stroke-width="0.6"/>`);
+    els.push(`<line x1="${(x2 - nx * (BAND + 2)).toFixed(1)}" y1="${(y2 - ny * (BAND + 2)).toFixed(1)}" x2="${(da2x - nx * 2).toFixed(1)}" y2="${(da2y - ny * 2).toFixed(1)}" stroke="#c00" stroke-width="0.6"/>`);
+    els.push(`<line x1="${da1x.toFixed(1)}" y1="${da1y.toFixed(1)}" x2="${da2x.toFixed(1)}" y2="${da2y.toFixed(1)}" stroke="#c00" stroke-width="0.9"/>`);
+    els.push(drawArrowhead(da1x, da1y, angDeg, 5, '#c00'));
+    els.push(drawArrowhead(da2x, da2y, angDeg + 180, 5, '#c00'));
+    els.push(drawText((da1x + da2x) / 2 - nx * 6, (da1y + da2y) / 2 - ny * 6, ftToFtIn(lenFt), {
+      anchor: 'middle', fontSize: 6.5, fill: '#c00', fontWeight: 'bold', rotate: labelAng,
+    }));
+
+    // Colored segment badge on the +n side (id + panel count)
+    const badgeOff = BAND + 13;
+    const bmx = (x1 + x2) / 2 + nx * badgeOff;
+    const bmy = (y1 + y2) / 2 + ny * badgeOff;
+    const badgeW = 54, badgeH = 12;
+    els.push(`<rect x="${(bmx - badgeW / 2).toFixed(1)}" y="${(bmy - badgeH / 2).toFixed(1)}" width="${badgeW}" height="${badgeH}" fill="${color}" rx="2" opacity="0.9"/>`);
+    els.push(drawText(bmx, bmy + 3.5, `${segLabel} · ${panCount}p`, {
+      anchor: 'middle', fontSize: 6.5, fill: '#fff', fontWeight: 'bold',
+    }));
   });
+
+  // ── Overall bounding dimension (extent along the longer axis) ──
+  // Label must match what the line MEASURES: for a single straight run the
+  // bounding extent IS the total run; for a multi-segment (L / U) run the
+  // bounding width/depth is NOT the summed length, so label it as extent.
+  const single = segments.length === 1;
+  if (Math.max(drawnWpx, drawnHpx) > 50) {
+    if (drawnWpx >= drawnHpx) {
+      const oy  = originYb + BAND + 34;
+      const ox1 = originX, ox2 = originX + drawnWpx;
+      const lbl = single ? `TOTAL RUN: ${ftToFtIn(totalLengthFt)}` : `OVERALL W: ${ftToFtIn(spanXft)}`;
+      els.push(`<line x1="${ox1.toFixed(1)}" y1="${oy.toFixed(1)}" x2="${ox2.toFixed(1)}" y2="${oy.toFixed(1)}" stroke="#036" stroke-width="1.3"/>`);
+      els.push(`<line x1="${ox1.toFixed(1)}" y1="${(oy - 4).toFixed(1)}" x2="${ox1.toFixed(1)}" y2="${(oy + 4).toFixed(1)}" stroke="#036" stroke-width="1"/>`);
+      els.push(`<line x1="${ox2.toFixed(1)}" y1="${(oy - 4).toFixed(1)}" x2="${ox2.toFixed(1)}" y2="${(oy + 4).toFixed(1)}" stroke="#036" stroke-width="1"/>`);
+      els.push(drawArrowhead(ox1, oy, 0, 6, '#036'));
+      els.push(drawArrowhead(ox2, oy, 180, 6, '#036'));
+      els.push(drawText((ox1 + ox2) / 2, oy - 4, lbl, {
+        anchor: 'middle', fontSize: 7.5, fill: '#036', fontWeight: 'bold',
+      }));
+    } else {
+      const ox  = originX - BAND - 30;
+      const oy1 = originYb, oy2 = originYb - drawnHpx;
+      const lbl = single ? `TOTAL RUN: ${ftToFtIn(totalLengthFt)}` : `OVERALL D: ${ftToFtIn(spanYft)}`;
+      els.push(`<line x1="${ox.toFixed(1)}" y1="${oy1.toFixed(1)}" x2="${ox.toFixed(1)}" y2="${oy2.toFixed(1)}" stroke="#036" stroke-width="1.3"/>`);
+      els.push(drawArrowhead(ox, oy1, -90, 6, '#036'));
+      els.push(drawArrowhead(ox, oy2, 90, 6, '#036'));
+      els.push(drawText(ox - 4, (oy1 + oy2) / 2, lbl, {
+        anchor: 'middle', fontSize: 7.5, fill: '#036', fontWeight: 'bold', rotate: -90,
+      }));
+    }
+  }
+
+  // For a multi-segment run, print the summed length as a clear note in the
+  // (usually empty) top-left corner — the bounding dim above only measures one
+  // axis of an L/U-shaped run, so the summed run length needs its own callout.
+  if (!single) {
+    els.push(drawText(dz.x + 4, dz.y + 14, `TOTAL RUN (ALL SEGMENTS): ${ftToFtIn(totalLengthFt)}`, {
+      anchor: 'start', fontSize: 8, fill: '#036', fontWeight: 'bold',
+    }));
+  }
 
   // ── Gate openings ──
   const gates = cadFence?.gateOpenings ?? layout.fenceGateOpenings ?? [];
@@ -217,14 +328,145 @@ export function drawFencePlan(
     });
   }
 
-  // ── North arrow ──
-  els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
-
-  // ── Scale bar ──
+  // ── North arrow + scale bar (kept inside the plan zone, upper half) ──
+  els.push(drawNorthArrow(planZone.x + planZone.width - 22, planZone.y + 20, 20));
   const scaleBarFt = 20;
-  const scaleBarPx = scaleBarFt * scale;
-  els.push(drawScaleBar(zones.dims.left + 4, H - zones.dims.bottom + 28,
-    Math.round(scaleBarPx), `0    ${scaleBarFt} FT`));
+  els.push(drawScaleBar(planZone.x + 6, planZone.y + planZone.height - 8,
+    Math.round(scaleBarFt * scale), `0    ${scaleBarFt} FT`));
+
+  // ── Property-line + setback site context ────────────────────────────────────
+  // The top-down alone is a thin ribbon (a fence is long + shallow), floating in
+  // white. Drawing the property boundary it parallels + the setback dimension
+  // turns the hairline into a readable SITE PLAN and fills the plan zone (Ray).
+  {
+    const _sbFt = (cadFence as { setbackFt?: number } | undefined)?.setbackFt
+      ?? (layout as { fenceSetbackFt?: number }).fenceSetbackFt ?? 5;
+    const plY  = Math.max(planZone.y + 16, originYb - BAND - 46);   // property line above the run
+    const px1  = Math.max(planZone.x + 6, originX - 24);
+    const px2  = Math.min(planZone.x + planZone.width - 6, originX + drawnWpx + 24);
+    els.push(`<line x1="${px1.toFixed(1)}" y1="${plY.toFixed(1)}" x2="${px2.toFixed(1)}" y2="${plY.toFixed(1)}" stroke="#c0392b" stroke-width="1" stroke-dasharray="9,4"/>`);
+    els.push(drawText(px1 + 3, plY - 4, 'PROPERTY LINE (TYP.)', { anchor: 'start', fontSize: 6.5, fill: '#c0392b', fontWeight: 'bold' }));
+    const sbX = originX + drawnWpx * 0.28;
+    const fenceTopY = originYb - BAND;
+    if (fenceTopY - plY > 14) {
+      els.push(`<line x1="${sbX.toFixed(1)}" y1="${plY.toFixed(1)}" x2="${sbX.toFixed(1)}" y2="${fenceTopY.toFixed(1)}" stroke="#c0392b" stroke-width="0.8"/>`);
+      els.push(drawArrowhead(sbX, plY, -90, 5, '#c0392b'));
+      els.push(drawArrowhead(sbX, fenceTopY, 90, 5, '#c0392b'));
+      els.push(drawText(sbX + 4, (plY + fenceTopY) / 2 + 2, `${_sbFt}' SETBACK`, { anchor: 'start', fontSize: 6, fill: '#c0392b', fontWeight: 'bold' }));
+    }
+  }
+
+  // ── TYPICAL FENCE SECTION — fills the lower half of the draw zone ───────────
+  // A real cross-section (driven post + 90° vertical modules + embedment) gives
+  // the sheet vertical content instead of a thin run floating in white.
+  {
+    const postSpFt  = metersToFt(cadFence?.postSpacingM ?? 2.44);
+    const embedFt   = metersToFt(cadFence?.postEmbedM   ?? 0.91);
+    const panelHtFt = metersToFt(cadFence?.panelHeightM ?? 1.83);
+    const rails     = Math.max(1, cadFence?.railCount ?? 2);
+    const clrFt     = 0.5;
+
+    const secX = dz.x, secW = dz.width;
+    const secY = dz.y + dz.height * 0.37;
+    const secH = dz.height - (secY - dz.y) - 6;
+
+    els.push(drawRectFilled(secX, secY, secW, 13, '#1a2332', '#1a2332', 0));
+    els.push(drawText(secX + 6, secY + 9.3,
+      `TYPICAL FENCE SECTION — VERTICAL MODULES · DRIVEN POST @ ${postSpFt.toFixed(0)}' O.C.`, {
+        anchor: 'start', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+
+    const innerTop = secY + 13;
+    const grade    = innerTop + (secH - 13) * 0.58;
+    const vft = Math.min(
+      (grade - innerTop - 18) / (panelHtFt + clrFt + 0.5),
+      (secY + secH - grade - 20) / (embedFt + 0.3),
+      22);
+    const clrPx   = clrFt * vft;
+    const panelPx = panelHtFt * vft;
+    const embedPx = embedFt * vft;
+    const bayPx   = Math.min(postSpFt * vft, secW * 0.30);
+    const cx      = secX + secW * 0.34;
+    const leftPost = cx - bayPx / 2, rightPost = cx + bayPx / 2;
+    const postTopY = grade - clrPx - panelPx - 8;
+    const panTop   = grade - clrPx - panelPx;
+
+    // Grade line + hatch
+    els.push(`<line x1="${(secX + 20).toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(secX + secW - 24).toFixed(1)}" y2="${grade.toFixed(1)}" stroke="#6b4a2a" stroke-width="1.8"/>`);
+    for (let i = 0; i < 22; i++) {
+      const gx = secX + 24 + i * ((secW - 48) / 22);
+      els.push(`<line x1="${gx.toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(gx - 5).toFixed(1)}" y2="${(grade + 6).toFixed(1)}" stroke="#6b4a2a" stroke-width="0.5"/>`);
+    }
+    // Posts: above grade (solid steel) + below grade (dashed embed)
+    for (const px of [leftPost, rightPost]) {
+      els.push(`<rect x="${(px - 2.6).toFixed(1)}" y="${postTopY.toFixed(1)}" width="5.2" height="${(grade - postTopY).toFixed(1)}" fill="#8a8a8a" stroke="#333" stroke-width="1"/>`);
+      els.push(`<rect x="${(px - 2.6).toFixed(1)}" y="${grade.toFixed(1)}" width="5.2" height="${embedPx.toFixed(1)}" fill="#707070" stroke="#333" stroke-width="1" stroke-dasharray="4,2"/>`);
+    }
+    // Vertical PV modules between posts — a SolFence section carries 2 PORTRAIT
+    // panels side by side (8' section = 2 panels), not one panel spanning the
+    // bay. CAD line-art: white glazing, black frame, thin cell grid.
+    const panelWidthFt = metersToFt((cadFence as any)?.panelWidthM ?? 1.134);
+    const nSecPanels = Math.max(1, Math.round(postSpFt / Math.max(panelWidthFt, 0.5)));
+    const innerL = leftPost + 4, innerR = rightPost - 4;
+    const secGap = 3;
+    const secPw = (innerR - innerL - secGap * (nSecPanels - 1)) / nSecPanels;
+    for (let pi = 0; pi < nSecPanels; pi++) {
+      const pxL = innerL + pi * (secPw + secGap);
+      els.push(`<rect x="${pxL.toFixed(1)}" y="${panTop.toFixed(1)}" width="${secPw.toFixed(1)}" height="${panelPx.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1.1"/>`);
+      // center mullion (2-cell-column portrait module) + row grid
+      els.push(`<line x1="${(pxL + secPw / 2).toFixed(1)}" y1="${(panTop + 1).toFixed(1)}" x2="${(pxL + secPw / 2).toFixed(1)}" y2="${(panTop + panelPx - 1).toFixed(1)}" stroke="#9ca3af" stroke-width="0.4"/>`);
+      for (let r = 1; r < 6; r++) {
+        const ry = panTop + (panelPx * r) / 6;
+        els.push(`<line x1="${(pxL + 1).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${(pxL + secPw - 1).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="#9ca3af" stroke-width="0.4"/>`);
+      }
+    }
+    // Wind arrow
+    const wY = (panTop + grade) / 2;
+    els.push(`<line x1="${(rightPost + 44).toFixed(1)}" y1="${wY.toFixed(1)}" x2="${(rightPost + 10).toFixed(1)}" y2="${wY.toFixed(1)}" stroke="#c00" stroke-width="1.6"/>`);
+    els.push(drawArrowhead(rightPost + 10, wY, 180, 6, '#c00'));
+    els.push(drawText(rightPost + 48, wY - 3, 'WIND', { anchor: 'start', fontSize: 6.5, fontWeight: 'bold', fill: '#c00' }));
+    // Dimensions
+    els.push(drawText(leftPost - 9, (panTop + grade - clrPx) / 2, `${panelHtFt.toFixed(1)}' PANEL`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#1a4a8a', rotate: -90 }));
+    els.push(drawText(rightPost + 10, grade + embedPx / 2, `${embedFt.toFixed(1)}' EMBED`, { anchor: 'start', fontSize: 6.8, fontWeight: 'bold', fill: '#333' }));
+    const dy = grade + embedPx + 13;
+    els.push(`<line x1="${leftPost.toFixed(1)}" y1="${dy.toFixed(1)}" x2="${rightPost.toFixed(1)}" y2="${dy.toFixed(1)}" stroke="#036" stroke-width="0.9"/>`);
+    els.push(`<line x1="${leftPost.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${leftPost.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#036" stroke-width="0.8"/>`);
+    els.push(`<line x1="${rightPost.toFixed(1)}" y1="${(dy - 4).toFixed(1)}" x2="${rightPost.toFixed(1)}" y2="${(dy + 4).toFixed(1)}" stroke="#036" stroke-width="0.8"/>`);
+    els.push(drawText(cx, dy - 3, `${postSpFt.toFixed(0)}' O.C.`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#036' }));
+
+    // Left: overall post-length dimension (above-grade + embed), fills left third
+    const totalPostFt = (grade - postTopY) / vft + embedFt;
+    const xL = leftPost - 34;
+    els.push(`<line x1="${xL.toFixed(1)}" y1="${postTopY.toFixed(1)}" x2="${xL.toFixed(1)}" y2="${(grade + embedPx).toFixed(1)}" stroke="#333" stroke-width="0.8"/>`);
+    els.push(`<line x1="${(xL - 4).toFixed(1)}" y1="${postTopY.toFixed(1)}" x2="${(xL + 4).toFixed(1)}" y2="${postTopY.toFixed(1)}" stroke="#333" stroke-width="0.8"/>`);
+    els.push(`<line x1="${(xL - 4).toFixed(1)}" y1="${(grade + embedPx).toFixed(1)}" x2="${(xL + 4).toFixed(1)}" y2="${(grade + embedPx).toFixed(1)}" stroke="#333" stroke-width="0.8"/>`);
+    els.push(drawText(xL - 6, (postTopY + grade + embedPx) / 2, `${totalPostFt.toFixed(1)}' POST L.`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#333', rotate: -90 }));
+
+    // Right: FENCE SECTION NOTES panel, fills the right third
+    const npX = secX + secW * 0.54;
+    const npW = secX + secW - 16 - npX;
+    const npTop = innerTop + 4;
+    els.push(drawRectFilled(npX, npTop, npW, 13, '#1a2332', '#1a2332', 0));
+    els.push(drawText(npX + 6, npTop + 9.3, 'FENCE SECTION NOTES', { anchor: 'start', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+    const secNotes = [
+      `Modules mounted 90° VERTICAL, side-by-side — ${panelHtFt.toFixed(1)}' panel height above grade.`,
+      `${rails}-rail SolFence vertical section system; posts @ ${postSpFt.toFixed(0)}' O.C.`,
+      `Foundation: 2-3/8" dia. driven steel pile, ${embedFt.toFixed(1)}' min embedment — NO concrete.`,
+      'Field-verify post size + driven depth to refusal per geotech.',
+      'Bond all posts, rails + frames to EGC — min #6 AWG Cu (NEC 250.166).',
+      'Wind design per ASCE 7-22; verify exposure category on site.',
+      'All dimensions NTS — verify in field.',
+    ];
+    let sny = npTop + 20;
+    secNotes.forEach((n, i) => {
+      els.push(drawText(npX + 5, sny + 6, `${i + 1}.`, { anchor: 'start', fontSize: 6.3, fontWeight: 'bold', fill: '#1a2332' }));
+      els.push(drawText(npX + 15, sny + 6, n, { anchor: 'start', fontSize: 6.3, fill: '#333' }));
+      sny += 13;
+    });
+
+    els.push(drawText(secX + secW * 0.34, secY + secH - 1,
+      'DRIVEN STEEL POST — NO CONCRETE · MODULES 90° VERTICAL · FIELD-VERIFY EMBEDMENT', {
+        anchor: 'middle', fontSize: 6.3, fill: '#888', italic: true }));
+  }
 
   // ── Data zone — segment schedule (STEP 8: fence-specific only) ──
   const dZone = zones.data;
@@ -253,7 +495,11 @@ export function drawFencePlan(
 
   // Segment rows
   segments.forEach((seg: any, i: number) => {
-    const lenFt    = seg.lengthFt ?? metersToFt(seg.lengthM ?? 0);
+    // Same geometry-derived length fallback as the drawing (never 0 when the
+    // segment spans real start/end coords).
+    const _sx = seg.startX ?? seg.startPoint?.x ?? 0, _sy = seg.startY ?? seg.startPoint?.y ?? 0;
+    const _ex = seg.endX ?? seg.endPoint?.x ?? 0,     _ey = seg.endY ?? seg.endPoint?.y ?? 0;
+    const lenFt    = seg.lengthFt ?? (seg.lengthM != null ? metersToFt(seg.lengthM) : metersToFt(Math.hypot(_ex - _sx, _ey - _sy)));
     const panCount = seg.panelCount ?? 0;
     const azDeg    = (seg.azimuth ?? 0).toFixed(0);
     const segLabel = seg.label ?? seg.id ?? `S${i + 1}`;
@@ -350,9 +596,23 @@ export function drawFenceElevation(
   const totalLengthFt  = cadFence ? metersToFt(cadFence.totalLengthM) : (layout.fenceTotalLengthFt ?? 0);
   const totalPanels    = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw           = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
-  const windSpeedMph   = engineering.windSpeedMph   ?? project?.ahjWindSpeedMph   ?? 90;
+  // Wave 6.2 (punch 1b): the elevation's WIND callout/schedule row must agree
+  // with the FENCE DATA zone (sheetComposition.getFenceData), which reads the
+  // REAL design wind from compliance.structural.wind.windSpeed first. The
+  // canonical site block carries that same value (buildCanonical:
+  // site.windSpeed = structural wind || ahj || project). The old chain fell
+  // straight to a hardcoded 90 while FENCE DATA said 115 MPH Vult (Stowell).
+  const _canonWind     = Number((project as unknown as {
+    _canonical?: { site?: { windSpeed?: number } };
+  })?._canonical?.site?.windSpeed) || 0;
+  const windSpeedMph   = engineering.windSpeedMph
+    ?? (_canonWind > 0 ? _canonWind : undefined)
+    ?? project?.ahjWindSpeedMph
+    ?? 115;   // same last-resort default as getFenceData — never a private 90
   const groundSnowPsf  = engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
-  const mountSys       = (project?.mountingSystem   || 'SOLAR FENCE SYSTEM').toUpperCase();
+  // Wave 6.1 (punch 1a): fence-system name from the sub's own equipment —
+  // never the raw project-wide mountingSystem scalar (roof racking leak).
+  const mountSys       = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
 
   // First segment for display (show 2 full bays)
   const segments: any[] = cadFence?.segments ?? layout.fenceSegments ?? [];
@@ -371,9 +631,12 @@ export function drawFenceElevation(
   const els: string[] = [];
   els.push(drawSVGOpen(W, H));
   els.push(drawBackground(W, H, '#fafafa'));
+  // Wave 6.2 (punch 1c): the drawing shows a TYPICAL 2-bay section — the old
+  // header read as if the whole fence were the drawn ~16' width; name the
+  // full run length so the detail can't be mistaken for the total extent.
   els.push(drawTitleBar(W,
-    'SOLAR FENCE — STRUCTURAL ELEVATION + POST DETAIL',
-    'SCALE: 1/2"=1\'-0"'));
+    `SOLAR FENCE — TYPICAL 2-BAY ELEVATION + POST DETAIL (${ftToFtIn(totalLengthFt)} L.F. TOTAL RUN)`,
+    'SCALE: 1/2"=1\'-0" — TYP. SECTION'));
 
   const dz = zones.draw;
 
@@ -398,23 +661,19 @@ export function drawFenceElevation(
   const toYa = (ft: number) => groundY - ft * FT_PX;   // above grade (up)
   const toYb = (ft: number) => groundY + ft * FT_PX;   // below grade (down)
 
-  // ── STEP 7: Ground plane ──
-  // Sky background
-  els.push(`<rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${(groundY - dz.y).toFixed(1)}"
-    fill="#f0f8ff" opacity="0.5"/>`);
-  // Earth/soil background
-  els.push(`<rect x="${dz.x}" y="${groundY.toFixed(1)}" width="${dz.width}" height="${(dz.y + dz.height - groundY).toFixed(1)}"
-    fill="#8B6914" opacity="0.18"/>`);
-  // Ground hatch (earth)
-  for (let hx = dz.x; hx < dz.x + dz.width; hx += 8) {
-    els.push(`<line x1="${hx.toFixed(1)}" y1="${groundY.toFixed(1)}"
-      x2="${(hx - 10).toFixed(1)}" y2="${(groundY + 12).toFixed(1)}"
-      stroke="#8B6914" stroke-width="0.7" opacity="0.5"/>`);
+  // ── STEP 7: Ground plane (CAD structural convention — no sky/soil color) ──
+  // A PE elevation is monochrome line-art: a bold GRADE line with a thin band of
+  // standard earth hatch just below it — not a colored sky/soil rendering.
+  const gradeX2 = dz.x + dz.width * 0.86;
+  const earthBandH = 14;
+  els.push(`<rect x="${dz.x}" y="${groundY.toFixed(1)}" width="${(gradeX2 - dz.x).toFixed(1)}" height="${earthBandH}" fill="url(#hatch-earth)"/>`);
+  // Bold grade line + short earth ticks below (ANSI grade symbol).
+  els.push(`<line x1="${dz.x}" y1="${groundY.toFixed(1)}" x2="${gradeX2.toFixed(1)}" y2="${groundY.toFixed(1)}" stroke="#111" stroke-width="1.6"/>`);
+  for (let hx = dz.x + 4; hx < gradeX2; hx += 11) {
+    els.push(`<line x1="${hx.toFixed(1)}" y1="${groundY.toFixed(1)}" x2="${(hx - 6).toFixed(1)}" y2="${(groundY + 6).toFixed(1)}" stroke="#111" stroke-width="0.6"/>`);
   }
-  // Ground line (bold)
-  els.push(drawLine(dz.x, groundY, dz.x + dz.width * 0.85, groundY, 'line-struct'));
-  els.push(drawText(dz.x + dz.width * 0.85 + 4, groundY + 3, 'GRADE', {
-    anchor: 'start', fontSize: 7, fill: '#333', fontWeight: 'bold',
+  els.push(drawText(gradeX2 + 4, groundY + 3, 'GRADE', {
+    anchor: 'start', fontSize: 7, fill: '#111', fontWeight: 'bold',
   }));
 
   // ── 3 posts (2 full bays) ──
@@ -425,34 +684,43 @@ export function drawFenceElevation(
     postPositions.push(p * postSpacingFt);
   }
 
+  // SolFence foundation = 2-3/8" steel pipe DRIVEN (no concrete). The square
+  // 4×4 SolFence post seats OVER the round driven pile (via the donut collar).
+  const pileWPx = Math.max(postWPx * 0.62, 3);   // 2-3/8" pipe vs 4" post
   postPositions.forEach((posFt, pi) => {
     const px = toX(posFt);
-
-    // Post above grade — steel gradient + hatch
-    const pTopY = toYa(panelHeightFt + 0.5);   // post extends slightly above panel top
-    els.push(`<rect x="${(px - postWPx/2).toFixed(1)}" y="${pTopY.toFixed(1)}" width="${postWPx}" height="${(groundY - pTopY).toFixed(1)}" fill="url(#post-steel)" stroke="#333" stroke-width="1.2"/>`);
-    // Steel hatch overlay
-    els.push(`<rect x="${(px - postWPx/2).toFixed(1)}" y="${pTopY.toFixed(1)}" width="${postWPx}" height="${(groundY - pTopY).toFixed(1)}" fill="url(#hatch-steel)" opacity="0.35"/>`);
-
-    // Post below grade (embed) — dashed to show hidden/buried
     const pBotY = toYb(postEmbedFt);
-    els.push(`<rect x="${(px - postWPx/2).toFixed(1)}" y="${groundY.toFixed(1)}" width="${postWPx}" height="${(pBotY - groundY).toFixed(1)}" fill="#707070" stroke="#333" stroke-width="1" stroke-dasharray="4,2"/>`);
 
-    // Concrete footing (wider block below embed) — concrete gradient + hatch
-    const footW = postWPx * 2.5;
-    const footH = Math.max(FT_PX * 0.6, 8);
-    els.push(`<rect x="${(px - footW/2).toFixed(1)}" y="${(pBotY - footH).toFixed(1)}" width="${footW}" height="${footH}" fill="url(#concrete-grad)" stroke="#777" stroke-width="1.0" rx="2"/>`);
-    // Concrete hatch overlay
-    els.push(`<rect x="${(px - footW/2).toFixed(1)}" y="${(pBotY - footH).toFixed(1)}" width="${footW}" height="${footH}" fill="url(#hatch-concrete)" opacity="0.3" rx="2"/>`);
+    // ── Below grade: 2-3/8" round steel pile, DRIVEN (dashed = buried),
+    //    driven point at the tip. NO concrete footing. ──
+    const pileTopY = groundY - 1;
+    const pileShaftBot = pBotY - pileWPx * 0.9;   // leave room for the driven tip
+    // Driven pile: hidden (buried) member → dashed black outline, white body.
+    els.push(`<rect x="${(px - pileWPx/2).toFixed(1)}" y="${pileTopY.toFixed(1)}" width="${pileWPx.toFixed(1)}" height="${(pileShaftBot - pileTopY).toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="0.9" stroke-dasharray="4,2"/>`);
+    // Driven chisel point
+    els.push(`<path d="M ${(px - pileWPx/2).toFixed(1)} ${pileShaftBot.toFixed(1)} L ${px.toFixed(1)} ${pBotY.toFixed(1)} L ${(px + pileWPx/2).toFixed(1)} ${pileShaftBot.toFixed(1)} Z" fill="#ffffff" stroke="#111" stroke-width="0.9" stroke-dasharray="4,2"/>`);
 
-    // Post cap — steel gradient
-    els.push(`<rect x="${(px - postWPx/2 - 2).toFixed(1)}" y="${(pTopY - 5).toFixed(1)}" width="${postWPx + 4}" height="5" fill="url(#pile-steel)" stroke="#555" stroke-width="0.8"/>`);
+    // ── Above grade: square 4×4 SolFence post — steel section (hatch + outline) ──
+    const pTopY = toYa(panelHeightFt + 0.5);   // extends slightly above panel top
+    els.push(`<rect x="${(px - postWPx/2).toFixed(1)}" y="${pTopY.toFixed(1)}" width="${postWPx}" height="${(groundY - pTopY).toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1.2"/>`);
+    els.push(`<rect x="${(px - postWPx/2).toFixed(1)}" y="${pTopY.toFixed(1)}" width="${postWPx}" height="${(groundY - pTopY).toFixed(1)}" fill="url(#hatch-steel)"/>`);
 
-    // Post label (only middle post to avoid clutter)
+    // ── Base plate / collar at grade: square post seated over the driven pile ──
+    const collarH = Math.max(FT_PX * 0.3, 5);
+    els.push(`<rect x="${(px - postWPx/2 - 1).toFixed(1)}" y="${(groundY - collarH/2).toFixed(1)}" width="${(postWPx + 2).toFixed(1)}" height="${collarH.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
+
+    // Post cap
+    els.push(`<rect x="${(px - postWPx/2 - 2).toFixed(1)}" y="${(pTopY - 5).toFixed(1)}" width="${postWPx + 4}" height="5" fill="#ffffff" stroke="#111" stroke-width="0.9"/>`);
+
+    // Labels (middle post only, to avoid clutter)
     if (pi === 1) {
-      els.push(drawText(px, pTopY - 8, 'POST (TYP.)', {
+      els.push(drawText(px, pTopY - 8, '4×4 POST (TYP.)', {
         anchor: 'middle', fontSize: 6.5, fill: '#333', fontWeight: 'bold',
       }));
+      els.push(drawText(px + pileWPx / 2 + 3, toYb(postEmbedFt * 0.5),
+        '2-3/8" DIA. STEEL PILE — DRIVEN (NO CONCRETE)', {
+          anchor: 'start', fontSize: 5.4, fill: '#555', italic: true,
+        }));
     }
   });
 
@@ -484,65 +752,53 @@ export function drawFenceElevation(
     ));
   });
 
-  // ── PV panels between posts (per bay) ──
-  const panelW_ft = panelLenIn / 12;   // panel landscape = length horizontal
-  const panelH_ft = panelWidIn / 12;
-  const panelWpx  = Math.min(panelW_ft * FT_PX, postSpacingFt * FT_PX - postWPx - 4);
-  const panelHpx  = panelH_ft * FT_PX;
-
-  // Panels fill the post spacing (stacked vertically = panel height)
-  const panelBotY  = toYa(0) - 2;                 // just above grade
+  // ── PV panels — SolFence 90° VERTICAL mount ──
+  // Modules stand STRAIGHT UP (portrait, full fence height) and sit SIDE BY
+  // SIDE within each bay — they are NEVER stacked in rows. A SolFence 8' section
+  // carries 2 modules; the count per bay is derived from module width vs the
+  // clear bay width.
+  const panelWidFt = panelWidIn / 12;             // module WIDTH (short dim) → horizontal
+  const panelBotY  = toYa(0) - 2;                 // ~2" ground clearance
   const panelTopY  = toYa(panelHeightFt) + 2;
-  const panelDrawH = panelBotY - panelTopY;        // total draw height
-
-  // How many panel rows stack vertically within the fence height?
-  // This is a physical count: panelHeightFt / panel-width-in-feet
-  // Cap at what fits visually (don't use total panel count — that's the horizontal count)
-  const panelRowsPhysical = Math.max(Math.round(panelHeightFt / (panelWidIn / 12)), 1);
-  const panelsPerBay = Math.min(panelRowsPhysical, 6);  // max 6 rows shown for clarity
 
   for (let bay = 0; bay < 2; bay++) {
-    const bayX1 = toX(postPositions[bay]) + postWPx / 2 + 2;
-    const bayX2 = toX(postPositions[bay + 1]) - postWPx / 2 - 2;
+    const bayX1 = toX(postPositions[bay]) + postWPx / 2 + 3;
+    const bayX2 = toX(postPositions[bay + 1]) - postWPx / 2 - 3;
     const bayW  = bayX2 - bayX1;
 
-    // Stack panels in bay
-    const safePanelDrawH = Math.max(panelDrawH, 4);  // never let draw height go negative
-    const panHFit = safePanelDrawH / Math.max(panelsPerBay, 1);
-    const nPanels = Math.max(panelsPerBay, 1);
+    const panelsPerBay = Math.max(1, Math.min(3,
+      Math.round(bayW / Math.max(panelWidFt * FT_PX, 1))));
+    const gap  = 3;
+    const panW = (bayW - gap * (panelsPerBay - 1)) / panelsPerBay;
+    const panH = Math.max(panelBotY - panelTopY, 4);
 
-    for (let pv = 0; pv < nPanels; pv++) {
-      const pvY1 = panelTopY + pv * panHFit + 1;
-      const pvH  = Math.max(panHFit - 2, 1);  // clamp: never negative, min 1px
-      const pvW  = bayW;
+    for (let pv = 0; pv < panelsPerBay; pv++) {
+      const pvX = bayX1 + pv * (panW + gap);
 
-      // Panel body — dark blue PV glass
-      els.push(`<rect x="${bayX1.toFixed(1)}" y="${pvY1.toFixed(1)}" width="${pvW.toFixed(1)}" height="${pvH.toFixed(1)}" fill="url(#panel-glass)" stroke="#0a1e4a" stroke-width="1.0" opacity="0.93" rx="0.5"/>`);
-      // Aluminum frame inner border
-      els.push(`<rect x="${(bayX1 + 1.5).toFixed(1)}" y="${(pvY1 + 1.5).toFixed(1)}" width="${(pvW - 3).toFixed(1)}" height="${(pvH - 3).toFixed(1)}" fill="none" stroke="rgba(180,210,240,0.6)" stroke-width="0.8"/>`);
+      // Module — CAD line-art: aluminum frame (double line), white glazing,
+      // thin cell/mullion grid. No glass gradient (this is an engineering
+      // elevation, not a product render).
+      els.push(`<rect x="${pvX.toFixed(1)}" y="${panelTopY.toFixed(1)}" width="${panW.toFixed(1)}" height="${panH.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1.1"/>`);
+      els.push(`<rect x="${(pvX + 1.6).toFixed(1)}" y="${(panelTopY + 1.6).toFixed(1)}" width="${(panW - 3.2).toFixed(1)}" height="${(panH - 3.2).toFixed(1)}" fill="none" stroke="#111" stroke-width="0.5"/>`);
 
-      // Cell grid (6 cells horizontal busbars)
-      if (pvW > 12) {
-        const cellW = (pvW - 3) / 6;
-        for (let c = 1; c < 6; c++) {
-          els.push(`<line x1="${(bayX1 + 1.5 + c * cellW).toFixed(1)}" y1="${(pvY1 + 1.5).toFixed(1)}" x2="${(bayX1 + 1.5 + c * cellW).toFixed(1)}" y2="${(pvY1 + pvH - 1.5).toFixed(1)}" stroke="rgba(147,197,253,0.45)" stroke-width="0.5"/>`);
-        }
+      // Portrait cell grid — center mullion (2 cols) + 6 rows, thin gray CAD lines
+      if (panW > 8) {
+        els.push(`<line x1="${(pvX + panW/2).toFixed(1)}" y1="${(panelTopY + 1.6).toFixed(1)}" x2="${(pvX + panW/2).toFixed(1)}" y2="${(panelTopY + panH - 1.6).toFixed(1)}" stroke="#6b7280" stroke-width="0.5"/>`);
       }
-      // Cell grid (3 cells vertical)
-      if (pvH > 10) {
-        const cellH = (pvH - 3) / 3;
-        for (let r = 1; r < 3; r++) {
-          els.push(`<line x1="${(bayX1 + 1.5).toFixed(1)}" y1="${(pvY1 + 1.5 + r * cellH).toFixed(1)}" x2="${(bayX1 + pvW - 1.5).toFixed(1)}" y2="${(pvY1 + 1.5 + r * cellH).toFixed(1)}" stroke="rgba(147,197,253,0.35)" stroke-width="0.4"/>`);
+      if (panH > 12) {
+        const rows = 6;
+        for (let r = 1; r < rows; r++) {
+          const ly = panelTopY + 1.6 + (panH - 3.2) * r / rows;
+          els.push(`<line x1="${(pvX + 1.6).toFixed(1)}" y1="${ly.toFixed(1)}" x2="${(pvX + panW - 1.6).toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#9ca3af" stroke-width="0.4"/>`);
         }
       }
     }
 
     // Bay label (inside, bottom)
     const cx = (bayX1 + bayX2) / 2;
-    els.push(drawText(cx, panelBotY - 4,
-      `BAY ${bay + 1}`, {
-        anchor: 'middle', fontSize: 6.5, fill: '#fff', fontWeight: 'bold',
-      }));
+    els.push(drawText(cx, panelBotY - 4, `BAY ${bay + 1}`, {
+      anchor: 'middle', fontSize: 6.5, fill: '#111', fontWeight: 'bold',
+    }));
   }
 
   // ── STEP 7: Wind load arrows ──
@@ -556,11 +812,12 @@ export function drawFenceElevation(
     `WIND ${windSpeedMph} MPH`
   ));
 
-  // Dead load arrow (gravity, pointing down)
-  const dlArrowX = toX(postSpacingFt);   // middle post
+  // Dead load arrow (gravity, pointing down) — over bay 1, clear of the
+  // middle-post "4×4 POST (TYP.)" label.
+  const dlArrowX = toX(postSpacingFt * 0.5);   // mid-bay 1
   els.push(drawWindArrow(
-    dlArrowX, panelTopY - 24,
-    18, 'down',
+    dlArrowX, panelTopY - 20,
+    16, 'down',
     'DL'
   ));
 
@@ -591,11 +848,11 @@ export function drawFenceElevation(
     12, ftToFtIn(postSpacingFt) + ' O.C.'
   ));
 
-  // L2 — Overall 2-bay width
+  // L2 — Overall 2-bay width (TYP. — the drawn section, never the total run)
   els.push(drawOverallDimension(
     toX(0), toX(elevWidthFt),
     groundY + postEmbedFt * FT_PX + 32,
-    16, ftToFtIn(elevWidthFt) + ' — 2 BAYS'
+    16, ftToFtIn(elevWidthFt) + ' — 2 BAYS (TYP. OF ' + ftToFtIn(totalLengthFt) + ' RUN)'
   ));
 
   // L3 — Panel height breakdown: each rail position
@@ -622,13 +879,13 @@ export function drawFenceElevation(
 
   // ── Callout schedule items (STEP 8: fence-specific — NO roof/ground terms) ──
   const calloutItems = [
-    { n: 1, label: `PV MODULE — ${panelLenIn}" × ${panelWidIn}" BIFACIAL` },
-    { n: 2, label: `FENCE POST — ${ftToFtIn(postSpacingFt)} O.C.` },
-    { n: 3, label: `POST EMBEDMENT — ${ftToFtIn(postEmbedFt)} MIN.` },
+    { n: 1, label: `PV MODULE — ${panelLenIn}" × ${panelWidIn}" BIFACIAL — 90° VERTICAL` },
+    { n: 2, label: `4×4 FENCE POST — ${ftToFtIn(postSpacingFt)} O.C.` },
+    { n: 3, label: `FOUNDATION — 2-3/8" DRIVEN PILE, ${ftToFtIn(postEmbedFt)} MIN.` },
     { n: 4, label: `PANEL HEIGHT — ${ftToFtIn(panelHeightFt)} A.G.` },
     { n: 5, label: `RAIL ×${railCount} — ${mountSys}` },
     { n: 6, label: `WIND LOAD — ${windSpeedMph} MPH (ASCE 7-22)` },
-    { n: 7, label: `DEAD LOAD — ${((panelLenIn * panelWidIn / 144) * 3.5 / totalPanels * totalPanels).toFixed(0)} LBS/PANEL EST.` },
+    { n: 7, label: `DEAD LOAD — ${((panelLenIn * panelWidIn / 144) * 3.5).toFixed(0)} LBS/PANEL EST.` },
   ];
 
   const rowH = 19;
@@ -654,10 +911,11 @@ export function drawFenceElevation(
     { text: `TOTAL: ${ftToFtIn(totalLengthFt)} L.F. FENCE`, bold: false },
     { text: `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`, bold: false },
     { text: `POST SPACING: ${ftToFtIn(postSpacingFt)} O.C.`, bold: false },
-    { text: `EMBED DEPTH: ${ftToFtIn(postEmbedFt)} MIN.`, bold: false },
+    { text: `FOUNDATION: 2-3/8" PIPE DRIVEN ${ftToFtIn(postEmbedFt)} MIN. — NO CONCRETE`, bold: false },
+    { text: `MODULES: 90° VERTICAL, SIDE-BY-SIDE`, bold: false },
     { text: `RAILS: ${railCount}× HORIZONTAL`, bold: false },
     { text: `REF: NEC 690 / ASCE 7-22`, bold: false },
-    { text: `INSTALLER TO VERIFY POST SIZE + SPACING`, bold: true, red: true },
+    { text: `INSTALLER TO VERIFY POST SIZE + DRIVEN DEPTH`, bold: true, red: true },
   ];
   notes.forEach((note, ni) => {
     els.push(drawText(dZone.x + 4, ry + ni * 10, note.text, {
@@ -671,11 +929,11 @@ export function drawFenceElevation(
   // First-segment label reference
   ry += notes.length * 10 + 8;
   els.push(drawRectFilled(dZone.x, ry, dZone.width, 24, '#eef2ff', '#8899cc', 0.8));
-  els.push(drawText(dZone.x + 4, ry + 8, 'ELEVATION SHOWN:', {
+  els.push(drawText(dZone.x + 4, ry + 8, 'TYPICAL 2-BAY DETAIL OF:', {
     anchor: 'start', fontSize: 6.5, fill: '#333',
   }));
   els.push(drawText(dZone.x + 4, ry + 18,
-    `${firstSegLabel} (${segments.length} SEG TOTAL)`, {
+    `${ftToFtIn(totalLengthFt)} RUN — ${firstSegLabel} (${segments.length} SEG TOTAL)`, {
       anchor: 'start', fontSize: 7, fill: '#2255aa', fontWeight: 'bold',
     }));
   ry += 32;
@@ -692,6 +950,161 @@ export function drawFenceElevation(
       anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
     }));
 
+  els.push(drawSVGClose());
+  return els.join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PV-3F — SOLAR FENCE STRUCTURAL DETAILS
+// A real connection/foundation detail sheet — NOT a second 2-bay elevation (that
+// lives on PV-1F) and NOT the degenerate top-down of vertical panels Ray flagged.
+// Four standard details in a 2×2 grid: post foundation section, rail-to-post
+// connection, panel-to-rail clamp, and equipment bonding.
+// ═══════════════════════════════════════════════════════════════════════════
+export function drawFenceStructural(
+  input: DraftingInput,
+  intent?: DesignIntent | null,
+  cad?: CADModel | null,
+  ctx?: RenderContext | null,
+): string {
+  const { engineering, project, layout } = input;
+  const cadFence = cad?.fence;
+  const postSpacingFt = cadFence ? metersToFt(cadFence.postSpacingM) : (layout.fencePostSpacingFt ?? 8);
+  const postEmbedFt   = cadFence ? metersToFt(cadFence.postEmbedM)   : (layout.fencePostEmbedmentFt ?? 3.5);
+  const panelHeightFt = cadFence ? metersToFt(cadFence.panelHeightM) : (layout.fencePanelHeightFt ?? 6);
+  const railCount     = cadFence?.railCount ?? layout.fenceRailCount ?? 2;
+  const totalLengthFt = cadFence ? metersToFt(cadFence.totalLengthM) : (layout.fenceTotalLengthFt ?? 0);
+  const totalPanels   = cad?.totalPanels ?? engineering.totalPanels ?? 0;
+  const dcKw          = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
+  const windSpeedMph  = engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? 115;
+  const mountSys      = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
+  const panelLenIn    = project?.panelLengthIn ?? 66;
+  const panelWidIn    = project?.panelWidthIn  ?? 40;
+
+  const zones = getLayoutForSystem('solar_fence', 'structural');
+  const W = zones.canvas.width, H = zones.canvas.height;
+  const els: string[] = [];
+  els.push(drawSVGOpen(W, H));
+  els.push(drawBackground(W, H, '#fafafa'));
+  els.push(drawTitleBar(W,
+    'SOLAR FENCE — CONNECTION & FOUNDATION DETAILS',
+    'SCALE: NTS'));
+
+  const dz = zones.draw;
+  const gapp = 12;
+  const cW = (dz.width - gapp) / 2;
+  const cH = (dz.height - gapp) / 2;
+  const cells = [
+    { x: dz.x,               y: dz.y,               t: 'A · POST FOUNDATION SECTION' },
+    { x: dz.x + cW + gapp,   y: dz.y,               t: 'B · RAIL-TO-POST CONNECTION' },
+    { x: dz.x,               y: dz.y + cH + gapp,   t: 'C · PANEL-TO-RAIL CLAMP' },
+    { x: dz.x + cW + gapp,   y: dz.y + cH + gapp,   t: 'D · EQUIPMENT BONDING (NEC 250.169)' },
+  ];
+  for (const c of cells) {
+    els.push(drawRectFilled(c.x, c.y, cW, cH, '#ffffff', '#c8d0e0', 1));
+    els.push(drawRectFilled(c.x, c.y, cW, 14, '#1a2332', '#1a2332', 0));
+    els.push(drawText(c.x + 6, c.y + 9.7, c.t, { anchor: 'start', fontSize: 7, fontWeight: '900', fill: '#fff' }));
+  }
+
+  // ── Detail A: POST FOUNDATION SECTION ──────────────────────────────────────
+  {
+    const a = cells[0];
+    const FT = Math.min((cH * 0.5) / Math.max(postEmbedFt, 3), 26);
+    const cx = a.x + cW * 0.40;
+    const grade = a.y + cH * 0.42;
+    els.push(`<rect x="${(a.x + 12).toFixed(1)}" y="${grade.toFixed(1)}" width="${(cW - 60).toFixed(1)}" height="12" fill="url(#hatch-earth)"/>`);
+    els.push(`<line x1="${(a.x + 12).toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(a.x + cW - 24).toFixed(1)}" y2="${grade.toFixed(1)}" stroke="#111" stroke-width="1.4"/>`);
+    els.push(drawText(a.x + cW - 22, grade + 3, 'GRADE', { anchor: 'start', fontSize: 6, fontWeight: 'bold', fill: '#111' }));
+    const postW = 10, postTop = grade - cH * 0.30;
+    els.push(`<rect x="${(cx - postW / 2).toFixed(1)}" y="${postTop.toFixed(1)}" width="${postW}" height="${(grade - postTop).toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1.2"/>`);
+    els.push(`<rect x="${(cx - postW / 2).toFixed(1)}" y="${postTop.toFixed(1)}" width="${postW}" height="${(grade - postTop).toFixed(1)}" fill="url(#hatch-steel)"/>`);
+    const pileBot = grade + postEmbedFt * FT, pileW = 6;
+    els.push(`<rect x="${(cx - pileW / 2).toFixed(1)}" y="${grade.toFixed(1)}" width="${pileW}" height="${(pileBot - grade - 6).toFixed(1)}" fill="#fff" stroke="#111" stroke-width="0.9" stroke-dasharray="4,2"/>`);
+    els.push(`<path d="M${(cx - pileW / 2).toFixed(1)} ${(pileBot - 6).toFixed(1)} L${cx.toFixed(1)} ${pileBot.toFixed(1)} L${(cx + pileW / 2).toFixed(1)} ${(pileBot - 6).toFixed(1)} Z" fill="#fff" stroke="#111" stroke-width="0.9" stroke-dasharray="4,2"/>`);
+    els.push(`<rect x="${(cx - postW / 2 - 1).toFixed(1)}" y="${(grade - 3).toFixed(1)}" width="${postW + 2}" height="6" fill="#fff" stroke="#111" stroke-width="1"/>`);
+    els.push(`<line x1="${(cx + 16).toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(cx + 16).toFixed(1)}" y2="${pileBot.toFixed(1)}" stroke="#333" stroke-width="0.7"/>`);
+    els.push(drawText(cx + 20, (grade + pileBot) / 2, `${ftToFtIn(postEmbedFt)} MIN`, { anchor: 'start', fontSize: 6, fontWeight: 'bold', fill: '#333' }));
+    els.push(drawText(cx, postTop - 4, '4×4 POST', { anchor: 'middle', fontSize: 6, fontWeight: 'bold', fill: '#333' }));
+    els.push(drawText(cx - postW, (postTop + grade) / 2, '2-3/8"⌀ DRIVEN PILE', { anchor: 'end', fontSize: 5.6, fill: '#555' }));
+    els.push(drawText(a.x + cW / 2, a.y + cH - 6, 'DRIVEN PILE — NO CONCRETE — FIELD-VERIFY REFUSAL', { anchor: 'middle', fontSize: 5.4, italic: true, fill: '#666' }));
+  }
+
+  // ── Detail B: RAIL-TO-POST CONNECTION ──────────────────────────────────────
+  {
+    const b = cells[1];
+    const cx = b.x + cW * 0.5, cyTop = b.y + 30;
+    const postW = 16, postH = cH * 0.62;
+    els.push(`<rect x="${(cx - postW / 2).toFixed(1)}" y="${cyTop.toFixed(1)}" width="${postW}" height="${postH.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1.2"/>`);
+    els.push(`<rect x="${(cx - postW / 2).toFixed(1)}" y="${cyTop.toFixed(1)}" width="${postW}" height="${postH.toFixed(1)}" fill="url(#hatch-steel)"/>`);
+    els.push(drawText(cx, cyTop - 4, '4×4 POST', { anchor: 'middle', fontSize: 6, fontWeight: 'bold', fill: '#333' }));
+    for (let r = 0; r < Math.min(railCount, 3); r++) {
+      const ry = cyTop + postH * (0.3 + 0.4 * r / Math.max(railCount - 1, 1));
+      els.push(`<rect x="${(cx + postW / 2).toFixed(1)}" y="${(ry - 3).toFixed(1)}" width="${(cW * 0.30).toFixed(1)}" height="6" fill="#888" stroke="#555" stroke-width="0.8"/>`);
+      els.push(`<rect x="${(cx + postW / 2 - 2).toFixed(1)}" y="${(ry - 6).toFixed(1)}" width="6" height="12" fill="#fff" stroke="#111" stroke-width="0.9"/>`);
+      els.push(`<circle cx="${cx.toFixed(1)}" cy="${(ry - 3).toFixed(1)}" r="1.5" fill="#fff" stroke="#111" stroke-width="0.7"/>`);
+      els.push(`<circle cx="${cx.toFixed(1)}" cy="${(ry + 3).toFixed(1)}" r="1.5" fill="#fff" stroke="#111" stroke-width="0.7"/>`);
+    }
+    els.push(drawText(b.x + cW / 2, b.y + cH - 16, 'RAIL BRACKET — (2) 3/8"⌀ SS THRU-BOLTS/POST', { anchor: 'middle', fontSize: 5.8, fill: '#333' }));
+    els.push(drawText(b.x + cW / 2, b.y + cH - 6, `${railCount}× ${mountSys} RAIL`, { anchor: 'middle', fontSize: 5.6, italic: true, fill: '#666' }));
+  }
+
+  // ── Detail C: PANEL-TO-RAIL CLAMP ──────────────────────────────────────────
+  {
+    const c = cells[2];
+    const cx = c.x + cW * 0.5, cy = c.y + cH * 0.5;
+    els.push(`<rect x="${(cx - 10).toFixed(1)}" y="${cy.toFixed(1)}" width="20" height="14" fill="#fff" stroke="#111" stroke-width="1.1"/>`);
+    els.push(`<rect x="${(cx - 10).toFixed(1)}" y="${cy.toFixed(1)}" width="20" height="14" fill="url(#hatch-steel)"/>`);
+    els.push(drawText(cx, cy + 26, 'RAIL', { anchor: 'middle', fontSize: 5.6, fill: '#555' }));
+    els.push(`<rect x="${(cx - 34).toFixed(1)}" y="${(cy - 6).toFixed(1)}" width="26" height="6" fill="#cfe0f4" stroke="#1a4a8a" stroke-width="1"/>`);
+    els.push(`<rect x="${(cx + 8).toFixed(1)}" y="${(cy - 6).toFixed(1)}" width="26" height="6" fill="#cfe0f4" stroke="#1a4a8a" stroke-width="1"/>`);
+    els.push(drawText(cx - 21, cy - 10, 'PV MODULE', { anchor: 'middle', fontSize: 5.4, fill: '#1a4a8a' }));
+    els.push(`<rect x="${(cx - 3).toFixed(1)}" y="${(cy - 12).toFixed(1)}" width="6" height="14" fill="#333" stroke="#111" stroke-width="0.8"/>`);
+    els.push(`<rect x="${(cx - 7).toFixed(1)}" y="${(cy - 12).toFixed(1)}" width="14" height="4" fill="#333" stroke="#111" stroke-width="0.8"/>`);
+    els.push(drawText(cx + 16, cy - 9, 'MID CLAMP', { anchor: 'start', fontSize: 5.6, fontWeight: 'bold', fill: '#111' }));
+    els.push(drawText(c.x + cW / 2, c.y + cH - 6, 'GROUNDING MID-CLAMP — BONDS FRAME TO RAIL', { anchor: 'middle', fontSize: 5.4, italic: true, fill: '#666' }));
+  }
+
+  // ── Detail D: EQUIPMENT BONDING ────────────────────────────────────────────
+  {
+    const d = cells[3];
+    const cx = d.x + cW * 0.32, cy = d.y + cH * 0.42;
+    els.push(`<rect x="${(cx - 7).toFixed(1)}" y="${(cy - 20).toFixed(1)}" width="14" height="52" fill="#fff" stroke="#111" stroke-width="1.1"/>`);
+    els.push(`<rect x="${(cx - 7).toFixed(1)}" y="${(cy - 20).toFixed(1)}" width="14" height="52" fill="url(#hatch-steel)"/>`);
+    els.push(`<rect x="${(cx + 7).toFixed(1)}" y="${(cy - 2).toFixed(1)}" width="8" height="8" fill="#c98a2b" stroke="#7a5500" stroke-width="0.9"/>`);
+    els.push(`<path d="M${(cx + 15).toFixed(1)} ${(cy + 2).toFixed(1)} C ${(cx + 50).toFixed(1)} ${(cy + 2).toFixed(1)}, ${(cx + 40).toFixed(1)} ${(cy + 34).toFixed(1)}, ${(cx + 70).toFixed(1)} ${(cy + 34).toFixed(1)}" fill="none" stroke="#0a7d00" stroke-width="1.6"/>`);
+    els.push(drawText(cx + 17, cy - 5, 'LAY-IN LUG', { anchor: 'start', fontSize: 5.8, fontWeight: 'bold', fill: '#111' }));
+    els.push(drawText(cx + 40, cy + 44, '#6 AWG Cu EGC — BOND ALL POSTS/RAILS/FRAMES', { anchor: 'middle', fontSize: 5.6, fill: '#0a7d00', fontWeight: 'bold' }));
+    els.push(drawText(d.x + cW / 2, d.y + cH - 6, 'CONTINUOUS EGC TO ARRAY GND — NEC 690.43 / 250.169', { anchor: 'middle', fontSize: 5.4, italic: true, fill: '#666' }));
+  }
+
+  // ── Data zone: FENCE STRUCTURAL SCHEDULE ───────────────────────────────────
+  const dZone = zones.data;
+  let ry = dZone.y + 4;
+  els.push(drawRectFilled(dZone.x, ry, dZone.width, 14, '#000', '#000', 0));
+  els.push(drawText(dZone.x + dZone.width / 2, ry + 9.5, 'FENCE STRUCTURAL SCHEDULE', { anchor: 'middle', fontSize: 7.5, fontWeight: '900', fill: '#fff' }));
+  ry += 16;
+  const schedule = [
+    { n: 1, label: `POST — 4×4 STEEL @ ${ftToFtIn(postSpacingFt)} O.C.` },
+    { n: 2, label: `FOUNDATION — 2-3/8"⌀ DRIVEN PILE, ${ftToFtIn(postEmbedFt)} MIN. — NO CONCRETE` },
+    { n: 3, label: `RAIL ×${railCount} — ${mountSys}, 3/8"⌀ SS THRU-BOLTS` },
+    { n: 4, label: `MODULE CLAMP — GROUNDING MID/END CLAMP` },
+    { n: 5, label: `BONDING — #6 AWG Cu EGC (NEC 250.169 / 690.43)` },
+    { n: 6, label: `WIND — ${windSpeedMph} MPH Vult (ASCE 7-22 §29.4)` },
+  ];
+  const rowH = 19;
+  schedule.forEach((item, i) => {
+    const rowY = ry + i * rowH;
+    els.push(drawRectFilled(dZone.x, rowY, dZone.width, rowH - 1, i % 2 === 0 ? '#fff' : '#f5f5f5', '#ddd', 0.5));
+    els.push(drawCallout({ cx: dZone.x + 11, cy: rowY + 8, number: item.n, r: 7 }));
+    els.push(drawText(dZone.x + 23, rowY + 11, item.label, { anchor: 'start', fontSize: 6.2, fill: '#222' }));
+  });
+  ry += schedule.length * rowH + 8;
+  els.push(drawText(dZone.x + 4, ry, `${totalPanels} MODULES · ${dcKw.toFixed(2)} kW DC · ${ftToFtIn(totalLengthFt)} L.F.`, { anchor: 'start', fontSize: 6.4, fontWeight: 'bold', fill: '#1a2332' }));
+  if (ctx) { const u = drawUtilityAnalysis(ctx, dZone.x, ry + 10, dZone.width); if (u) els.push(u); }
+
+  els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
+    'STRUCTURAL DETAILS — NTS — VERIFY POST SIZE, EMBEDMENT + CONNECTIONS IN FIELD PER PE', {
+      anchor: 'start', fontSize: 6.5, fill: '#888', italic: true }));
   els.push(drawSVGClose());
   return els.join('');
 }

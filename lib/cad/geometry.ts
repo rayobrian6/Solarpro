@@ -53,6 +53,20 @@ export function latLngToXY(
   };
 }
 
+/** Inverse of latLngToXY — local meters (relative to origin) back to lat/lng. */
+export function xyToLatLng(
+  x: number,
+  y: number,
+  originLat: number,
+  originLng: number,
+): { lat: number; lng: number } {
+  const cosLat = Math.cos(originLat * DEG_TO_RAD);
+  return {
+    lat: originLat + (y / EARTH_RADIUS_M) / DEG_TO_RAD,
+    lng: originLng + (x / (EARTH_RADIUS_M * (cosLat || 1e-9))) / DEG_TO_RAD,
+  };
+}
+
 export function latlngArrayToXY(
   points: Array<{ lat: number; lng: number }>,
 ): Point2D[] {

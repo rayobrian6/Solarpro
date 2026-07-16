@@ -12,6 +12,11 @@ import {
   RACKING_SYSTEMS, OPTIMIZERS, MICROINVERTERS,
   getMidClampGapMeters, getMidClampGapInches,
 } from '@/lib/equipment-db';
+// Wave 4A: per-subsystem design-electrical writer (contract §1.3) — pure
+// builder + stamp partitioner live in the design→engineering module so the
+// split is testable outside the component.
+import { buildDesignElectricalBlock, presentDesignSubSystemKeys } from '@/lib/system/designToEngineering';
+import { toSubSystemKey } from '@/lib/system/subSystemEquipment';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
 // v50.11: POA calculation + segment labels
@@ -65,7 +70,7 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff, Bug
+  Info, ChevronRight, Eye, EyeOff, Bug, Download
 } from 'lucide-react';
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
@@ -726,6 +731,10 @@ export default function DesignStudio({ project, onSave }: Props) {
     () => stringAssignment.strings.map(s => ({ label: s.label, color: s.color, panelCount: s.panelCount })),
     [stringAssignment],
   );
+  // Wave 4A: distinct sub-system keys stamped on the placed panels (membership
+  // authority §1.1), fixed roof > ground > fence order. >1 keys = hybrid design
+  // — equipment picks then carry a per-sub scope to the canonical store.
+  const presentSubSystemKeys = useMemo(() => presentDesignSubSystemKeys(panels as any), [panels]);
   // Turning equipment view on dims the panels so devices are visible underneath.
   const toggleEquipment = useCallback(() => {
     setShowEquipment(prev => {
@@ -753,18 +762,17 @@ export default function DesignStudio({ project, onSave }: Props) {
   // scratch/testing designs never persist), read by the Engineering page to seed
   // its inverter/string/topology config with no re-entry.
   const buildDesignElectrical = useCallback((): DesignElectrical => {
-    const byPanelId: Record<string, number> = {};
-    const stringMap = new Map<number, string[]>();
+    const assignmentByPanelId: Record<string, number> = {};
     for (const pid in stringAssignment.byPanelId) {
-      const idx = stringAssignment.byPanelId[pid].stringIndex;
-      byPanelId[pid] = idx;
-      const arr = stringMap.get(idx);
-      if (arr) arr.push(pid); else stringMap.set(idx, [pid]);
+      assignmentByPanelId[pid] = stringAssignment.byPanelId[pid].stringIndex;
     }
-    const strings = [...stringMap.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([stringIndex, panelIds]) => ({ stringIndex, panelCount: panelIds.length, panelIds }));
-    return {
+    // Wave 4A (contract §1.3): the pure builder splits by classifyPanel over
+    // the panel stamps — hybrid designs get per-sub `subSystems[]` blocks and
+    // the flat fields become the PRIMARY sub's mirror (§1.4); single-type
+    // designs emit the flat block only, byte-identical to the legacy writer.
+    return buildDesignElectricalBlock({
+      panels: panels as any,
+      assignmentByPanelId,
       topology,
       inverterBrand: topology === 'micro' ? 'Enphase' : 'SolarEdge',
       modulesPerString,
@@ -776,13 +784,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       // uses IQ8A (349W) makes the AC output ~17% low. Fall back to the catalog
       // default only when nothing is selected.
       microModelId: topology === 'micro' ? ((selectedInverter as any)?.id ?? MICROINVERTERS[0]?.id) : undefined,
-      byPanelId,
       overrides: Object.keys(stringOverrides).length > 0 ? stringOverrides : undefined,
-      strings,
       deviceCount: stringAssignment.deviceCount,
       generatedAt: new Date().toISOString(),
-    };
-  }, [stringAssignment, topology, modulesPerString, rackingId, selectedPanel, stringOverrides]);
+    });
+  }, [stringAssignment, panels, topology, modulesPerString, rackingId, selectedPanel, selectedInverter, stringOverrides]);
 
   // Keep the latest electrical design in a ref for the beforeunload save path.
   const designElectricalRef = useRef<DesignElectrical | null>(null);
@@ -914,6 +920,13 @@ export default function DesignStudio({ project, onSave }: Props) {
   const zoomRef = useRef(zoom);
   const lastSavedPanelsRef = useRef<string>('[]');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Data-loss guard (task #3 root cause, 2026-07-16): NO save path may run
+  // before the DB restore has resolved. The autosave timer armed on MOUNT and
+  // fired 3s later — on a slow restore (cold Neon) it saved the EMPTY initial
+  // panel state over the stored layout (Stowell 07-15: 81 panels → {} → 19).
+  // The beforeunload beacon had the same hole. 'failed' keeps saves disabled
+  // too: if we couldn't READ the layout we must not risk WRITING over it.
+  const restoreStateRef = useRef<'pending' | 'done' | 'failed'>('pending');
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
   const fenceLineRef = useRef<{ lat: number; lng: number }[]>([]); // keeps fence geometry accessible in saveLayoutToDB autosave
@@ -1062,10 +1075,13 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   }, [project.id, project.systemType, buildDesignElectrical]);
 
-  // Trigger auto-save 3 seconds after panels change
+  // Trigger auto-save 3 seconds after panels change — but NEVER before the DB
+  // restore resolves (see restoreStateRef above; the timer checks at FIRE time
+  // so a restore finishing inside the 3s window isn't lost).
   useEffect(() => {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
+      if (restoreStateRef.current !== 'done') return;
       saveLayoutToDB(panels);
     }, 3000);
     return () => {
@@ -1076,6 +1092,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
     const handleBeforeUnload = () => {
+      // Same restore gate as autosave: closing the tab before the layout
+      // loaded must not beacon an empty save over the stored design.
+      if (restoreStateRef.current !== 'done') return;
       const panelList = panelsRef2.current;
       const designElectrical = designElectricalRef.current ?? undefined;
       const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
@@ -1116,6 +1135,10 @@ export default function DesignStudio({ project, onSave }: Props) {
           setRestoredPanelCount(data.data.panels.length);
           setLayoutLoadedFromDB(true);
           console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
+        } else if (data.success) {
+          // DB genuinely has no layout — seed the dedup signature so the first
+          // real edit diffs against "empty", and let saves proceed.
+          lastSavedPanelsRef.current = JSON.stringify([]) + '|' + JSON.stringify(data.data?.designElectrical ?? null);
         }
         // v63: restore the electrical design (topology / brand / modules-per-string /
         // racking / manual string-paint overrides) so the UI reflects what was saved.
@@ -1144,8 +1167,11 @@ export default function DesignStudio({ project, onSave }: Props) {
           setSolarApiStatus('idle');
           console.log('[DesignStudio] Skipping auto-detect — waiting for explicit building pick');
         }
+        restoreStateRef.current = 'done';
       } catch (e) {
-        console.error('Panel restore failed:', e);
+        console.error('Panel restore failed — saves stay DISABLED to protect the stored layout:', e);
+        restoreStateRef.current = 'failed';
+        toast.error('Could not load the saved design — saving is disabled. Reload the page to try again.');
       }
     };
     restorePanels();
@@ -1163,7 +1189,15 @@ export default function DesignStudio({ project, onSave }: Props) {
           setSelectedPanel(d.data.panels[0]);
         }
         if (d.data.inverters.length > 0 && !project.selectedInverter) {
-          setSelectedInverter(d.data.inverters[3]); // SolarEdge default
+          // Default inverter by ID — NEVER a magic index. `inverters[3]` was
+          // commented "SolarEdge default" but the unified list reordered and
+          // index 3 became "SMA Sunny Boy 7.7-US", silently stamping a phantom
+          // SunnyBoy onto every design where no inverter was explicitly chosen
+          // (it rode into proposal snapshots — Ray caught it on a 21 kW set).
+          const _defInv = d.data.inverters.find((i: Inverter) => i.id === 'se-7600h')
+            ?? d.data.inverters.find((i: Inverter) => /solaredge/i.test((i as any).manufacturer ?? ''))
+            ?? d.data.inverters[0];
+          setSelectedInverter(_defInv);
         }
       }
     });
@@ -3647,6 +3681,55 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
+  // v50.x: BOM CSV export — pure client-side, no backend.
+  // Builds a single-row-per-unique-model CSV with header
+  //   Category,Manufacturer,Model,Quantity,Unit
+  // inspired by OpenSolar Pro's multi-supplier cart, but shipped as the
+  // lighter CSV-export version per JAMES / Quinn 2026-06-29 22:27 CT.
+  const handleBomExport = useCallback(() => {
+    if (panels.length === 0) return;
+
+    // RFC 4180: wrap fields containing comma/quote/newline in double-quotes.
+    const csvField = (val: string | number): string => {
+      const s = String(val);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const panelMfr   = selectedPanel?.manufacturer ?? 'Unknown';
+    const panelModel = selectedPanel?.model ?? 'Unknown';
+
+    // One row per unique panel model (the whole design uses selectedPanel).
+    const rows: Array<[string, string, string, number, string]> = [
+      ['Panel', panelMfr, panelModel, panels.length, 'ea'],
+    ];
+    if (selectedInverter) {
+      rows.push(['Inverter', selectedInverter.manufacturer, selectedInverter.model, 1, 'ea']);
+    }
+    // Racking + BOS stubs — replace with real selector values when
+    // DesignSidebar surfaces a racking picker. rowCount derived from
+    // panelsPerRow so ground/fence systems stay sensible.
+    const rowCount = Math.max(1, Math.ceil(panels.length / Math.max(1, panelsPerRow)));
+    rows.push(['Racking', 'Generic', 'XR-Series', rowCount, 'ea']);
+    rows.push(['BOS', 'Generic', 'Misc', 1, 'ea']);
+
+    const header = ['Category', 'Manufacturer', 'Model', 'Quantity', 'Unit'];
+    const csvLines = [header, ...rows].map(r => r.map(csvField).join(','));
+    const csv = csvLines.join('\n') + '\n';
+
+    // Trigger browser download via Blob + temporary anchor.
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const date = new Date().toISOString().slice(0, 10);
+    const projectName = (project?.name ?? 'design').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName}-BOM-${date}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [panels, selectedPanel, selectedInverter, panelsPerRow, project]);
+
   return (
     <div className="flex flex-col h-full bg-slate-950">
       {/* Report a Bug — floating (Design Studio runs without the app header) */}
@@ -3775,6 +3858,10 @@ export default function DesignStudio({ project, onSave }: Props) {
               <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
             </div>
           ) : null}
+          <span className="ml-2 hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <span aria-hidden>🖱️</span>
+            Left click drag and scroll wheel rotates
+          </span>
           <button
             onClick={() => setShowPanels(!showPanels)}
             className={`btn-sm ${showPanels ? 'btn-secondary' : 'btn-ghost'}`}
@@ -3877,13 +3964,24 @@ export default function DesignStudio({ project, onSave }: Props) {
           ) : null}
           {/* Proceed to Engineering CTA — shown once panels are placed */}
           {panels.length > 0 ? (
-            <button
-              onClick={() => router.push(`/engineering?projectId=${project.id}`)}
-              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
-              title="Open Engineering with this project"
-            >
-              Engineering <ArrowRight size={11} />
-            </button>
+            <>
+              {/* v50.x: BOM CSV export — pure client-side Blob download, no backend.
+                  Sibling to the Engineering CTA, identical styling for visual coherence. */}
+              <button
+                onClick={handleBomExport}
+                className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
+                title="Download Bill of Materials (CSV)"
+              >
+                <Download size={11} /> BOM
+              </button>
+              <button
+                onClick={() => router.push(`/engineering?projectId=${project.id}`)}
+                className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
+                title="Open Engineering with this project"
+              >
+                Engineering <ArrowRight size={11} />
+              </button>
+            </>
           ) : null}
         </div>
       </div>
@@ -5551,7 +5649,28 @@ export default function DesignStudio({ project, onSave }: Props) {
                     {filteredPanels.map(p => (
                       <button
                         key={p.id}
-                        onClick={() => { clearGridCache(); setSelectedPanel(p); }}
+                        onClick={() => {
+                          clearGridCache();
+                          setSelectedPanel(p);
+                          // Immediately persist to the canonical selected_equipment store
+                          // (single source of truth both pages read) — don't wait on the
+                          // debounced layout auto-save. Engineering picks it up on next load.
+                          // Wave 4A (§1.3): on a HYBRID design the pick is scoped to the
+                          // ACTIVE zone's sub-system (+ the stamped keys so the route can
+                          // derive the primary) — the route then writes the v2 per-sub
+                          // entry instead of a project-wide flat promotion. Single-type
+                          // designs keep the legacy flat body (byte-identical write).
+                          fetch(`/api/projects/${project.id}/equipment`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              selectedPanel: p,
+                              ...(presentSubSystemKeys.length > 1
+                                ? { subSystem: toSubSystemKey(activeZoneType), presentKeys: presentSubSystemKeys }
+                                : {}),
+                            }),
+                          }).catch(() => {/* non-fatal; auto-save is the backup */});
+                        }}
                         className={`w-full text-left p-2.5 rounded-lg border transition-all ${
                           selectedPanel.id === p.id
                             ? 'bg-amber-500/15 border-amber-500/40'

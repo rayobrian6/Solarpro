@@ -18,6 +18,7 @@
 
 import type { CADModel }    from '../cad/types';
 import type { BillInsights } from '../billInsights';
+import { utilityDisplayName } from '../permit/utils/helpers';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
 import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
 import type { EngineeringInvalidationLineageMetadata, EngineeringStateRegistry, EngineeringStateSnapshotReference, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation';
@@ -210,11 +211,12 @@ export function drawUtilityAnalysis(
   );
   curY += headerH + 3;
 
-  // ── Utility name ────────────────────────────────────────────────────────────
+  // ── Utility name — humanized (the raw registry slug 'il-ameren-illinois'
+  // printed verbatim on PV-3's utility block) ─────────────────────────────────
   if (hasUtility) {
     lines.push(
       `<text x="${x}" y="${curY + 7}" font-family="Arial,sans-serif" font-size="6.5" fill="#555">Utility</text>`,
-      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#111">${eng!.utilityName}</text>`,
+      `<text x="${x + w}" y="${curY + 7}" text-anchor="end" font-family="Arial,sans-serif" font-size="6.5" font-weight="bold" fill="#111">${utilityDisplayName(eng!.utilityName!)}</text>`,
     );
     curY += 12;
   }

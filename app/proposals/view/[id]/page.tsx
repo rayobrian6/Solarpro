@@ -21,7 +21,7 @@ import { calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { buildArraysFromLayout, buildSystemConfig, getArrayProposalText } from '@/lib/multiArrayEngine';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { UtilityRateGraph } from '@/components/proposal/UtilityRateGraph';
-import { UtilityCostProjectionChart } from '@/components/proposal/UtilityCostProjectionChart';
+import { CashFlowStoryCard } from '@/components/proposal/CashFlowStoryCard';
 import {
   buildUtilityProfile,
   validateProposalTruth,
@@ -34,7 +34,7 @@ import {
   getStateIcaFallback,
 } from '@/lib/utilityInterconnection';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
-import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
+import { resolveActualAnnualBill, resolveMonthlyUsageHistory } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   GLOBAL_INCENTIVES_CONFIG,
@@ -407,6 +407,7 @@ function PublicProposalView({
     dbUtilityRate:       proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:      client?.annualKwh ?? 0,
     actualAnnualBill:    resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
+    monthlyUsageHistoryKwh: resolveMonthlyUsageHistory(client), // real seasonal shape for the bill chart
 
     // Pricing
     systemType,
@@ -526,7 +527,10 @@ function PublicProposalView({
   const solar_cost_total             = cp.truth25yr.solarCostTotal;
   const remaining_utility_cost_total = cp.truth25yr.remainingUtilityCost;
   const estimated_energy_value_25yr  = cp.truth25yr.estimatedEnergyValue;
-  const net_financial_difference_25yr = cp.truth25yr.netFinancialDifference;
+  // Canonical netDifference (SREC-inclusive), NOT the legacy netFinancialDifference:
+  // the two disagreed by ~$10.5k and the proposal showed "+$130,198 total est.
+  // savings" and "+$140,731 25-Yr Advantage" for the same concept on facing pages.
+  const net_financial_difference_25yr = cp.truth25yr.netDifference;
   // CANONICAL SAVINGS — the only savings number:
   const netDifference_25yr           = cp.truth25yr.netDifference;
 
@@ -883,7 +887,9 @@ function PublicProposalView({
                       ${effectiveFinal.toLocaleString()}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      {purchaseMode === 'finance' ? `${financeTermYears}-yr loan` : 'One-time cost'} — you own the energy
+                      {/* This value is the SYSTEM PRICE (cash basis) — calling it the
+                          "25-yr loan" implied it was the financed total ($137k, not $59k). */}
+                      {purchaseMode === 'finance' ? `System price, financed over ${financeTermYears} yrs` : 'One-time cost'} — you own the energy
                     </div>
                   </div>
                 </div>
@@ -920,6 +926,18 @@ function PublicProposalView({
                     {ownership_delta_monthly <= 0 ? (
                       <p className="text-xs text-emerald-400/70 mt-1.5 text-center">
                         Immediate monthly savings of ${Math.abs(ownership_delta_monthly)}/mo — and it grows as utility rates increase.
+                      </p>
+                    ) : null}
+                    {/* SREC cash context — the bill comparison above is bills-only; the REC
+                        contract is real income paid as checks (50% upfront + 6 yrs), and
+                        omitting it made "+$X/mo" contradict the SREC-driven payoff year. */}
+                    {(cp.truth25yr.srec_income_25yr ?? 0) > 0 && (cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? (
+                      <p className="text-xs mt-1.5 text-center" style={{ color: '#16a34a' }}>
+                        Bills aren&apos;t the whole story: your REC contract also pays ~${Math.round(cp.truth25yr.yearlyFlow[0].srec_income).toLocaleString()} after energization
+                        {(cp.truth25yr.yearlyFlow?.[1]?.srec_income ?? 0) > 0
+                          ? <> + ~${Math.round((cp.truth25yr.yearlyFlow[1].srec_income) / 12).toLocaleString()}/mo equivalent (paid annually) for the following 6 years</>
+                          : null}
+                        {' '}— income the monthly comparison above doesn&apos;t include.
                       </p>
                     ) : null}
                   </div>
@@ -1113,16 +1131,10 @@ function PublicProposalView({
                 Your utility rate has been rising ~{(cp.utility.escalationRate * 100).toFixed(1)}%/year.
                 Solar locks in your energy cost today.
               </p>
-              <UtilityRateGraph utility={cp.utility} financial={cp.financial} />
+              <UtilityRateGraph utility={cp.utility} financial={cp.financial} annualProductionKwh={cp.production.annualKwh} />
             </div>
-            <div className="proposal-sec card p-4" data-block-id="cost-projection-chart">
-              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
-                <Zap size={15} style={{ color: primaryColor }} /> 25-Year Cost Comparison
-              </h3>
-              <p className="text-xs text-slate-400 mb-3">
-                The green line shows your total cost with solar. The red line shows what you&apos;d pay staying on grid power.
-              </p>
-              <UtilityCostProjectionChart
+            <div data-block-id="cost-projection-chart">
+              <CashFlowStoryCard
                 utility={cp.utility}
                 financial={cp.financial}
                 truth25yr={cp.truth25yr}
@@ -1196,9 +1208,15 @@ function PublicProposalView({
                     <div className="text-xs font-bold flex-shrink-0 text-blue-400 text-right">
                       {inc.type === 'property_tax_exemption' || inc.type === 'sales_tax_exemption'
                         ? 'Exempt'
-                        : inc.calculatedValue > 0
-                          ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
-                          : 'Eligible'}
+                        // SREC: the canonical truth engine (program-year REC price ×
+                        // this system's contracted production, 50%-upfront schedule)
+                        // is the ONE SREC number — never the catalog's generic $/kWh
+                        // estimate, which contradicted the PDF on the same proposal.
+                        : inc.type === 'srec' && (cp.truth25yr.srec_income_25yr ?? 0) > 0
+                          ? `~$${Math.round(cp.truth25yr.srec_income_25yr).toLocaleString()} contract`
+                          : inc.calculatedValue > 0
+                            ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
+                            : 'Eligible'}
                     </div>
                   </div>
                 </div>
@@ -1222,7 +1240,10 @@ function PublicProposalView({
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed mb-3">
                   Under federal §48E, solar companies that own the system can still claim
-                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit (through 2032)</span> and
+                  {/* P.L. 119-21: solar/wind §48E requires construction start by
+                      2026-07-04 (or in-service by end of 2027) — "(through 2032)"
+                      was the pre-repeal schedule and is false for solar. */}
+                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit</span> and
                   pass those savings directly to you through a lease or power purchase agreement (PPA).
                   This means lower monthly payments — sometimes $0 upfront.
                 </p>
@@ -1467,7 +1488,10 @@ function PublicProposalView({
               <div className="relative flex items-end gap-1 mb-1" style={{ height: '80px' }}>
                 {cp.production.monthlyKwh.map((kwh, i) => {
                   const max = Math.max(...cp.production.monthlyKwh, 1);
-                  const barH = Math.max(2, Math.round((kwh / max) * 68));
+                  // 60px max: bar + ~16px month label must fit the 80px column —
+                  // at 68px the flexbox shrank every tall bar to one identical
+                  // height (May-Aug rendered flat despite distinct kWh).
+                  const barH = Math.max(2, Math.round((kwh / max) * 60));
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center justify-end" style={{ height: '80px' }}>
                       <div
@@ -1522,15 +1546,28 @@ function PublicProposalView({
                 </div>
                 {avgMonthlyBefore - avgMonthlyAfter > 0 ? (
                   <span className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-300">
-                    −${avgMonthlyBefore - avgMonthlyAfter}/mo
+                    −${avgMonthlyBefore - avgMonthlyAfter}/mo utility bill
                   </span>
                 ) : null}
               </div>
+              {/* Bridge to "What Changes Today": this card is the UTILITY BILL only.
+                  Without this line, "−$229/MO" here read as contradicting the
+                  honest "+$228/mo" total-outlay figure on the summary (Ray, 07-16). */}
+              {purchaseMode === 'finance' && solar_payment_monthly > 0 ? (
+                <p className="text-xs text-slate-500 mb-2">
+                  Utility bill only — your ${solar_payment_monthly}/mo solar payment is separate
+                  (total ${total_energy_cost_monthly}/mo; see &ldquo;What Changes Today&rdquo;).
+                </p>
+              ) : null}
               <ResponsiveContainer width="100%" height={130}>
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                  {/* Explicit even ticks — recharts' auto axis dropped an interior
+                      tick ($0/$85/$170/$340), printing a scale that reads nonlinear. */}
+                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`}
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax / 20) * 20]}
+                    ticks={(() => { const m = Math.ceil(Math.max(...monthlyBillData.map(d => d.before), 1) / 20) * 20; return [0, m / 4, m / 2, (3 * m) / 4, m]; })()} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`$${v}`, '']} />
                   <Bar dataKey="before" fill="#ef4444" radius={[3, 3, 0, 0]} name="Before Solar" opacity={0.6} />
                   <Bar dataKey="after" fill="#22c55e" radius={[3, 3, 0, 0]} name="After Solar" opacity={0.8} />
@@ -1664,7 +1701,12 @@ function PublicProposalView({
                 <div className="text-xs text-slate-500 mb-1">Your Solar Investment</div>
                 <div className="text-lg font-black text-white">${Math.round(solar_cost_total).toLocaleString()}</div>
                 <div className="text-xs text-slate-500 mt-1">
-                  {purchaseMode === 'finance' ? `${financeTermYears}-yr loan total` : 'One-time cash purchase'}
+                  {/* Value is cash-basis system price (canonical savings basis) — the
+                      old "25-yr loan total" label was false ($59,200 vs the real
+                      $137,100 financed total shown in the loan comparison table). */}
+                  {purchaseMode === 'finance'
+                    ? `System price — financed @ $${solar_payment_monthly}/mo`
+                    : 'One-time cash purchase'}
                 </div>
               </div>
 
@@ -1672,7 +1714,14 @@ function PublicProposalView({
               <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
                 <div className="text-xs text-slate-500 mb-1">Est. Remaining Utility Bills</div>
                 <div className="text-lg font-black text-slate-300">${remaining_utility_cost_total > 0 ? remaining_utility_cost_total.toLocaleString() : '0'}</div>
-                <div className="text-xs text-slate-500 mt-1">{energyOffset}% offset — {100 - energyOffset}% still from grid</div>
+                {/* "100% offset — 0% still from grid" next to a nonzero remaining-bills
+                    figure read as a contradiction: fixed charges, delivery riders, and
+                    true-up shortfalls remain even at full offset. Say so. */}
+                <div className="text-xs text-slate-500 mt-1">
+                  {energyOffset >= 100
+                    ? `${energyOffset}% offset — fixed charges & riders still apply`
+                    : `${energyOffset}% offset — ${100 - energyOffset}% still from grid`}
+                </div>
               </div>
 
               {/* Net advantage — prominent */}
@@ -1865,10 +1914,21 @@ function PublicProposalView({
                 {(proj as any)?.selectedInverter?.model || (proj as any)?.selectedInverter?.name || 'Premium grid-tie inverter'}
               </div>
               {(proj as any)?.selectedInverter?.efficiency ? (
-                <div className="text-xs text-slate-400 mt-1">{((proj as any).selectedInverter.efficiency * 100).toFixed(1)}% efficiency</div>
+                // Efficiency is stored as a FRACTION (0.965) in some records and a
+                // PERCENT (96.5) in others (equipment-db vs engineering snapshots) —
+                // blind ×100 rendered "9650.0% efficiency". Normalize: >1.5 = already %.
+                <div className="text-xs text-slate-400 mt-1">
+                  {((proj as any).selectedInverter.efficiency > 1.5
+                    ? (proj as any).selectedInverter.efficiency
+                    : (proj as any).selectedInverter.efficiency * 100).toFixed(1)}% efficiency
+                </div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
-                <CheckCircle size={10} /> 25-yr warranty
+                {/* Warranty was hardcoded "25-yr" — SMA string inverters carry 10yr,
+                    Enphase micros 25yr. Read the snapshot; only claim when known. */}
+                <CheckCircle size={10} /> {(proj as any)?.selectedInverter?.warranty
+                  ? `${(proj as any).selectedInverter.warranty}-yr warranty`
+                  : 'Manufacturer warranty'}
               </div>
             </div>
 
@@ -2144,7 +2204,9 @@ function PublicProposalView({
         {/* Why Solar / Trust section */}
         <div className="proposal-sec grid grid-cols-1 md:grid-cols-3 gap-2" data-block-id="trust-performance">
           {[
-            { icon: <Shield size={20} />, title: '25-Year Warranty', desc: 'Full coverage on panels, inverter, and mounting system for complete peace of mind.' },
+            // Honest scope (audit 2026-07-16): "full coverage on panels, inverter,
+            // and mounting" was false whenever the inverter carries 10yr (SMA).
+            { icon: <Shield size={20} />, title: '25-Year Panel Warranty', desc: 'Panels carry a 25-year manufacturer warranty; inverter and racking carry their own manufacturer terms — see the equipment section.' },
             { icon: <Award size={20} />, title: 'Licensed & Insured', desc: 'Fully licensed installers with comprehensive insurance coverage on every job.' },
             { icon: <Star size={20} />, title: 'Local Expertise', desc: 'Deep knowledge of local utility rules, incentives, and permitting requirements.' },
           ].map(t => (
@@ -2260,8 +2322,10 @@ function PublicProposalView({
             <div className="flex items-center justify-center gap-4 mt-4">
               <p className="text-slate-500 text-xs">Legally binding e-signature · No DocuSign needed</p>
             </div>
-            {/* Secondary: Download PDF */}
-            <div className="border-t border-slate-700/40 mt-5 pt-4">
+            {/* Secondary: Download PDF — data-html2canvas-ignore keeps the
+                "Generating PDF…" spinner state from being baked into the PDF
+                itself (generateProposalPDF screenshots the live DOM). */}
+            <div className="border-t border-slate-700/40 mt-5 pt-4" data-html2canvas-ignore="true">
               <button
                 onClick={onDownloadPdf}
                 disabled={downloadingPdf}

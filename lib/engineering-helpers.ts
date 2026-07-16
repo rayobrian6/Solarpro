@@ -3,6 +3,7 @@
  * Extracted from app/engineering/page.tsx for monolith relief.
  */
 import { getBatteryById } from '@/lib/equipment-db';
+import type { SubSystemKey, SubSystemEquipmentMap } from '@/lib/system/subSystemEquipment';
 
 // ── Types ────────────────────────────────────────────────────────────
 // v47.418 — 'hybrid' added as first-class member. See systemDefinition.ts.
@@ -10,6 +11,12 @@ export type InverterType = 'string' | 'micro' | 'optimizer' | 'hybrid' | 'ecoflo
 export type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' | 'flat_tpo' | 'flat_epdm' | 'flat_gravel';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type TabId = 'config' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
+
+// ── CANONICAL ProjectConfig family ───────────────────────────────────
+// Wave 1 of docs/ARCHITECTURE-per-subsystem-equipment.md: the two ProjectConfig
+// copies (this one + app/engineering/page.tsx:220) are REUNIFIED — this is the
+// single canonical declaration; page.tsx aliases it via `import()` types.
+// Keep this the exact superset of everything the engineering page persists.
 
 export interface StringConfig {
   id: string;
@@ -24,6 +31,9 @@ export interface StringConfig {
   wireLength: number;
   ocpdOverride?: number;
   ocpdOverrideAcknowledged?: boolean;
+  /** Per-subsystem tag (derived cache — contract §1.1). Inherits the parent
+   *  inverter's key when untagged. */
+  subSystemKey?: SubSystemKey;
 }
 
 export interface InverterConfig {
@@ -34,15 +44,21 @@ export interface InverterConfig {
   deviceRatioOverride?: number;
   modulesPerString?: number;
   stringsPerInverter?: number;
+  // v58.6: optimizer topology peripheral ID (e.g. 'se-p505') — separate from
+  // inverterId (central string inverter). Drives BOM Stage 1 optimizer lines.
+  optimizerPeripheralId?: string;
+  /** Per-subsystem tag (derived cache — contract §1.1, re-stamped from panel
+   *  stamps at hydration; survives both normalizer whitelists per I-2). */
+  subSystemKey?: SubSystemKey;
 }
 
 export interface ProjectConfig {
   projectName: string;
   clientName: string;
   address: string;
-  state: string;
-  city: string;
-  county: string;
+  state: string;          // Explicit state code (e.g. 'CA', 'TX') — overrides address parsing
+  city: string;           // City name — used for AHJ city-level overrides
+  county: string;         // County name — used for AHJ county-level overrides
   designer: string;
   date: string;
   systemType: SystemType;
@@ -50,12 +66,13 @@ export interface ProjectConfig {
   batteryBrand: string;
   batteryModel: string;
   batteryCount: number;
-  batteryKwh: number;
-  batteryId: string;
-  generatorId: string;
-  generatorWireLength: number;
+  batteryKwh: number;     // LEGACY PER-UNIT kWh (page multiplies by batteryCount for totals)
+  batteryId: string;      // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
+  generatorId: string;    // equipment-db generator ID
+  generatorWireLength: number;  // ft — distance from generator to ATS
+  trenchRunLengthFt?: number;   // ft — ground/fence array → service trench distance
   atsId: string;
-  backupInterfaceId: string;
+  backupInterfaceId: string;    // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, …)
   mainPanelAmps: number;
   mainPanelBrand: string;
   utilityMeter: string;
@@ -76,19 +93,22 @@ export interface ProjectConfig {
   rafterSpan: number;
   rafterSize: string;
   rafterSpecies: string;
-  framingType: 'truss' | 'rafter' | 'unknown';
-  panelOrientation?: 'portrait' | 'landscape';
+  framingType: 'truss' | 'rafter' | 'unknown';  // V3 structural engine
+  meanRoofHeight?: number;              // ft — mean height of eave to ridge midpoint (ASCE 7 Kz)
+  panelOrientation?: 'portrait' | 'landscape';  // V3 array geometry
   attachmentSpacing: number;
-  railSpacing: number;
+  railSpacing: number;           // inches — distance between rail rows
   rowCount?: number;
   columnCount?: number;
   layoutOrientation?: 'portrait' | 'landscape';
+  // Installer preference: cut the AC trunk at row transitions.
+  spliceAtRows?: boolean;
   panelCoordinates?: Array<{ x: number; y: number; row: number; col: number; }>;
   notes: string;
   interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE';
-  panelBusRating: number;
-  utilityId: string;
-  ahjId: string;
+  panelBusRating: number;        // Bus bar rating (may differ from mainPanelAmps)
+  utilityId: string;             // e.g. 'ameren', 'comed', 'pge' — '' = auto/unknown
+  ahjId: string;                 // e.g. 'il-icc', 'manual' — '' = auto
   roofWidth?: number;
   roofLength?: number;
   inverterLocation?: string;
@@ -103,7 +123,39 @@ export interface ProjectConfig {
   electricalLicense?: string;
   ownerPhone?: string;
   ownerEmail?: string;
-  zip?: string;
+  zip?: string;                  // ZIP code — used for AHJ lookup
+  apn?: string;                  // Assessor Parcel Number — Error 3e fix
+  // Phase 13 — Smart Defaults sentinel + seed brand.
+  // `defaultsApplied` is set exactly ONCE by applySmartDefaultsOnce() and must
+  // remain true until the user explicitly resets the system (reset hook
+  // clearDefaultsAppliedFlag). It blocks the defaults layer from ever
+  // overriding user edits after the first bootstrap. `selectedBrand` records
+  // the seed brand chosen by the defaults layer (only when the user had not
+  // already picked one); defaults will NOT re-fire on brand changes.
+  defaultsApplied?: boolean;
+  selectedBrand?: string;
+  // Phase 13.1 — USER INTENT LOCK. Set to `true` the moment the user touches
+  // ANY inverter / string field. While on: smart defaults + auto-apply of the
+  // sizing recommendation are hard no-ops. Only "Apply Recommendation" or
+  // "Reset System" flips it off. NON-NEGOTIABLE: the sizing engine MAY still
+  // compute a recommendation for display, but MUST NOT mutate the user's
+  // config once this lock is engaged.
+  userHasEditedInverters?: boolean;
+  // v61.7 — CONFIG OVERWRITE KILL SWITCH. Set to `true` after any explicit
+  // user action (Apply Recommendation, manual edit, smart-defaults bootstrap).
+  // When true ALL automatic config mutations are BLOCKED: CAD sync only
+  // updates panel count (never rearranges strings), AUTO-APPLY is a no-op,
+  // HARD DC/AC AUTO-HEAL is warning-only, ecosystem apply is blocked.
+  isUserControlled?: boolean;
+  // ── Per-subsystem equipment contract (Wave 1, §1.3) — all additive ──
+  /** Equipment authority per subsystem — survives inverter regeneration
+   *  (contract §1.1 authority hierarchy; keyed by SubSystemKey). */
+  subSystems?: SubSystemEquipmentMap;
+  /** Per-subsystem smart-defaults sentinel (extends `defaultsApplied`). */
+  defaultsAppliedBySubSystem?: Partial<Record<SubSystemKey, boolean>>;
+  /** engineering_config envelope schema version. 2 = per-subsystem contract;
+   *  absent/<2 = legacy flat shape (save route re-normalizes — Wave 1b). */
+  schemaVersion?: number;
 }
 
 export interface ComplianceResult {

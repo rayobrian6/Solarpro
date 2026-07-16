@@ -107,6 +107,31 @@ export async function POST(req: NextRequest) {
       projectId: body.projectId,
       hasStrings: Array.isArray(body.strings) && body.strings.length > 0,
     });
+
+    // ── Wave 3.7 — versioned client-passthrough recompute guard (contract §3
+    // Wave 3 item 7): a per-subsystem-aware client namespaces per-sub ids
+    // `${sub}:${id}` at N>1. This route recomputes computeSystem() at entry
+    // (STEP 1), so namespaced ids never drive math here — but any that arrive
+    // in the passthrough arrays are re-keyed to base ids instead of silently
+    // failing downstream `.find(id)` lookups (recompute-on-miss, I-8).
+    {
+      const _nsRe = /^(roof|ground|fence):(.+)$/;
+      if (Array.isArray(body.strings)) {
+        let _nsHits = 0;
+        body.strings = body.strings.map((s: { id?: string }) => {
+          const m = typeof s?.id === 'string' ? _nsRe.exec(s.id) : null;
+          if (!m) return s;
+          _nsHits++;
+          return { ...s, id: m[2] };
+        });
+        if (_nsHits > 0) {
+          console.warn(`[PLANSET] hybrid client passthrough: ${_nsHits} namespaced string id(s) re-keyed to base ids (Wave 3.7 guard)`);
+        }
+      }
+      if (Array.isArray(body.runs) && body.runs.some((r: { id?: string }) => typeof r?.id === 'string' && _nsRe.test(r.id))) {
+        console.warn('[PLANSET] hybrid client passthrough: namespaced run ids detected — ignored (route recomputes computeSystem at entry)');
+      }
+    }
     const {
       projectId,
       clientId,
@@ -540,6 +565,10 @@ export async function POST(req: NextRequest) {
     // The renderer displays them — no re-calculation.
     const elecInput: ElectricalSheetInput = {
       tb:                    { ...tb, sheetTitle: 'Electrical / SLD', sheetNumber: 'E-1' },
+      // Single source of truth for E-1: embed the professional SLD the client
+      // already rendered (was destructured then dropped — the plan-set drew its
+      // own single-lane, hybrid-blind SLD instead, the data breach Ray flagged).
+      existingSldSvg,
       // Module specs (for display/fallback)
       moduleVoc,
       moduleIsc,

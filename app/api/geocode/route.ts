@@ -152,11 +152,19 @@ async function autocomplete(q: string): Promise<NextResponse> {
             const zip = get('postal_code')?.long_name || '';
             const street = [streetNum, route].filter(Boolean).join(' ');
             const short_name = buildShortName(street, city, stateCode, zip);
+            const address = {
+              house_number: streetNum,
+              road: route,
+              city,
+              state: stateCode,
+              postcode: zip,
+            };
             return {
               short_name,
               display_name: item.formatted_address || short_name,
               lat: item.geometry.location.lat,
               lng: item.geometry.location.lng,
+              address,
             };
           });
           return NextResponse.json({ success: true, data: suggestions });
@@ -191,11 +199,19 @@ async function autocomplete(q: string): Promise<NextResponse> {
             stateCode.trim(),
             zip.trim()
           );
+          const address = {
+            house_number: (street.match(/^\d+[-\d]*/) || [''])[0],
+            road: street.replace(/^\d+[-\d]*\s*/, ''),
+            city: parts[1] || '',
+            state: (parts[2] || '').trim(),
+            postcode: (parts[3] || '').trim(),
+          };
           return {
             short_name,
             display_name: short_name,
             lat: coords.y || 0,
             lng: coords.x || 0,
+            address,
           };
         }).filter((s: any) => s.lat !== 0 && s.lng !== 0);
         if (suggestions.length > 0) {
@@ -230,6 +246,7 @@ async function autocomplete(q: string): Promise<NextResponse> {
             display_name: item.display_name,
             lat: parseFloat(item.lat),
             lng: parseFloat(item.lon),
+            address: a,
           };
         });
         return NextResponse.json({ success: true, data: suggestions });

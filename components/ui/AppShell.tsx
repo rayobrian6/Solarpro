@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Sun, LayoutDashboard, Users, FolderOpen, Zap,
+  Sun, LayoutDashboard, Users, FolderOpen,
   FileText, Settings, ChevronLeft, ChevronRight, DollarSign,
   Bell, Search, Menu, X,
   Cpu, BarChart3, Map, Home,

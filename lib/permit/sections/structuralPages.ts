@@ -10,10 +10,16 @@ import {
   getSheetComposition, validateSheetComposition, validateSheet,
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
+import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
-import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension } from '../utils/drawing';
-import {  isFence, isGround, isRoof } from '@/lib/system';
+import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
+import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
+import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
+import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
+import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import {
   extractStructuralInputFromCAD,
   deriveStructuralBOM,
@@ -30,16 +36,44 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
     throw new Error(`[pageRoofStructural] getPrimaryView(${comp.primaryView}) returned empty SVG`);
   }
 
+  // ── Manufacturer attachment detail (real published cross-section) ───────────
+  // When the job's selected racking has a manufacturer detail on file
+  // (manufacturer_assets library), render the REAL published attachment
+  // cross-section as the primary detail — PE sets embed the racking maker's own
+  // detail for permit submittal. The hand-drawn CAD line-art is the fallback
+  // when no manufacturer asset exists for the mounting system.
+  const mountId = (input.project as { mountingSystemId?: string }).mountingSystemId;
+  const rackAsset = getManufacturerAsset(mountId, 'racking_detail');
+  let primaryDetail = drawingSvg;
+  let detailCaption: string | null = null;
+  if (rackAsset?.imageUrl) {
+    comp.drawHeader = `ATTACHMENT DETAIL — ${rackAsset.brand} ${rackAsset.model} (MANUFACTURER PUBLISHED)`;
+    primaryDetail =
+      `<img src="${rackAsset.imageUrl}" alt="${escapeH(rackAsset.brand + ' ' + rackAsset.model + ' attachment detail')}" ` +
+      `style="max-width:100%;max-height:100%;object-fit:contain;display:block;" />`;
+    const src = rackAsset.docTitle || (rackAsset.sourceUrl ? new URL(rackAsset.sourceUrl).hostname : '');
+    detailCaption =
+      `Source: ${escapeH(src)}${rackAsset.pageRef ? ' · ' + escapeH(rackAsset.pageRef) : ''}` +
+      ` · Manufacturer-published detail — field-verify against current revision.`;
+  }
+
+  // Provenance caption strip (secondary zone) when a manufacturer asset is used.
+  let captionStrip: string | null = null;
+  if (detailCaption) {
+    comp.secondaryHeader = 'DETAIL SOURCE / PROVENANCE';
+    captionStrip = `<div style="font-size:8px;line-height:1.3;color:#334;padding:2px 8px;text-align:center;width:100%;">${detailCaption}</div>`;
+  }
+
   return `
   <div class="page">
     ${titleBlock(input, 'PV-3', 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION', pageNum, totalPages)}
-    ${composeDrawPage(comp, drawingSvg)}
+    ${composeDrawPage(comp, primaryDetail, captionStrip)}
   </div>`;
 }
 
 
 
-export function pageGroundStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+export function pageGroundStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('ground_mount', 'structural', cad, inputRec);
   validateSheet('ground_mount', comp);
@@ -51,14 +85,14 @@ export function pageGroundStructural(input: PermitInput, cad: CADModel, pageNum:
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-3', 'GROUND MOUNT STRUCTURAL DETAILS', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-3', opts?.title ?? 'GROUND MOUNT STRUCTURAL DETAILS', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
 
 
 
-export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
+export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; title?: string }): string {
   const inputRec = input as unknown as Record<string, unknown>;
   const comp = getSheetComposition('solar_fence', 'structural', cad, inputRec);
   validateSheet('solar_fence', comp);
@@ -71,7 +105,7 @@ export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: 
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-3', 'FENCE STRUCTURAL DETAILS', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-3', opts?.title ?? 'FENCE STRUCTURAL DETAILS', pageNum, totalPages)}
     ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
@@ -455,7 +489,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
             <tr><td>Foundation Type</td><td class="cv">${structType}</td></tr>
             <tr><td>Pile Embedment Depth</td><td class="cv">${pileDepth} ft min. (below frost)</td></tr>
             <tr><td>Pile Spacing</td><td class="cv">${pileSp} ft O.C.</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < MIN_ATTACHMENT_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${MIN_ATTACHMENT_SF.toFixed(1)})` : ''}</td></tr>
             <tr><td>Wind Code Reference</td><td class="cv">ASCE 7-22 §27</td></tr>
           </table>
         </div>
@@ -536,7 +570,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">GROUND MOUNT PILE REQUIREMENTS</div>
           <div style="margin-bottom:3px;">1. Pile type: ${structType} — verify diameter and wall thickness with geotechnical report.</div>
           <div style="margin-bottom:3px;">2. Embedment: <strong>${pileDepth} ft min.</strong> below finish grade — must be below local frost depth.</div>
-          <div style="margin-bottom:3px;">3. Pile spacing: <strong>${pileSp} ft O.C.</strong> per structural analysis — see array layout on PV-2.</div>
+          <div style="margin-bottom:3px;">3. Pile spacing: <strong>${pileSp} ft O.C.</strong> per structural analysis — see array layout on PV-1.</div>
           <div style="margin-bottom:3px;">4. Ground clearance: <strong>${groundClr}" min.</strong> from lowest module edge to finish grade.</div>
           <div style="margin-bottom:3px;">5. Tilt angle: <strong>${tiltDeg}°</strong> from horizontal — verify per final array design.</div>
           <div style="margin-bottom:3px;">6. Grounding: Drive ground rod per NEC 690.47 — bond all metallic structure per NEC 250.97.</div>
@@ -569,13 +603,13 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ASCE 7-22 §7.` : 'Snow loading is not a controlling factor at this location.'}
         Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ASCE 7-22 §7.
         Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ASCE 7-22 §27.
-        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= 2.0 ? 'above' : 'BELOW'} the required minimum of 2.0.` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= MIN_ATTACHMENT_SF ? 'above' : 'BELOW'} the required ASD minimum of ${MIN_ATTACHMENT_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ASCE 7-22 §2.4).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
         wind uplift, snow, dead load, and pile capacity per ASCE 7-22 §27 and ${ibcVer} IBC.
-        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
+        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= MIN_ATTACHMENT_SF
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
           : structural && structural.attachment?.safetyFactor == null
@@ -662,7 +696,19 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
 
   const rafterSize  = project.rafterSize || '2×6';
   const rafterSpace = project.rafterSpacing || 24;
-  const attachSpace = project.attachmentSpacing || 48;
+  // Same resolution chain as PV-3/PE-1 (engineering-resolved → user input →
+  // racking rated max) and lag spec from the SELECTED mounting system — the
+  // requirements block used to print "3/8" / 48" max" beside a lag analysis
+  // that resolved 5/16" @ 24" for the same job.
+  const _mountSel   = project.mountingSystemId ? getMountingSystemById(project.mountingSystemId) : undefined;
+  const attachSpace = structural?.attachment?.maxAllowedSpacing
+    || project.attachmentSpacing
+    || _mountSel?.mount?.maxSpacingIn
+    || 48;
+  const _fracIn = (v: number) =>
+    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
+  const lagDia    = _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
+  const lagEmbed  = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
 
   return `
   <div class="page">
@@ -719,7 +765,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <table class="calc-table">
             <tr><td>Lag Bolt Capacity</td><td class="cv">${lagCap} lbs</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < MIN_ATTACHMENT_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${MIN_ATTACHMENT_SF.toFixed(1)})` : ''}</td></tr>
             <tr><td>Max Allowed Spacing</td><td class="cv">${maxSpacing}"</td></tr>
           </table>
         </div>
@@ -751,50 +797,58 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <div class="section-title">Standard Detail — Roof Attachment (Lag Bolt w/ Flashing, Typical)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
         <div style="text-align:center;">
-          <svg viewBox="0 0 300 240" width="280" height="220" style="display:block;margin:0 auto;">
-            <!-- Rafter -->
-            <rect x="20" y="130" width="260" height="55" fill="#d4a76a" stroke="#000" stroke-width="1.5"/>
-            <text x="150" y="162" text-anchor="middle" font-size="10" font-weight="bold" fill="#000">RAFTER (${rafterSize})</text>
-            <!-- Sheathing -->
-            <rect x="20" y="115" width="260" height="15" fill="#c8b898" stroke="#000" stroke-width="1"/>
-            <text x="150" y="125" text-anchor="middle" font-size="7" fill="#333">ROOF SHEATHING (3/4" PLY)</text>
-            <!-- Roofing material -->
-            <rect x="20" y="104" width="260" height="11" fill="#888" stroke="#000" stroke-width="0.8"/>
-            <text x="150" y="112" text-anchor="middle" font-size="6.5" fill="#fff">ROOFING MATERIAL</text>
-            <!-- Flashing -->
-            <path d="M 100,86 L 100,106 L 200,106 L 200,86 L 188,86 L 188,98 L 112,98 L 112,86 Z" fill="#bbb" stroke="#000" stroke-width="1.2"/>
-            <text x="150" y="94" text-anchor="middle" font-size="7" fill="#000" font-weight="bold">FLASHING</text>
-            <!-- L-Foot -->
-            <rect x="133" y="62" width="34" height="24" fill="#555" stroke="#000" stroke-width="1.5" rx="2"/>
-            <text x="150" y="77" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold">L-FOOT</text>
-            <!-- Rail -->
-            <rect x="110" y="48" width="80" height="14" fill="#333" stroke="#000" stroke-width="1.2" rx="1"/>
-            <text x="150" y="58" text-anchor="middle" font-size="7" fill="#fff">RAIL</text>
-            <!-- Module -->
-            <rect x="75" y="30" width="150" height="18" fill="#2255aa" stroke="#000" stroke-width="1" rx="1"/>
-            <text x="150" y="43" text-anchor="middle" font-size="7.5" fill="#fff" font-weight="bold">PV MODULE</text>
-            <!-- Lag bolt -->
-            <line x1="150" y1="86" x2="150" y2="175" stroke="#000" stroke-width="3"/>
-            <polygon points="145,175 155,175 150,185" fill="#000"/>
-            <text x="158" y="132" font-size="6.5" fill="#000">LAG BOLT</text>
-            <text x="158" y="140" font-size="6.5" fill="#000">3/8" DIA.</text>
-            <!-- Embedment dimension -->
-            <line x1="163" y1="130" x2="205" y2="130" stroke="#c00" stroke-width="0.6" stroke-dasharray="2,1"/>
-            <line x1="163" y1="175" x2="205" y2="175" stroke="#c00" stroke-width="0.6" stroke-dasharray="2,1"/>
-            <line x1="200" y1="130" x2="200" y2="175" stroke="#c00" stroke-width="1"/>
-            <polygon points="196,130 204,130 200,124" fill="#c00"/>
-            <polygon points="196,175 204,175 200,181" fill="#c00"/>
-            <text x="208" y="155" font-size="7" fill="#c00" font-weight="bold">2.5"</text>
-            <text x="208" y="163" font-size="6.5" fill="#c00">MIN</text>
-            <!-- Uplift arrow -->
-            <line x1="150" y1="20" x2="150" y2="5" stroke="#c00" stroke-width="2"/>
-            <polygon points="146,5 154,5 150,-2" fill="#c00"/>
-            <text x="158" y="14" font-size="7" fill="#c00" font-weight="bold">UPLIFT</text>
+          <svg viewBox="0 0 300 240" width="212" height="170" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
+            <defs><pattern id="rt-woodhatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#c8a56f" stroke-width="0.6"/></pattern></defs>
+            <!-- rafter (wood, hatched) -->
+            <rect x="20" y="134" width="260" height="60" fill="#efe0c4" stroke="#7a5a2e" stroke-width="1.4"/>
+            <rect x="20" y="134" width="260" height="60" fill="url(#rt-woodhatch)"/>
+            <text x="40" y="178" font-size="8.5" font-weight="bold" fill="#5a4322">RAFTER (${rafterSize})</text>
+            <!-- sheathing -->
+            <rect x="20" y="119" width="260" height="15" fill="#f2ead8" stroke="#8a7a58" stroke-width="1"/>
+            <text x="40" y="130" font-size="6.5" fill="#5a5340">ROOF SHEATHING (5/8" OSB)</text>
+            <!-- roofing (asphalt shingle courses) -->
+            <rect x="20" y="107" width="260" height="12" fill="#c4c9d2" stroke="#5b6472" stroke-width="0.8"/>
+            <g stroke="#94a0af" stroke-width="0.5"><line x1="70" y1="107" x2="70" y2="119"/><line x1="120" y1="107" x2="120" y2="119"/><line x1="170" y1="107" x2="170" y2="119"/><line x1="220" y1="107" x2="220" y2="119"/></g>
+            <text x="40" y="116" font-size="6.5" fill="#3b4250">ASPHALT SHINGLE</text>
+            <!-- flashing (metal, under upslope course) -->
+            <path d="M 98,86 L 98,109 L 202,109 L 202,86 L 190,86 L 190,101 L 110,101 L 110,86 Z" fill="#e4e7ec" stroke="#5b6472" stroke-width="1.1"/>
+            <text x="150" y="96" text-anchor="middle" font-size="6.5" fill="#3b4250" font-weight="bold">FLASHING</text>
+            <!-- L-foot (aluminum) -->
+            <path d="M 138,68 L 138,88 L 162,88 L 162,80 L 148,80 L 148,68 Z" fill="#d4dae2" stroke="#3b4250" stroke-width="1.2"/>
+            <line x1="163" y1="81" x2="174" y2="81" stroke="#3b4250" stroke-width="0.5"/>
+            <text x="176" y="82" font-size="6.5" fill="#3b4250" font-weight="bold">L-FOOT</text>
+            <!-- rail (top-hat, edge on) -->
+            <rect x="112" y="54" width="76" height="14" fill="#d4dae2" stroke="#3b4250" stroke-width="1.1" rx="1"/>
+            <rect x="140" y="57" width="20" height="8" fill="none" stroke="#8a94a6" stroke-width="0.6"/>
+            <text x="150" y="64" text-anchor="middle" font-size="6.5" fill="#3b4250" font-weight="bold">RAIL</text>
+            <!-- PV module (edge on) + clamp -->
+            <rect x="70" y="40" width="160" height="13" fill="#2a3444" stroke="#1a2230" stroke-width="1"/>
+            <rect x="70" y="40" width="160" height="4" fill="#4a5568"/>
+            <rect x="145" y="49" width="10" height="6" fill="#8a94a6" stroke="#3b4250" stroke-width="0.6"/>
+            <text x="120" y="35" text-anchor="middle" font-size="7" fill="#1a2230" font-weight="bold">PV MODULE</text>
+            <!-- lag screw: hex head + shank + thread into rafter -->
+            <rect x="146" y="86" width="8" height="6" fill="#6b7280" stroke="#3b4250" stroke-width="0.8"/>
+            <line x1="150" y1="92" x2="150" y2="184" stroke="#6b7280" stroke-width="2.4"/>
+            <g stroke="#3b4250" stroke-width="0.5"><line x1="146" y1="152" x2="154" y2="152"/><line x1="146" y1="158" x2="154" y2="158"/><line x1="146" y1="164" x2="154" y2="164"/><line x1="146" y1="170" x2="154" y2="170"/><line x1="146" y1="176" x2="154" y2="176"/></g>
+            <text x="160" y="130" font-size="6.5" fill="#1a2230">LAG SCREW</text>
+            <text x="160" y="138" font-size="6.5" fill="#1a2230">${lagDia}" DIA. SS</text>
+            <!-- embedment dimension -->
+            <line x1="163" y1="134" x2="212" y2="134" stroke="#5b6472" stroke-width="0.5"/>
+            <line x1="163" y1="184" x2="212" y2="184" stroke="#5b6472" stroke-width="0.5"/>
+            <line x1="207" y1="134" x2="207" y2="184" stroke="#334155" stroke-width="0.9"/>
+            <polygon points="204,139 210,139 207,134" fill="#334155"/>
+            <polygon points="204,179 210,179 207,184" fill="#334155"/>
+            <text x="214" y="160" font-size="7" fill="#334155" font-weight="bold">${lagEmbed}"</text>
+            <text x="214" y="168" font-size="5.6" fill="#5b6472">MIN EMBED</text>
+            <!-- uplift arrow -->
+            <line x1="248" y1="38" x2="248" y2="20" stroke="#b23b2e" stroke-width="1.8"/>
+            <polygon points="244,22 252,22 248,15" fill="#b23b2e"/>
+            <text x="240" y="30" font-size="6.5" fill="#b23b2e" font-weight="bold" text-anchor="end">UPLIFT</text>
           </svg>
         </div>
         <div style="font-size:var(--f-sm);line-height:1.7;">
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">ROOF ATTACHMENT REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. Lag bolt: 3/8" diameter minimum stainless steel, <strong>2.5" minimum embedment into rafter.</strong></div>
+          <div style="margin-bottom:3px;">1. Lag bolt: ${lagDia}" diameter minimum stainless steel, <strong>${lagEmbed}" minimum embedment into rafter.</strong></div>
           <div style="margin-bottom:3px;">2. Flashing: Aluminum or stainless steel base flashing installed under existing roofing material per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">3. Sealant: Polyurethane or silicone roofing sealant at all roof penetrations per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">4. Attachment to structural framing members only — <strong>no attachment to sheathing or decking alone.</strong></div>
@@ -805,8 +859,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         </div>
       </div>
 
-      <!-- Governing Load Combination — Roof -->
-      <div class="section-title">Governing Load Combination — ASCE 7-22 §2.3</div>
+      <!-- Governing Load Combination — Roof. ASD (§2.4) combos — the rafter/lag
+           capacities on this sheet are allowable-stress values; quoting the
+           LRFD §2.3 factored combos beside them contradicted PE-1/CERT. -->
+      <div class="section-title">Governing Load Combination — ASCE 7-22 §2.4 (ASD)</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
           <tr><td class="il" style="width:100px;">ASCE 7-22</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
@@ -814,11 +870,11 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
-          <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.3) — ROOF-MOUNTED PV:</strong>
-          The controlling load case for roof-mounted PV is <strong>0.9D + 1.0W</strong> (net uplift) for lag bolt
-          withdrawal capacity, and <strong>1.2D + 1.6S + 0.5W</strong> for gravity/snow loading on existing framing.
+          <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.4 — ASD) — ROOF-MOUNTED PV:</strong>
+          The controlling load case for roof-mounted PV is <strong>0.6D + 0.6W</strong> (net uplift) for lag bolt
+          withdrawal capacity, and <strong>D + S</strong> for gravity/snow loading on existing framing.
           All lag bolt attachments shall develop the required withdrawal capacity with a minimum safety factor of 2.0
-          per ASCE 7-22 §2.3 and manufacturer installation requirements.
+          per ASCE 7-22 §2.4 and manufacturer installation requirements.
         </div>
       </div>
       ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
@@ -827,13 +883,13 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ASCE 7-22 §7).` : 'Snow loading is not a controlling factor at this location.'}
         ${_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.'}
-        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= 2.0 ? 'exceeds' : 'DOES NOT MEET'} the required minimum of 2.0.` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= MIN_ATTACHMENT_SF ? 'meets' : 'DOES NOT MEET'} the required ASD minimum of ${MIN_ATTACHMENT_SF.toFixed(1)} (ASD demand vs allowable capacity per ASCE 7-22 §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ASCE 7-22 §26/27 and ${ibcVer} IBC/IRC.
-        ${structural && structural.rafter?.utilizationRatio != null && structural.rafter.utilizationRatio <= 1.0 && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
+        ${structural && structural.rafter?.utilizationRatio != null && structural.rafter.utilizationRatio <= 1.0 && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= MIN_ATTACHMENT_SF
           ? `All structural parameters are within acceptable limits. The existing roof structure and lag bolt attachment
              system are adequate to support the proposed PV array without modification.`
           : structural && structural.rafter?.utilizationRatio == null && structural.attachment?.safetyFactor == null
@@ -856,23 +912,18 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           </tr>`).join('')}
         </tbody>
       </table>` : ''}
-      ${rulesResult?.structuralAutoResolutions && rulesResult.structuralAutoResolutions.length > 0 ? `
-      <div class="section-title">Auto-Resolutions Applied</div>
-      <table class="equip-table" style="font-size:7px;">
-        <thead><tr><th>Field</th><th>Original</th><th>Resolved</th><th>Reason</th><th>Reference</th></tr></thead>
-        <tbody>
-          ${rulesResult.structuralAutoResolutions.slice(0, 5).map(r => `
-          <tr style="background:#fff">
-            <td class="mono" style="font-size:7px;">${r.field}</td>
-            <td style="font-size:7px;">${r.originalValue}</td>
-            <td style="color:#000;font-weight:bold;font-size:7px;">${r.resolvedValue}</td>
-            <td style="font-size:7px;">${r.reason}</td>
-            <td class="mono" style="font-size:7px;">${r.necReference}</td>
-          </tr>`).join('')}
-          ${rulesResult.structuralAutoResolutions.length > 5 ? `
-          <tr style="background:#f5f5f5"><td colspan="5" style="font-size:7px;font-weight:bold;text-align:center;">+ ${rulesResult.structuralAutoResolutions.length - 5} additional auto-resolution(s) — full record retained in the engineering file</td></tr>` : ''}
-        </tbody>
-      </table>` : ''}
+      ${(input.permitOptions as { includeInternalValidation?: boolean } | undefined)?.includeInternalValidation === true
+        && rulesResult?.structuralAutoResolutions && rulesResult.structuralAutoResolutions.length > 0 ? `
+      <!-- Engine-proposed resolutions are internal-review provenance only and are
+           NOT printed on the issued construction sheet (Ray, 2026-07-09). The full
+           record is retained in the engineering file. Shown only when internal
+           validation is explicitly requested. -->
+      <div style="padding:3px 6px;margin-top:2px;font-size:7px;line-height:1.4;border:var(--border);background:#fafafa;color:#333;">
+        <strong>ENGINE-PROPOSED RESOLUTIONS (INTERNAL REVIEW — provenance only, NOT applied to this design):</strong>
+        ${rulesResult.structuralAutoResolutions.slice(0, 4).map(r =>
+          `${r.field}: ${r.originalValue} → <strong>${r.resolvedValue}</strong> (${r.reason}${r.necReference ? ` — ${r.necReference}` : ''})`,
+        ).join(' &nbsp;·&nbsp; ')}${rulesResult.structuralAutoResolutions.length > 4 ? ` &nbsp;·&nbsp; + ${rulesResult.structuralAutoResolutions.length - 4} more — full record retained in the engineering file` : ''}
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -986,10 +1037,10 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
     const arrayWidthFt  = cadArrWidthM ? cadArrWidthM * 3.28084 : Math.ceil(totalPanels * 1.1);
     const conduitFt     = Math.ceil(arrayWidthFt + 20); // array width + 20ft run to inverter
 
-    const pileLabel = structType === 'concrete_pier' ? 'Concrete Piers' : 'Driven Piles';
+    const pileLabel = structType === 'concrete_pier' ? 'Concrete Piers' : 'Driven Pylons';
     const pileDesc  = structType === 'concrete_pier'
       ? 'Concrete form tube, rebar cage, 3000 psi min.'
-      : 'Unirac RM10 Driven Pier — Hot-Dip Galvanized Steel, driven to refusal';
+      : 'Speck PLP POWER DRIVE™ Driven I-beam Pylon — Hot-Dip Galvanized Steel, driven to refusal';
 
     let html = '<div class="section-title">Ground Mount Hardware Schedule</div>';
     html += '<table class="equip-table">';
@@ -999,23 +1050,23 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
           + '<td>' + pileSpacingFt + 'ft spacing, ' + pileEmbedFt + 'ft embed</td>'
           + '<td class="tr">' + qty('pile') + '</td><td>' + unitOf('pile') + '</td>'
           + '<td style="font-size:7px;color:#555">structural-engine: pilesPerRow × 2 rows</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">Cross Beams</td><td>Unirac RM10 Cross Beam — Hot-Dip Galvanized Steel</td>'
-          + '<td>1 per pile pair</td>'
+    html += '<tr class="bg-lt"><td class="fw7">Strongbacks</td><td>Speck PLP POWER DRIVE™ Strongback — Hot-Dip Galvanized Steel</td>'
+          + '<td>1 per pylon</td>'
           + '<td class="tr">' + qty('beam') + '</td><td>' + unitOf('beam') + '</td>'
-          + '<td style="font-size:7px;color:#555">pileCount / 2</td></tr>';
-    html += '<tr><td class="fw7">Racking Rails</td><td>Unirac RM10 Ground Mount Rail — Hot-Dip Galvanized Steel, 14ft sections</td>'
-          + '<td>2 rails per row, span per pile spacing</td>'
+          + '<td style="font-size:7px;color:#555">1 per pylon</td></tr>';
+    html += '<tr><td class="fw7">PX Rails</td><td>Speck PLP POWER DRIVE™ PX Rail — Hot-Dip Galvanized Steel, 14ft sections</td>'
+          + '<td>2 rails per row, span per pylon spacing</td>'
           + '<td class="tr">' + qty('rail') + '</td><td>' + unitOf('rail') + '</td>'
           + '<td style="font-size:7px;color:#555">railsPerRow × rowCount ÷ 14ft sections</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">Rail Splices</td><td>Unirac RM10 Rail Splice — SS Grade 316</td>'
+    html += '<tr class="bg-lt"><td class="fw7">Rail Splices</td><td>Speck PLP POWER DRIVE™ Rail Splice — SS Grade 316</td>'
           + '<td>1 per rail section junction</td>'
           + '<td class="tr">' + qty('rail_splice') + '</td><td>' + unitOf('rail_splice') + '</td>'
           + '<td style="font-size:7px;color:#555">structural-engine calc</td></tr>';
-    html += '<tr><td class="fw7">Mid Clamps</td><td>Unirac RM10 Mid Clamp — Aluminum, SS Grade 316</td>'
+    html += '<tr><td class="fw7">Mid Clamps</td><td>Speck PLP POWER DRIVE™ Mid Clamp — Aluminum, SS Grade 316</td>'
           + '<td>1 per panel junction per rail, UL 2703</td>'
           + '<td class="tr">' + qty('mid_clamp') + '</td><td>' + unitOf('mid_clamp') + '</td>'
           + '<td style="font-size:7px;color:#555">array-geometry: (panelsPerRow-1) × rails</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">End Clamps</td><td>Unirac RM10 End Clamp — Aluminum, SS Grade 316</td>'
+    html += '<tr class="bg-lt"><td class="fw7">End Clamps</td><td>Speck PLP POWER DRIVE™ End Clamp — Aluminum, SS Grade 316</td>'
           + '<td>2 per rail end (row edge), UL 2703</td>'
           + '<td class="tr">' + qty('end_clamp') + '</td><td>' + unitOf('end_clamp') + '</td>'
           + '<td style="font-size:7px;color:#555">2 end clamps per rail</td></tr>';
@@ -1050,10 +1101,19 @@ export function schedBomRowCount(bom: PermitInput['bom']): number {
  *  inverter tables); the continuation sheet is all-table and fits more. */
 export const SCHED_BOM_ROWS_FIRST = 15;
 
-function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY): string {
+/** Sub-system ordinal for BOM grouping (roof > ground > fence > unstamped). */
+const BOM_SUB_ORDER: Record<string, number> = { roof: 0, ground: 1, fence: 2 };
+const bomSubOrd = (s?: string) => (s && s in BOM_SUB_ORDER ? BOM_SUB_ORDER[s] : 3);
+const bomSubLabel = (s?: string) =>
+  s === 'roof' ? 'ROOF' : s === 'ground' ? 'GROUND' : s === 'fence' ? 'FENCE' : '—';
+
+function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY, opts?: { bySub?: boolean }): string {
   if (!bom || bom.length === 0) {
     return '<!-- No BOM data — permit generated without BOM integration -->';
   }
+  // Wave 5B hybrid: group stage rows by sub-system WHERE STAMPED (Wave 2c
+  // stamps; unstamped/shared items sort last in each stage and print '—').
+  const bySub = opts?.bySub === true;
 
   const bomItems = bom.filter(i => !BOM_SKIP_CATEGORIES.has(i.category));
   if (bomItems.length === 0) {
@@ -1083,22 +1143,28 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   html += '<table class="bom-table" style="width:100%;font-size:var(--f-sm);">';
   html += '<thead><tr style="background:#000;color:#fff;">';
   html += '<th style="width:4%">#</th>';
-  html += '<th style="width:12%">Stage</th>';
+  html += bySub
+    ? '<th style="width:10%">Stage</th><th style="width:7%">System</th>'
+    : '<th style="width:12%">Stage</th>';
   html += '<th style="width:12%">Category</th>';
   html += '<th style="width:13%">Manufacturer</th>';
-  html += '<th style="width:16%">Model / Description</th>';
+  html += bySub ? '<th style="width:14%">Model / Description</th>' : '<th style="width:16%">Model / Description</th>';
   html += '<th style="width:10%">Part Number</th>';
   html += '<th style="width:5%;text-align:right">Qty</th>';
   html += '<th style="width:5%">Unit</th>';
   html += '<th style="width:12%">NEC Reference</th>';
-  html += '<th style="width:11%">Derived From</th>';
+  html += bySub ? '<th style="width:8%">Derived From</th>' : '<th style="width:11%">Derived From</th>';
   html += '</tr></thead><tbody>';
+  const nCols = bySub ? 11 : 10;
 
   // Flatten in stage order so the table can be sliced across sheets.
   const flat: Array<{ item: (typeof bomItems)[number]; stageLabel: string }> = [];
   for (const stageKey of stages) {
-    const items = grouped[stageKey];
+    let items = grouped[stageKey];
     if (!items || items.length === 0) continue;
+    // Hybrid: within each stage, stamped rows group roof → ground → fence,
+    // unstamped (shared/POI) rows last. Stable — original order otherwise.
+    if (bySub) items = [...items].sort((a, b) => bomSubOrd(a.subSystem) - bomSubOrd(b.subSystem));
     const stageLabel = items[0].stageLabel || stageLabels[stageKey] || stageKey;
     for (const item of items) flat.push({ item, stageLabel });
   }
@@ -1118,6 +1184,7 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
       html += '<tr style="' + bg + '">';
       html += '<td class="mono f-lg" style="color:#888;text-align:center">' + rowNum + '</td>';
       html += '<td style="font-size:7.5px;color:#555">' + (item.stageLabel || stageLabel) + '</td>';
+      if (bySub) html += '<td style="font-size:7.5px;font-weight:700;">' + bomSubLabel(item.subSystem) + '</td>';
       html += '<td style="text-transform:capitalize;font-weight:600">' + item.category.replace(/_/g, ' ') + '</td>';
       html += '<td>' + (item.manufacturer || '—') + '</td>';
       html += '<td style="font-size:8px;">' + (item.model || '—') + descExtra + reqBadge + '</td>';
@@ -1133,14 +1200,14 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   if (endRow < flat.length) {
     // More rows follow on the continuation sheet — say so instead of clipping.
     html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-    html += '<td colspan="10" style="text-align:center;letter-spacing:1px;">CONTINUED ON SCHED-2 — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
+    html += '<td colspan="' + nCols + '" style="text-align:center;letter-spacing:1px;">CONTINUED ON SCHED-2 — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
     html += '</tr>';
     html += '</tbody></table>';
     return html;
   }
 
   html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-  html += '<td colspan="6" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS</td>';
+  html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS</td>';
   html += '<td class="tr">' + flat.length + '</td>';
   html += '<td colspan="3"></td>';
   html += '</tr>';
@@ -1167,7 +1234,7 @@ export function pageEquipmentScheduleCont(input: PermitInput, cad: CADModel, pag
   <div class="page">
     ${titleBlock(input, 'SCHED-2', 'EQUIPMENT SCHEDULE (CONTINUED)', pageNum, totalPages)}
     <div class="page-content">
-      ${renderBOMTable(input.bom, SCHED_BOM_ROWS_FIRST)}
+      ${renderBOMTable(input.bom, SCHED_BOM_ROWS_FIRST, Number.POSITIVE_INFINITY, { bySub: isHybridPlanset(cad) })}
     </div>
   </div>`;
 }
@@ -1177,18 +1244,101 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // CAD-sourced equipment counts
   const cadTotalPanels = cad.totalPanels;
   const cadTotalDcKw   = cad.totalDcKw;
+  // Topology-aware: a microinverter system has NO 52-module DC series string
+  // and no DC source circuits — modules pair 1:1 with microinverters and the
+  // field wiring is AC branch circuits (Q-Cable). Use the SAME branch planner
+  // PV-4A/PV-4B/E-1 use so the schedule can't disagree with them.
+  const _schedIsMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
+  const _schedPP      = (project.panelPositions ?? []) as Array<{ id: string }>;
+  const _schedGroupLabel = _schedIsMicro ? 'Array' : 'String';
+  // AC branch circuit schedule for micro — OCPD / conductor / ampacity come
+  // from the shared conductor authority (same values PV-4A/PV-4B/E-1/BOM print),
+  // not a hardcoded 20A/#10 row.
+  const _schedAuth = buildConductorAuthority(input, cad);
+  // 75°C ampacity display keyed to conductor size (NEC 310.16).
+  const _schedAmpacity = (gauge: string): string => ({
+    '#12 AWG': '25A (#12)', '#10 AWG': '35A (#10)', '#8 AWG': '50A (#8)',
+    '#6 AWG': '65A (#6)', '#4 AWG': '85A (#4)',
+  } as Record<string, string>)[gauge] ?? gauge;
+  const _schedAcRows = (_schedIsMicro && _schedPP.length ? _schedAuth.microBranches : []).map((b) => {
+    return `<tr><td class="fw7 mono">B${b.index}</td><td>${b.deviceCount} &times; microinverter</td>`
+      + `<td class="tr mono">${b.branchCurrentA.toFixed(1)}A</td><td class="tr mono">${b.continuousA.toFixed(1)}A</td>`
+      + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td>${b.conductorCallout}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
+      + `<td class="center fw7">&check;</td></tr>`;
+  }).join('');
+  // ── Wave 5B hybrid chrome ──────────────────────────────────────────────
+  const _schedHybrid = _schedAuth.isHybrid;
+  const _schedPrimaryKey = primarySubKey(cad);
+  const _schedSubOf = (inv: unknown): string =>
+    SUB_LABEL[inverterSubKey(inv as { subSystemKey?: string }, _schedPrimaryKey)];
+  // Per-sub wire-sizing blocks — each sub's OWN branch/string set from the
+  // shared authority (same values PV-4A/PV-4B/E-1 print).
+  const _schedSubWireBlock = (sub: SubSystemConductorAuthority): string => {
+    const eq2 = sub.equipment;
+    const inv = [eq2.inverterManufacturer, eq2.inverterModel].filter(s => s && s !== '—').join(' ');
+    const hdr = `${SUB_LABEL[sub.key]} — ${sub.panelCount} MODULES${inv ? ` — ${inv}` : ''} (${sub.topology})`;
+    if (sub.isMicro) {
+      const rows = sub.microBranches.map(b =>
+        `<tr><td class="fw7 mono">B${b.index}</td><td>${b.deviceCount} &times; microinverter</td>`
+        + `<td class="tr mono">${b.branchCurrentA.toFixed(1)}A</td><td class="tr mono">${b.continuousA.toFixed(1)}A</td>`
+        + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td>${b.conductorCallout}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
+        + `<td class="center fw7">&check;</td></tr>`).join('');
+      return `
+      <div class="section-title">AC Branch Circuit Schedule &mdash; ${hdr} &mdash; NEC 690.8(A)</div>
+      <table class="equip-table">
+        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" class="center">AC branch layout pending module placement &mdash; see PV-4A</td></tr>'}</tbody>
+      </table>`;
+    }
+    const rows = sub.dcStrings.map(s =>
+      `<tr><td class="fw7">${s.label}</td>`
+      + `<td class="tr mono">${s.ampacityA != null ? s.ampacityA.toFixed(2) + 'A' : '—'}</td>`
+      + `<td class="tr mono fw7">${s.ocpdAmps != null ? s.ocpdAmps + 'A' : '—'}</td>`
+      + `<td>${s.wireGauge} USE-2</td>`
+      + `<td class="tr">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>`
+      + `<td class="tr">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>`
+      + `<td class="center fw7">&check;</td></tr>`).join('');
+    return `
+      <div class="section-title">DC String Wire Sizing &mdash; ${hdr} &mdash; NEC 690.8</div>
+      <table class="equip-table">
+        <thead><tr><th>String</th><th>Isc&times;1.25 (A)</th><th>OCPD (A)</th><th>Wire</th><th>V-Drop</th><th>Length</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="center">String plan pending &mdash; see PV-4B</td></tr>'}</tbody>
+      </table>`;
+  };
+  const _schedHybridWireBlocks = _schedHybrid
+    ? _schedAuth.subSystems.map(_schedSubWireBlock).join('') + `
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+        <strong>WIRE SIZING INTERPRETATION (HYBRID):</strong>
+        Each sub-system's circuits are sized from ITS OWN equipment and module subset per NEC 690.8 — micro sub-systems
+        as AC branch circuits (&times;1.25 continuous), string/optimizer sub-systems as DC source circuits (Isc &times; 1.25,
+        OCPD per 690.8(B)). Values match PV-4A / PV-4B / E-1 (shared conductor authority). Rooftop temperature adder
+        applies to ROOF sub-system circuits only.
+      </div>`
+    : '';
+  const _schedAcBranchBlock = `
+      <div class="section-title">AC Branch Circuit Schedule &mdash; NEC 690.8(A) / 705.12</div>
+      <table class="equip-table">
+        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>Status</th></tr></thead>
+        <tbody>${_schedAcRows || '<tr><td colspan="8" class="center">AC branch layout pending module placement &mdash; see PV-4A</td></tr>'}</tbody>
+      </table>
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+        <strong>WIRE SIZING INTERPRETATION (MICROINVERTER):</strong>
+        Each module is paired 1:1 with a microinverter, so this system has no DC series string and no DC source-circuit sizing &mdash; DC / Voc / Isc string calculations do not apply.
+        AC branch (trunk) circuits are sized per NEC 690.8(A) with the continuous-duty factor (&times;1.25); each branch is protected at its calculated OCPD (see table) and terminates at the AC combiner. THWN-2 (90&deg;C) conductors are specified.
+      </div>`;
   return `
   <div class="page">
     ${titleBlock(input, 'SCHED', 'EQUIPMENT SCHEDULE', pageNum, totalPages)}
     <div class="page-content">
-      <div class="section-title">Solar Modules</div>
+      <div class="section-title">Solar Modules${_schedHybrid ? ' — per sub-system (hybrid)' : _schedIsMicro ? ' — each module paired 1:1 with a microinverter (no series DC string)' : ''}</div>
       <table class="equip-table">
-        <thead><tr><th>String</th><th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
+        <thead><tr><th>${_schedGroupLabel}</th>${_schedHybrid ? '<th>System</th>' : ''}<th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
         <tbody>
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => `
             <tr>
               <td class="fw7">${invIdx + 1}-${strIdx + 1}</td>
+              ${_schedHybrid ? `<td class="fw7">${_schedSubOf(inv)}</td>` : ''}
               <td>${str.panelManufacturer || '—'}</td><td>${str.panelModel || '—'}</td>
               <td class="tr fw7">${str.panelCount}</td>
               <td class="tr">${str.panelWatts}W</td>
@@ -1200,19 +1350,20 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
             </tr>`) || []
           ).join('')}
           <tr style="background:#f5f5f5;font-weight:bold">
-            <td colspan="3">TOTAL</td><td class="tr">${system.totalPanels}</td>
+            <td colspan="${_schedHybrid ? 4 : 3}">TOTAL</td><td class="tr">${system.totalPanels}</td>
             <td colspan="3"></td><td class="tr">${system.totalDcKw?.toFixed(2)}</td>
             <td colspan="2"></td>
           </tr>
         </tbody>
       </table>
-      <div class="section-title">Inverters</div>
+      <div class="section-title">Inverters${_schedHybrid ? ' — per sub-system (hybrid)' : ''}</div>
       <table class="equip-table">
-        <thead><tr><th>#</th><th>Type</th><th>Manufacturer</th><th>Model</th><th>AC kW</th><th>Max DC V</th><th>Efficiency</th><th>UL Listing</th></tr></thead>
+        <thead><tr><th>#</th>${_schedHybrid ? '<th>System</th>' : ''}<th>Type</th><th>Manufacturer</th><th>Model</th><th>AC kW</th><th>Max DC V</th><th>Efficiency</th><th>UL Listing</th></tr></thead>
         <tbody>
           ${system.inverters?.map((inv, idx) => `
           <tr>
             <td class="fw7">${idx + 1}</td>
+            ${_schedHybrid ? `<td class="fw7">${_schedSubOf(inv)}</td>` : ''}
             <td>${inv.type === 'micro' ? 'Microinverter' : inv.type === 'optimizer' ? 'String + Optimizer' : 'String'}</td>
             <td>${inv.manufacturer || '—'}</td><td>${inv.model || '—'}</td>
             <td class="tr">${Number(inv.acOutputKw).toFixed(2)}</td>
@@ -1222,7 +1373,31 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           </tr>`).join('')}
         </tbody>
       </table>
-      <!-- Wire Sizing Justification -->
+      ${(() => {
+        // AC aggregation / monitoring device (the brand-integrated "brains" —
+        // e.g. Enphase IQ Combiner 6C). Single-sourced with PV-6 / E-1 / BOM.
+        const _bos = buildIntegratedEquipment(input, cad);
+        if (!_bos.devices.length) return '';
+        return `
+      <div class="section-title">AC Aggregation &amp; Monitoring</div>
+      <table class="equip-table">
+        <thead><tr><th>Qty</th><th>Manufacturer</th><th>Model</th><th>Integrated Functions</th><th>Branches</th><th>Mounting</th></tr></thead>
+        <tbody>
+          ${_bos.devices.map(d => `
+          <tr>
+            <td class="tr fw7">${d.quantity}</td>
+            <td>${d.brand}</td><td>${d.model}</td>
+            <td style="font-size:8px;">${d.roleSummary}</td>
+            <td class="tr">${d.branchSlots ? `${d.branchSlots}-pos` : '—'}</td>
+            <td>${d.mounting === 'wall' ? 'Wall-mounted' : d.mounting || '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      ${_bos.branchSlotWarning ? `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#fff8e1;"><strong>NOTE:</strong> ${_bos.branchSlotWarning}</div>` : ''}`;
+      })()}
+      <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string;
+           hybrid: one block PER SUB from the shared conductor authority) -->
+      ${_schedHybrid ? _schedHybridWireBlocks : _schedIsMicro ? _schedAcBranchBlock : `
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>
       <table class="equip-table">
         <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Isc×1.25 (A)</th><th>OCPD ≥ Isc×1.56 (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
@@ -1262,9 +1437,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           All PV source circuits use USE-2/THWN-2 rated at 90\u00b0C to maximize available ampacity under ${isRoof(cad.systemType) ? 'rooftop temperature' : 'outdoor'} conditions.
         </span>
         <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>
-      </div>
+      </div>`}
 
-      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST)}
+      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid })}
 
 
       <!-- System-Specific Hardware Schedule -->
@@ -1272,8 +1447,10 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
 
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — EQUIPMENT SCHEDULE:</strong>
-        This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
-        rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
+        ${_schedAuth.isHybrid
+          ? `This hybrid system utilizes ${system.totalPanels} modules across ${_schedAuth.subSystems.length} sub-systems (see the per-sub module tables above)`
+          : `This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
+        rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each`} for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
         All equipment is UL-listed and installed per manufacturer specifications. Wire sizing has been verified per NEC 690.8 with appropriate derating applied.
         The equipment selection complies with NEC ${compliance?.jurisdiction?.necVersion || '2020'} and applicable UL standards (UL 1741, UL 61730, UL 2703).
       </div>

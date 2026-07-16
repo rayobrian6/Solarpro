@@ -422,10 +422,11 @@ test.describe('Design Studio → planset E2E harness', () => {
   });
 
   // ── Regression guard 6: Planset draws real geometry ─────────────────────
-  //  Verify PV-2 panel count matches design panel count, and PV-2 ≠ PV-2B.
+  //  Verify PV-1 panel count matches design panel count, and PV-1 ≠ PV-1B.
+  //  (Site plan folded into the array sheet 2026-07-08: PV-2→PV-1, PV-2B→PV-1B.)
   //  This hits the /api/engineering/permit endpoint and checks the generated
   //  HTML planset.
-  test('planset PV-2 panel count matches design — PV-2 ≠ PV-2B', async ({ page }) => {
+  test('planset PV-1 panel count matches design — PV-1 ≠ PV-1B', async ({ page }) => {
     const state = await bootDesignStudio(page);
     const cesiumCanvas = page.locator('canvas').first();
     const hasCanvas = await cesiumCanvas.isVisible({ timeout: 45_000 }).catch(() => false);
@@ -494,18 +495,18 @@ test.describe('Design Studio → planset E2E harness', () => {
     if (permitResponse.ok()) {
       const html = await permitResponse.text();
 
-      // PV-2 should exist and contain a panel count
-      const pv2Match = html.match(/PV-2/);
-      expect(pv2Match, 'Planset should contain PV-2 sheet').toBeTruthy();
+      // PV-1 (site & array plan) should exist and contain a panel count
+      const pv1Match = html.match(/PV-1/);
+      expect(pv1Match, 'Planset should contain PV-1 sheet').toBeTruthy();
 
-      // PV-2B should exist and be different from PV-2
-      const pv2bMatch = html.match(/PV-2B/);
-      if (pv2bMatch) {
+      // PV-1B should exist and be different from PV-1
+      const pv1bMatch = html.match(/PV-1B/);
+      if (pv1bMatch) {
         // Extract the SVG content of each sheet — they should differ
-        const pv2Section = html.match(/<div class="page"[\s\S]*?PV-2[\s\S]*?<\/div>/)?.[0] ?? '';
-        const pv2bSection = html.match(/<div class="page"[\s\S]*?PV-2B[\s\S]*?<\/div>/)?.[0] ?? '';
-        expect(pv2Section === pv2bSection,
-          'PV-2 and PV-2B should be different sheets'
+        const pv1Section = html.match(/<div class="page"[\s\S]*?PV-1[\s\S]*?<\/div>/)?.[0] ?? '';
+        const pv1bSection = html.match(/<div class="page"[\s\S]*?PV-1B[\s\S]*?<\/div>/)?.[0] ?? '';
+        expect(pv1Section === pv1bSection,
+          'PV-1 and PV-1B should be different sheets'
         ).toBe(false);
       }
 

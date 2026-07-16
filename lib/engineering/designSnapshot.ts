@@ -5,6 +5,12 @@
 
 import type { Project, PlacedPanel, Layout, SolarPanel } from '@/types';
 import type { DesignSnapshot, RoofSegmentSummary, GroundArraySummary, FenceArraySummary } from './types';
+import {
+  canonicalIdTuple,
+  canonicalMapSerialization,
+  isDegenerateSubSystemMap,
+  normalizeSubSystemMap,
+} from '@/lib/system/subSystemMirror';
 
 
 // Default panel specs (400W monocrystalline) used when no panel selected
@@ -47,8 +53,12 @@ export function buildDesignSnapshot(project: Project, layout: Layout): DesignSna
   const panelCount = panels.length;
   const systemSizeKw = parseFloat((panelCount * ((project.selectedPanel?.wattage ?? 400) / 1000)).toFixed(2));
 
-  // Compute design version hash (for change detection)
-  const designVersionId = computeDesignVersionId(layout);
+  // Compute design version hash (for change detection). MUST include the
+  // selected equipment — otherwise a panel swap (model, wattage, or physical
+  // SIZE) leaves the version unchanged and engineering keeps a stale report
+  // (the "reverted to 600W" bug: the panel was changed to 440W but the version
+  // was hashed from the stale layout.systemSizeKw, so the old report survived).
+  const designVersionId = computeDesignVersionId(layout, project);
 
   // Extract roof segments from panels
   const roofSegments = extractRoofSegments(panels, layout);
@@ -101,16 +111,49 @@ export function buildDesignSnapshot(project: Project, layout: Layout): DesignSna
 }
 
 /**
- * Compute a deterministic version ID from the layout.
- * Changes when panels are added/removed/moved.
+ * Compute a deterministic version ID from the layout AND the selected
+ * equipment. Changes when panels are added/removed/moved OR when the panel /
+ * inverter / mounting / battery selection changes — including the panel's
+ * physical dimensions, so a size change (which alters the array footprint)
+ * invalidates the engineering report and forces a rebuild + layout recompute.
+ *
+ * Wave 1b — §1.6 degenerate-map rule (I-9 hash stability): the LEGACY shape
+ * is hashed whenever the per-subsystem equipment map is ABSENT or DEGENERATE
+ * (exactly one entry whose canonical id-tuple matches the flat mirror's), so
+ * migrate-on-load synthesis / lazy write-back of the map to an unchanged
+ * single-system project NEVER changes its designVersionId (no false
+ * staleness, no fleet-wide report rebuild). The extended hash — the legacy
+ * key plus the canonically-serialized map (fixed key order, id-tuples only,
+ * rename/provenance immune) — kicks in only for genuinely hybrid equipment
+ * or real map/mirror drift.
  */
-function computeDesignVersionId(layout: Layout): string {
-  const key = JSON.stringify({
+function computeDesignVersionId(layout: Layout, project?: Project): string {
+  const sp = project?.selectedPanel;
+  const legacyShape = {
     id: layout.id,
     panelCount: layout.totalPanels,
     systemSizeKw: layout.systemSizeKw,
     updatedAt: layout.updatedAt,
+    // Equipment selection — the single source of truth for what's installed.
+    panel: sp ? { m: sp.manufacturer, model: sp.model, w: sp.wattage, wd: sp.width, ht: sp.height, voc: sp.voc, isc: sp.isc } : null,
+    inverter: project?.selectedInverter ? { m: project.selectedInverter.manufacturer, model: project.selectedInverter.model } : null,
+    mounting: project?.selectedMounting ? { id: (project.selectedMounting as { id?: string }).id, model: (project.selectedMounting as { model?: string }).model } : null,
+    batteryCount: project?.batteryCount ?? 0,
+  };
+
+  // Per-subsystem map from the canonical selected_equipment envelope
+  // (hydrated by rowToProject; absent for every pre-contract project).
+  const map = normalizeSubSystemMap(project?.selectedEquipmentSubSystems);
+  const flatMirrorTuple = canonicalIdTuple({
+    panelId: sp?.id,
+    inverterId: (project?.selectedInverter as { id?: string } | undefined)?.id,
+    mountingId: (project?.selectedMounting as { id?: string } | undefined)?.id,
+    batteryId: project?.selectedBatteries?.[0]?.id,
   });
+  const key = !map || isDegenerateSubSystemMap(map, flatMirrorTuple)
+    ? JSON.stringify(legacyShape)
+    : JSON.stringify({ ...legacyShape, subSystems: canonicalMapSerialization(map) });
+
   // Simple hash
   let hash = 0;
   for (let i = 0; i < key.length; i++) {

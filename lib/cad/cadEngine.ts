@@ -25,6 +25,111 @@ import { roofCAD }   from './roof/roofCAD';
 import { groundCAD } from './ground/groundCAD';
 import { fenceCAD }  from './fence/fenceCAD';
 import { buildSystemDefinition } from '@/lib/system';
+import { partitionSubSystems, classifyPanel, type SubSystem } from '@/lib/permit/utils/subSystems';
+import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+
+/** CADModel.hybrid.sections[].equipment shape (contract §1.3, types.ts). */
+type HybridSectionEquipment = NonNullable<
+  NonNullable<CADModel['hybrid']>['sections'][number]['equipment']
+>;
+
+/**
+ * ROOT-CAUSE FIX (Stowell v3 "48 × 0W · Inverter · 0.0A"): the hybrid section
+ * `equipment` carriage is DOCUMENTED (types.ts §1.3) as "Populated from the
+ * subsystem's own SubSystemEquipment entry" — but the section-push below never
+ * wrote it, so `cad.hybrid.sections[key].equipment` (carriage #3 of the permit
+ * resolver, lib/permit/utils/helpers.ts resolveEquipmentBySubSystem) was ALWAYS
+ * undefined. A sub with no tagged inverter fleet and no threaded project.subSystems
+ * id-map then resolved to '—'/0 per lane. This enriches the sub's own
+ * SubSystemEquipment entry (panelId/inverterId/topology) via the equipment DB into
+ * the section carriage so every hybrid lane prints its REAL per-sub equipment.
+ * Returns undefined when the sub carries no equipment ids (the fail-loud path
+ * downstream then shows "⚠ INVERTER NOT SELECTED", never a fabricated default).
+ */
+function buildSectionEquipment(
+  input: PermitInputShape,
+  key: 'roof' | 'ground' | 'fence',
+): HybridSectionEquipment | undefined {
+  const map = (input.project as { subSystems?: Record<string, {
+    panelId?: string; inverterId?: string; topology?: string;
+  }> } | undefined)?.subSystems;
+  const entry = map?.[key];
+  if (!entry || (!entry.panelId && !entry.inverterId)) return undefined;
+
+  const out: HybridSectionEquipment = {};
+
+  if (entry.panelId) {
+    const p = getPanelById(entry.panelId) as
+      { model?: string; watts?: number; voc?: number; isc?: number } | undefined;
+    if (p) {
+      if (p.model) out.panelModel = p.model;
+      if (typeof p.watts === 'number' && p.watts > 0) out.panelWatts = p.watts;
+      if (typeof p.voc === 'number' && p.voc > 0) out.voc = p.voc;
+      if (typeof p.isc === 'number' && p.isc > 0) out.isc = p.isc;
+    }
+  }
+
+  if (entry.inverterId) {
+    const micro = getMicroinverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputW?: number } | undefined;
+    const str = micro ? undefined : (getInverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputKw?: number } | undefined);
+    const dev = micro ?? str;
+    if (dev) {
+      if (dev.manufacturer) out.inverterMfr = dev.manufacturer;
+      if (dev.model) out.inverterModel = dev.model;
+      out.topology = micro ? 'micro'
+        : (entry.topology === 'optimizer' ? 'optimizer' : 'string');
+      const kw = micro
+        ? (micro.acOutputW ? micro.acOutputW / 1000 : 0)
+        : (str?.acOutputKw ?? 0);
+      if (kw > 0) out.acKwPerDevice = kw;
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+// ── Hybrid (multi-system) support — Phase 1 ─────────────────────────
+// A design may contain roof + ground + fence panels in ONE project.
+// Each solver historically consumed the UNSCOPED input (all panels /
+// project-wide totalPanels) — how the Stowell fence claimed all 80
+// modules. For hybrids we run EVERY present solver with an input scoped
+// to its own panel subset, then compose one CADModel carrying all
+// sections (types.ts already allows roof?/ground?/fence? together).
+
+const SUB_TO_CAD: Record<'roof' | 'ground' | 'fence', CADSystemType> = {
+  roof: 'roof', ground: 'ground_mount', fence: 'solar_fence',
+};
+const SUB_BUILDER: Record<'roof' | 'ground' | 'fence', (i: PermitInputShape) => CADModel> = {
+  roof: roofCAD, ground: groundCAD, fence: fenceCAD,
+};
+
+/** Scope the permit input to ONE sub-system: its panels, its counts, its type. */
+function scopeInputToSubSystem(input: PermitInputShape, sub: SubSystem): PermitInputShape {
+  const fullPanels = input.system?.totalPanels || 0;
+  const fullKw = input.system?.totalDcKw || 0;
+  const kwPerPanel = fullPanels > 0 ? fullKw / fullPanels : 0;
+  const filterByType = <T,>(list: T[] | undefined): T[] | undefined =>
+    list ? (list as any[]).filter(p => classifyPanel(p) === sub.key) as T[] : list;
+  return {
+    ...input,
+    system: {
+      ...(input.system ?? {}),
+      totalPanels: sub.panelCount,
+      totalDcKw: Math.round(sub.panelCount * kwPerPanel * 100) / 100,
+    },
+    project: {
+      ...(input.project ?? {}),
+      panelPositions: filterByType(input.project?.panelPositions),
+      systemType: sub.key,
+    },
+    layout: {
+      ...(input.layout ?? {}),
+      type: SUB_TO_CAD[sub.key],
+    },
+  } as PermitInputShape;
+}
 
 // Re-use the existing system type resolver logic
 // FIX v47.318: Priority order:
@@ -81,23 +186,99 @@ export function generateCADLayout(input: PermitInputShape): CADModel {
 
   let model: CADModel;
 
-  switch (systemType) {
-    case 'roof':
-      model = roofCAD(input);
-      break;
+  // ── HYBRID PATH (Phase 1): panels span >1 system type ─────────────
+  // Run EVERY present solver with a SCOPED input (its own panel subset —
+  // unscoped, the fence solver claimed all 80 Stowell modules), use the
+  // legacy winner's model as the base, graft the other sections onto it,
+  // and restore project-wide totals. Each grafted section's local XY is
+  // relative to ITS OWN origin — recorded in model.hybrid.sections so the
+  // site plan (top-down aerial with roof + ground + fence together) can
+  // re-project each section against the base origin.
+  const _allPanels = (input.project?.panelPositions ?? []) as any[];
+  const _subs = partitionSubSystems(_allPanels);
 
-    case 'ground_mount':
-      model = groundCAD(input);
-      break;
+  if (_subs.length > 1) {
+    const _cadToKey: Record<CADSystemType, 'roof' | 'ground' | 'fence'> =
+      { roof: 'roof', ground_mount: 'ground', solar_fence: 'fence' };
+    const primaryKey = _cadToKey[systemType];
+    const built = new Map<'roof' | 'ground' | 'fence', CADModel>();
+    for (const sub of _subs) {
+      try {
+        built.set(sub.key, SUB_BUILDER[sub.key](scopeInputToSubSystem(input, sub)));
+      } catch (e) {
+        console.warn(`[CAD ENGINE] hybrid sub-solver '${sub.key}' failed (section skipped):`,
+          e instanceof Error ? e.message : e);
+      }
+    }
+    // Base = the legacy winner's scoped model (falls back to first built).
+    const base = built.get(primaryKey) ?? built.values().next().value as CADModel;
+    model = base;
+    model.hybrid = { sections: [] };
+    for (const sub of _subs) {
+      const m = built.get(sub.key);
+      if (!m) continue;
+      // Graft the section (base already carries its own).
+      if (sub.key === 'roof' && m.roof) model.roof = m.roof;
+      if (sub.key === 'ground' && m.ground) model.ground = m.ground;
+      if (sub.key === 'fence' && m.fence) model.fence = m.fence;
+      // A sub-solver that synthesized geometry without GPS leaves origin (0,0)
+      // — fall back to the sub-system's panel centroid (panels always carry
+      // lat/lng from the design studio) so overlays/re-projection stay real.
+      let _oLat = m.originLat, _oLng = m.originLng;
+      if (!isFinite(_oLat) || !isFinite(_oLng) || (Math.abs(_oLat) < 0.01 && Math.abs(_oLng) < 0.01)) {
+        const pts = (sub.panels as any[]).filter(p => isFinite(p?.lat) && isFinite(p?.lng) && Math.abs(p.lat) > 0.001);
+        if (pts.length) {
+          _oLat = pts.reduce((t, p) => t + p.lat, 0) / pts.length;
+          _oLng = pts.reduce((t, p) => t + p.lng, 0) / pts.length;
+        }
+      }
+      model.hybrid.sections.push({
+        key: sub.key,
+        originLat: _oLat, originLng: _oLng,
+        totalPanels: m.totalPanels, dcKw: m.totalDcKw,
+        // §1.3 per-sub equipment carriage — enriched from the sub's own
+        // SubSystemEquipment entry (input.project.subSystems[key]). Was NEVER
+        // written before → carriage #3 always empty → hybrid lanes printed
+        // '—'/0. Omitted (undefined) when the sub selected no equipment.
+        equipment: buildSectionEquipment(input, sub.key),
+        // Real designed positions — the site-plan overlay draws these, NOT the
+        // solver's synthesized geometry (which is not registered to the design).
+        panels: (sub.panels as any[])
+          .filter(p => isFinite(p?.lat) && isFinite(p?.lng) && Math.abs(p.lat) > 0.001)
+          .map(p => ({
+            lat: p.lat, lng: p.lng,
+            azimuth: typeof p.azimuth === 'number' ? p.azimuth : undefined,
+            row: typeof p.row === 'number' ? p.row : undefined,
+            arrayId: (p.arrayId ?? p.layoutId ?? undefined) as string | undefined,
+          })),
+      });
+    }
+    // Project-wide totals (consistency checks compare vs canonical.panels).
+    model.totalPanels = input.system?.totalPanels || _allPanels.length || model.totalPanels;
+    model.totalDcKw   = input.system?.totalDcKw   || model.totalDcKw;
+    model.warnings.push(
+      `HYBRID: ${_subs.map(s => `${s.key}:${s.panelCount}`).join(' + ')} — all sections populated; ` +
+      `grafted sections use their own origins (see model.hybrid.sections)`);
+    console.log('[CAD ENGINE] HYBRID composed:', model.hybrid.sections);
+  } else {
+    switch (systemType) {
+      case 'roof':
+        model = roofCAD(input);
+        break;
 
-    case 'solar_fence':
-      model = fenceCAD(input);
-      break;
+      case 'ground_mount':
+        model = groundCAD(input);
+        break;
 
-    default: {
-      // TypeScript exhaustive check
-      const _never: never = systemType;
-      throw new Error(`[CAD ENGINE] Unknown system type: ${String(_never)}`);
+      case 'solar_fence':
+        model = fenceCAD(input);
+        break;
+
+      default: {
+        // TypeScript exhaustive check
+        const _never: never = systemType;
+        throw new Error(`[CAD ENGINE] Unknown system type: ${String(_never)}`);
+      }
     }
   }
 

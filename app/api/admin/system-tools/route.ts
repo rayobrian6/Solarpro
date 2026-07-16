@@ -36,6 +36,41 @@ export async function POST(req: NextRequest) {
         if (!migrationFile || !migrationFile.endsWith('.sql'))
           return NextResponse.json({ success: false, error: 'Invalid migration file' }, { status: 400 });
 
+        // ────────────────────────────────────────────────────────────────────────
+        // Phase 1A.2 — Migration Governance (MIGRATION-GOV-13)
+        //
+        // This legacy run_migration case is PERMANENTLY ELIMINATED as a
+        // migration execution path. Per MIGRATION-GOV-13 (Phase 1A.2), legacy
+        // mutation paths must be permanently blocked, not feature-flagged.
+        // The canonical migration execution path is /api/admin/migrations
+        // (lib/migrations/runner.ts). This case now ALWAYS returns 423 Locked
+        // and directs the operator to the canonical API. The list_migrations
+        // case (diagnostic listing) remains functional.
+        // ────────────────────────────────────────────────────────────────────────
+        console.log(JSON.stringify({
+          level: 'audit',
+          type: 'migration.legacy.invoked',
+          timestamp: new Date().toISOString(),
+          actorType: 'human',
+          actorId: admin.id,
+          environment: (process.env.VERCEL_ENV || process.env.NODE_ENV || 'development').toLowerCase(),
+          executionId: null,
+          migrationIdentifier: null,
+          filename: migrationFile,
+          details: {
+            legacyRunner: 'app/api/admin/system-tools/route.ts:run_migration',
+            reason: 'Legacy system-tools run_migration permanently eliminated (MIGRATION-GOV-13, Phase 1A.2).',
+            canonicalPath: '/api/admin/migrations',
+          },
+        }));
+        return NextResponse.json({
+          success: false,
+          error: 'This legacy migration execution path has been permanently eliminated (MIGRATION-GOV-13, Phase 1A.2). ' +
+            'Use the canonical migration API at /api/admin/migrations instead. ' +
+            'This route will never re-enable, regardless of environment variables.',
+          canonicalPath: '/api/admin/migrations',
+        }, { status: 423 }); // 423 Locked
+
         // Security: only allow files from the migrations directory
         const migrationsDir = path.join(process.cwd(), 'lib', 'migrations');
         const filePath = path.join(migrationsDir, path.basename(migrationFile));

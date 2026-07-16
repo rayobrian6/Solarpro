@@ -140,7 +140,12 @@ describe('Defect 5 — Structural prose guards against — values', () => {
     expect(pv4c).not.toContain('rafter utilization ratio of —%');
   });
 
-  it('roof conclusion shows "data incomplete" when both SF and utilization are absent', () => {
+  it('roof structural is ALWAYS recomputed — absent/stale saved data cannot render', () => {
+    // Roof generation now unconditionally re-runs the V4 engine (the old
+    // needsCalc gate let a stale saved attachment payload print "DO NOT ISSUE"
+    // with a pre-ASD 1.62-vs-2.0 safety factor while the current engine PASSES).
+    // Deleting every saved structural field must therefore yield REAL computed
+    // values on PV-4C — never dashes, never "data incomplete".
     const input = clone(roofProject);
     delete input.compliance.structural.rafter;
     delete input.compliance.structural.attachment;
@@ -149,19 +154,18 @@ describe('Defect 5 — Structural prose guards against — values', () => {
     delete input.compliance.structural.rackingLoadPsf;
     delete input.compliance.structural.wind;
     delete input.compliance.structural.snow;
-    // The server-side V4 engine now genuinely runs in the vitest env (the old
-    // lazy require('@/…') silently failed here) and would backfill everything
-    // deleted above. Pin a rafter stub so needsCalc stays false and the
-    // absent-data prose guard is actually exercised.
+    // A stale rafter stub must NOT suppress the recompute anymore.
     input.compliance.structural.rafter = { bendingMoment: 1 } as any;
 
     const html = generatePermitHTML(input);
     const pv4c = sheetPage(html, 'PV-4C');
     expect(pv4c).toBeTruthy();
 
-    // With null values, should show "data incomplete" or "verify" message
-    // rather than "Review flagged structural items" (which implies a failure)
-    expect(pv4c).toContain('data incomplete');
+    // Freshly computed: a real safety factor with the ASD threshold label,
+    // and no dash-placeholder prose.
+    expect(pv4c).toContain('ASD');
+    expect(pv4c).not.toContain('data incomplete');
+    expect(pv4c).not.toContain('safety factor of —');
   });
 
   it('ground structural prose shows data-not-available when safety factor is —', () => {
@@ -184,28 +188,31 @@ describe('Defect 5 — Structural prose guards against — values', () => {
 });
 
 // ── Defect 9: OCPD formula display ─────────────────────────────────
-describe('Defect 9 — OCPD formula uses ×1.56 with NEC section citations', () => {
-  it('equipment schedule (SCHED) shows OCPD ≥ Isc×1.56 in wire sizing table', () => {
+// NOTE (EL-1, topology remediation): the DC source-circuit OCPD formula
+// (Isc×1.56, NEC 690.8) only applies to STRING-inverter systems. roofProject is
+// a MICROINVERTER fixture, which has no DC source circuits — SCHED now correctly
+// renders an AC branch circuit schedule instead of the DC Isc×1.56 table. See
+// tests/planset/sched-topology.test.ts. These assertions verify the schedule is
+// topology-correct rather than asserting the (inapplicable) DC formula.
+describe('Defect 9 — OCPD formula is topology-aware (DC ×1.56 only for string systems)', () => {
+  it('microinverter SCHED shows an AC branch schedule, not the DC Isc×1.56 table', () => {
     const html = generatePermitHTML(clone(roofProject));
     const sched = sheetPage(html, 'SCHED');
     expect(sched).toBeTruthy();
 
-    // The header should use the clearer "Isc×1.56" format with NEC reference
-    expect(sched).toContain('Isc×1.56');
-    // Should NOT contain the old ambiguous "×1.25 OCPD" header
+    // micro topology → AC branch circuit schedule, no DC source-circuit formula
+    expect(sched).toContain('AC Branch Circuit Schedule');
+    expect(sched).not.toContain('Isc×1.56');
     expect(sched).not.toContain('×1.25 OCPD');
   });
 
-  it('equipment schedule formula reference cites NEC 690.8(A)(1)×(B)(1)', () => {
+  it('microinverter SCHED wire-sizing interpretation is AC (no DC source-circuit claim)', () => {
     const html = generatePermitHTML(clone(roofProject));
     const sched = sheetPage(html, 'SCHED');
     expect(sched).toBeTruthy();
 
-    // Formula reference should include NEC section citations
-    expect(sched).toContain('690.8(A)(1)');
-    expect(sched).toContain('690.8(A)(1)×(B)(1)');
-    // Wire sizing interpretation should use ×1.56
-    expect(sched).toContain('Isc × 1.56');
+    expect(sched).toContain('WIRE SIZING INTERPRETATION (MICROINVERTER)');
+    expect(sched).not.toContain('All DC source circuit conductors');
   });
 });
 

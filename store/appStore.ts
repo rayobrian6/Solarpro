@@ -294,68 +294,46 @@ export const useAppStore = create<AppStore>()(
 
     // ── Load Active Project (fetch from server by ID) ─────────────────────────
     loadActiveProject: async (id: string): Promise<Project | null> => {
-      // Check store first — but ALWAYS re-fetch if the cached project has stale bill data.
-      // After a bill upload we call syncProjectToStore() to keep the cache warm, but on
-      // cold navigation (new tab, hard refresh) the in-memory store is empty and we must
-      // fetch from the server to get the bill_data-hydrated project.
-      // FIX v47.8: also bypass cache when cached project lacks billAnalysis so that
-      // navigation back to the project page always shows up-to-date bill/utility fields.
-      const existing = get().projects.find(p => p.id === id);
-      // FIX v47.168: bypass stale cache when utilityRatePerKwh is missing/zero.
-      // Provision-created projects may have been cached before rate was corrected by validateAndCorrectUtilityRate.
-      // FIX v47.221: bypass cache when layout is absent — cached project may predate
-      // Design Studio save. syncProjectToStore(updated) after onSave keeps cache warm,
-      // but cold loads (new tab, hard refresh) must re-fetch to get fresh layout.
-      const cacheValid = existing
-        && (existing.utilityRatePerKwh ?? 0) > 0
-        && existing.layout !== undefined;
-      if (cacheValid) {
-        set({ activeProjectId: id });
-        // Return cached version immediately (syncProjectToStore keeps it fresh after design save)
-        return existing;
-      }
-
-      // Fetch from server
+      // SERVER IS THE SOURCE OF TRUTH. Always re-fetch on load so equipment/layout
+      // changed on ANOTHER page (e.g. the panel swapped in Engineering, which writes
+      // the canonical selected_equipment column) is reflected after reload/navigation.
+      // The previous "return the cached project when it has a layout+rate" shortcut
+      // let a stale in-memory/localStorage copy override fresh canonical data — the
+      // Design Studio then showed the old panel forever. Cache/localStorage is now
+      // only an OFFLINE FALLBACK when the server is unreachable.
+      set({ activeProjectId: id });
       try {
         const res = await fetch(`/api/projects/${id}`);
-        if (!res.ok) {
-          // Try localStorage as last resort
-          const local = localGetProjects().find((p: Project) => p.id === id);
-          if (local) {
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.data) {
+            const project: Project = data.data;
             set(state => ({
-              projects: [...state.projects.filter(p => p.id !== id), local],
+              projects: [...state.projects.filter(p => p.id !== id), project],
               activeProjectId: id,
             }));
-            return local;
+            localSaveProject(project);
+            // FIX v47.13 T2e: structured reload log
+            console.log(`[PROJECT_RELOADED] id=${id} billAnalysis=${!!project.billAnalysis} utilityRatePerKwh=${project.utilityRatePerKwh ?? 'null'} utilityName="${project.utilityName ?? 'null'}" stateCode=${project.stateCode ?? 'null'} systemSizeKw=${project.systemSizeKw ?? 'null'} panel="${project.selectedPanel?.model ?? 'null'}"`);
+            return project;
           }
-          return null;
         }
-        const data = await res.json();
-        if (!data.success || !data.data) return null;
+        // Server reachable but no usable project (404/!success): fall through to cache.
+      } catch (err) {
+        console.error('[store] loadActiveProject fetch failed — falling back to cache:', err);
+      }
 
-        const project: Project = data.data;
-        // Add to store
+      // Offline / server-error fallback: in-memory store, then localStorage.
+      const fallback = get().projects.find(p => p.id === id)
+        ?? localGetProjects().find((p: Project) => p.id === id)
+        ?? null;
+      if (fallback) {
         set(state => ({
-          projects: [...state.projects.filter(p => p.id !== id), project],
+          projects: [...state.projects.filter(p => p.id !== id), fallback],
           activeProjectId: id,
         }));
-        localSaveProject(project);
-        // FIX v47.13 T2e: structured reload log
-        console.log(`[PROJECT_RELOADED] id=${id} billAnalysis=${!!project.billAnalysis} utilityRatePerKwh=${project.utilityRatePerKwh ?? 'null'} utilityName="${project.utilityName ?? 'null'}" stateCode=${project.stateCode ?? 'null'} systemSizeKw=${project.systemSizeKw ?? 'null'}`);
-        return project;
-      } catch (err) {
-        console.error('[store] loadActiveProject error:', err);
-        // Last resort: localStorage
-        const local = localGetProjects().find((p: Project) => p.id === id);
-        if (local) {
-          set(state => ({
-            projects: [...state.projects.filter(p => p.id !== id), local],
-            activeProjectId: id,
-          }));
-          return local;
-        }
-        return null;
       }
+      return fallback;
     },
 
     // ── Refresh All ───────────────────────────────────────────────────────────

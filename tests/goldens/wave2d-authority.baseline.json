@@ -1,0 +1,43 @@
+{
+  "topology": "MICRO",
+  "isMicro": true,
+  "microBranches": [
+    {
+      "index": 1,
+      "deviceCount": 11,
+      "branchCurrentA": 19.09722222222222,
+      "continuousA": 23.87152777777778,
+      "ocpdAmps": 25,
+      "wireGauge": "#10 AWG",
+      "conductorCallout": "#10 AWG THWN-2 + EGC",
+      "egcGauge": "#10 AWG"
+    },
+    {
+      "index": 2,
+      "deviceCount": 1,
+      "branchCurrentA": 1.7361111111111112,
+      "continuousA": 2.170138888888889,
+      "ocpdAmps": 15,
+      "wireGauge": "#12 AWG",
+      "conductorCallout": "#12 AWG THWN-2 + EGC",
+      "egcGauge": "#14 AWG"
+    }
+  ],
+  "dcStrings": [],
+  "acFeeder": {
+    "conductorCallout": "10 AWG",
+    "wireGauge": "#8 AWG",
+    "ampacityA": null,
+    "ocpdAmps": 30,
+    "voltageDropPct": null,
+    "conduitType": "EMT",
+    "conduitSize": null,
+    "lengthFt": 45
+  },
+  "egc": {
+    "gauge": "#10 AWG",
+    "basisOcpd": 25,
+    "source": "nec-250.122"
+  },
+  "governingOcpd": 25
+}

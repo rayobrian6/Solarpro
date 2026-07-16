@@ -5,6 +5,7 @@
 
 import type { PermitInput, CanonicalInput, CanonicalSysType, CanonicalModule, CanonicalSite, CanonicalStructure, CanonicalElectrical, CanonicalLayoutDimensions } from '../types';
 import type { CADModel } from '@/lib/cad/types';
+import { partitionSubSystems } from './subSystems';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { resolveEquipment } from './helpers';
 
@@ -23,6 +24,56 @@ export const MOUNT_SYSTEM_MAP: Record<CanonicalSysType, string> = {
 };
 
 export const VALID_CANONICAL_TYPES: CanonicalSysType[] = ['roof', 'ground_mount', 'solar_fence'];
+
+/**
+ * Single-source-of-truth guard for the module wattage. The planset resolves the
+ * module from engineering (system.inverters[].strings[]); this cross-checks that
+ * against every OTHER place a module wattage is stored and logs a loud warning
+ * when they disagree by >2%, naming each source and its value. Diagnostic only —
+ * never throws — but it turns a silent design↔engineering drift (design 440W vs
+ * engineering 600W) into a visible, attributable log line. Exported for tests.
+ */
+export function assertModuleConsistency(input: PermitInput, authoritativeWatts: number): Array<{ source: string; watts: number }> {
+  if (!isFinite(authoritativeWatts) || authoritativeWatts <= 0) return [];
+  const sys = input.system as Record<string, unknown> | undefined;
+  const proj = input.project as Record<string, unknown> | undefined;
+  const num = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) && v > 0 ? v : null);
+
+  const sources: Array<{ source: string; watts: number }> = [];
+  const push = (source: string, w: number | null) => { if (w != null) sources.push({ source, watts: Math.round(w) }); };
+
+  // System totals: DC kW ÷ module count (what several sheets derive Wp from).
+  const totalDcKw = num(sys?.['totalDcKw']);
+  const totalPanels = num(sys?.['totalPanels']);
+  if (totalDcKw && totalPanels) push('system.totalDcKw÷totalPanels', (totalDcKw * 1000) / totalPanels);
+
+  // The design's selected-panel object (the intended source of truth upstream).
+  push('project.selectedPanel.wattage', num((proj?.['selectedPanel'] as Record<string, unknown> | undefined)?.['wattage']));
+
+  // The alternate system.modules[] payload.
+  const modules = sys?.['modules'] as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(modules) && modules[0]) push('system.modules[0]', num(modules[0]['watts']) ?? num(modules[0]['panelWatts']));
+
+  // The design layout's per-panel wattage (modal value — some are 0/blank).
+  const panelPos = proj?.['panelPositions'] as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(panelPos) && panelPos.length) {
+    const counts = new Map<number, number>();
+    for (const p of panelPos) { const w = num(p['wattage']); if (w) counts.set(w, (counts.get(w) ?? 0) + 1); }
+    let modeW = 0, modeN = 0;
+    for (const [w, n] of counts) if (n > modeN) { modeN = n; modeW = w; }
+    if (modeW) push('project.panelPositions[].wattage', modeW);
+  }
+
+  const disagree = sources.filter(s => Math.abs(s.watts - authoritativeWatts) / authoritativeWatts > 0.02);
+  if (disagree.length) {
+    console.warn(
+      `[canonical] ⚠ MODULE WATTAGE DRIFT — planset uses ${Math.round(authoritativeWatts)}W (from engineering strings), but: ` +
+      disagree.map(s => `${s.source}=${s.watts}W`).join(', ') +
+      '. Design↔engineering out of sync — engineering report should rebuild from the current selected panel.',
+    );
+  }
+  return disagree;
+}
 
 /**
  * buildCanonical — Layout-locked pipeline entry point.
@@ -60,15 +111,40 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   // Priority 1: Panel-based detection (placementType/systemType on each panel)
   let fromPanels: CanonicalSysType | null = null;
   const panels_raw = layout.panels || [];
-  let fenceCount = 0, groundCount = 0;
+  let fenceCount = 0, groundCount = 0, roofCount = 0;
   for (const p of panels_raw) {
     const pt = (p.placementType || '').toUpperCase();
     const st = (p.systemType   || '').toLowerCase();
     if (pt === 'FENCE'  || st === 'fence'  || st === 'solar_fence')  fenceCount++;
-    if (pt === 'GROUND' || st === 'ground' || st === 'ground_mount') groundCount++;
+    else if (pt === 'GROUND' || st === 'ground' || st === 'ground_mount') groundCount++;
+    else if (pt === 'ROOF' || st === 'roof') roofCount++;
   }
   if (fenceCount  > 0) fromPanels = 'solar_fence';
   else if (groundCount > 0) fromPanels = 'ground_mount';
+
+  // ── HYBRID DETECTION (Phase 0 — Stowell finding, 2026-07-11) ──────────────
+  // A design can contain roof + ground + fence sub-arrays simultaneously. The
+  // single-winner vote below then papers over 2/3 of the system: the Stowell
+  // hybrid (fence+ground+roof) rendered as an 80-module "SOLAR FENCE SYSTEM",
+  // billed fence posts for every panel, and — because the fence/ground RSD
+  // exemption went project-wide — dropped NEC 690.12 module-level rapid
+  // shutdown for the ON-ROOF panels. Until sub-system support lands
+  // (SubSystem[] partition threaded through CAD→structural→BOM→sheets), a
+  // hybrid must NEVER pass silently.
+  const _typesPresent = [
+    roofCount > 0 ? `roof:${roofCount}` : null,
+    groundCount > 0 ? `ground:${groundCount}` : null,
+    fenceCount > 0 ? `fence:${fenceCount}` : null,
+  ].filter(Boolean) as string[];
+  const isHybridDesign = _typesPresent.length > 1;
+  if (isHybridDesign) {
+    console.warn(
+      `[CANONICAL RESOLVE] ⚠ HYBRID DESIGN DETECTED — panels of ${_typesPresent.length} system types ` +
+      `(${_typesPresent.join(', ')}). The pipeline currently supports ONE system type per project; ` +
+      `this planset/BOM will document ONLY the winning type and is NOT PERMIT-READY for the others ` +
+      `(missing racking/structural for the losing types; NEC 690.12 RSD may be wrongly exempted for roof panels).`
+    );
+  }
 
   // Priority 2: Project name keyword scan
   let fromName: CanonicalSysType | null = null;
@@ -155,6 +231,15 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
     isc:          eq.panelIsc,
   };
 
+  // ── Single-source-of-truth guard ─────────────────────────────────────────
+  // The module resolves from engineering (system.inverters[].strings[]). Other
+  // places store their OWN module wattage — the design's per-panel field, the
+  // system totals (DC kW ÷ modules), the selected-panel object. When those
+  // disagree the layout drifted from engineering (the "reverted to 600W" class
+  // of bug: design 440W vs engineering 600W). Phase 0 stops it recurring; this
+  // makes any residual drift LOUD instead of silent, naming each source.
+  assertModuleConsistency(input, canonicalModule.wattage);
+
   // ── Step 5: Mount system — the SELECTED racking is authoritative ─────────
   // Hardcoding roof→'IronRidge XR100' here shipped packages whose PV-3
   // detailed the actually-selected Roof Tech RT-MINI while APP-A and the
@@ -233,6 +318,8 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
 
   return {
     systemType:       rawType,
+    hybridSystemTypes: isHybridDesign ? _typesPresent : undefined,
+    subSystems:       partitionSubSystems(panels_raw as any[]),
     panels,
     geometry:         layout.geometry ?? undefined,
     layout,

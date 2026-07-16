@@ -27,7 +27,7 @@ import UpgradeModal from '@/components/ui/UpgradeModal';
 import { useToast } from '@/components/ui/Toast';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
-import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
+import { resolveActualAnnualBill, resolveMonthlyUsageHistory } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   buildUtilityProfile,
@@ -1344,6 +1344,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     dbUtilityRate:         proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:        client?.annualKwh ?? 0,
     actualAnnualBill:      resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
+    monthlyUsageHistoryKwh: resolveMonthlyUsageHistory(client), // real seasonal shape for the bill chart
     systemType,
     storedCashPrice:       storedCashPrice,
     roofPricePerWatt:      pricingCfg?.roofPricePerWatt,
@@ -1426,42 +1427,17 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   // Energy savings only — from canonical pipeline
   const energySavingsOnly = cp.financial.annualEnergyValue;
 
-  // SREC/IL income separately — pulled from stateIncentives if available
-  const srecAnnualIncome = (() => {
-    if (!stateIncentives) return 0;
-    const srecInc = stateIncentives.stateIncentives.find((s: any) =>
-      s.type === 'srec' || s.type === 'trec' || s.type === 'performance_payment'
-    );
-    if (!srecInc) return 0;
-    // 15-year total → annualized
-    return Math.round((srecInc.calculatedValue ?? 0) / 15);
-  })();
-
   // ITC from canonical pipeline (overrides inline calc)
   const itcRate   = cp.financial.itcRate;
   const itcAmount = cp.financial.itcAmount;
   const effectiveNet = cp.financial.netCost;
 
-  // Base payback: from canonical pipeline (uses net-of-ITC cost)
+  // Payback: from canonical pipeline — flow-based and SREC-schedule-aware
+  // (2026-07-16). The old dead locals here (srecAnnualIncome from the generic
+  // state-incentive catalog, adjustedPaybackYears, financeBreakEvenYear) were a
+  // SECOND, divergent SREC model computed but never rendered — removed so the
+  // canonical walk is the only payback math in existence.
   const basePaybackYears = cp.financial.paybackYears;
-
-  // Adjusted payback: with SREC income factored in
-  const adjustedPaybackYears = (energySavingsOnly + srecAnnualIncome) > 0
-    ? parseFloat((cp.financial.netCost / (energySavingsOnly + srecAnnualIncome)).toFixed(1))
-    : basePaybackYears;
-
-  // Break-even year for financing: when cumulative utility avoided >= cumulative loan payments
-  const financeBreakEvenYear = (() => {
-    if (financeMonthlyPayment <= 0) return null;
-    let cumUtility = 0;
-    let cumPayment = 0;
-    for (let i = 0; i < 25; i++) {
-      cumUtility += energySavingsOnly * Math.pow(1 + utilityInflation, i);
-      cumPayment += financeMonthlyPayment * 12;
-      if (cumUtility >= cumPayment) return i + 1;
-    }
-    return null;
-  })();
 
   // Is financing payment higher than current utility bill?
   // v47.340: use TOTAL energy cost (solar + remaining utility) vs current bill for truth
@@ -1515,7 +1491,9 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   const solar_cost_total         = cp.truth25yr.solarCostTotal;
   const remaining_utility_cost_total = cp.truth25yr.remainingUtilityCost;
   const estimated_energy_value_25yr  = cp.truth25yr.estimatedEnergyValue;
-  const net_financial_difference_25yr = cp.truth25yr.netFinancialDifference;
+  // Mirrors view page: canonical SREC-inclusive netDifference so every "25-yr
+  // savings/advantage" figure tells one story (was $130,198 vs $140,731).
+  const net_financial_difference_25yr = cp.truth25yr.netDifference;
   const netDifference_25yr       = cp.truth25yr.netDifference;
   const energyValueBreakdown     = cp.financial.energyValueBreakdown;
   const comparisonChartData      = cp.truth25yr.yearlyFlow.map((yr: any) => ({
@@ -1568,6 +1546,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
       effectiveFinal,
       annualEnergyValue,
       paybackYears:              payoffYear ?? 0,
+      srecIncome25yr:            cp.truth25yr.srec_income_25yr ?? 0,
       estimatedEnergyValue25yr:  estimated_energy_value_25yr,
       annualProductionKwh:       annualProduction,
       utilityRate,
@@ -1825,7 +1804,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                       ${effectiveFinal.toLocaleString()}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      {purchaseMode === 'finance' ? `${financeTermYears}-yr loan` : 'One-time cost'} — you own the energy
+                      {/* Mirrors view page: cash-basis price, not the financed total. */}
+                      {purchaseMode === 'finance' ? `System price, financed over ${financeTermYears} yrs` : 'One-time cost'} — you own the energy
                     </div>
                   </div>
                 </div>
@@ -1862,6 +1842,17 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                     {ownership_delta_monthly <= 0 ? (
                       <p className="text-xs text-emerald-400/70 mt-1.5 text-center">
                         Immediate monthly savings of ${Math.abs(ownership_delta_monthly)}/mo — and it grows as utility rates increase.
+                      </p>
+                    ) : null}
+                    {/* SREC cash context — bills-only comparison omits the REC contract
+                        (50% upfront + 6 yrs), which contradicted the SREC-driven payoff. */}
+                    {(cp.truth25yr.srec_income_25yr ?? 0) > 0 && (cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? (
+                      <p className="text-xs mt-1.5 text-center" style={{ color: '#16a34a' }}>
+                        Bills aren&apos;t the whole story: your REC contract also pays ~${Math.round(cp.truth25yr.yearlyFlow[0].srec_income).toLocaleString()} after energization
+                        {(cp.truth25yr.yearlyFlow?.[1]?.srec_income ?? 0) > 0
+                          ? <> + ~${Math.round((cp.truth25yr.yearlyFlow[1].srec_income) / 12).toLocaleString()}/mo equivalent (paid annually) for the following 6 years</>
+                          : null}
+                        {' '}— income the monthly comparison above doesn&apos;t include.
                       </p>
                     ) : null}
                   </div>
@@ -2376,7 +2367,9 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <div className="relative flex items-end gap-1 mb-1" style={{ height: '80px' }}>
                 {cp.production.monthlyKwh.map((kwh, i) => {
                   const max = Math.max(...cp.production.monthlyKwh, 1);
-                  const barH = Math.max(2, Math.round((kwh / max) * 68));
+                  // Mirrors view page: 60px so bar + label fit the 80px column
+                  // (68px flex-shrank all tall bars to one height).
+                  const barH = Math.max(2, Math.round((kwh / max) * 60));
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center justify-end" style={{ height: '80px' }}>
                       <div
@@ -2439,7 +2432,10 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                  {/* Mirrors view page: explicit even ticks (recharts dropped one). */}
+                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`}
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax / 20) * 20]}
+                    ticks={(() => { const m = Math.ceil(Math.max(...monthlyBillData.map(d => d.before), 1) / 20) * 20; return [0, m / 4, m / 2, (3 * m) / 4, m]; })()} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [`$${v}`, '']} />
                   <Bar dataKey="before" fill="#ef4444" radius={[3, 3, 0, 0]} name="Before Solar" opacity={0.6} />
                   <Bar dataKey="after" fill="#22c55e" radius={[3, 3, 0, 0]} name="After Solar" opacity={0.8} />
@@ -2573,7 +2569,10 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <div className="text-xs text-slate-500 mb-1">Your Solar Investment</div>
                 <div className="text-lg font-black text-white">${Math.round(solar_cost_total).toLocaleString()}</div>
                 <div className="text-xs text-slate-500 mt-1">
-                  {purchaseMode === 'finance' ? `${financeTermYears}-yr loan total` : 'One-time cash purchase'}
+                  {/* Mirrors view page: "25-yr loan total" was false for a cash-basis value. */}
+                  {purchaseMode === 'finance'
+                    ? `System price — financed @ $${solar_payment_monthly}/mo`
+                    : 'One-time cash purchase'}
                 </div>
               </div>
 
@@ -2581,7 +2580,13 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
                 <div className="text-xs text-slate-500 mb-1">Est. Remaining Utility Bills</div>
                 <div className="text-lg font-black text-slate-300">${remaining_utility_cost_total > 0 ? remaining_utility_cost_total.toLocaleString() : '0'}</div>
-                <div className="text-xs text-slate-500 mt-1">{energyOffset}% offset — {100 - energyOffset}% still from grid</div>
+                {/* Mirrors view page: at ≥100% offset, "0% still from grid" contradicted
+                    the nonzero remaining-bills figure (fixed charges/riders remain). */}
+                <div className="text-xs text-slate-500 mt-1">
+                  {energyOffset >= 100
+                    ? `${energyOffset}% offset — fixed charges & riders still apply`
+                    : `${energyOffset}% offset — ${100 - energyOffset}% still from grid`}
+                </div>
               </div>
 
               {/* Net advantage — prominent */}
@@ -2774,10 +2779,19 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 {(proj as any)?.selectedInverter?.model || (proj as any)?.selectedInverter?.name || 'Premium grid-tie inverter'}
               </div>
               {(proj as any)?.selectedInverter?.efficiency ? (
-                <div className="text-xs text-slate-400 mt-1">{((proj as any).selectedInverter.efficiency * 100).toFixed(1)}% efficiency</div>
+                // Mirrors view page: efficiency stored as % (96.5) in some records,
+                // fraction (0.965) in others — blind ×100 rendered "9650.0%".
+                <div className="text-xs text-slate-400 mt-1">
+                  {((proj as any).selectedInverter.efficiency > 1.5
+                    ? (proj as any).selectedInverter.efficiency
+                    : (proj as any).selectedInverter.efficiency * 100).toFixed(1)}% efficiency
+                </div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
-                <CheckCircle size={10} /> 25-yr warranty
+                {/* Was hardcoded "25-yr" — SMA 10yr vs Enphase 25yr; read the snapshot. */}
+                <CheckCircle size={10} /> {(proj as any)?.selectedInverter?.warranty
+                  ? `${(proj as any).selectedInverter.warranty}-yr warranty`
+                  : 'Manufacturer warranty'}
               </div>
             </div>
 
@@ -2960,7 +2974,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
         {/* Why Solar / Trust section */}
         <div className="proposal-sec grid grid-cols-1 md:grid-cols-3 gap-2" data-block-id="trust-performance">
           {[
-            { icon: <Shield size={20} />, title: '25-Year Warranty', desc: 'Full coverage on panels, inverter, and mounting system for complete peace of mind.' },
+            // Mirrors view page: honest warranty scope (inverter/racking vary).
+            { icon: <Shield size={20} />, title: '25-Year Panel Warranty', desc: 'Panels carry a 25-year manufacturer warranty; inverter and racking carry their own manufacturer terms — see the equipment section.' },
             { icon: <Award size={20} />, title: 'Licensed & Insured', desc: 'Fully licensed installers with comprehensive insurance coverage on every job.' },
             { icon: <Star size={20} />, title: 'Local Expertise', desc: 'Deep knowledge of local utility rules, incentives, and permitting requirements.' },
           ].map(t => (

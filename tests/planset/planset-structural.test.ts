@@ -53,60 +53,63 @@ function hasRealDesignRoofGeometry(project: any): boolean {
 }
 
 describe('planset structural/golden coverage — Design Studio to permit guardrails', () => {
-  it('renders PV-2 and PV-2B as different primary SVG drawings', () => {
+  it('renders PV-1 and PV-1B as different primary SVG drawings', () => {
     const html = generatePermitHTML(clone(roofProject));
 
-    const pv2 = sheetPage(html, 'PV-2');
-    const pv2b = sheetPage(html, 'PV-2B');
+    const pv1 = sheetPage(html, 'PV-1');
+    const pv1b = sheetPage(html, 'PV-1B');
 
-    expect(pv2).toContain('ROOF PLAN');
-    expect(pv2b).toContain('ARRAY GEOMETRY');
-    expect(pv2b).toContain('STRING LAYOUT');
+    expect(pv1).toContain('ROOF PLAN');
+    expect(pv1b).toContain('ARRAY GEOMETRY');
+    expect(pv1b).toContain('STRING LAYOUT');
 
-    const pv2Svg = normalizedSvg(firstSvg(pv2));
-    const pv2bSvg = normalizedSvg(firstSvg(pv2b));
+    const pv1Svg = normalizedSvg(firstSvg(pv1));
+    const pv1bSvg = normalizedSvg(firstSvg(pv1b));
 
-    expect(pv2Svg.length).toBeGreaterThan(1000);
-    expect(pv2bSvg.length).toBeGreaterThan(1000);
-    expect(pv2Svg).not.toEqual(pv2bSvg);
+    expect(pv1Svg.length).toBeGreaterThan(1000);
+    expect(pv1bSvg.length).toBeGreaterThan(1000);
+    expect(pv1Svg).not.toEqual(pv1bSvg);
   });
-  it('PV-2B branch-colored circuit plan has circuit layout title and differs from PV-2', () => {
+  it('PV-1B branch-colored circuit plan has circuit layout title and differs from PV-1', () => {
     const html = generatePermitHTML(clone(roofProject));
 
-    const pv2 = sheetPage(html, 'PV-2');
-    const pv2b = sheetPage(html, 'PV-2B');
+    const pv1 = sheetPage(html, 'PV-1');
+    const pv1b = sheetPage(html, 'PV-1B');
 
-    const pv2Svg = firstSvg(pv2);
-    const pv2bSvg = firstSvg(pv2b);
+    const pv1Svg = firstSvg(pv1);
+    const pv1bSvg = firstSvg(pv1b);
 
-    // PV-2B SVG must contain CIRCUIT LAYOUT title (replaces PV-2's ROOF PLAN)
-    expect(pv2bSvg).toContain('CIRCUIT LAYOUT');
+    // The CIRCUIT LAYOUT title lives in the sheet header (draw-zone-hdr); the
+    // in-drawing duplicate banner was removed (read as an orphaned watermark).
+    // The SVG itself is distinguished from PV-1 by its AC-branch circuit content.
+    expect(pv1b).toContain('CIRCUIT LAYOUT');
+    expect(pv1bSvg).toContain('AC BRANCH');
     // v47376: the SVG BRANCH LEGEND overlay was REMOVED — it duplicated the
     // data-zone HTML legend and painted over the viewport title. The legend
     // must exist in the PAGE (data zone), not the drawing SVG.
-    expect(pv2bSvg).not.toContain('BRANCH LEGEND');
-    expect(pv2b).toContain('BRANCH LEGEND');
+    expect(pv1bSvg).not.toContain('BRANCH LEGEND');
+    expect(pv1b).toContain('BRANCH LEGEND');
 
-    // PV-2 must NOT contain CIRCUIT LAYOUT or BRANCH LEGEND in its SVG
-    expect(pv2Svg).not.toContain('CIRCUIT LAYOUT');
-    expect(pv2Svg).not.toContain('BRANCH LEGEND');
+    // PV-1 must NOT contain the branch-circuit SVG content or BRANCH LEGEND.
+    expect(pv1Svg).not.toContain('AC BRANCH');
+    expect(pv1Svg).not.toContain('BRANCH LEGEND');
 
-    // PV-2B modules use branch-colored fills (at least the default navy #1b3f74)
+    // PV-1B modules use branch-colored fills (at least the default navy #1b3f74)
     // For multi-branch systems, multiple distinct stringColors appear.
     // For single-branch systems (e.g. small micro arrays), only one color appears
-    // but the sheet is still distinct from PV-2 via title and legend overlay.
+    // but the sheet is still distinct from PV-1 via title and legend overlay.
     const branchColors = ['#1b3f74', '#cc0000', '#cc6600', '#5500cc', '#0891b2', '#be185d', '#65a30d', '#e5a100'];
     const fillsFound = new Set<string>();
     for (const color of branchColors) {
-      if (pv2bSvg.includes('fill="' + color + '"')) {
+      if (pv1bSvg.includes('fill="' + color + '"')) {
         fillsFound.add(color);
       }
     }
     // At least one branch color fill must be present
     expect(fillsFound.size).toBeGreaterThanOrEqual(1);
 
-    // Confirm PV-2 and PV-2B are not identical
-    expect(normalizedSvg(pv2Svg)).not.toEqual(normalizedSvg(pv2bSvg));
+    // Confirm PV-1 and PV-1B are not identical
+    expect(normalizedSvg(pv1Svg)).not.toEqual(normalizedSvg(pv1bSvg));
   });
 
 
@@ -158,9 +161,9 @@ describe('planset structural/golden coverage — Design Studio to permit guardra
   });
 
   it.each([
-    ['roof', roofProject, 'PV-2', 'PV-2B'],
-    ['ground', groundProject, 'PV-2', 'PV-2B'],
-    ['fence', fenceProject, 'PV-2', 'PV-2B'],
+    ['roof', roofProject, 'PV-1', 'PV-1B'],
+    ['ground', groundProject, 'PV-1', 'PV-1B'],
+    ['fence', fenceProject, 'PV-1', 'PV-1B'],
   ] as const)('generates a valid multi-sheet planset for %s systems without throwing', (_label, fixture, pv2Sheet, pv2bSheet) => {
     const html = generatePermitHTML(clone(fixture));
     const pages = pagesFrom(html);

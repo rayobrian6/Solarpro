@@ -5,9 +5,12 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, handleRouteDbError, getDbReady, isValidUUID} from '@/lib/db-neon';
+import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, handleRouteDbError, getDbReady, isValidUUID, upsertSelectedEquipment } from '@/lib/db-neon';
 import { syncProjectPipeline } from '@/lib/engineering/syncPipeline';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { getPanelById } from '@/lib/equipment-db';
+import { equipmentPanelToTypesPanel } from '@/lib/system/selectedEquipment';
+import { designSubSystemBlocks } from '@/lib/system/designToEngineering';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -123,6 +126,84 @@ export async function POST(req: NextRequest, context: RouteContext) {
       } catch (syncErr) {
         console.error('[layout/route] Failed to sync project system_type (non-critical):', syncErr);
       }
+    }
+
+    // ── Full-duplex Design→Engineering: write the canonical panel ───────────────
+    // The design auto-save is the reliable persist path (the production route only
+    // fires when kW changes). When the design's panel differs from the canonical
+    // selected_equipment (i.e. the designer changed it), write canonical — the
+    // single source of truth that BOTH pages read (design on mount, engineering via
+    // the canonical-panel reconciliation effect). Compared against canonical (not the
+    // previous layout) so a diverged pair converges. Non-fatal.
+    //
+    // Wave 4A (contract §1.3/I-4): when the design carries a v2 per-sub split
+    // (designElectrical.subSystems with >1 panel-bearing blocks), the old
+    // PROJECT-WIDE panelId promotion is retired for this project. Instead:
+    //  • each sub's equipment lands in selected_equipment.subSystems[key]
+    //    (schemaVersion 2; upsertSelectedEquipment deep-merges per key), and
+    //  • the flat panel write is SCOPED TO THE PRIMARY sub (blocks[0], fixed
+    //    roof > ground > fence — §1.4): the flat mirror moves only when the
+    //    PRIMARY sub's panel changed. This is deliberately NOT dropped: the
+    //    engineering page's canonical-panel reconcile (page.tsx:2432, Wave
+    //    3.3) re-pins exactly the primary sub's strings from the flat id with
+    //    a composite `${key}:${panelId}` ref-guard — a primary-scoped flat
+    //    write cooperates with it, while non-primary subs sync through the
+    //    map, never through flat promotion.
+    try {
+      // Body's designElectrical ONLY (like the legacy write) — a layout save
+      // that didn't re-author the electrical design must never re-promote a
+      // stored design panel over a later engineering-side choice.
+      const de = designElectrical as import('@/types').DesignElectrical | undefined;
+      const blocks = designSubSystemBlocks(de);
+      if (blocks) {
+        const nowIso = new Date().toISOString();
+        const subs: Record<string, unknown> = {};
+        for (const b of blocks) {
+          if (!b.panelId || !getPanelById(b.panelId)) continue; // resolvable ids only
+          subs[b.key] = {
+            key: b.key,
+            panelId: b.panelId,
+            ...(b.topology ? { topology: b.topology } : {}),
+            ...(b.rackingId ? { mountingId: b.rackingId } : {}),
+            source: 'design',
+            updatedAt: nowIso,
+          };
+        }
+        if (Object.keys(subs).length > 0) {
+          const patch: Record<string, unknown> = {
+            schemaVersion: 2, subSystems: subs, source: 'design', updatedAt: nowIso,
+          };
+          const primary = blocks[0];
+          if (primary.panelId && subs[primary.key] && primary.panelId !== project.selectedPanel?.id) {
+            const panel = getPanelById(primary.panelId);
+            if (panel) {
+              patch.panelId = panel.id;
+              patch.panel = equipmentPanelToTypesPanel(panel);
+            }
+          }
+          await upsertSelectedEquipment(projectId, user.id, patch);
+          console.log('[layout/route] design subSystems → canonical (per-sub scoped)', {
+            projectId, keys: Object.keys(subs), flatPanel: patch.panelId ?? null,
+          });
+        }
+      } else {
+        // Single-type design — legacy flat write, byte-identical.
+        const newPanelId = de?.panelId as string | undefined;
+        if (newPanelId && newPanelId !== project.selectedPanel?.id) {
+          const panel = getPanelById(newPanelId);
+          if (panel) {
+            await upsertSelectedEquipment(projectId, user.id, {
+              panelId: panel.id,
+              panel: equipmentPanelToTypesPanel(panel),
+              source: 'design',
+              updatedAt: new Date().toISOString(),
+            });
+            console.log('[layout/route] design panel → canonical', { projectId, newPanelId });
+          }
+        }
+      }
+    } catch (propErr: unknown) {
+      console.warn('[layout/route] design panel canonical write skipped (non-fatal):', (propErr as Error)?.message);
     }
 
     // Save version snapshot (async, non-blocking for response).

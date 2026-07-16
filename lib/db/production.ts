@@ -3,7 +3,7 @@
  * Production results and project-with-details DB operations — extracted from lib/db-neon.ts.
  */
 
-import { getDbReady, isValidUUID, assertUUID, rowToLayout, parseDbFloat } from './core';
+import { getDbReady, isValidUUID, assertUUID, rowToLayout, parseDbFloat, hydrateCanonicalEquipment } from './core';
 import { hydrateBillData } from '@/lib/bill/hydrateBillData';
 
 // ============================================================
@@ -225,6 +225,13 @@ export async function getProjectWithDetails(
     }
   }
 
+  // Canonical selected equipment (migration 101) takes precedence over the
+  // productions.data_json snapshot read above — the snapshot is the design-time
+  // calc result, while selected_equipment reflects the LATEST choice from either
+  // Design or Engineering. Without this, an Engineering panel change (which writes
+  // only the canonical column) never surfaced through GET /api/projects/[id].
+  const canonEq = hydrateCanonicalEquipment(row);
+
   // Delegate all bill_data hydration to shared helper (see lib/bill/hydrateBillData.ts)
   const rawBillData = row.bill_data as Record<string, unknown> | undefined;
   const {
@@ -266,8 +273,13 @@ export async function getProjectWithDetails(
     layout,
     production,
     costEstimate,
-    selectedPanel,
-    selectedInverter,
+    // Canonical column wins; productions.data_json is the fallback for projects
+    // that predate the canonical store.
+    selectedPanel:     canonEq.selectedPanel     ?? selectedPanel,
+    selectedInverter:  canonEq.selectedInverter  ?? selectedInverter,
+    selectedMounting:  canonEq.selectedMounting,
+    selectedBatteries: canonEq.selectedBatteries,
+    batteryCount:      canonEq.batteryCount,
     engineeringSeed: row.engineering_seed
       ? (typeof row.engineering_seed === 'string'
           ? JSON.parse(row.engineering_seed)

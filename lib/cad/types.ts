@@ -46,6 +46,11 @@ export interface CADRoofPlane {
     rakeM:   number;
   };
   panels:         CADPanel[];
+  /** True when the DESIGN carries real panels elsewhere but placed none on
+   *  this facet — the user stitched the full roofline and left it empty.
+   *  Such planes render as outline-only (never grid-filled, never stripped:
+   *  deleting them erased half of Stowell's gable from the site plan). */
+  designedEmpty?: boolean;
   dimensions: {
     widthM:     number;
     heightM:    number;
@@ -222,10 +227,47 @@ export interface CADModel {
   systemType:  CADSystemType;
   version:     string;
 
-  // System-specific geometry (only one will be populated)
+  // System-specific geometry. Single-system: only one populated.
+  // HYBRID (Phase 1): all present sections populated — see `hybrid` below.
   roof?:   CADRoofModel;
   ground?: CADGroundModel;
   fence?:  CADFenceModel;
+
+  /** Hybrid (multi-system) metadata — present ONLY when the design spans >1
+   *  system type. Each grafted section's local XY is relative to its OWN
+   *  origin (recorded here) — renderers drawing sections together (site plan)
+   *  must re-project using these origins vs the base originLat/originLng. */
+  /* (see CADRoofPlane.designedEmpty for empty-facet semantics) */
+  hybrid?: {
+    sections: Array<{
+      key: 'roof' | 'ground' | 'fence';
+      originLat: number; originLng: number;
+      totalPanels: number; dcKw: number;
+      /** REAL designed panel positions for this sub-system (lat/lng centers,
+       *  straight from the design studio). Site-plan overlays draw from THESE
+       *  — never from a solver's synthesized local geometry, which is not
+       *  registered to where the user actually placed the array (Stowell). */
+      panels?: Array<{
+        lat: number; lng: number;
+        azimuth?: number; row?: number; arrayId?: string;
+      }>;
+      /** Per-subsystem equipment carriage (contract §1.3 — docs/
+       *  ARCHITECTURE-per-subsystem-equipment.md). Populated from the
+       *  subsystem's own SubSystemEquipment entry so hybrid sheet renderers
+       *  never fall back to a project-wide winner. `acKwPerDevice` is the
+       *  explicit per-device kW contract (never a summed total). */
+      equipment?: {
+        panelModel?: string;
+        panelWatts?: number;
+        voc?: number;
+        isc?: number;
+        inverterMfr?: string;
+        inverterModel?: string;
+        topology?: 'string' | 'micro' | 'optimizer';
+        acKwPerDevice?: number;
+      };
+    }>;
+  };
 
   // Aggregated metrics
   totalPanels:  number;

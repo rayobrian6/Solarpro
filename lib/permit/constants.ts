@@ -372,7 +372,348 @@ const PDF_PAGE_CONFIG = {
 // (4) PV-3 sidebar callout de-hardcoded (3/8" @ 2.5" → DB lag/embed via
 // d.lagSpec) + rail-less wording; cross-section dims moved off the eave
 // stack (self-strikethrough).
-const PLANSET_ENGINE_VERSION = 47383;
+// 47384 (2026-07-04): audit of Ray's v47383 regen ((12).html) — cross-sheet
+// single-sourcing round.
+// (1) SCHED BOM sized the AC disconnect/fuses from DC kW (31.2 → 175A RK5
+// fuses in an Eaton 200A disco) while PV-0/PV-4B/E-1 specify the 100A fused
+// disco (75.6A × 1.25). bom-engine-v4 takes acOutputKw and sizes all AC-side
+// gear (disco/fuse/backfeed/EGC/GEC fallbacks) from the AC nameplate.
+// (2) APP-A 690.8 table printed Voc ×1.25 = 62.3 V "max" directly across from
+// the inverter's 60 V DC limit with no flag. Now prints the exact NEC 690.7(A)
+// cold-corrected Voc (project designTempMin, same input the engines use) and
+// the red EQUIPMENT COMPATIBILITY warning fires on the CORRECTED value.
+// (3) Attach spacing + lag spec single-sourced set-wide: PE-1 and the PV-4C
+// requirements block now use the same engineering-resolved chain as PV-3
+// (structural.attachment.maxAllowedSpacing → user input → racking max) and
+// the mounting system's lag dia/embed — they printed 48" max / 3/8" beside
+// PV-3/PV-4C-analysis' resolved 24" / 5/16" for the same job. APP-A's "Max
+// Attach Spacing" prefers the resolved value over the racking's rated max.
+// (4) PE-1 prints the pitch the structural engine analyzed (CAD plane[0] →
+// project) — the letter claimed project.roofPitch 4.4:12 (20.0°) while the
+// analysis above it ran on the 17° CAD plane (PV-0/PV-2 print 3.6:12).
+// (5) Seismic Design Category single-sourced: PE-1/CERT '|| D' fallback
+// printed SDC D beside PV-0's AHJ-derived CAT. B; now falls back to
+// project.seismicCategory, then '—' (never invents a category).
+// (6) PV-4C load-combo block restated as ASD §2.4 (0.6D+0.6W / D+S) — 47383
+// fixed PE-1/CERT but this sheet still quoted LRFD §2.3 (0.9D+1.0W,
+// 1.2D+1.6S) beside ASD capacities.
+// (7) PV-4C auto-resolutions render as a compact footnote line (the 5-column
+// table sat after the page conclusion and fell entirely past the page bottom
+// on real data — invisible in print); typical-detail SVG slimmed 220→168px.
+// (8) PV-0 vicinity aerial fills the space the column has left (flex,
+// min 90px) instead of a fixed 150px that pushed the section 27px past the
+// page bottom; CERT "Date of Certification" left blank for the PE (the
+// prefilled issue date read as the license-expiration value above it).
+// 47385 (2026-07-04): Ray's battery regen ((13)-era) — visual-fidelity round.
+// (1) PV-1 module layer REGISTERS to the imagery: whole-roof bbox-center
+// fallback when Nearmap returns fewer subject polygons than design planes
+// (per-plane matching degenerated → shift always rejected → modules rendered
+// ~1 m off, south row read as past the eave).
+// (2) Fire setbacks are PER EDGE TYPE per IFC 2021 §1204.2: ridge gets the
+// coverage-resolved 18"/36", hips/valleys 18" (§1204.2.1.2), eaves/rakes
+// NONE — the blanket 3'-0" band on every hip buried the W/E planes in
+// keep-out hatch. Labels/legend/data zones/callouts say which edge.
+// (3) PV-2/PV-2B general notes get an opaque backing (printed over the NW
+// hip hatch when the roof extended into the left column).
+// (4) PV-0 construction notes scale with count (battery packages carry 22+
+// notes — ran 31px past the page); PV-5 label schedule splits into two
+// side-by-side half tables (all-13-labels battery case ran 81px past).
+// (5) Micro overpower pairing surfaced: computed-system warns when module
+// STC W > 1.55× the micro's AC rating (600W-on-IQ8A = 1.72 shipped silently
+// as "31 kW DC / 18 kW AC"); APP-A prints the red compatibility warning for
+// the same condition. Battery brand/model resolved from batteryId at permit
+// build (L-8 BESS placard printed "Manufacturer: —").
+// 47386 (2026-07-04): Ray's (13).html sweep ("plethora of problems") — 7 fixes.
+// (1) PV-2B trunk routing is COLLISION-SCORED: plane transitions + homeruns
+// pick the axis-aligned route (Manhattan corners + 4 array-bbox skirts) that
+// passes through the fewest module bboxes — the fixed corner drew the trunk
+// straight through other branches' modules. Cross-hip branch MEMBERSHIP is
+// intentional (Ray's economical-branch directive 2026-07-03).
+// (2) PV-4A now surfaces the micro overpower pairing as a WARNING row +
+// count — it declared "0 warnings / complies" while APP-A red-flagged the
+// same 600W-on-349W pairing.
+// (3) PV-1: equipment labels sit on opaque plates (were halo text on the
+// neighbor's parked cars), lot lines carry TRUE ground-length dimensions
+// from the county ring, and the non-standard computed "1
+// ≈ 14'" ratio is
+// gone (graphic scale bar carries the scale).
+// (4) PV-3: callout bubbles at a 16px pitch (r7 bubbles at 13px stacked on
+// each other), leaders land at the text BASELINE with a horizontal landing
+// (mid-glyph endpoints read as strike-throughs), rafter-O.C. dim moved off
+// the section's thick baseline, attach dim de-collided; utility name
+// humanized ('il-ameren-illinois' → 'Ameren Illinois').
+// (5) E-1: "(N) AC DISCONNECT" node label moved above the enclosure (it
+// printed exactly on renderDisco's internal header — the garbled label);
+// embedded SLDs suppress the internal SOLARPRO title panel + crop the
+// viewBox (it duplicated the sheet title block).
+// (6) BOM disconnecting-means labels = AC/DC disco + POI (NEC 690.13), not
+// inverterCount+1 (printed qty 53 on a 52-micro job).
+// (7) PV-4B supply-side jobs: AC Output lands at "Supply-Side Tap @
+// Service" and the EGC at the disco ground bus (both said "Main Panel");
+// PV-2B JB note gets an opaque backing (hip/eave linework struck it).
+// 47387 (2026-07-06): market-readiness round — honesty + density.
+// (1) Encroachment test = module FOOTPRINT (center + 4 rotation-aware
+// corners) vs setback bands — the centers-only test let a module overlap a
+// band by half its width silently.
+// (2) Display azimuths snap to the sheet axes within the regularizer's 8°
+// tolerance (table read 3°/273°/89° beside axis-squared linework).
+// (3) PV-4A carries an AC BRANCH CIRCUIT SCHEDULE (per-branch devices/amps/
+// ×1.25/OCPD/conductor/terminus from the same planMicroBranches plan PV-2B
+// draws) + an INTERCONNECTION SUMMARY block — the bottom 60% shipped blank.
+// (4) APP-A upgraded to DATASHEET-GRADE: real manufacturer Vmp/Imp/temp-
+// coefficients/NOCT/cell-type from equipment-db (Vmp was estimated Voc×0.83,
+// coeffs hardcoded), plus PV MODULE and MICROINVERTER datasheet-reference
+// tables (max system V, series fuse, MPPT range, max input current,
+// units/branch, CEC eff, RSD, warranties). The 690.7 Voc calc now uses the
+// module's own coefficient.
+// (5) PV-3 structural canvas 520→800 (was letterboxing into a half-blank
+// sheet): FASTENER & HARDWARE SCHEDULE (lag/embed/pilot/torque/flashing/
+// bonding) + WATERPROOFING & ROOFING NOTES fill the band below the section;
+// section + detail circle pinned to their original frame so the taller
+// canvas can't slide them.
+// 47388 (2026-07-06): Ray's Google-fallback render exposed a class bug —
+// PV-1 overlay furniture was sized in ABSOLUTE image pixels and ballooned
+// ~2.4× on a 640px Google crop (giant plates burying the aerial; Nearmap's
+// ~900px crop was the only case ever verified). All PV-1 furniture (labels,
+// plates, chips, leaders, street label, canopy/parcel labels, lot dims,
+// scale-bar plate, north arrow, neatline) now scales with fk = cropW/900,
+// verified at BOTH resolutions. (2) PV-2 fit-to-frame RESERVES the tables/
+// notes column (280px, plan mode only) so the roof can never slide under it
+// — replaces the opaque-backing patch that erased linework. (3) On-screen
+// VIEWER in the HTML shell: gray desk, sheet shadows, fixed toolbar (zoom
+// in/out, fit-width, 100%, sheet prev/next + indicator, print), keyboard
+// +/−/0; print CSS hides the toolbar and resets the transform so print/PDF
+// output is byte-identical. Default = fit-width for laptop readability.
+// 47389 (2026-07-06): STRUCTURAL TRUTH — Ray zoomed into PE-1's DO-NOT-ISSUE
+// and called it ("we drive screws into trusses all the time"). The letter was
+// failing on FICTION: the UI held framingType 'unknown' but never threaded it
+// into the permit payload, and generatePermit coerced everything non-truss to
+// 'rafter' — the V4 engine's own auto-detect (24" O.C. → truss, BCSI capacity
+// path) was unreachable, and the span was a flat 12 ft guess. Now: (1) the
+// engineering payload threads framingType/rafterSpan/rafterSpecies; (2)
+// generatePermit passes 'unknown' through so auto-detect runs; (3) span
+// derives from the ROOF GEOMETRY when unset (truss = building short
+// dimension, stick = half of it) labeled 'PER ROOF GEOMETRY — FIELD VERIFY';
+// (4) PE-1 truss rows speak truss (BCSI basis, capacity in PSF, governing
+// utilization, deflection per truss mfr) instead of lb-ft stick concepts.
+// Melvin: truss @ 24" O.C., span 32.4 ft, 31.1/35 psf = 89% PASS — letter
+// certifies instead of DO-NOT-ISSUE. Explicit rafter still runs the honest
+// stick path.
+// 47390 (2026-07-06): PV-1 module↔imagery alignment on GOOGLE-FALLBACK
+// aerials (Ray's 07-06 render: modules hung past the south eave). Google has
+// no imagery-registered vector layer — Solar API roofSegments belong to a
+// NEIGHBOR building on Melvin (measured 14 m off), so registration now comes
+// from the IMAGE: utils/aerialEdgeSnap.ts grid-searches a ≤3.5 m translation
+// that lands the design roof hull on the strongest oriented Sobel edges
+// (route pre-pass → aerialData.registrationShift → PV-1 toPxD). Confidence
+// gates (score ratio ≥1.3, ≥50% of perimeter on edges, no boundary lock)
+// fail OPEN to the previous unshifted behavior. Melvin real-Google fixture:
+// 1.11 m shift, ratio 3.34 — modules land on the roof pixels; Nearmap path
+// byte-identical (its vector registration is untouched).
+// 47391 (2026-07-06): PV-1 module ROTATION regularizer (Ray: "straighter to
+// the edge of the roof"). PV-1 drew each module rotate(rawAzimuth); hand-
+// traced planes carry ~3° azimuth noise so opposite slopes of one ridge
+// weren't exact opposites (Melvin N 3.2° vs S 180.1°) → the top array
+// rendered canted off the eave while the bottom sat straight. New
+// utils/moduleAzimuthGrid.ts snaps each module's DRAW rotation to the
+// building's principal 90° grid (doubled-angle circular mean; near-square
+// buildings collapse to true cardinal → matches PV-2's 0/180/270/90),
+// leaving genuinely off-grid arrays (>10° from grid) alone. Display-only,
+// same spirit as regularizeRoofPlanes; positions untouched. Both Melvin
+// arrays now render upright and parallel to the roof edges.
+// 47392 (2026-07-06): PV-1 module WIDTH from design pitch (Ray: "hip cluster
+// looks messy"). The payload often omits real panel dimensions and the 66×40"
+// default drew modules ~10% narrower than the placement pitch (1.13 m vs 40" =
+// 1.016 m) → an ~11 cm gap between every module. On the small triangular hip
+// clusters those gaps made 4 panels read as scattered tiles. sitePlan now
+// derives the drawn width from the median nearest-neighbour spacing (= module
+// footprint in its tightest-packing direction) less a hairline rail gap, so
+// panels tile as solid blocks; length already matched the ~66" row pitch.
+// Applies only when the real width is absent; sanity-bounded 0.6-2.5 m. Module
+// positions untouched — the hip layout is still the design's, just drawn tight.
+// 47393 (2026-07-07): DE-SKEW the array to TRUE lines (Ray: "the arrays are
+// slightly askewed and not recognizing lines of trueness … left side not
+// snapping true, other 3 fine"). Measured cause: the design's per-plane grid
+// noise is UNEVEN — Melvin's WEST plane grid sits 3.1° off cardinal while N/S/E
+// are all <0.8°, so only the west cluster looks crooked. New
+// utils/deskewArrayToTrue.ts runs ONCE at the source (route, before render +
+// snapshot): (1) snaps every plane's + panel's azimuth to the building cardinal
+// grid so rectangles draw true; (2) measures each plane's own grid tilt from
+// its row/col structure and rotates that plane's panels about their centroid to
+// remove it, so rows/columns land on true horizontal/vertical LINES. De-skew
+// only — same panels/count/arrangement/symmetry; a square plane barely moves; a
+// genuinely rotated building is preserved (target = dominant-plane tilt, not
+// forced cardinal). Every sheet (PV-1, PV-2, …) now draws the array identically
+// square. Verified: west 3.29°→0, all four planes 0.00°, both hips symmetric.
+// 47394 (2026-07-07): PE-1 structural — recompute when the saved result is
+// STALE, not just missing. The V4 truss auto-detect (v47389) was being bypassed
+// whenever the payload already carried a structural result: needsCalc only fired
+// on missing/zero bending, so a stale worst-case STICK analysis (framingType
+// 'rafter', assumed 12ft span, 109% deflection) survived and printed a false
+// "DO NOT ISSUE" on a trussed house. needsCalc now also fires when the saved
+// framingType disagrees with what the current design resolves (explicit
+// selection, else 24" O.C.→truss). Melvin: stale rafter/109%/DO-NOT-ISSUE →
+// live truss/32.4ft-geometry-span/89%/PASS/certifies. Same stale-payload class
+// as the 600W module drift — never trust a saved result the inputs contradict.
+// 47395 (2026-07-07): CERT letter speaks TRUSS on trussed houses. The
+// certification paragraph hard-coded rafter language ("rafter bending stress
+// F'b …, bending utilization 0%, deflection Δ = — in") even for trusses (which
+// have no bending/deflection numbers). Now branches: truss → "pre-engineered
+// truss load capacity (governing utilization X%; member deflection to be
+// verified with the truss manufacturer)"; stick keeps the rafter wording.
+// 47396 (2026-07-07): APP-A module efficiency + physical dims from the
+// equipment-db record, not the 66"×40" layout default. A 440W module over the
+// generic 66×40 footprint back-computed to 25.8% efficiency (physically
+// impossible for silicon); now uses the manufacturer/CEC datasheet value
+// (Philadelphia Solar 440W → 22.6%) and real 67.8"×44.6"/46 lbs dims. Efficiency
+// is never back-computed from a drawn footprint when a DB record resolves.
+// 47397 (2026-07-07): two minor completeness fixes. (a) BOM PV Junction Box
+// manufacturer was hard-coded "TBD" → now specs a real Soladeck 0786-41 (or
+// approved equal), the industry-standard roof-flashed open-air-to-conduit box.
+// (b) NEC 220.82 dwelling-load Step 1 now labels the sqft as "assumed from the
+// service size — field verify" (no dwelling-area field exists on the project; it
+// is keyed to service amps), matching the HVAC row's existing field-verify note.
+// 47398 (2026-07-08): PV-2 site-context inset (Phase 1). A parcel-scale plot view
+// (county-GIS property line + edge dims, building/roof footprint, PV array,
+// street name label, service equipment, approximate building/array→property-line
+// setbacks, north, scale, APN, provenance) is injected into the roof SVG's empty
+// bottom-left reserve — the main roof/module viewport is untouched. Renders only
+// when a county-GIS parcel is present; otherwise the roof plan is kept as-is (no
+// fabricated lot). All GIS-derived geometry/dimensions labeled APPROXIMATE. No
+// driveways/sidewalks/roads fabricated; a provider seam (approved-only) is left
+// for later. Parcel fetch wired into the permit route (POST + GET self-heal).
+// 47399 (2026-07-08): PV-2 inset render fix for REAL parcels. A large apartment/
+// complex lot (Braidon's actual parcel) shrank the building to a dot and drew a
+// clutter of ~12 overlapping edge-length labels over a jagged boundary. Now the
+// inset ZOOMS to the building + adaptive margin (enough to show the nearest
+// property line when reasonable), CLIPS the parcel to that window (nearest lines
+// only), and skips per-edge dimension labels on complex (>8-vertex) lots. Footer
+// cleaned. Simple small lots still show the full parcel with edge dims.
+// 47400 (2026-07-08): PV-2 site context INTEGRATED into the main roof drawing
+// (Ray: the driveways/sidewalks belong WITH the roof drawout, not a separate
+// box). Removed the bolted-on plot inset; drawRoofPlan now draws the property
+// line + street + driveway + sidewalk in the roof's own frame (real lat/lng →
+// cad.origin → fake-degree → toX/toY), fit window expands to include the lot
+// (capped so the roof stays prominent). Gated on a county-GIS parcel; roof-only
+// (byte-identical) when absent. See lib/drafting/templates/roofSiteContext.ts.
+// 47401 (2026-07-08): PV-2 site plan now draws REALITY, not guesses. Added
+// lib/aerial/siteFeatures.ts (OpenStreetMap via Overpass) → real road
+// centerlines + names (drawn where the road actually is) and real surrounding
+// building footprints (critical for apartment complexes: Braidon's building is
+// 1 of ~13 on a single 3.12-ac parcel). REMOVED the inferred driveway/sidewalk
+// (no data behind them). Fetched in the async permit route alongside the parcel.
+// 47402 (2026-07-08): (1) RT-Mini feet drawn STAGGERED @ 48" O.C. (Ray: not a
+// foot per module / not 2 ft O.C. — over-built labor). Both foot-rows start on
+// the same rafter; top row +2 ft then 4 ft O.C., bottom row straight 4 ft O.C.
+// Attach-spacing callout + SYSTEM DATA + ATTACHMENT ZONE now say 48" O.C.
+// STAGGERED for rail-less. (2) Plane callouts decluttered → small numbered
+// badges keyed to the ROOF DESCRIPTION table (were 3-line boxes burying the
+// modules). (3) Fixed the OSM site-features fetch (GET not POST — POST→406).
+// 47403 (2026-07-08): RT-Mini CANTILEVER logic (Ray). Foot+RAIL now drawn at the
+// 25%/75% points of the module (equal cantilevers, 50% span carries the load);
+// feet on rafters @ 48" O.C. staggered; END OVERHANG capped at 18" — a
+// DECK-MOUNTED foot (open ◻) is placed where no rafter falls within 18" of the
+// end panel edge (else the panel droops). Legend + general note added. Also:
+// roads pulled into the PV-2 fit window + more Overpass mirrors (datacenter IPs
+// like Vercel get rate-limited on the main instance — parcel uses a diff source).
+// 47404 (2026-07-08): BIG/SHARED PARCEL → frame the SUBJECT building (Ray: when
+// the parcel holds >1 livable building we only want to see what we're working
+// on). When the parcel is >2× the roof extent (apartment complex / big rural
+// lot), the PV-2 fit tightens to 1.4× the roof so the building dominates and the
+// attachment detail stays readable, instead of cramming the whole 3-ac lot in.
+// A normal home lot still shows the full lot + street. Uses parcel-vs-roof extent
+// (robust) rather than a point-in-parcel test on OSM footprints (they don't
+// register to the county GIS lot — 0/13 matched Braidon's parcel).
+// 47405 (2026-07-08): PHASE B — REAL site surfaces from Nearmap AI. mapNearmapSurfaces
+// pulls Driveway / Concrete-Asphalt-HardSurface (walks+paving) / Road / Building
+// footprints from the AI Feature response; drawn as filled polygons on PV-2's
+// site layer (preferred over OSM). QUOTA SAFETY (trial = 100 parcels): new
+// lib/aerial/nearmapCache.ts + migration 102 (nearmap_ai_cache) persist each
+// location's response so a property costs AT MOST 1 AI parcel EVER (in-memory
+// cache dies on Vercel cold starts). Coverage check SKIPPED (trial keys lack
+// coverage v2 → would 403). Route fetches once, prefers Nearmap, OSM fallback.
+// 47406 (2026-07-08): Nearmap surface CONTRAST — the light-gray fills blended into
+// the sheet. Neighbor buildings now draw with a clear dark outline (read as
+// footprints), driveways get a diagonal HATCH + "DRIVEWAY" label (standard
+// site-plan treatment), road/walk grays darkened. Same real data, readable.
+// 47407 (2026-07-08): ★ THE BUG — Nearmap/OSM surfaces never reached the render.
+// The POST route fetched them onto aerialData, but the aerial RE-CENTER
+// (enrichedBody.aerialData = _recentered) REPLACED aerialData right after, wiping
+// them; the parcel survived only because it's re-fetched post-recenter. Moved the
+// surface fetch (Nearmap AI + OSM fallback) to AFTER the re-center, next to the
+// parcel re-attach, so driveways/paving/buildings actually land on PV-2.
+// 47408 (2026-07-08): SOFTSCAPE + SHADING — mapNearmapSurfaces now also extracts
+// Lawn/Pervious and tall Vegetation (>2m). PV-2 draws lawn as a light-green base
+// (site reads as landscape, not a gray hardscape sea) and tree canopies as
+// semi-transparent green; a canopy reaching the array is outlined amber + noted
+// (SHADING — FIELD VERIFY). Same cached AI response, no extra parcel.
+// 47409 (2026-07-08): SETBACK DIMS + SUBJECT EMPHASIS. (1) Setback dimensions —
+// ray-cast from each building side to the nearest property line; draw a dim line
+// + distance where it fits (≤70 ft, so normal home lots get front/side/rear
+// setbacks; big shared lots skip and keep the closest-approach note). (2) De-
+// noise — neighbor buildings + non-shading trees fade with distance from the
+// subject so it + its immediate context read crisp and the far complex recedes.
+// 47410 (2026-07-08): EQUIPMENT ON THE SITE PLAN (roadmap #4) — meter/MSP/AC
+// disconnect located on the building wall (survey-photo GPS or street-side
+// heuristic, the same locateEquipment PV-1 uses) and drawn as UM/MSP/AC tags
+// clamped just outside the roof footprint, keyed to a "SERVICE EQUIP" legend row.
+// 47411 (2026-07-08): FOLD PV-1 → drop a page ("less is more"). The standalone
+// site plan is retired; the array sheet now IS the site plan (integrated site
+// context) and is renamed PV-1 (was PV-2); array geometry → PV-1B (was PV-2B).
+// Statutory clearance notes (gas-meter 3', vents, knife-blade disconnect)
+// migrated into the shared construction notes → cover General Notes. Cover
+// vicinity aerial enlarged. Downstream sheet indices renumbered set-wide.
+// 47412 (2026-07-08): PV-1B circuit-sheet polish (branch-color mode only, PV-1
+// untouched): removed the redundant in-drawing "CIRCUIT LAYOUT" watermark +
+// bottom caption reworded to a color key; AC-branch daisy-chain routing made
+// bold (the sheet's hero); fire-access pathway labels dropped (they live on
+// PV-1); and the drawing now frames the ARRAY (modules + margin) instead of the
+// whole roof plane, so a small array no longer renders tiny in a sea of white.
+// 47413 (2026-07-08): PV-1B redesigned to the CANNON PE-set style (Ray's ref).
+// Modules are no longer garish solid branch-color blocks — they're clean uniform
+// white outlines (like PV-1), the branch identity carried by THIN colored circuit
+// WIRES + a small circuit number per module + an in-drawing CIRCUIT LEGEND box.
+// 47414 (2026-07-08): PV-1B pro-parity — Ray "should be visually similar to PV-1".
+// Un-gated PV-1's rich frame onto the circuit sheet: site context (faded 0.5 so
+// wires stay hero), overall dimensions, full N/E/S/W compass rose (was a plain
+// arrow), and the faint rafter framing lines. Full symbol legend stays PV-1-only
+// (PV-1B keeps the compact CIRCUIT LEGEND). PV-1B is now a sibling of PV-1.
+// 47415 (2026-07-08): PV-1B = the ELECTRICAL sheet (PV-1 = physical/setbacks).
+// Draw the IQ8 MICROINVERTER under each module (dark device box, branch-color
+// outline) + "IQ8 MICROINVERTER" legend row + caption; the AC branch wires
+// daisy-chain them per circuit. Also matched leftReserve (280) on both sheets so
+// PV-1B frames at the same zoom/scale as PV-1 (was more zoomed at reserve 0).
+// 47416 (2026-07-08): PV-1B cleanup — un-gated vents/obstructions onto PV-1B
+// (a circuit can't route through a vent keep-out); plane numbers now sit OFF the
+// plane with a leader line to the facet centroid (both sheets), decluttering the
+// roof. Verified the micro string sizing matches Enphase IQ8 spec (IQ8+ = 13 per
+// 20A branch) and fixed a stale "16 units" comment (that was IQ7+, not IQ8+).
+// 47417 (2026-07-08): PV-3 attachment-detail cleanup (Ray "absolute trainwreck").
+// The giant empty detail circle (r=148, tiny stack floating in it) is right-sized
+// (r=122) with the zoomed layers filling it and a LAG BOLT drawn penetrating
+// flashing/shingle/sheathing INTO the rafter with the embedment dimensioned — the
+// actual point of an attachment detail. Removed the triplicated ①–⑦ callout list
+// (killed the in-drawing "ATTACHMENT CALLOUT SCHEDULE"; the data-zone keeps the
+// one schedule) and the stray UTILITY ANALYSIS block that doesn't belong here.
+// 47418 (2026-07-08): PV-3 detail circle under-filled at 47417 (stack only filled
+// the middle half → still read as an empty bubble). Enlarged the zoomed layer
+// stack (~119→~194px) so the detail fills the r=122 circle edge-to-edge; lag bolt
+// auto-scales with it. Page-level blank lower area still pending a layout pass.
+// 47419 (2026-07-08): PV-3 detail rebuilt to a REAL MECHANICAL ASSEMBLY vs the
+// flat colored layer-cake (Ray sent the Cannon PE reference — "looks like dook").
+// Now draws the actual hardware: module frame + laminate, clamp, mount + base
+// plate (steel-hatched), butyl flashing pad, seated on shingle/sheathing/rafter,
+// with the lag bolt (hex head + EPDM washer) driven into the rafter + embedment
+// dim; numbered leaders out to labels. Still to do toward full Cannon match: iso
+// context view + mounting BOM + finer clamp/rail geometry + page vertical-fill.
+// 47420 (2026-07-08): PV-3 detail → TRUE CAD LINE-ART (multi-agent workflow spec):
+// white/hatched fills (zero saturated color), strict 4:2:1 line weights, real
+// hardware profiles (hollow frame extrusion, top-hat clamp + WEEB serration,
+// T-slot base + riser, lag screw w/ chamfered hex head + EPDM washer + hidden
+// threads in rafter), rebalanced proportions (bigger hardware, thin separated
+// layers). This is now the FALLBACK; the plan (Ray-approved) is to EMBED real
+// MANUFACTURER attachment details from a DB asset library keyed by racking brand.
+const PLANSET_ENGINE_VERSION = 47420;
 
 
 

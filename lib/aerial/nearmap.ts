@@ -119,41 +119,60 @@ export async function fetchNearmapStaticAerial(
   opts: { zoom?: number; sizePx?: number; widthPx?: number; heightPx?: number } = {},
 ): Promise<NearmapStaticAerial | null> {
   const key = process.env.NEARMAP_API_KEY;
-  if (!key) return null;
+  // Diagnostics so a Google fallback is never silent — the Vercel logs now say
+  // WHY (missing key / auth-quota / coverage gap / timeout) instead of nothing.
+  if (!key) {
+    console.warn('[nearmap] NO IMAGE — NEARMAP_API_KEY is not set on this deployment → falling back to Google');
+    return null;
+  }
   const W = opts.widthPx ?? opts.sizePx ?? 1024;
   const H = opts.heightPx ?? opts.sizePx ?? 1024;
   const zooms = opts.zoom ? [opts.zoom] : [21, 20, 19];
   let sharp: typeof import('sharp');
   try { sharp = (await import('sharp')).default as unknown as typeof import('sharp'); }
-  catch { return null; }
+  catch (e) { console.warn('[nearmap] sharp unavailable:', (e as Error)?.message); return null; }
 
+  const zoomDiag: string[] = [];
   for (const z of zooms) {
     try {
       const grid = nearmapTileGrid(lat, lng, z, W, H);
+      const statuses: number[] = [];
+      let blank = 0, threw = 0;
       const results = await Promise.all(grid.tiles.map(async (t) => {
         try {
           const r = await fetch(`${TILE_URL}/${t.z}/${t.x}/${t.y}.jpg?apikey=${key}`, {
             signal: AbortSignal.timeout(15000),
           });
+          statuses.push(r.status);
           if (!r.ok) return null;
           const buf = Buffer.from(await r.arrayBuffer());
-          if (buf.byteLength < 500) return null;   // blank/placeholder tile
+          if (buf.byteLength < 500) { blank++; return null; }   // blank/placeholder tile
           return { input: buf, left: t.left, top: t.top };
-        } catch { return null; }
+        } catch { threw++; return null; }
       }));
       const composites = results.filter(c => c !== null) as Array<{ input: Buffer; left: number; top: number }>;
+      // Aggregate status counts for this zoom (e.g. "200×0 403×12" = auth/quota).
+      const counts: Record<string, number> = {};
+      for (const s of statuses) counts[s] = (counts[s] ?? 0) + 1;
+      const statusStr = Object.entries(counts).map(([s, n]) => `${s}×${n}`).join(' ') || 'no-response';
+      zoomDiag.push(`z${z}: ${composites.length}/${grid.tiles.length} ok [${statusStr}${blank ? ` blank×${blank}` : ''}${threw ? ` timeout×${threw}` : ''}]`);
       if (composites.length === 0) continue;
 
       const out = await stitchAndCropTiles(sharp, grid, composites);
-
+      if (z !== zooms[0]) console.log('[nearmap] used fallback zoom', z, '—', zoomDiag.join(' | '));
       return {
         imageBase64: `data:image/jpeg;base64,${out.toString('base64')}`,
         imageWidth: W, imageHeight: H, zoom: z, tilesFetched: composites.length,
       };
-    } catch {
+    } catch (e) {
+      zoomDiag.push(`z${z}: EXCEPTION ${(e as Error)?.message}`);
       continue;
     }
   }
+  // Every zoom failed — surface the aggregate so the cause is diagnosable.
+  // 403 = key invalid/unauthorized for Vert tiles; 429 = over quota/rate limit;
+  // all-blank or all-timeout = coverage gap or network.
+  console.warn('[nearmap] NO IMAGE after all zooms → Google fallback. Detail:', zoomDiag.join(' | '));
   return null;
 }
 
@@ -466,6 +485,7 @@ export async function fetchNearmapRoofPlanes(
       const cov = await checkNearmapCoverage(lat, lng);
       if (!cov?.covered || !cov.hasAiFeatures) return [];
     }
+    console.warn('[nearmap] QUOTA-UNSAFE direct AI fetch (fetchNearmapRoofPlanes) — production callers must use lib/aerial/nearmapCache (durable, fail-closed)');
     const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
     const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -512,6 +532,88 @@ export function mapNearmapObstructions(responseJson: unknown): NearmapObstructio
     });
   }
   return obstructions;
+}
+
+// ── Ground surfaces (Phase B: real driveways / sidewalks / paving / neighbor
+// buildings for the PV-2 site plan) ─────────────────────────────────────────
+// From the SAME AI Feature response (no extra credit). Nearmap classes seen on
+// a real lot: Driveway, Road (Driveable Surface), Concrete Slab / Asphalt /
+// Hard Surface (walks & pads), Building (footprint). Each is a GeoJSON
+// Polygon or MultiPolygon of real lon/lat.
+export interface NearmapSurfaces {
+  buildings: Array<Array<{ lat: number; lng: number }>>;   // real footprints
+  driveways: Array<Array<{ lat: number; lng: number }>>;
+  paved:     Array<Array<{ lat: number; lng: number }>>;   // concrete/asphalt/hard (walks & pads)
+  roads:     Array<Array<{ lat: number; lng: number }>>;   // driveable-surface polygons
+  lawn:      Array<Array<{ lat: number; lng: number }>>;   // grass / pervious softscape
+  trees:     Array<Array<{ lat: number; lng: number }>>;   // tall vegetation (>2m) — shading
+  surveyDate: string | null;
+}
+
+/** Every outer ring from a GeoJSON Polygon or MultiPolygon (MultiPolygon → many). */
+function allOuterRings(geom: any): number[][][] {
+  const out: number[][][] = [];
+  if (!geom) return out;
+  if (geom.type === 'Polygon' && Array.isArray(geom.coordinates?.[0])) out.push(geom.coordinates[0]);
+  else if (geom.type === 'MultiPolygon' && Array.isArray(geom.coordinates)) {
+    for (const poly of geom.coordinates) if (Array.isArray(poly?.[0])) out.push(poly[0]);
+  }
+  return out;
+}
+
+const _PAVED_CLASSES = new Set(['Concrete Slab', 'Asphalt', 'Hard Surface']);
+const _LAWN_CLASSES = new Set(['Lawn Grass', 'Natural Pervious Surface', 'Natural (soft)']);
+const _TREE_CLASSES = new Set([
+  'Medium and High Vegetation (>2m)',
+  'Medium and High Vegetation with Woody Vegetation',
+  'Woody Vegetation',
+]);
+
+/**
+ * Raw AI Feature response for an AOI. The coverage check is SKIPPED on purpose —
+ * trial/eval keys have AI-feature access but NOT the coverage v2 product (that
+ * gate would 403 and block the AI call). Returns null on no-key / error.
+ * ⚠ COSTS 1 AI parcel per successful call — callers MUST cache (see
+ * lib/aerial/nearmapCache.ts). radiusM ~55 covers a home + its driveway/walks.
+ */
+export async function fetchNearmapAIRaw(lat: number, lng: number, radiusM = 55): Promise<any | null> {
+  const key = process.env.NEARMAP_API_KEY;
+  if (!key) return null;
+  try {
+    const polygon = aoiPolygonAround(lat, lng, radiusM);
+    const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) { console.warn(`[nearmap] AI raw HTTP ${res.status}`); return null; }
+    return await res.json();
+  } catch (e) {
+    console.warn('[nearmap] AI raw fetch failed:', (e as Error)?.message);
+    return null;
+  }
+}
+
+/** Pure mapper: Nearmap AI Feature response → ground surfaces for the site plan.
+ *  Exported for testing off a cached response (no network). */
+export function mapNearmapSurfaces(responseJson: unknown): NearmapSurfaces {
+  const d = responseJson as any;
+  const feats: any[] = Array.isArray(d?.features) ? d.features : [];
+  const res: NearmapSurfaces = { buildings: [], driveways: [], paved: [], roads: [], lawn: [], trees: [], surveyDate: d?.surveyDate ?? null };
+  for (const f of feats) {
+    const desc = String(f?.description ?? '');
+    for (const ring of allOuterRings(f.geometry)) {
+      const poly = ring
+        .filter((pt: number[]) => Array.isArray(pt) && pt.length >= 2 && isFinite(pt[0]) && isFinite(pt[1]))
+        .map((pt: number[]) => ({ lat: pt[1], lng: pt[0] }));
+      if (poly.length < 3) continue;
+      if (desc === 'Building') res.buildings.push(poly);
+      else if (desc === 'Driveway') res.driveways.push(poly);
+      else if (desc.startsWith('Road')) res.roads.push(poly);
+      else if (_PAVED_CLASSES.has(desc)) res.paved.push(poly);
+      else if (_LAWN_CLASSES.has(desc)) res.lawn.push(poly);
+      else if (_TREE_CLASSES.has(desc)) res.trees.push(poly);
+    }
+  }
+  return res;
 }
 
 /**
@@ -564,6 +666,7 @@ export async function fetchNearmapObstructions(
       if (!cov?.covered || !cov.hasAiFeatures) return [];
     }
 
+    console.warn('[nearmap] QUOTA-UNSAFE direct AI fetch (fetchNearmapObstructions) — production callers must use lib/aerial/nearmapCache (durable, fail-closed)');
     const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
     const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -621,6 +724,7 @@ export async function fetchNearmapAIResult(
       if (!cov?.covered || !cov.hasAiFeatures) return empty;
     }
 
+    console.warn('[nearmap] QUOTA-UNSAFE direct AI fetch (fetchNearmapAIResult) — production callers must use lib/aerial/nearmapCache (durable, fail-closed)');
     const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
     const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),

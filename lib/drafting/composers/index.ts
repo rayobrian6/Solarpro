@@ -35,8 +35,10 @@ import type { DraftingInput, SysType } from '../types';
 import type { PermitInputShape } from '../permitInputShape';
 import { resolveSystemType } from '../resolver';
 import { drawRoofPlan, drawRoofStructural } from '../templates/roof';
+import { buildSiteContext, type SiteContext } from '../templates/roofSiteContext';
+import { classifyPanel } from '@/lib/permit/utils/subSystems';
 import { drawGroundArray, drawGroundStructural } from '../templates/ground';
-import { drawFencePlan, drawFenceElevation } from '../templates/fence';
+import { drawFencePlan, drawFenceElevation, drawFenceStructural } from '../templates/fence';
 import { safeBuildIntent } from '../designIntent';
 import type { DesignIntent } from '../designIntent';
 import { assertValidPlanSet, type SystemType } from '../validation';
@@ -237,6 +239,9 @@ export function getArrayPlanFromCAD(
   input: PermitInputShape,
   ctx?: RenderContext | null,
   panelColorById?: Map<string, string> | null,
+  // Ground circuit mode (PV-1BG): color the ground modules by DC string so the
+  // circuit sheet is a real string map, not a clone of PV-1G's physical layout.
+  groundCircuit?: { strings: number; colors: string[] } | null,
 ): string {
   console.log('[CAD COMPOSER] getArrayPlanFromCAD — using pre-resolved cad', {
     systemType:  cad.systemType,
@@ -247,18 +252,80 @@ export function getArrayPlanFromCAD(
   // ── Step 10: Validate ────────────────────────────────────────────────────
   assertValidPlanSet(cad, cad.systemType as SystemType);
 
-  // Convert pre-solved CADModel → DraftingInput
-  const dInput = adaptCADToDrafting(cad, input);
+  // ── HYBRID (Phase 1): the plan sheet is the TOP-DOWN SITE PLAN ─────────────
+  // Ray: the aerial must show ALL the variety — roof, ground AND fence. When
+  // the composed CADModel is hybrid and carries a roof section, route the plan
+  // sheet to drawRoofPlan (which overlays the ground arrays + fence runs via
+  // hybridOverlay) instead of the winner's single-system view. The base model's
+  // origin belongs to the WINNER (e.g. the fence), so build a roof-origin VIEW
+  // — cad.roof's local geometry is relative to the roof section's own origin.
+  // The DraftingInput must be adapted from this VIEW too: drawRoofPlan reads
+  // planes/panels from dInput, and adapting the fence-typed base produced
+  // "planes=0 panels=0" (caught in harness).
+  const _hybRoofSec = cad.hybrid?.sections.find(sec => sec.key === 'roof');
+  // Wave 6.2 (punch 1c): a view explicitly scoped to a NON-ROOF sub (PV-1F /
+  // PV-1G / PV-3F secondary+primary views pass subScopedView(cad, key)) must
+  // render ITS OWN template below — never re-take this hybrid branch, which
+  // embedded the whole roof site plan as the fence sheet's "SEGMENT PLAN"
+  // inset. Roof-scoped and unscoped hybrid models keep the branch.
+  const _subScopedKey = (cad as unknown as { _subScoped?: string })._subScoped;
+  const _allowHybridPlan = !_subScopedKey || _subScopedKey === 'roof';
+  // The VIEW scopes totals to the ROOF subset — the roof sheet documents the
+  // roof; ground/fence appear as overlays with their own labels. Project-wide
+  // totals here made the sheet claim "94 MOD" on IronRidge (Stowell v2).
+  const _hybridPlanCad = (_allowHybridPlan && cad.hybrid && cad.roof && _hybRoofSec)
+    ? { ...cad, systemType: 'roof' as const,
+        originLat: _hybRoofSec.originLat, originLng: _hybRoofSec.originLng,
+        totalPanels: _hybRoofSec.totalPanels, totalDcKw: _hybRoofSec.dcKw }
+    : null;
+  // Scope the INPUT's panel positions to roof panels too — drawRoofPlan draws
+  // module rectangles from panelPositions; unscoped, the ground+fence panels
+  // rendered as floating "roof" modules on the lawn and tripped phantom
+  // fire-setback encroachments (25 on Stowell v2).
+  const _hybridInput = _hybridPlanCad
+    ? ({ ...input,
+        project: { ...(input.project ?? {}),
+          panelPositions: ((input.project?.panelPositions ?? []) as any[]).filter(p => classifyPanel(p) === 'roof') },
+        system: { ...(input.system ?? {}), totalPanels: _hybRoofSec!.totalPanels, totalDcKw: _hybRoofSec!.dcKw,
+          // Scope inverters to the ROOF sub too — unscoped, inverters[0] was the
+          // FENCE inverter and the roof sheet's callout printed the fence panel's
+          // wattage: "(N) 54 PV MODULES (440W)" on a 405W roof (Ray, 2026-07-16).
+          // Untagged configs (single-system) pass through unchanged.
+          inverters: (() => {
+            const _all = (input.system?.inverters ?? []) as Array<{ subSystemKey?: string }>;
+            const _roof = _all.filter(i => (i.subSystemKey ?? '').startsWith('roof'));
+            return _roof.length ? _roof : _all;
+          })(),
+        },
+      } as typeof input)
+    : null;
+
+  // Convert pre-solved CADModel → DraftingInput (roof-origin view for hybrids)
+  const dInput = adaptCADToDrafting(_hybridPlanCad ?? cad, _hybridInput ?? input);
   const intent = safeBuildIntent(dInput);
+
+  // Site context (county-GIS parcel + street) projected into the roof's own
+  // fake-degree frame so PV-2 can draw the property line / driveway / sidewalk
+  // INTEGRATED with the roof (not a separate box). Null when no parcel/origin →
+  // roof plan renders exactly as before.
+  try {
+    (dInput as unknown as { _siteContext?: SiteContext | null })._siteContext =
+      buildSiteContext(_hybridPlanCad ?? cad, _hybridInput ?? input);
+  } catch { /* non-fatal — roof-only render */ }
 
   // Route to template using cad.systemType (authoritative), passing cad directly
   let svg: string;
+  if (_hybridPlanCad) {
+    svg = drawRoofPlan(dInput, intent, _hybridPlanCad, ctx, panelColorById);
+    console.log('[COMPOSER] HYBRID plan → roof site plan w/ ground+fence overlays');
+    return svg;
+  }
   switch (cad.systemType) {
     case 'solar_fence':
       svg = drawFencePlan(dInput, intent, cad, ctx);
       break;
     case 'ground_mount':
-      svg = drawGroundArray(dInput, intent, cad, ctx);
+      svg = drawGroundArray(dInput, intent, cad, ctx, groundCircuit);
       break;
     case 'roof':
     default:
@@ -312,6 +379,24 @@ export function getStructuralFromCAD(
     svgLength:  svg.length,
   });
   return svg;
+}
+
+/**
+ * PV-3F fence STRUCTURAL DETAILS (connection/foundation details) using a
+ * pre-computed CADModel. Distinct from getStructuralFromCAD (which draws the
+ * PV-1F 2-bay elevation) and getArrayPlanFromCAD (the standalone-fence site
+ * plan) — the 'fence_structural' view routes here so PV-3F is real details,
+ * not a repeat elevation or a degenerate top-down.
+ */
+export function getFenceDetailFromCAD(
+  cad: CADModel,
+  input: PermitInputShape,
+  ctx?: RenderContext | null,
+): string {
+  assertValidPlanSet(cad, cad.systemType as SystemType);
+  const dInput = adaptCADToDrafting(cad, input);
+  const intent = safeBuildIntent(dInput);
+  return drawFenceStructural(dInput, intent, cad, ctx);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

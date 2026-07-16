@@ -48,6 +48,7 @@ import {
 import {
   buildFinancialNarrative,
   computePayoffYear,
+  computePayoffFromFlow,
 } from './financialNarrativeEngine';
 import {
   validatePanelIntegrity,
@@ -61,6 +62,12 @@ import {
   type EnergyFlowYear,
   type PanelSpec,
 } from '../proposalTruthEngine';
+import {
+  illinoisShinesGroupForUtility,
+  illinoisShinesRecPrice,
+  IL_SHINES_PROGRAM_YEAR,
+  IL_SHINES_CUSTOMER_OWNED_ADDER,
+} from '../incentives/illinoisShines';
 import {
   resolveDefaultFencePanelSpec,
   getPanelDegradationRate,
@@ -92,6 +99,13 @@ export interface BuildCanonicalProposalInput {
   parsedBillRate?: number;        // v48.3: rate extracted from uploaded utility bill (highest priority)
   dbUtilityRate?: number;         // v48.3: rate fetched from utility_policies DB (second priority)
   annualUsageKwh: number;         // from client.annualKwh
+  /**
+   * Real 12-month usage history (kWh) from the bill analysis, when available.
+   * Drives the SHAPE of the before/after bill chart — without it, hardcoded
+   * summer-peak SEASONAL_FACTORS inverted a winter-peaked electric-heat
+   * customer's bills (Jan 4,198 kWh drawn as the year's LOW month).
+   */
+  monthlyUsageHistoryKwh?: number[];
   /**
    * v48.x: the homeowner's ACTUAL total annual utility bill in dollars (from
    * their real bill — includes delivery, fixed charges, and taxes, not just
@@ -396,10 +410,31 @@ export function buildCanonicalProposal(
     0.0500, // Dec
   ]; // sum ≈ 1.0000
 
-  const rawMonthly = input.monthlyProductionKwh ?? [];
+  // Production-basis guard (audit 2026-07-16, "recompute-if-contradicts"):
+  // the stored PVWatts run is made at design time; if the panel spec changes
+  // afterwards (52×440W → 52×405W), the run's kW basis (layoutSystemSizeKw)
+  // diverges from the canonical resolvedSystemSizeKw and every downstream
+  // dollar (energy value, REC contract, CO2) is silently overstated. Same
+  // site/orientation → production scales linearly with kW; rescale + warn.
+  let _prodScale = 1;
+  if (
+    input.annualProductionKwh > 0 &&
+    input.layoutSystemSizeKw > 0 &&
+    resolvedSystemSizeKw > 0 &&
+    Math.abs(input.layoutSystemSizeKw - resolvedSystemSizeKw) / resolvedSystemSizeKw > 0.02
+  ) {
+    _prodScale = resolvedSystemSizeKw / input.layoutSystemSizeKw;
+    warnings.push(
+      `Production run basis ${input.layoutSystemSizeKw.toFixed(2)} kW != canonical ` +
+      `${resolvedSystemSizeKw.toFixed(2)} kW (panel spec changed after PVWatts run) — ` +
+      `production rescaled ×${_prodScale.toFixed(3)}`
+    );
+  }
+
+  const rawMonthly = (input.monthlyProductionKwh ?? []).map((v: number) => v * _prodScale);
   const hasRealMonthly = rawMonthly.some((v: number) => v > 0);
   const annualKwh = input.annualProductionKwh > 0
-    ? input.annualProductionKwh
+    ? Math.round(input.annualProductionKwh * _prodScale)
     : rawMonthly.reduce((a: number, b: number) => a + b, 0);
 
   // If the monthly array is all-zeros but we have an annual total, synthesise
@@ -495,6 +530,25 @@ export function buildCanonicalProposal(
   });
 
   const utilityProfile   = builtProfile.profile;
+  // ── Illinois Shines: replace the flat per-utility REC estimate with the
+  //    accurate 2026-27 price (Group A/B × size tier) + the $20/REC customer-
+  //    owned adder (residential federal ITC/§25D is repealed for 2026+, so a
+  //    residential customer-owned project qualifies). Feeds BOTH the 25-yr
+  //    projection and the incentive/SREC summary. Off-IL or an unrecognized IL
+  //    utility (co-op/muni) keeps the profile's own estimate.
+  let effectiveUtilityProfile = utilityProfile;
+  if (utilityProfile.srec_available && utilityProfile.state === 'IL') {
+    const _ilGroup = illinoisShinesGroupForUtility(utilityProfile.utility_name);
+    if (_ilGroup) {
+      const _rec = illinoisShinesRecPrice({
+        group:           _ilGroup,
+        sizeKwAc:        resolvedSystemSizeKw / 1.2,   // DC→AC estimate for the size tier
+        customerOwned:   input.purchaseMode === 'cash' || input.purchaseMode === 'finance',
+        takesFederalItc: !!input.isCommercial,         // residential §25D repealed → false → adder eligible
+      });
+      effectiveUtilityProfile = { ...utilityProfile, srec_price_estimate: _rec.total, srec_value_estimate: _rec.total };
+    }
+  }
   const resolvedRate     = builtProfile.resolved_rate;
   const escalationRate   = utilityProfile.escalation_rate || 0.03;
 
@@ -615,11 +669,21 @@ export function buildCanonicalProposal(
   const solar_payment_monthly   = financeMonthlyPayment;
   const total_energy_cost_monthly = solar_payment_monthly + remaining_utility_monthly;
 
-  // Monthly bill chart (before/after with seasonal factors)
+  // Monthly bill chart — REAL usage shape when the bill history has one,
+  // hardcoded seasonal factors only as fallback. Scale real months so they
+  // sum to the annual usage the rest of the pipeline runs on.
+  const _realHistory = input.monthlyUsageHistoryKwh;
+  const _histSum = Array.isArray(_realHistory) && _realHistory.length === 12
+    ? _realHistory.reduce((a, b) => a + (b > 0 ? b : 0), 0)
+    : 0;
+  const _annualForChart = input.annualUsageKwh > 0 ? input.annualUsageKwh : avgMonthlyUsageKwh * 12;
+  const _histScale = _histSum > 0 && _annualForChart > 0 ? _annualForChart / _histSum : 1;
   const monthlyBillChart = MONTHS.map((month, i) => {
-    const monthlyUsage    = avgMonthlyUsageKwh > 0
-      ? avgMonthlyUsageKwh * SEASONAL_FACTORS[i]
-      : ((input.annualUsageKwh > 0 ? input.annualUsageKwh : 12000) / 12) * SEASONAL_FACTORS[i];
+    const monthlyUsage    = _histSum > 0
+      ? (_realHistory as number[])[i] * _histScale
+      : avgMonthlyUsageKwh > 0
+        ? avgMonthlyUsageKwh * SEASONAL_FACTORS[i]
+        : ((input.annualUsageKwh > 0 ? input.annualUsageKwh : 12000) / 12) * SEASONAL_FACTORS[i];
     const monthlyProduced = monthlyKwh[i] ?? 0;
     // Both before and after carry the fixed charge — solar offsets energy only.
     const before = Math.round(monthlyUsage * resolvedRate) + fixedMonthlyCharge;
@@ -702,7 +766,7 @@ export function buildCanonicalProposal(
     annualProductionKwh:  annualKwh,
     annualUsageKwh:       input.annualUsageKwh,
     retailRate:           resolvedRate,
-    profile:              utilityProfile,
+    profile:              effectiveUtilityProfile,
     systemCost:           effectiveFinal,
     financeTotal:         undefined,   // cash basis: netDifference independent of purchase mode
     solarAnnualPayment,
@@ -715,7 +779,7 @@ export function buildCanonicalProposal(
     annualProductionKwh:  annualKwh,
     annualUsageKwh:       input.annualUsageKwh,
     retailRate:           resolvedRate,
-    profile:              utilityProfile,
+    profile:              effectiveUtilityProfile,
     systemCost:           effectiveFinal,
     financeTotal,
     solarAnnualPayment,
@@ -723,13 +787,19 @@ export function buildCanonicalProposal(
     panelDegradation:     PANEL_DEGRADATION,
   }), fixedMonthlyCharge * 12, escalationRate) : proj25;
 
-  // CANONICAL SAVINGS DEFINITION — cash basis, enforced here, used everywhere:
+  // CANONICAL SAVINGS DEFINITION — cash basis, enforced here, used everywhere.
+  // INCLUDES SREC contract income (real contracted revenue, scheduled per-year
+  // in yearlyFlow): before this, the payoff year included SREC while the
+  // headline savings + both cumulative charts excluded it — the same proposal
+  // showed contradictory bottom lines (SREC audit 2026-07-16).
   const netDifference = proj25.utility_cost_without_solar_25yr
-    - (proj25.solar_cost_total + proj25.remaining_utility_cost_total);
+    - (proj25.solar_cost_total + proj25.remaining_utility_cost_total)
+    + (proj25.srec_income_25yr ?? 0);
 
   // Finance-basis difference (may be negative for high-APR/long-term loans)
   const netDifferenceFinanced = proj25Finance.utility_cost_without_solar_25yr
-    - (proj25Finance.solar_cost_total + proj25Finance.remaining_utility_cost_total);
+    - (proj25Finance.solar_cost_total + proj25Finance.remaining_utility_cost_total)
+    + (proj25Finance.srec_income_25yr ?? 0);
 
   // v47.253: annualEnergyValue — Year 1 total energy value from the iterative flow engine
   // SPEC v47.253 RULE: derive from yearlyFlow[0].total_energy_value, NOT annualKwh * resolvedRate
@@ -743,11 +813,17 @@ export function buildCanonicalProposal(
     ? proj25.yearlyFlow[0].utility_cost_with_solar
     : Math.round(Math.max(0, input.annualUsageKwh - annualKwh) * resolvedRate); // fallback only
 
-  // v47.253: payback derived from flow-based annualEnergyValue (not production*rate)
+  // Payback from the REAL year-by-year flow (energy value + SREC as actually
+  // scheduled) — the single walk that also drives payoffYear below, so the
+  // cash-flow card, the hero "Payoff Year", and the chart tell ONE story.
+  // Falls back to the naive ratio only when the flow is unavailable.
   const paybackBasis = netCost;  // = effectiveFinal when ITC disabled (SPEC §3)
-  const paybackYears = paybackBasis > 0 && annualEnergyValue > 0
-    ? parseFloat((paybackBasis / annualEnergyValue).toFixed(1))
-    : 0;
+  const _payoffWalk = computePayoffFromFlow(proj25.yearlyFlow, paybackBasis);
+  const paybackYears = _payoffWalk
+    ? _payoffWalk.fractional
+    : (paybackBasis > 0 && annualEnergyValue > 0
+        ? parseFloat((paybackBasis / annualEnergyValue).toFixed(1))
+        : 0);
 
   // v47.254: energyValueBreakdown — identity map from yearlyFlow[0], NO recomputation
   // selfConsumed = yearlyFlow[0].self_consumed_value
@@ -816,8 +892,11 @@ export function buildCanonicalProposal(
 
   // ─── STEP 6: OFFSET ─────────────────────────────────────────────────────────
 
+  // UNCAPPED (proposal audit 2026-07-16): Math.min(...,100) displayed a 185%-of-
+  // usage system as "~100% offset" — hiding oversizing the customer should see
+  // (and a NEM-eligibility question the installer must answer). Display truth.
   const offsetPct = input.annualUsageKwh > 0
-    ? Math.min(Math.round((annualKwh / input.annualUsageKwh) * 100), 100)
+    ? Math.round((annualKwh / input.annualUsageKwh) * 100)
     : 0;
 
   const offset = {
@@ -834,13 +913,18 @@ export function buildCanonicalProposal(
   const incentivesAllowed = policyEffect !== 'at_risk';
   const policyMessage    = getPolicyMessage(utilityProfile);
   const netMeteringSummary = getNetMeteringSummary(utilityProfile);
-  const srecSummary      = getSrecSummary(utilityProfile, annualKwh);
+  // SREC summary quotes the REAL scheduled payout (total + 50% upfront) from
+  // the projection — replaces the old flat "$X/year, typical 8 MWh system" prose.
+  const srecSummary      = getSrecSummary(effectiveUtilityProfile, annualKwh,
+    (proj25.srec_income_25yr ?? 0) > 0 && proj25.yearlyFlow.length > 0
+      ? { totalValue: proj25.srec_income_25yr, upfrontValue: proj25.yearlyFlow[0].srec_income ?? 0 }
+      : null);
   const failsafeMessage  = getFailsafeMessage(builtProfile);
 
   const policy = {
-    srecAvailable:          utilityProfile.srec_available,
-    srecProgramName:        utilityProfile.srec_program_name,
-    srecPricePerMwh:        utilityProfile.srec_price_estimate,
+    srecAvailable:          effectiveUtilityProfile.srec_available,
+    srecProgramName:        effectiveUtilityProfile.srec_program_name,
+    srecPricePerMwh:        effectiveUtilityProfile.srec_price_estimate,
     incentivesAllowed,
     policyMessage,
     netMeteringSummary,
@@ -861,18 +945,15 @@ export function buildCanonicalProposal(
   const truthConfidence = truthConfidenceResult.level;
 
   // ─── STEP 8b: PAYOFF YEAR ───────────────────────────────────────────────────
-  // Canonical payoff year: when cumulative energy value produced >= systemCost.
-  // v48.6: Include Year-1 SREC income in the annual value passed to computePayoffYear.
-  // SREC income (e.g. Illinois Shines ABP) is real contracted revenue from system output.
-  // It was already computed in proj25.yearlyFlow[0].srec_income but was excluded from
-  // payoff math — corrected here. Non-SREC states: srec_income = 0, behavior unchanged.
-  const annualSrecY1 = proj25.yearlyFlow.length > 0 ? (proj25.yearlyFlow[0].srec_income ?? 0) : 0;
-  const payoffYear = computePayoffYear(
-    annualEnergyValue + annualSrecY1,
-    escalationRate,
-    effectiveFinal,
-    PANEL_DEGRADATION,
-  );
+  // Canonical payoff year: first year cumulative (energy value + SREC income AS
+  // ACTUALLY SCHEDULED per yearlyFlow) covers the system cost. The old v48.6
+  // approach fed yearlyFlow[0].srec_income into computePayoffYear as a RECURRING
+  // annual amount — under the 2026-27 Illinois Shines schedule that Year-1 value
+  // is the 50% UPFRONT chunk, so payback came out absurdly short (~25× SREC
+  // overstatement). Same walk as paybackYears above — one break-even story.
+  const payoffYear = _payoffWalk
+    ? _payoffWalk.year
+    : computePayoffYear(annualEnergyValue, escalationRate, effectiveFinal, PANEL_DEGRADATION);
 
   // ─── STEP 8c: FINANCIAL NARRATIVE ───────────────────────────────────────────
   const narrative = buildFinancialNarrative({

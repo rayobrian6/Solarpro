@@ -1,0 +1,105 @@
+{
+  "_meta": {
+    "title": "Structural basis for rooftop PV attachment (foot/standoff) uplift capacity",
+    "purpose": "Normalize a mount-hardware catalog to ONE consistent uplift-capacity basis and define the correct attachment design check.",
+    "researchedOn": "2026-07-10",
+    "codeBasis": "ASCE 7-22, IBC/IRC 2021, ICC-ES AC428, ASTM D1761, NDS (AWC NDS), UL 2703",
+    "keyCorrection": "There is NO single universal safety factor. The correct omega depends on the capacity's origin: (a) attachments governed by lag-screw withdrawal from wood and certified by ASTM D1761 testing (most flashed feet) apply omega = 3.0 to average ultimate test load; (b) metal-roof standing-seam clamps publish MEAN ULTIMATE holding strength and the engineer applies a safety factor (commonly 2.0-3.0). The '900->600 = 1.5' figure cited for RT-MINI does NOT come from ESR-3575 (that report is flashing/water-resistance only and explicitly excludes structural capacity)."
+  },
+
+  "omegaUltimateToAllowable": {
+    "value": 3.0,
+    "range": [1.5, 3.0],
+    "source": "PRIMARY: IronRidge FlashFoot2 Certification Letter (IronRidge, Inc.) states average peak (ultimate) uplift = 3,203 lb, and 'a safety factor of 3.0 was applied to certify the allowable uplift capacity to 1,067 lb' (failure mode = 5/16 in lag pullout from rafter, ASTM D1761-12). CORROBORATING: CA DSA Interpretation of Regulations IR 16-8 (2022 CBC), for uplift connection tests per ICC-ES AC428 Sec. 3.2.5, 'the allowable design value shall be the average of the four tests with a safety factor of 3.' The lower end of the range (1.5-2.0) reflects manufacturer/marketing figures and some engineering judgments; ICC-ES AC428 test-based allowable loads and NDS withdrawal practice support ~3.0 for tension/withdrawal-governed attachments.",
+    "note": "Conservative choice for a safety-critical catalog = 3.0 (yields the LOWEST allowable, i.e. safest). Only drop to 2.0 when a manufacturer/RDP explicitly justifies it, and never below the value stated in that product's own ESR/certification."
+  },
+
+  "asdWindFactor": {
+    "value": 0.6,
+    "source": "ASCE 7-22 Section 2.4 (Allowable Stress Design load combinations). The controlling net-uplift combination for a rooftop attachment is 0.6D + 0.6W: dead load is reduced to 0.6 (only 60% counted to resist uplift) and wind is factored by 0.6. The 0.6 on W converts the strength-level (ultimate) wind load to the ASD service level (0.6 approx= 1/1.6)."
+  },
+
+  "windLevelInASCE722": "STRENGTH (ultimate). Under ASCE 7-22, mapped basic wind speeds and the resulting MWFRS and Components-and-Cladding (C&C) pressures (Chapters 26-30) are strength-level / LRFD-level loads. To perform an ASD check you must multiply the wind load by 0.6 (per Section 2.4). So a rooftop component uplift PRESSURE computed from ASCE 7-22 is ultimate; the attachment DEMAND used in an ASD check is 0.6W (net uplift = 0.6*W - 0.6*D per attachment tributary area). If instead an LRFD/strength check is used, the demand is ~1.0W (0.9D + 1.0W) compared against phi * ultimate capacity.",
+
+  "designRule": {
+    "demandLevel": "ASD net uplift per attachment = 0.6*W_uplift - 0.6*D, where W_uplift is the ASCE 7-22 (strength-level) C&C uplift pressure times the attachment tributary area, and D is the dead load resisting uplift over that tributary area. (Governing ASD combination 0.6D + 0.6W.)",
+    "allowableBasis": "If the catalog stores ALLOWABLE (ASD) capacity: check directly  ->  T_asd (= 0.6W - 0.6D tributary uplift)  <=  P_allowable. No conversion of the capacity; both sides are ASD. This is the cleanest, least error-prone form.",
+    "ultimateBasis": "If the catalog stores ULTIMATE (mean/nominal test) capacity: first reduce it  ->  P_allowable = P_ultimate / omega (omega = 3.0 default for tension/withdrawal-governed attachments; 2.0 only if justified). Then check  T_asd  <=  P_ultimate / omega. Equivalent LRFD form: strength uplift (0.9D + 1.0W tributary)  <=  phi * P_ultimate. Do NOT compare an ASD demand directly to an ultimate capacity.",
+    "commonMistake": "Comparing a 0.6W ASD uplift demand against an unreduced ULTIMATE (mean-failure) capacity. That silently embeds a factor-of-~3 unconservatism (e.g. 3,203 lb ultimate vs 1,067 lb allowable for FF2). Always know which basis a stored number is."
+  },
+
+  "products": [
+    {
+      "name": "IronRidge FlashFoot2 (FF2)",
+      "basis": "allowable",
+      "upliftLbs": 1067,
+      "source": "IronRidge FlashFoot2 Certification Letter: allowable uplift = 1,067 lb (and allowable lateral = 412 lb) for rafter specific gravity G=0.54 (Douglas Fir-Larch/SPF-equiv), 5/16 in lag, min 2.5 in end distance / center 1/3 of rafter. Derived from 3,203 lb average ultimate (ASTM D1761-12) with a 3.0 safety factor. Adjust down for lower-G species per NDS Eq. 12.2-1. Governed by lag withdrawal from wood, so the PUBLISHED value is ALLOWABLE (ASD)."
+    },
+    {
+      "name": "Quick Mount PV / QMHeavyDuty (now Esdec/EcoFasten)",
+      "basis": "allowable",
+      "upliftLbs": null,
+      "source": "Quick Mount PV publishes ALLOWABLE (ASD) design loads governed by lag-screw withdrawal from wood (NDS / ASTM D1761), consistent with all flashed-lag feet. Exact QMHeavyDuty uplift value not verified in this pass - treat as allowable, value unknown; pull from the current Esdec/Quick Mount engineering datasheet before use."
+    },
+    {
+      "name": "Unirac SolarMount / FlashLoc",
+      "basis": "allowable",
+      "upliftLbs": null,
+      "source": "Unirac holds ICC-ES AC428 evaluation; ESR/engineering tables publish ALLOWABLE (ASD) attachment/connection capacities. Specific ESR number and uplift value not verified here - value unknown; do not fabricate the ESR number, confirm from Unirac's current ESR/tech data."
+    },
+    {
+      "name": "SnapNrack",
+      "basis": "allowable",
+      "upliftLbs": null,
+      "source": "SnapNrack publishes ALLOWABLE (ASD) attachment design loads (lag withdrawal governed) in its engineering/ESR documentation. Exact ESR number and value not verified in this pass - unknown."
+    },
+    {
+      "name": "K2 Systems",
+      "basis": "allowable",
+      "upliftLbs": null,
+      "source": "K2 Systems publishes ALLOWABLE (ASD) design capacities in its engineering tables / ICC-ES evaluation. Exact ESR number and value not verified - unknown."
+    },
+    {
+      "name": "S-5! clamps (standing-seam metal roof)",
+      "basis": "ultimate",
+      "upliftLbs": null,
+      "source": "S-5! publishes MEAN ULTIMATE (load-to-failure) holding strength, NOT allowable - the design professional must divide by a safety factor. Mean ultimate averages exceed ~1,800 lb with some seams >4,000 lb; holding capacity ranges roughly +/-300 to +/-4,000 lb depending on clamp model, seam profile, roof gauge/material and load direction (setscrews torqued to 115 in-lb for test). Use the S-5! Clamp-to-Seam load database for the specific seam, then apply omega (commonly 2.0-3.0). Per CA DSA IR 16-8, uplift connection tests per AC428 Sec. 3.2.5 use allowable = average of 4 tests / 3."
+    },
+    {
+      "name": "EcoFasten / RockIt (Esdec)",
+      "basis": "allowable",
+      "upliftLbs": null,
+      "source": "EcoFasten publishes ALLOWABLE (ASD) design loads governed by lag withdrawal from wood (NDS / ASTM D1761), like other flashed feet. Exact RockIt uplift value not verified here - allowable, value unknown; confirm from current Esdec/EcoFasten datasheet."
+    },
+    {
+      "name": "Roof Tech RT-MINI / RT-MINI II (ICC-ES ESR-3575)",
+      "basis": "allowable",
+      "upliftLbs": 600,
+      "source": "CAUTION: ESR-3575 (reissued Aug 2023) is a FLASHING / water-resistance report only (Div 07 65 00 Flexible Flashing). Section 5.2 states structural capacity of the bracket and its connection to the roof is OUTSIDE the scope of the report and 'must be determined by a registered design professional.' The uplift number therefore does NOT come from ESR-3575 - it comes from Roof Tech's separate structural test data (ASTM D1761 fasteners-in-wood; brochures cite up to 180 mph / 90 psf). Ray's field-referenced allowable is ~600 lb (approx), presumed ASD. VERIFY against Roof Tech's current structural test report / stamped calc; the ~1.5 implied ratio (900 ult -> 600 all) is lower than the 3.0 seen for FF2 and must be confirmed, not assumed."
+    },
+    {
+      "name": "Pegasus / other",
+      "basis": "unknown",
+      "upliftLbs": null,
+      "source": "unknown - not verified in this pass. Determine basis from the specific product's ESR/certification before cataloging; default to treating an unlabeled number as ULTIMATE (conservative) until confirmed."
+    }
+  ],
+
+  "recommendedNormalization": {
+    "storeAs": "allowable",
+    "omega": 3.0,
+    "rationale": "Store ONE consistent basis = ALLOWABLE (ASD) uplift per attachment, because: (1) most residential flashed-foot datasheets already publish ALLOWABLE values (FF2, Quick Mount, Unirac, SnapNrack, K2, EcoFasten) since their capacity is governed by lag withdrawal from wood and NDS/ASTM design values are inherently ASD; (2) the attachment demand you compute (0.6D + 0.6W net uplift) is also ASD, so an allowable-basis catalog checks directly (T_asd <= P_allow) with no per-check conversion - fewer places to make a factor-of-3 error; (3) for the minority of products published as ULTIMATE (S-5! clamps, occasional marketing 'load-to-failure' figures), convert ONCE at ingest: P_allow = P_ultimate / 3.0 (use 2.0 only with explicit manufacturer/RDP justification, never below the product's own ESR-stated allowable). Also store a per-row 'sourceBasis' + 'omegaApplied' + 'species/G assumption' + 'embedment' so the provenance and any wood-species (NDS Eq. 12.2-1) or seam-profile derations are auditable."
+  },
+
+  "caveats": [
+    "SAFETY-CRITICAL: never compare a 0.6W ASD uplift demand against an unreduced ULTIMATE capacity - that hides a ~3x unconservatism.",
+    "ESR-3575 is NOT a structural capacity report for RT-MINI; it is flashing/water-resistance only and explicitly excludes structural capacity (Sec. 5.2). Do not cite it as the source of any uplift lb value.",
+    "The omega is not universal: 3.0 is documented for lag-withdrawal/tension attachments (IronRidge FF2 cert; DSA IR 16-8 per AC428 3.2.5). Values of 1.5-2.0 appear in some manufacturer/marketing statements and engineering judgments - treat lower factors as needing explicit justification.",
+    "The RT-MINI '900 ult -> 600 all = 1.5' ratio Ray recalled is UNVERIFIED and inconsistent with the 3.0 seen for FF2; flagged for field verification against Roof Tech's actual structural test report / stamped calc. Stored 600 lb is provisional.",
+    "Lag-withdrawal allowable capacities are species-dependent (specific gravity G). Published values usually assume G=0.50-0.55 (DF-L / SPF); reduce per NDS Eq. 12.2-1 for lower-G framing (e.g., SPF G~0.42, Hem-Fir). Also require min embedment/end-distance (FF2: >=2.5 in, center 1/3 of rafter).",
+    "UL 2703 governs mechanical integrity, grounding/bonding and fire class of the mounting SYSTEM - it is NOT an uplift capacity standard; do not source attachment uplift numbers from UL 2703.",
+    "Manufacturer allowable values assume the LAG is the governing element into a sound rafter. If the attachment is deck-mounted (no rafter) or the fastener/embedment differs, the cataloged allowable does not apply - recompute.",
+    "Several per-product uplift values were left null/unknown rather than fabricated. Do NOT invent ESR numbers; confirm each product's basis and value from its current ESR/certification datasheet before relying on the catalog.",
+    "ASCE 7-22 introduced updated C&C provisions and (per ASCE 7-22) rooftop solar-specific pressure equations (Ch. 29/Fig. 29.4-x) - ensure the DEMAND side uses the solar-specific GCp, effective wind area, and array edge/exposure factors, since attachment spacing (tributary area) directly scales the per-foot uplift."
+  ]
+}

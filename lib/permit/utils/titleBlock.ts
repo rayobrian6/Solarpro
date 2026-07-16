@@ -31,17 +31,52 @@ export function titleBlock(
   const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
   const apn     = project.apn || '—';
 
-  // Resolve module and inverter models for title block
-  const firstInv = system?.inverters?.[0];
-  const firstStr = firstInv?.strings?.[0];
-  const moduleModel   = firstStr?.panelModel    || project.moduleModel    || project.panelModel    || '—';
-  const moduleMfr     = firstStr?.panelManufacturer || project.moduleMfr  || '';
-  const inverterModel = firstInv?.model          || project.inverterModel || '—';
-  const inverterMfr   = firstInv?.manufacturer   || project.inverterMfr  || '';
-  const moduleDisplay   = [moduleMfr, moduleModel].filter(Boolean).join(' ') || '—';
-  const inverterDisplay = [inverterMfr, inverterModel].filter(Boolean).join(' ') || '—';
-  const systemSizeKw    = system?.totalDcKw ? `${system.totalDcKw.toFixed(2)} kW DC` : '—';
-  const panelCount      = system?.totalPanels ? `${system.totalPanels} modules` : '';
+  // Resolve module and inverter models for title block.
+  // HYBRID (Ray 2026-07-16): inverters[0] leaked whichever subsystem sorted
+  // first — the ROOF sheet's title block said "Philadelphia Solar Nexus 440W /
+  // EcoFlow" (the FENCE equipment) while its own string legend said 54×405W.
+  // With heterogeneous subsystems, list one short line per subsystem instead.
+  const _invs = system?.inverters ?? [];
+  const _subKeyOf = (o: { subSystemKey?: string } | undefined) => (o?.subSystemKey ?? '').toString();
+  const _distinctSubs = new Set(_invs.map(i => _subKeyOf(i)).filter(Boolean));
+  const _subPrefix = (k: string) =>
+    k.startsWith('roof') ? 'R' : k.startsWith('ground') ? 'G' : k.startsWith('fence') ? 'F' : k.slice(0, 1).toUpperCase();
+  let moduleDisplay: string;
+  let inverterDisplay: string;
+  if (_distinctSubs.size > 1) {
+    const modLines: string[] = [];
+    const invLines: string[] = [];
+    const seenMod = new Set<string>(); const seenInv = new Set<string>();
+    for (const inv of _invs) {
+      const k = _subKeyOf(inv); if (!k) continue;
+      const st = inv.strings?.[0];
+      const mod = [st?.panelManufacturer, st?.panelModel].filter(Boolean).join(' ');
+      const ivt = [inv.manufacturer, inv.model].filter(Boolean).join(' ');
+      const mKey = `${_subPrefix(k)}:${mod}`, iKey = `${_subPrefix(k)}:${ivt}`;
+      if (mod && !seenMod.has(mKey)) { seenMod.add(mKey); modLines.push(`${_subPrefix(k)}: ${mod}`); }
+      if (ivt && !seenInv.has(iKey)) { seenInv.add(iKey); invLines.push(`${_subPrefix(k)}: ${ivt}`); }
+    }
+    moduleDisplay   = modLines.join('<br/>') || '—';
+    inverterDisplay = invLines.join('<br/>') || '—';
+  } else {
+    const firstInv = _invs[0];
+    const firstStr = firstInv?.strings?.[0];
+    const moduleModel   = firstStr?.panelModel    || project.moduleModel    || project.panelModel    || '—';
+    const moduleMfr     = firstStr?.panelManufacturer || project.moduleMfr  || '';
+    const inverterModel = firstInv?.model          || project.inverterModel || '—';
+    const inverterMfr   = firstInv?.manufacturer   || project.inverterMfr  || '';
+    moduleDisplay   = [moduleMfr, moduleModel].filter(Boolean).join(' ') || '—';
+    inverterDisplay = [inverterMfr, inverterModel].filter(Boolean).join(' ') || '—';
+  }
+  // HYBRID: sheet-scoped inputs (e.g. the roof site plan documenting only the
+  // roof subset) stash the PROJECT totals — the title block is project-wide
+  // chrome and must never show subset numbers (PV-1 printed "20.40 kW / 51
+  // modules" on a 94-module hybrid while the cover said 37.60/94).
+  const _sysAny = system as (typeof system & { _projectTotalDcKw?: number; _projectTotalPanels?: number }) | undefined;
+  const _tbDcKw = _sysAny?._projectTotalDcKw ?? system?.totalDcKw;
+  const _tbPanels = _sysAny?._projectTotalPanels ?? system?.totalPanels;
+  const systemSizeKw    = _tbDcKw ? `${_tbDcKw.toFixed(2)} kW DC` : '—';
+  const panelCount      = _tbPanels ? `${_tbPanels} modules` : '';
 
   // Industry-standard VERTICAL title-block strip on the right edge of every
   // sheet — firm block, project block, meta, revisions, PE seal, sheet name,
@@ -69,7 +104,7 @@ export function titleBlock(
       <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
       <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
       <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
-      <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-2|PV-2B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
+      <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-1B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
     </table>
     <div class="tbs-rev-hdr">REVISIONS</div>
     <table class="tb-table">
@@ -96,7 +131,9 @@ export function titleBlock(
 
 export function buildConstructionNotes(input: PermitInput): string[] {
   const { project, compliance } = input;
-  const necVer = compliance.jurisdiction?.necVersion || '2023';
+  // Strip any 'NEC ' prefix so notes never read 'NEC NEC 2023' and the IFC
+  // cycle matches the title block / cover (all derive from the same version).
+  const necVer = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
   const ibcVer = '2021';
   const ifcVer = necVer === '2023' ? '2024' : '2021';
   const notes: string[] = [
@@ -119,6 +156,11 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     `Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.`,
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
     `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
+    // Statutory site/clearance notes \u2014 migrated from the retired PV-1 site sheet
+    // (2026-07-08 fold) so they persist in the set's general notes.
+    `All electrical equipment \u2014 inverters, disconnects, main service panel, and junction/combiner boxes \u2014 shall be located a minimum of 3 ft from the gas meter supply and demand piping.`,
+    `Existing plumbing vents, skylights, and mechanical/roof vents shall not be covered, moved, re-routed, or relocated by the PV installation.`,
+    `A visible, lockable, labeled, knife-blade AC disconnect shall be located within 10 ft of the utility meter and accessible to utility personnel per NEC 690.13 and AHJ requirements.`,
     // FIX v47.295: Only include roof attachment / flashing notes for roof systems
     ...((input.project)?.systemType === 'fence' || input.project?.systemType === 'solar_fence'
       ? [

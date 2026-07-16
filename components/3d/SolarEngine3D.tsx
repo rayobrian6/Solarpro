@@ -761,9 +761,36 @@ function SolarEngine3D({
       setStatusMsg('🏡 Click any house on the map to select it as the target property');
     }
     // v62: marking faces → auto-show the stitched Roof Model so edges classify live.
-    if (placementMode === 'mark_plane' && prevMode !== 'mark_plane') {
-      setShowRoofModel(true);
-      setStatusMsg('⬡ Mark Plane — click a roof face\'s corners (3+), right-click to finish · edges classify live');
+    // v62 (3D-plane no-tiles guard): plane3d + mark_plane trace CORNERS on the 3D
+    // mesh. When no Google Photorealistic 3D Tiles are loaded, the scene falls
+    // back to satellite imagery + WGS84 ellipsoid and every click hits the ellipsoid
+    // surface (h=0). computePlaneFromPoints3D's Newell normal then points straight
+    // up, the eave axis falls through to the most-horizontal-edge heuristic, and
+    // the resulting frame is (n=up, u=arbitrary horizontal, v=arbitrary horizontal).
+    // buildSurfaceGrid places panels on that horizontal frame, aligned to whatever
+    // arbitrary direction — not to the user's traced polygon. That's the "wonky
+    // panels on bare 2D maps" bug (Auto Fill on a no-tiles address).
+    //
+    // Layer A: refuse entry to these modes unless 3D tiles loaded. (Layer C lives
+    // in handlePlane3DClick — defensive pickMethod check on each click.)
+    if ((placementMode === 'plane3d' || placementMode === 'mark_plane') && prevMode !== placementMode) {
+      if (!tilesetRef.current) {
+        const isLoading = tileStatus === 'loading';
+        setStatusMsg(
+          isLoading
+            ? '⏳ 3D Plane is waiting for Google 3D Tiles to finish loading…'
+            : '3D Plane needs Google Photorealistic 3D Tiles for roof elevation. This address has no 3D coverage — try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.'
+        );
+        addLog('PLANE3D', `Refused entry to ${placementMode} — tilesetRef.current=${!!tilesetRef.current} tileStatus=${tileStatus}`);
+        onPlacementModeChange('select');
+      } else {
+        if (placementMode === 'mark_plane') {
+          setShowRoofModel(true);
+          setStatusMsg('⬡ Mark Plane — click a roof face\'s corners (3+), right-click to finish · edges classify live');
+        } else {
+          setStatusMsg('▣ Custom Array — click 3+ roof corners, right-click to place an array');
+        }
+      }
     }
     if (placementMode === 'auto_roof' && prevMode !== 'auto_roof') {
       const viewer = viewerRef.current;
@@ -6542,6 +6569,9 @@ function SolarEngine3D({
    * handlePlane3DClick — left-click in 'plane3d' mode.
    * Picks 3D position using full getWorldPosition() chain (3D tiles → terrain → ellipsoid).
    * v47.125: upgraded from raw pickPosition to robust 3-fallback chain.
+   * v62: defensive no-3D-tiles guard — reject any pick whose pickMethod !== '3dtiles'
+   *   so a bare 2D map trace (terrain/ellipsoid fallback) can't accumulate
+   *   degenerate horizontal-frame points. See mode-entry guard for Layer A.
    */
   function handlePlane3DClick(viewer: any, C: any, screenPos: any) {
     try {
@@ -6551,6 +6581,19 @@ function SolarEngine3D({
       if (!hit) {
         setStatusMsg('3D Plane: could not pick surface — ensure 3D tiles are loaded and zoom closer to roof');
         addLog('PLANE3D', 'getWorldPosition failed — no valid 3D position from any picking method');
+        return;
+      }
+      // v62 (3D-plane no-tiles guard, Layer C): on a bare 2D map, getWorldPosition
+      // falls through to terrain (globe.pick on a hidden globe is skipped) or
+      // ellipsoid. Either way, the point is on the WGS84 ellipsoid (h=0) — NOT
+      // on the roof. Reject so the user gets a clear "this region has no 3D
+      // coverage" message instead of building a horizontal frame with arbitrary
+      // u-axis and seeing "wonky" panels on Auto Fill.
+      if (hit.pickMethod !== '3dtiles') {
+        setStatusMsg(
+          `3D Plane: point must be on a 3D roof surface — ${hit.pickMethod} pick detected (this region has no 3D tile coverage). Try Auto Fill on detected roof segments, or pick an address in a 3D-covered region.`
+        );
+        addLog('PLANE3D', `Rejected click — pickMethod=${hit.pickMethod} (expected 3dtiles); only 3D tiles carry roof elevation`);
         return;
       }
       // v62: STITCH — snap this corner to a shared roof point (existing plane vertex
@@ -8675,7 +8718,7 @@ function SolarEngine3D({
               { mode: 'roof'    as PlacementMode, icon: '\u{1F3E0}', label: 'Roof',     tip: 'Place panels on a roof surface' },
               { mode: 'ground'  as PlacementMode, icon: '\u{1F331}', label: 'Ground',   tip: 'Ground mount: click start \u2192 end to place a row' },
               { mode: 'fence'   as PlacementMode, icon: '\u26A1',    label: 'Fence',    tip: 'SOL Fence: click points, right-click to finish' },
-              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: '3D Plane', tip: '3D Plane: click 3+ roof points to define a custom grid' },
+              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: 'Custom Array', tip: 'Outline the panel area: click 3+ roof corners, right-click to place an array' },
               { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Use 🔗 Roof Model to see all edges.' },
               { mode: 'row'     as PlacementMode, icon: '\u27A1',    label: 'Row',      tip: 'Row Tool: click two points to place a panel row' },
             ],
@@ -8818,7 +8861,7 @@ function SolarEngine3D({
                         onMouseLeave={() => setTooltipInfo(null)}
                         onClick={() => activateTool(mode)}
                         style={{
-                          width: 86, height: 34, borderRadius: 8, fontSize: 12,
+                          width: 'max-content', minWidth: 86, maxWidth: 130, height: 34, borderRadius: 8, fontSize: 12,
                           display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px',
                           cursor: 'pointer', border: 'none', transition: 'all 0.12s',
                           background: placementMode === mode
@@ -8913,7 +8956,7 @@ function SolarEngine3D({
                  placementMode === 'roof' ? '\u{1F3E0} Place Roof' :
                  placementMode === 'ground' || placementMode === 'ground_array' ? '\u{1F331} Ground Array' :
                  placementMode === 'fence' ? '\u26A1 Fence' :
-                 placementMode === 'plane3d' ? '\u{1F4D0} 3D Plane' :
+                 placementMode === 'plane3d' ? '\u{1F4D0} Custom Array' :
                  placementMode === 'row' ? '\u27A1 Row' :
                  placementMode === 'auto_roof' ? '\u2728 Auto Fill' :
                  placementMode === 'pick_house' ? '\u{1F3E1} Pick House' :
@@ -9595,29 +9638,6 @@ function SolarEngine3D({
           color: '#666', fontSize: 10, zIndex: 50, fontFamily: 'monospace',
         }}>
           {lat.toFixed(5)}, {lng.toFixed(5)} | h={ftStr(cesiumGroundElevRef.current)} ({cesiumGroundElevRef.current.toFixed(0)}m)
-        </div>
-      ) : null}
-
-      {/* Tile status indicator */}
-      {stage === 'done' ? (
-        <div style={{
-          position: 'absolute', top: 8, right: 60,
-          background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 7px',
-          color: tileStatus === 'loaded' ? '#44ff88' : tileStatus === 'failed' ? '#ff6644' : '#ffaa44',
-          fontSize: 10, zIndex: 50, fontFamily: 'monospace',
-        }}>
-          {tileStatus === 'loaded' ? '🟢 3D' : tileStatus === 'failed' ? '🔴 3D' : '🟡 3D'}
-        </div>
-      ) : null}
-
-      {/* FPS counter */}
-      {stage === 'done' ? (
-        <div style={{
-          position: 'absolute', top: 8, right: 8,
-          background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 7px',
-          color: fps < 30 ? '#ff4444' : '#44ff88', fontSize: 10, zIndex: 50, fontFamily: 'monospace',
-        }}>
-          {fps} FPS
         </div>
       ) : null}
 

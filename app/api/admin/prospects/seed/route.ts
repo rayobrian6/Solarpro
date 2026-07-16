@@ -6,6 +6,26 @@
  * choked on the seed). Reads the real migration files (092 schema, 093 seed) and
  * executes them directly via the neon driver: 092 statement-by-statement,
  * 093 as a single INSERT. Idempotent — safe to click repeatedly.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Phase 1A.2 — Migration Governance (MIGRATION-GOV-13)
+ *
+ * This route is a NON-CANONICAL migration execution path: it reads numbered
+ * migration SQL files (092_installer_prospects.sql, 093_seed_installer_prospects_batch1.sql)
+ * directly from disk and executes them via the neon driver without passing
+ * through the canonical migration governance system (lib/migrations/runner.ts),
+ * which provides the schema_migrations ledger, mandatory SHA-256 checksums,
+ * transactional execution, advisory locks, environment-aware authorization,
+ * fresh TOTP verification, and audit event emission.
+ *
+ * This route's mutation path is PERMANENTLY ELIMINATED.
+ * Per MIGRATION-GOV-13 (Phase 1A.2), legacy mutation paths must be permanently
+ * blocked, not feature-flagged. A feature flag that can restore ungoverned DDL
+ * is a latent risk. This route now ALWAYS returns 423 Locked and directs the
+ * operator to the canonical migration API. The file is preserved (not deleted)
+ * so existing integrations receive a clear error response rather than a 404.
+ * This route will never re-enable, regardless of environment variables.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,6 +57,44 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Phase 1A.2 — Migration Governance (MIGRATION-GOV-13)
+  //
+  // This legacy prospects-seed route is PERMANENTLY ELIMINATED as a migration
+  // execution path. Per MIGRATION-GOV-13 (Phase 1A.2), legacy mutation paths
+  // must be permanently blocked, not feature-flagged. A feature flag that can
+  // restore ungoverned DDL is a latent risk. The canonical migration execution
+  // path is /api/admin/migrations (lib/migrations/runner.ts). This route now
+  // ALWAYS returns 423 Locked and directs the operator to the canonical API.
+  // This route will never re-enable, regardless of environment variables.
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(JSON.stringify({
+    level: 'audit',
+    type: 'migration.legacy.invoked',
+    timestamp: new Date().toISOString(),
+    actorType: 'human',
+    actorId: admin.id,
+    environment: (process.env.VERCEL_ENV || process.env.NODE_ENV || 'development').toLowerCase(),
+    executionId: null,
+    migrationIdentifier: null,
+    filename: null,
+    details: {
+      legacyRunner: 'app/api/admin/prospects/seed/route.ts',
+      reason: 'Legacy prospects-seed migration execution path permanently eliminated (MIGRATION-GOV-13, Phase 1A.2).',
+      canonicalPath: '/api/admin/migrations',
+    },
+  }));
+  return NextResponse.json({
+    success: false,
+    error: 'This legacy migration execution path has been permanently eliminated (MIGRATION-GOV-13, Phase 1A.2). ' +
+      'Use the canonical migration API at /api/admin/migrations instead. ' +
+      'This route will never re-enable, regardless of environment variables.',
+    canonicalPath: '/api/admin/migrations',
+  }, { status: 423 }); // 423 Locked
+
+  // The code below this point is unreachable. It is preserved (not deleted) so
+  // the file structure remains intact for any future reference. The permanent
+  // 423 return above means no schema mutation can ever occur through this route.
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     return NextResponse.json({ success: false, error: "DATABASE_URL not set" }, { status: 500 });

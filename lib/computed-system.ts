@@ -97,6 +97,10 @@ export type RunSegmentId =
 
 export interface RunSegment {
   id: RunSegmentId;
+  /** Owning subsystem (contract §1.3 permit carriage). Absent on the legacy
+   *  single-system path (N=1 keeps bare run ids — Invariant I-1); stamped by
+   *  computeMultiSystem (Wave 2a) only when N>1. */
+  subSystem?: import('@/lib/system/subSystemEquipment').SubSystemKey;
   label: string;
   from: string;               // device label
   to: string;                 // device label
@@ -430,6 +434,22 @@ export interface ComputedSystemInput {
   backupInterfaceBrand?: string;
   backupInterfaceModel?: string;
   systemType?: string;              // 'roof' | 'ground' | 'fence' — adds the mounting/racking row to the equipment schedule
+
+  // ── Per-subsystem compute (Wave 2a — contract §1.7, docs/ARCHITECTURE-per-subsystem-equipment.md) ──
+  /** The subsystem this compute pass belongs to. RunSegments are stamped
+   *  run.subSystem = subSystemKey ONLY on the multi-system per-sub path
+   *  (emitSharedServiceRuns === false, i.e. computeMultiSystem at N>1) —
+   *  tag presence ALONE never changes output (Invariant I-10: behavior gates
+   *  on N>1 subsystems present, never on tag presence; the Wave-0 tagged-
+   *  single-sub parity golden pins this). */
+  subSystemKey?: import('@/lib/system/subSystemEquipment').SubSystemKey;
+  /** Default TRUE (legacy). computeMultiSystem sets FALSE on per-sub calls so
+   *  the shared service tail (DISCO_TO_METER_RUN + MSP_TO_UTILITY_RUN) is
+   *  emitted exactly ONCE by the aggregate, sized at Σ acOutputCurrentA —
+   *  never once per subsystem (the tributary double-count class). Suppression
+   *  also drops the matching segment-schedule rows so per-sub bomQuantities
+   *  cannot double-count service wire/conduit footage. */
+  emitSharedServiceRuns?: boolean;
 }
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
@@ -871,6 +891,9 @@ function autoSizeOpenAirWire(
 
 export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const issues: ValidationIssue[] = [];
+  // Wave 2a (contract §1.7): default TRUE — legacy callers emit the full
+  // service tail exactly as before. computeMultiSystem sets FALSE per sub.
+  const emitSharedServiceRuns = input.emitSharedServiceRuns !== false;
   const isMicro = input.topology === 'micro';
   const isOptimizer = input.topology === 'optimizer';
   const isString = input.topology === 'string' || isOptimizer;
@@ -959,6 +982,59 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       autoFixed: false,
       suggestion:
         'Select a microinverter with a higher max DC input voltage or a lower-Voc module',
+    });
+  }
+
+  // Per-module overpower pairing. A 600 W module on a 366 W-AC micro is a
+  // per-module DC/AC of 1.64 — beyond every IQ8-series pairing range (≤1.55).
+  // It ships silently as "31 kW DC / 18 kW AC" with sustained clipping. Legal
+  // per NEC (no code section caps the ratio), so a WARNING, not an error —
+  // but it is almost always an equipment-selection mistake.
+  const MICRO_MAX_PAIRING_RATIO = 1.55;
+  if (isMicro && input.inverterAcKw > 0 && input.panelWatts > 0) {
+    const perModuleRatio = input.panelWatts / (input.inverterAcKw * 1000);
+    if (perModuleRatio > MICRO_MAX_PAIRING_RATIO) {
+      issues.push({
+        severity: 'warning',
+        code: 'MICRO_DC_AC_PAIRING',
+        message:
+          `${input.panelWatts}W module on a ${Math.round(input.inverterAcKw * 1000)}W-AC microinverter — ` +
+          `per-module DC/AC ratio ${perModuleRatio.toFixed(2)} exceeds the manufacturer pairing range ` +
+          `(≤${MICRO_MAX_PAIRING_RATIO}). Expect sustained output clipping.`,
+        necReference: 'Manufacturer pairing guide',
+        autoFixed: false,
+        suggestion:
+          'Select a higher-output microinverter (480W-class for 550–670W modules) or a lower-wattage module',
+      });
+    }
+  }
+
+  // ── acKwPerDevice guard (Wave 2a — contract §1.3 per-device kW carriage) ──
+  // The engine contract is PER-DEVICE kW for micro topology: totalAcKw and
+  // perMicroCurrentA both multiply inverterAcKw by device count. A SYSTEM-level
+  // kW leaking in here silently inflates every downstream number (the 07-11
+  // lesson: 12 devices × a system-level rating → a phantom 250 A / 4/0 AWG
+  // feeder on a 5 kW job). No real residential micro exceeds ~2 kW AC per
+  // device, so anything above that is almost certainly a system rating.
+  const MICRO_MAX_PLAUSIBLE_PER_DEVICE_KW = 2;
+  if (isMicro && input.inverterAcKw > MICRO_MAX_PLAUSIBLE_PER_DEVICE_KW) {
+    console.error(
+      `[computeSystem] acKwPerDevice guard: micro inverterAcKw=${input.inverterAcKw} kW ` +
+      `looks SYSTEM-LEVEL (> ${MICRO_MAX_PLAUSIBLE_PER_DEVICE_KW} kW/device). The engine ` +
+      `multiplies this by ${input.totalPanels} modules — every AC current, OCPD and ` +
+      `feeder gauge downstream will be inflated. Pass the PER-DEVICE rating.`,
+    );
+    issues.push({
+      severity: 'warning',
+      code: 'MICRO_ACKW_PER_DEVICE',
+      message:
+        `Microinverter AC rating ${input.inverterAcKw} kW exceeds any per-device rating ` +
+        `(max plausible ${MICRO_MAX_PLAUSIBLE_PER_DEVICE_KW} kW/device) — a system-level kW was ` +
+        `likely passed where the engine contract requires PER-DEVICE kW. AC output currents, ` +
+        `OCPDs and feeder sizes computed from it are inflated ~${Math.max(1, Math.round(input.totalPanels / Math.max(1, input.inverterModulesPerDevice)))}×.`,
+      necReference: 'Engine contract — ComputedSystemInput.inverterAcKw (per-device)',
+      autoFixed: false,
+      suggestion: 'Pass the per-device microinverter rating (e.g. 0.29 for IQ8+), not the system total',
     });
   }
 
@@ -1543,6 +1619,10 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
   // ── Common AC Runs (both topologies) ──────────────────────────────────────
 
+  // Wave 2a: the service tail (AC disco → MSP → utility) is SHARED at the POI.
+  // On computeMultiSystem per-sub calls (emitSharedServiceRuns=false) these two
+  // runs are suppressed here and emitted ONCE by the aggregate at Σ current.
+  if (emitSharedServiceRuns) {
   // DISCO_TO_METER_RUN
   // DISCO_TO_METER_RUN: AC Disconnect to MSP interconnection point
   // NOTE: No separate production meter — utility swaps bidirectional meter for net metering;
@@ -1641,6 +1721,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     conductorCallout: mspToUtilWire.conductorCallout,
     color: 'ac',
   }));
+  } // end if (emitSharedServiceRuns) — shared service tail (Wave 2a)
 
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1947,6 +2028,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     }
   }
 
+  // ── Per-subsystem stamp (Wave 2a — contract §1.3 RunSegment.subSystem) ────
+  // Stamped ONLY on the multi-system per-sub path (key present AND the shared
+  // service tail suppressed — computeMultiSystem at N>1 sets both). A bare
+  // subSystemKey tag on a legacy/N=1 call changes NOTHING (I-10: behavior
+  // gates on N>1, never on tag presence — pinned by the Wave-0 tagged-
+  // single-sub parity golden).
+  if (input.subSystemKey && !emitSharedServiceRuns) {
+    for (const run of runs) run.subSystem = input.subSystemKey;
+  }
+
   // ── Run Map ────────────────────────────────────────────────────────────────
   const runMap = {} as Record<RunSegmentId, RunSegment>;
   for (const run of runs) {
@@ -1989,7 +2080,13 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     maxACVoltageDropPct: input.maxACVoltageDropPct,
     maxDCVoltageDropPct: input.maxDCVoltageDropPct,
   };
-  const segmentSchedule = buildSegmentSchedule(segmentScheduleInput);
+  const segmentScheduleFull = buildSegmentSchedule(segmentScheduleInput);
+  // Wave 2a: when the service tail is aggregate-owned, drop its schedule rows
+  // too — otherwise per-sub segmentSchedule/calcBOMFromSegments would still
+  // carry per-sub-sized service wire and the merged BOM would double-count it.
+  const segmentSchedule = emitSharedServiceRuns
+    ? segmentScheduleFull
+    : segmentScheduleFull.filter(s => s.segmentType !== 'DISCO_TO_METER' && s.segmentType !== 'MSP_TO_UTILITY');
 
   // Back-populate conductorBundle, conduitSize, conduitFillPct, conduitType, ocpdAmps,
   // continuousCurrent, voltageDropPct, overallPass from segmentSchedule onto each RunSegment.

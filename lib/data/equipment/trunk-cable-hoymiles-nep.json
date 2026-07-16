@@ -1,0 +1,186 @@
+{
+  "_meta": {
+    "description": "AC trunk/bus cable systems (the Enphase Q-Cable equivalents) for Hoymiles and NEP (Northern Electric Power) microinverters, for a brand-agnostic solar BOM. All fields sourced from manufacturer install manuals / trunk-cable datasheets / distributor listings; unconfirmed fields are null and flagged in caveats. Do not treat null as zero.",
+    "researchedAt": "2026-07-10",
+    "researcher": "trunk-cable-hoymiles-nep research worker",
+    "unitsNote": "connectorSpacingFt converted from manufacturer metric spacing (1 m = 3.28 ft). voltageAcV = cable insulation rating (600 V); US application is 240 V split-phase 2-wire (L1+L2+PE). ampRating = connector/cable component rating, NOT the branch limit (branch limit is set by branchOcpdA / conductor ampacity).",
+    "primarySources": [
+      "Hoymiles Datasheet: Cable Accessories for Microinverter of HMS Series, Global V202108 (single-phase trunk cable accessories) — solar-electric.com mirror",
+      "Hoymiles User Manual HMS-1600/1800/2000-4T-NA (2022) — AC branch circuit capacity + accessories",
+      "Hoymiles User Manual HMS-700/800/900/1000-2T-NA — 5 micros per 12AWG/20A branch",
+      "NEP BDM-800 Installer Quick Reference Guide v2 (2024) — Trunk Version (molded-T) architecture, 5 per 20A branch",
+      "NEP BDM-800 & BDM-600 SAA152167 Installation & Operation Manual USA + BDM-300X2 (BDM-600) manual — integrated-pigtail + T-connector architecture, 20A max breaker",
+      "Distributor listings: NAZ/solar-electric.com, Signature Solar, Rexel USA (NB020229)"
+    ]
+  },
+
+  "brands": [
+    {
+      "brand": "Hoymiles",
+      "ecosystem": "AC Trunk",
+      "architectureNote": "Pre-molded-connector trunk sold as a BULK reel (Enphase Q-Cable style, but field-cut): a continuous 2P+PE cable with AC Trunk Connectors molded at a FIXED spacing (1 m / 2 m / 4.2 m options, plus newer 2.3 m for wide modules). Each microinverter has a short 'AC Sub Connector' pigtail that plugs into a trunk-connector port (plug-and-play). The installer cuts a segment of the bulk reel to the length of each branch, field-installs an AC Trunk Connector on the cut end feeding the distribution/junction box (the 'AC end cable'/home run), and caps the far end with an AC Trunk End Cap. Vacant ports get an AC Trunk Port Cap. It is therefore a hybrid: molded ports + field-cut length + field-installed home-run connector and end cap. Covers HMS single-phase (single-module & 2-in-1/4-in-1) micros; HMT three-phase uses a separate three-phase trunk line.",
+      "cables": [
+        {
+          "orientation": "portrait",
+          "sku": "AC Trunk Cable_40T_40L_12AWG-1m",
+          "connectorSpacingFt": 3.28,
+          "gaugeAwg": 12,
+          "conductors": 3,
+          "voltageAcV": 600,
+          "ampRating": 32,
+          "priceUsdPerFt": null,
+          "source": "Hoymiles Single-phase Trunk Cable Accessories datasheet Global V202108: 40 trunk connectors + 40 sub cables, 1 m (3.28 ft) connector spacing, ~46 m reel, 12 AWG, cable 600 V, wet/outdoor UL 44/1277/1581, connector IP68"
+        },
+        {
+          "orientation": "landscape",
+          "sku": "AC Trunk Cable_20T_20L_10AWG-2m",
+          "connectorSpacingFt": 6.56,
+          "gaugeAwg": 10,
+          "conductors": 3,
+          "voltageAcV": 600,
+          "ampRating": 32,
+          "priceUsdPerFt": 5.25,
+          "source": "Hoymiles datasheet: 20 trunk connectors, 2 m (6.56 ft) spacing, ~41 m reel, 10 AWG. Price: NAZ/solar-electric.com 'AC Trunk Cable Bulk 10AWG (20T, 2.0M)' = $706.72 for the full ~41 m/134.5 ft 20-drop reel -> ~$5.25/ft incl. 20 molded connectors (2026-07 listing)"
+        },
+        {
+          "orientation": "landscape",
+          "sku": "AC Trunk Cable_10T_10L_10AWG-4.2m",
+          "connectorSpacingFt": 13.78,
+          "gaugeAwg": 10,
+          "conductors": 3,
+          "voltageAcV": 600,
+          "ampRating": 32,
+          "priceUsdPerFt": null,
+          "source": "Hoymiles datasheet: 10 trunk connectors, 4.2 m (13.78 ft) spacing, ~39.3 m reel, 10 AWG (used for widely-spaced / high-power 4-in-1 layouts)"
+        }
+      ],
+      "connectors": {
+        "male": {
+          "sku": "AC Trunk Connector (Hoymiles, 2P+PE, field-assemblable)",
+          "rating": "32 A / cable rated 600 V (connector rated 300 V), 12/10 AWG, IP68, UL 94-V0, ANSI/UL 6703-2017. NOTE: Hoymiles does NOT ship a separate male/female field-connector pair. This single modular AC Trunk Connector (screw-press/crimp) is field-installed on cut cable ends to build the home-run to the distribution box and to splice segments.",
+          "priceUsd": null
+        },
+        "female": {
+          "sku": "AC Trunk Connector (same modular connector — no distinct female field connector)",
+          "rating": "See male: one field-assemblable AC Trunk Connector serves both ends of a field splice/home-run.",
+          "priceUsd": null
+        },
+        "terminator": {
+          "sku": "AC Trunk End Cap",
+          "rating": "IP68 watertight seal for the cut cable-port end of the AC Trunk Connector at the end of each AC branch (one per branch/split). Installed with AC Trunk Connector Unlock Tool.",
+          "priceUsd": null
+        },
+        "sealingCap": {
+          "sku": "AC Trunk Port Cap",
+          "rating": "IP68 cap to protect any vacant/unused AC Trunk Port along the trunk.",
+          "priceUsd": null
+        },
+        "extensionCable": {
+          "sku": "DC_Ext_Cable-1m (Betteri BC03A) / Stau_DC_Ext_Cable-1m (Staubli MC4)",
+          "rating": "DC module-to-micro extension, 1 m, 12 AWG, 20 A (Betteri) / 30 A (Staubli). NOTE: this is a DC extension, not AC — AC reach is extended by cutting more trunk-cable segment. No dedicated AC extension-cable SKU in the datasheet.",
+          "priceUsd": null
+        }
+      },
+      "maxDevicesPerBranch": 5,
+      "branchOcpdA": 20,
+      "maxDevicesPerBranchNote": "Model-dependent, governed by conductor ampacity, not a fixed count. 5 = HMS-700/800/900/1000-2T (2-in-1) on a 12 AWG / 20 A branch. High-power 4-in-1 HMS-1600/1800/2000-4T run only 2-4 per branch and are rated for a 30 A OCPD (per HMS-4T manual). Single-module low-power HMS units can run more. Always size to the trunk-cable rating label + local code.",
+      "spliceInstallRule": {
+        "realRule": "The trunk is ONE continuous pre-molded cut length per contiguous array section. Row-to-row jumps within the same plane are made by leaving a SERVICE LOOP of the same continuous cable between the last port of one row and the first port of the next — NO connector/splice is consumed at a row transition. Field connections per branch are only: (1) one AC Trunk Connector home-run to the distribution/junction box at the branch START, and (2) one AC Trunk End Cap at the branch END. An extra field splice (a second AC Trunk Connector pair) is required ONLY to bridge a physical gap larger than the remaining trunk reach, to join a new reel segment, or to cross between physically separated sub-arrays.",
+        "typicalResidentialSinglePlaneSplices": 0,
+        "source": "Hoymiles HMS install manual (Step 2 'Plan and Build the AC Trunk Cable' — cut segments, install End Cap at one side + AC end cable at the other) + trunk accessories datasheet. Corrects the '1 splice per (rows-1)' overcount: continuous trunk + service loops = 0 field splices on a single contiguous plane."
+      },
+      "caveats": [
+        "No discrete male/female field-connector pair like Enphase Q field connectors — Hoymiles uses one modular AC Trunk Connector (2P+PE) field-installed on cut ends. Modeling a separate male+female SKU per splice would over-count.",
+        "Component prices largely unpublished (installer/distributor channel). Only the 10 AWG 2 m bulk reel price ($706.72, NAZ/solar-electric.com 2026-07) was found; per-ft is an inclusive reel figure (cable + 20 molded connectors), not bare wire.",
+        "voltageAcV = 600 V cable insulation rating; US branch operates at 240 V split-phase (2P+PE, no neutral). Connector body rated 300 V / 32 A.",
+        "Newer 2.3 m connector-spacing variant referenced by distributors for wider modules; exact SKU not confirmed here.",
+        "conductors=3 counts L1+L2+PE (equipment ground carried in the trunk); there is no neutral in the 240 V 2-wire branch.",
+        "Verify exact spacing SKU against the physical module dimension + orientation before BOM; wrong spacing forces service-loop slack or won't reach."
+      ]
+    },
+
+    {
+      "brand": "NEP",
+      "ecosystem": "AC Trunk",
+      "architectureNote": "Two architectures exist across NEP generations. NEWER BDM-800 'Trunk Version' = molded-T trunk cable (Enphase-style): a continuous 2P+PE trunk cable with pre-molded T-taps ('Trunk T') at a fixed spacing, offered in PORTRAIT and LANDSCAPE spacings and 12 AWG or 10 AWG. Each BDM-800 plugs its AC connector into a Trunk T. Cut to length per branch; terminate with a Trunk End Cap; feed the junction box via a Home Run cable; cap unused taps with Trunk T Seal Caps. Connector families: Betteri (new style) and Wieland (old style) — must match. OLDER BDM-600 / BDM-300X2 (and early BDM-800 'wire version') = each micro has an integrated 3-pin pigtail that mates through a T-connector to an extension cable fed from a separate ~6 ft trunk cable (field-assembled bus rather than molded trunk).",
+      "cables": [
+        {
+          "orientation": "landscape",
+          "sku": "NB020229 (NEP) / Signature Solar 1531044",
+          "connectorSpacingFt": 14.44,
+          "gaugeAwg": 12,
+          "conductors": 3,
+          "voltageAcV": 600,
+          "ampRating": null,
+          "priceUsdPerFt": null,
+          "source": "Rexel USA NB020229 'Northern Electric Power Technology 12AWG TRUNK CABLE, 4.4M BETWEEN T FOR LANDSCAPE, 12T PER ROLL' + Signature Solar 'NEP Trunk Cable | Landscape | 12AWG | 4.4m' (SKU 1531044). 4.4 m = 14.44 ft between molded T's (spans a dual-input BDM-800 driving 2 landscape modules). Price gated behind login on both; not captured."
+        },
+        {
+          "orientation": "portrait",
+          "sku": "unknown (NEP Trunk Cable Portrait, 12 AWG) — portrait spacing SKU not captured",
+          "connectorSpacingFt": null,
+          "gaugeAwg": 12,
+          "conductors": 3,
+          "voltageAcV": 600,
+          "ampRating": null,
+          "priceUsdPerFt": null,
+          "source": "NEP BDM-800 Installer QRG v2 lists 'Trunk Cable (12AWG or 10AWG, Portrait or Landscape)'; portrait spacing value + SKU not published in sources reviewed"
+        },
+        {
+          "orientation": "landscape",
+          "sku": "unknown (NEP Trunk Cable, 10 AWG) — 10 AWG portrait/landscape SKUs not captured",
+          "connectorSpacingFt": null,
+          "gaugeAwg": 10,
+          "conductors": 3,
+          "voltageAcV": 600,
+          "ampRating": null,
+          "priceUsdPerFt": null,
+          "source": "NEP BDM-800 QRG confirms 10 AWG option exists for longer/higher-current runs; exact SKU/spacing not found"
+        }
+      ],
+      "connectors": {
+        "male": {
+          "sku": "NEP Male Trunk Cable Splice Adaptor (Betteri new-style: Signature Solar 1531022; also Wieland version)",
+          "rating": "Field splice used ONLY to JOIN two trunk-cable sections / bridge sub-array gaps (a.k.a. 'Home Run Cable Adapter'). NOT installed per micro or per row. Price $2.00 (SigSolar sale, reg $3.31, 2026-07).",
+          "priceUsd": 2.0
+        },
+        "female": {
+          "sku": "NEP Female Trunk Cable Splice Adaptor (Betteri new-style / Wieland version)",
+          "rating": "Mating half of the field trunk splice; pairs with the male splice adaptor to join trunk sections.",
+          "priceUsd": null
+        },
+        "terminator": {
+          "sku": "NEP Trunk End Cap (Signature Solar 1531038) / 'Female Trunk Cable End Cap' Betteri new-style",
+          "rating": "Watertight terminator for the female connector at the end of each branch/split — one per branch circuit or split section. Price $4.55 (SigSolar sale, reg $8.19, 2026-07).",
+          "priceUsd": 4.55
+        },
+        "sealingCap": {
+          "sku": "NEP Trunk Seal Cap / 'Trunk T Seal Cap' (Signature Solar 1531039); MC4 Seal Cap for unused DC inputs",
+          "rating": "Caps an unused Trunk-T port on the trunk cable. Price $4.55 (SigSolar sale, reg $8.19, 2026-07). Separate MC4 Seal Caps recommended for unused DC inputs.",
+          "priceUsd": 4.55
+        },
+        "extensionCable": {
+          "sku": "NEP Micro Inverter Home Run Cable, 12 AWG, 16 ft (Betteri new-style)",
+          "rating": "Leader cable from the first Trunk T to the junction box / distribution — the AC home run. In older BDM-600/300X2 systems the equivalent is a T-connector + AC extension cable fed from the ~6 ft trunk cable.",
+          "priceUsd": null
+        }
+      },
+      "maxDevicesPerBranch": 5,
+      "branchOcpdA": 20,
+      "maxDevicesPerBranchNote": "BDM-800 Trunk Version: 'Don't exceed 5 microinverters per branch circuit on a 20 A OCPD' (4 when the branch shares Circuit 1 with other loads) — NEP BDM-800 QRG v2. Example given: 768 W AC x 5 = 3840 W on a 20 A minimum OCPD. Older BDM-600/300X2 manual: for 12 AWG trunk, each branch protected by a 20 A maximum breaker; max count per the trunk-cable rating label.",
+      "spliceInstallRule": {
+        "realRule": "BDM-800 Trunk Version: one continuous molded-T trunk cut length per contiguous array section. Secure the trunk to racking with each Trunk T aligned just off-center of the two modules it serves; row-to-row jumps use a SERVICE LOOP of the same continuous trunk — no splice adaptor consumed at a row transition. Per branch: one Home Run cable to the junction box at the start + one Trunk End Cap at the end; Trunk T Seal Caps on any unused taps. Male+Female Trunk Cable Splice Adaptors are used ONLY to join two trunk sections — i.e., across a physical sub-array gap or when a roll (12 T's) runs out — NOT per row.",
+        "typicalResidentialSinglePlaneSplices": 0,
+        "source": "NEP BDM-800 Installer QRG v2 (2024) 'Installing BDM-800' + recommended-stock list (Trunk End Caps, Trunk T Seal Caps, Trunk Cable T, Splice Adaptors). Corrects the '1 splice per (rows-1)' overcount: continuous molded-T trunk + service loops = 0 field splices on a single contiguous plane; splices scale with the count of separated sub-arrays / reel joins, not rows."
+      },
+      "caveats": [
+        "Connector family matters: Betteri 'new style' vs Wieland 'old style' trunk connectors are not cross-compatible — the BOM must pin the generation. End caps, seal caps and splice adaptors are sold per family.",
+        "NEP trunk-cable prices and the trunk connector's own current/voltage rating were login-gated (Rexel) or not published; only accessory prices (End Cap $4.55, Seal Cap $4.55, Male Splice Adaptor $2.00; Signature Solar 2026-07) were captured. ampRating left null.",
+        "Portrait spacing value and 10 AWG spacings not published in sources reviewed; only landscape 12 AWG = 4.4 m between T's (SKU NB020229, 12 T/roll) confirmed.",
+        "Two distinct architectures by generation: newer BDM-800 = molded-T continuous trunk; older BDM-600/BDM-300X2 = integrated pigtail + T-connector + extension cable + separate ~6 ft trunk cable. Model the one matching the selected micro.",
+        "conductors=3 = L1+L2+PE (equipment ground carried in the trunk); 240 V split-phase 2-wire, no neutral. voltageAcV=600 is the cable insulation rating.",
+        "First AC connector in the branch is code-listed as a disconnecting means once the branch breaker is opened (BDM manual) — relevant to placarding, not to cable count."
+      ]
+    }
+  ]
+}

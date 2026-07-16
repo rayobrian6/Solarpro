@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
+import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { getInverterById } from '@/lib/equipment-db';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
@@ -36,6 +37,40 @@ import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizingEngine';
 import type { LayoutCandidate } from '@/lib/system/inverterCapabilities';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { parseRunId } from '@/lib/computed-multi-system';
+
+// ── Wave 3.7 → Wave 5A: LEGACY FALLBACK ARMOR ────────────────────────────────
+// Since Wave 5A the primary hybrid path is `body.sources` (validated by
+// sanitizeClientSources below): namespaced `${sub}:${RunSegmentId}` payloads
+// are accepted AS-IS and rendered multi-lane server-side. sanitizeClientRuns
+// remains ONLY for the legacy fallback: a hybrid-aware client that hits the
+// single-lane path (no/invalid sources) with namespaced runs on the
+// compute-failure passthrough — namespaced ids resolve to the PRIMARY sub's
+// runs (fixed roof > ground > fence) + shared service runs, re-keyed to base
+// ids — never a silent resolve-to-nothing (I-8). Legacy bare-id payloads pass
+// through IDENTICALLY (same array reference).
+function sanitizeClientRuns<T extends { id: string }>(runs: T[] | undefined | null): T[] | undefined {
+  if (!Array.isArray(runs) || runs.length === 0) return runs ?? undefined;
+  const RANK: Record<string, number> = { roof: 0, ground: 1, fence: 2 };
+  let primary: string | null = null;
+  for (const r of runs) {
+    const { subSystem } = parseRunId(String(r?.id ?? ''));
+    if (subSystem && (primary === null || RANK[subSystem] < RANK[primary])) primary = subSystem;
+  }
+  if (primary === null) return runs; // legacy bare-id payload — untouched by reference
+  console.warn('[SLD] hybrid client passthrough detected — resolving primary-sub runs to bare ids (Wave 3.7 guard)');
+  return runs.flatMap(r => {
+    const parsed = parseRunId(String(r?.id ?? ''));
+    if (parsed.subSystem === null) return [r];
+    if (parsed.subSystem === primary) return [{ ...r, id: parsed.baseId } as T];
+    return [];
+  });
+}
+
+// ── Wave 5A — client `sources` validation lives in the shared adapter
+// (sanitizeClientSourceBranches — also used by the sld/pdf route). ≥2 valid
+// branches ⇒ multi-lane server render; otherwise the request falls through
+// to the legacy single-lane path (with sanitizeClientRuns as fallback armor).
 
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
@@ -52,6 +87,93 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+
+    // ── Wave 5A — hybrid multi-lane path (primary at N>1) ────────────────────
+    // A per-subsystem-aware client sends `sources` (built from computedMulti)
+    // + the aggregate's NAMESPACED runs; both are accepted as-is — the
+    // multi-lane renderer resolves `${sub}:` ids per lane. Stored-SVG parity:
+    // the same renderer runs server-side, so what the Diagram tab shows is
+    // byte-what the route persists/exports. No sizing-engine pass here — the
+    // per-lane values ARE the engine outputs the client already computed.
+    {
+      const _sources = sanitizeClientSourceBranches(body.sources);
+      if (_sources) {
+        const _clientRuns = Array.isArray(body.runs)
+          ? (body.runs as Array<{ id?: unknown }>).filter(r => r && typeof r.id === 'string')
+          : undefined;
+        const _sumLaneBackfeed = _sources.reduce((s, b) => s + (b.backfeedAmps ?? b.acOCPD ?? 0), 0);
+        const _mlInput: SLDProfessionalInput = {
+          projectName:             String(body.projectName ?? 'Solar PV System'),
+          clientName:              String(body.clientName ?? 'Homeowner'),
+          address:                 String(body.address ?? ''),
+          designer:                String(body.designer ?? 'SolarPro Engineering'),
+          drawingDate:             String(body.drawingDate ?? body.date ?? new Date().toLocaleDateString()),
+          drawingNumber:           String(body.drawingNumber ?? 'SLD-001'),
+          revision:                String(body.revision ?? 'A'),
+          topologyType:            String(body.topologyType ?? 'HYBRID_MULTI_SOURCE'),
+          totalModules:            Number(body.totalModules) || _sources.reduce((s, b) => s + (b.totalModules ?? 0), 0),
+          totalStrings:            Number(body.totalStrings) || 0,
+          panelModel:              String(body.panelModel ?? _sources[0].panelModel ?? 'PV Module'),
+          panelWatts:              Number(body.panelWatts) || _sources[0].panelWatts || 400,
+          panelVoc:                Number(body.panelVoc) || _sources[0].panelVoc || 0,
+          panelIsc:                Number(body.panelIsc) || _sources[0].panelIsc || 0,
+          dcWireGauge:             String(body.dcWireGauge ?? '#10 AWG'),
+          dcConduitType:           String(body.dcConduitType ?? body.conduitType ?? 'EMT'),
+          dcOCPD:                  Number(body.dcOCPD) || 0,
+          inverterModel:           String(body.inverterModel ?? _sources[0].inverterModel ?? 'Inverter'),
+          inverterManufacturer:    String(body.inverterManufacturer ?? _sources[0].inverterManufacturer ?? ''),
+          acOutputKw:              Number(body.acOutputKw) || _sources.reduce((s, b) => s + (b.acOutputKw ?? 0), 0),
+          acOutputAmps:            Number(body.acOutputAmps) || Math.round(_sources.reduce((s, b) => s + (b.acOutputAmps ?? 0), 0)),
+          acWireGauge:             String(body.acWireGauge ?? body.wireGauge ?? '#6 AWG'),
+          acConduitType:           String(body.acConduitType ?? body.conduitType ?? 'EMT'),
+          acOCPD:                  Number(body.acOCPD) || _sumLaneBackfeed,
+          mainPanelAmps:           Number(body.mainPanelAmps) || 200,
+          panelBusRating:          Number(body.panelBusRating ?? body.mainPanelAmps) || 200,
+          // §1.7 CONTRACT: client passes the AGGREGATE total (per-inverter
+          // OCPDs summed across subs + battery). Fallback: Σ lane values.
+          backfeedAmps:            Number(body.backfeedAmps) || _sumLaneBackfeed,
+          utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),
+          interconnection:         String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'LOAD_SIDE'),
+          rapidShutdownIntegrated: !!(body.rapidShutdownIntegrated || body.rapidShutdown),
+          hasProductionMeter:      body.hasProductionMeter !== false,
+          hasBattery:              !!(body.hasBattery || body.batteryModel || body.batteryKwh || body.batteryBrand),
+          batteryModel:            String(body.batteryModel || body.batteryBrand || ''),
+          batteryKwh:              Number(body.batteryKwh) || 0,
+          batteryBrand:            body.batteryBrand ? String(body.batteryBrand) : undefined,
+          batteryCount:            body.batteryCount ? Number(body.batteryCount) : undefined,
+          batteryBackfeedA:        body.batteryBackfeedA ? Number(body.batteryBackfeedA) : undefined,
+          backupInterfaceBrand:    body.backupInterfaceBrand ? String(body.backupInterfaceBrand) : undefined,
+          backupInterfaceModel:    body.backupInterfaceModel ? String(body.backupInterfaceModel) : undefined,
+          generatorKw:             body.generatorKw ? Number(body.generatorKw) : undefined,
+          scale:                   String(body.scale ?? 'NOT TO SCALE'),
+          acWireLength:            Number(body.acWireLength || body.wireLength) || 60,
+          runs:                    _clientRuns as SLDProfessionalInput['runs'],
+          sources:                 _sources,
+        };
+        const _mlSvg = renderSLDProfessional(_mlInput);
+        console.log(`[SLD] Wave 5A multi-lane server render: lanes=${_sources.length} keys=${_sources.map(s => s.key).join('+')} backfeed=${_mlInput.backfeedAmps}A`);
+        if ((body.format ?? 'svg') === 'svg') {
+          return new NextResponse(_mlSvg, {
+            headers: {
+              'Content-Type':        'image/svg+xml',
+              'Content-Disposition': 'inline; filename="sld.svg"',
+              'X-System-Model':      'client-multi-lane',
+              'X-Sld-Lanes':         String(_sources.length),
+            },
+          });
+        }
+        return NextResponse.json({
+          success: true,
+          svg: _mlSvg,
+          systemModelUsed: 'client-multi-lane',
+          lanes: _sources.map(s => s.key),
+          topology: 'HYBRID_MULTI_SOURCE',
+          resolvedValues: { backfeedAmps: _mlInput.backfeedAmps, acOCPD: _mlInput.acOCPD },
+          dimensions: { width: 2304, height: 1728, format: 'ANSI C 24×18"' },
+          generatedAt: new Date().toISOString(),
+        });
+      }
+    }
 
     // Handle both old field names (inverterKw, inverterModel as combined string)
     // and new field names (acOutputKw, inverterManufacturer + inverterModel separate)
@@ -509,7 +631,9 @@ export async function POST(req: NextRequest) {
       console.warn('[SLD] computeSystem failed, using body fallback values:', csErr);
       cs = null;
       systemModel = null;
-      computedRuns = body.runs ?? undefined;
+      // Wave 3.7 — client-passthrough guard: namespaced (hybrid) run ids are
+      // resolved to the primary sub's bare ids; legacy payloads untouched.
+      computedRuns = sanitizeClientRuns(body.runs) ?? undefined;
     }
 
     // ── Resolve all electrical display values from PermitSystemModel (engine) ──

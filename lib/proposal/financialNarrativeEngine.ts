@@ -186,3 +186,37 @@ export function computePayoffYear(
   }
   return null; // doesn't pay off within 25 years
 }
+
+/**
+ * Payoff from the REAL year-by-year flow (single source of truth): cumulative
+ * (energy value + SREC income as actually scheduled) vs system cost.
+ *
+ * This replaces the old hack of feeding `annualEnergyValue + yearlyFlow[0]
+ * .srec_income` into computePayoffYear — under the 2026-27 Illinois Shines
+ * schedule, yearlyFlow[0].srec_income is the 50% UPFRONT chunk, and treating
+ * it as a recurring, escalating annual amount overstated SREC ~25× and made
+ * payback absurdly short. Here each year contributes exactly what the
+ * customer actually receives that year.
+ *
+ * Returns { year, fractional }: `year` = first whole year cumulative value
+ * covers the cost (the "Payoff Year X" display); `fractional` = interpolated
+ * decimal payback (e.g. 7.4) for the simple-payback display. Null = doesn't
+ * pay off within the projection.
+ */
+export function computePayoffFromFlow(
+  flow: ReadonlyArray<{ total_energy_value: number; srec_income?: number }>,
+  systemCost: number,
+): { year: number; fractional: number } | null {
+  if (systemCost <= 0 || flow.length === 0) return null;
+  let cumulative = 0;
+  for (let i = 0; i < flow.length; i++) {
+    const yearValue = (flow[i].total_energy_value || 0) + (flow[i].srec_income || 0);
+    const prev = cumulative;
+    cumulative += yearValue;
+    if (cumulative >= systemCost) {
+      const frac = yearValue > 0 ? (systemCost - prev) / yearValue : 0;
+      return { year: i + 1, fractional: Math.round((i + frac) * 10) / 10 };
+    }
+  }
+  return null;
+}

@@ -451,8 +451,10 @@ export function getPrimaryView(
     case 'fence_elevation':
       return drawingEngine.getStructuralFromCAD(cad, input, ctx);
     case 'fence_structural':
-      // PV-3: top-down site plan (drawFencePlan) — distinct from PV-2 elevation
-      return drawingEngine.getArrayPlanFromCAD(cad, input, ctx);
+      // PV-3F: real connection/foundation DETAILS (post footing, rail-to-post,
+      // panel clamp, bonding) — distinct from PV-1F's 2-bay elevation, and not
+      // the degenerate top-down of vertical panels.
+      return drawingEngine.getFenceDetailFromCAD(cad, input, ctx);
     // ── ROOF ─────────────────────────────────────────────────────────────
     case 'roof_plan':
       return drawingEngine.getArrayPlanFromCAD(cad, input, ctx);
@@ -470,6 +472,109 @@ export function getPrimaryView(
   }
 }
 
+// ── Dedicated MINIMAL secondary views ────────────────────────────────────────
+// getSecondaryView must NEVER re-call getArrayPlanFromCAD: that returns a fully
+// COMPOSED sheet (title bar + segment/row schedule furniture). Shrunk into the
+// ~22% secondary strip it printed the ENTIRE plan as a blurry thumbnail — the
+// "SEGMENT PLAN — TOP VIEW" (fence) and "ROW SPACING DIAGRAM" (ground) strips
+// were miniature copies of the whole sheet (recursive-thumbnail bug). These
+// helpers render ONLY the geometry on their own small viewBox.
+const THUMB_SEG_COLORS = ['#2255aa', '#1a7a3a', '#8b1a1a', '#7a5500', '#4a1a7a', '#006666'];
+const M_TO_FT = 3.280839895;
+
+/** Minimal fence top-down: colored runs + module ticks + per-segment length.
+ *  No title bar, no schedule — just the segment plan for the secondary strip. */
+function buildSegmentPlanThumb(cad: CADModel): string | null {
+  const f = cad.fence;
+  const segs = f?.segments ?? [];
+  if (!f || segs.length === 0) return null;
+
+  const W = 400, H = 150, pad = 26;
+  const xs: number[] = [], ys: number[] = [];
+  segs.forEach(s => { xs.push(s.startX, s.endX); ys.push(s.startY, s.endY); });
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = (maxX - minX) || 1, spanY = (maxY - minY) || 1;
+  const fit   = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
+  const scale = Math.min(fit, 34);            // px per metre
+  const dW = spanX * scale, dH = spanY * scale;
+  const ox = (W - dW) / 2, oyb = (H + dH) / 2;
+  const X = (x: number) => ox + (x - minX) * scale;
+  const Y = (y: number) => oyb - (y - minY) * scale;
+
+  const out: string[] = [
+    `<rect x="0" y="0" width="${W}" height="${H}" fill="#fff"/>`,
+    // Discreet caption — the inset is the FENCE'S OWN segment plan (not the
+    // roof site plan, and not the full sheet's schedule furniture).
+    `<text x="6" y="12" font-size="8" font-weight="bold" fill="#333">FENCE SEGMENT PLAN</text>`,
+  ];
+  segs.forEach((s, i) => {
+    const x1 = X(s.startX), y1 = Y(s.startY), x2 = X(s.endX), y2 = Y(s.endY);
+    const col = THUMB_SEG_COLORS[i % THUMB_SEG_COLORS.length];
+    const segPx = Math.hypot(x2 - x1, y2 - y1) || 1;
+    const nx = -(y2 - y1) / segPx, ny = (x2 - x1) / segPx;
+    const B = 8;
+    out.push(`<polygon points="${(x1 + nx * B).toFixed(1)},${(y1 + ny * B).toFixed(1)} ${(x2 + nx * B).toFixed(1)},${(y2 + ny * B).toFixed(1)} ${(x2 - nx * B).toFixed(1)},${(y2 - ny * B).toFixed(1)} ${(x1 - nx * B).toFixed(1)},${(y1 - ny * B).toFixed(1)}" fill="${col}" fill-opacity="0.12" stroke="${col}" stroke-width="0.9"/>`);
+    const cells = Math.max(s.panelCount ?? 0, 1);
+    for (let c = 0; c <= cells; c++) {
+      const t = c / cells, cx = x1 + (x2 - x1) * t, cy = y1 + (y2 - y1) * t;
+      out.push(`<line x1="${(cx + nx * B).toFixed(1)}" y1="${(cy + ny * B).toFixed(1)}" x2="${(cx - nx * B).toFixed(1)}" y2="${(cy - ny * B).toFixed(1)}" stroke="${col}" stroke-width="0.6"/>`);
+    }
+    out.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="2" stroke-linecap="round"/>`);
+    const lenFt = (s.lengthM ?? 0) * M_TO_FT;
+    const mx = (x1 + x2) / 2 - nx * (B + 7), my = (y1 + y2) / 2 - ny * (B + 7);
+    const lbl = escapeH(String(s.label ?? s.id ?? ('S' + (i + 1))));
+    out.push(`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="7" font-weight="bold" fill="${col}">${lbl}: ${Math.round(lenFt)}'</text>`);
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">${out.join('')}</svg>`;
+}
+
+/** Minimal ground row-spacing SIDE diagram: tilted module rows + O.C. dim.
+ *  A genuinely different view (side elevation), not a copy of the top-down. */
+function buildRowSpacingThumb(cad: CADModel): string | null {
+  const g = cad.ground;
+  const a = g?.arrays?.[0];
+  if (!g || !a) return null;
+
+  const W = 400, H = 150;
+  const rowCount  = Math.max(1, a.dimensions?.rowCount ?? a.rows?.length ?? 1);
+  const spacingFt = (a.rowSpacingM ?? 0) * M_TO_FT;
+  const tilt      = a.tiltDeg ?? 20;
+  const clearFt   = (a.groundClearanceM ?? 0.5) * M_TO_FT;
+
+  const showRows = Math.min(rowCount, 5);
+  const marginL = 46, marginR = 20, baseY = H - 34;
+  const avail   = W - marginL - marginR;
+  const pitchPx = avail / Math.max(showRows, 2);
+  const modLen  = Math.min(pitchPx * 0.62, 60);
+  const rise    = Math.sin(tilt * Math.PI / 180) * modLen;
+  const run     = Math.cos(tilt * Math.PI / 180) * modLen;
+  const clrPx   = Math.min(Math.max(clearFt, 0.5) * 3, 16);
+
+  const out: string[] = [`<rect x="0" y="0" width="${W}" height="${H}" fill="#fff"/>`];
+  out.push(`<line x1="20" y1="${baseY}" x2="${W - 14}" y2="${baseY}" stroke="#6b4a2a" stroke-width="1.4"/>`);
+  for (let i = 0; i < 8; i++) {
+    const gx = 24 + i * ((W - 44) / 8);
+    out.push(`<line x1="${gx.toFixed(1)}" y1="${baseY}" x2="${(gx - 5).toFixed(1)}" y2="${(baseY + 6).toFixed(1)}" stroke="#6b4a2a" stroke-width="0.6"/>`);
+  }
+  for (let r = 0; r < showRows; r++) {
+    const bx = marginL + r * pitchPx, by = baseY - clrPx;
+    const tx = bx + run, ty = by - rise;
+    out.push(`<line x1="${bx.toFixed(1)}" y1="${by.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}" stroke="#1a4a8a" stroke-width="3" stroke-linecap="round"/>`);
+    out.push(`<line x1="${((bx + tx) / 2).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${((bx + tx) / 2).toFixed(1)}" y2="${((by + ty) / 2).toFixed(1)}" stroke="#555" stroke-width="1"/>`);
+  }
+  if (showRows >= 2) {
+    const dx1 = marginL, dx2 = marginL + pitchPx, dy = baseY + 16;
+    out.push(`<line x1="${dx1}" y1="${dy}" x2="${dx2}" y2="${dy}" stroke="#c00" stroke-width="0.9"/>`);
+    out.push(`<line x1="${dx1}" y1="${dy - 4}" x2="${dx1}" y2="${dy + 4}" stroke="#c00" stroke-width="0.8"/>`);
+    out.push(`<line x1="${dx2}" y1="${dy - 4}" x2="${dx2}" y2="${dy + 4}" stroke="#c00" stroke-width="0.8"/>`);
+    out.push(`<text x="${((dx1 + dx2) / 2).toFixed(1)}" y="${(dy - 3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="bold" fill="#c00">${spacingFt.toFixed(1)}' O.C.</text>`);
+  }
+  out.push(`<text x="${(marginL + run + 6).toFixed(1)}" y="${(baseY - clrPx - rise - 4).toFixed(1)}" font-size="7.5" font-weight="bold" fill="#1a4a8a">${Math.round(tilt)}° TILT</text>`);
+  out.push(`<text x="24" y="16" font-size="7.5" font-weight="bold" fill="#333">${rowCount} ROWS @ ${spacingFt.toFixed(1)}' O.C. — SIDE VIEW</text>`);
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">${out.join('')}</svg>`;
+}
+
 // ── getSecondaryView: Secondary view dispatcher ──────────────────────────────
 // Returns null when no separate implementation exists yet (strip hidden).
 export function getSecondaryView(
@@ -480,15 +585,11 @@ export function getSecondaryView(
 ): string | null {
   switch (viewId) {
     case 'segment_plan':
-      try {
-        const segSvg = drawingEngine.getArrayPlanFromCAD(cad, input, ctx);
-        return segSvg && segSvg.length > 200 ? segSvg : null;
-      } catch { return null; }
+      // Dedicated minimal fence top-down — NOT the full getArrayPlanFromCAD sheet.
+      try { return buildSegmentPlanThumb(cad); } catch { return null; }
     case 'row_layout':
-      try {
-        const rowSvg = drawingEngine.getArrayPlanFromCAD(cad, input, ctx);
-        return rowSvg && rowSvg.length > 200 ? rowSvg : null;
-      } catch { return null; }
+      // Dedicated minimal ground row-spacing side diagram — NOT the full sheet.
+      try { return buildRowSpacingThumb(cad); } catch { return null; }
     // Not yet implemented — secondary strip hidden until dedicated views exist
     case 'footing_detail':
     case 'pier_detail':
@@ -547,6 +648,16 @@ export function composeDrawPage(
     `</div>`
   ).join('');
 
+  // ── General notes (fills the data column below the callout schedule) ────────
+  const generalNotesHtml = (comp.generalNotes && comp.generalNotes.length > 0)
+    ? `<div class="draw-zone-hdr" style="flex-shrink:0;margin-top:6px;">GENERAL NOTES</div>
+       <div style="padding:3px 5px;font-size:7px;line-height:1.5;">
+         ${comp.generalNotes.map((n, i) =>
+           `<div style="display:flex;gap:5px;margin-bottom:2px;"><span style="font-weight:700;">${i + 1}.</span><span>${escapeH(n)}</span></div>`
+         ).join('')}
+       </div>`
+    : '';
+
   // ── Secondary view strip (bottom of draw zone) ─────────────────────────────
   // Use secondaryHeader from composition (system-specific label)
   const secHeader = escapeH(comp.secondaryHeader ?? 'SECONDARY VIEW');
@@ -587,6 +698,7 @@ export function composeDrawPage(
             <div style="padding:0;font-size:7px;overflow:auto;">
               ${calloutsHtml}
             </div>
+            ${generalNotesHtml}
           </div>
         </div>
       </div>
@@ -594,9 +706,14 @@ export function composeDrawPage(
 }
 
 export function escapeH(s: string): string {
+  // Idempotent HTML escape: escapes bare <>&"' but leaves existing entities
+  // (&amp; &mdash; &#39; …) intact, so values that already contain entities or
+  // are escaped twice don't become &amp;mdash;. (Historically this function was
+  // a no-op — replacing each char with itself — a repo-wide XSS hole.)
   return String(s)
-    .replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')
-    .replace(/"/g,'"');
+    .replace(/&(?![a-zA-Z0-9#]+;)/g, '&amp;')   // escape bare & but keep &mdash; &#39; &times; …
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 

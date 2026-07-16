@@ -116,6 +116,9 @@ export interface SheetComposition {
   dataRows: DataRow[];
   /** callout schedule items */
   callouts: CalloutItem[];
+  /** optional GENERAL NOTES rendered below the callout schedule to fill the
+   *  data column (kept out of the callout list so bubbles stay drawing-linked) */
+  generalNotes?: string[];
   /** validation: what must be present */
   requires: string[];
 }
@@ -328,8 +331,16 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
     rowSpacingFt:  arr?.rowSpacingM             ? mToFt(arr.rowSpacingM)            : ((gArrs?.rowSpacingFt as number) || 10),
     groundClearIn: arr?.groundClearanceM        ? Math.round(arr.groundClearanceM * 39.3701) : ((gArrs?.groundClearanceIn as number) || 18),
     pileDepthFt:   arr?.pileDepthM              ? mToFt(arr.pileDepthM)             : ((gArrs?.pileDepthFt as number) || 5),
-    pileSpacingFt: arr?.pileSpacingM            ? mToFt(arr.pileSpacingM)           : ((gArrs?.pileSpacingFt as number) || 8),
-    structureType: (arr?.structureType         ?? (gArrs?.structureType as string)  ?? 'DRIVEN PILE').toString().toUpperCase().replace(/_/g,' '),
+    // Speck PLP POWER DRIVE™ places ONE driven I-beam pylon per BAY at ~20 ft O.C.
+    // (engine PLP_BAY_SPAN_M = 6.10). A legacy per-array pile-spacing scalar (often
+    // a stale ~8 ft generic default) does NOT describe PLP, so honor a stored value
+    // only when it is a plausible PLP bay span (≥ 15 ft); otherwise use the 20 ft
+    // engine standard. Keeps the PV-3G detail + STRUCTURAL DATA panel in agreement.
+    pileSpacingFt: (() => {
+      const v = arr?.pileSpacingM ? mToFt(arr.pileSpacingM) : (gArrs?.pileSpacingFt as number);
+      return (typeof v === 'number' && v >= 15) ? Math.round(v) : 20;
+    })(),
+    structureType: 'DRIVEN PYLON — PLP',
     setbackFt:     g?.setbackFt                ?? ((lay?.groundSetbackFt as number) || 5),
     windSpeedMph:  (cw?.windSpeed as number)   || (p?.ahjWindSpeedMph as number)   || 115,
     snowPsf:       (p?.ahjGroundSnowPsf as number) || 0,
@@ -345,6 +356,7 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   mountSys: string;
   rafterSize: string;
   rafterSpacing: number;
+  isTruss: boolean;
   attachSpacing: number;
   lagSpec: string;
   embedSpec: string;
@@ -385,11 +397,16 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   // Same coverage-aware rule as the DRAWING (resolveFireSetbackIn) — the data
   // zone printed "1.5' EDGES" while the plan hatched 3'-0" bands.
   const _covRoofFt2 = (r?.planes ?? []).reduce((s: number, x: any) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
+  const _covPitch = (() => {
+    const ps = (r?.planes ?? []).map((x: any) => Number(x?.pitch)).filter((v: number) => isFinite(v));
+    return ps.length ? ps.reduce((a: number, b: number) => a + b, 0) / ps.length : undefined;
+  })();
   const _covFrac = arrayCoverageFrac(
     cad?.totalPanels ?? 0,
     (p?.panelLengthIn as number) || 66,
     (p?.panelWidthIn as number) || 40,
     _covRoofFt2,
+    _covPitch,   // plan-projected basis — same 18"-vs-36" decision as the drawing
   );
   const fireSetbackFt = Math.round((resolveFireSetbackIn(_fireIn, _covFrac) / 12) * 10) / 10;
   const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;
@@ -437,6 +454,11 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     mountSys:      _mountName.toUpperCase(),
     rafterSize:    ((p?.rafterSize as string) || '2x6'),
     rafterSpacing: (p?.rafterSpacing as number) || 24,
+    // Framing type mirrors the SAME determination PV-4C/PE-1/CERT use, so PV-3
+    // labels the framing consistently with the structural sheets (truss vs stick).
+    isTruss: ((c?.structural as any)?.rafter?.framingType === 'truss')
+      || (((c?.structural as any)?.rafter?.bendingMoment === 0)
+        && (((c?.structural as any)?.rafter?.allowableBendingMoment as number) || 0) > 0),
     // Engineering-resolved spacing first (V4 mount layout — e.g. auto-resolved
     // 36"), then the user's input, then the racking system's rated max.
     attachSpacing: (_ca?.maxAllowedSpacing as number)
@@ -516,10 +538,13 @@ function fenceComposition(
     layout:         'elevation_dominant',
     drawPct:        78,
     dataPct:        22,
+    // Wave 6.2 (punch 1c): the drawn elevation is a TYPICAL 2-bay section of
+    // the run — headers must say so (the sheet otherwise read as if the whole
+    // fence were the drawn ~16' width).
     drawHeader:     isPlan
-      ? `SOLAR FENCE ELEVATION — ${d.totalLenFt} L.F. TOTAL | ${d.segmentCount} SEGMENTS | POST @ ${d.postSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`
-      : `FENCE STRUCTURAL ELEVATION — POST EMBED: ${d.embedFt}' MIN | WIND: ${d.windSpeedMph} MPH Vult | ASCE 7-22`,
-    secondaryHeader: isPlan ? 'SEGMENT PLAN — TOP VIEW' : 'FOOTING DETAIL — NTS',
+      ? `SOLAR FENCE — TYPICAL 2-BAY ELEVATION OF ${d.totalLenFt} L.F. RUN | ${d.segmentCount} SEGMENTS | POST @ ${d.postSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`
+      : `FENCE STRUCTURAL DETAILS — POST EMBED: ${d.embedFt}' MIN | WIND: ${d.windSpeedMph} MPH Vult | ASCE 7-22 | ${d.totalLenFt} L.F. RUN`,
+    secondaryHeader: isPlan ? 'SEGMENT PLAN — TOP VIEW' : 'CONNECTION + FOOTING DETAILS — NTS',
     dataTitle:      isPlan ? 'FENCE DATA' : 'STRUCTURAL DATA',
     dataRows,
     callouts,
@@ -550,8 +575,8 @@ function groundComposition(
       ]
     : [
         { label: 'STRUCTURE TYPE', value: d.structureType,                  bold: true },
-        { label: 'PILE DEPTH',     value: `${d.pileDepthFt}' MIN`,          bold: true, highlight: true },
-        { label: 'PILE SPACING',   value: `${d.pileSpacingFt}' O.C.` },
+        { label: 'PYLON EMBED',    value: `${d.pileDepthFt}' MIN`,          bold: true, highlight: true },
+        { label: 'PYLON SPACING',  value: `${d.pileSpacingFt}' O.C. (1/BAY)` },
         { label: 'GND CLEARANCE',  value: `${d.groundClearIn}" MIN` },
         { label: 'TILT ANGLE',     value: `${d.tiltDeg}°` },
         { label: 'WIND SPEED',     value: `${d.windSpeedMph} MPH Vult` },
@@ -566,11 +591,17 @@ function groundComposition(
         { n: 2, label: 'GROUND LINE', sub: 'grade elevation reference' },
         { n: 3, label: 'TILT INDICATOR', sub: `${d.tiltDeg}° array tilt` },
         { n: 4, label: 'SETBACK LINE', sub: `${d.setbackFt}' property setback` },
-        { n: 5, label: 'PILE LOCATION', sub: d.structureType },
+        { n: 5, label: 'PYLON LOCATION', sub: d.structureType },
+        { n: 6, label: 'ROW SPACING', sub: `${d.rowSpacingFt}' O.C. — verify inter-row shading` },
+        { n: 7, label: 'PYLON EMBED', sub: `${d.pileDepthFt}' min below grade — field-verify refusal` },
+        { n: 8, label: 'GROUND CLEARANCE', sub: `${d.groundClearIn}" min below lowest module` },
+        { n: 9, label: 'EQUIP. BONDING', sub: 'all metalwork bonded to EGC — see PV-3' },
+        { n: 10, label: 'FOUNDATION', sub: 'driven I-beam pylon — no concrete' },
+        { n: 11, label: 'DESIGN LOADS', sub: `${d.windSpeedMph} MPH Vult · ASCE 7-22` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: `${d.tiltDeg}° tilt` },
-        { n: 2, label: 'PILE / POST', sub: d.structureType },
+        { n: 2, label: 'PYLON / STRUT', sub: d.structureType },
         { n: 3, label: 'EMBEDMENT', sub: `${d.pileDepthFt}' min below grade` },
         { n: 4, label: 'GRADE LINE', sub: `${d.groundClearIn}" clearance min` },
       ];
@@ -580,7 +611,10 @@ function groundComposition(
     viewType,
     sheetId:        isPlan ? 'PV-2' : 'PV-3',
     primaryView:    isPlan ? 'ground_plan' : 'ground_elevation',
-    secondaryViews: isPlan ? ['row_layout'] : ['pier_detail'],
+    // Ground plan owns its row-spacing side elevation + pile section INSIDE the
+    // primary SVG (drawGroundArray split layout) — no duplicate outer strip, so
+    // the primary fills the full draw-zone height instead of ~48% letterbox.
+    secondaryViews: isPlan ? [] : ['pier_detail'],
     dataSections:   isPlan
       ? ['row_spacing', 'tilt', 'system_size']
       : ['foundation_depth', 'wind_load'],
@@ -589,11 +623,22 @@ function groundComposition(
     dataPct:        35,
     drawHeader:     isPlan
       ? `GROUND ARRAY PLAN — ${d.rowCount} ROWS × ${d.panelsPerRow} MOD/ROW | TILT: ${d.tiltDeg}° | AZ: ${d.azimuthDeg}° | ROW SPACING: ${d.rowSpacingFt}'`
-      : `PILE ELEVATION — ${d.structureType} | EMBED: ${d.pileDepthFt}' MIN | PILE @ ${d.pileSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`,
-    secondaryHeader: isPlan ? 'ROW SPACING DIAGRAM' : 'PIER / PILE DETAIL — NTS',
+      : `PLP PYLON ELEVATION — ${d.structureType} | EMBED: ${d.pileDepthFt}' MIN | PYLON @ ${d.pileSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`,
+    secondaryHeader: isPlan ? 'ROW SPACING DIAGRAM' : 'PLP PYLON DETAIL — NTS',
     dataTitle:      isPlan ? 'ARRAY DATA' : 'STRUCTURAL DATA',
     dataRows,
     callouts,
+    generalNotes:   isPlan
+      ? [
+          'Array is ground-mounted on a driven-steel-pile foundation — no concrete unless refusal cannot be met; field-verify refusal depth.',
+          `Module rows at ${d.tiltDeg}° fixed tilt, azimuth ${d.azimuthDeg}° (${azLabel(d.azimuthDeg)}); verify inter-row shading at winter solstice for the ${d.rowSpacingFt}' O.C. spacing.`,
+          `Maintain ${d.setbackFt}' minimum setback from all property lines and the ${d.groundClearIn}" minimum ground clearance below the lowest module edge.`,
+          'Bond all module frames, rails and pile caps to the equipment grounding conductor per NEC 690.43 / 250.—see PV-3 for the grounding schedule.',
+          'Racking, clamps and fasteners installed per the manufacturer\'s ICC-ES report and stamped structural details; torque to spec.',
+          `Design loads: ${d.windSpeedMph} MPH Vult wind (ASCE 7-22)${d.snowPsf > 0 ? `, ${d.snowPsf} PSF ground snow` : ''}; foundation embedment per the project geotechnical report.`,
+          'All dimensions are approximate / NTS — field-verify pile locations, row spacing and grades prior to installation.',
+        ]
+      : undefined,
     requires:       isPlan
       ? ['ground', 'ground.arrays']
       : ['ground', 'ground.arrays', 'ground.arrays[0].pileDepthM'],
@@ -607,6 +652,19 @@ function roofComposition(
 ): SheetComposition {
   const d = getRoofData(cad, input);
   const isPlan = viewType === 'plan';
+  // Roof Tech RT-MINI is an L-FOOT + RAIL base (rail_based), NOT rail-less — so
+  // its attach spacing is the ENGINE-resolved value (structural.attachment
+  // .maxAllowedSpacing), the SAME single source PV-4C/PE-1/CERT/APP-A print. The
+  // old regex wrongly matched RT-MINI + the brand name "ROOF TECH" and hardcoded
+  // 48" STAGGERED, contradicting the structural authority. Only genuinely
+  // rail-less products (RT-APEX / E Mount AIR / explicit "rail-less") get the
+  // direct-attach treatment. (RT-MINI research 2026-07-09, sourced.)
+  const _railless = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(d.mountSys);
+  const _attachDisplay = _railless ? '48" O.C. STAGGERED' : `${d.attachSpacing}" O.C. MAX`;
+  const _attachInto = _railless ? 'direct-attach mounts @ 48" O.C. staggered' : `L-foot @ ${d.attachSpacing}" O.C.`;
+  // Framing term matches the structural authority (PV-4C/PE-1/CERT) so the set
+  // doesn't say "RAFTER" on PV-3 while the calcs certify a pre-engineered truss.
+  const _frameLabel = d.isTruss ? 'TRUSS' : 'RAFTER';
 
   const dataRows: DataRow[] = isPlan
     ? [
@@ -616,16 +674,16 @@ function roofComposition(
         { label: 'ROOF TYPE',      value: d.roofType },
         { label: 'PITCH',          value: d.pitchStr,                        bold: true },
         { label: 'AZIMUTH',        value: d.azimuthLabel },
-        { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' EDGES · ${d.pathwayFt}' PATHWAY`, bold: true },
+        { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' RIDGE · 18" HIP · ${d.pathwayFt}' PATHWAY`, bold: true },
         { label: 'FRAMING',        value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX` },
+        { label: 'ATTACH SPACING', value: _attachDisplay },
         { label: 'MODULES',        value: `${d.totalPanels} @ ${d.dcKw} kWdc`, bold: true },
       ]
     : [
         { label: 'MOUNTING SYS',   value: d.mountSys },
-        { label: 'RAFTER SIZE',    value: d.rafterSize },
-        { label: 'RAFTER SPACING', value: `${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: `${d.attachSpacing}" O.C. MAX`,   bold: true },
+        { label: `${_frameLabel} SIZE`,    value: d.rafterSize },
+        { label: `${_frameLabel} SPACING`, value: `${d.rafterSpacing}" O.C.` },
+        { label: 'ATTACH SPACING', value: _attachDisplay,   bold: true },
         { label: 'LAG BOLT',       value: d.lagSpec },
         { label: 'EMBEDMENT',      value: d.embedSpec,                      bold: true, highlight: true },
         { label: 'ROOF TYPE',      value: d.roofType },
@@ -637,17 +695,18 @@ function roofComposition(
   const callouts: CalloutItem[] = isPlan
     ? [
         { n: 1, label: 'PV MODULE ARRAY', sub: `${d.totalPanels} mod @ ${d.dcKw} kW DC` },
-        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge/hip/rake · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
+        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
-        { n: 5, label: 'ATTACHMENT ZONE', sub: `${/RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'direct-attach mounts' : 'L-foot'} @ ${d.attachSpacing}" O.C. into rafters` },
+        // 'truss'.toLowerCase()+'s' printed "trusss" on PV-1 — pluralize properly.
+        { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into ${_frameLabel === 'TRUSS' ? 'trusses' : 'rafters'}` },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
         { n: 2, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'DIRECT-ATTACH MOUNT' : 'MOUNTING RAIL', sub: d.mountSys },
         { n: 3, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
         { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
-        { n: 5, label: `RAFTER ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
+        { n: 5, label: `${_frameLabel} ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
         { n: 6, label: d.conduitType + ' CONDUIT', sub: 'see conductor schedule' },
         { n: 7, label: 'BONDING JUMPER', sub: 'NEC 690.43' },
       ];
@@ -666,7 +725,7 @@ function roofComposition(
     dataPct:        18,
     drawHeader:     isPlan
       ? `ROOF PLAN — ${d.totalPanels} MOD @ ${d.dcKw} kWdc | ${d.roofType} ROOF @ ${d.pitchStr} | AZ: ${d.azimuthLabel} | ${d.mountSys}`
-      : `ATTACHMENT DETAIL — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${d.attachSpacing}" O.C. MAX`,
+      : `ATTACHMENT DETAIL — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${_attachDisplay}`,
     secondaryHeader: isPlan ? 'SETBACK & OBSTRUCTION OVERLAY' : 'ATTACHMENT DETAIL — NTS',
     dataTitle:      isPlan ? 'SYSTEM DATA' : 'ATTACHMENT SPECS',
     dataRows,

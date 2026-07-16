@@ -1,0 +1,59 @@
+import { describe, it, expect } from 'vitest';
+import { generatePermitHTML } from '@/lib/permit';
+import { roofProject } from '../../test-fixtures/roofProject';
+
+// Representative rectangular parcel around the roofProject building. Even WITH a
+// county-GIS parcel available, the PV-1 site & roof sheet must NOT carry a
+// second bolted-on plot-plan visual.
+const REP_PARCEL = {
+  polygon: [
+    { lat: 33.44820, lng: -112.07455 },
+    { lat: 33.44820, lng: -112.07365 },
+    { lat: 33.44875, lng: -112.07365 },
+    { lat: 33.44875, lng: -112.07455 },
+  ],
+  apn: '301-45-072',
+  acres: 0.18,
+  source: 'County GIS',
+};
+
+function clone<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
+
+// Ray, 2026-07-08: the site/plot context (property line, street, driveway,
+// service equipment) is drawn INTEGRATED into the ONE site & roof drawing —
+// now the combined PV-1 sheet (the standalone site plan was folded in) —
+// matching the professional reference. The site context lives in the roof
+// drawing's own frame, never a separate bolted-on plot-plan box.
+describe('PV-1 site & roof sheet carries NO separate plot-plan box', () => {
+  it('omits any bolted-on plot inset even when a county-GIS parcel is present', () => {
+    const withoutParcel = generatePermitHTML(clone(roofProject));
+    const withParcelInput = clone(roofProject) as unknown as Record<string, unknown>;
+    withParcelInput.aerialData = { parcel: REP_PARCEL };
+    const withParcel = generatePermitHTML(withParcelInput as never);
+
+    // Both are full plansets with the combined PV-1 site & roof sheet.
+    expect(withoutParcel).toContain('PV-1');
+    expect(withParcel).toContain('PV-1');
+
+    // NEVER a second plot-plan visual on the module-layout sheet — with or
+    // without a parcel available.
+    for (const html of [withoutParcel, withParcel]) {
+      expect(html).not.toContain('site-context-inset');
+      expect(html).not.toContain('SITE / PLOT PLAN');
+    }
+
+    // WITH a parcel: the site context is drawn INTEGRATED into the main roof
+    // drawing (one drawing), not a box — property line rendered in the roof's
+    // own frame (class "pv2-site").
+    expect(withParcel).toContain('pv2-site');
+    expect(withParcel).toContain('PROPERTY LINE');
+
+    // No fabricated driveway/sidewalk — those only come from real data now
+    // (OSM/aerial), never inferred.
+    expect(withParcel).not.toContain('DRIVEWAY (APPROX)');
+    expect(withParcel).not.toContain('SIDEWALK (APPROX)');
+
+    // WITHOUT a parcel or site features: no fabricated lot — roof plan as before.
+    expect(withoutParcel).not.toContain('pv2-site');
+  });
+});

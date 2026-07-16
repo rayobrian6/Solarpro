@@ -21,7 +21,7 @@ import type {
 } from '../types';
 import {
   Point2D, BBox,
-  bbox, metersToFt, ftToMeters, fmtFt,
+  bbox, metersToFt, ftToMeters, fmtFt, latLngToXY,
 } from '../geometry';
 
 const INCHES_TO_METERS = 0.0254;
@@ -51,14 +51,45 @@ export function groundCAD(input: PermitInputShape): CADModel {
   const setbackFt = input.layout?.groundSetbackFt ?? 5;
   const setbackM  = ftToMeters(setbackFt);
 
+  // ── GPS-FIRST PATH: the user's REAL designed panel positions ─────────────
+  // groundCAD historically NEVER read project.panelPositions — when
+  // layout.groundArrays was absent it synthesized a ceil(sqrt(N))-wide grid at
+  // tilt 20 / azimuth 180 anchored at (0,0). Stowell's real ground array (26
+  // panels, 2 rows of 13, az ~175, at a specific GPS spot east of the house)
+  // was ignored: detail sheets and the structural BOM ("30 rails, 12 piles")
+  // were derived from phantom 5-row geometry. Mirror roofCAD: when the design
+  // carries GPS panels, build the CAD arrays from the REAL positions.
+  //
+  // Scope guard: only consume panels stamped ground (placementEngine tags
+  // systemType/placementType) or entirely untagged (legacy single-system
+  // ground projects predate stamping). Panels stamped roof/fence are another
+  // solver's — the hybrid engine scopes them away in production, but direct
+  // callers (tests, legacy paths) may pass the unscoped list.
+  const gpsGroundPanels = (input.project?.panelPositions || []).filter((p: any) => {
+    if (!p || !isFinite(p?.lat) || !isFinite(p?.lng) || Math.abs(p.lat) <= 0.001) return false;
+    const st = String(p.systemType ?? '').toLowerCase();
+    const pt = String(p.placementType ?? '').toUpperCase();
+    if (pt === 'GROUND' || st === 'ground' || st === 'ground_mount') return true;
+    return st === '' && pt === '';
+  });
+  if (gpsGroundPanels.length > 0) {
+    return solveGroundFromGPS(input, gpsGroundPanels, { panelW, panelH, setbackFt, warnings, t0 });
+  }
+
   const cadArrays: CADGroundArray[] = [];
   let globalOriginX = 0;
   let globalOriginY = 0;
 
   // If no arrays defined, generate default from system totals
+  // Synthesized grids must never emit MORE panels than the system actually
+  // has: ceil(sqrt(26))=6 × 5 rows tiled 30 slots for Stowell's 26 ground
+  // panels — the site-plan overlay label and the per-module BOM lines
+  // (bonding clips etc.) all inherited the phantom 4.
+  let panelBudget = Infinity;
   if (rawArrays.length === 0) {
     warnings.push('groundCAD: no groundArrays — generating from system totals');
     const totalPanels  = input.system?.totalPanels ?? 10;
+    panelBudget        = totalPanels;
     const panelsPerRow = Math.ceil(Math.sqrt(totalPanels));
     const rowCount     = Math.ceil(totalPanels / panelsPerRow);
 
@@ -113,6 +144,7 @@ export function groundCAD(input: PermitInputShape): CADModel {
       const rowPanels: CADPanel[] = [];
 
       for (let c = 0; c < panelsPerRow; c++) {
+        if (allPanels.length + rowPanels.length >= panelBudget) break;
         const px = rowX + c * (panelW + DEFAULT_GAP_M);
         const py = rowY;
         rowPanels.push({
@@ -128,6 +160,7 @@ export function groundCAD(input: PermitInputShape): CADModel {
         });
       }
 
+      if (rowPanels.length === 0) continue;   // panelBudget exhausted — no empty rows
       allPanels.push(...rowPanels);
       rows.push({
         id:       `${arr.id || ai}-row${r}`,
@@ -233,6 +266,241 @@ export function groundCAD(input: PermitInputShape): CADModel {
     solveMs:      Date.now() - t0,
     warnings,
   };
+}
+
+// ── GPS solver — REAL designed panel positions ───────────────
+//
+// Mirrors roofCAD's GPS branch: origin = centroid of the designed panels,
+// local XY via latLngToXY, panels stored top-left (center − dims/2). Rows are
+// grouped by arrayId/layoutId when the design carries them (the studio emits
+// one 'ground-row-<ts>' id per row — Stowell), else clustered on the minor
+// axis of the point cloud. All downstream geometry (dimensions, rows[],
+// rowSpacingM) reflects the REAL extent so pile/rail/clamp counts derived
+// from rows and arrayWidthM follow the actual array, not a phantom grid.
+
+function solveGroundFromGPS(
+  input: PermitInputShape,
+  rawPanels: any[],
+  ctx: { panelW: number; panelH: number; setbackFt: number; warnings: string[]; t0: number },
+): CADModel {
+  const { panelW, panelH, setbackFt, warnings, t0 } = ctx;
+  const layout0: any = input.layout?.groundArrays?.[0] ?? {};
+
+  warnings.push(`groundCAD: using ${rawPanels.length} designed GPS panel position(s)`);
+
+  // ── Origin = centroid of the designed panels ─────────────────
+  const originLat = rawPanels.reduce((s: number, p: any) => s + p.lat, 0) / rawPanels.length;
+  const originLng = rawPanels.reduce((s: number, p: any) => s + p.lng, 0) / rawPanels.length;
+
+  const pts = rawPanels.map((p: any, i: number) => {
+    const xy = latLngToXY(p.lat, p.lng, originLat, originLng);
+    return {
+      raw:      p,
+      id:       (p.id as string) || `gps-${i}`,
+      x:        xy.x,
+      y:        xy.y,
+      groupKey: (p.arrayId ?? p.layoutId ?? null) as string | null,
+    };
+  });
+
+  // ── Row axis = principal (major) axis of the point cloud ─────
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const p of pts) {
+    const dx = p.x - cx, dy = p.y - cy;
+    sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+  }
+  const theta    = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const rowDir   = { x: Math.cos(theta), y: Math.sin(theta) };
+  const minorDir = { x: -rowDir.y, y: rowDir.x };
+  const alongRow  = (p: { x: number; y: number }) => p.x * rowDir.x   + p.y * rowDir.y;
+  const acrossRow = (p: { x: number; y: number }) => p.x * minorDir.x + p.y * minorDir.y;
+  const avg = (vs: number[]) => vs.reduce((s, v) => s + v, 0) / vs.length;
+
+  // ── Group panels into rows ────────────────────────────────────
+  let groups: Array<typeof pts>;
+  const keyedCount = pts.filter(p => p.groupKey != null).length;
+  const keyCount   = new Set(pts.map(p => p.groupKey).filter(k => k != null)).size;
+  if (keyedCount === pts.length && keyCount >= 2) {
+    // Design-studio row ids (one per row) — authoritative grouping.
+    const byKey = new Map<string, typeof pts>();
+    for (const p of pts) {
+      const g = byKey.get(p.groupKey!) ?? [];
+      g.push(p);
+      byKey.set(p.groupKey!, g);
+    }
+    groups = [...byKey.values()];
+  } else {
+    // Cluster on the minor-axis projection: a gap wider than ~3/4 of the
+    // panel depth starts a new row (within-row spread is ~0; row-to-row
+    // spacing is meters).
+    const sorted = [...pts].sort((a, b) => acrossRow(a) - acrossRow(b));
+    const gapM = Math.max(panelH * 0.75, 0.6);
+    groups = [];
+    let cur: typeof pts = [];
+    let last = NaN;
+    for (const p of sorted) {
+      const v = acrossRow(p);
+      if (cur.length > 0 && v - last > gapM) { groups.push(cur); cur = []; }
+      cur.push(p);
+      last = v;
+    }
+    if (cur.length > 0) groups.push(cur);
+  }
+  // Stable order: rows front-to-back along the minor axis, columns along the row axis.
+  groups.sort((a, b) => avg(a.map(acrossRow)) - avg(b.map(acrossRow)));
+  for (const g of groups) g.sort((a, b) => alongRow(a) - alongRow(b));
+
+  // ── Array azimuth: median of panel azimuths, else derived from row axis ──
+  const azSamples = rawPanels
+    .map((p: any) => p.azimuth)
+    .filter((a: any) => typeof a === 'number' && isFinite(a))
+    .map((a: number) => ((a % 360) + 360) % 360);
+  let azimuth: number;
+  if (azSamples.length > 0) {
+    azimuth = median(azSamples);
+  } else {
+    // Perpendicular to the row axis, facing the equator (the downslope face
+    // of a tilted ground array in either hemisphere).
+    const rowBearing = (Math.atan2(rowDir.x, rowDir.y) * 180 / Math.PI + 360) % 360;
+    const cands  = [(rowBearing + 90) % 360, (rowBearing + 270) % 360];
+    const target = originLat >= 0 ? 180 : 0;
+    const angDist = (a: number) => Math.min(Math.abs(a - target), 360 - Math.abs(a - target));
+    azimuth = angDist(cands[0]) <= angDist(cands[1]) ? cands[0] : cands[1];
+  }
+  azimuth = Math.round(azimuth * 10) / 10;
+
+  // ── Tilt: median of panel tilts (5–60°), else layout, else 20 ─
+  const tiltSamples = rawPanels
+    .map((p: any) => p.tilt)
+    .filter((t: any) => typeof t === 'number' && isFinite(t) && t >= 5 && t <= 60);
+  const tiltDeg = tiltSamples.length > 0
+    ? median(tiltSamples)
+    : (typeof layout0.tiltDeg === 'number' && layout0.tiltDeg > 0 ? layout0.tiltDeg : 20);
+
+  // ── Panels at the REAL local XY (top-left convention, as roofCAD) ──
+  const allPanels: CADPanel[] = [];
+  const rows: CADGroundRow[] = [];
+  groups.forEach((g, r) => {
+    const rowPanels: CADPanel[] = g.map((p, c) => {
+      // Ground default is landscape; honor an explicit portrait orientation.
+      const isLandscape = String(p.raw.orientation ?? 'landscape').toLowerCase() !== 'portrait';
+      const pw = isLandscape ? panelW : panelH;
+      const ph = isLandscape ? panelH : panelW;
+      return {
+        id:          p.id,
+        x:           p.x - pw / 2,
+        y:           p.y - ph / 2,
+        widthM:      pw,
+        heightM:     ph,
+        orientation: isLandscape ? 'landscape' : 'portrait',
+        row:         typeof p.raw.row === 'number' ? p.raw.row : r,
+        col:         typeof p.raw.col === 'number' ? p.raw.col : c,
+        arrayId:     p.groupKey ?? 'gps-array',
+      };
+    });
+    const rb = bbox(rowPanels.flatMap(p => [
+      { x: p.x, y: p.y },
+      { x: p.x + p.widthM, y: p.y + p.heightM },
+    ]));
+    rows.push({
+      id:       `gps-row${r}`,
+      rowIndex: r,
+      x:        rb.minX,
+      y:        rb.minY,
+      widthM:   rb.width,
+      panels:   rowPanels,
+    });
+    allPanels.push(...rowPanels);
+  });
+
+  // ── Real extent (drives dimensions AND downstream pile/rail counts) ──
+  const ext = bbox(allPanels.flatMap(p => [
+    { x: p.x, y: p.y },
+    { x: p.x + p.widthM, y: p.y + p.heightM },
+  ]));
+
+  // ── Row spacing from the real row centers ─────────────────────
+  const rowCenters = groups.map(g => avg(g.map(acrossRow))).sort((a, b) => a - b);
+  let rowSpacingM: number;
+  if (rowCenters.length >= 2) {
+    let s = 0;
+    for (let i = 1; i < rowCenters.length; i++) s += rowCenters[i] - rowCenters[i - 1];
+    rowSpacingM = s / (rowCenters.length - 1);
+  } else {
+    rowSpacingM = ftToMeters(layout0.rowSpacingFt || 10);
+  }
+
+  // ── Structure: layout overrides or existing defaults ──────────
+  const gcIn        = layout0.groundClearanceIn || 18;
+  const structType  = layout0.structureType     || 'driven_pile';
+  const pileDepthFt = layout0.pileDepthFt       || 5;
+  const pileSpFt    = layout0.pileSpacingFt     || 8;
+
+  const cadArray: CADGroundArray = {
+    id:               layout0.id || 'gps-array',
+    originX:          ext.minX,
+    originY:          ext.minY,
+    rows,
+    panels:           allPanels,
+    tiltDeg,
+    azimuth,
+    rowSpacingM,
+    groundClearanceM: gcIn * INCHES_TO_METERS,
+    structureType:    structType,
+    pileDepthM:       ftToMeters(pileDepthFt),
+    pileSpacingM:     ftToMeters(pileSpFt),
+    dimensions: {
+      arrayWidthM:  ext.width,
+      arrayDepthM:  ext.height,
+      rowCount:     rows.length,
+      panelsPerRow: Math.max(...rows.map(rw => rw.panels.length)),
+    },
+  };
+
+  console.log(`[PANEL GRID GENERATED] groundCAD source=GPS count=${allPanels.length} rows=${rows.length}`);
+
+  const totalPanels = allPanels.length;
+  const panelWatts  = input.system?.inverters?.[0]?.strings?.[0]?.panelWatts ?? 400;
+  const totalDcKw   = totalPanels * panelWatts / 1000;
+  const dims        = buildGroundDimensions([cadArray]);
+
+  const groundModel: CADGroundModel = {
+    arrays:      [cadArray],
+    totalPanels,
+    setbackFt,
+  };
+
+  console.log('[GROUND CAD SOLVED]', {
+    arrays:      1,
+    totalPanels,
+    totalDcKw:   totalDcKw.toFixed(2),
+    solveMs:     Date.now() - t0,
+    warnings,
+  });
+
+  return {
+    systemType:   'ground_mount',
+    version:      'v1.0',
+    ground:       groundModel,
+    totalPanels,
+    totalDcKw,
+    panelWidthM:  panelW,
+    panelHeightM: panelH,
+    originLat,
+    originLng,
+    bounds:       ext,
+    dimensions:   dims,
+    solveMs:      Date.now() - t0,
+    warnings,
+  };
+}
+
+function median(vs: number[]): number {
+  const s = [...vs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 === 1 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 // ── Dimension builder ─────────────────────────────────────────

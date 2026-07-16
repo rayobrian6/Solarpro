@@ -62,6 +62,8 @@ export interface DistributorPriceOverride {
 
 export interface PricingApplyResult {
   items: BOMLineItemV4[];
+  /** Recommended truck-stock extras subtotal — EXCLUDED from totalBomCost/$-per-W. */
+  truckStockCost?: number;
   /** Count of items priced from static catalog. */
   catalogMatches: number;
   /** Count of items priced from DB overrides. */
@@ -92,11 +94,23 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     source: 'CED', asOf: '2025-01-15',
   },
   {
+    // REC Alpha Pure-R is a PREMIUM HJT black-on-black module — dealer ~$0.95–1.0/W
+    // (~$385–486/panel), NOT the ~$0.37/W commodity rate previously assumed.
     partNumber: 'REC405AA-PURE-R',
-    description: 'REC Alpha Pure 405W Black Frame',
+    description: 'REC Alpha Pure-R 405W (HJT, black)',
     category: 'solar_panel', unit: 'ea',
-    listPrice: 0.46, netPrice: 0.37,
-    source: 'CED', asOf: '2025-01-15',
+    listPrice: 1.10, netPrice: 0.98,
+    source: 'CED', asOf: '2025-09-15',
+  },
+  {
+    // Alias for the equipment-db id ('rec-alpha-pure-405' → uppercased) the BOM
+    // engine emits, so the resolved panel matches this SKU instead of the
+    // generic $/W fallback.
+    partNumber: 'REC-ALPHA-PURE-405',
+    description: 'REC Alpha Pure-R 405W (HJT, black)',
+    category: 'solar_panel', unit: 'ea',
+    listPrice: 1.10, netPrice: 0.98,
+    source: 'CED', asOf: '2025-09-15',
   },
   {
     partNumber: 'SIL-380-BK',
@@ -185,6 +199,77 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     source: 'Soligent', asOf: '2025-01-15',
   },
 
+  // ─── Trunk / AC bus cable (sold per connector-DROP, not per foot) ──────────
+  // Sourced 2026-07-10 — research JSONs in lib/data/equipment/trunk-cable-*.json.
+  {
+    partNumber: 'Q-12-10-240',
+    description: 'Enphase Q Cable, portrait (1.3 m drops) — per connector-drop',
+    category: 'trunk_cable', unit: 'ea',
+    listPrice: 22.29, netPrice: 22.29,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    // Landscape per-drop price not published — set = portrait as a FLOOR
+    // (longer cable per drop, so real price ≥ this). FIELD-VERIFY.
+    partNumber: 'Q-12-17-240',
+    description: 'Enphase Q Cable, landscape (2.0 m drops) — per connector-drop (≈portrait, verify)',
+    category: 'trunk_cable', unit: 'ea',
+    listPrice: 22.29, netPrice: 22.29,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: 'Q-CONN-10M',
+    description: 'Enphase IQ Field-Wireable Connector, male ($138.57 / 10-pack)',
+    category: 'connector', unit: 'ea',
+    listPrice: 13.86, netPrice: 13.86,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    // Female price not published — assume ≈ male. FIELD-VERIFY.
+    partNumber: 'Q-CONN-10F',
+    description: 'Enphase IQ Field-Wireable Connector, female (≈male price, verify)',
+    category: 'connector', unit: 'ea',
+    listPrice: 13.86, netPrice: 13.86,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: 'DS3-AC-BUS',
+    description: 'APsystems DS3 AC Bus trunk (2.4 m drops) — per connector-drop',
+    category: 'trunk_cable', unit: 'ea',
+    listPrice: 49.00, netPrice: 49.00,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: '2300931202',
+    description: 'APsystems AC Bus field-wireable connector, male (IP67)',
+    category: 'connector', unit: 'ea',
+    listPrice: 18.64, netPrice: 18.64,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    // Polaris/NSI IPLD-class insulated multi-tap, 350 kcmil range — typical
+    // distributor ~$25-40 ea depending on range. FIELD-VERIFY exact SKU/price.
+    partNumber: 'IPLD350-3',
+    description: 'NSI Polaris insulated multi-tap connector (350 kcmil-#6)',
+    category: 'connector', unit: 'ea',
+    listPrice: 32.00, netPrice: 32.00,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: '1531038',
+    description: 'NEP BDM trunk end cap',
+    category: 'terminator', unit: 'ea',
+    listPrice: 4.55, netPrice: 4.55,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+  {
+    partNumber: '1531022',
+    description: 'NEP BDM male splice adaptor',
+    category: 'connector', unit: 'ea',
+    listPrice: 2.00, netPrice: 2.00,
+    source: 'Soligent', asOf: '2026-07-10',
+  },
+
   // ─── Microinverters ────────────────────────────────────────────────────────
   {
     partNumber: 'IQ8PLUS-72-2-US',
@@ -197,8 +282,62 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     partNumber: 'IQ8M-72-2-US',
     description: 'Enphase IQ8M Microinverter',
     category: 'microinverter', unit: 'ea',
-    listPrice: 215.00, netPrice: 172.00,
-    source: 'CED', asOf: '2025-01-15',
+    listPrice: 230.00, netPrice: 185.00,
+    source: 'CED', asOf: '2025-09-15',
+  },
+
+  // ─── Integrated combiners / gateways (SOURCED — bos-pricing-research.json) ───
+  // The app previously priced ALL of these off the generic $145 "combiner"
+  // category fallback. Real distributor prices are 5–12× that (a 6C is an
+  // all-in-one smart load center: enclosure + IQ Gateway + CTs + breakers).
+  {
+    partNumber: 'X-IQ-AM1-240-6C',
+    description: 'Enphase IQ Combiner 6C (combiner + IQ Gateway + integral disconnect)',
+    category: 'combiner', unit: 'ea',
+    listPrice: 2000.00, netPrice: 1800.00,
+    source: 'CED', asOf: '2025-09-15',
+  },
+  {
+    partNumber: 'X-IQ-AM1-240-5C',
+    description: 'Enphase IQ Combiner 5C',
+    category: 'combiner', unit: 'ea',
+    listPrice: 1520.00, netPrice: 1350.00,
+    source: 'CED', asOf: '2025-09-15',
+  },
+  {
+    partNumber: 'X-IQ-AM1-240-4C',
+    description: 'Enphase IQ Combiner 4C',
+    category: 'combiner', unit: 'ea',
+    listPrice: 800.00, netPrice: 709.00,
+    source: 'CED', asOf: '2025-09-15',
+  },
+  {
+    partNumber: 'ENV-IQ-AM1-240',
+    description: 'Enphase IQ Gateway (standalone)',
+    category: 'gateway', unit: 'ea',
+    listPrice: 780.00, netPrice: 690.00,
+    source: 'CED', asOf: '2025-09-15',
+  },
+  {
+    partNumber: 'ENV2-IQ-AM1-240',
+    description: 'Enphase IQ Gateway (IEEE 2030.5)',
+    category: 'gateway', unit: 'ea',
+    listPrice: 780.00, netPrice: 690.00,
+    source: 'CED', asOf: '2025-09-15',
+  },
+  {
+    partNumber: 'MC-200-011-V01',
+    description: 'Enphase IQ Meter Collar (meter-socket adapter + MID)',
+    category: 'meter_socket', unit: 'ea',
+    listPrice: 700.00, netPrice: 630.00,
+    source: 'Soligent', asOf: '2025-09-15',
+  },
+  {
+    partNumber: '1624171',
+    description: 'Tesla Backup Switch (meter-socket + grid isolation)',
+    category: 'meter_socket', unit: 'ea',
+    listPrice: 550.00, netPrice: 450.00,   // ⚠ LOW confidence — Tesla is quote-only via distributors
+    source: 'Internal', asOf: '2025-09-15',
   },
 
   // ─── Power Optimizers ──────────────────────────────────────────────────────
@@ -421,8 +560,8 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
 
 export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: string; source: DistributorSource }> = {
   // Equipment
-  solar_panel:       { unitCost: 0.34 * 400,  unit: 'ea',   source: 'CED' },      // ~$136/panel at 400W avg
-  microinverter:     { unitCost: 160.00,        unit: 'ea',   source: 'CED' },
+  solar_panel:       { unitCost: 0.50 * 400,  unit: 'ea',   source: 'CED' },      // fallback only — resolvePriceForItem prices resolved panels $/W × actual watts
+  microinverter:     { unitCost: 175.00,        unit: 'ea',   source: 'CED' },
   string_inverter:   { unitCost: 1500.00,       unit: 'ea',   source: 'CED' },
   hybrid_inverter:   { unitCost: 2400.00,       unit: 'ea',   source: 'Soligent' },
   optimizer:         { unitCost: 52.00,         unit: 'ea',   source: 'CED' },
@@ -431,16 +570,24 @@ export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: 
   racking:           { unitCost: 18.00,         unit: 'ea',   source: 'CED' },
   // Electrical BOS
   wire:              { unitCost: 0.85,          unit: 'ft',   source: 'KWh' },      // $/ft — #10 AWG THWN avg
-  trunk_cable:       { unitCost: 2.40,          unit: 'ft',   source: 'Soligent' },
+  // Trunk cable is sold PER CONNECTOR-DROP (1 drop per micro), not per foot —
+  // Enphase ≈ $22/drop, APsystems ≈ $49/drop; real SKUs priced above.
+  trunk_cable:       { unitCost: 25.00,         unit: 'ea',   source: 'Soligent' },
+  connector:         { unitCost: 14.00,         unit: 'ea',   source: 'Soligent' }, // field-wireable splice avg
+  conduit_body:      { unitCost: 10.50,         unit: 'ea',   source: 'KWh' },      // LB/LR/LL 3/4" die-cast avg
+  conduit_fitting:   { unitCost: 1.80,          unit: 'ea',   source: 'KWh' },      // EMT coupling/connector/strap avg
+  consumable:        { unitCost: 9.00,          unit: 'ea',   source: 'KWh' },      // sealant tube / wire-nut assortment avg
+  sealing_cap:       { unitCost: 4.50,          unit: 'ea',   source: 'Soligent' },
   conduit:           { unitCost: 0.75,          unit: 'ft',   source: 'KWh' },      // 3/4" EMT avg
   breaker:           { unitCost: 24.00,         unit: 'ea',   source: 'KWh' },
   disconnect:        { unitCost: 185.00,        unit: 'ea',   source: 'KWh' },
   rapid_shutdown:    { unitCost: 95.00,         unit: 'ea',   source: 'CED' },
-  combiner:          { unitCost: 145.00,        unit: 'ea',   source: 'CED' },
+  combiner:          { unitCost: 900.00,        unit: 'ea',   source: 'CED' },      // integrated smart combiner (4C ~$700 → 6C ~$1800); real SKUs priced above
+  meter_socket:      { unitCost: 550.00,        unit: 'ea',   source: 'Soligent' },
   junction_box:      { unitCost: 18.00,         unit: 'ea',   source: 'KWh' },
   meter:             { unitCost: 320.00,        unit: 'ea',   source: 'KWh' },
   // Monitoring
-  gateway:           { unitCost: 175.00,        unit: 'ea',   source: 'CED' },
+  gateway:           { unitCost: 690.00,        unit: 'ea',   source: 'CED' },      // standalone IQ Gateway ~$690
   monitoring:        { unitCost: 95.00,         unit: 'ea',   source: 'CED' },
   // Structural (fence/ground)
   post:              { unitCost: 95.00,         unit: 'ea',   source: 'Internal' },
@@ -460,6 +607,7 @@ export const CATEGORY_FALLBACK_PRICES: Record<string, { unitCost: number; unit: 
 const PANEL_WATTAGE_BY_PART: Record<string, number> = {
   'Q.PEAK DUO BLK ML-G10+400': 400,
   'REC405AA-PURE-R':            405,
+  'REC-ALPHA-PURE-405':        405,
   'SIL-380-BK':                 380,
   'PS-MNB108-HCBF-440W':       440,
 };
@@ -521,6 +669,12 @@ function resolvePriceForItem(
   // 4. Category fallback
   const fallback = CATEGORY_FALLBACK_PRICES[item.category];
   if (fallback) {
+    // Panels: price the actual wattage ($/W) rather than a flat 400W, so a 440W
+    // module isn't undercharged like a 400W one.
+    if (item.category === 'solar_panel') {
+      const w = Number((`${item.model} ${item.description ?? ''}`.match(/(\d{3,4})\s*W/) ?? [])[1]);
+      if (w >= 200 && w <= 800) return { unitCost: Math.round(0.50 * w * 100) / 100, source: 'fallback' };
+    }
     return { unitCost: fallback.unitCost, source: 'fallback' };
   }
 
@@ -560,11 +714,21 @@ export function applyDistributorPricing(
   let fallbackMatches = 0;
   let unpriced = 0;
   let totalBomCost = 0;
+  // Truck-stock (recommended extras) is priced but summed SEPARATELY so the
+  // hardware total / $-per-W stays on REQUIRED materials only.
+  let truckStockCost = 0;
+  const _addCost = (item: BOMLineItemV4, cost: number) => {
+    if (item.stageId === 'truck_stock') truckStockCost += cost;
+    else totalBomCost += cost;
+  };
 
   const pricedItems: BOMLineItemV4[] = items.map(item => {
+    // Suggested TOOLS are advice, not materials — never priced, never counted
+    // in totals or the unpriced KPI.
+    if (item.stageId === 'tools') return item;
     // Skip items already priced (e.g. if called twice)
     if (item.unitCost !== undefined && item.unitCost > 0) {
-      totalBomCost += item.totalCost ?? item.unitCost * item.quantity;
+      _addCost(item, item.totalCost ?? item.unitCost * item.quantity);
       catalogMatches++;
       return item;
     }
@@ -577,7 +741,7 @@ export function applyDistributorPricing(
     else if (source === 'fallback') fallbackMatches++;
     else                            unpriced++;
 
-    if (unitCost > 0) totalBomCost += totalCost;
+    if (unitCost > 0) _addCost(item, totalCost);
 
     return {
       ...item,
@@ -587,6 +751,7 @@ export function applyDistributorPricing(
   });
 
   totalBomCost = Math.round(totalBomCost * 100) / 100;
+  truckStockCost = Math.round(truckStockCost * 100) / 100;
 
   return {
     items: pricedItems,
@@ -595,6 +760,7 @@ export function applyDistributorPricing(
     fallbackMatches,
     unpriced,
     totalBomCost,
+    truckStockCost,
   };
 }
 

@@ -39,6 +39,21 @@ import {
   type EquipmentRegistryEntry,
 } from '@/lib/equipment-registry-v4';
 import { necNextStandardOcpd } from './helpers';
+import { buildConductorAuthority, type ConductorAuthority } from './conductorAuthority';
+import { buildIntegratedEquipment } from './integratedEquipment';
+import { buildHybridAcCollection } from './sldAdapter';
+import { MICROINVERTERS, STRING_INVERTERS, SOLAR_PANELS } from '@/lib/equipment-db';
+import {
+  SOLFENCE_MOUNTING_ID,
+  type SubSystemEquipment,
+  type SubSystemKey,
+} from '@/lib/system/subSystemEquipment';
+import { buildCanonical } from './canonical';
+import { buildStructuralInputForPermit, buildSubSystemStructuralInputs } from './structuralInput';
+import { resolveArrayStructuralLayout } from './arrayLayout';
+import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
+import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
+import { buildComputedRunsForPermit } from './computedRuns';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -64,6 +79,9 @@ export interface PermitBOMItem {
   required?: boolean;
   unitCost?: number;
   totalCost?: number;
+  /** Wave 5B passthrough of the Wave-2c per-sub stamp ('roof'|'ground'|'fence')
+   *  — SCHED groups stage rows by sub WHERE STAMPED (hybrid only). */
+  subSystem?: string;
   // Legacy compat
   ulListing?: string;
 }
@@ -145,6 +163,9 @@ function v4ToPermit(item: BOMLineItemV4): PermitBOMItem {
     required:     item.required,
     unitCost:     item.unitCost,
     totalCost:    item.totalCost,
+    // Per-sub stamp survives into the permit BOM (set by generateBOMV4 only
+    // when the generation input carries subSystems — Wave 2c).
+    subSystem:    item.subSystem,
   };
 }
 
@@ -316,6 +337,94 @@ function buildFallbackBOM(input: PermitInput, cad: CADModel): PermitBOMItem[] {
   return items;
 }
 
+// ── Hybrid per-sub equipment map (SYSTEMIC ROOT #1) ───────────
+// generateBOMV4 already owns a correct per-sub path (generateBOMV4PerSubSystem)
+// that runs Stages 1–3 PER SUB — but it only fires when the caller hands it a
+// `subSystemEquipment` map with N>1 entries. Until now bomForPermit never built
+// one, so every hybrid fell through to the legacy single-fleet path: one
+// inverter line (the roof brand) × the PROJECT panel total → "91 Enphase
+// micros", one 91-device trunk, one whole-system combiner. This builder derives
+// the map from the per-sub conductor authority so the engine emits each sub's
+// OWN inverter (roof→micros×roof, ground→1 string, fence→optimizers×fence +
+// inverter) at its OWN count, and scopes the micro cabling/caps to the roof sub.
+
+const _norm = (s?: string | null) => (s ?? '').toLowerCase().trim();
+
+/** Resolve an equipment-db / V4-registry id from a make+model, so the per-sub
+ *  engine prints the REAL device instead of a TBD line. Prefers the sub's own
+ *  project.subSystems id when the payload carries one. Undefined ⇒ engine falls
+ *  back to the sub's ecosystemBrand + topology (still correct count/topology). */
+function resolveInverterIdFromNames(mfr: string, model: string, isMicro: boolean): string | undefined {
+  if (_norm(model) === '' || _norm(model) === '—') return undefined;
+  const v4 = resolveRegistryEntry(model, mfr);
+  if (v4) return v4.id;
+  const nm = _norm(model), nf = _norm(mfr);
+  const pool = (isMicro ? MICROINVERTERS : STRING_INVERTERS) as Array<{ id: string; manufacturer?: string; model?: string }>;
+  const hit = pool.find(e => (!nf || _norm(e.manufacturer).includes(nf) || nf.includes(_norm(e.manufacturer)))
+    && (_norm(e.model).includes(nm) || nm.includes(_norm(e.model))));
+  return hit?.id;
+}
+
+function resolvePanelIdFromNames(mfr: string, model: string): string | undefined {
+  if (_norm(model) === '' || _norm(model) === '—') return undefined;
+  const v4 = resolveRegistryEntry(model, mfr);
+  if (v4) return v4.id;
+  const nm = _norm(model), nf = _norm(mfr);
+  const hit = (SOLAR_PANELS as Array<{ id: string; manufacturer?: string; model?: string }>).find(e =>
+    (!nf || _norm(e.manufacturer).includes(nf) || nf.includes(_norm(e.manufacturer)))
+    && (_norm(e.model).includes(nm) || nm.includes(_norm(e.model))));
+  return hit?.id;
+}
+
+/** One SubSystemEquipment map from the per-sub conductor authority — the input
+ *  generateBOMV4's hybrid path consumes. Only built when the authority is
+ *  hybrid (N>1 subs); single-system jobs keep the byte-identical legacy path. */
+function buildSubSystemEquipmentMap(
+  input: PermitInput,
+  auth: ConductorAuthority,
+): Partial<Record<SubSystemKey, SubSystemEquipment>> {
+  const project = input.project as PermitInput['project'] & {
+    subSystems?: Record<string, { inverterId?: string; panelId?: string; optimizerId?: string;
+      mountingId?: string; ecosystemBrand?: string; topology?: string }>;
+    mountingSystemId?: string; rackingId?: string; optimizerPeripheralId?: string;
+    roofType?: string; trenchRunLengthFt?: number; conduitType?: string;
+  };
+  const nowIso = '2026-07-13T00:00:00.000Z'; // deterministic; the map is transient input, never persisted
+  const map: Partial<Record<SubSystemKey, SubSystemEquipment>> = {};
+
+  for (const sub of auth.subSystems) {
+    const key = sub.key;
+    const pm = project.subSystems?.[key];
+    const topo: SubSystemEquipment['topology'] =
+      sub.topology === 'MICRO' ? 'micro' : sub.topology === 'OPTIMIZER' ? 'optimizer' : 'string';
+    const e = sub.equipment;
+
+    map[key] = {
+      key,
+      topology: topo,
+      inverterId: pm?.inverterId ?? resolveInverterIdFromNames(e.inverterManufacturer, e.inverterModel, sub.isMicro),
+      panelId: pm?.panelId ?? resolvePanelIdFromNames(e.panelManufacturer, e.panelModel),
+      optimizerId: pm?.optimizerId ?? (topo === 'optimizer' ? project.optimizerPeripheralId : undefined),
+      ecosystemBrand: pm?.ecosystemBrand
+        ?? (e.inverterManufacturer !== '—' ? e.inverterManufacturer.toLowerCase() : undefined),
+      // Fence ALWAYS mounts on SolFence (contract §1.1); roof/ground take the
+      // project-wide racking. Never clone the roof racking onto the fence.
+      mountingId: key === 'fence'
+        ? SOLFENCE_MOUNTING_ID
+        : (pm?.mountingId ?? project.rackingId ?? project.mountingSystemId ?? undefined),
+      roofType: key === 'roof' ? (project.roofType || undefined) : undefined,
+      trenchRunLengthFt: key !== 'roof' ? (project.trenchRunLengthFt || undefined) : undefined,
+      env: {
+        rooftopTempAdderC: key === 'roof' ? 30 : 0,
+        ...(project.conduitType ? { conduitType: project.conduitType } : {}),
+      },
+      source: 'engineering',
+      updatedAt: nowIso,
+    };
+  }
+  return map;
+}
+
 // ── Main entry point ──────────────────────────────────────────
 /**
  * Generate a full BOM for the permit pipeline.
@@ -357,9 +466,40 @@ export function generateBOMForPermit(
   const mainPanelA   = project.mainPanelAmps || 200;
   const acKw         = totalAcKw;
   const acOutputAmps = acKw * 1000 / 240;
-  const backfeedAmps = necNextStandardOcpd(acOutputAmps * 1.25);
+  // Shared conductor authority — the BOM's AC feeder gauge + OCPD must match
+  // what PV-4A/PV-4B/E-1 print (the "4th independent compute" this collapses).
+  const _auth        = buildConductorAuthority(input, cad);
+  const backfeedAmps = _auth.acFeeder.ocpdAmps ?? necNextStandardOcpd(acOutputAmps * 1.25);
   const isMicro      = (system.topology || '').toLowerCase() === 'micro' ||
                        firstInv?.type === 'micro';
+  // SYSTEMIC ROOT #1 — hybrid BOM routes through generateBOMV4's per-sub path so
+  // each sub bills its OWN inverter at its OWN count (kills "91 Enphase micros").
+  // Only built for genuine hybrids (N>1 subs) AND when the CAD carries the
+  // section split the engine apportions modules by; single-system jobs keep the
+  // byte-identical legacy path (Wave-0 goldens pin it).
+  const _perSubEquipment = (_auth.isHybrid && _auth.subSystems.length > 1 && cad.hybrid)
+    ? buildSubSystemEquipmentMap(input, _auth)
+    : undefined;
+  const _isPerSubHybrid = !!_perSubEquipment;
+
+  // The V4 engine's per-sub hybrid path resolves EACH sub's inverter itself and
+  // does not need a registry-resolvable PRIMARY. But V4 needs *some* inverterId
+  // for its legacy-mirror field. When the project's inverters[0] misses the V4
+  // registry (common on hybrids whose first inverter is a string model), fall
+  // back to the first per-sub resolved inverterId so V4 still runs the correct
+  // per-sub BOM instead of dropping to the minimal fallback (which billed one
+  // string-inverter fleet + a kW-guess disconnect and no per-sub micros).
+  const _perSubPrimaryInvId = _perSubEquipment
+    ? (['roof', 'ground', 'fence'] as SubSystemKey[])
+        .map(k => _perSubEquipment[k]?.inverterId).find(Boolean)
+    : undefined;
+  const _v4InverterId = inverterId ?? _perSubPrimaryInvId;
+
+  // Stage D — the hybrid AC collection (per-source combiners → ONE shared AC
+  // combiner panel → ONE system disconnect) from the SAME resolver E-1 draws.
+  // Null for single-system. Feeds both the V4 disconnect rating (below) and the
+  // shared-panel BOM line (step 5c) so BOM/SCHED/E-1 print identical hardware.
+  const _acCollection = buildHybridAcCollection(input, cad);
 
   const stringCount   = system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1;
   const inverterCount = isMicro ? totalPanels : (system.inverters?.length || 1);
@@ -367,36 +507,119 @@ export function generateBOMForPermit(
 
   const elec = compliance.electrical;
   const dcWireGauge   = firstStr?.wireGauge || elec?.dcConductorCallout || '#10 AWG';
-  const acWireGauge   = elec?.acConductorCallout || '#8 AWG';
-  const dcWireLength  = firstStr?.wireLength || project.wireLength || 50;
-  const acWireLength  = project.wireLength || 60;
+  // Plain gauge from the authority (e.g. '#8 AWG'), not the raw callout string
+  // ('3#8 THWN-2 …') which V4 mis-parsed into an oversized conductor.
+  const acWireGauge   = _auth.acFeeder.wireGauge;
+
+  // Wire lengths per stage — derive the FULL real run path from CAD geometry via
+  // the existing deriveRunLengths engine, instead of a single segment / flat
+  // default. Each `?? 0` only contributes a segment the engine could actually
+  // derive from geometry (undefined segments add nothing — no default padding).
+  const _rl = (() => {
+    try { return deriveRunLengths(cad).runLengths; } catch { return {} as Record<string, number>; }
+  })();
+  // DC path: string home run + roof run + array-to-inverter conduit (micro roof
+  // open-air is priced separately in the DC stage).
+  const _dcPathFt = (_rl.DC_STRING_RUN ?? 0) + (_rl.ROOF_RUN ?? 0) + (_rl.ARRAY_CONDUIT_RUN ?? 0);
+  // AC feeder path: inverter/combiner → disconnect → meter → main service panel.
+  const _acPathFt = (_rl.COMBINER_TO_DISCO_RUN ?? _rl.INV_TO_DISCO_RUN ?? 0)
+    + (_rl.DISCO_TO_METER_RUN ?? 0) + (_rl.METER_TO_MSP_RUN ?? 0);
+  const dcWireLength  = firstStr?.wireLength || (_dcPathFt > 0 ? _dcPathFt : 0) || project.wireLength || 50;
+  const acWireLength  = (_acPathFt > 0 ? _acPathFt : 0) || project.wireLength || 60;
   const conduitType   = (project.conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
   const conduitSize   = project.conduitSize || '3/4';
 
   // ── 3. Structural ─────────────────────────────────────────
   const bomSystemType = cadTypeToBOMType(cad.systemType);
-  const structInput   = extractStructuralInputFromCAD(bomSystemType, totalPanels, cad);
-  const structResult  = deriveStructuralBOM(structInput);
-  const structItems   = structResult.items.map((item, idx) =>
-    structuralToPermit(item, idx),
-  );
-  log.push(`[bomForPermit] structural: ${structItems.length} items (${bomSystemType})`);
+  let structItems: PermitBOMItem[];
+  if (cad.hybrid) {
+    // HYBRID (P2): fence posts AND ground piles — each sub-system's structural
+    // BOM derives from ITS OWN panel subset + CAD section (the legacy single
+    // switch billed one type for every panel: Stowell got fence posts for all
+    // 80 modules and zero piles/rails). Roof racking comes from the V4
+    // rackingBOM path below, as for single-roof jobs.
+    structItems = [];
+    let _idx = 0;
+    for (const sec of cad.hybrid.sections) {
+      if (sec.key === 'roof') continue; // V4 rackingBOM path handles roof
+      const bomType = sec.key === 'fence' ? 'fence' : 'ground';
+      const secInput = extractStructuralInputFromCAD(bomType as BOMSystemType, sec.totalPanels, cad);
+      const secResult = deriveStructuralBOM(secInput);
+      // Wave 5B: stamp each hybrid structural line with its owning sub so the
+      // SCHED table can group fence posts under FENCE and piles under GROUND.
+      for (const item of secResult.items) structItems.push({ ...structuralToPermit(item, _idx++), subSystem: sec.key });
+      log.push(`[bomForPermit] hybrid ${sec.key} structural: ${secResult.items.length} items (${sec.totalPanels} panels)`);
+    }
+  } else {
+    const structInput  = extractStructuralInputFromCAD(bomSystemType, totalPanels, cad);
+    const structResult = deriveStructuralBOM(structInput);
+    structItems = structResult.items.map((item, idx) => structuralToPermit(item, idx));
+    log.push(`[bomForPermit] structural: ${structItems.length} items (${bomSystemType})`);
+  }
+
+  // Roof racking SINGLE SOURCE: re-derive the structural engine's real
+  // rackingBOM (rail count from real length, splices, clamps, lag + rail bolts)
+  // via the SAME builder generatePermit uses — so the BOM matches the structural
+  // sheets instead of guessing attachmentCount/railSections. Deterministic:
+  // buildCanonical + buildStructuralInputForPermit are pure functions of `input`.
+  // Real design layout (pure selector — same values the structural path reads):
+  // orientation → trunk SKU, subArrayCount → trunk bridge splices.
+  const _arrayLayout = resolveArrayStructuralLayout(input, cad);
+  let roofRackingBOM: import('@/lib/structural-engine-v4').RackingBOM | undefined;
+  let roofMountCount = 0;
+  let roofRowCount   = 0;
+  // HYBRID (P2): per-sub-system structural results — fence posts + ground piles
+  // come from THEIR analyzers, roof racking from ITS scoped run (unscoped, the
+  // roof run sized rails for fence+ground panels too).
+  let fenceStructural: import('@/lib/structural-engine-v4').StructuralResultV4 | undefined;
+  let groundStructural: import('@/lib/structural-engine-v4').StructuralResultV4 | undefined;
+  if (bomSystemType === 'roof' || cad.hybrid) {
+    try {
+      const _canonical = buildCanonical(input);
+      const _runs = buildSubSystemStructuralInputs(input, cad, _canonical);
+      for (const r of _runs) {
+        try {
+          const _sr = runStructuralCalcV4(r.input);
+          if (r.key === 'roof') {
+            roofRackingBOM = _sr.rackingBOM;
+            roofMountCount = _sr.mountLayout?.mountCount ?? 0;
+            roofRowCount   = _sr.arrayGeometry?.rowCount ?? 0;
+            log.push(`[bomForPermit] roof racking: ${roofMountCount} mounts, ${roofRackingBOM?.rails.qty ?? 0} rails, ${roofRackingBOM?.mountingBolts.qty ?? 0} rail bolts`);
+          } else if (r.key === 'fence') {
+            fenceStructural = _sr;
+            log.push(`[bomForPermit] fence structural: ${_sr.fenceMountAnalysis ? 'analyzed' : 'no analysis'} (${r.input.panelCount} panels)`);
+          } else if (r.key === 'ground') {
+            groundStructural = _sr;
+            log.push(`[bomForPermit] ground structural: ${_sr.groundMountAnalysis ? 'analyzed' : 'no analysis'} (${r.input.panelCount} panels)`);
+          }
+        } catch (e) {
+          log.push(`[bomForPermit] '${r.key}' structural run failed: ${(e as Error).message}`);
+        }
+      }
+    } catch (e) {
+      log.push(`[bomForPermit] structural runs failed (using registry fallback): ${(e as Error).message}`);
+    }
+  }
 
   // ── 4. V4 BOM (electrical) ───────────────────────────────
   let v4Items: PermitBOMItem[] = [];
 
-  if (inverterId) {
+  if (_v4InverterId) {
     try {
       const v4Input: BOMGenerationInputV4 = {
-        inverterId,
+        inverterId: _v4InverterId,
         panelId,
-        rackingId:           project.rackingId,
+        // Same id the STRUCTURAL path resolves (mountingSystemId) when the BOM-
+        // specific rackingId is unset — otherwise Stage 5 lost its registry entry
+        // and the planset BOM shipped with no racking hardware at all.
+        rackingId:           project.rackingId || project.mountingSystemId,
         batteryId:           project.batteryId,
         moduleCount:         totalPanels,
         deviceCount,
         stringCount,
         inverterCount,
         systemKw:            totalDcKw,
+        acOutputKw:          totalAcKw > 0 ? totalAcKw : undefined,
         dcWireGauge,
         acWireGauge,
         dcWireLength,
@@ -404,11 +627,45 @@ export function generateBOMForPermit(
         conduitType,
         conduitSizeInch:     conduitSize,
         roofType:            project.roofType || 'shingle',
-        attachmentCount:     project.attachmentCount || Math.ceil(totalPanels * 1.2),
-        railSections:        project.railSections   || Math.ceil(totalPanels / 2),
+        // Real structural-engine values (single source) with the old guesses as
+        // fallback only when the roof racking calc is unavailable.
+        attachmentCount:     roofMountCount || project.attachmentCount || Math.ceil(totalPanels * 1.2),
+        railSections:        roofRackingBOM?.rails.qty || project.railSections || Math.ceil(totalPanels / 2),
+        rowCount:            roofRowCount || undefined,
+        rackingBOM:          roofRackingBOM,
+        // Real design layout (arrayLayout selector): orientation drives the
+        // trunk-cable SKU (portrait vs landscape spacing — was silently portrait
+        // always), sub-array count forces trunk bridge splices, spliceAtRows is
+        // the installer's cut-at-rows preference.
+        layoutOrientation:   _arrayLayout.orientation,
+        subArrayCount:       _arrayLayout.subArrayCount,
+        // Hybrid (P2): per-sub-system module counts — NEC 690.12 RSD follows
+        // the ROOF subset regardless of the project's winning systemType.
+        subSystemCounts:     cad.hybrid ? {
+          roof:   cad.hybrid.sections.find(sec => sec.key === 'roof')?.totalPanels ?? 0,
+          ground: cad.hybrid.sections.find(sec => sec.key === 'ground')?.totalPanels ?? 0,
+          fence:  cad.hybrid.sections.find(sec => sec.key === 'fence')?.totalPanels ?? 0,
+        } : undefined,
+        // Wave 2c per-sub map — flips generateBOMV4 to its hybrid path (Stages
+        // 1–3 per sub, one Stage-4 service set). Absent for single-system jobs.
+        subSystemEquipment:  _perSubEquipment,
+        spliceAtRows:        project.spliceAtRows,
+        // Permit SCHED lists INSTALLED materials only — truck-stock extras are
+        // an engineering/crew view, not a permit submittal line.
+        includeTruckStock:   false,
+        includeSuggestedTools: false,
+        // Sized per-segment runs from the wire-sizing engine (computeSystem)
+        // fed with REAL deriveRunLengths(cad) geometry — switches generateBOMV4
+        // to its per-segment wire/conduit path (qty = Σ length × conductors ×
+        // 1.15 per gauge) instead of one flat length × generic conductor count.
+        // null → previous flat path (never blocks a permit).
+        runs:                buildComputedRunsForPermit(input, cad) ?? undefined,
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,
+        // Stage D — hybrid system AC disconnect single-sourced to E-1's
+        // Σ-backfeed rating (undefined for single-system → legacy kW basis).
+        systemAcDisconnectA: _acCollection?.disconnectA,
         dcOCPD:              necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.25 * 1.25),
         jurisdiction:        compliance.jurisdiction?.ahj,
         requiresACDisconnect:    project.acDisconnect !== false,
@@ -452,7 +709,66 @@ export function generateBOMForPermit(
   );
   log.push(`[bomForPermit] structural after dedup: ${mergedStructural.length} items`);
 
-  const merged = [...v4Items, ...mergedStructural];
+  let merged = [...v4Items, ...mergedStructural];
+
+  // ── 5b. Reconcile the integrated combiner/gateway ("the brains") ──
+  // The resolver is the single source of truth for this device (same one PV-6 /
+  // SCHED / E-1 print). Drop any registry-derived combiner/gateway line (which
+  // could be a stale 4C, or MISSING entirely for IQ8H/IQ8A/IQ8AC) and emit the
+  // resolved device, so the BOM can never disagree with the sheets.
+  // The per-sub hybrid path (generateBOMV4PerSubSystem) already emits the
+  // integrated combiner/gateway PER BRAND GROUP with each group's REAL branch
+  // count — running the whole-system reconciler on top would double-emit a
+  // 91-device combiner. Skip it when the per-sub path handled the BOM.
+  const bosPlan = buildIntegratedEquipment(input, cad);
+  if (!_isPerSubHybrid && bosPlan.devices.length) {
+    merged = merged.filter(it => it.category !== 'combiner' && it.category !== 'gateway');
+    for (const d of bosPlan.devices) {
+      const isGw = d.kind === 'gateway';
+      merged.push({
+        stageId: isGw ? 'monitoring' : 'inverter',
+        stageLabel: STAGE_LABELS[isGw ? 'monitoring' : 'inverter'],
+        category: isGw ? 'gateway' : 'combiner',
+        manufacturer: d.brand,
+        model: d.model,
+        partNumber: d.partNumber || '—',
+        quantity: d.quantity,
+        unit: 'ea',
+        description: `Integrated ${d.roleSummary}${d.branchSlots ? ` — ${d.branchSlots} branch positions` : ''}`,
+        necReference: (d.necRefs && d.necRefs[0]) || 'NEC 690.4',
+        derivedFrom: 'integrated-bos resolver',
+        required: true,
+      });
+    }
+  }
+
+  // ── 5c. Shared AC combiner panel (hybrid) — Stage D ──────
+  // E-1 (renderSLDMultiLane) draws every PV source landing on ONE shared AC
+  // combiner panel busbar → ONE system disconnect. The BOM/SCHED were blind to
+  // that panel (they listed only the per-brand IQ Combiners + the aggregate
+  // disconnect). Emit it from the SAME resolver the diagram uses so the sheets
+  // list exactly what the SLD shows. Reuses _acCollection (hoisted above).
+  const _sharedPanel = _acCollection?.sharedPanel;
+  if (_sharedPanel) {
+    merged.push({
+      stageId: 'ac',
+      stageLabel: STAGE_LABELS['ac'],
+      category: 'combiner',
+      manufacturer: _sharedPanel.brand,
+      model: _sharedPanel.model,
+      partNumber: _sharedPanel.partNumber || '—',
+      quantity: 1,
+      unit: 'ea',
+      description:
+        `Shared AC combiner panel — ${_sharedPanel.busbarA}A busbar / ${_sharedPanel.mainOcpdA}A main OCPD. ` +
+        `All ${_acCollection!.perSource.length} PV sources land here on backfed OCPDs → one ` +
+        `${_acCollection!.disconnectA}A system AC disconnect (NEC 705.12(B)).`,
+      necReference: _sharedPanel.necRefs?.[0] ?? 'NEC 705.12(B)',
+      derivedFrom: 'hybrid AC collection (E-1 single source)',
+      required: true,
+    });
+    log.push(`[bomForPermit] shared AC combiner panel: ${_sharedPanel.model} (${_sharedPanel.busbarA}A busbar, ${_acCollection!.perSource.length} sources)`);
+  }
 
   // ── 6. Sort by stageId ordinal ───────────────────────────
   const STAGE_ORDER: Record<string, number> = {

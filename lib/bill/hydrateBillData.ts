@@ -108,9 +108,20 @@ export function hydrateBillData(
       const rateValidation = validateAndCorrectUtilityRate(rawRate, utilityNameForRate);
       const utilityRate = rateValidation.rate;
 
+      // A single analyzed bill's totalAmount only represents the AVERAGE month
+      // when its usage does. Braidon audit 2026-07-16: a $271.38 bill from a
+      // 2,208 kWh month ×12 inflated the annual baseline 49% (true avg 1,479
+      // kWh/mo). When we know the bill's own usage, scale by its blended $/kWh
+      // (which correctly carries fixed charges + taxes) to the average month.
+      const singleBillKwh = typeof rawBillData.monthlyKwh === 'number' ? (rawBillData.monthlyKwh as number) : 0;
+      const singleBillTotal = (rawBillData.totalAmount as number) || 0;
+      const usageNormalizedBill =
+        singleBillTotal > 0 && singleBillKwh > 0 && avgMonthlyKwh > 0
+          ? Math.round((singleBillTotal / singleBillKwh) * avgMonthlyKwh * 100) / 100
+          : singleBillTotal;
       const avgMonthlyBill =
         ((rawBillData.estimatedMonthlyBill as number) || 0) ||
-        ((rawBillData.totalAmount as number) || 0) ||
+        usageNormalizedBill ||
         Math.round(avgMonthlyKwh * utilityRate * 100) / 100;
 
       const monthlyKwhSafe = monthlyKwhArray.length > 0 ? monthlyKwhArray : [0];

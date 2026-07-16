@@ -7,9 +7,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import {
   getProjectById, getClientById, getLayoutByProject,
-  upsertLayout, updateProject, upsertProduction,
+  upsertLayout, updateProject, upsertProduction, upsertSelectedEquipment,
   handleRouteDbError,
 } from '@/lib/db-neon';
+import { designEquipmentPatch, type SelectedEquipment } from '@/lib/system/selectedEquipment';
+import { designSubSystemBlocks } from '@/lib/system/designToEngineering';
 import { calculateProduction, calculateProductionFromDefinition } from '@/lib/pvwatts';
 import { calculateFinalPrice, calculateItemizedPrice, loadPricingConfig, type SalesOverride } from '@/lib/pricingEngine';
 import { buildArraysFromLayout, buildSystemConfig, buildArrayBreakdown } from '@/lib/multiArrayEngine';
@@ -19,6 +21,38 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Wave 4A (contract §1.3/§1.4): scope a flat design-equipment patch when the
+ * saved layout carries a v2 per-sub electrical split. The design's flat
+ * selection IS the primary mirror, so the flat ids are folded into an
+ * explicit `subSystems[primaryKey]` entry + schemaVersion 2 — a first-class
+ * primary-scoped v2 write (per-key deep merge downstream), not a legacy flat
+ * write the storage layer has to re-mirror with an old-client warning.
+ * Single-type layouts (no split) return the patch unchanged (byte-identical).
+ */
+function scopeDesignEquipmentPatch(
+  patch: SelectedEquipment,
+  layoutDesignElectrical: unknown,
+): Record<string, unknown> {
+  const blocks = designSubSystemBlocks(
+    layoutDesignElectrical as import('@/types').DesignElectrical | undefined,
+  );
+  if (!blocks) return patch as Record<string, unknown>;
+  const primaryKey = blocks[0].key; // fixed roof > ground > fence order (§1.4)
+  const entry: Record<string, unknown> = {
+    key: primaryKey,
+    source: 'design',
+    updatedAt: patch.updatedAt ?? new Date().toISOString(),
+  };
+  if (patch.panelId) entry.panelId = patch.panelId;
+  if (patch.inverterId) entry.inverterId = patch.inverterId;
+  return {
+    ...(patch as Record<string, unknown>),
+    schemaVersion: 2,
+    subSystems: { [primaryKey]: entry },
+  };
+}
 
 /** Validate ephemeral inputs and return structured INSUFFICIENT_INPUT if needed */
 function validateEphemeralInputs(
@@ -389,6 +423,26 @@ export async function POST(req: NextRequest) {
         panelCount:       savedLayout.totalPanels,
       });
 
+      // Design → canonical selected_equipment (migration 101): keep the design a
+      // live writer of the store so it isn't shadowed by a stale engineering
+      // write-back. Non-fatal. Wave 4A: primary-scoped v2 write when the saved
+      // layout carries a per-sub electrical split (see scopeDesignEquipmentPatch).
+      try {
+        const eqPatch = designEquipmentPatch(
+          body.selectedPanel ?? project.selectedPanel ?? null,
+          body.selectedInverter ?? project.selectedInverter ?? null,
+          new Date().toISOString(),
+        );
+        if (eqPatch) {
+          await upsertSelectedEquipment(
+            projectId, user.id,
+            scopeDesignEquipmentPatch(eqPatch, (savedLayout as any)?.designElectrical),
+          );
+        }
+      } catch (e: unknown) {
+        console.warn('[production] equipment write-back skipped (non-fatal):', (e as Error)?.message);
+      }
+
       return NextResponse.json({ success: true, data: { layout: savedLayout, production, costEstimate } });
     }
 
@@ -449,6 +503,24 @@ export async function POST(req: NextRequest) {
       systemSizeKw:     savedLayout.systemSizeKw,
       panelCount:       savedLayout.totalPanels,
     });
+
+    // Design → canonical selected_equipment (migration 101). Non-fatal.
+    // Wave 4A: primary-scoped v2 write when the layout carries a per-sub split.
+    try {
+      const eqPatch = designEquipmentPatch(
+        body.selectedPanel ?? project.selectedPanel ?? null,
+        body.selectedInverter ?? project.selectedInverter ?? null,
+        new Date().toISOString(),
+      );
+      if (eqPatch) {
+        await upsertSelectedEquipment(
+          projectId, user.id,
+          scopeDesignEquipmentPatch(eqPatch, (savedLayout as any)?.designElectrical),
+        );
+      }
+    } catch (e: unknown) {
+      console.warn('[production] equipment write-back skipped (non-fatal):', (e as Error)?.message);
+    }
 
     return NextResponse.json({ success: true, data: { layout: savedLayout, production, costEstimate } });
 

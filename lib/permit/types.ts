@@ -144,6 +144,10 @@ export interface StructuralCompliance {
   totalDeadLoadPsf?: number;
   moduleLoadPsf?: number;
   rackingLoadPsf?: number;
+  /** Hybrid (P2): per-sub-system StructuralResultV4, keyed 'roof'|'ground'|'fence'.
+   *  The scalar fields above map from the ROOF run; fence/ground sheets + the
+   *  BOM read their own runs here. */
+  subSystems?: Record<string, unknown>;
   // Survey integration notes (set by permitIntegration.ts from site survey data)
   surveyNotes?: string[];
 }
@@ -186,6 +190,26 @@ export interface PermitInput {
     generatorKw?: number;
     interconnectionMethod?: string;
     panelBusRating?: number;
+    // User-selected brand-integrated BOS device(s) — combiner/gateway/"brains"
+    // (ids from lib/equipment/integratedBos). When set, overrides the auto-config
+    // (the design-studio picker will write this). Read by buildIntegratedEquipment.
+    bosDeviceIds?: string[];
+    combinerId?: string;
+    /** §1.1 per-subsystem equipment authority map (config.subSystems carriage).
+     *  Read by resolveEquipmentBySubSystem as the id-based fallback source when
+     *  a sub's tagged fleet carries no enriched names (legacy/thin payloads). */
+    subSystems?: Record<string, {
+      key?: string;
+      inverterId?: string;
+      panelId?: string;
+      topology?: string;
+      mountingId?: string;
+      ecosystemBrand?: string;
+    }>;
+    // Installer preference: cut the AC trunk at row transitions (splice pair per
+    // within-branch transition) instead of the cheapest-option service loop.
+    // Read by bomForPermit → generateBOMV4 → resolveTrunkCablePlan.
+    spliceAtRows?: boolean;
     // AHJ data (auto-populated server-side from ahj-national.ts)
     ahjName?: string;
     ahjWindSpeedMph?: number;
@@ -321,6 +345,12 @@ export interface PermitInput {
       ulListing: string;
       // Error 5c fix: mpptChannels accessed via (inv0 as any)?.mpptChannels in sldAdapter.ts
       mpptChannels?: number;
+      /** Per-subsystem tag (contract §1.3 permit carriage — derived cache,
+       *  re-stamped from panel stamps; see docs/ARCHITECTURE-per-subsystem-equipment.md). */
+      subSystemKey?: import('@/lib/system/subSystemEquipment').SubSystemKey;
+      /** Equipment-db id (carried so server-side resolvers can re-derive full
+       *  specs when the enriched name fields are blank). */
+      inverterId?: string;
       strings: Array<{
         label: string;
         panelCount: number;
@@ -331,6 +361,8 @@ export interface PermitInput {
         panelIsc: number;
         wireGauge: string;
         wireLength: number;
+        /** Per-subsystem tag (contract §1.3 — untagged strings inherit the parent inverter's key). */
+        subSystemKey?: import('@/lib/system/subSystemEquipment').SubSystemKey;
         // FIX v47.318: FIX7 conductor schedule fields (added by v47.315)
         isc?: number;
         ampacity?: number;
@@ -411,6 +443,9 @@ export interface PermitInput {
     required?: boolean;
     unitCost?: number;
     totalCost?: number;
+    /** Wave 2c per-sub stamp ('roof'|'ground'|'fence') — present only when the
+     *  BOM was generated with per-subsystem inputs; SCHED groups by it. */
+    subSystem?: string;
     // Legacy compat
     ulListing?: string;
   }>;
@@ -596,6 +631,14 @@ export interface CanonicalLayoutDimensions {
 
 export interface CanonicalInput {
   systemType:       CanonicalSysType;
+  /** Set when the design contains panels of MORE THAN ONE system type (e.g.
+   *  roof+ground+fence hybrid). The pipeline currently documents only
+   *  `systemType` — consumers must surface this as NOT-PERMIT-READY. */
+  hybridSystemTypes?: string[];
+  /** Phase-1 hybrid support: the per-type partition of the design's panels
+   *  (roof→ground→fence). Always ≥1 entry. Consumers iterate this instead of
+   *  reading the single `systemType` scalar. */
+  subSystems?: import('./utils/subSystems').SubSystem[];
   panels:           NonNullable<NonNullable<PermitInput['layout']>['panels']>;
   geometry:         NonNullable<PermitInput['layout']>['geometry'];
   layout:           NonNullable<PermitInput['layout']>;
@@ -620,6 +663,11 @@ export interface ResolvedEquipment {
   inverterModel: string;
   inverterType: string;
   inverterAcOutputKw: number;
+  /** Factory-integrated DC disconnect (per the inverter datasheet). When true,
+   *  no separate external DC disconnect is drawn on the SLD / required by the
+   *  BOM — the inverter's integral switch is the PV DC disconnecting means
+   *  (NEC 690.15). Undefined ⇒ unknown → external disconnect assumed. */
+  inverterIntegratedDcDisconnect?: boolean;
 }
 
 // ─── Drawing Types ───
@@ -720,15 +768,15 @@ export interface PermitSheetIndexEntry {
 
 // ─── Full permit planset sheet definitions ────────────────────────────────────
 
-// v47.312: Canonical 14-sheet permit plan-set — matches generatePermitHTML() page assembly order.
+// Canonical permit plan-set — matches generatePermitHTML() page assembly order.
+// PV-1 (standalone site plan) folded into the array sheet 2026-07-08.
 // Page indices (0-based) must match exactly:
-//   0=PV-0  1=PV-1  2=PV-2  3=PV-2B  4=PV-3  5=PV-4A  6=PV-4B  7=PV-4C
-//   8=PV-5  9=SCHED  10=APP-A  11=CERT  12=PE-1  13=E-1  14=VAL-1  15=APP-CAD
+//   0=PV-0  1=PV-1  2=PV-1B  3=PV-3  4=PV-4A  5=PV-4B  6=PV-4C
+//   7=PV-5  8=SCHED  9=APP-A  10=CERT  11=PE-1  12=E-1  13=VAL-1  14=APP-CAD
 export type PermitSheetId =
   | 'PV-0'   // Cover Sheet
-  | 'PV-1'   // Site Information
-  | 'PV-2'   // Array Plan (Roof / Ground / Fence — system-routed)
-  | 'PV-2B'  // Array Geometry & String Layout
+  | 'PV-1'   // Site & Array Plan (Roof / Ground / Fence — system-routed; integrated site context)
+  | 'PV-1B'  // Array Geometry & String Layout
   | 'PV-3'   // Structural Details (Roof / Ground / Fence — system-routed)
   | 'PV-4A'  // NEC Compliance
   | 'PV-4B'  // Conductor Schedule
@@ -744,9 +792,8 @@ export type PermitSheetId =
 
 export const PERMIT_SHEET_INDEX: PermitSheetIndexEntry[] = [
   { id: 'PV-0',  title: 'Cover Sheet',                 description: 'Project overview, sheet index, aerial view, design criteria, governing codes' },
-  { id: 'PV-1',  title: 'Site Information',             description: 'Site plan, address, utility info, AHJ, interconnection, construction notes' },
-  { id: 'PV-2',  title: 'Array Plan',                   description: 'Roof layout / ground array / fence elevation with panel placement and setbacks' },
-  { id: 'PV-2B', title: 'Array Geometry',               description: 'Array dimensions, string assignments, tilt, spacing, module layout detail' },
+  { id: 'PV-1',  title: 'Site & Array Plan',            description: 'Integrated site + roof/ground/fence array: property line, street, service equipment, panel placement, fire setbacks' },
+  { id: 'PV-1B', title: 'Array Geometry',               description: 'Array dimensions, string assignments, tilt, spacing, module layout detail' },
   { id: 'PV-3',  title: 'Structural Details',           description: 'Attachment cross-section / pile detail / fence post detail (system-specific)' },
   { id: 'PV-4A', title: 'NEC Compliance',               description: 'NEC 690/705 rules engine results, 120% busbar rule, code citations' },
   { id: 'PV-4B', title: 'Conductor Schedule',           description: 'Wire sizing, conduit schedule, voltage drop calcs, temperature correction' },
@@ -758,7 +805,7 @@ export const PERMIT_SHEET_INDEX: PermitSheetIndexEntry[] = [
   { id: 'PE-1',  title: 'PE Structural Letter',         description: 'Licensed PE review letter with ASCE 7-22 analysis and structural attestation' },
   { id: 'E-1',   title: 'Single-Line Diagram',          description: 'Complete electrical SLD — IEEE/ANSI symbols, wire gauges, OCP ratings, grounding' },
   { id: 'VAL-1', title: 'Validation Summary',           description: 'Canonical validation summary and engineering readiness checks' },
-  { id: 'APP-CAD', title: 'CAD Preview Appendix',       description: 'Preview-only CAD SVG appendix; non-authoritative and not a PV-2/PV-3 replacement' },
+  { id: 'APP-CAD', title: 'CAD Preview Appendix',       description: 'Preview-only CAD SVG appendix; non-authoritative and not a PV-1/PV-3 replacement' },
 ];
 
 // ─── Satellite image result (from satelliteService) ───────────────────────────

@@ -85,20 +85,27 @@ export function UtilityCostProjectionChart({
   }
 
   // ── Y-axis range ──────────────────────────────────────────────────────────
+  // Floor can be NEGATIVE: cumulative_with_solar is net of SREC receipts, and
+  // the Illinois Shines 50%-upfront check can exceed Year-1 bills+payments.
   const maxVal = Math.max(...withoutSolar, ...withSolar);
+  const minVal = Math.min(0, ...withSolar);
   const yMax   = Math.ceil(maxVal / 10000) * 10000;
+  const yMin   = minVal < 0 ? Math.floor(minVal / 10000) * 10000 : 0;
+  const ySpan  = yMax - yMin || 1;
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function xPos(i: number): number {
     return PAD.left + (i / (YEARS - 1)) * CHART_W;
   }
   function yPos(val: number): number {
-    return PAD.top + CHART_H - (val / yMax) * CHART_H;
+    return PAD.top + CHART_H - ((val - yMin) / ySpan) * CHART_H;
   }
   function formatK(val: number): string {
-    if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
-    if (val >= 1000)    return `$${Math.round(val / 1000)}k`;
-    return `$${val}`;
+    const sign = val < 0 ? '-' : '';
+    const abs = Math.abs(val);
+    if (abs >= 1000000) return `${sign}$${(abs / 1000000).toFixed(1)}M`;
+    if (abs >= 1000)    return `${sign}$${Math.round(abs / 1000)}k`;
+    return `${sign}$${abs}`;
   }
 
   // ── Path builders ─────────────────────────────────────────────────────────
@@ -106,8 +113,8 @@ export function UtilityCostProjectionChart({
     return data.map((v, i) => `${i === 0 ? 'M' : 'L'}${xPos(i).toFixed(1)},${yPos(v).toFixed(1)}`).join(' ');
   }
 
-  // ── Y-axis ticks (6 levels) ───────────────────────────────────────────────
-  const yTicks = Array.from({ length: 6 }, (_, i) => Math.round((yMax / 5) * i));
+  // ── Y-axis ticks (6 levels, spanning yMin..yMax so a negative floor labels) ──
+  const yTicks = Array.from({ length: 6 }, (_, i) => Math.round(yMin + (ySpan / 5) * i));
 
   // ── X-axis labels (every 5 years) ─────────────────────────────────────────
   const xLabels = [1, 5, 10, 15, 20, 25];

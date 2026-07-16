@@ -364,7 +364,9 @@ describe('v47.420 — Growatt MIN TL-XH-US end-to-end string generation', () => 
     expect(errorText).toContain('MPPT_CURRENT_EXCEEDED');
     // (b) v47.421 — the error now tells the user WHICH panels would work.
     expect(errorText).toContain('Compatible panels in the SolarPro catalog');
-    expect(errorText).toContain('Panasonic EverVolt HK Black 410W');
+    // The lowest-Isc panel in the unified catalog (SunPower Maxeon 3, Isc 6.58A)
+    // is always the top compatible suggestion.
+    expect(errorText).toContain('SunPower Maxeon 3 400W');
   });
 
   // ─── v47.422 — MPPT-channel-spread display fix ───────────────────────────

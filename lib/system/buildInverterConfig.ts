@@ -19,6 +19,8 @@
 
 // ── Types (re-exported so callers share exact shapes) ────────
 
+import { isSubSystemKey, type SubSystemKey } from '@/lib/system/subSystemEquipment';
+
 export type InverterType = 'string' | 'micro' | 'optimizer' | 'hybrid' | 'ecoflow';
 
 // RoofType is intentionally a wide string alias so the builder stays
@@ -39,6 +41,9 @@ export interface StringConfig {
   wireLength: number;
   ocpdOverride?: number;
   ocpdOverrideAcknowledged?: boolean;
+  /** Per-subsystem tag (derived cache — contract §1.1). Inherits the parent
+   *  inverter's key when untagged; survives both normalizer whitelists (I-2). */
+  subSystemKey?: SubSystemKey;
 }
 
 export interface InverterConfig {
@@ -54,6 +59,9 @@ export interface InverterConfig {
   deviceRatioOverride?: number;
   /** For optimizer topology: peripheral optimizer equipment ID */
   optimizerPeripheralId?: string;
+  /** Per-subsystem tag (derived cache — contract §1.1, re-stamped from panel
+   *  stamps at hydration). MUST survive normalizeRawInverter (I-2). */
+  subSystemKey?: SubSystemKey;
 }
 
 // ── StringConfig defaults ────────────────────────────────────
@@ -81,6 +89,8 @@ export interface BuildStringOptions {
   existingId?: string;
   ocpdOverride?: number;
   ocpdOverrideAcknowledged?: boolean;
+  /** Per-subsystem tag to carry through (contract §1.1). */
+  subSystemKey?: SubSystemKey;
 }
 
 const DEFAULT_PANEL_ID_ROOF    = 'rec-alpha-400w';
@@ -116,6 +126,7 @@ export function buildStringConfig(opts: BuildStringOptions): StringConfig {
     ...(opts.ocpdOverrideAcknowledged !== undefined
       ? { ocpdOverrideAcknowledged: opts.ocpdOverrideAcknowledged }
       : {}),
+    ...(opts.subSystemKey !== undefined ? { subSystemKey: opts.subSystemKey } : {}),
   };
 }
 
@@ -134,6 +145,8 @@ export interface BuildInverterOptions {
   optimizerPeripheralId?: string;
   /** Micro/optimizer device ratio override */
   deviceRatioOverride?: number;
+  /** Per-subsystem tag to carry through (contract §1.1). */
+  subSystemKey?: SubSystemKey;
 }
 
 /**
@@ -170,6 +183,9 @@ export function buildInverterConfig(opts: BuildInverterOptions): InverterConfig 
   }
   if (opts.deviceRatioOverride !== undefined) {
     inv.deviceRatioOverride = opts.deviceRatioOverride;
+  }
+  if (opts.subSystemKey !== undefined) {
+    inv.subSystemKey = opts.subSystemKey;
   }
 
   return inv;
@@ -252,6 +268,7 @@ export function rebuildInverterStrings(opts: RebuildStringsOptions): InverterCon
       mountingSystem: old?.mountingSystem,
       wireGauge:     old?.wireGauge,
       wireLength:    old?.wireLength,
+      subSystemKey:  old?.subSystemKey ?? existing.subSystemKey,
     });
   });
 
@@ -262,6 +279,7 @@ export function rebuildInverterStrings(opts: RebuildStringsOptions): InverterCon
     existingId:           existing.id,
     optimizerPeripheralId: existing.optimizerPeripheralId,
     deviceRatioOverride:  existing.deviceRatioOverride,
+    subSystemKey:         existing.subSystemKey,
   });
 }
 
@@ -335,6 +353,12 @@ export function assertInverterMetadata(inv: InverterConfig, context = ''): void 
 export function normalizeRawInverter(raw: Record<string, unknown>): InverterConfig {
   const rawStrings = Array.isArray(raw.strings) ? (raw.strings as Record<string, unknown>[]) : [];
 
+  // Per-subsystem tag survival (contract §1.3 non-negotiable rule, I-2):
+  // subSystemKey is whitelisted here; untagged strings inherit the parent
+  // inverter's key.
+  const invSubSystemKey: SubSystemKey | undefined =
+    isSubSystemKey(raw.subSystemKey) ? raw.subSystemKey : undefined;
+
   // Synthesise a minimal string when none exist
   const strings: BuildStringOptions[] = rawStrings.length > 0
     ? rawStrings.map((s, i) => ({
@@ -349,6 +373,7 @@ export function normalizeRawInverter(raw: Record<string, unknown>): InverterConf
         mountingSystem: typeof s.mountingSystem === 'string' ? s.mountingSystem : undefined,
         wireGauge:      typeof s.wireGauge === 'string' ? s.wireGauge : undefined,
         wireLength:     typeof s.wireLength === 'number' ? s.wireLength : undefined,
+        subSystemKey:   isSubSystemKey(s.subSystemKey) ? s.subSystemKey : invSubSystemKey,
       }))
     : [{
         index:      0,
@@ -368,6 +393,7 @@ export function normalizeRawInverter(raw: Record<string, unknown>): InverterConf
     strings:               builtStrings,
     optimizerPeripheralId: typeof raw.optimizerPeripheralId === 'string' ? raw.optimizerPeripheralId : undefined,
     deviceRatioOverride:   typeof raw.deviceRatioOverride === 'number' ? raw.deviceRatioOverride : undefined,
+    subSystemKey:          invSubSystemKey,
   });
 }
 

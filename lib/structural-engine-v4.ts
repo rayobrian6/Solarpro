@@ -6,6 +6,7 @@
 
 import { computeArrayGeometry, autoLayout, type ArrayGeometry, type ArrayLayoutInput } from './array-geometry';
 import { getMountingSystemById, resolveMountingSystemId, type MountingSystemSpec } from './mounting-hardware-db';
+import { allowableUpliftLbs, asdUpliftDemandLbs, MIN_ATTACHMENT_SF } from './structural/attachmentCapacity';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INPUT TYPES
@@ -230,6 +231,11 @@ export interface FenceMountAnalysis {
 }
 
 export interface RackingBOM {
+  /** Mounting-system manufacturer (from the hardware DB) — lets BOM consumers
+   *  emit real racking lines even when no equipment-registry entry resolves. */
+  manufacturer: string;
+  /** Mounting-system display model (e.g. 'RT-MINI Flush Mount'). */
+  systemModel: string;
   rails: { qty: number; lengthFt: number; unit: string; description: string; partNumber: string };
   railSplices: { qty: number; unit: string; description: string; partNumber: string };
   mounts: { qty: number; unit: string; description: string; partNumber: string };
@@ -238,6 +244,9 @@ export interface RackingBOM {
   endClamps: { qty: number; unit: string; description: string; partNumber: string };
   groundLugs: { qty: number; unit: string; description: string; partNumber: string };
   lagBolts: { qty: number; unit: string; description: string; partNumber: string };
+  // Rail-attachment (T-/carriage) bolts joining each mount/L-foot to the rail —
+  // distinct from lag bolts (mount→rafter). 0 for rail-less systems.
+  mountingBolts: { qty: number; unit: string; description: string; partNumber: string };
   flashingKits: { qty: number; unit: string; description: string; partNumber: string };
   bondingClips: { qty: number; unit: string; description: string; partNumber: string };
   ballastBlocks?: { qty: number; weightLbs: number; unit: string; description: string };
@@ -569,31 +578,51 @@ function calcMountLayout(
 ): MountLayoutResult {
   const mount = system.mount;
   const maxSpacingIn = mount.maxSpacingIn;
-  const mountCapacityLbs = mount.upliftCapacityLbs;
+  // Basis-normalized ASD allowable (ultimate ratings reduced by Ω=3.0; unset
+  // basis treated conservatively as ultimate). ONE source: attachmentCapacity.
+  const allowableCapLbs = allowableUpliftLbs(mount.upliftCapacityLbs, mount.capacityBasis);
 
-  // Rail span = distance between the 2 rails per row (across slope)
-  const railSpanIn = geometry.railSpacingIn;
+  // Tributary WIDTH perpendicular to the rail (across slope), per mount.
+  // A row is carried by 2 rails (geometry.railCount = 2 × rowCount), so each
+  // rail — and each mount on it — carries HALF the row's across-slope depth by
+  // symmetry (two symmetric supports each react half the module load). The
+  // across-slope module depth is geometry.railSpacingIn (= panelShortIn), so
+  // the per-mount tributary width is railSpacingIn / 2.
+  //
+  // This restores the /2 that structural-engine-v3 used (analyzeRail there:
+  // `railTribWidthIn = geometry.railSpacingIn / 2`). v4 introduced a 2-rail
+  // mount layout (mountCount = mountsPerRail × railCount) but kept the FULL
+  // panel width here, so Σ(tributary areas over all mounts) came to 2× the real
+  // array area — every mount was charged 2× the true uplift, halving SF and
+  // driving the SF≥2.0 loop to floor spacing (e.g. 48"→24"), doubling the feet.
+  // Area-conservation check now holds: Σ tributary = mountCount × spacing ×
+  // (panelShort/2) = arrayWidth × arrayHeight = actual array footprint.
+  const railTribWidthIn = geometry.railSpacingIn / 2;
 
   let spacingIn = maxSpacingIn;
   let iterations = 0;
   let spacingWasReduced = false;
 
-  // Iterative: tighten spacing until SF ≥ 2.0 (the permit's required minimum —
-  // was 1.5, which left attachments shipping a red "1.59 (min 2.0)" FAIL).
+  // Iterative: tighten spacing until the ASD demand fits the allowable —
+  // SF = P_allow / T_asd ≥ MIN_ATTACHMENT_SF (1.0). Demand and capacity are BOTH
+  // ASD (0.6·W over tributary vs the basis-normalized allowable), so the safety
+  // margin lives inside the allowable, not in an extra multiplier. This replaces
+  // the old strength-demand-vs-capacity/2.0 check, which triple-counted safety on
+  // allowable-basis mounts (≈3.3× too many feet) and was ~right only for ultimate.
   while (spacingIn >= 12) {
     iterations++;
-    const tribAreaFt2 = (spacingIn * railSpanIn) / 144;
-    const upliftPerMount = netUpliftPsf * tribAreaFt2;
-    const sf = mountCapacityLbs / upliftPerMount;
-    if (sf >= 2.0) break;
+    const tribAreaFt2 = (spacingIn * railTribWidthIn) / 144;
+    const upliftPerMount = asdUpliftDemandLbs(netUpliftPsf, tribAreaFt2);
+    const sf = allowableCapLbs / upliftPerMount;
+    if (sf >= MIN_ATTACHMENT_SF) break;
     spacingIn -= 6;
     spacingWasReduced = true;
   }
   spacingIn = Math.max(12, spacingIn);
 
-  const tribAreaFt2 = (spacingIn * railSpanIn) / 144;
-  const upliftPerMount = netUpliftPsf * tribAreaFt2;
-  const safetyFactor = mountCapacityLbs / upliftPerMount;
+  const tribAreaFt2 = (spacingIn * railTribWidthIn) / 144;
+  const upliftPerMount = asdUpliftDemandLbs(netUpliftPsf, tribAreaFt2);
+  const safetyFactor = allowableCapLbs / upliftPerMount;
 
   // Downward load per mount
   const downwardPerMount = 0; // calculated separately if needed
@@ -609,7 +638,7 @@ function calcMountLayout(
     safetyFactor,
     upliftPerMountLbs: upliftPerMount,
     downwardPerMountLbs: downwardPerMount,
-    mountCapacityLbs,
+    mountCapacityLbs: allowableCapLbs,
     tributaryAreaPerMountFt2: tribAreaFt2,
     spacingWasReduced,
     maxAllowedSpacingIn: maxSpacingIn,
@@ -632,8 +661,11 @@ function analyzeRail(
   const spanIn = mountLayout.mountSpacingIn;
   const cantileverIn = Math.min(spanIn / 3, rail.maxCantileverIn);
 
-  // Tributary width per rail (half the panel height across slope)
-  const tribWidthIn = geometry.railSpacingIn;
+  // Tributary width per rail = half the across-slope panel depth (2 rails share
+  // the row, each reacts half by symmetry). The comment here already said "half"
+  // but the code used the FULL railSpacingIn, designing the rail for 2× the real
+  // distributed load; matches v3 analyzeRail (`railSpacingIn / 2`).
+  const tribWidthIn = geometry.railSpacingIn / 2;
   const tribWidthFt = tribWidthIn / 12;
 
   // Distributed load on rail
@@ -896,6 +928,10 @@ function calcRackingBOM(
   const lagBoltsPerMount = system.mount.fastenersPerMount;
   const lagBoltQty = mountQty * lagBoltsPerMount;
 
+  // ── Rail-attachment (T-/carriage) Bolts ───────────────────────────────
+  // One bolt joins each mount/L-foot to the rail. Rail-less/ballasted have none.
+  const mountingBoltQty = isRailBased ? mountQty : 0;
+
   // ── Flashing Kits ─────────────────────────────────────────────────────
   // Self-flashing pad standoffs (RT-MINI) carry integrated EPDM/butyl on the base
   // and take NO separate flashing kit — adding one double-bills the same seal.
@@ -908,14 +944,16 @@ function calcRackingBOM(
   const bondingClipQty = geometry.totalPanels;
 
   const bom: RackingBOM = {
+    manufacturer: system.manufacturer,
+    systemModel: system.model,
     rails: {
       qty: railQty,
       lengthFt: railLengthFt,
       unit: 'ea',
       description: isRailBased
-        ? `${system.manufacturer} ${system.rail?.model} Rail — ${railLengthFt.toFixed(1)} ft each`
+        ? `${system.manufacturer} ${system.rail?.model ?? 'Compatible Rail'} — ${railLengthFt.toFixed(1)} ft each`
         : 'N/A — Rail-less or ballasted system',
-      partNumber: system.rail?.model ?? 'N/A',
+      partNumber: system.rail?.model ?? 'RAIL-COMPAT',
     },
     railSplices: {
       qty: totalSplices,
@@ -960,6 +998,14 @@ function calcRackingBOM(
         ? `${hw.lagBolt} (${lagBoltsPerMount} per mount × ${mountQty} mounts)`
         : 'N/A — No penetrations',
       partNumber: hw.lagBolt,
+    },
+    mountingBolts: {
+      qty: mountingBoltQty,
+      unit: 'ea',
+      description: mountingBoltQty > 0
+        ? `Rail T-bolt / mount-to-rail bolt (1 per mount × ${mountQty} mounts)`
+        : 'N/A — rail-less / ballasted',
+      partNumber: 'T-BOLT-38',
     },
     flashingKits: {
       qty: flashingQty,
@@ -1010,10 +1056,13 @@ function calcRackingBOM(
 function naRackingBOM(): RackingBOM {
   const z = (description: string) => ({ qty: 0, unit: 'ea', description, partNumber: 'N/A' });
   return {
+    manufacturer: 'N/A',
+    systemModel: 'N/A — fence',
     rails: { qty: 0, lengthFt: 0, unit: 'ea', description: 'N/A — SolFence sections (see fence BOM)', partNumber: 'N/A' },
     railSplices: z('N/A — fence'), mounts: z('N/A — fence'), lFeet: z('N/A — fence'),
     midClamps: z('N/A — fence'), endClamps: z('N/A — fence'), groundLugs: z('N/A — fence'),
-    lagBolts: z('N/A — fence'), flashingKits: z('N/A — fence'), bondingClips: z('N/A — fence'),
+    lagBolts: z('N/A — fence'), mountingBolts: z('N/A — fence'),
+    flashingKits: z('N/A — fence'), bondingClips: z('N/A — fence'),
   };
 }
 
@@ -1248,13 +1297,13 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
                          system.systemType === 'ground_concrete' ||
                          system.systemType === 'tracker_single_axis' ||
                          system.systemType === 'tracker_dual_axis';
-  if (!skipMountCheck && mountLayout.safetyFactor < 1.5) {
+  if (!skipMountCheck && mountLayout.safetyFactor < MIN_ATTACHMENT_SF) {
     errors.push({
       code: 'MOUNT_INSUFFICIENT_CAPACITY',
-      message: `Mount safety factor ${mountLayout.safetyFactor.toFixed(2)} < 1.5 required`,
+      message: `Attachment ASD uplift demand exceeds allowable (SF ${mountLayout.safetyFactor.toFixed(2)} < ${MIN_ATTACHMENT_SF.toFixed(1)}) even at minimum spacing`,
       severity: 'error',
       suggestion: 'Upgrade to higher-capacity mount or reduce mount spacing',
-      reference: 'ASCE 7-22 §26.10',
+      reference: 'ASCE 7-22 §2.4 (0.6D+0.6W)',
     });
   }
 
@@ -1363,7 +1412,12 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
     recommendations.push('High snow load: verify roof structure capacity with structural engineer');
   }
   if (mountLayout.spacingWasReduced) {
-    recommendations.push(`Mount spacing auto-reduced to ${mountLayout.mountSpacingIn}" to achieve SF ≥ 1.5`);
+    // Wave 4B.E — honest wording: the loop enforces MIN_ATTACHMENT_SF (1.0),
+    // not the 1.5 this string used to claim; and when even the 12" floor
+    // can't meet it, say FAIL — never claim a target was "achieved".
+    recommendations.push(mountLayout.safetyFactor >= MIN_ATTACHMENT_SF
+      ? `Mount spacing auto-reduced to ${mountLayout.mountSpacingIn}" (rated max ${mountLayout.maxAllowedSpacingIn}") to achieve SF ≥ ${MIN_ATTACHMENT_SF.toFixed(1)} (SF = ${mountLayout.safetyFactor.toFixed(2)})`
+      : `FAIL: attachment SF ${mountLayout.safetyFactor.toFixed(2)} < ${MIN_ATTACHMENT_SF.toFixed(1)} even at minimum 12" spacing — select a higher-capacity attachment or add rows of attachments`);
   }
   if (input.framingType === 'unknown') {
     const detected = rafterAnalysis.framingType;

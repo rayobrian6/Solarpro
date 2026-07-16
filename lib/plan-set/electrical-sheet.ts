@@ -24,6 +24,12 @@ export interface StringRun {
 export interface ElectricalSheetInput {
   tb: TitleBlockData;
 
+  /** Pre-rendered authoritative SLD SVG (the SAME professional multi-lane render
+   *  the permit E-1 uses). When present it is embedded verbatim instead of this
+   *  sheet's own single-lane buildSldSvg — so the plan-set E-1 can never diverge
+   *  from the permit E-1 (single source of truth; kills the hybrid data breach). */
+  existingSldSvg?: string;
+
   // Module electrical specs (NEW — for calculations)
   moduleVoc:            number;   // Module open-circuit voltage @ STC
   moduleIsc:            number;   // Module short-circuit current @ STC
@@ -148,12 +154,31 @@ export function buildElectricalSheet(inp: ElectricalSheetInput): string {
   const maxBackfeed   = inp.mainPanelBusAmps * 1.2 - inp.mainPanelBreakerAmps;
   const busbarPasses  = inp.interconnectionType === 'supply-side' || inp.backfeedBreakerAmps <= maxBackfeed;
 
-  const sldSvg      = buildSldSvg(inp);
+  // Single source of truth: embed the authoritative professional SLD when the
+  // caller supplies one; only fall back to the local single-lane renderer when
+  // no upstream SVG is available (e.g. legacy single-inverter callers).
+  const _hasPro     = !!(inp.existingSldSvg && inp.existingSldSvg.trim().length > 0);
+  const sldSvg      = _hasPro ? inp.existingSldSvg! : buildSldSvg(inp);
   const wireTable   = buildWireScheduleTable(inp, dcDeratedAmpacity, acDeratedAmpacity);
   const calcsBlock  = buildCalcBlock(inp, tcFactor, stringVocCorr, vocCheck, reqAmpacity, dcDeratedAmpacity, rooftopDerateFactor, maxBackfeed, busbarPasses);
   const necNotes    = buildNecNotes(inp, reqAmpacity, maxBackfeed);
 
-  const content = `
+  // When the authoritative professional SLD is supplied it is a COMPLETE E-1
+  // (schematic + PV-source-lane / interconnection / equipment / conductor
+  // schedules). Render it FULL-PAGE — its own tables replace this sheet's
+  // sidebar, and the plan-set E-1 becomes byte-identical to the permit E-1.
+  const content = _hasPro ? `
+    <div class="sheet-header">
+      <div>
+        <div class="sh-title">ELECTRICAL — SINGLE-LINE DIAGRAM</div>
+        <div class="sh-sub">${escHtml(inp.systemKw.toFixed(2))} kW DC · ${inp.panelCount} Panels · ${escHtml(inp.necVersion)}</div>
+      </div>
+      <div class="sh-badge">E-1 ELECTRICAL</div>
+    </div>
+    <div style="height: calc(100% - 30px); border:1px solid #aab; border-radius:3px; padding:4px; background:#fff; overflow:hidden;">
+      ${sldSvg}
+    </div>
+  ` : `
     <!-- Sheet Header -->
     <div class="sheet-header">
       <div>

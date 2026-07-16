@@ -528,8 +528,12 @@ function page25YrProjection(cp: CanonicalProposal): string {
   const cumulativeUtility: number[] = [];
   let solarRunning = 0;
   let utilRunning = 0;
+  const _hasSrec = yearlyFlow.some(y => (y.srec_income ?? 0) > 0);
   for (const y of yearlyFlow) {
-    solarRunning += y.total_energy_value ?? 0;
+    // Solar value = energy value + SREC income as actually scheduled per year
+    // (Illinois Shines: 50% at energization + 50% over the following 6 years).
+    // Excluding SREC here contradicted the SREC-inclusive break-even + savings.
+    solarRunning += (y.total_energy_value ?? 0) + (y.srec_income ?? 0);
     cumulativeSolar.push(solarRunning);
     utilRunning += y.utility_cost_without_solar ?? 0;
     cumulativeUtility.push(utilRunning);
@@ -539,7 +543,7 @@ function page25YrProjection(cp: CanonicalProposal): string {
   const lineChart = renderLineChartSVG({
     series: [
       { values: cumulativeUtility, color: '#ef4444', label: 'Cumulative Utility Cost (No Solar)' },
-      { values: cumulativeSolar, color: '#22c55e', label: 'Cumulative Solar Value' },
+      { values: cumulativeSolar, color: '#22c55e', label: _hasSrec ? 'Cumulative Solar Value (incl. SREC income)' : 'Cumulative Solar Value' },
     ],
     labels,
     width: 520,
@@ -599,7 +603,7 @@ function page25YrProjection(cp: CanonicalProposal): string {
           <tr><td>Total Solar Investment</td><td>${fmt$(cp.truth25yr.solarCostTotal)}</td></tr>
           <tr><td>Remaining Utility Bills</td><td>${fmt$(cp.truth25yr.remainingUtilityCost)}</td></tr>
           <tr><td style="font-weight:900;">Net Savings</td><td style="font-weight:900;color:#16a34a;">${fmt$(cp.truth25yr.netDifference)}</td></tr>
-          ${cp.truth25yr.srec_income_25yr > 0 ? `<tr><td>SREC Income (25yr)</td><td style="color:#16a34a;">${fmt$(cp.truth25yr.srec_income_25yr)}</td></tr>` : ''}
+          ${cp.truth25yr.srec_income_25yr > 0 ? `<tr><td>SREC Contract Income${(cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? ` <span style="font-weight:400;color:#64748b;">(~${fmt$(cp.truth25yr.yearlyFlow[0].srec_income)} upfront, remainder over 6 yrs)</span>` : ' (25yr)'}</td><td style="color:#16a34a;">${fmt$(cp.truth25yr.srec_income_25yr)}</td></tr>` : ''}
         </table>
       </div>
     </div>
@@ -647,9 +651,13 @@ function pageIncentives(cp: CanonicalProposal): string {
     ${cp.policy.srecAvailable ? `
     <div class="sec-hdr">SREC Program</div>
     <div style="padding:10px;border:1px solid #e5e7eb;border-radius:4px;background:#f8fafc;margin-bottom:12px;font-size:9px;">
-      <strong>Solar Renewable Energy Certificates (SRECs)</strong> — Your solar system earns 1 SREC for every 1,000 kWh of electricity produced.
-      SRECs can be sold to utilities in states with Renewable Portfolio Standards.
-      ${cp.truth25yr.srec_income_25yr > 0 ? `<br><strong style="color:#16a34a;">Estimated 25-year SREC income: ${fmt$(cp.truth25yr.srec_income_25yr)}</strong>` : ''}
+      ${cp.policy.srecSummary
+        // Single source of truth: the schedule-aware summary (program name, $/REC,
+        // total contract value, 50%-upfront + 6-yr payout) — same text as on-screen.
+        ? `<strong>SREC / REC Program</strong> — ${cp.policy.srecSummary}`
+        : `<strong>Solar Renewable Energy Certificates (SRECs)</strong> — Your solar system earns 1 SREC for every 1,000 kWh of electricity produced.
+      SRECs can be sold to utilities in states with Renewable Portfolio Standards.`}
+      ${cp.truth25yr.srec_income_25yr > 0 ? `<br><strong style="color:#16a34a;">Estimated total SREC contract income: ${fmt$(cp.truth25yr.srec_income_25yr)}${(cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? ` — ~${fmt$(cp.truth25yr.yearlyFlow[0].srec_income)} paid after energization, remainder over the following 6 years` : ''}</strong>` : ''}
     </div>` : ''}
 
     <div class="sec-hdr">Net Energy Metering (NEM)</div>
@@ -729,7 +737,7 @@ function pageIncentives(cp: CanonicalProposal): string {
       <tbody>
         ${showItc ? `<tr><td>Federal ITC (${fmtPct(f.itcRate * 100)})</td><td>Tax Credit</td><td style="color:#16a34a;font-weight:700;">${fmt$(f.itcAmount)}</td><td>Year 1 tax filing</td></tr>` : ''}
         ${inc.total_incentives > 0 ? `<tr><td>State Incentive</td><td>Varies</td><td style="color:#16a34a;font-weight:700;">${fmt$(inc.total_incentives)}</td><td>Varies</td></tr>` : ''}
-        ${cp.policy.srecAvailable ? `<tr><td>SREC Income</td><td>Market Credit</td><td style="color:#16a34a;font-weight:700;">${cp.truth25yr.srec_income_25yr > 0 ? fmt$(cp.truth25yr.srec_income_25yr) : 'Market Rate'}</td><td>Annual</td></tr>` : ''}
+        ${cp.policy.srecAvailable ? `<tr><td>SREC Income</td><td>REC Contract</td><td style="color:#16a34a;font-weight:700;">${cp.truth25yr.srec_income_25yr > 0 ? fmt$(cp.truth25yr.srec_income_25yr) : 'Market Rate'}</td><td>${(cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? '~50% upfront + 6 yrs' : 'Annual'}</td></tr>` : ''}
         <tr style="background:#f0fdf4;font-weight:900;"><td>Total Potential Value</td><td></td><td style="color:#16a34a;">${fmt$(f.itcAmount + inc.total_incentives + (cp.truth25yr.srec_income_25yr ?? 0))}</td><td></td></tr>
       </tbody>
     </table>

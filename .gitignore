@@ -96,3 +96,6 @@ worker/dist/
 .harness/secrets/james-git.env
 .harness/secrets/*.env
 !.harness/secrets/*.env.template
+
+# Manufacturer asset PDF download cache (not source)
+scripts/.mfr-cache/

@@ -21,21 +21,30 @@ import {
 } from '@/lib/engineeringDecisionProvenance';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
+import { classifyPanel, isSubSystemKey } from './utils/subSystems';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
+import { buildStructuralInputForPermit, buildSubSystemStructuralInputs } from './utils/structuralInput';
 import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
-import { pageSiteInformation } from './sections/sitePlan';
-import { pageArrayPrimary, pageArrayGeometry } from './sections/arrayPages';
-import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPages';
+import { pageArrayPrimary, pageArrayGeometry, pageGroundArrayPlan, pageFencePlan } from './sections/arrayPages';
+import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
-import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
-import { pageEngineerCert, pagePELetter } from './sections/certPages';
+import { pageWarningLabels, pageDisconnectDirectory, pageSpecSheetReference } from './sections/compliancePages';
+import { pageEngineerCert, pagePELetter, pagePELetterRoof, pagePELetterGround, pagePELetterFence } from './sections/certPages';
+import {
+  hybridSheetSections, isHybridPlanset, primarySubKey, subScopedView, subScopedInput,
+  mapSubStructural, subStructuralResult, SUB_LABEL,
+  type HybridSectionRef,
+} from './sections/subSystemSheets';
+import { hybridSheetId } from './sheetManifest';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
+import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
+import { inlineManufacturerAssets } from './utils/inlineManufacturerAssets';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
 
@@ -69,8 +78,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // nothing to render and would only produce blank sheets.
   if (cad.roof?.planes) {
     const before = cad.roof.planes.length;
+    // designedEmpty facets are the user's stitched roofline with no modules on
+    // that side — they MUST survive as outline-only planes. Stripping them
+    // deleted half of Stowell's gable from every roof sheet.
     cad.roof.planes = cad.roof.planes.filter(
-      (p: any) => p.panels && p.panels.length > 0
+      (p: any) => (p.panels && p.panels.length > 0) || p.designedEmpty
     );
     const removed = before - cad.roof.planes.length;
     if (removed > 0) {
@@ -91,7 +103,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Cross-contamination guard: strip stale fields from other system types.
   // The CAD engine may leave residual roof/ground/fence sub-models when
   // systemType changes between runs. validatePlanSet() (locked) throws on these.
-  if (cad.systemType === 'solar_fence') {
+  // HYBRID (Phase 1): when the CAD engine composed a multi-system model, every
+  // section is REAL (built scoped, per sub-system) — deleting them here was the
+  // second master chokepoint that erased 2/3 of the Stowell design. Skip.
+  if (cad.hybrid) {
+    console.log('[PLANSET] HYBRID CAD — keeping all sections:', cad.hybrid.sections.map(s => s.key).join('+'));
+  } else if (cad.systemType === 'solar_fence') {
     delete cad.roof;
     delete cad.ground;
   } else if (cad.systemType === 'ground_mount') {
@@ -282,57 +299,44 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Run the V4 engine server-side so the structural page always shows real
   // calculated values instead of "0 ft-lbs".
   try {
-    const existingRafter = input.compliance?.structural?.rafter;
-    const needsCalc = !existingRafter
-      || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0);
-    if (needsCalc && sysType === 'roof') {
-      // (static import — the old lazy require('@/…') silently failed outside
-      // webpack, so test/render harnesses got '—' structural values)
-      const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? input.project.roofPitch ?? 20;
-      const windSpeed    = canonical.site.windSpeed || 115;
-      const groundSnow   = canonical.site.groundSnowLoad || 0;
-      const rafterSize   = input.project.rafterSize || '2x6';
-      const rafterSpIn   = input.project.rafterSpacing || 24;
-      const rafterSpFt   = input.project.rafterSpan || 12;
-      const framingType  = input.project.framingType || 'rafter';
-      const totalPanels  = input.system?.totalPanels || cad.totalPanels || 1;
-      const structInput = {
-        // 'residential_pitched' was never a valid InstallationType — the old
-        // untyped require() hid it; the engine fell through to its default.
-        installationType: 'roof_residential' as const,
-        windSpeed,
-        windExposure: ((): 'B' | 'C' | 'D' => {
-          const e = String(canonical.site.exposureCategory || 'C').toUpperCase();
-          return e === 'B' || e === 'D' ? e : 'C';
-        })(),
-        groundSnowLoad: groundSnow,
-        meanRoofHeight: 15,
-        roofPitch: roofPitchDeg,
-        framingType: (framingType === 'truss' ? 'truss' : 'rafter') as 'truss' | 'rafter',
-        rafterSize,
-        rafterSpacingIn: rafterSpIn,
-        rafterSpanFt: rafterSpFt,
-        // Normalize to the WoodSpecies enum ('Douglas Fir-Larch' | 'Southern Pine'
-        // | 'Hem-Fir' | 'Spruce-Pine-Fir'). The old default 'douglas_fir_larch'
-        // (and any lowercase/underscored UI value) matched no NDS_FB/FV/E key, so
-        // the engine silently used generic Fb 1000 psi for EVERY project. (Audit
-        // structural finding 3.)
-        woodSpecies: ((): 'Douglas Fir-Larch' | 'Southern Pine' | 'Hem-Fir' | 'Spruce-Pine-Fir' => {
-          const k = (input.project.rafterSpecies ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
-          if (k.startsWith('southern')) return 'Southern Pine';
-          if (k.startsWith('hem')) return 'Hem-Fir';
-          if (k.startsWith('spruce') || k === 'spf') return 'Spruce-Pine-Fir';
-          return 'Douglas Fir-Larch';
-        })(),
-        panelCount: totalPanels,
-        panelLengthIn: input.project.panelLengthIn || 65,
-        panelWidthIn: input.project.panelWidthIn || 40,
-        panelWeightLbs: input.project.panelWeightLbs || 50,
-        panelOrientation: 'portrait' as const,
-        mountingSystemId: input.project.mountingSystemId || 'ironridge-xr100',
-        rackingWeightPerPanelLbs: 4,
-      };
-      const structResult = runStructuralCalcV4(structInput);
+    // ALWAYS recompute for roof. The old staleness gate (missing/zero bending
+    // moment or framing mismatch) let every OTHER saved field go stale — a
+    // pre-ASD-basis attachment payload (SF 1.62 vs the old 2.0 bar, strength-
+    // level uplift) printed a red "DO NOT ISSUE" on PE-1/PV-4C while the
+    // current engine PASSES the same design. runStructuralCalcV4 is a pure
+    // function of buildStructuralInputForPermit(input,cad,canonical) — same
+    // inputs the saved payload was built from — and costs milliseconds, so
+    // regeneration always reflects the ENGINE OF RECORD, never a stale save.
+    const needsCalc = true;
+    // HYBRID (P2): loop EVERY sub-system's structural analysis — fence
+    // analyzeFenceSystem, ground analyzeGroundMount, roof rafter flow all
+    // exist in the engine; the legacy pipeline just never ran more than one.
+    // Results keyed under compliance.structural.subSystems for the BOM +
+    // per-system sheets; the legacy scalar fields map from the ROOF run so
+    // the existing sheets keep reading their single source.
+    if (needsCalc && (sysType === 'roof' || cad.hybrid)) {
+      // Single source (shared with the BOM): the V4 structural input, built
+      // deterministically from input + CAD + canonical site data. See
+      // buildStructuralInputForPermit — bomForPermit calls the SAME builder so
+      // the BOM's rail/clamp/bolt counts match these structural sheets.
+      const _runs = buildSubSystemStructuralInputs(input, cad, canonical);
+      const _byKey: Record<string, ReturnType<typeof runStructuralCalcV4>> = {};
+      for (const r of _runs) {
+        try { _byKey[r.key] = runStructuralCalcV4(r.input); }
+        catch (e) { console.warn(`[PLANSET] structural '${r.key}' run failed:`, (e as Error)?.message); }
+      }
+      if (cad.hybrid) {
+        if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
+        const sh = (input.compliance.structural ?? {}) as Record<string, unknown>;
+        sh.subSystems = _byKey;
+        input.compliance.structural = sh as typeof input.compliance.structural;
+        console.log('[PLANSET] HYBRID structural runs:', Object.keys(_byKey).map(k =>
+          `${k}:${(_byKey[k] as { status?: string })?.status ?? '?'}`).join(' '));
+      }
+      // Legacy scalar mapping — the ROOF run (building attachment letter).
+      const structResult = _byKey['roof'] ?? _byKey[_runs[0]?.key ?? 'roof'];
+      const structInput = _runs.find(r => r.key === 'roof')?.input ?? _runs[0]?.input;
+      if (!structResult || !structInput) throw new Error('[PLANSET] no structural run produced a result');
       const ra = structResult.rafterAnalysis;
       const wa = structResult.wind;
       const sa = structResult.snow;
@@ -416,6 +420,40 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const _getInvById = getInverterById;
       const _getMicroById = getMicroinverterById;
 
+      // ── Wave 2d: per-sub fleet detection (STRICT N>1 gate — Invariant I-10;
+      //    never tag-presence, which migrate-on-load would defeat) ──
+      const _taggedKeys = new Set(
+        input.system.inverters
+          .map(inv => (inv as { subSystemKey?: string }).subSystemKey)
+          .filter(isSubSystemKey),
+      );
+      const _hybridSections = cad.hybrid?.sections ?? [];
+      const _perSubFleet = _taggedKeys.size > 1 || _hybridSections.length > 1;
+      // Per-sub panel counts: placement stamps first (membership authority),
+      // CAD hybrid sections as corroboration when positions are absent.
+      const _subPanelCounts: Partial<Record<'roof' | 'ground' | 'fence', number>> = {};
+      if (_perSubFleet) {
+        const _positions = (input.project.panelPositions ?? []) as Array<{ systemType?: string; placementType?: string }>;
+        for (const p of _positions) {
+          const k = classifyPanel(p);
+          _subPanelCounts[k] = (_subPanelCounts[k] ?? 0) + 1;
+        }
+        for (const sec of _hybridSections) {
+          if (!(_subPanelCounts[sec.key] ?? 0) && sec.totalPanels > 0) _subPanelCounts[sec.key] = sec.totalPanels;
+        }
+      }
+      /** Micro panel basis: the inverter's OWN sub's panel count when the
+       *  fleet is per-sub — never the whole project's totalPanels (a roof
+       *  micro fleet must not absorb ground/fence modules). Legacy path
+       *  (N<=1) keeps the exact historical basis. */
+      const _microPanelBasis = (inv: { subSystemKey?: string }): number => {
+        if (_perSubFleet && isSubSystemKey(inv.subSystemKey)) {
+          const n = _subPanelCounts[inv.subSystemKey] ?? 0;
+          if (n > 0) return n;
+        }
+        return input.system.totalPanels || 1;
+      };
+
       // ── Build InverterInput[] from system.inverters + equipment-db backfill ──
       const invInputs: InverterInput[] = input.system.inverters.map((inv, invIdx) => {
         // Resolve full inverter spec from equipment DB if model matches
@@ -495,12 +533,93 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
           acOutputCurrentMax: invSpec?.acOutputCurrentMax || 0,
           strings:           stringInputs,
           modulesPerDevice:  invSpec?.modulesPerDevice,
+          // Wave 2d: micro device count from the inverter's OWN sub's panel
+          // basis (per-sub fleet), legacy totalPanels basis at N<=1.
           deviceCount:       inv.type === 'micro'
-            ? Math.ceil((input.system.totalPanels || 1) / (invSpec?.modulesPerDevice || 1))
+            ? Math.ceil(_microPanelBasis(inv) / (invSpec?.modulesPerDevice || 1))
             : undefined,
           integratedDcDisconnect: invSpec?.integratedDcDisconnect,
+          // Per-sub tag carried through for the electrical engine (2b reads
+          // it when its per-sub result lands; harmless passthrough today).
+          ...(isSubSystemKey((inv as { subSystemKey?: string }).subSystemKey)
+            ? { subSystemKey: (inv as { subSystemKey?: string }).subSystemKey }
+            : {}),
         } as InverterInput;
       });
+
+      // ── Wave 2d: fallback per-sub synthesis — a hybrid section that carries
+      //    equipment but has NO tagged inverter still needs its fleet entry,
+      //    so the compliance run sees the REAL per-sub fleet (not a collapsed
+      //    single-system view). Untagged inverters are assumed to cover the
+      //    PRIMARY sub (first present in roof>ground>fence order). ──
+      if (_perSubFleet) {
+        const _presentKeys = (['roof', 'ground', 'fence'] as const)
+          .filter(k => (_subPanelCounts[k] ?? 0) > 0 || _hybridSections.some(s => s.key === k));
+        const _primaryKey = _presentKeys[0];
+        const _covered = new Set<string>();
+        for (const inv of input.system.inverters) {
+          const k = (inv as { subSystemKey?: string }).subSystemKey;
+          _covered.add(isSubSystemKey(k) ? k : _primaryKey);
+        }
+        for (const sec of _hybridSections) {
+          if (_covered.has(sec.key) || !sec.equipment) continue;
+          const se = sec.equipment;
+          const secPanels = _subPanelCounts[sec.key] ?? sec.totalPanels ?? 0;
+          if (secPanels <= 0) continue;
+          const secTopo: 'string' | 'micro' | 'optimizer' = se.topology ?? 'string';
+          const secSpec: any = secTopo === 'micro'
+            ? (_getMicroById(se.inverterModel ?? '') || _getMicroById((se.inverterModel ?? '').toLowerCase()))
+            : (_getInvById(se.inverterModel ?? '') || _getInvById((se.inverterModel ?? '').toLowerCase()));
+          const perDeviceKw = se.acKwPerDevice || secSpec?.acOutputKw || 0;
+          const voc = se.voc || 0;
+          const maxDcV = secSpec?.maxDcVoltage || (secTopo === 'micro' ? 60 : 600);
+          const mkString = (panelCount: number): StringInput => ({
+            panelCount,
+            panelVoc:     voc,
+            panelIsc:     se.isc || 0,
+            panelImp:     secSpec?.imp || 0,
+            panelVmp:     secSpec?.vmp || 0,
+            panelWatts:   se.panelWatts || 0,
+            tempCoeffVoc: -0.27,
+            tempCoeffIsc: 0.05,
+            maxSeriesFuseRating: 20,
+            wireGauge:    input.project.wireGauge || '#12 AWG',
+            wireLength:   input.project.wireLength || 50,
+            conduitType:  input.project.conduitType || 'EMT',
+          });
+          let secStrings: StringInput[];
+          if (secTopo === 'micro') {
+            secStrings = [mkString(secSpec?.modulesPerDevice || 1)];
+          } else {
+            // Chunk the section's modules into plausible series strings —
+            // cold-Voc-safe when voc is known, 12/string otherwise.
+            const perString = voc > 0
+              ? Math.max(1, Math.min(secPanels, Math.floor((maxDcV * 0.95) / (voc * 1.2))))
+              : Math.min(secPanels, 12);
+            secStrings = [];
+            for (let left = secPanels; left > 0; left -= perString) {
+              secStrings.push(mkString(Math.min(perString, left)));
+            }
+          }
+          invInputs.push({
+            type:              secTopo,
+            acOutputKw:        perDeviceKw,
+            maxDcVoltage:      maxDcV,
+            mpptVoltageMin:    secSpec?.mpptVoltageMin || 0,
+            mpptVoltageMax:    secSpec?.mpptVoltageMax || 0,
+            maxInputCurrentPerMppt: secSpec?.maxInputCurrentPerMppt || secSpec?.maxInputCurrent || 0,
+            acOutputCurrentMax: secSpec?.acOutputCurrentMax || 0,
+            strings:           secStrings,
+            modulesPerDevice:  secSpec?.modulesPerDevice,
+            deviceCount:       secTopo === 'micro'
+              ? Math.ceil(secPanels / (secSpec?.modulesPerDevice || 1))
+              : undefined,
+            integratedDcDisconnect: secSpec?.integratedDcDisconnect,
+            subSystemKey:      sec.key,
+          } as InverterInput);
+          console.log(`[PLANSET] Wave 2d: synthesized '${sec.key}' ${secTopo} fleet entry from hybrid section equipment (${secPanels} modules, ${perDeviceKw} kW/device)`);
+        }
+      }
 
       // ── Determine NEC version from jurisdiction or AHJ ──
       const _rawNec = input.compliance?.jurisdiction?.necVersion ?? '';
@@ -788,9 +907,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     staleStateMetadata: staleMetadataForState(engineeringStateRegistry.stateRecords.find((record: any) => record.stateId === 'state:renderContext:renderContext:primary') ?? engineeringStateRegistry.stateRecords[0]),
   });
 
-  const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
-    || input.planSetOptions?.cadAppendixPreviewV1 === true
-    || input.permitOptions?.cadAppendixPreviewV1 === true;
+  // APP-CAD (non-authoritative CAD preview appendix) removed from the deliverable
+  // 2026-07-09 (Ray) — it was a rough, non-construction preview page. Kept behind a
+  // distinct internal opt-in (nothing sets it today) so it's OFF by default and can
+  // still be requested for internal review.
+  const includeCADAppendixPreview = (input.permitOptions as { includeCadAppendixInternal?: boolean } | undefined)?.includeCadAppendixInternal === true;
   // VAL-1 is internal QA telemetry (hashes, decision provenance, rule IDs) —
   // NOT part of the AHJ deliverable. Opt back in for internal review runs.
   const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
@@ -798,24 +919,93 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Long BOMs paginate onto SCHED-2 instead of clipping at the page edge.
   const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
 
+  // ── Wave 5B: hybrid per-sub sheet loop ────────────────────────────────
+  // A hybrid design gets ONE detail set PER sub-system alongside the primary
+  // (roof-led) set — fence elevation + fence structural, ground array plan +
+  // ground structural, per-sub circuit layouts and per-sub PE letters — each
+  // rendered through the scoped-view pattern (sub-typed CAD view + placement-
+  // stamp-filtered input; project totals stashed for the title block). Sheet
+  // ids: primary sub keeps the legacy unsuffixed ids; additional subs suffix
+  // G (ground) / F (fence). buildSheetManifest mirrors this exactly.
+  const _w5Sections = hybridSheetSections(cad);
+  const _w5Hybrid = isHybridPlanset(cad);
+  const _w5Primary = primarySubKey(cad);
+  const _w5Extras: HybridSectionRef[] = _w5Hybrid ? _w5Sections.slice(1) : [];
+  /** Scoped input whose compliance.structural is the SUB's own V4 run —
+   *  kills the "94 modules on the fence PE letter" class of lie. */
+  const _w5StructuralInput = (key: HybridSectionRef['key']): PermitInput => {
+    const scoped = subScopedInput(input, cad, key);
+    return {
+      ...scoped,
+      compliance: {
+        ...(scoped.compliance ?? { overallStatus: '' }),
+        structural: mapSubStructural(subStructuralResult(input, key), input.compliance?.structural, key),
+      },
+    } as PermitInput;
+  };
+  const _w5PlanPage = (sec: HybridSectionRef) => (n: number, t: number) =>
+    sec.key === 'ground'
+      ? pageGroundArrayPlan(subScopedInput(input, cad, 'ground'), subScopedView(cad, 'ground'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-1', 'ground'), title: 'GROUND ARRAY PLAN — MODULE LAYOUT' })
+      : pageFencePlan(subScopedInput(input, cad, 'fence'), subScopedView(cad, 'fence'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-1', 'fence') });
+  const _w5StructPage = (sec: HybridSectionRef) => (n: number, t: number) =>
+    sec.key === 'ground'
+      ? pageGroundStructural(subScopedInput(input, cad, 'ground'), subScopedView(cad, 'ground'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-3', 'ground') })
+      : pageFenceStructural(subScopedInput(input, cad, 'fence'), subScopedView(cad, 'fence'), n, t, renderCtx,
+          { sheetId: hybridSheetId('PV-3', 'fence') });
+  const _w5LetterFor = (key: HybridSectionRef['key'], sheetId: string) => (n: number, t: number) => {
+    const scoped = _w5StructuralInput(key);
+    const view = subScopedView(cad, key);
+    const opts = { sheetId, subKey: key };
+    if (key === 'ground') return pagePELetterGround(scoped, view, n, t, opts);
+    if (key === 'fence') return pagePELetterFence(scoped, view, n, t, opts);
+    return pagePELetterRoof(scoped, view, n, t, opts);
+  };
+
   // Dynamic page assembly — numbering derives from the list, so conditional
   // sheets can never desync pageNum/TOTAL or the cover index again.
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
-    (n, t) => pageSiteInformation(input, cad, n, t),                   // PV-1: Site Plan (all systems)
-    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-2: Roof / Ground / Fence (cad.systemType)
-    (n, t) => pageArrayGeometry(input, cad, n, t),                     // PV-2B: Array geometry (system-aware)
-    (n, t) => pageStructuralPrimary(input, cad, n, t, renderCtx),      // PV-3: Structural (cad.systemType)
-    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (all)
-    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (system-aware)
-    (n, t) => pageStructural(input, cad, n, t),                        // PV-4C: Structural calcs (system-aware)
+    // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
+    // the roof/array drawing now carries the integrated site context (parcel,
+    // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.
+    (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-1: Site & Roof / Ground / Fence (cad.systemType; hybrid = roof-scoped w/ overlays)
+    ...(_w5Extras.map(_w5PlanPage)),                                   // PV-1G / PV-1F: per-sub plan/elevation (hybrid only)
+    (n, t) => _w5Hybrid
+      ? pageArrayGeometry(subScopedInput(input, cad, _w5Primary), subScopedView(cad, _w5Primary), n, t,
+          { titleSuffix: ` — ${SUB_LABEL[_w5Primary]}` })
+      : pageArrayGeometry(input, cad, n, t),                           // PV-1B: Array geometry (hybrid = primary sub scoped)
+    ..._w5Extras.map(sec => (n: number, t: number) =>
+      pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t,
+        { sheetId: hybridSheetId('PV-1B', sec.key), titleSuffix: ` — ${SUB_LABEL[sec.key]}` })), // PV-1BG / PV-1BF
+    // ── Reading order (2026-07-09): electrical grouped together, E-1 with them ──
+    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
+    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
+    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (was orphaned after the certs — moved up with the electrical set)
+    (n, t) => _w5Hybrid
+      ? (_w5Primary === 'roof'
+          ? pageRoofStructural(subScopedInput(input, cad, 'roof'), subScopedView(cad, 'roof'), n, t, renderCtx)
+          : _w5StructPage(_w5Sections[0])(n, t))
+      : pageStructuralPrimary(input, cad, n, t, renderCtx),            // PV-3: Attachment detail (hybrid = primary sub scoped)
+    ..._w5Extras.map(_w5StructPage),                                   // PV-3G / PV-3F: per-sub structural detail (hybrid only)
+    (n, t) => _w5Hybrid
+      ? pageStructural(_w5StructuralInput(_w5Primary), subScopedView(cad, _w5Primary), n, t)
+      : pageStructural(input, cad, n, t),                              // PV-4C: Structural calcs (hybrid = primary sub scoped)
     (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
-    (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (all)
+    (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
+    (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
     ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
     (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
+    // DS-n: full-page REAL manufacturer datasheets (module/inverter/battery),
+    // one per selected-equipment id that has an image on file (manufacturer_assets).
+    ...equipmentDatasheetPageFns(input, cad),
     (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
-    (n, t) => pagePELetter(input, cad, n, t),                          // PE-1 (all)
-    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (all, system-labeled)
+    (n, t) => _w5Hybrid
+      ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
+      : pagePELetter(input, cad, n, t),                                // PE-1 (hybrid = primary sub letter, subset params)
+    ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))), // PE-1G / PE-1F
     ...(includeInternalValidation ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
   ];
   const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);
@@ -829,7 +1019,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     }
   }
 
-  return `<!DOCTYPE html>
+  const __permitHtml = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -1174,16 +1364,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   /* ── Warning label card ─────────────────────────────────────────────────── */
-  .lbl-card { border: var(--border-med); overflow: hidden; width: 100%; box-sizing: border-box; }
+  .lbl-card { border: 1.5px solid #111; border-radius: 3px; overflow: hidden; width: 100%; box-sizing: border-box; background: #fff; }
   .lbl-hdr {
-    background: #000; color: #fff;
-    padding: 3px 6px;
+    background: #1a1d24; color: #fff;
+    padding: 3px 7px;
     display: flex; justify-content: space-between; align-items: center;
     width: 100%; box-sizing: border-box;
   }
   .lbl-hdr-id  { font-weight: 900; font-size: 9px; font-family: var(--mono); letter-spacing: 1px; color: #fff; }
-  .lbl-hdr-ref { font-size: 7.5px; font-family: var(--mono); color: #ccc; }
-  .lbl-footer  { background: #f5f5f5; border-top: var(--border); padding: 3px 6px; font-size: 7.5px; color: #000; }
+  .lbl-hdr-ref { font-size: 7.5px; font-family: var(--mono); color: #b9c0cc; }
+  .lbl-body    { padding: 7px 9px; min-height: 58px; }
+  .lbl-signal  { display: flex; align-items: center; gap: 5px; font-weight: 900; font-size: 12.5px; letter-spacing: 1.2px; padding-bottom: 4px; margin-bottom: 5px; border-bottom: 1.4px solid currentColor; }
+  .lbl-footer  { background: #f2f4f7; border-top: 1px solid #111; padding: 3px 7px; font-size: 7.5px; color: #111; }
 
   /* ── Note / callout bar ──────────────────────────────────────────────────── */
   .note-bar {
@@ -1739,6 +1931,37 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .note-num { display: table-cell; width: var(--md); font-family: var(--mono); font-weight: 900; font-size: var(--f-md); vertical-align: top; color: #000; }
   .note-txt { display: table-cell; font-size: var(--f-md); line-height: 1.5; color: #000; font-family: var(--sans); }
 
+  /* ── On-screen viewer (screen only — print output untouched) ───────────── */
+  /* The raw 17in sheets rendered edge-to-edge at 1:1 were unreadable on a
+     laptop and barely usable on a monitor. On screen the set now behaves
+     like a PDF viewer: gray desk, sheet shadows, zoom toolbar. */
+  @media screen {
+    body { background: #52565c; }
+    #sp-sheets { transform-origin: top center; width: 17in; margin: 46px auto 0; }
+    #sp-sheets .page { margin: 0 0 18px; box-shadow: 0 2px 14px rgba(0,0,0,0.45); }
+    #sp-toolbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      display: flex; align-items: center; gap: 6px; justify-content: center;
+      background: #23262b; color: #e8eaed; padding: 6px 10px;
+      font-family: Arial, sans-serif; font-size: 13px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.5); user-select: none;
+    }
+    #sp-toolbar button {
+      background: #3a3f46; color: #e8eaed; border: 1px solid #4a5058;
+      border-radius: 4px; padding: 4px 10px; font-size: 13px; cursor: pointer;
+      font-family: inherit;
+    }
+    #sp-toolbar button:hover { background: #4a5058; }
+    #sp-toolbar .sp-zoomval { min-width: 46px; text-align: center; font-weight: bold; }
+    #sp-toolbar .sp-pageind { margin-left: 10px; color: #aab; }
+    #sp-toolbar .sp-title { margin-right: 14px; font-weight: bold; letter-spacing: 0.5px; color: #fff; }
+  }
+  @media print {
+    #sp-toolbar { display: none !important; }
+    #sp-sheets { transform: none !important; width: auto !important; margin: 0 !important; }
+    #sp-sheets .page { margin: 0 !important; box-shadow: none !important; }
+  }
+
   /* ── Print ──────────────────────────────────────────────────────────────── */
   /* Explicit 17in x 11in IS landscape. Do NOT add the orientation keyword after
      explicit lengths — that combination is invalid CSS and browsers fall back to
@@ -1748,8 +1971,81 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 </style>
 </head>
 <body>
+<div id="sp-toolbar">
+  <span class="sp-title">SOLARPRO PLANSET</span>
+  <button data-act="out" title="Zoom out (-)">−</button>
+  <span class="sp-zoomval" id="sp-zoomval">100%</span>
+  <button data-act="in" title="Zoom in (+)">+</button>
+  <button data-act="fit" title="Fit page width">Fit Width</button>
+  <button data-act="full" title="Actual size (0)">100%</button>
+  <button data-act="prev" title="Previous sheet">◀</button>
+  <span class="sp-pageind" id="sp-pageind">Sheet 1 / ?</span>
+  <button data-act="next" title="Next sheet">▶</button>
+  <button data-act="print" title="Print / Save as PDF">Print / PDF</button>
+</div>
+<div id="sp-sheets">
 ${pages.join('\
 ')}
+</div>
+<script>
+(function () {
+  // Screen-only viewer — no-ops entirely when printing.
+  var sheets = document.getElementById('sp-sheets');
+  var pages = sheets ? [].slice.call(sheets.querySelectorAll('.page')) : [];
+  var zoomEl = document.getElementById('sp-zoomval');
+  var indEl = document.getElementById('sp-pageind');
+  var PAGE_W = 17 * 96;
+  var z = 1;
+  function apply() {
+    sheets.style.transform = 'scale(' + z + ')';
+    // transform doesn't affect layout size — compensate so scroll extents match
+    sheets.style.marginBottom = (-(1 - z) * sheets.scrollHeight) + 'px';
+    zoomEl.textContent = Math.round(z * 100) + '%';
+  }
+  function fit() {
+    z = Math.max(0.15, (window.innerWidth - 28) / PAGE_W);
+    apply();
+  }
+  function cur() {
+    var mid = window.scrollY + window.innerHeight / 2;
+    for (var i = pages.length - 1; i >= 0; i--) {
+      var r = pages[i].getBoundingClientRect();
+      if (r.top + window.scrollY <= mid) return i;
+    }
+    return 0;
+  }
+  function ind() { indEl.textContent = 'Sheet ' + (cur() + 1) + ' / ' + pages.length; }
+  function go(d) {
+    var n = Math.min(pages.length - 1, Math.max(0, cur() + d));
+    pages[n].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  document.getElementById('sp-toolbar').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    var act = b.getAttribute('data-act');
+    if (act === 'in')  { z = Math.min(3, z * 1.2); apply(); }
+    if (act === 'out') { z = Math.max(0.15, z / 1.2); apply(); }
+    if (act === 'fit') fit();
+    if (act === 'full') { z = 1; apply(); }
+    if (act === 'prev') go(-1);
+    if (act === 'next') go(1);
+    if (act === 'print') window.print();
+  });
+  window.addEventListener('keydown', function (e) {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    if (e.key === '+' || e.key === '=') { z = Math.min(3, z * 1.2); apply(); }
+    if (e.key === '-') { z = Math.max(0.15, z / 1.2); apply(); }
+    if (e.key === '0') { z = 1; apply(); }
+  });
+  window.addEventListener('scroll', ind, { passive: true });
+  window.addEventListener('resize', ind);
+  if (pages.length) { fit(); ind(); }
+})();
+</script>
 </body>
 </html>`;
+
+  // Self-contained export: inline manufacturer-asset images as base64 data URIs
+  // so the downloaded HTML and the server-rendered PDF render offline/off-server
+  // (root-relative /manufacturer-assets/* otherwise resolve against about:blank).
+  return inlineManufacturerAssets(__permitHtml).html;
 }

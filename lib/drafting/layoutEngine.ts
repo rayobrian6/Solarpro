@@ -80,7 +80,13 @@ export function getLayoutForSystem(
 // Tall canvas for proper above-grade + below-grade structure.
 
 function fenceLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones {
-  const H = CANVAS_ELEV_H;   // 520 — fence always uses tall canvas
+  // PLAN (top-down) uses a TALL canvas (840 ≈ 1.26 aspect) so it fills the
+  // sheet's draw zone instead of a 520 (2.04) strip that letterboxed with a
+  // blank band below. The extra height carries the TYPICAL FENCE SECTION under
+  // the thin top-down run (drawFencePlan). Elevation + structural grow 520→800
+  // (same letterbox fix as roof/ground): the 2.04-aspect 520 canvas left the
+  // 2-bay elevation (PV-1F) and structural detail in ~60% dead white.
+  const H = viewType === 'plan' ? 840 : 800;
   const W = CANVAS_W;
 
   // Dimension margins
@@ -118,7 +124,15 @@ function fenceLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones
 
 function groundLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones {
   const isPlan = viewType === 'plan';
-  const H = isPlan ? CANVAS_PLAN_H : CANVAS_ELEV_H;
+  // GROUND PLAN canvas is TALL (880 ≈ 1.20 aspect), matching the sheet's draw
+  // zone — not the generic 460 (2.30) plan strip. Same fix as roof (see
+  // roofLayout): the 2.30 canvas letterboxed into the ~1.15 zone and printed
+  // ~48% blank sheet above/below the drawing. The extra height carries the
+  // ground "split layout" the engine header promises: top-down array plan +
+  // row-spacing side elevation + typical pile section, stacked (drawGroundArray).
+  // Structural grows 520→800 (same fix as roofLayout): the 2.04-aspect 520
+  // canvas letterboxed into a tall page draw-zone, leaving ~60% dead white.
+  const H = isPlan ? 880 : (viewType === 'structural' ? 800 : CANVAS_ELEV_H);
   const W = CANVAS_W;
 
   const dimLeft   = 68;
@@ -127,7 +141,11 @@ function groundLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZone
   const dimBottom = isPlan ? 52 : 48;
 
   const usableW = W - dimLeft - dimRight;
-  const drawFrac = isPlan ? 0.65 : 0.60;
+  // PLAN uses the FULL width: the schedule lives in the OUTER frame (PV-1G
+  // ARRAY DATA / PV-1BG per-sub panel), so an internal 35% data column just
+  // duplicated it and squeezed the drawing. drawGroundArray now stacks the
+  // top-view / side-elevation / pile-section across the whole width instead.
+  const drawFrac = isPlan ? 1.0 : 0.60;
   const drawW   = Math.round(usableW * drawFrac);
   const dataW   = usableW - drawW;
 
@@ -160,7 +178,10 @@ function roofLayout(viewType: 'plan' | 'elevation' | 'structural'): LayoutZones 
   // the tall zone with ~50% blank sheet above/below, which also shrank the
   // roof (and its 5.4px table text) to ~48% of achievable size. Ground/fence
   // plans keep CANVAS_PLAN_H.
-  const H = isPlan ? 920 : CANVAS_ELEV_H;
+  // Structural (PV-3) grew 520→800: the 2.4-aspect canvas letterboxed into
+  // the sheet's tall draw zone and the bottom half of PV-3 printed blank.
+  // The extra height carries the hardware schedule + roofing notes blocks.
+  const H = isPlan ? 920 : (viewType === 'structural' ? 800 : CANVAS_ELEV_H);
   const W = CANVAS_W;
 
   const dimLeft   = 70;

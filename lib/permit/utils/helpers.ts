@@ -4,6 +4,34 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type { PermitInput, ResolvedEquipment } from '../types';
+import { SOLAR_PANELS, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import { effectiveInverterSubKey } from './subSystems';
+
+// ═══════════════════════════════════════════════════════════════
+// FAIL-LOUD unselected-inverter marker (permit integrity)
+// ───────────────────────────────────────────────────────────────
+// resolveEquipmentBySubSystem returns inverterModel '—' when a sub genuinely
+// has NO inverter selected in ANY carriage. The planset must NEVER silently
+// fabricate a default inverter ('Inverter' / 'MICROINVERTER'): the SLD lane
+// nameplate + E-1/SCHED rows must show a visible red warning so the operator
+// selects the missing equipment before submitting. Display layers (sldAdapter,
+// sld-professional-renderer) emit + colorize this marker; the resolver keeps
+// its '—' sentinel unchanged so numeric consumers are unaffected.
+// ═══════════════════════════════════════════════════════════════
+export const INVERTER_UNSELECTED = '⚠ INVERTER NOT SELECTED';
+
+/** Build the per-sub fail-loud inverter marker, e.g.
+ *  '⚠ INVERTER NOT SELECTED — PV-ROOF'. Bare marker when no key is given. */
+export function unselectedInverterLabel(key?: string | null): string {
+  const k = key ? String(key).trim().toUpperCase() : '';
+  return k ? `${INVERTER_UNSELECTED} — PV-${k}` : INVERTER_UNSELECTED;
+}
+
+/** True when a model string is the fail-loud unselected-inverter marker (any
+ *  variant), so display layers can detect + colorize it. */
+export function isInverterUnselectedMarker(model?: string | null): boolean {
+  return !!model && model.includes('INVERTER NOT SELECTED');
+}
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -36,10 +64,12 @@ export function sysTypeLabel(t: SysType): string {
   return 'ROOF-MOUNTED';
 }
 
+// Title for the combined PV-1 site & array sheet (the old standalone PV-1 site
+// plan was folded in 2026-07-08). Kept named pv2Title for call-site stability.
 export function pv2Title(t: SysType): string {
   if (t === 'solar_fence')  return 'SOLAR FENCE ELEVATION & PLAN';
-  if (t === 'ground_mount') return 'GROUND ARRAY PLAN';
-  return 'ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS';
+  if (t === 'ground_mount') return 'SITE & GROUND ARRAY PLAN';
+  return 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS';
 }
 
 export function pv3Title(t: SysType): string {
@@ -103,6 +133,22 @@ export function interconnectionLabel(m?: string) {
     PANEL_UPGRADE: 'Panel Upgrade Required',
   };
   return m ? (map[m] || m) : 'Load Side — NEC 705.12(B)';
+}
+
+/**
+ * One source of truth for "does this job actually have a battery". A count alone
+ * is not enough — a stale config can carry batteryCount>0 with no model/id (a
+ * "phantom battery"), which otherwise renders ESS labels, ESS certification refs,
+ * and a 48V/xx-kWh line across the planset for a project that has no battery.
+ * A real battery has an identifying model or id, not just a count.
+ */
+export function hasRealBattery(project: {
+  batteryCount?: number; batteryModel?: string; batteryId?: string;
+} | null | undefined): boolean {
+  if (!project) return false;
+  if (!((project.batteryCount ?? 0) > 0)) return false;
+  const model = (project.batteryModel ?? '').trim();
+  return !!(project.batteryId || (model && model !== '—'));
 }
 
 /**
@@ -310,6 +356,172 @@ export function resolveEquipment(input: PermitInput): ResolvedEquipment {
 
 
 export type { ResolvedEquipment } from '../types';
+
+// ═══════════════════════════════════════════════════════════════
+// Wave 2d — per-subsystem equipment resolution (contract §1.7)
+// ═══════════════════════════════════════════════════════════════
+
+/** The slice of CADModel the per-sub resolver reads (structural — a full
+ *  CADModel satisfies it; tests can pass a hand-built object). */
+export interface HybridEquipmentCarrier {
+  hybrid?: {
+    sections?: Array<{
+      key: string;
+      totalPanels?: number;
+      equipment?: {
+        panelModel?: string;
+        panelWatts?: number;
+        voc?: number;
+        isc?: number;
+        inverterMfr?: string;
+        inverterModel?: string;
+        topology?: 'string' | 'micro' | 'optimizer';
+        acKwPerDevice?: number;
+      };
+    }>;
+  } | null;
+}
+
+const _blankStr = (s?: string) => !s || s === '—';
+const _blankNum = (n?: number) => !(typeof n === 'number' && n > 0);
+
+/** Resolve equipment-db ids from a §1.1 subSystems map entry into `out`,
+ *  filling ONLY blank fields (tagged-fleet names always win). Micro registry
+ *  is tried first — a micro id in the string registry is impossible, and the
+ *  two carry different AC-output units (acOutputW vs acOutputKw). */
+function fillFromEquipmentIds(
+  out: ResolvedEquipment,
+  entry: { inverterId?: string; panelId?: string; topology?: string },
+): void {
+  if (entry.inverterId) {
+    const micro = getMicroinverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputW?: number } | undefined;
+    const str = micro ? undefined : getInverterById(entry.inverterId) as
+      { manufacturer?: string; model?: string; acOutputKw?: number; integratedDcDisconnect?: boolean } | undefined;
+    const dev = micro ?? str;
+    if (dev) {
+      if (_blankStr(out.inverterManufacturer) && dev.manufacturer) out.inverterManufacturer = dev.manufacturer;
+      if (_blankStr(out.inverterModel)        && dev.model)        out.inverterModel = dev.model;
+      const kw = micro
+        ? (micro.acOutputW ? micro.acOutputW / 1000 : 0)
+        : (str?.acOutputKw ?? 0);
+      if (_blankNum(out.inverterAcOutputKw) && kw > 0) out.inverterAcOutputKw = kw;
+      if (_blankStr(out.inverterType)) out.inverterType = micro ? 'micro' : (entry.topology || 'string');
+      // Manufacturer install logic: a string/hybrid inverter with a factory
+      // DC disconnect is its own PV DC disconnecting means (NEC 690.15) — no
+      // separate external DC disconnect on the SLD. Micros have no DC side.
+      if (out.inverterIntegratedDcDisconnect === undefined && str?.integratedDcDisconnect !== undefined) {
+        out.inverterIntegratedDcDisconnect = str.integratedDcDisconnect;
+      }
+    }
+  }
+  if (entry.panelId) {
+    const p = (SOLAR_PANELS as Array<{ id: string; manufacturer?: string; model?: string;
+      watts?: number; voc?: number; isc?: number }>).find(x => x.id === entry.panelId);
+    if (p) {
+      if (_blankStr(out.panelManufacturer) && p.manufacturer) out.panelManufacturer = p.manufacturer;
+      if (_blankStr(out.panelModel)        && p.model)        out.panelModel = p.model;
+      if (_blankNum(out.panelWatts)        && p.watts)        out.panelWatts = p.watts;
+      if (_blankNum(out.panelVoc)          && p.voc)          out.panelVoc = p.voc;
+      if (_blankNum(out.panelIsc)          && p.isc)          out.panelIsc = p.isc;
+    }
+  }
+}
+
+/**
+ * Per-subsystem equipment resolution — the hybrid-safe sibling of
+ * `resolveEquipment`. Reads the PermitInput carriage in priority order:
+ *
+ *   1. Tagged inverters (`system.inverters[].subSystemKey === key`) + their
+ *      strings' panel fields — the sub's OWN fleet, never `inverters[0]`.
+ *   2. `cad.hybrid.sections[key].equipment` (panelModel/watts/voc/isc,
+ *      inverterMfr/Model, topology, acKwPerDevice — per-device kW contract).
+ *   3. `input.project._canonical.subSystems[key].panels[].wattage` (panel
+ *      wattage from the sub's own placement stamps).
+ *   4. NO per-sub carriage at all (untagged single-system legacy payloads):
+ *      full fallback to `resolveEquipment(input)` — byte-identical legacy.
+ *
+ * When PARTIAL per-sub carriage exists, missing fields stay '—'/0 rather than
+ * backfilling from the project-wide winner — a fence sub must never print the
+ * roof sub's panel model (the contamination class this wave kills).
+ */
+export function resolveEquipmentBySubSystem(
+  input: PermitInput,
+  key: 'roof' | 'ground' | 'fence',
+  cad?: HybridEquipmentCarrier | null,
+): ResolvedEquipment {
+  const inverters = input.system?.inverters ?? [];
+  // Effective tag: the inverter's own subSystemKey, or (when a reload dropped it)
+  // the majority subSystemKey of its strings. Recovers the sub instead of
+  // collapsing to '—'/"INVERTER NOT SELECTED". No fallback here — an inverter
+  // with NO per-sub signal must not be claimed by every lane.
+  const tagged = inverters.filter(inv => effectiveInverterSubKey(inv as { subSystemKey?: unknown; strings?: Array<{ subSystemKey?: unknown }> }) === key);
+  const section = cad?.hybrid?.sections?.find(s => s.key === key);
+  const canonSubs = (input.project?._canonical as
+    { subSystems?: Array<{ key: string; panels?: Array<{ wattage?: number }> }> } | undefined)?.subSystems;
+  const canonSub = canonSubs?.find(s => s.key === key);
+  // §1.1 equipment authority map (project.subSystems carriage) — id-based
+  // fallback so a thin/legacy payload (untagged fleet, no enriched names)
+  // still resolves the sub's REAL equipment instead of '—'/0 (the Stowell v3
+  // "48 × 0W · Inverter" E-1 class).
+  const mapEntry = (input.project as { subSystems?: Record<string, {
+    inverterId?: string; panelId?: string; topology?: string;
+  }> })?.subSystems?.[key];
+
+  // 4. Untagged / N=1 legacy: no per-sub carriage → legacy resolver unchanged.
+  if (tagged.length === 0 && !section?.equipment && !canonSub && !mapEntry) {
+    return resolveEquipment(input);
+  }
+
+  const out: ResolvedEquipment = {
+    panelManufacturer: '—', panelModel: '—', panelWatts: 0, panelVoc: 0, panelIsc: 0,
+    inverterManufacturer: '—', inverterModel: '—', inverterType: '—', inverterAcOutputKw: 0,
+  };
+
+  // 1. The sub's own tagged fleet.
+  if (tagged.length > 0) {
+    const inv0 = tagged[0];
+    const anyString = tagged.flatMap(inv => inv.strings ?? []).find(s => s?.panelModel);
+    if (anyString) {
+      out.panelManufacturer = anyString.panelManufacturer || '—';
+      out.panelModel        = anyString.panelModel        || '—';
+      out.panelWatts        = anyString.panelWatts        || 0;
+      out.panelVoc          = anyString.panelVoc          || 0;
+      out.panelIsc          = anyString.panelIsc          || 0;
+    }
+    out.inverterManufacturer = inv0.manufacturer || '—';
+    out.inverterModel        = inv0.model        || '—';
+    out.inverterType         = inv0.type         || '—';
+    out.inverterAcOutputKw   = inv0.acOutputKw   || 0;
+  }
+
+  // 1.5. Equipment-authority ids → equipment-db specs (fills blanks only —
+  // the tagged fleet's enriched names always win when present).
+  if (mapEntry?.inverterId || mapEntry?.panelId) {
+    fillFromEquipmentIds(out, mapEntry);
+  }
+
+  // 2. The sub's CAD section equipment carriage fills what the fleet lacks.
+  const se = section?.equipment;
+  if (se) {
+    if (_blankStr(out.panelModel)           && se.panelModel)    out.panelModel = se.panelModel;
+    if (_blankNum(out.panelWatts)           && se.panelWatts)    out.panelWatts = se.panelWatts;
+    if (_blankNum(out.panelVoc)             && se.voc)           out.panelVoc = se.voc;
+    if (_blankNum(out.panelIsc)             && se.isc)           out.panelIsc = se.isc;
+    if (_blankStr(out.inverterManufacturer) && se.inverterMfr)   out.inverterManufacturer = se.inverterMfr;
+    if (_blankStr(out.inverterModel)        && se.inverterModel) out.inverterModel = se.inverterModel;
+    if (_blankStr(out.inverterType)         && se.topology)      out.inverterType = se.topology;
+    if (_blankNum(out.inverterAcOutputKw)   && se.acKwPerDevice) out.inverterAcOutputKw = se.acKwPerDevice;
+  }
+
+  // 3. Panel wattage from the sub's OWN placement-stamped panels.
+  if (_blankNum(out.panelWatts) && canonSub?.panels?.length) {
+    const w = canonSub.panels.find(p => typeof p?.wattage === 'number' && p.wattage > 0)?.wattage;
+    if (w) out.panelWatts = w;
+  }
+
+  return out;
+}
 
 
 // Error 5bb fix: NEC 240.6(A) standard OCPD ampere ratings

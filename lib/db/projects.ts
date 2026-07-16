@@ -8,6 +8,16 @@
 
 import { Project, Layout } from '@/types';
 import { getDbReady, isValidUUID, assertUUID, rowToProject, rowToLayout } from './core';
+import {
+  assertMirrorInvariant,
+  derivePrimaryKey,
+  derivePrimaryMirror,
+  deriveSelectedEquipmentFlatFromMirror,
+  normalizeSubSystemMap,
+  subSystemEntryCount,
+  subSystemEntryFromFlatEquipmentPatch,
+} from '@/lib/system/subSystemMirror';
+import type { SubSystemEquipmentMap, SubSystemKey } from '@/lib/system/subSystemEquipment';
 
 // ============================================================
 // PROJECTS
@@ -405,6 +415,142 @@ export async function updateProject(
   return rows.length > 0 ? rowToProject(rows[0]) : null;
 }
 
+/**
+ * Merge a canonical selected-equipment patch into projects.selected_equipment
+ * (migration 101). Shallow JSONB merge — patch keys overwrite, untouched keys
+ * (e.g. an unchanged battery when only the panel changed) are preserved.
+ *
+ * Self-heals the column with ADD COLUMN IF NOT EXISTS so a write works even
+ * before the formal migration is run (same pattern as save-config). Returns
+ * true when a row was updated. Callers pass a patch from
+ * reconcileFromEngineeringConfig() (engineering) or build one from the resolved
+ * design equipment (design) — see /api/production and /api/engineering/save-config.
+ *
+ * NOTE: kept AFTER updateProject so updateProject's is the first `UPDATE projects`
+ * in this file (a source-scanning test in tests/solardog.test.ts relies on that).
+ */
+export async function upsertSelectedEquipment(
+  projectId: string,
+  userId: string,
+  patch: Record<string, unknown> | null | undefined,
+): Promise<boolean> {
+  if (!isValidUUID(projectId) || !isValidUUID(userId)) return false;
+  if (!patch || typeof patch !== 'object' || Object.keys(patch).length === 0) return false;
+  const sql = await getDbReady();
+  try {
+    await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS selected_equipment JSONB`;
+  } catch (alterErr: unknown) {
+    console.warn('[upsertSelectedEquipment] ALTER TABLE warning (non-fatal):', (alterErr as Error)?.message);
+  }
+
+  // ── Wave 1b (§1.3/§1.4): read the stored envelope to route the write ──────
+  // (schemaVersion guard + per-key deep merge). Read failure degrades to the
+  // legacy shallow merge — never blocks the write.
+  let stored: Record<string, unknown> | null = null;
+  try {
+    const cur = await sql`
+      SELECT selected_equipment FROM projects
+      WHERE id = ${projectId}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      LIMIT 1
+    `;
+    if (cur.length === 0) return false; // project not found — same result as today's UPDATE miss
+    const raw = cur[0].selected_equipment;
+    stored = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown> | null);
+  } catch (readErr: unknown) {
+    console.warn('[upsertSelectedEquipment] envelope read failed (legacy shallow merge):', (readErr as Error)?.message);
+  }
+
+  const storedMap = normalizeSubSystemMap(stored?.subSystems);
+  const storedVersion = typeof stored?.schemaVersion === 'number' ? (stored.schemaVersion as number) : 0;
+  const patchVersion = typeof patch.schemaVersion === 'number' ? (patch.schemaVersion as number) : 0;
+  const patchMap = normalizeSubSystemMap(patch.subSystems);
+
+  // ── Path C: pure legacy (no v2 data anywhere) — byte-identical to today ───
+  if (!patchMap && patchVersion < 2 && !(storedVersion >= 2 && storedMap)) {
+    const patchJson = JSON.stringify(patch);
+    const rows = await sql`
+      UPDATE projects
+      SET selected_equipment = COALESCE(selected_equipment, '{}'::jsonb) || ${patchJson}::jsonb
+      WHERE id = ${projectId}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      RETURNING id
+    `;
+    return rows.length > 0;
+  }
+
+  const nowIso = typeof patch.updatedAt === 'string' ? (patch.updatedAt as string) : new Date().toISOString();
+  let flatPatch: Record<string, unknown> = { ...patch };
+  delete flatPatch.subSystems;
+  let mapPatch: SubSystemEquipmentMap = { ...(patchMap ?? {}) };
+
+  if (!patchMap && patchVersion < 2 && storedVersion >= 2 && storedMap) {
+    // ── Path B: LEGACY flat write against a v2 envelope — §1.3: "detected via
+    // schemaVersion and re-mirrored, not interleaved". Fold the flat equipment
+    // into the PRIMARY entry so the map stays the single source of truth.
+    const primaryKey: SubSystemKey = derivePrimaryKey(storedMap) ?? 'roof';
+    const entryPatch = subSystemEntryFromFlatEquipmentPatch(patch, primaryKey, nowIso);
+    mapPatch = { [primaryKey]: { ...(storedMap[primaryKey] ?? {}), ...entryPatch } };
+    console.warn('[upsertSelectedEquipment] RE-MIRRORED legacy-client write onto v2 envelope (contract §1.3)', {
+      projectId, primaryKey, patchKeys: Object.keys(patch),
+    });
+  } else {
+    // ── Path A: v2-aware write — stamp the envelope version.
+    flatPatch.schemaVersion = Math.max(2, patchVersion);
+  }
+
+  // §1.4 single-writer flat mirror: with >1 entries in the MERGED map, the
+  // top-level ids are always derived from the map (a fence write can never
+  // flip the roof-primary flat mirror). I-5 asserts + repairs before persist.
+  const mergedMap: SubSystemEquipmentMap = { ...(storedMap ?? {}), ...mapPatch };
+  if (subSystemEntryCount(mergedMap) > 1) {
+    const mirror = derivePrimaryMirror(mergedMap)!;
+    const i5 = assertMirrorInvariant(
+      {
+        panelId: flatPatch.panelId as string | undefined,
+        inverterId: flatPatch.inverterId as string | undefined,
+        mountingId: flatPatch.mountingId as string | undefined,
+        batteryId: flatPatch.batteryId as string | undefined,
+      },
+      mergedMap,
+      'selected_equipment',
+    );
+    void i5; // violation already logged; repair = unconditional derivation below
+    flatPatch = { ...flatPatch, ...deriveSelectedEquipmentFlatFromMirror(mirror) };
+  }
+
+  // ── Per-key deep merge (§1.3, I-4): jsonb_set on the subSystems block so a
+  // patch touching only one key can never drop/overwrite another key's entry.
+  const restJson = JSON.stringify(flatPatch);
+  const subsJson = JSON.stringify(mapPatch);
+  if (Object.keys(mapPatch).length === 0) {
+    const rows = await sql`
+      UPDATE projects
+      SET selected_equipment = COALESCE(selected_equipment, '{}'::jsonb) || ${restJson}::jsonb
+      WHERE id = ${projectId}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      RETURNING id
+    `;
+    return rows.length > 0;
+  }
+  const rows = await sql`
+    UPDATE projects
+    SET selected_equipment = jsonb_set(
+      COALESCE(selected_equipment, '{}'::jsonb) || ${restJson}::jsonb,
+      '{subSystems}',
+      COALESCE(selected_equipment -> 'subSystems', '{}'::jsonb) || ${subsJson}::jsonb
+    )
+    WHERE id = ${projectId}
+      AND user_id = ${userId}
+      AND deleted_at IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
 export async function softDeleteProject(id: string, userId: string): Promise<boolean> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return false;
   const sql = await getDbReady();
@@ -544,6 +690,38 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   `;
 
   if (existing.length > 0) {
+    // ── Subsystem-wipe guard (2026-07-16) ─────────────────────────────────────
+    // A studio reload bug saved Stowell's hybrid layout with its 48 roof +
+    // 16 ground panels silently GONE (project_versions: 81 panels → {} →
+    // 19 fence in three saves over 3 minutes). Same fail-loud doctrine as the
+    // coords guard above: refuse any single save that makes an entire ≥4-panel
+    // subsystem vanish. One-by-one deletion still works (the last save of a
+    // shrinking subsystem sees <4 stored panels), and small arrays are exempt.
+    try {
+      const storedRows = await sql`
+        SELECT p->>'systemType' AS st, COUNT(*)::int AS n
+        FROM layouts, jsonb_array_elements(coalesce(panels, '[]'::jsonb)) p
+        WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+        GROUP BY 1
+      `;
+      const incoming = new Set((data.panels || []).map(p => ((p as { systemType?: string }).systemType ?? 'roof')));
+      const wiped = storedRows.filter((r: { st: string | null; n: number }) =>
+        (r.n ?? 0) >= 4 && !incoming.has(r.st ?? 'roof'));
+      if (wiped.length > 0) {
+        const desc = wiped.map((r: { st: string | null; n: number }) => `${r.st ?? 'roof'} (${r.n} panels)`).join(', ');
+        console.error('[LAYOUT_SUBSYSTEM_WIPE_BLOCKED]', { projectId: data.projectId, wiped: desc, incomingCount: (data.panels || []).length });
+        throw new Error(
+          `LAYOUT_SUBSYSTEM_WIPE: this save would remove the entire ${desc} sub-system in one step — ` +
+          `this is the signature of the reload data-loss bug, not a normal edit. ` +
+          `Refusing to save. If you really are removing the whole array, delete its panels in the studio first ` +
+          `(reduce it below 4 panels), then save.`,
+        );
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith('LAYOUT_SUBSYSTEM_WIPE')) throw e;
+      // census query failure must never block a legit save
+      console.warn('[LAYOUT_SUBSYSTEM_WIPE_GUARD] census failed, skipping guard:', (e as Error)?.message);
+    }
     // UPDATE existing layout
     const rows = await sql`
       UPDATE layouts SET

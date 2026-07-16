@@ -8,7 +8,15 @@ export type BOMStageId =
   | 'ac'
   | 'structural'
   | 'monitoring'
-  | 'labels';
+  | 'labels'
+  // Recommended extra/consumable materials crews carry per job — NOT installed
+  // quantities. Kept as a distinct stage so consumers can subtotal it separately
+  // ($/W stays on required materials) and the permit SCHED can exclude it.
+  | 'truck_stock'
+  // Suggested TOOLS for this job (bandsaw for rails, Q-cable disconnect tool,
+  // EMT bender, torque tools…) — resolved from what the job actually involves.
+  // Never priced, never counted in totals/unpriced KPIs, never on the permit.
+  | 'tools';
 
 export type BOMSystemType = 'roof' | 'ground' | 'fence';
 
@@ -30,4 +38,9 @@ export interface BOMLineItemV4 {
   formula?: string;
   notes?: string;
   required: boolean;
+  /** Owning subsystem (contract §1.3 permit carriage — docs/
+   *  ARCHITECTURE-per-subsystem-equipment.md). Absent on the legacy
+   *  single-system path; stamped in addItem by the per-sub BOM stages
+   *  (Wave 2c) only when the generation input carries subSystems. */
+  subSystem?: BOMSystemType;
 }

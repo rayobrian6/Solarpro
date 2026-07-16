@@ -40,6 +40,52 @@ export async function POST(req: NextRequest) {
     const secretValid = expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf);
     if (!secretValid) return NextResponse.json({ success: false, error: 'Valid MIGRATE_SECRET required' }, { status: 401 });
 
+    // ───────────────────────────────────────────────────────────────────────
+    // Phase 1A — Migration Governance (MIGRATION-GOV-01)
+    //
+    // This legacy inline runner is DEPRECATED as a migration execution path.
+    // The canonical migration execution path is now
+    // /api/admin/migrations (lib/migrations/runner.ts), which provides:
+    //   - schema_migrations ledger (authoritative applied-state record)
+    //   - mandatory SHA-256 checksums
+    //   - transactional execution (all-or-nothing per migration)
+    //   - PostgreSQL advisory locks (concurrency safety)
+    //   - environment-aware authorization (production disabled by default)
+    //   - fresh TOTP for human execution
+    //   - audit event emission
+    //
+    // This legacy runner's mutation path is PERMANENTLY ELIMINATED.
+    // Per MIGRATION-GOV-13 (Phase 1A.2), legacy mutation paths must be
+    // permanently blocked, not feature-flagged. A feature flag that can
+    // restore ungoverned DDL is a latent risk. This route now ALWAYS returns
+    // 423 Locked and directs the operator to the canonical migration API.
+    // The file is preserved (not deleted) so existing integrations receive a
+    // clear error response rather than a 404.
+    // ────────────────────────────────────────────────────────────────────────
+    console.log(JSON.stringify({
+      level: 'audit',
+      type: 'migration.legacy.invoked',
+      timestamp: new Date().toISOString(),
+      actorType: 'human',
+      actorId: null,
+      environment: (process.env.VERCEL_ENV || process.env.NODE_ENV || 'development').toLowerCase(),
+      executionId: null,
+      migrationIdentifier: null,
+      filename: null,
+      details: {
+        legacyRunner: 'app/api/migrate/route.ts',
+        reason: 'Legacy inline migration runner permanently eliminated (MIGRATION-GOV-13, Phase 1A.2).',
+        canonicalPath: '/api/admin/migrations',
+      },
+    }));
+    return NextResponse.json({
+      success: false,
+      error: 'This legacy migration execution path has been permanently eliminated (MIGRATION-GOV-13, Phase 1A.2). ' +
+        'Use the canonical migration API at /api/admin/migrations instead. ' +
+        'This route will never re-enable, regardless of environment variables.',
+      canonicalPath: '/api/admin/migrations',
+    }, { status: 423 }); // 423 Locked
+
     const sql = await getDbReady();
     const results: string[] = [];
 

@@ -18,6 +18,7 @@ import {
 } from './manufacturer-specs';
 import { DC_AC_TARGET, DC_AC_CLIPPING_BANDS, getDcAcClippingSeverity } from './system/dcAcConstants';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
+import type { SubSystemKey } from './system/subSystemEquipment';
 
 // ─── Input Types ──────────────────────────────────────────────────────────────
 
@@ -99,6 +100,26 @@ export interface InverterInput {
    * StringInverter.integratedDcDisconnect field on the equipment-db side.
    */
   integratedDcDisconnect?: boolean;
+  /**
+   * Wave 2b (per-subsystem equipment contract §1.7 / permit carriage) —
+   * which sub-system this physical inverter belongs to. ABSENT on legacy
+   * inputs: an untagged inverter gets today's roof-equivalent legacy
+   * treatment (rooftop adder from input.rooftopTempAdder, RSD asserted) —
+   * callers own §1.5 tag inheritance (config.systemType), not this engine.
+   * All deliberate NEC scoping changes gate strictly on >1 DISTINCT keys
+   * being present (Invariant I-10) — never on tag presence alone.
+   */
+  subSystemKey?: SubSystemKey;
+  /**
+   * Wave 2b — per-inverter environment overrides (contract §1.2 env block).
+   * When set, these take precedence over the input-level scalars for THIS
+   * inverter only. Legacy callers never set them → zero behavior change.
+   */
+  env?: {
+    rooftopTempAdderC?: number; // overrides the roof/non-roof adder rule
+    conduitType?: string;       // overrides input.conduitType for the AC run
+    wireLengthFt?: number;      // overrides input.wireLength for the AC run
+  };
 }
 
 export interface ElectricalCalcInput {
@@ -239,12 +260,102 @@ export interface EngineeringModel {
   // Multi-inverter support
   inverterCount: number;           // number of inverters in system (for disconnect sizing)
   totalAcKw: number;               // total combined AC output kW
+  /**
+   * Wave 2b HONESTY FIX (contract §3 2b): before Wave 2b these two scalars
+   * were FABRICATED as totalAcKw / inverterCount (a fleet average that
+   * matches no physical inverter in a heterogeneous system). They are now
+   * honest mirrors of `perInverter[]`: the LARGEST entry's values (conservative
+   * for the separate-disconnect approach; identical to the old average for
+   * N=1 and for homogeneous fleets — the Wave-0 golden numbers are unchanged).
+   * Heterogeneous consumers must read `perInverter[]`, not these scalars.
+   */
   perInverterAcKw: number;         // per-inverter AC output kW (for separate disconnect sizing)
   perInverterDisconnectAmps: number; // per-inverter disconnect rating (for separate approach)
+  /** Wave 2b — honest per-physical-inverter AC sizing (one entry per InverterInput). */
+  perInverter?: PerInverterAcSizing[];
   // Validation
   isValid: boolean;
   validationErrors: string[];
 }
+
+// ─── Wave 2b — per-subsystem AC sizing (contract §1.7 downstream) ─────────────
+
+/**
+ * Pure Step 1–3 AC math for ONE AC circuit (inverter output / branch /
+ * aggregate POI view). This is THE single source for output-amps →
+ * continuous (×1.25, NEC 705.60) → OCPD rounding (NEC 240.6) everywhere in
+ * this engine — per inverter, per sub-system, and at the POI aggregate.
+ */
+export interface AcBranchSizing {
+  acKw: number;
+  acOutputAmps: number;   // Step 1 — acKw × 1000 / systemVoltage
+  continuousAmps: number; // Step 2 — × 1.25 (NEC 705.60)
+  ocpdAmps: number;       // Step 3 — nextStandardOCPD(continuousAmps) (NEC 240.6)
+}
+
+export function sizeAcBranch(acKw: number, systemVoltage: number): AcBranchSizing {
+  const acOutputAmps = (acKw * 1000) / systemVoltage;
+  const continuousAmps = acOutputAmps * 1.25;
+  return { acKw, acOutputAmps, continuousAmps, ocpdAmps: nextStandardOCPD(continuousAmps) };
+}
+
+/**
+ * Entry-level AC kW for one InverterInput: micro entries carry per-DEVICE
+ * acOutputKw and represent a fleet of deviceCount devices behind one AC
+ * circuit; string/optimizer entries are already the full inverter output.
+ */
+export function inverterEntryAcKw(inv: InverterInput): number {
+  return inv.type === 'micro' ? inv.acOutputKw * (inv.deviceCount || 1) : inv.acOutputKw;
+}
+
+/** One entry per physical InverterInput — the honest per-inverter AC record. */
+export interface PerInverterAcSizing {
+  inverterIndex: number;                       // index into input.inverters / result.inverters
+  type: 'string' | 'micro' | 'optimizer';
+  subSystemKey: SubSystemKey;                  // EFFECTIVE key (untagged legacy → 'roof', see InverterInput.subSystemKey)
+  acKw: number;                                // entry AC kW (micro: per-device × deviceCount)
+  acOutputAmps: number;
+  continuousAmps: number;
+  /** This entry's physical backfeed breaker — nextStandardOCPD(continuousAmps).
+   *  705.12(B) total backfeed = Σ of THESE (round per inverter FIRST, then sum). */
+  ocpdAmps: number;
+  disconnectAmps: number;                      // per-inverter disconnect basis (= ocpdAmps)
+  deviceCount?: number;                        // micro fleets only
+}
+
+/**
+ * Wave 2b — `result.subSystems[]` entry (consumed by 2d conductorAuthority
+ * and Waves 3/5). One per DISTINCT effective SubSystemKey, in fixed
+ * roof > ground > fence order. The legacy aggregate result shape is
+ * unchanged; these summaries sit alongside it.
+ */
+export interface SubSystemElectricalSummary {
+  key: SubSystemKey;
+  topology: 'string' | 'micro' | 'optimizer' | 'mixed';
+  inverterIndexes: number[];      // indexes into input.inverters / result.inverters
+  inverterCount: number;          // InverterInput entries in this sub
+  deviceCount: number;            // physical devices (micro fleets expanded; string/optimizer = 1 each)
+  panelCount: number;
+  stringCount: number;
+  dcKw: number;
+  acKw: number;
+  acOutputAmps: number;           // Σ entry output amps
+  continuousAmps: number;         // × 1.25 (NEC 705.60)
+  /** Sub's 705.12(B) backfeed contribution = Σ per-inverter-rounded OCPDs.
+   *  NOT re-rounded at the sub level — feeds the single POI 120% check. */
+  ocpdAmps: number;
+  acWireGauge: string;            // governing gauge among the sub's inverter AC runs
+  acConductorCallout: string;
+  /** NEC 690.12 scopes to buildings → true iff key === 'roof'. */
+  rsdRequired: boolean;
+  /** Adder applied to this sub's DC conductors (roof: input adder; ground/fence at N>1: 0). */
+  rooftopTempAdderC: number;
+  branch?: { deviceCount: number; modulesPerDevice: number }; // micro branch info
+  perInverter: PerInverterAcSizing[];
+}
+
+/** Fixed contract ordering (§1.4) for subSystems[] output. */
+const SUB_SYSTEM_ORDER: readonly SubSystemKey[] = ['roof', 'ground', 'fence'] as const;
 
 // Validation function — throws if configuration is electrically impossible
 export function validateEngineeringModel(model: EngineeringModel): void {
@@ -334,6 +445,12 @@ export interface ElectricalCalcResult {
   interconnection: InterconnectionResult;
   // NEW: AC Disconnect & Conductor Sizing (Steps 1–7)
   acSizing: ACSizingResult;
+  /**
+   * Wave 2b — per-sub electrical summaries (one per distinct effective
+   * SubSystemKey, fixed roof > ground > fence order). Always present; a
+   * legacy untagged single-system input yields exactly one 'roof' entry.
+   */
+  subSystems: SubSystemElectricalSummary[];
   summary: {
     totalDcKw: number;
     totalAcKw: number;
@@ -367,17 +484,41 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   };
   const acStartGauge = normalizeGauge(input.wireGauge);
 
+  // ── Wave 2b — sub-system partition (contract §1.7, Invariant I-10) ────────
+  // Effective key per entry: untagged legacy inputs get today's roof-
+  // equivalent treatment (§1.5 tag inheritance is the CALLER's job — 2d's
+  // generatePermit fallback tags InverterInputs from config.systemType).
+  // NEC scoping changes below gate STRICTLY on >1 distinct keys (multiSub);
+  // tag presence alone never changes a single-system project's numbers.
+  const effKeys: SubSystemKey[] = input.inverters.map(inv => inv.subSystemKey ?? 'roof');
+  const distinctSubKeys: SubSystemKey[] = SUB_SYSTEM_ORDER.filter(k => effKeys.includes(k));
+  const multiSub = distinctSubKeys.length > 1;
+  const hasRoofSub = distinctSubKeys.includes('roof');
+
+  // Honest per-physical-inverter AC sizing (Steps 1–3 via sizeAcBranch) plus
+  // per-entry DC tallies — feeds backfeed Σ, engineeringModel.perInverter,
+  // and result.subSystems[].
+  const entrySizings: PerInverterAcSizing[] = [];
+  const entryDcTallies: Array<{ panelCount: number; dcKw: number; stringCount: number }> = [];
+
   // ── Per-inverter calculations ─────────────────────────────────────────────
   input.inverters.forEach((inv, invIdx) => {
     const invIssues: CalcIssue[] = [];
     const stringResults: StringCalcResult[] = [];
+    const invKey = effKeys[invIdx];
+    // Per-inverter rooftop temperature adder (NEC 310.15(B)(2)(c) scoping):
+    // explicit env override wins; at N>1 subs the adder applies to ROOF-tagged
+    // conductors only (ground/fence conductors never carry roof derates,
+    // Invariant I-7); single-sub/legacy keeps input.rooftopTempAdder as-is.
+    const invRooftopAdder = inv.env?.rooftopTempAdderC
+      ?? (multiSub ? (invKey === 'roof' ? input.rooftopTempAdder : 0) : input.rooftopTempAdder);
+    let entryPanels = 0;
+    let entryDcKw = 0;
 
-    // Topology-aware AC capacity accumulation
+    // Topology-aware AC capacity accumulation (single-source helper)
     // MICRO: acOutputKw is per-device; multiply by deviceCount for total AC
     // STRING: acOutputKw is already the full inverter AC output
-    const invAcKw = inv.type === 'micro'
-      ? inv.acOutputKw * (inv.deviceCount || 1)
-      : inv.acOutputKw;
+    const invAcKw = inverterEntryAcKw(inv);
     totalAcKw += invAcKw;
     totalAcOutputAmps += (invAcKw * 1000) / input.systemVoltage;
 
@@ -388,6 +529,8 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       const moduleWattage = inv.strings[0]?.panelWatts || 400; // Use panel wattage from config or default
       totalDcKw += (moduleCount * moduleWattage) / 1000;
       totalPanels += moduleCount;
+      entryPanels += moduleCount;
+      entryDcKw += (moduleCount * moduleWattage) / 1000;
     } else {
       // STRING/OPTIMIZER: DC size derived from string arrays
 
@@ -396,6 +539,8 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       const strIssues: CalcIssue[] = [];
       totalPanels += str.panelCount;
       totalDcKw += (str.panelCount * str.panelWatts) / 1000;
+      entryPanels += str.panelCount;
+      entryDcKw += (str.panelCount * str.panelWatts) / 1000;
       const stringLabel = `${invIdx + 1}-${strIdx + 1}`;
 
       // 1. String Voc temperature correction (NEC 690.7)
@@ -464,7 +609,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         tempCoeffIsc,
         maxSeriesFuseRating: str.maxSeriesFuseRating,
         designTempMaxC: input.designTempMax,
-        rooftopTempAdderC: input.rooftopTempAdder,
+        rooftopTempAdderC: invRooftopAdder, // Wave 2b: roof-scoped (I-7)
         inverterMaxInputCurrentPerMppt: inv.maxInputCurrentPerMppt,
       });
 
@@ -512,7 +657,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         onewayLengthFt: str.wireLength,
         systemVoltage: str.panelVmp * str.panelCount,
         ambientTempC: input.designTempMax,
-        rooftopTempAdderC: input.rooftopTempAdder,
+        rooftopTempAdderC: invRooftopAdder, // Wave 2b: roof-scoped (I-7)
         conduitType: str.conduitType,
         maxVoltageDropPct: 3.0,
         startingGauge: normalizeGauge(str.wireGauge),
@@ -551,7 +696,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       }
 
       const finalDCConductor = getConductorByGauge(finalDCGauge);
-      const rooftopTemp = input.designTempMax + input.rooftopTempAdder;
+      const rooftopTemp = input.designTempMax + invRooftopAdder; // Wave 2b: roof-scoped (I-7)
       const wireAmpacity = finalDCConductor?.ampacity_90c ?? 0;
       const wireAmpacityDerated = wireAmpacity * getTempDeratingFactor(rooftopTemp) * getConduitFillDeratingFactor(2);
 
@@ -600,9 +745,14 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       ? (invAcKw * 1000) / (input.systemVoltage || 240)
       : inv.acOutputCurrentMax;
     const acBranchKw = inv.type === 'micro' ? invAcKw : inv.acOutputKw;
-    const acWireLengthFt = (Number.isFinite(input.wireLength) && input.wireLength > 0)
-      ? input.wireLength
+    // Wave 2b: per-inverter env override wins over the input-level scalar.
+    const acWireLenBasis = (Number.isFinite(inv.env?.wireLengthFt) && (inv.env?.wireLengthFt ?? 0) > 0)
+      ? (inv.env!.wireLengthFt as number)
+      : input.wireLength;
+    const acWireLengthFt = (Number.isFinite(acWireLenBasis) && acWireLenBasis > 0)
+      ? acWireLenBasis
       : 50; // default 50ft if missing/zero
+    const acConduitType = inv.env?.conduitType ?? input.conduitType;
 
     const acWireResult = autoSizeACWire({
       inverterMaxACOutputCurrent: acBranchCurrentA,
@@ -612,7 +762,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       rooftopTempAdderC: 0,
       onewayLengthFt: acWireLengthFt,
       currentCarryingConductors: 3,
-      conduitType: input.conduitType,
+      conduitType: acConduitType,
       maxVoltageDropPct: 2.0,
       startingGauge: acStartGauge,
       mode,
@@ -664,14 +814,40 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       acWireResult,
       issues: invIssues,
     });
+
+    // Wave 2b — honest per-physical-inverter AC sizing (single-source helper).
+    const entryAc = sizeAcBranch(invAcKw, input.systemVoltage);
+    entrySizings.push({
+      inverterIndex: invIdx,
+      type: inv.type,
+      subSystemKey: invKey,
+      acKw: entryAc.acKw,
+      acOutputAmps: entryAc.acOutputAmps,
+      continuousAmps: entryAc.continuousAmps,
+      ocpdAmps: entryAc.ocpdAmps,
+      disconnectAmps: entryAc.ocpdAmps,
+      ...(inv.type === 'micro' ? { deviceCount: inv.deviceCount || 1 } : {}),
+    });
+    entryDcTallies.push({
+      panelCount: entryPanels,
+      dcKw: entryDcKw,
+      stringCount: inv.type === 'micro' ? 0 : inv.strings.length,
+    });
   });
 
   // ─── Interconnection Method Engine (NEC 705.11 / 705.12) ─────────────────────
   // Supports: LOAD_SIDE, SUPPLY_SIDE_TAP, MAIN_BREAKER_DERATE, PANEL_UPGRADE
   const isMicroSystem = input.inverters.every(inv => inv.type === 'micro');
-  const solarBreakerRequired = isMicroSystem
-    ? nextStandardOCPD(totalAcOutputAmps * 1.25)
-    : nextStandardOCPD((totalAcOutputAmps / Math.max(input.inverters.length, 1)) * 1.25);
+  // Wave 2b (contract §1.7 + Addendum B ruling 2) — 705.12(B) total backfeed
+  // = Σ over each PHYSICAL inverter of nextStandardOCPD(inverterAmps × 1.25):
+  // round PER INVERTER FIRST, then sum, so the check matches the actual
+  // breaker schedule an AHJ reviews. This DELETES the old :671–674 fork,
+  // which fabricated a single average-per-inverter breaker
+  // (nextStandardOCPD((totalAmps / N) × 1.25)) as the whole system's
+  // backfeed — an undercount for every N>1 system. N=1 is numerically
+  // identical to the old path (both micro and string/optimizer branches).
+  // Always recomputed — no legacy freeze flag (Ray ruling 2026-07-12).
+  const solarBreakerRequired = entrySizings.reduce((sum, e) => sum + e.ocpdAmps, 0);
 
   // Battery NEC 705.12(B) bus impact — AC-coupled battery backfeed breakers add to bus loading
   // NEC 705.12(B): ALL backfeed breakers (solar + battery) count toward 120% rule
@@ -719,7 +895,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         necReference: interconnectionNecRef,
       });
     } else {
-      interconnectionMessage = `120% Busbar Rule Violation. Total backfeed (${icSolarBreaker}A) exceeds max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max. Options: supply-side tap, derate main breaker, or upgrade panel bus.`;
+      interconnectionMessage = `120% Busbar Rule Violation. Total backfeed (${icSolarBreaker}A) exceeds max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max. Options: supply-side connection (insulated tap or utility-approved meter-socket lug adapter, NEC 705.11), derate main breaker, or upgrade panel bus.`;
       interconnectionIssues.push({
         code: 'E-BUSBAR-120',
         severity: 'error',
@@ -922,15 +1098,30 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   }
 
   // ── Rapid Shutdown ────────────────────────────────────────────────────────
-  if (!input.rapidShutdown && ['2017', '2020', '2023'].includes(input.necVersion)) {
+  // Wave 2b scoping (Invariant I-7): NEC 690.12 applies to PV systems ON
+  // BUILDINGS — at N>1 subs the assertion fires only when a ROOF-tagged
+  // inverter exists. Ground/fence-only hybrids are exempt (info emitted).
+  // Single-sub/legacy keeps today's behavior (I-10 gate: strictly N>1).
+  const rsdApplies = multiSub ? hasRoofSub : true;
+  if (!input.rapidShutdown && rsdApplies && ['2017', '2020', '2023'].includes(input.necVersion)) {
     allErrors.push({
       code: 'E-RAPID-SHUTDOWN',
       severity: 'error',
-      message: 'Rapid Shutdown required for rooftop PV under NEC 2017+',
+      message: multiSub
+        ? 'Rapid Shutdown required for the roof sub-system (rooftop PV under NEC 2017+)'
+        : 'Rapid Shutdown required for rooftop PV under NEC 2017+',
       necReference: 'NEC 690.12',
       suggestion: 'Install module-level rapid shutdown (Enphase IQ8, SolarEdge optimizers)',
     });
+  } else if (!input.rapidShutdown && !rsdApplies) {
+    allInfos.push({
+      code: 'I-RSD-NOT-REQUIRED',
+      severity: 'info',
+      message: `Rapid shutdown not required — no roof sub-system present (${distinctSubKeys.join(' + ')}); NEC 690.12 scopes to PV systems on buildings`,
+      necReference: 'NEC 690.12',
+    });
   }
+  const rapidShutdownCompliant = input.rapidShutdown || !rsdApplies;
 
   // ── NEC 2023-specific checks ──────────────────────────────────────────────
   if (input.necVersion === '2023') {
@@ -993,32 +1184,68 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   const hasNonMicroInverter = input.inverters.some(inv => inv.type !== 'micro');
   const integratedSwitchSatisfiesNEC690_15 = hasNonMicroInverter && allNonMicroHaveIntegratedDisconnect;
 
-  if (!input.dcDisconnect && !isMicroSystem && !integratedSwitchSatisfiesNEC690_15) {
-    allErrors.push({
-      code: 'E-DC-DISCONNECT',
-      severity: 'error',
-      message: 'DC disconnect required for each string/central inverter',
-      necReference: 'NEC 690.15',
-      suggestion: 'Install DC disconnect switch at each inverter',
-    });
-  } else if (!input.dcDisconnect && isMicroSystem) {
-    // Microinverter systems: DC disconnect not required per NEC 690.15
-    // Module-level power electronics eliminate accessible DC conductors
-    allInfos.push({
-      code: 'I-DC-DISCONNECT-MICRO',
-      severity: 'info',
-      message: 'DC disconnect not required for microinverter system (NEC 690.15 — no accessible DC circuit)',
-      necReference: 'NEC 690.15',
-    });
-  } else if (!input.dcDisconnect && integratedSwitchSatisfiesNEC690_15) {
-    // v47.417 — Integrated factory switch satisfies NEC 690.15 for all
-    // non-micro inverters in the system.
-    allInfos.push({
-      code: 'I-DC-DISCONNECT-INTEGRATED',
-      severity: 'info',
-      message: 'DC disconnect requirement satisfied by factory-integrated switch on each inverter (NEC 690.15)',
-      necReference: 'NEC 690.15',
-    });
+  if (!multiSub) {
+    // ── Single-sub / legacy path — byte-identical to pre-Wave-2b behavior ──
+    if (!input.dcDisconnect && !isMicroSystem && !integratedSwitchSatisfiesNEC690_15) {
+      allErrors.push({
+        code: 'E-DC-DISCONNECT',
+        severity: 'error',
+        message: 'DC disconnect required for each string/central inverter',
+        necReference: 'NEC 690.15',
+        suggestion: 'Install DC disconnect switch at each inverter',
+      });
+    } else if (!input.dcDisconnect && isMicroSystem) {
+      // Microinverter systems: DC disconnect not required per NEC 690.15
+      // Module-level power electronics eliminate accessible DC conductors
+      allInfos.push({
+        code: 'I-DC-DISCONNECT-MICRO',
+        severity: 'info',
+        message: 'DC disconnect not required for microinverter system (NEC 690.15 — no accessible DC circuit)',
+        necReference: 'NEC 690.15',
+      });
+    } else if (!input.dcDisconnect && integratedSwitchSatisfiesNEC690_15) {
+      // v47.417 — Integrated factory switch satisfies NEC 690.15 for all
+      // non-micro inverters in the system.
+      allInfos.push({
+        code: 'I-DC-DISCONNECT-INTEGRATED',
+        severity: 'info',
+        message: 'DC disconnect requirement satisfied by factory-integrated switch on each inverter (NEC 690.15)',
+        necReference: 'NEC 690.15',
+      });
+    }
+  } else if (!input.dcDisconnect) {
+    // ── Wave 2b: N>1 subs — NEC 690.15 evaluated PER SUB-SYSTEM (I-7).
+    // A micro roof must not exempt a string ground from its DC disconnect,
+    // and a string ground must not force a phantom disconnect onto a micro
+    // roof. Fixed roof > ground > fence emission order (deterministic).
+    for (const key of distinctSubKeys) {
+      const subInvs = input.inverters.filter((_, i) => effKeys[i] === key);
+      const subAllMicro = subInvs.every(inv => inv.type === 'micro');
+      const subNonMicro = subInvs.filter(inv => inv.type !== 'micro');
+      if (subAllMicro) {
+        allInfos.push({
+          code: 'I-DC-DISCONNECT-MICRO',
+          severity: 'info',
+          message: `DC disconnect not required for microinverter ${key} sub-system (NEC 690.15 — no accessible DC circuit)`,
+          necReference: 'NEC 690.15',
+        });
+      } else if (subNonMicro.every(inv => inv.integratedDcDisconnect === true)) {
+        allInfos.push({
+          code: 'I-DC-DISCONNECT-INTEGRATED',
+          severity: 'info',
+          message: `DC disconnect requirement for the ${key} sub-system satisfied by factory-integrated switch on each inverter (NEC 690.15)`,
+          necReference: 'NEC 690.15',
+        });
+      } else {
+        allErrors.push({
+          code: 'E-DC-DISCONNECT',
+          severity: 'error',
+          message: `DC disconnect required for each string/central inverter in the ${key} sub-system`,
+          necReference: 'NEC 690.15',
+          suggestion: `Install DC disconnect switch at each ${key} sub-system inverter`,
+        });
+      }
+    }
   }
 
   // ── DC/AC Ratio ───────────────────────────────────────────────────────────
@@ -1100,14 +1327,15 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     '#2/0 AWG': 0.2223,
   };
 
-  // Step 1: Inverter Output Current
-  const acSizingCurrentAmps = (totalAcKw * 1000) / input.systemVoltage;
-
-  // Step 2: Continuous Load Rule (NEC 705.60 — PV output is continuous)
-  const acSizingContinuousAmps = acSizingCurrentAmps * 1.25;
-
-  // Step 3: OCPD — next standard breaker size ≥ continuous current (NEC 240.6)
-  const acSizingOcpdAmps = nextStandardOCPD(acSizingContinuousAmps);
+  // Steps 1–3 (aggregate POI view) — same pure helper as the per-inverter
+  // and per-sub paths (Wave 2b single-source AC math):
+  //   Step 1: Inverter Output Current = totalAcKw × 1000 / systemVoltage
+  //   Step 2: Continuous Load Rule (NEC 705.60) = × 1.25
+  //   Step 3: OCPD = next standard breaker ≥ continuous (NEC 240.6)
+  const acSizingAggregate = sizeAcBranch(totalAcKw, input.systemVoltage);
+  const acSizingCurrentAmps = acSizingAggregate.acOutputAmps;
+  const acSizingContinuousAmps = acSizingAggregate.continuousAmps;
+  const acSizingOcpdAmps = acSizingAggregate.ocpdAmps;
 
   // Step 4: Disconnect — enclosure must be rated ≥ OCPD (NEC 690.14)
   // Placeholder: final enclosure size is computed in Step 5 after fuse sizing.
@@ -1187,12 +1415,21 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   const acSizingGrounding = getEGCSize(acSizingOcpdAmps);
 
   // Build canonical engineeringModel — single source of truth
-  // Per-inverter sizing for separate disconnect approach
+  // Wave 2b HONESTY FIX: the old code fabricated per-inverter values as the
+  // fleet AVERAGE (totalAcKw / invCount → nextStandardOCPD(avg × 1.25)) —
+  // matching no physical inverter in a heterogeneous system. The honest
+  // per-inverter data now lives in entrySizings (one record per physical
+  // InverterInput, via sizeAcBranch); the legacy scalar mirrors are the
+  // LARGEST entry's values — identical to the old average for N=1 and for
+  // homogeneous fleets (so the Wave-0 golden numbers are unchanged), and
+  // conservative for the separate-disconnect approach when entries differ.
   const invCount = input.inverters.length;
-  const perInvAcKw = invCount > 0 ? totalAcKw / invCount : totalAcKw;
-  const perInvCurrentAmps = (perInvAcKw * 1000) / input.systemVoltage;
-  const perInvContinuousAmps = perInvCurrentAmps * 1.25;
-  const perInvDisconnectAmps = nextStandardOCPD(perInvContinuousAmps);
+  const largestEntry = entrySizings.reduce<PerInverterAcSizing | null>(
+    (best, e) => (best === null || e.acKw > best.acKw ? e : best), null);
+  const perInvAcKw = largestEntry ? largestEntry.acKw : totalAcKw;
+  const perInvDisconnectAmps = largestEntry
+    ? entrySizings.reduce((max, e) => Math.max(max, e.disconnectAmps), 0)
+    : sizeAcBranch(totalAcKw, input.systemVoltage).ocpdAmps;
 
   const engineeringModelData: EngineeringModel = {
     ocpd: acSizingOcpdAmps,
@@ -1211,6 +1448,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     totalAcKw,
     perInverterAcKw: perInvAcKw,
     perInverterDisconnectAmps: perInvDisconnectAmps,
+    perInverter: entrySizings, // Wave 2b — honest per-physical-inverter data
     isValid: true,
     validationErrors: [],
   };
@@ -1273,6 +1511,56 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     ],
   };
 
+  // ── Wave 2b — per-sub electrical summaries (result.subSystems[]) ──────────
+  // One entry per distinct effective SubSystemKey, fixed roof > ground >
+  // fence order. Sub-level ocpdAmps = Σ per-inverter-rounded OCPDs (never
+  // re-rounded at the sub level) — the sub's 705.12(B) backfeed
+  // contribution feeding the SINGLE 120% check at the POI above.
+  const subSystemSummaries: SubSystemElectricalSummary[] = distinctSubKeys.map(key => {
+    const idxs = effKeys.map((k, i) => (k === key ? i : -1)).filter(i => i >= 0);
+    const subEntries = idxs.map(i => entrySizings[i]);
+    const subTallies = idxs.map(i => entryDcTallies[i]);
+    const types = [...new Set(idxs.map(i => input.inverters[i].type))];
+    const microIdxs = idxs.filter(i => input.inverters[i].type === 'micro');
+
+    // Governing AC run for the sub = the inverter AC run with the highest
+    // derated ampacity (its gauge bounds every run in the sub).
+    const governing = idxs.reduce<InverterCalcResult | null>((best, i) => {
+      const r = inverterResults[i];
+      return best === null || (r.acWireResult?.effectiveAmpacity ?? 0) > (best.acWireResult?.effectiveAmpacity ?? 0)
+        ? r : best;
+    }, null);
+
+    return {
+      key,
+      topology: types.length === 1 ? types[0] : 'mixed',
+      inverterIndexes: idxs,
+      inverterCount: idxs.length,
+      deviceCount: idxs.reduce((n, i) => n + (input.inverters[i].type === 'micro'
+        ? (input.inverters[i].deviceCount || 1) : 1), 0),
+      panelCount: subTallies.reduce((n, t) => n + t.panelCount, 0),
+      stringCount: subTallies.reduce((n, t) => n + t.stringCount, 0),
+      dcKw: subTallies.reduce((n, t) => n + t.dcKw, 0),
+      acKw: subEntries.reduce((n, e) => n + e.acKw, 0),
+      acOutputAmps: subEntries.reduce((n, e) => n + e.acOutputAmps, 0),
+      continuousAmps: subEntries.reduce((n, e) => n + e.continuousAmps, 0),
+      ocpdAmps: subEntries.reduce((n, e) => n + e.ocpdAmps, 0),
+      acWireGauge: governing?.acWireResult?.selectedGauge ?? acWireGauge,
+      acConductorCallout: governing?.acWireResult?.conductorCallout ?? acConductorCallout,
+      rsdRequired: key === 'roof', // NEC 690.12 scopes to buildings
+      rooftopTempAdderC: multiSub
+        ? (key === 'roof' ? input.rooftopTempAdder : 0)
+        : input.rooftopTempAdder,
+      ...(microIdxs.length > 0 ? {
+        branch: {
+          deviceCount: microIdxs.reduce((n, i) => n + (input.inverters[i].deviceCount || 1), 0),
+          modulesPerDevice: input.inverters[microIdxs[0]].modulesPerDevice || 1,
+        },
+      } : {}),
+      perInverter: subEntries,
+    };
+  });
+
   return {
     status,
     necVersion: input.necVersion,
@@ -1289,10 +1577,11 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     acWireAmpacity: acAmpacityDerated,
     acVoltageDrop: acVdrop,
     acConductorCallout,
-    rapidShutdownCompliant: input.rapidShutdown,
+    rapidShutdownCompliant,
     autoResolutions,
     interconnection: interconnectionResult,
     acSizing: acSizingResult,
+    subSystems: subSystemSummaries,
     summary: {
       totalDcKw,
       totalAcKw,

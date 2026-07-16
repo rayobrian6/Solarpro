@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Wave 0 golden — SLD legacy MICRO baseline (structural markers) > canvas dims + marker counts match the pre-contract snapshot 1`] = `
+{
+  "canvas": {
+    "height": "1728",
+    "viewBox": "0 0 2304 1728",
+    "width": "2304",
+  },
+  "counts": {
+    "acCombiner": 4,
+    "externalDcDisconnect": 0,
+    "mainServicePanel": 1,
+    "optimizerHdr": 0,
+    "pvArrayNode": 1,
+    "solarFenceNode": 0,
+    "stringInverterHdr": 0,
+    "title": 1,
+    "utilityGrid": 1,
+  },
+  "isSvg": true,
+}
+`;
+
+exports[`Wave 0 golden — SLD legacy STRING baseline (structural markers) > canvas dims + marker counts match the pre-contract snapshot 1`] = `
+{
+  "canvas": {
+    "height": "1728",
+    "viewBox": "0 0 2304 1728",
+    "width": "2304",
+  },
+  "counts": {
+    "acCombiner": 0,
+    "externalDcDisconnect": 1,
+    "mainServicePanel": 1,
+    "optimizerHdr": 0,
+    "pvArrayNode": 2,
+    "solarFenceNode": 0,
+    "stringInverterHdr": 4,
+    "title": 1,
+    "utilityGrid": 1,
+  },
+  "isSvg": true,
+}
+`;

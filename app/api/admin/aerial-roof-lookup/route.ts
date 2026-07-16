@@ -13,8 +13,8 @@ import { geocodeAddress } from '@/lib/geocode';
 import {
   nearmapConfigured,
   checkNearmapCoverage,
-  fetchNearmapRoofPlanes,
 } from '@/lib/aerial/nearmap';
+import { getNearmapRoofPlanesCached } from '@/lib/aerial/nearmapCache';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -73,7 +73,8 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const planes = await fetchNearmapRoofPlanes(lat, lng, { radiusM: 45, skipCoverageCheck: true });
+    // Durable DB cache (fail-closed) — never re-bills a property already fetched.
+    const planes = await getNearmapRoofPlanesCached(lat, lng);
     return NextResponse.json({
       success: true,
       covered: true,

@@ -2665,10 +2665,19 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
   // ══════════════════════════════════════════════════════════════════════════
 
   {
-    id: 'plp-power-peak-driven-pile',
+    // Speck PLP POWER DRIVE™ — the I-beam pile-driven, SINGLE-ROW vertical-post
+    // ground mount (one pylon per bay + tilted strongback + PX rail, single-strut
+    // cantilever). This is the product the Design Studio ground reality engine
+    // builds (lib/3d/ground/groundMountRealityEngine.ts, install doc SP3284 RevE).
+    // Corrected 2026-07 from a mis-entered "POWER PEAK" double-post (2 piles/row,
+    // 2-7/8" pipe) spec, which is a DIFFERENT PLP product and contradicted the
+    // studio. Ref: plp.com/renewables/solar/ground-mounts/power-drive (UL 2703,
+    // wind-tunnel tested). NOTE: PLP does not publish catalog SKUs/pricing — part
+    // numbers below are internal identifiers; real pricing is per PLP quote/RFQ.
+    id: 'plp-power-drive-driven-pile',
     manufacturer: 'PLP (Preformed Line Products)',
-    model: 'POWER PEAK Driven Pile System',
-    partNumber: 'PP-DRIVEN-PILE-01',
+    model: 'POWER DRIVE Ground Mount System',
+    partNumber: 'PD-SYSTEM-SP3284',
     category: 'racking',
     topologyType: 'GROUND_MOUNT_DRIVEN_PILE',
     mountTopology: 'GROUND_MOUNT_DRIVEN_PILE',
@@ -2676,8 +2685,8 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     structuralSpecs: {
       maxWindSpeed: 170,
       maxSnowLoad: 60,
-      railSpanMax: 120,
-      attachmentSpacingMax: 120,
+      railSpanMax: 240,             // continuous PX rail spans ~20 ft pylon-to-pylon
+      attachmentSpacingMax: 240,    // one pylon per bay ≈ 20 ft O.C.
       requiresRail: true,
       foundationType: 'driven_pile',
       upliftCapacityLbs: 4000,
@@ -2688,21 +2697,21 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     requiredAccessories: [
       {
         category: 'driven_pile',
-        description: 'POWER PEAK driven pile — 2 per row (front + back post)',
+        description: 'POWER DRIVE driven I-beam pylon — single-row, one per bay',
         required: true, quantityRule: 'formula',
-        quantityFormula: 'ceil(strings * 2)',
-        defaultManufacturer: 'PLP', defaultModel: 'POWER PEAK 2-7/8" OD Pile',
-        defaultPartNumber: 'PP-PILE-278-01', necReference: 'ASCE 7-22',
-        notes: '2 piles per string row — front and back post. Driven with hydraulic hammer.',
+        quantityFormula: 'ceil(modules / 5)',
+        defaultManufacturer: 'PLP', defaultModel: 'POWER DRIVE I-beam Pylon (W-section, galv. steel)',
+        defaultPartNumber: 'PD-PYLON-IBEAM', necReference: 'ASCE 7-22',
+        notes: 'Single-row vertical I-beam post, ONE per bay ≈ 20 ft O.C., driven with hydraulic hammer — no concrete. Exact count per PLP layout / reality engine.',
       },
       {
         category: 'rail',
-        description: 'POWER PEAK horizontal rail — spans between piles',
+        description: 'POWER DRIVE PX rail — integrated wire channel, spans pylon-to-pylon',
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
-        defaultManufacturer: 'PLP', defaultModel: 'POWER PEAK Rail 20ft',
-        defaultPartNumber: 'PP-RAIL-20FT', necReference: 'ASCE 7-22',
-        notes: '2 rails per string row (top and bottom chord)',
+        defaultManufacturer: 'PLP', defaultModel: 'POWER DRIVE PX Rail 20 ft (integrated wire channel)',
+        defaultPartNumber: 'PD-PXRAIL-20FT', necReference: 'ASCE 7-22',
+        notes: '2 continuous rails per table (upper + lower clamp line), spliced between sections',
       },
       {
         category: 'grounding',
@@ -2713,19 +2722,19 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
       },
       {
         category: 'mid_clamp',
-        description: 'Module mid clamp — 2 per interior module',
+        description: 'Module mid clamp — 2 per interior module (pre-assembled)',
         required: true, quantityRule: 'formula',
         quantityFormula: '(modules - strings) * 2',
-        defaultManufacturer: 'PLP', defaultModel: 'POWER PEAK Mid Clamp',
-        defaultPartNumber: 'PP-MID-CLAMP-01', necReference: 'IBC 2021',
+        defaultManufacturer: 'PLP', defaultModel: 'POWER DRIVE Pre-Assembled Mid Clamp',
+        defaultPartNumber: 'PD-MID-CLAMP', necReference: 'IBC 2021',
       },
       {
         category: 'end_clamp',
-        description: 'Module end clamp — 4 per string (2 rails × 2 ends)',
+        description: 'Module end clamp — 4 per string (2 rails × 2 ends, pre-assembled)',
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 4',
-        defaultManufacturer: 'PLP', defaultModel: 'POWER PEAK End Clamp',
-        defaultPartNumber: 'PP-END-CLAMP-01', necReference: 'IBC 2021',
+        defaultManufacturer: 'PLP', defaultModel: 'POWER DRIVE Pre-Assembled End Clamp',
+        defaultPartNumber: 'PD-END-CLAMP', necReference: 'IBC 2021',
       },
       {
         category: 'conduit',
@@ -2738,10 +2747,12 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     ],
     compatibilityRules: [],
     notesTemplates: [
-      'PLP POWER PEAK — driven pile ground mount, hydraulic installation',
-      'ICC-ES ESR-3895, ASCE 7-22 compliant, max 120" pile spacing',
-      'No concrete required — driven pile foundation',
+      'PLP POWER DRIVE™ — single-row driven I-beam pylon ground mount (install doc SP3284, UL 2703)',
+      'Wind-tunnel tested; ICC-ES ESR-3895; ASCE 7-22 compliant',
+      'ONE pylon per bay ≈ 20 ft O.C. — no concrete, driven foundation',
+      'Patented pre-assembled module clamps; PX rail with integrated wire channel',
       'Underground conduit required for DC home run per NEC 300.5',
+      'Pricing per PLP quote/RFQ — not publicly listed',
     ],
     iccEsReport: 'ESR-3895',
     warranty: '25-year product',

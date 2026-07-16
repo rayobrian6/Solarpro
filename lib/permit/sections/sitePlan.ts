@@ -7,11 +7,13 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
-import { buildSchemSVG } from '../utils/drawing';
+import { buildSchemSVG, escapeH } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
-import { nearmapConfigured, fetchNearmapStaticAerial, fetchNearmapAIResult, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, fetchNearmapStaticAerial, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
+import { getNearmapAIResultCached } from '@/lib/aerial/nearmapCache';
 import { cropToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { locateEquipment } from '../utils/equipmentLocator';
+import { computeModuleAzimuthGrid, snapModuleAzimuth } from '../utils/moduleAzimuthGrid';
 
 // Ray-casting point-in-ring (lat/lng) — used to join a panel to its roof plane
 // for the azimuth fallback when the panel record carries no azimuth.
@@ -30,7 +32,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const { project, system, compliance } = input;
   const aerial = input.aerialData;
 
-  const addr    = project.address || '—';
+  const addr    = escapeH(project.address || '—');
   const ahj     = compliance.jurisdiction?.ahj || '—';
   // FIX v47.341: Convert utility slug to display name
   const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
@@ -133,6 +135,14 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     const inCrop = (p: { x: number; y: number }, pad = 4) =>
       p.x > cropX - pad && p.x < cropX + cropW + pad && p.y > cropY - pad && p.y < cropY + cropH + pad;
 
+    // ── FURNITURE SCALE — resolution independence ──────────────────────────
+    // Every overlay size below is in IMAGE pixels and the crop is what maps
+    // to the printed sheet. Sized for a ~900px Nearmap crop, the same 9.5px
+    // labels rendered ~2.4× oversized on a 640px Google-fallback crop (giant
+    // plates burying the aerial — Ray's 07-06 render). Scale all furniture
+    // with the crop width instead.
+    const fk = Math.min(1.35, Math.max(0.55, cropW / 900));
+
     // ── Registration shift: design GPS → imagery GPS ──────────────────────
     // Nearmap's AI roof polygons are registered to the SAME imagery as the
     // tiles; the design trace sits ~1 m off. When subject polygons are in
@@ -175,6 +185,39 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const agree = _deltas.filter(d =>
           Math.hypot((d.dLat - mLat) * 111320, (d.dLng - mLng) * 111320 * _cos) < 1.2).length;
         if (magM < 2.5 && agree * 2 >= _deltas.length) { _dLat = mLat; _dLng = mLng; }
+      }
+      // FALLBACK: whole-roof bbox-center registration. Nearmap often returns
+      // ONE outline for a multi-plane hip roof — every design plane then
+      // matches the same subject centroid, the per-plane deltas can never
+      // agree, the shift was rejected, and the module layer rendered at raw
+      // design GPS (~1 m off the pixels — south row read as past the eave).
+      if (_dLat === 0 && _dLng === 0 && _subjPolys.length < ((project.roofPlanes?.length ?? 0))) {
+        const _bboxC = (vs: Array<{lat:number;lng:number}>) => ({
+          lat: (Math.min(...vs.map(v => v.lat)) + Math.max(...vs.map(v => v.lat))) / 2,
+          lng: (Math.min(...vs.map(v => v.lng)) + Math.max(...vs.map(v => v.lng))) / 2,
+        });
+        const allSubj = _subjPolys.flat().filter(v => isFinite(v?.lat) && isFinite(v?.lng));
+        const allDesign = ((project.roofPlanes ?? []) as any[])
+          .flatMap(rp => rp.vertices ?? [])
+          .filter((v: any) => isFinite(v?.lat) && isFinite(v?.lng) && Math.abs(v.lat) > 0.001);
+        if (allSubj.length >= 3 && allDesign.length >= 3) {
+          const sc = _bboxC(allSubj), dcAll = _bboxC(allDesign);
+          const dLat = sc.lat - dcAll.lat, dLng = sc.lng - dcAll.lng;
+          const magM = Math.hypot(dLat * 111320, dLng * 111320 * _cos);
+          if (magM < 2.5) { _dLat = dLat; _dLng = dLng; }
+        }
+      }
+    }
+    // GOOGLE-FALLBACK registration: no vector layer shares Google's imagery
+    // registration (Solar API roofSegments routinely belong to a NEIGHBOR
+    // building — measured 14 m off on Melvin), so the permit route pre-computes
+    // an image-space EDGE-SNAP shift (see utils/aerialEdgeSnap.ts) and stores
+    // it on aerialData.registrationShift. Applied through the same toPxD path
+    // as the Nearmap shift; absent/unconfident → unshifted, as before.
+    if (_dLat === 0 && _dLng === 0 && _subjPolys.length === 0) {
+      const _rs = (aerial as any).registrationShift as { dLat?: number; dLng?: number } | undefined;
+      if (_rs && isFinite(_rs.dLat as number) && isFinite(_rs.dLng as number)) {
+        _dLat = _rs.dLat as number; _dLng = _rs.dLng as number;
       }
     }
     const toPxD = (lat: number, lng: number) => toPx(lat + _dLat, lng + _dLng);
@@ -262,7 +305,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           };
         };
         const _vis = pts
-          .map((p, i) => _clipSeg(p, pts[(i + 1) % pts.length]))
+          .map((p, i) => { const s = _clipSeg(p, pts[(i + 1) % pts.length]); return s ? { ...s, i } : null; })
           .filter((s): s is NonNullable<typeof s> => !!s)
           .map(s => ({ ...s, len: Math.hypot(s.bx - s.ax, s.by - s.ay) }))
           .filter(s => s.len > 8);
@@ -271,13 +314,25 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           const d = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
           parcelSvg = `<polygon points="${d}" fill="none" stroke="#fff" stroke-width="3" opacity="0.7" stroke-dasharray="14 7"/>` +
                       `<polygon points="${d}" fill="none" stroke="#111" stroke-width="1.4" stroke-dasharray="14 7"/>`;
+          // TRUE ground length of a lot line (ft) from the county-GIS ring —
+          // examiners expect lot-line dimensions on a site plan; the line
+          // drew undimensioned.
+          const _edgeFt = (i: number) => {
+            const a = pv[i], b = pv[(i + 1) % pv.length];
+            const cosA = Math.cos(a.lat * Math.PI / 180);
+            return Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * cosA) * 3.28084;
+          };
           // Label every visible run long enough to carry text (so a clipped
           // edge can never read as a stray unexplained line).
           for (const s of _vis.filter(v => v.len > 110).slice(0, 3)) {
             const mx = (s.ax + s.bx) / 2, my = (s.ay + s.by) / 2;
             let ang = Math.atan2(s.by - s.ay, s.bx - s.ax) * 180 / Math.PI;
             if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-            parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="8.5" font-weight="900" letter-spacing="1.5" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="2.4" paint-order="stroke">PROPERTY LINE</text>`;
+            parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my - 5 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8.5 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(1.5 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.4 * fk).toFixed(1)}" paint-order="stroke">PROPERTY LINE</text>`;
+            const _ft = _edgeFt(s.i);
+            if (isFinite(_ft) && _ft > 5) {
+              parcelSvg += `<text x="${mx.toFixed(1)}" y="${(my + 12 * fk).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.7)" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">${_ft.toFixed(1)}'</text>`;
+            }
           }
         }
       }
@@ -289,18 +344,55 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // reads on outlines, not on fills).
     let modSvg = '';
     if (panelPos && panelPos.length > 0 && panelPos.length <= 800) {
-      const wM = panelWidIn * 0.0254, lM = panelLenIn * 0.0254;
+      let wM = panelWidIn * 0.0254;
+      const lM = panelLenIn * 0.0254;
+      // Module WIDTH from the design's own pitch. The payload often omits real
+      // panel dimensions, and the 66×40" default drew each module ~10% narrower
+      // than the placement pitch (design pitch 1.13 m vs 40" = 1.016 m) → an
+      // ~11 cm gap between every module. On the big rows that just looks loose;
+      // on the small triangular hip clusters those gaps make 4 panels read as
+      // scattered tiles (Ray 2026-07-06: "hip cluster looks messy"). The median
+      // nearest-neighbour spacing IS the module footprint in its tightest-
+      // packing direction (= width), so draw to it (less a hairline rail gap)
+      // and the panels tile as solid blocks. Length already matches the ~66"
+      // row pitch, so it's left alone. Only applies when the real width is
+      // absent; sanity-bounded so a stray coordinate can't balloon a module.
+      if (!project.panelWidthIn && panelPos.length >= 4) {
+        const _mPerLng = 111320 * Math.cos(cLat * Math.PI / 180);
+        const nn: number[] = [];
+        for (const a of panelPos) {
+          if (!isFinite(a.lat) || !isFinite(a.lng)) continue;
+          let best = Infinity;
+          for (const b of panelPos) {
+            if (b === a || !isFinite(b.lat) || !isFinite(b.lng)) continue;
+            const d = Math.hypot((b.lng - a.lng) * _mPerLng, (b.lat - a.lat) * 111320);
+            if (d > 0 && d < best) best = d;
+          }
+          if (isFinite(best)) nn.push(best);
+        }
+        nn.sort((x, y) => x - y);
+        const medNN = nn.length ? nn[Math.floor(nn.length / 2)] : 0;
+        if (medNN > 0.6 && medNN < 2.5) wM = medNN * 0.96;   // hairline gap
+      }
       const planeAz = (p: {lat:number;lng:number}) => {
         const rp = (project.roofPlanes ?? []).find((r: any) =>
           (r.vertices?.length ?? 0) >= 3 && _pipRing(p.lat, p.lng, r.vertices));
         return (rp as any)?.azimuth;
       };
+      // ── Module-rotation regularizer (Ray 2026-07-06: "straighter to the
+      //    edge of the roof") — see utils/moduleAzimuthGrid.ts. Snaps each
+      //    module's draw rotation to the building's principal 90° grid so
+      //    arrays that should share a ridge render parallel (Melvin's noisy
+      //    N=3.2°/S=180.1° both → the sheet axes).
+      const _azForGrid = panelPos.map(p =>
+        isFinite((p as any).azimuth) ? (p as any).azimuth : planeAz(p)).filter(isFinite) as number[];
+      const azGridOffset = computeModuleAzimuthGrid(_azForGrid);
       const parts: string[] = [];
       for (const p of panelPos) {
         if (!isFinite(p.lat) || !isFinite(p.lng)) continue;
         const c = toPxD(p.lat, p.lng);
         if (c.x < -30 || c.x > imgW + 30 || c.y < -30 || c.y > imgH + 30) continue;
-        const az = isFinite((p as any).azimuth) ? (p as any).azimuth : (planeAz(p) ?? 180);
+        const az = snapModuleAzimuth(isFinite((p as any).azimuth) ? (p as any).azimuth : (planeAz(p) ?? 180), azGridOffset);
         const landscape = (p.orientation || '').toLowerCase() === 'landscape';
         const w = (landscape ? lM : wM) * ppm, h = (landscape ? wM : lM) * ppm;
         // Near-opaque navy — a DESIGN layer, not a photo tint; also absorbs
@@ -325,8 +417,8 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
         const cy = pts.reduce((s: number, p: any) => s + p.y, 0) / pts.length;
         parts.push(`<polygon points="${d}" fill="rgba(22,101,52,0.20)" stroke="#37c871" stroke-width="1.3" stroke-dasharray="5 3"/>`);
         if (i === 0) {
-          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy - 4).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#eafff2" stroke="#14532d" stroke-width="2.2" paint-order="stroke">TREE CANOPY</text>`);
-          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#eafff2" stroke="#14532d" stroke-width="1.8" paint-order="stroke">CONCEALED — FIELD VERIFY</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy - 4).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(8 * fk).toFixed(1)}" font-weight="900" fill="#eafff2" stroke="#14532d" stroke-width="${(2.2 * fk).toFixed(1)}" paint-order="stroke">TREE CANOPY</text>`);
+          parts.push(`<text x="${cx.toFixed(1)}" y="${(cy + 5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(5.6 * fk).toFixed(1)}" font-weight="bold" fill="#eafff2" stroke="#14532d" stroke-width="${(1.8 * fk).toFixed(1)}" paint-order="stroke">CONCEALED — FIELD VERIFY</text>`);
         }
       });
       canopySvg = parts.join('');
@@ -356,11 +448,11 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           if (rot > 90) rot -= 180; else if (rot < -90) rot += 180;
         } else {
           // Degenerate pin (at the building) → bottom edge, horizontal
-          sx = cropX + cropW / 2; sy = cropY + cropH - 44; rot = 0;
+          sx = cropX + cropW / 2; sy = cropY + cropH - 44 * fk; rot = 0;
         }
-        sx = Math.max(cropX + 60, Math.min(cropX + cropW - 60, sx));
-        sy = Math.max(cropY + 26, Math.min(cropY + cropH - 20, sy));
-        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" letter-spacing="3" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="3" paint-order="stroke">${streetName}</text>`;
+        sx = Math.max(cropX + 60 * fk, Math.min(cropX + cropW - 60 * fk, sx));
+        sy = Math.max(cropY + 26 * fk, Math.min(cropY + cropH - 20 * fk, sy));
+        streetSvg = `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" transform="rotate(${rot.toFixed(0)} ${sx.toFixed(1)} ${sy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(13 * fk).toFixed(1)}" font-weight="900" letter-spacing="${(3 * fk).toFixed(1)}" fill="#fff" stroke="rgba(0,0,0,0.8)" stroke-width="${(3 * fk).toFixed(1)}" paint-order="stroke">${escapeH(streetName)}</text>`;
       }
     }
 
@@ -387,27 +479,32 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
           .filter(({ p }) => inCrop(p, -8))
           .sort((a, b) => a.p.y - b.p.y);
         const colRight = visible.length ? (visible[0].p.x > cropX + cropW / 2) : true;
-        const colX = colRight ? cropX + cropW - 14 : cropX + 14;
-        let ly = Math.max(cropY + cropH * 0.16, (visible[0]?.p.y ?? 0) - 34);
+        const colX = colRight ? cropX + cropW - 14 * fk : cropX + 14 * fk;
+        let ly = Math.max(cropY + cropH * 0.16, (visible[0]?.p.y ?? 0) - 34 * fk);
         visible.forEach(({ eq, p }) => {
           const meta = TAGS[eq.kind];
           const prov = eq.provenance === 'survey_photo_gps' ? 'PER SURVEY PHOTO GPS' : 'APPROX. — FIELD VERIFY';
-          ly = Math.max(ly, cropY + 22); ly = Math.min(ly, cropY + cropH - 26);
+          ly = Math.max(ly, cropY + 22 * fk); ly = Math.min(ly, cropY + cropH - 26 * fk);
           // leader: straight, white casing + dark line — ends BEFORE the text
           // block (it used to terminate under the label and read as a
           // strikethrough across its own 'FIELD VERIFY' subtext).
-          const _nameW = meta.name.length * 6.2 + 6;
-          const lexEnd = colRight ? colX - _nameW - 6 : colX + _nameW + 6;
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3).toFixed(1)}" stroke="#fff" stroke-width="2.6" opacity="0.9"/>`);
-          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3).toFixed(1)}" stroke="#111" stroke-width="1.1"/>`);
+          // EVERYTHING here scales with fk — fixed px buried a low-res crop
+          // under giant plates (Ray's Google-fallback render).
+          const _nameW = (meta.name.length * 6.2 + 6) * fk;
+          const lexEnd = colRight ? colX - _nameW - 6 * fk : colX + _nameW + 6 * fk;
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3 * fk).toFixed(1)}" stroke="#fff" stroke-width="${(2.6 * fk).toFixed(2)}" opacity="0.9"/>`);
+          parts.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${lexEnd.toFixed(1)}" y2="${(ly + 3 * fk).toFixed(1)}" stroke="#111" stroke-width="${(1.1 * fk).toFixed(2)}"/>`);
           // wall tag: white square + code
-          parts.push(`<rect x="${(p.x - 6).toFixed(1)}" y="${(p.y - 6).toFixed(1)}" width="12" height="12" fill="#fff" stroke="#111" stroke-width="1.3"/>`);
-          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${meta.tag.length > 2 ? 5.6 : 7}" font-weight="900" fill="#111">${meta.tag}</text>`);
-          // margin label: halo text, no box
+          parts.push(`<rect x="${(p.x - 6 * fk).toFixed(1)}" y="${(p.y - 6 * fk).toFixed(1)}" width="${(12 * fk).toFixed(1)}" height="${(12 * fk).toFixed(1)}" fill="#fff" stroke="#111" stroke-width="${(1.3 * fk).toFixed(2)}"/>`);
+          parts.push(`<text x="${p.x.toFixed(1)}" y="${(p.y + 3 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${((meta.tag.length > 2 ? 5.6 : 7) * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.tag}</text>`);
+          // margin label on an opaque plate — halo text alone sat straight on
+          // the neighbor's parked cars and read as sloppy overlay.
           const anchor = colRight ? 'end' : 'start';
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="9.5" font-weight="900" fill="#111" stroke="#fff" stroke-width="2.6" paint-order="stroke">${meta.name}</text>`);
-          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="6.8" font-weight="bold" fill="#333" stroke="#fff" stroke-width="2" paint-order="stroke">${prov}</text>`);
-          ly += 30;
+          const _plateX = colRight ? colX - _nameW - 4 * fk : colX - 4 * fk;
+          parts.push(`<rect x="${_plateX.toFixed(1)}" y="${(ly - 10 * fk).toFixed(1)}" width="${(_nameW + 8 * fk).toFixed(1)}" height="${(23 * fk).toFixed(1)}" rx="2" fill="rgba(255,255,255,0.90)" stroke="#c9ced6" stroke-width="0.6"/>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly - 1 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="${(9.5 * fk).toFixed(1)}" font-weight="900" fill="#111">${meta.name}</text>`);
+          parts.push(`<text x="${colX.toFixed(1)}" y="${(ly + 9 * fk).toFixed(1)}" text-anchor="${anchor}" font-family="Arial,sans-serif" font-size="${(6.8 * fk).toFixed(1)}" font-weight="bold" fill="#333">${prov}</text>`);
+          ly += 30 * fk;
         });
         eqSvg = parts.join('');
       }
@@ -422,24 +519,27 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     // blue module badge moved to the footer strip.
     const scalePx = Math.round(20 * 0.3048 * ppm);
     const seg = scalePx / 4;
-    const plateW = scalePx + 96;
-    const fx = cropX + 12, fy = cropY + cropH - 34;
-    const scaleFeetPerInch = Math.round(cropW / ppm / 0.3048 / 10.6);   // ~10.6in printed drawing width
+    // Graphic scale bar ONLY — the computed "1\" ≈ 14'" ratio is a
+    // non-standard scale an examiner red-lines; the bar carries the scale
+    // and the footer already says AS NOTED — SEE SCALE BAR.
+    // Plate paddings/fonts scale with fk (the bar itself is ground-true via
+    // ppm); the north arrow scales the same way.
+    const plateW = scalePx + 34 * fk;
+    const fx = cropX + 12 * fk, fy = cropY + cropH - 34 * fk;
     const furniture = `
       <g>
-        <rect x="${fx}" y="${fy}" width="${plateW}" height="26" rx="2" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1"/>
-        ${[0,1,2,3].map(i => `<rect x="${(fx + 8 + i*seg).toFixed(1)}" y="${fy + 8}" width="${seg.toFixed(1)}" height="7" fill="${i % 2 ? '#fff' : '#111'}" stroke="#111" stroke-width="0.8"/>`).join('')}
-        <text x="${fx + 8}" y="${fy + 23}" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">0</text>
-        <text x="${(fx + 8 + scalePx/2).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">10</text>
-        <text x="${(fx + 8 + scalePx).toFixed(1)}" y="${fy + 23}" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="#111">20 FT</text>
-        <text x="${(fx + scalePx + 18).toFixed(1)}" y="${fy + 16}" font-family="Arial,sans-serif" font-size="7.5" font-weight="900" fill="#111">1" ≈ ${scaleFeetPerInch}'</text>
+        <rect x="${fx.toFixed(1)}" y="${fy.toFixed(1)}" width="${plateW.toFixed(1)}" height="${(26 * fk).toFixed(1)}" rx="2" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="${fk.toFixed(2)}"/>
+        ${[0,1,2,3].map(i => `<rect x="${(fx + 8 * fk + i*seg).toFixed(1)}" y="${(fy + 8 * fk).toFixed(1)}" width="${seg.toFixed(1)}" height="${(7 * fk).toFixed(1)}" fill="${i % 2 ? '#fff' : '#111'}" stroke="#111" stroke-width="${(0.8 * fk).toFixed(2)}"/>`).join('')}
+        <text x="${(fx + 8 * fk).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">0</text>
+        <text x="${(fx + 8 * fk + scalePx/2).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">10</text>
+        <text x="${(fx + 8 * fk + scalePx).toFixed(1)}" y="${(fy + 23 * fk).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${(7 * fk).toFixed(1)}" font-weight="bold" fill="#111">20 FT</text>
       </g>
-      <g transform="translate(${(cropX + cropW - 30).toFixed(0)},${(cropY + 30).toFixed(0)})">
+      <g transform="translate(${(cropX + cropW - 30 * fk).toFixed(1)},${(cropY + 30 * fk).toFixed(1)}) scale(${fk.toFixed(3)})">
         <circle cx="0" cy="0" r="19" fill="rgba(255,255,255,0.93)" stroke="#111" stroke-width="1.5"/>
         <polygon points="0,-13 5,8 0,3 -5,8" fill="#111"/>
         <text x="0" y="-22" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="900" fill="#fff" stroke="rgba(0,0,0,0.75)" stroke-width="2.4" paint-order="stroke">N</text>
       </g>
-      <rect x="${(cropX + 1.5).toFixed(1)}" y="${(cropY + 1.5).toFixed(1)}" width="${(cropW - 3).toFixed(1)}" height="${(cropH - 3).toFixed(1)}" fill="none" stroke="#111" stroke-width="2"/>`;
+      <rect x="${(cropX + 1.5).toFixed(1)}" y="${(cropY + 1.5).toFixed(1)}" width="${(cropW - 3).toFixed(1)}" height="${(cropH - 3).toFixed(1)}" fill="none" stroke="#111" stroke-width="${(2 * fk).toFixed(2)}"/>`;
 
     drawingContent = `
       <div class=\"f-lg fw9 caps center\">${addr}</div>
@@ -617,6 +717,10 @@ export interface AerialRoofData {
    *  are pixel-true). Drives the PV-1 subject-dimming mask + the design→
    *  imagery registration shift. */
   subjectRoofPolygons?: Array<Array<{ lat: number; lng: number }>>;
+  /** Design→imagery shift for Google-fallback aerials, pre-computed by the
+   *  permit route via utils/aerialEdgeSnap.ts (generatePermitHTML is sync so
+   *  the image analysis can't run here). Degrees to ADD to design lat/lng. */
+  registrationShift?: { dLat: number; dLng: number; shiftM?: number; scoreRatio?: number; method?: string };
   roofSegments?: Array<{
     center?: { lat: number; lng: number };
     azimuthDegrees: number;
@@ -785,7 +889,10 @@ export async function fetchAerialRoofData(
       try {
         // ONE AI call returns both roof planes (for the frame snap) and roof
         // OBSTRUCTIONS (vents/chimneys/AC/skylights) for the PV-2 drawing.
-        const ai = await fetchNearmapAIResult(centerLat, centerLng, { radiusM: 45 });
+        // Durable DB cache (fail-closed): the in-memory cache dies on every
+        // serverless cold start, so this line was billing AI parcels on EVERY
+        // planset generate (81/100 trial parcels in 5 days).
+        const ai = await getNearmapAIResultCached(centerLat, centerLng);
         // Subject-building polygons (imagery-registered) → PV-1 dimming mask +
         // design-layer registration shift. cropToSubjectBuilding fails open.
         try {
