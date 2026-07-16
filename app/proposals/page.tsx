@@ -27,7 +27,7 @@ import UpgradeModal from '@/components/ui/UpgradeModal';
 import { useToast } from '@/components/ui/Toast';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
-import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
+import { resolveActualAnnualBill, resolveMonthlyUsageHistory } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   buildUtilityProfile,
@@ -1344,6 +1344,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     dbUtilityRate:         proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:        client?.annualKwh ?? 0,
     actualAnnualBill:      resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
+    monthlyUsageHistoryKwh: resolveMonthlyUsageHistory(client), // real seasonal shape for the bill chart
     systemType,
     storedCashPrice:       storedCashPrice,
     roofPricePerWatt:      pricingCfg?.roofPricePerWatt,

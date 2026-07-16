@@ -100,6 +100,13 @@ export interface BuildCanonicalProposalInput {
   dbUtilityRate?: number;         // v48.3: rate fetched from utility_policies DB (second priority)
   annualUsageKwh: number;         // from client.annualKwh
   /**
+   * Real 12-month usage history (kWh) from the bill analysis, when available.
+   * Drives the SHAPE of the before/after bill chart — without it, hardcoded
+   * summer-peak SEASONAL_FACTORS inverted a winter-peaked electric-heat
+   * customer's bills (Jan 4,198 kWh drawn as the year's LOW month).
+   */
+  monthlyUsageHistoryKwh?: number[];
+  /**
    * v48.x: the homeowner's ACTUAL total annual utility bill in dollars (from
    * their real bill — includes delivery, fixed charges, and taxes, not just
    * energy). When present and plausible, the model anchors the effective
@@ -403,10 +410,31 @@ export function buildCanonicalProposal(
     0.0500, // Dec
   ]; // sum ≈ 1.0000
 
-  const rawMonthly = input.monthlyProductionKwh ?? [];
+  // Production-basis guard (audit 2026-07-16, "recompute-if-contradicts"):
+  // the stored PVWatts run is made at design time; if the panel spec changes
+  // afterwards (52×440W → 52×405W), the run's kW basis (layoutSystemSizeKw)
+  // diverges from the canonical resolvedSystemSizeKw and every downstream
+  // dollar (energy value, REC contract, CO2) is silently overstated. Same
+  // site/orientation → production scales linearly with kW; rescale + warn.
+  let _prodScale = 1;
+  if (
+    input.annualProductionKwh > 0 &&
+    input.layoutSystemSizeKw > 0 &&
+    resolvedSystemSizeKw > 0 &&
+    Math.abs(input.layoutSystemSizeKw - resolvedSystemSizeKw) / resolvedSystemSizeKw > 0.02
+  ) {
+    _prodScale = resolvedSystemSizeKw / input.layoutSystemSizeKw;
+    warnings.push(
+      `Production run basis ${input.layoutSystemSizeKw.toFixed(2)} kW != canonical ` +
+      `${resolvedSystemSizeKw.toFixed(2)} kW (panel spec changed after PVWatts run) — ` +
+      `production rescaled ×${_prodScale.toFixed(3)}`
+    );
+  }
+
+  const rawMonthly = (input.monthlyProductionKwh ?? []).map((v: number) => v * _prodScale);
   const hasRealMonthly = rawMonthly.some((v: number) => v > 0);
   const annualKwh = input.annualProductionKwh > 0
-    ? input.annualProductionKwh
+    ? Math.round(input.annualProductionKwh * _prodScale)
     : rawMonthly.reduce((a: number, b: number) => a + b, 0);
 
   // If the monthly array is all-zeros but we have an annual total, synthesise
@@ -641,11 +669,21 @@ export function buildCanonicalProposal(
   const solar_payment_monthly   = financeMonthlyPayment;
   const total_energy_cost_monthly = solar_payment_monthly + remaining_utility_monthly;
 
-  // Monthly bill chart (before/after with seasonal factors)
+  // Monthly bill chart — REAL usage shape when the bill history has one,
+  // hardcoded seasonal factors only as fallback. Scale real months so they
+  // sum to the annual usage the rest of the pipeline runs on.
+  const _realHistory = input.monthlyUsageHistoryKwh;
+  const _histSum = Array.isArray(_realHistory) && _realHistory.length === 12
+    ? _realHistory.reduce((a, b) => a + (b > 0 ? b : 0), 0)
+    : 0;
+  const _annualForChart = input.annualUsageKwh > 0 ? input.annualUsageKwh : avgMonthlyUsageKwh * 12;
+  const _histScale = _histSum > 0 && _annualForChart > 0 ? _annualForChart / _histSum : 1;
   const monthlyBillChart = MONTHS.map((month, i) => {
-    const monthlyUsage    = avgMonthlyUsageKwh > 0
-      ? avgMonthlyUsageKwh * SEASONAL_FACTORS[i]
-      : ((input.annualUsageKwh > 0 ? input.annualUsageKwh : 12000) / 12) * SEASONAL_FACTORS[i];
+    const monthlyUsage    = _histSum > 0
+      ? (_realHistory as number[])[i] * _histScale
+      : avgMonthlyUsageKwh > 0
+        ? avgMonthlyUsageKwh * SEASONAL_FACTORS[i]
+        : ((input.annualUsageKwh > 0 ? input.annualUsageKwh : 12000) / 12) * SEASONAL_FACTORS[i];
     const monthlyProduced = monthlyKwh[i] ?? 0;
     // Both before and after carry the fixed charge — solar offsets energy only.
     const before = Math.round(monthlyUsage * resolvedRate) + fixedMonthlyCharge;

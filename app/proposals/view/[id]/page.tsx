@@ -34,7 +34,7 @@ import {
   getStateIcaFallback,
 } from '@/lib/utilityInterconnection';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
-import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
+import { resolveActualAnnualBill, resolveMonthlyUsageHistory } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   GLOBAL_INCENTIVES_CONFIG,
@@ -407,6 +407,7 @@ function PublicProposalView({
     dbUtilityRate:       proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:      client?.annualKwh ?? 0,
     actualAnnualBill:    resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
+    monthlyUsageHistoryKwh: resolveMonthlyUsageHistory(client), // real seasonal shape for the bill chart
 
     // Pricing
     systemType,
