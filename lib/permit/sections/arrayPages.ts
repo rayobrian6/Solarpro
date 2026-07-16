@@ -479,7 +479,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
       <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
-      ${_isMicro && totalStrings > 4 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner accepts 4; remaining branches land on AC subpanel, see E-1</div>` : ''}
+      ${_isMicro && totalStrings > 5 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner 6C accepts 5; remaining branches land on AC subpanel, see E-1</div>` : ''}
     </div>` :
     isFence(cadSystemType) ? `
     <div class="draw-zone-hdr">FENCE SEGMENTS</div>

@@ -3073,13 +3073,27 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const W_PANEL = 140;
   const xPanel = Math.max(...geoms.map(g => g.xFeedRight)) + 90 + W_PANEL/2;
   const xPanelInX = xPanel - W_PANEL/2;
-  const xSingleDisco = xPanel + W_PANEL/2 + 90 + W_ACDS/2;
-  const xPOI = xSingleDisco + W_ACDS/2 + 110;
-  const xMSP = xPOI + 90 + 80;                    // MSP width = 160
-  const panelInputs: Array<{ y: number; ocpd: number; tag: string }> = [];
+  // Fill the sheet width: at unit gaps the shared tail (panel → disco → POI →
+  // MSP → meter) hugged the lanes and left ~1/3 of the drawing area dead right
+  // of the meter (Ray audit 2026-07-16: "visual ickyness"). Compute the tail
+  // once at unit gaps, then stretch the gaps so the utility symbol lands near
+  // the right edge — capped so a short tail can't become wire spaghetti.
+  const _rawDisco = xPanel + W_PANEL/2 + 90 + W_ACDS/2;
+  const _rawPOI   = _rawDisco + W_ACDS/2 + 110;
+  const _rawMSP   = _rawPOI + 90 + 80;            // MSP width = 160
   const _hasBUI = !!input.hasBattery;
-  const xBUI = _hasBUI ? nextCX(xMSP, 160, W_BUI) : (xMSP + 130);
-  const xUtil = _hasBUI ? nextCX(xBUI, W_BUI, 120) : nextCX(xMSP, 160, 120);
+  const _rawBUI  = _hasBUI ? nextCX(_rawMSP, 160, W_BUI) : (_rawMSP + 130);
+  const _rawUtil = _hasBUI ? nextCX(_rawBUI, W_BUI, 120) : nextCX(_rawMSP, 160, 120);
+  const _tailRightEdge = DX + DW - 70;            // keep the grid symbol inside the frame
+  const _tailStretch = Math.max(1, Math.min(1.8,
+    (_tailRightEdge - xPanel) / Math.max(1, (_rawUtil + 60) - xPanel)));
+  const _st = (x: number) => xPanel + (x - xPanel) * _tailStretch;
+  const xSingleDisco = _st(_rawDisco);
+  const xPOI = _st(_rawPOI);
+  const xMSP = _st(_rawMSP);
+  const panelInputs: Array<{ y: number; ocpd: number; tag: string }> = [];
+  const xBUI = _st(_rawBUI);
+  const xUtil = _st(_rawUtil);
   const tailY = laneYs.length ? (laneYs[0] + laneYs[laneYs.length - 1]) / 2 : laneTop;
   // Compact AC combiner panel geometry: a proportioned box centered on tailY
   // with the backfed breakers stacked tight — was a full-lane-height slab
@@ -3300,7 +3314,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   }
   // Header sits clear ABOVE the top lane's wire callouts (which occupy
   // roughly laneY-40..laneY-8) and below the lane band label at laneY-114.
-  parts.push(txt(xPOI, laneYs[0] - 76, 'POINT OF INTERCONNECTION', {sz:F.hdr, bold:true, anc:'middle'}));
+  // Anchor the POI title just above the POI node on the tail bus (it floated
+  // at the TOP of the sheet, ~700px from the dot it names — audit 2026-07-16).
+  parts.push(txt(xPOI, tailY - 30, 'POINT OF INTERCONNECTION', {sz:F.hdr, bold:true, anc:'middle'}));
   parts.push(txt(xPOI, laneYs[0] - 66, `Σ BACKFEED ${totalBackfeedAmps}A — NEC 705.12(B) (Σ PER-INVERTER OCPDs)`, {sz:F.tiny, anc:'middle', fill:'#1B5E20'}));
 
   // ── Shared service tail: MSP → [BUI] → METER → GRID ──────────────────────
@@ -3434,11 +3450,24 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     : lanes.flatMap(b => (b.runs ?? []) as RunSegment[]);
   const _condEmpty = _condRunsPre.filter(r => !String(r.id).endsWith('MSP_TO_UTILITY_RUN')).length === 0;
   const CONDBAR_H = 34;
-  const mCALC_H  = _condEmpty ? (H - MAR - CALC_Y - 8 - CONDBAR_H) : CALC_H;
-  const mSCHED_Y = _condEmpty ? (H - MAR - CONDBAR_H) : (CALC_Y + mCALC_H + 8);
+  // Row cap 26px: the old "uncapped → spread to fill" mode stretched ~10 rows
+  // over a 500px+ box — sparse rows with air between them read WORSE than the
+  // empty schedule it replaced (Ray audit 2026-07-16). Rows stay dense and the
+  // whole band bottom-anchors against the conductor bar, consolidating the
+  // leftover space ABOVE the tables (between diagram and band) instead of
+  // inside them.
+  const _availH   = _condEmpty ? (H - MAR - CALC_Y - 8 - CONDBAR_H) : CALC_H;
+  const mRowCap   = _condEmpty ? 26 : 13;
+  const pFont     = _condEmpty ? F.seg : F.tiny;   // larger, readable text in the filled panels
+  // Longest panel determines the shared band height (max rows across the three
+  // summary panels: lanes×3 rows, POI ~10 rows, equipment ~11 rows).
+  const _maxPanelRows = Math.max(lanes.length * 3, 10 + lanes.length, 11);
+  const mCALC_H  = _condEmpty
+    ? Math.min(_availH, 19 + _maxPanelRows * mRowCap + 10)
+    : CALC_H;
+  const CALC_Y2  = _condEmpty ? (H - MAR - CONDBAR_H - 8 - mCALC_H) : CALC_Y;
+  const mSCHED_Y = _condEmpty ? (H - MAR - CONDBAR_H) : (CALC_Y2 + mCALC_H + 8);
   const mSCHED_H = _condEmpty ? CONDBAR_H : (H - MAR - mSCHED_Y);
-  const mRowCap  = _condEmpty ? 999 : 13;  // uncapped → rows spread to fill the taller box
-  const pFont    = _condEmpty ? F.seg : F.tiny;   // larger, readable text in the filled panels
 
   // ── CALCULATION PANELS ────────────────────────────────────────────────────
   const cW = Math.floor(DW/3) - 4;
@@ -3447,9 +3476,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
   // Panel 1 — per-lane source summary
   const p1x = DX;
-  parts.push(rect(p1x, CALC_Y, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
-  parts.push(rect(p1x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
-  parts.push(txt(p1x+cW/2, CALC_Y+10, 'PV SOURCE LANES', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  parts.push(rect(p1x, CALC_Y2, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p1x, CALC_Y2, cW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(p1x+cW/2, CALC_Y2+10, 'PV SOURCE LANES', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const p1rows: [string,string][] = lanes.flatMap((b, i): [string,string][] => {
     const g = geoms[i];
     // Honest labels: an unresolved model prints the topology device name, an
@@ -3468,7 +3497,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   });
   const p1rh = Math.min(mRowCap, (mCALC_H-17)/Math.max(p1rows.length, 1));
   p1rows.forEach(([l,v],i) => {
-    const ry = CALC_Y+19+i*p1rh;
+    const ry = CALC_Y2+19+i*p1rh;
     if (i%2===1) parts.push(rect(p1x, ry-p1rh+2, cW, p1rh, {fill:LGY, stroke:'none', sw:0}));
     parts.push(txt(p1x+4, ry, l, {sz:pFont}));
     parts.push(txt(p1x+cW-4, ry, v, {sz:pFont, anc:'end', bold:true}));
@@ -3476,9 +3505,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
   // Panel 2 — POI / NEC 705.12(B) (aggregator-owned, exactly ONE check — I-6)
   const p2x = DX+cW+4;
-  parts.push(rect(p2x, CALC_Y, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
-  parts.push(rect(p2x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
-  parts.push(txt(p2x+cW/2, CALC_Y+10, 'POINT OF INTERCONNECTION — NEC 705.12(B)', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  parts.push(rect(p2x, CALC_Y2, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p2x, CALC_Y2, cW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(p2x+cW/2, CALC_Y2+10, 'POINT OF INTERCONNECTION — NEC 705.12(B)', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const _busAmps = input.panelBusRating ?? input.mainPanelAmps;
   const _batBfA = input.batteryBackfeedA ?? 0;
   const _busLimit = _busAmps * 1.2;
@@ -3503,7 +3532,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   ];
   const p2rh = Math.min(mRowCap, (mCALC_H-17)/p2rows.length);
   p2rows.forEach(([l,v],i) => {
-    const ry = CALC_Y+19+i*p2rh;
+    const ry = CALC_Y2+19+i*p2rh;
     if (i%2===1) parts.push(rect(p2x, ry-p2rh+2, cW, p2rh, {fill:LGY, stroke:'none', sw:0}));
     parts.push(txt(p2x+4, ry, l, {sz:pFont}));
     const isPF = v.includes('✓')||v.includes('✗');
@@ -3512,9 +3541,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
   // Panel 3 — equipment schedule (shared POI gear once — I-6)
   const p3x = DX+(cW+4)*2;
-  parts.push(rect(p3x, CALC_Y, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
-  parts.push(rect(p3x, CALC_Y, cW, 14, {fill:BLK, sw:0}));
-  parts.push(txt(p3x+cW/2, CALC_Y+10, 'EQUIPMENT SCHEDULE', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
+  parts.push(rect(p3x, CALC_Y2, cW, mCALC_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
+  parts.push(rect(p3x, CALC_Y2, cW, 14, {fill:BLK, sw:0}));
+  parts.push(txt(p3x+cW/2, CALC_Y2+10, 'EQUIPMENT SCHEDULE', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
   const p3rows: [string,string][] = [
     ...lanes.map((b): [string,string] => [`PV-${LANE_TAG[b.key]} Modules`, `${b.totalModules ?? 0} × ${b.panelModel ?? ''}`]),
     ...lanes.map((b, i): [string,string] => [`PV-${LANE_TAG[b.key]} Inverter`, `${b.inverterManufacturer ?? ''} ${b.inverterModel ?? ''}${geoms[i].topo==='MICRO' ? ` ×${b.deviceCount ?? b.totalModules ?? 0}` : (b.inverterCount && b.inverterCount > 1 ? ` ×${b.inverterCount}` : '')}`]),
@@ -3527,7 +3556,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   ];
   const p3rh = Math.min(mRowCap, (mCALC_H-17)/p3rows.length);
   p3rows.forEach(([l,v],i) => {
-    const ry = CALC_Y+19+i*p3rh;
+    const ry = CALC_Y2+19+i*p3rh;
     if (i%2===1) parts.push(rect(p3x, ry-p3rh+2, cW, p3rh, {fill:LGY, stroke:'none', sw:0}));
     parts.push(txt(p3x+4, ry, l, {sz:pFont}));
     parts.push(txt(p3x+cW-4, ry, v, {sz:pFont, anc:'end', bold:true}));
