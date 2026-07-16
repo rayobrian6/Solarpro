@@ -526,7 +526,10 @@ function PublicProposalView({
   const solar_cost_total             = cp.truth25yr.solarCostTotal;
   const remaining_utility_cost_total = cp.truth25yr.remainingUtilityCost;
   const estimated_energy_value_25yr  = cp.truth25yr.estimatedEnergyValue;
-  const net_financial_difference_25yr = cp.truth25yr.netFinancialDifference;
+  // Canonical netDifference (SREC-inclusive), NOT the legacy netFinancialDifference:
+  // the two disagreed by ~$10.5k and the proposal showed "+$130,198 total est.
+  // savings" and "+$140,731 25-Yr Advantage" for the same concept on facing pages.
+  const net_financial_difference_25yr = cp.truth25yr.netDifference;
   // CANONICAL SAVINGS — the only savings number:
   const netDifference_25yr           = cp.truth25yr.netDifference;
 
@@ -1234,7 +1237,10 @@ function PublicProposalView({
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed mb-3">
                   Under federal §48E, solar companies that own the system can still claim
-                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit (through 2032)</span> and
+                  {/* P.L. 119-21: solar/wind §48E requires construction start by
+                      2026-07-04 (or in-service by end of 2027) — "(through 2032)"
+                      was the pre-repeal schedule and is false for solar. */}
+                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit</span> and
                   pass those savings directly to you through a lease or power purchase agreement (PPA).
                   This means lower monthly payments — sometimes $0 upfront.
                 </p>
@@ -1684,7 +1690,14 @@ function PublicProposalView({
               <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/30">
                 <div className="text-xs text-slate-500 mb-1">Est. Remaining Utility Bills</div>
                 <div className="text-lg font-black text-slate-300">${remaining_utility_cost_total > 0 ? remaining_utility_cost_total.toLocaleString() : '0'}</div>
-                <div className="text-xs text-slate-500 mt-1">{energyOffset}% offset — {100 - energyOffset}% still from grid</div>
+                {/* "100% offset — 0% still from grid" next to a nonzero remaining-bills
+                    figure read as a contradiction: fixed charges, delivery riders, and
+                    true-up shortfalls remain even at full offset. Say so. */}
+                <div className="text-xs text-slate-500 mt-1">
+                  {energyOffset >= 100
+                    ? `${energyOffset}% offset — fixed charges & riders still apply`
+                    : `${energyOffset}% offset — ${100 - energyOffset}% still from grid`}
+                </div>
               </div>
 
               {/* Net advantage — prominent */}
@@ -1887,7 +1900,11 @@ function PublicProposalView({
                 </div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
-                <CheckCircle size={10} /> 25-yr warranty
+                {/* Warranty was hardcoded "25-yr" — SMA string inverters carry 10yr,
+                    Enphase micros 25yr. Read the snapshot; only claim when known. */}
+                <CheckCircle size={10} /> {(proj as any)?.selectedInverter?.warranty
+                  ? `${(proj as any).selectedInverter.warranty}-yr warranty`
+                  : 'Manufacturer warranty'}
               </div>
             </div>
 
@@ -2279,8 +2296,10 @@ function PublicProposalView({
             <div className="flex items-center justify-center gap-4 mt-4">
               <p className="text-slate-500 text-xs">Legally binding e-signature · No DocuSign needed</p>
             </div>
-            {/* Secondary: Download PDF */}
-            <div className="border-t border-slate-700/40 mt-5 pt-4">
+            {/* Secondary: Download PDF — data-html2canvas-ignore keeps the
+                "Generating PDF…" spinner state from being baked into the PDF
+                itself (generateProposalPDF screenshots the live DOM). */}
+            <div className="border-t border-slate-700/40 mt-5 pt-4" data-html2canvas-ignore="true">
               <button
                 onClick={onDownloadPdf}
                 disabled={downloadingPdf}

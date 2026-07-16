@@ -854,8 +854,11 @@ export function buildCanonicalProposal(
 
   // ─── STEP 6: OFFSET ─────────────────────────────────────────────────────────
 
+  // UNCAPPED (proposal audit 2026-07-16): Math.min(...,100) displayed a 185%-of-
+  // usage system as "~100% offset" — hiding oversizing the customer should see
+  // (and a NEM-eligibility question the installer must answer). Display truth.
   const offsetPct = input.annualUsageKwh > 0
-    ? Math.min(Math.round((annualKwh / input.annualUsageKwh) * 100), 100)
+    ? Math.round((annualKwh / input.annualUsageKwh) * 100)
     : 0;
 
   const offset = {
