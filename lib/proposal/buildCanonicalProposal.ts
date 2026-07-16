@@ -48,6 +48,7 @@ import {
 import {
   buildFinancialNarrative,
   computePayoffYear,
+  computePayoffFromFlow,
 } from './financialNarrativeEngine';
 import {
   validatePanelIntegrity,
@@ -748,13 +749,19 @@ export function buildCanonicalProposal(
     panelDegradation:     PANEL_DEGRADATION,
   }), fixedMonthlyCharge * 12, escalationRate) : proj25;
 
-  // CANONICAL SAVINGS DEFINITION — cash basis, enforced here, used everywhere:
+  // CANONICAL SAVINGS DEFINITION — cash basis, enforced here, used everywhere.
+  // INCLUDES SREC contract income (real contracted revenue, scheduled per-year
+  // in yearlyFlow): before this, the payoff year included SREC while the
+  // headline savings + both cumulative charts excluded it — the same proposal
+  // showed contradictory bottom lines (SREC audit 2026-07-16).
   const netDifference = proj25.utility_cost_without_solar_25yr
-    - (proj25.solar_cost_total + proj25.remaining_utility_cost_total);
+    - (proj25.solar_cost_total + proj25.remaining_utility_cost_total)
+    + (proj25.srec_income_25yr ?? 0);
 
   // Finance-basis difference (may be negative for high-APR/long-term loans)
   const netDifferenceFinanced = proj25Finance.utility_cost_without_solar_25yr
-    - (proj25Finance.solar_cost_total + proj25Finance.remaining_utility_cost_total);
+    - (proj25Finance.solar_cost_total + proj25Finance.remaining_utility_cost_total)
+    + (proj25Finance.srec_income_25yr ?? 0);
 
   // v47.253: annualEnergyValue — Year 1 total energy value from the iterative flow engine
   // SPEC v47.253 RULE: derive from yearlyFlow[0].total_energy_value, NOT annualKwh * resolvedRate
@@ -768,11 +775,17 @@ export function buildCanonicalProposal(
     ? proj25.yearlyFlow[0].utility_cost_with_solar
     : Math.round(Math.max(0, input.annualUsageKwh - annualKwh) * resolvedRate); // fallback only
 
-  // v47.253: payback derived from flow-based annualEnergyValue (not production*rate)
+  // Payback from the REAL year-by-year flow (energy value + SREC as actually
+  // scheduled) — the single walk that also drives payoffYear below, so the
+  // cash-flow card, the hero "Payoff Year", and the chart tell ONE story.
+  // Falls back to the naive ratio only when the flow is unavailable.
   const paybackBasis = netCost;  // = effectiveFinal when ITC disabled (SPEC §3)
-  const paybackYears = paybackBasis > 0 && annualEnergyValue > 0
-    ? parseFloat((paybackBasis / annualEnergyValue).toFixed(1))
-    : 0;
+  const _payoffWalk = computePayoffFromFlow(proj25.yearlyFlow, paybackBasis);
+  const paybackYears = _payoffWalk
+    ? _payoffWalk.fractional
+    : (paybackBasis > 0 && annualEnergyValue > 0
+        ? parseFloat((paybackBasis / annualEnergyValue).toFixed(1))
+        : 0);
 
   // v47.254: energyValueBreakdown — identity map from yearlyFlow[0], NO recomputation
   // selfConsumed = yearlyFlow[0].self_consumed_value
@@ -859,7 +872,12 @@ export function buildCanonicalProposal(
   const incentivesAllowed = policyEffect !== 'at_risk';
   const policyMessage    = getPolicyMessage(utilityProfile);
   const netMeteringSummary = getNetMeteringSummary(utilityProfile);
-  const srecSummary      = getSrecSummary(effectiveUtilityProfile, annualKwh);
+  // SREC summary quotes the REAL scheduled payout (total + 50% upfront) from
+  // the projection — replaces the old flat "$X/year, typical 8 MWh system" prose.
+  const srecSummary      = getSrecSummary(effectiveUtilityProfile, annualKwh,
+    (proj25.srec_income_25yr ?? 0) > 0 && proj25.yearlyFlow.length > 0
+      ? { totalValue: proj25.srec_income_25yr, upfrontValue: proj25.yearlyFlow[0].srec_income ?? 0 }
+      : null);
   const failsafeMessage  = getFailsafeMessage(builtProfile);
 
   const policy = {
@@ -886,18 +904,15 @@ export function buildCanonicalProposal(
   const truthConfidence = truthConfidenceResult.level;
 
   // ─── STEP 8b: PAYOFF YEAR ───────────────────────────────────────────────────
-  // Canonical payoff year: when cumulative energy value produced >= systemCost.
-  // v48.6: Include Year-1 SREC income in the annual value passed to computePayoffYear.
-  // SREC income (e.g. Illinois Shines ABP) is real contracted revenue from system output.
-  // It was already computed in proj25.yearlyFlow[0].srec_income but was excluded from
-  // payoff math — corrected here. Non-SREC states: srec_income = 0, behavior unchanged.
-  const annualSrecY1 = proj25.yearlyFlow.length > 0 ? (proj25.yearlyFlow[0].srec_income ?? 0) : 0;
-  const payoffYear = computePayoffYear(
-    annualEnergyValue + annualSrecY1,
-    escalationRate,
-    effectiveFinal,
-    PANEL_DEGRADATION,
-  );
+  // Canonical payoff year: first year cumulative (energy value + SREC income AS
+  // ACTUALLY SCHEDULED per yearlyFlow) covers the system cost. The old v48.6
+  // approach fed yearlyFlow[0].srec_income into computePayoffYear as a RECURRING
+  // annual amount — under the 2026-27 Illinois Shines schedule that Year-1 value
+  // is the 50% UPFRONT chunk, so payback came out absurdly short (~25× SREC
+  // overstatement). Same walk as paybackYears above — one break-even story.
+  const payoffYear = _payoffWalk
+    ? _payoffWalk.year
+    : computePayoffYear(annualEnergyValue, escalationRate, effectiveFinal, PANEL_DEGRADATION);
 
   // ─── STEP 8c: FINANCIAL NARRATIVE ───────────────────────────────────────────
   const narrative = buildFinancialNarrative({

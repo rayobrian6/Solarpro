@@ -1190,9 +1190,15 @@ function PublicProposalView({
                     <div className="text-xs font-bold flex-shrink-0 text-blue-400 text-right">
                       {inc.type === 'property_tax_exemption' || inc.type === 'sales_tax_exemption'
                         ? 'Exempt'
-                        : inc.calculatedValue > 0
-                          ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
-                          : 'Eligible'}
+                        // SREC: the canonical truth engine (program-year REC price ×
+                        // this system's contracted production, 50%-upfront schedule)
+                        // is the ONE SREC number — never the catalog's generic $/kWh
+                        // estimate, which contradicted the PDF on the same proposal.
+                        : inc.type === 'srec' && (cp.truth25yr.srec_income_25yr ?? 0) > 0
+                          ? `~$${Math.round(cp.truth25yr.srec_income_25yr).toLocaleString()} contract`
+                          : inc.calculatedValue > 0
+                            ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
+                            : 'Eligible'}
                     </div>
                   </div>
                 </div>

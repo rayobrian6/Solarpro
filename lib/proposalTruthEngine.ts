@@ -63248,15 +63248,32 @@ export function getNetMeteringSummary(profile: ProposalUtilityProfile): string {
 
 export function getSrecSummary(
   profile: ProposalUtilityProfile,
-  utilityRate: number
+  /** THIS system's annual production in kWh. (Legacy callers passed a $/kWh
+   *  rate here — values < 1000 are treated as "unknown" and produce the
+   *  non-quantified generic text instead of nonsense math.) */
+  annualProductionKwh: number,
+  /** Actual scheduled payout from the 25-yr projection (single source of
+   *  truth). When present, the summary quotes the REAL contract value and the
+   *  50%-upfront/6-yr schedule instead of a flat per-year estimate. */
+  schedule?: { totalValue: number; upfrontValue: number } | null,
 ): string | null {
   const srecValue = profile.srec_value_estimate ?? profile.srec_price_estimate;
   if (!profile.srec_available || !srecValue || srecValue <= 0) return null;
 
-  const annualMwhEstimate = 8;
-  const annualSrecIncome = Math.round((srecValue / 1000) * annualMwhEstimate * 1000);
+  const isIlShines = /illinois shines|adjustable block/i.test(profile.srec_program_name || '');
+  const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
 
-  return `${profile.srec_program_name}: Your utility's state participates in a Solar Renewable Energy Credit (SREC) program. For every 1,000 kWh (1 MWh) your system produces, you may earn one SREC, currently estimated at ~$${srecValue}/MWh. For a typical system, this could represent approximately $${annualSrecIncome}/year in additional income. SREC prices fluctuate with market supply and demand.`;
+  if (isIlShines && schedule && schedule.totalValue > 0) {
+    // Illinois Shines 2026-27: 15-yr REC contract, paid 50% at energization +
+    // the remainder ratably over the following 6 years. Quote the real numbers.
+    const remainder = schedule.totalValue - schedule.upfrontValue;
+    return `${profile.srec_program_name}: your system earns one Renewable Energy Credit (REC) for every 1,000 kWh it produces, purchased under a 15-year contract at ~$${srecValue}/REC. Estimated total contract value: ${fmt(schedule.totalValue)} — paid ~50% (${fmt(schedule.upfrontValue)}) after your system is energized, with the remaining ${fmt(remainder)} in payments over the following 6 years. REC prices are set by the Illinois Power Agency for the current program year.`;
+  }
+
+  // Open SREC markets (or unknown production): per-year framing.
+  const annualMwh = annualProductionKwh >= 1000 ? annualProductionKwh / 1000 : null;
+  const annualSrecIncome = annualMwh ? Math.round((srecValue) * annualMwh) : null;
+  return `${profile.srec_program_name}: Your utility's state participates in a Solar Renewable Energy Credit (SREC) program. For every 1,000 kWh (1 MWh) your system produces, you may earn one SREC, currently estimated at ~$${srecValue}/MWh.${annualSrecIncome ? ` For this system, that's approximately $${annualSrecIncome.toLocaleString('en-US')}/year in additional income.` : ''} SREC prices fluctuate with market supply and demand.`;
 }
 
 function getSystemDesignGuidance(profile: ProposalUtilityProfile): string {
@@ -63645,9 +63662,16 @@ export function calculate25yrProjection(params: {
       : (i < srecTermYears ? srecValuePerKwh * yearProduction : 0);
     srecIncome25yr += yearSrecIncome;
 
-    // Cumulative with-solar: solar payment (while loan active) + remaining utility
+    // Cumulative with-solar: solar payment (while loan active) + remaining utility,
+    // NET of SREC receipts in the year they're actually paid (Illinois Shines:
+    // 50% at energization + 50% over 6 yrs). SREC checks are real cash the
+    // customer receives — excluding them made the with-solar line, the chart
+    // crossover, and the 25-yr delta all contradict the SREC-inclusive payoff
+    // year on the same proposal. Note: the line can legitimately dip NEGATIVE
+    // early (the upfront SREC check can exceed that year's bills+payments) —
+    // chart renderers must support y < 0, not clamp.
     const yearSolarPayment = i < loanYears ? solarAnnualPayment : 0;
-    cumulativeWithSolar += yearRemainingWithCredit + yearSolarPayment;
+    cumulativeWithSolar += yearRemainingWithCredit + yearSolarPayment - yearSrecIncome;
 
     yearlyFlow.push({
       year: i + 1,
@@ -63672,8 +63696,11 @@ export function calculate25yrProjection(params: {
     utility_cost_without_solar_25yr: Math.round(utilityCostWithoutSolar),
     solar_cost_total: financeTotal ?? systemCost,
     remaining_utility_cost_total: Math.round(remainingUtilityCost),
-    net_financial_difference_25yr: Math.round(estimatedEnergyValue - (financeTotal ?? systemCost)),
-    estimated_energy_value_25yr: Math.round(estimatedEnergyValue),
+    // Net difference INCLUDES SREC income — it's real contracted revenue from
+    // system output. Excluding it here while the payoff year included it showed
+    // two contradictory bottom lines on one proposal.
+    net_financial_difference_25yr: Math.round(estimatedEnergyValue + srecIncome25yr - (financeTotal ?? systemCost)),
+    estimated_energy_value_25yr: Math.round(estimatedEnergyValue),  // energy value ONLY (excl. SREC) — labeled as such
     srec_income_25yr: Math.round(srecIncome25yr),
     yearlyFlow,
   };
@@ -63693,6 +63720,9 @@ export function validateProposalTruth(params: {
   effectiveFinal: number;
   annualEnergyValue: number;
   paybackYears: number;
+  /** 25-yr SREC contract income — when > 0, A2 treats the naive energy-only
+   *  payback ratio as an UPPER bound (SREC can only shorten payback). */
+  srecIncome25yr?: number;
   estimatedEnergyValue25yr: number;
   annualProductionKwh: number;
   utilityRate: number;
@@ -63750,12 +63780,21 @@ export function validateProposalTruth(params: {
     }
   }
 
-  // A2: paybackYears ≈ effectiveFinal / annualEnergyValue (±10%)
+  // A2: paybackYears sanity vs the naive ratio (effectiveFinal / annualEnergyValue).
+  // paybackYears is a flow-walk (escalation + SREC as scheduled), so it is
+  // legitimately SHORTER than the flat ratio: escalation alone trims ~10-20%;
+  // an SREC contract (e.g. Illinois Shines 50% upfront + 6yr) can trim far more.
+  // The ratio is therefore an UPPER bound always; the lower sanity bound (×0.5,
+  // catches wildly-wrong math) applies only when no SREC is present.
   if (annualEnergyValue > 0 && effectiveFinal > 0 && paybackYears > 0) {
     const expectedPayback = effectiveFinal / annualEnergyValue;
-    if (Math.abs(paybackYears - expectedPayback) > expectedPayback * 0.10) {
+    const hasSrec = (params.srecIncome25yr ?? 0) > 0;
+    const tooLong     = paybackYears - expectedPayback > expectedPayback * 0.10;
+    const absurdShort = !hasSrec && paybackYears < expectedPayback * 0.5;
+    if (tooLong || absurdShort) {
       warnings.push(
-        `[A2] paybackYears mismatch: got ${paybackYears}, expected ~${expectedPayback.toFixed(1)}`
+        `[A2] paybackYears out of band: got ${paybackYears}, expected ≤${expectedPayback.toFixed(1)}` +
+        `${hasSrec ? ' (SREC-adjusted)' : ` and ≥${(expectedPayback * 0.5).toFixed(1)}`}`
       );
     }
   }

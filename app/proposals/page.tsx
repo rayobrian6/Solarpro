@@ -1426,42 +1426,17 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   // Energy savings only — from canonical pipeline
   const energySavingsOnly = cp.financial.annualEnergyValue;
 
-  // SREC/IL income separately — pulled from stateIncentives if available
-  const srecAnnualIncome = (() => {
-    if (!stateIncentives) return 0;
-    const srecInc = stateIncentives.stateIncentives.find((s: any) =>
-      s.type === 'srec' || s.type === 'trec' || s.type === 'performance_payment'
-    );
-    if (!srecInc) return 0;
-    // 15-year total → annualized
-    return Math.round((srecInc.calculatedValue ?? 0) / 15);
-  })();
-
   // ITC from canonical pipeline (overrides inline calc)
   const itcRate   = cp.financial.itcRate;
   const itcAmount = cp.financial.itcAmount;
   const effectiveNet = cp.financial.netCost;
 
-  // Base payback: from canonical pipeline (uses net-of-ITC cost)
+  // Payback: from canonical pipeline — flow-based and SREC-schedule-aware
+  // (2026-07-16). The old dead locals here (srecAnnualIncome from the generic
+  // state-incentive catalog, adjustedPaybackYears, financeBreakEvenYear) were a
+  // SECOND, divergent SREC model computed but never rendered — removed so the
+  // canonical walk is the only payback math in existence.
   const basePaybackYears = cp.financial.paybackYears;
-
-  // Adjusted payback: with SREC income factored in
-  const adjustedPaybackYears = (energySavingsOnly + srecAnnualIncome) > 0
-    ? parseFloat((cp.financial.netCost / (energySavingsOnly + srecAnnualIncome)).toFixed(1))
-    : basePaybackYears;
-
-  // Break-even year for financing: when cumulative utility avoided >= cumulative loan payments
-  const financeBreakEvenYear = (() => {
-    if (financeMonthlyPayment <= 0) return null;
-    let cumUtility = 0;
-    let cumPayment = 0;
-    for (let i = 0; i < 25; i++) {
-      cumUtility += energySavingsOnly * Math.pow(1 + utilityInflation, i);
-      cumPayment += financeMonthlyPayment * 12;
-      if (cumUtility >= cumPayment) return i + 1;
-    }
-    return null;
-  })();
 
   // Is financing payment higher than current utility bill?
   // v47.340: use TOTAL energy cost (solar + remaining utility) vs current bill for truth
@@ -1568,6 +1543,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
       effectiveFinal,
       annualEnergyValue,
       paybackYears:              payoffYear ?? 0,
+      srecIncome25yr:            cp.truth25yr.srec_income_25yr ?? 0,
       estimatedEnergyValue25yr:  estimated_energy_value_25yr,
       annualProductionKwh:       annualProduction,
       utilityRate,
