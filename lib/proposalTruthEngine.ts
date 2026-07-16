@@ -63530,7 +63530,19 @@ export function calculate25yrProjection(params: {
   // system life like an open/ongoing SREC market. Illinois Shines (Adjustable
   // Block Program) DG is a 15-year REC contract — applying the REC price across
   // all 25 projection years overstates the incentive by ~67% (25/15). Cap it.
-  const srecTermYears = /illinois shines|adjustable block/i.test(profile.srec_program_name || '') ? 15 : 25;
+  const isIlShines = /illinois shines|adjustable block/i.test(profile.srec_program_name || '');
+  const srecTermYears = isIlShines ? 15 : 25;
+  // 2026-27 Illinois Shines PAYOUT SCHEDULE: Small DG is paid 50% upfront at
+  // energization + the remaining 50% ratably over the subsequent 6 years — NOT
+  // accrued per-year like an open SREC market. Precompute the full contract-term
+  // value and distribute it by that schedule in the loop below (the TOTAL is
+  // identical; only the year-by-year timing — hence payback + cash flow — changes).
+  let _srecTotalValue = 0;
+  if (isIlShines && srecValuePerKwh > 0) {
+    let _prod = 0;
+    for (let _y = 0; _y < srecTermYears; _y++) _prod += annualProductionKwh * Math.pow(1 - panelDegradation, _y);
+    _srecTotalValue = srecValuePerKwh * _prod;
+  }
 
   // SPEC §10 HARD FAIL check
   if (
@@ -63625,9 +63637,12 @@ export function calculate25yrProjection(params: {
       : yearRemainingBill;
     remainingUtilityCost += yearRemainingWithCredit;
 
-    // SPEC §7: SREC income added to solar scenario (capped to the REC contract
-    // term — e.g. Illinois Shines DG pays for 15 years, not the full 25).
-    const yearSrecIncome = i < srecTermYears ? srecValuePerKwh * yearProduction : 0;
+    // SPEC §7: SREC income added to solar scenario. Illinois Shines pays on a
+    // fixed schedule (50% at energization + 50% ratably over the next 6 years);
+    // open SREC markets accrue per-year over the contract term.
+    const yearSrecIncome = isIlShines
+      ? (i === 0 ? _srecTotalValue * 0.5 : (i >= 1 && i <= 6 ? (_srecTotalValue * 0.5) / 6 : 0))
+      : (i < srecTermYears ? srecValuePerKwh * yearProduction : 0);
     srecIncome25yr += yearSrecIncome;
 
     // Cumulative with-solar: solar payment (while loan active) + remaining utility
