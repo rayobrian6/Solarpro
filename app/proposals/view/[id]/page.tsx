@@ -1545,10 +1545,19 @@ function PublicProposalView({
                 </div>
                 {avgMonthlyBefore - avgMonthlyAfter > 0 ? (
                   <span className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-300">
-                    −${avgMonthlyBefore - avgMonthlyAfter}/mo
+                    −${avgMonthlyBefore - avgMonthlyAfter}/mo utility bill
                   </span>
                 ) : null}
               </div>
+              {/* Bridge to "What Changes Today": this card is the UTILITY BILL only.
+                  Without this line, "−$229/MO" here read as contradicting the
+                  honest "+$228/mo" total-outlay figure on the summary (Ray, 07-16). */}
+              {purchaseMode === 'finance' && solar_payment_monthly > 0 ? (
+                <p className="text-xs text-slate-500 mb-2">
+                  Utility bill only — your ${solar_payment_monthly}/mo solar payment is separate
+                  (total ${total_energy_cost_monthly}/mo; see &ldquo;What Changes Today&rdquo;).
+                </p>
+              ) : null}
               <ResponsiveContainer width="100%" height={130}>
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
