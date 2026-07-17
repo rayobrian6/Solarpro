@@ -198,7 +198,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const _azDir = (az: number) => az >= 337.5 || az < 22.5 ? 'N' :
     az < 67.5 ? 'NE' : az < 112.5 ? 'E' : az < 157.5 ? 'SE' :
     az < 202.5 ? 'S' : az < 247.5 ? 'SW' : az < 292.5 ? 'W' : 'NW';
-  const _multiAz = _azList.length > 1
+  // Gate on isRoof: _azList reads cad.roof.planes, which a hybrid CAD still
+  // carries on GROUND/FENCE circuit sheets — PV-1BG printed the ROOF's
+  // "MULTI — E/W (SEE PLANE LABELS)" as the ground array's azimuth while the
+  // ground faces 181° (S) (Ray, 2026-07-16).
+  const _multiAz = isRoof(cadSystemType) && _azList.length > 1
     && new Set(_azList.map(_azDir)).size > 1;
   const avgAz = isRoof(cadSystemType) && roofPlane0?.azimuth != null
     ? roofPlane0.azimuth.toFixed(0)
@@ -528,7 +532,25 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
             <tr><td>${_isMicro ? 'AC Branches' : 'Strings'}</td><td>${totalStrings}</td></tr>
             <tr><td>Tilt</td><td>${avgTilt}\xb0</td></tr>
             <tr><td>Azimuth</td><td>${azDisplay}</td></tr>
-            <tr><td>Rows</td><td>${rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels))}</td></tr>
+            <tr><td>Rows</td><td>${(() => {
+              // Studio ground/fence panels often all carry row=0 — the stamp
+              // grouping then said "Rows 1" while GROUND ARRAY DETAILS said
+              // "Row Count 2" on the same rail (Ray, 2026-07-16). When stamps
+              // are degenerate, band the modules geometrically by latitude
+              // (same clustering the ground top-view draws with).
+              if (rowNums.length > 1) return rowNums.length;
+              const latsM = panels.map(p => p.lat * 111320).filter(v => isFinite(v)).sort((a, b) => a - b);
+              if (latsM.length > 1) {
+                // cluster in meters: a new row starts when the N-S gap exceeds
+                // 0.8 m (ground row pitch is ≥1.5 m; within-row jitter ≪ 0.5 m)
+                let geo = 1;
+                for (let gi = 1; gi < latsM.length; gi++) {
+                  if (latsM[gi] - latsM[gi - 1] > 0.8) geo++;
+                }
+                if (geo > 1) return geo;
+              }
+              return rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels));
+            })()}</td></tr>
             <tr><td>System</td><td>${isFence(cadSystemType) ? 'FENCE' : isGround(cadSystemType) ? 'GROUND' : 'ROOF'}</td></tr>
             <tr><td>Orient.</td><td>${panels[0]?.orientation?.toUpperCase() || 'PORTRAIT'}</td></tr>
             <tr class="row-bold"><td>DC kW</td><td>${system.totalDcKw?.toFixed(2) || '\u2014'}</td></tr>

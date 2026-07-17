@@ -179,7 +179,13 @@ export function subScopedInput(input: PermitInput, cad: CADModel, key: SubSystem
   let sumWatts = 0;
   for (const p of subPositions) {
     const w = Number((p as { wattage?: number }).wattage);
-    sumWatts += (isFinite(w) && w > 0) ? w : nameplateW;
+    // §1.1: within a sub the equipment-authority nameplate GOVERNS — a sub is
+    // by-contract panel-homogeneous, and per-panel wattage stamps go stale
+    // when the panel is swapped after placement. Ray's live PV-1BG (2026-07-16):
+    // 16 ground modules stamped 405W (pre-swap) while the map + STRING LEGEND
+    // said 580W → "DC kW 6.48" printed beside "9.28 kWdc" on the same sheet.
+    // Stamps remain the fallback when no map/string nameplate resolves.
+    sumWatts += nameplateW > 0 ? nameplateW : ((isFinite(w) && w > 0) ? w : 0);
   }
   const computedDcKw = subPositions.length
     ? Math.round(sumWatts) / 1000
