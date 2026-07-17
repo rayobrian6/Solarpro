@@ -233,7 +233,7 @@ describe('wave 5B — per-sub PE structural letters', () => {
     expect(p).toContain('Ground Mount Array');
     expect(p).toMatch(/Total Modules<\/td><td class="iv">4</);
     expect(p).toContain('Tesla TSP-420');
-    expect(p).toContain('Ground Mount Racking System');
+    expect(p).toContain('POWER DRIVE'); // Speck PLP POWER DRIVE ground system (dfe63c9e realism pass)
     expect(p).not.toContain('IronRidge');
   });
 

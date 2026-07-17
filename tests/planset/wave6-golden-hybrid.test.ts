@@ -219,8 +219,10 @@ describe('wave 6 golden — multi-lane E-1', () => {
   it('Σ backfeed equals the sum of the per-lane contributions (§1.7)', () => {
     const sigma = /Σ BACKFEED (\d+)A — NEC 705\.12\(B\) \(Σ PER-INVERTER OCPDs\)/.exec(e1);
     expect(sigma, 'Σ BACKFEED marker').toBeTruthy();
+    // Per-lane contributions moved from the "PV-R: 90A" note into the POI
+    // panel's "PV-R Backfeed" / "90 A" row pair (Stage-C layout) — read those.
     const lanes = ['PV-R', 'PV-G', 'PV-F'].map(tag => {
-      const m = new RegExp(`${tag}: (\\d+)A`).exec(e1);
+      const m = new RegExp(`${tag} Backfeed[\\s\\S]{0,400}?>(\\d+) A<`).exec(e1);
       expect(m, `${tag} contribution row`).toBeTruthy();
       return Number(m![1]);
     });

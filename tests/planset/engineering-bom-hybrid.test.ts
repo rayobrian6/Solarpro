@@ -124,11 +124,11 @@ describe('engineering BOM route — hybrid multi-system payload', () => {
     expect(byPart(json, 'LOCAL-DRIVEN-STEEL-POST')?.quantity).toBe(10); // 1 per post
 
     // ── GROUND subset: structural scaled to 26 panels ──
-    expect(byPart(json, 'UNIRAC-RM10-DRIVEN')?.quantity).toBe(12);  // pileCount from CAD
-    expect(byPart(json, 'UNIRAC-RM10-BOND')?.quantity).toBe(26);    // bonding clips = ground subset
+    expect(byPart(json, 'PLP-PD-PYLON-W6')?.quantity).toBe(12);     // pileCount from CAD (PLP POWER DRIVE since dfe63c9e)
+    expect(byPart(json, 'PLP-PD-BONDCLIP')?.quantity).toBe(26);     // bonding clips = ground subset
     expect(byPart(json, 'GNDMNT-GNDLUG')?.quantity).toBe(13);       // ceil(26 / 2)
     // Ground rails COEXIST with roof rails (different physical assemblies)
-    expect(byPart(json, 'UNIRAC-RM10-RAIL')).toBeDefined();
+    expect(byPart(json, 'PLP-PD-PXRAIL')).toBeDefined();
 
     // ── ROOF subset: NEC 690.12 RSD for the 51 on-building modules ──
     const rsd = byPart(json, 'TS4-A-F');
@@ -207,7 +207,7 @@ describe('bom-system-profiles — subsystem partition + fence section math', () 
     expect(r.subsystemsRun.sort()).toEqual(['fence', 'ground']);
     const q = (pn: string) => r.items.find(i => i.partNumber === pn)?.quantity;
     expect(q('SOLFENCE-SECTION-6')).toBe(9);
-    expect(q('UNIRAC-RM10-BOND')).toBe(26);   // moduleCount scoped to ground subset
+    expect(q('PLP-PD-BONDCLIP')).toBe(26);    // moduleCount scoped to ground subset
     expect(q('GNDMNT-GNDLUG')).toBe(13);
   });
 
@@ -254,7 +254,7 @@ describe('bom-system-profiles — subsystem partition + fence section math', () 
       ground: groundData as any,
     });
     expect(r.subsystemsRun).toEqual(['ground']);
-    expect(r.items.find(i => i.partNumber === 'UNIRAC-RM10-BOND')?.quantity).toBe(26);
+    expect(r.items.find(i => i.partNumber === 'PLP-PD-BONDCLIP')?.quantity).toBe(26);
     expect(r.items.some(i => i.category === 'fence_section')).toBe(false);
   });
 });
