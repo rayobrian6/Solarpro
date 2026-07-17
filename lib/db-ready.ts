@@ -55,7 +55,6 @@
  */
 
 import { neon, NeonQueryFunction } from '@neondatabase/serverless';
-import { Pool, type PoolClient } from 'pg';
 
 // Concrete type for a default neon() sql executor (no array mode, no full results)
 type SqlExecutor = NeonQueryFunction<false, false>;
@@ -185,101 +184,18 @@ function getDatabaseUrl(): string {
 }
 
 /**
- * Returns true if DATABASE_URL points at a local Postgres (localhost / 127.0.0.1 / ::1).
- * The Neon HTTP driver can't talk to plain postgresql:// hosts — it expects Neon's
- * serverless endpoint shape (`ep-…-pooler.region.azure.neon.tech`). For local dev we
- * swap to a TCP `pg.Pool` via a thin adapter that mimics the neon() API.
- */
-function isLocalDatabaseUrl(url: string): boolean {
-  return /@(localhost|127\.0\.0\.1|\[::1\]|::1|0\.0\.0\.0)(:|\/|$)/i.test(url);
-}
-
-/**
- * Build a parameterized SQL string from a template-tag call:
- *   sql`SELECT * FROM users WHERE id = ${id} AND name = ${n}`
- *   -> "SELECT * FROM users WHERE id = $1 AND name = $2" with values [id, n]
- */
-function templateToParameterized(
-  strings: TemplateStringsArray,
-  params: unknown[]
-): { text: string; values: unknown[] } {
-  let text = strings[0];
-  for (let i = 1; i < strings.length; i++) {
-    text += `$${i}${strings[i]}`;
-  }
-  return { text, values: params };
-}
-
-/**
- * Creates a SQL executor backed by a local `pg.Pool`. Exposes the same
- * `sql\`SELECT ${value}\`` template-tag API as `neon()`, so existing
- * callsites work unchanged. Also supports `sql.transaction(callback)`
- * for the one Neon-style transaction callsite in the codebase.
- */
-function createLocalSqlExecutor(connectionString: string): SqlExecutor {
-  const pool = new Pool({ connectionString, max: 10 });
-
-  const clientSqlFn = (client: PoolClient) =>
-    async (strings: TemplateStringsArray, ...params: unknown[]) => {
-      const { text, values } = templateToParameterized(strings, params);
-      const result = await client.query({ text, values: values as unknown[] });
-      return result.rows;
-    };
-
-  const sqlFn = async (strings: TemplateStringsArray, ...params: unknown[]) => {
-    const { text, values } = templateToParameterized(strings, params);
-    const result = await pool.query({ text, values: values as unknown[] });
-    return result.rows;
-  };
-
-  // Attach .transaction() to mimic Neon's batched HTTP transaction API.
-  // Supports both forms: sql.transaction(txn => [q1, q2]) and sql.transaction([q1, q2]).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const exec = sqlFn as unknown as SqlExecutor & { transaction: any };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  exec.transaction = async (queriesOrFn: any, _opts?: any): Promise<any> => {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      if (typeof queriesOrFn === 'function') {
-        // Callback form — sync callback returns array of query promises.
-        const txn = clientSqlFn(client) as unknown as SqlExecutor;
-        const out = queriesOrFn(txn);
-        const promises = Array.isArray(out) ? out : [out];
-        await Promise.all(promises.map((p: unknown) => Promise.resolve(p)));
-      } else if (Array.isArray(queriesOrFn)) {
-        // Array form — pre-built query promises.
-        await Promise.all(queriesOrFn.map((p: unknown) => Promise.resolve(p)));
-      } else {
-        throw new Error('sql.transaction: expected callback or array of queries');
-      }
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-    }
-  };
-
-  return exec as SqlExecutor;
-}
-
-/**
  * Returns or creates the module-level SQL executor singleton.
- * Auto-selects between Neon HTTP driver and local TCP Pool based on
- * the DATABASE_URL host shape. Logs DB_CLIENT_INIT on first creation
- * for cold-start tracing.
+ * Always uses the Neon HTTP driver (the only path that works on Vercel).
+ * Local-dev-with-`pg.Pool` support was removed in this change because the
+ * static `import { Pool } from 'pg'` at the top of this file leaked into
+ * the client bundle and broke `next build`. If local TCP Postgres support
+ * is needed again, re-add via a dynamic import + `import 'server-only'`.
  */
 function getSqlSingleton(): SqlExecutor {
   if (!_cachedSql) {
     const url = getDatabaseUrl();
-    const isLocal = isLocalDatabaseUrl(url);
-    console.log(`[DB_CLIENT_INIT] DATABASE_URL host detection: ${isLocal ? 'LOCAL (pg.Pool)' : 'NEON (HTTP)'}`);
-    _cachedSql = isLocal
-      ? createLocalSqlExecutor(url)
-      : (neon(url) as SqlExecutor);
-    console.log(`[DB_CLIENT_INIT] SQL executor created successfully (${isLocal ? 'pg.Pool' : 'Neon HTTP'})`);
+    _cachedSql = neon(url) as SqlExecutor;
+    console.log('[DB_CLIENT_INIT] SQL executor created (Neon HTTP)');
   }
   return _cachedSql;
 }
