@@ -59,7 +59,16 @@ function arrayColor(i: number): string {
 // at the N-S midpoint" of the TABLE, one tilted strongback per pylon carrying
 // BOTH the south and north row. The two rows of a table are adjacent (shared
 // strongback); the row-spacing gap is BETWEEN tables, not within one.
-const PLP_ROWS_PER_TABLE = 2;
+// CONSTANTS IMPORTED from the ground reality engine — the drawing must never
+// carry its own copies (Ray 2026-07-16: a drifted local copy drew 2 rails
+// instead of the engine's 4 and a cantilevered pylon layout the engine
+// doesn't build).
+import {
+  PLP_ROW_COUNT,
+  PLP_BAY_SPAN_M,
+  PLP_CLAMP_INSET_FRAC,
+} from '@/lib/3d/ground/groundMountRealityEngine';
+const PLP_ROWS_PER_TABLE = PLP_ROW_COUNT;
 
 // ── Ground mount-system name resolution (STEP 9 cross-contamination block) ────
 // A ground sheet must NEVER brand the project-wide ROOF racking. project
@@ -346,17 +355,13 @@ export function drawGroundArray(
         }
       }
 
-      // ── Speck PLP POWER DRIVE™ structure — matches the Design Studio ground
-      // reality engine (lib/3d/ground/groundMountRealityEngine.ts). Driven I-beam
-      // PYLONS, ONE per bay at the table's N-S midpoint (bay span ≈ 20 ft), a
-      // tilted N-S STRONGBACK on each pylon, and CONTINUOUS E-W PLP rails that
-      // cantilever past the end pylons. NOT a generic front/rear double-post grid.
-      const PLP_BAY_SPAN_M = 6.10;    // ~20 ft between pylons (engine constant)
-      const PLP_MAX_CANT_M = 1.50;    // max rail overhang past end pylon
-      const PLP_CLAMP_INSET = 0.15;   // rail inset from table N/S edge (frac of depth)
-      // Group the module rows into 2-high PLP tables — ONE pylon line per table
-      // at its true N-S midpoint (the shared row seam), not one line per module
-      // row. Each table = up to PLP_ROWS_PER_TABLE consecutive row-bands.
+      // ── Speck PLP POWER DRIVE™ structure — drawn from the SAME constants and
+      // formulas as the Design Studio ground reality engine (imported, never
+      // copied — Ray 2026-07-16: "reference design", the copied version drew
+      // 2 rails instead of 4 and invented a cantilevered 2-pylon layout).
+      //   rails:  2 per portrait row × PLP_ROW_COUNT rows (engine railDefs)
+      //   pylons: nPylons = max(2, ceil(rowSpan / PLP_BAY_SPAN_M) + 1),
+      //           evenly spaced EDGE TO EDGE (engine frac = i/(n−1))
       const tableGroups: Rect[][] = [];
       for (let ti = 0; ti < rowBands.length; ti += PLP_ROWS_PER_TABLE)
         tableGroups.push(rowBands.slice(ti, ti + PLP_ROWS_PER_TABLE).flat());
@@ -368,19 +373,26 @@ export function drawGroundArray(
         }
         const wM = bMaxX - bMinX, depthM = bMaxY - bMinY;
         const cyM = (bMinY + bMaxY) / 2;                    // table N-S midpoint (pylon line = row seam)
-        // Pylon E-W positions: end cantilevers ≤ PLP_MAX_CANT_M, interior bays ≤ span.
-        const cant = Math.min(PLP_MAX_CANT_M, wM * 0.14);
-        const innerW = Math.max(wM - 2 * cant, 0.1);
-        const nSpans = Math.max(1, Math.ceil(innerW / PLP_BAY_SPAN_M));
+        // Pylons per the ENGINE formula: edge-to-edge, no invented cantilever.
+        const nPylons = Math.max(2, Math.ceil(wM / PLP_BAY_SPAN_M) + 1);
         const pylonXs: number[] = [];
-        for (let i = 0; i <= nSpans; i++) pylonXs.push(bMinX + cant + (innerW * i) / nSpans);
-        // Continuous E-W PLP rails (2), at the clamp zones, cantilevering to module edges.
-        const railYs = [bMinY + depthM * PLP_CLAMP_INSET, bMaxY - depthM * PLP_CLAMP_INSET];
+        for (let i = 0; i < nPylons; i++)
+          pylonXs.push(bMinX + (wM * i) / Math.max(nPylons - 1, 1));
+        const baySpanM = wM / Math.max(nPylons - 1, 1);
+        // PX rails per the ENGINE railDefs: 2 per portrait row (15%/85% clamp
+        // insets of EACH row's span) = 4 lines on a 2-high table.
+        const railYs: number[] = [];
+        const rowDepthM = depthM / PLP_ROWS_PER_TABLE;
+        for (let ri = 0; ri < PLP_ROWS_PER_TABLE; ri++) {
+          const rowY0 = bMinY + ri * rowDepthM;
+          railYs.push(rowY0 + rowDepthM * PLP_CLAMP_INSET_FRAC);
+          railYs.push(rowY0 + rowDepthM * (1 - PLP_CLAMP_INSET_FRAC));
+        }
         for (const ryM of railYs) {
           const ry = toSvgY(ryM);
           // PX rails: heavy double line so structure reads over module strokes
-          els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="#39445c" stroke-width="1.9"/>`);
-          els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${(ry + 1.5).toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${(ry + 1.5).toFixed(1)}" stroke="#39445c" stroke-width="0.5"/>`);
+          els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="#39445c" stroke-width="1.7"/>`);
+          els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${(ry + 1.4).toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${(ry + 1.4).toFixed(1)}" stroke="#39445c" stroke-width="0.5"/>`);
         }
         // Strongback (tilted N-S beam) on each pylon — spans the table depth.
         const cy = toSvgY(cyM);
@@ -397,7 +409,7 @@ export function drawGroundArray(
         }
         // One label per table (northern edge).
         els.push(drawText(toSvgX(pylonXs[Math.floor(pylonXs.length / 2)]), toSvgY(bMinY) - 4,
-          `${pylonXs.length} PLP PYLONS @ ${(innerW / nSpans * 3.28084).toFixed(0)}' O.C.`, {
+          `${nPylons} PLP PYLONS @ ${ftToFtIn(baySpanM * 3.28084)} O.C. · ${railYs.length} PX RAILS`, {
             anchor: 'middle', fontSize: 6, fill: '#44506a', fontWeight: 'bold',
           }));
         // Pylon BAY dimension string (first→last pylon, with count), below the
@@ -406,10 +418,10 @@ export function drawGroundArray(
           const d1 = toSvgX(pylonXs[0]), d2 = toSvgX(pylonXs[pylonXs.length - 1]);
           const dy = toSvgY(bMaxY) + 9;
           els.push(`<line x1="${d1.toFixed(1)}" y1="${dy.toFixed(1)}" x2="${d2.toFixed(1)}" y2="${dy.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>`);
-          for (const dx of [d1, d2]) {
+          for (const dx of pylonXs.map(toSvgX)) {
             els.push(`<line x1="${dx.toFixed(1)}" y1="${(dy - 3.5).toFixed(1)}" x2="${dx.toFixed(1)}" y2="${(dy + 3.5).toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>`);
           }
-          els.push(drawText((d1 + d2) / 2, dy + 8, `${nSpans} BAY${nSpans > 1 ? 'S' : ''} @ ${ftToFtIn(innerW / nSpans * 3.28084)}`, {
+          els.push(drawText((d1 + d2) / 2, dy + 8, `${nPylons - 1} BAY${nPylons > 2 ? 'S' : ''} @ ${ftToFtIn(baySpanM * 3.28084)}`, {
             anchor: 'middle', fontSize: 6, fill: '#44506a', fontWeight: 'bold',
           }));
         }
@@ -534,9 +546,16 @@ export function drawGroundArray(
         els.push(`<line x1="${(bx + run * a).toFixed(1)}" y1="${(by - rise * a - 3.2).toFixed(1)}" x2="${(bx + run * b).toFixed(1)}" y2="${(by - rise * b - 3.2).toFixed(1)}" stroke="#7fa4d4" stroke-width="0.8"/>`);
       }
       // PX rail cross-sections: rails run E-W, so in this N-S section they are
-      // POINTS on the strongback at the clamp zones (~15% / ~85% of the slant).
-      const railPts: Array<[number, number]> = [0.15, 0.85].map(f =>
-        [bx + tableRun * f, by - tableRise * f + 0] as [number, number]);
+      // POINTS on the strongback — TWO PER PORTRAIT ROW at the engine's clamp
+      // insets (railDefs: 15%/85% of EACH row's span) = 4 on a 2-high table.
+      // (Ray 2026-07-16: the drawing showed 2 — "missing a rail per row".)
+      const railPts: Array<[number, number]> = [];
+      for (let ri = 0; ri < nRows; ri++) {
+        for (const rf of [PLP_CLAMP_INSET_FRAC, 1 - PLP_CLAMP_INSET_FRAC]) {
+          const f = (ri + rf) / nRows;
+          railPts.push([bx + tableRun * f, by - tableRise * f] as [number, number]);
+        }
+      }
       for (const [rx, ry2] of railPts) {
         els.push(`<circle cx="${rx.toFixed(1)}" cy="${(ry2 + 3.4).toFixed(1)}" r="2.6" fill="#fff" stroke="#39445c" stroke-width="1.3"/>`);
         els.push(`<circle cx="${rx.toFixed(1)}" cy="${(ry2 + 3.4).toFixed(1)}" r="0.9" fill="#39445c"/>`);
@@ -577,9 +596,10 @@ export function drawGroundArray(
         if (sub) els.push(drawText(cX, cY + 9.5, sub, { anchor: 'start', fontSize: 5.6, fill: '#555' }));
         cY += 22;
       };
-      co(A.knX, A.knY, 'TILT KNUCKLE', 'slotted bracket — 25° set');
+      co(A.knX, A.knY, 'TILT KNUCKLE', `slotted bracket — ${Math.round(tilt)}° set`);
       co(A.sbMidX, A.sbMidY - 4, 'STRONGBACK (N-S)', 'PLP POWER DRIVE™ — HDG steel');
-      co(A.railPts[1][0], A.railPts[1][1] + 4, 'PX RAIL ×2 (CONT. E-W)', '14′ sections, spliced');
+      co(A.railPts[A.railPts.length - 1][0], A.railPts[A.railPts.length - 1][1] + 4,
+        `PX RAIL ×${A.railPts.length} (CONT. E-W)`, '2 per row — 14′ sections, spliced');
       co(A.strutMidX, A.strutMidY, 'DIAGONAL STRUT', 'braces south cantilever');
       co(A.pylonX + 2, (A.pylonTopY + baseY) / 2 + 8, 'DRIVEN I-BEAM PYLON', 'W6 HDG — see section C');
       // Height + clearance dimensions (left of the table)
@@ -590,7 +610,13 @@ export function drawGroundArray(
       }
       els.push(drawText(dimX - 4, baseY - clrPx / 2 + 2, `${clearFt.toFixed(1)}' CLR`, {
         anchor: 'end', fontSize: 6.4, fill: '#333' }));
-      const topFt = clearFt + nRows * (a0.moduleLenM ?? 1.73) * metersToFt(1) * Math.sin(tilt * Math.PI / 180);
+      // Top-of-table height from PLAN geometry: CAD panel heightM is the
+      // plan-PROJECTED N-S extent, so rise = plan depth × tan(tilt) (slope
+      // length × sin ≡ plan × tan). The old 1.73 m slope default printed
+      // "9.3' TOP" on a table that stands ~11.5' (Ray 2026-07-16: "a typical
+      // PLP ground mount is going to be somewhere around 10 to 12 feet").
+      const _rowPlanM = Number((a0._cadPanels?.[0]?.heightM)) || Number(a0.rows?.[0]?.panels?.[0]?.heightM) || 1.74;
+      const topFt = clearFt + nRows * _rowPlanM * metersToFt(1) * Math.tan(tilt * Math.PI / 180);
       els.push(drawText(dimX - 4, baseY - clrPx - tableRise / 2, `${topFt.toFixed(1)}' TOP`, {
         anchor: 'end', fontSize: 6.4, fill: '#333' }));
       // Tilt arc at the south (low) end
@@ -599,35 +625,9 @@ export function drawGroundArray(
       els.push(drawText(xStart + arcR + 4, baseY - clrPx - 6, `${Math.round(tilt)}°`, {
         anchor: 'start', fontSize: 8, fontWeight: 'bold', fill: '#1a4a8a' }));
 
-      // ── Winter-solstice shadow GEOMETRY (Ray "next level" item 1): the
-      // Dec-21 solar-noon sun ray drawn from the module top edge to grade,
-      // with the true shadow length dimensioned — turns the "verify inter-row
-      // shading" NOTE into checkable drawing geometry. Solar-noon altitude on
-      // the solstice = 90° − latitude − 23.44° (site latitude from project).
-      const _siteLat = Math.abs(Number((input.project as { lat?: number })?.lat)) || 38.7;
-      const sunAlt = Math.max(5, 90 - _siteLat - 23.44);
-      const topFtS = clearFt + nRows * (a0.moduleLenM ?? 1.73) * metersToFt(1) * Math.sin(tilt * Math.PI / 180);
-      const shadowFt = topFtS / Math.tan(sunAlt * Math.PI / 180);
-      const ftPxB = clrPx / Math.max(clearFt, 0.5);
-      const shadowPxRaw = shadowFt * ftPxB;
-      const maxShadowPx = (vpB.x + vpB.w - 20) - A.topX;
-      const shadowPx = Math.min(shadowPxRaw, Math.max(maxShadowPx, 40));
-      const shEndX = A.topX + shadowPx;
-      // sun ray (dashed amber) from module top edge down to grade
-      els.push(`<line x1="${A.topX.toFixed(1)}" y1="${A.topY.toFixed(1)}" x2="${shEndX.toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#e5a100" stroke-width="0.9" stroke-dasharray="5,3"/>`);
-      // sun glyph on the ray, above the module top
-      const sunX = A.topX - 14, sunY = A.topY - 12;
-      els.push(`<circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="4.5" fill="#ffd34d" stroke="#e5a100" stroke-width="0.9"/>`);
-      for (let sr = 0; sr < 8; sr++) {
-        const sa = (sr * Math.PI) / 4;
-        els.push(`<line x1="${(sunX + Math.cos(sa) * 6).toFixed(1)}" y1="${(sunY + Math.sin(sa) * 6).toFixed(1)}" x2="${(sunX + Math.cos(sa) * 8.5).toFixed(1)}" y2="${(sunY + Math.sin(sa) * 8.5).toFixed(1)}" stroke="#e5a100" stroke-width="0.8"/>`);
-      }
-      // shadow extent on grade (heavy amber tick + dimension)
-      els.push(`<line x1="${A.topX.toFixed(1)}" y1="${(baseY + 2).toFixed(1)}" x2="${shEndX.toFixed(1)}" y2="${(baseY + 2).toFixed(1)}" stroke="#e5a100" stroke-width="2" opacity="0.55"/>`);
-      els.push(`<line x1="${shEndX.toFixed(1)}" y1="${(baseY - 3).toFixed(1)}" x2="${shEndX.toFixed(1)}" y2="${(baseY + 5).toFixed(1)}" stroke="#e5a100" stroke-width="1"/>`);
-      els.push(drawText((A.topX + shEndX) / 2, baseY + 12,
-        `${shadowFt.toFixed(1)}' SHADOW @ DEC 21 NOON — SUN ALT ${sunAlt.toFixed(1)}° (LAT ${_siteLat.toFixed(1)}°)`, {
-          anchor: 'middle', fontSize: 5.8, fontWeight: 'bold', fill: '#b07d00' }));
+      // (Solstice sun/shadow overlay REMOVED — Ray 2026-07-16: "wtf is the
+      // sun about". Inter-row shading stays a NOTE; the drawing shows the
+      // structure, not an astronomy lesson.)
     }
   }
 
@@ -764,7 +764,7 @@ export function drawGroundArray(
         ['Modules', `${totalPanels} @ ${(dcKw / Math.max(1, totalPanels) * 1000).toFixed(0)}W`],
         ['Tilt / Azimuth', `${_tilt}° / ${_az}°`],
         ['Row spacing', `${_rs}' O.C.`],
-        ['Ground clearance', `18" min. below lowest module`],
+        ['Ground clearance', `${Math.round(((arrays[0]?.groundClearanceM ?? 0.46) * 39.3701))}" min. below lowest module`],
         ['Pile embedment', `5' min. — field-verify refusal`],
         ['Property setback', `${setbackFt}' min. from line`],
         ['Bonding', 'All metalwork to EGC — NEC 690.43'],
@@ -792,7 +792,7 @@ export function drawGroundArray(
           [`<line x1="0" y1="2" x2="14" y2="-3" stroke="#44506a" stroke-width="2.4"/>`,
             'STRONGBACK', 'tilted N-S beam on pylon'],
           [`<line x1="0" y1="0" x2="14" y2="0" stroke="#39445c" stroke-width="2"/><line x1="0" y1="1.6" x2="14" y2="1.6" stroke="#39445c" stroke-width="0.5"/>`,
-            'PX RAIL (×2, CONT. E-W)', '14′ sections + splices'],
+            'PX RAIL — 2 PER ROW (CONT. E-W)', '4 per 2-high table · 14′ + splices'],
           [`<rect x="3" y="-2.6" width="8" height="5.2" fill="#2c3444" stroke="#111" stroke-width="0.6" rx="1"/>`,
             'TILT KNUCKLE', 'slotted tilt-set bracket'],
           [`<line x1="1" y1="3" x2="12" y2="-3" stroke="#44506a" stroke-width="1.4"/>`,

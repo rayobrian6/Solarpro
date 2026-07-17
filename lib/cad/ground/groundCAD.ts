@@ -371,13 +371,18 @@ function solveGroundFromGPS(
   }
   azimuth = Math.round(azimuth * 10) / 10;
 
-  // ── Tilt: median of panel tilts (5–60°), else layout, else 20 ─
+  // ── Tilt: LAYOUT AUTHORITY first (the studio slider the user set and SAW
+  // rendered in 3D), then panel-stamp median, then 20. Stamps lag the slider
+  // when tilt is changed after placement — Stowell's ground panels carried
+  // tilt=25 stamps while the studio said 40.16°, so PV-1G drew a 6'3" table
+  // Ray builds at 10-12' (2026-07-16). Same stale-stamp doctrine as panel
+  // wattage: authority governs, stamps are the fallback.
   const tiltSamples = rawPanels
     .map((p: any) => p.tilt)
     .filter((t: any) => typeof t === 'number' && isFinite(t) && t >= 5 && t <= 60);
-  const tiltDeg = tiltSamples.length > 0
-    ? median(tiltSamples)
-    : (typeof layout0.tiltDeg === 'number' && layout0.tiltDeg > 0 ? layout0.tiltDeg : 20);
+  const tiltDeg = Math.round(((typeof layout0.tiltDeg === 'number' && layout0.tiltDeg >= 5 && layout0.tiltDeg <= 60)
+    ? layout0.tiltDeg
+    : (tiltSamples.length > 0 ? median(tiltSamples) : 20)) * 10) / 10; // 0.1° — raw slider floats printed "40.16186827572303°" on the sheet
 
   // ── Panels at the REAL local XY (top-left convention, as roofCAD) ──
   const allPanels: CADPanel[] = [];
