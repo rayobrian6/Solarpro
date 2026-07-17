@@ -1589,51 +1589,19 @@ export function drawRoofPlan(
       // parcel was drawn on this sheet.
       ..._siteLegend,
     ];
-    const lgW = 128, rowH = 13;
-    const lgH = 13 + lg.length * rowH;
-    // Corner-pick the legend: the fixed top-right float sat ON TOP of the
-    // fence run on the Stowell site sheet (Ray 2026-07-16: "the legend
-    // covering where the [fence] should be"). Score each candidate corner by
-    // how many SUBJECT points (modules, ground rings, fence line, labels)
-    // fall under the panel; take the emptiest. Bottom-right is excluded —
-    // the compass rose + SYSTEM REFERENCE live there.
-    const _subjPx: Array<[number, number]> = [];
-    for (const p of regPanels as any[]) if (isFinite(p?.lng) && isFinite(p?.lat)) _subjPx.push([toX(p.lng), toY(p.lat)]);
-    if (_hyb) {
-      for (const g of _hyb.ground) for (const p of g.ring) _subjPx.push([toX(p.lng), toY(p.lat)]);
-      for (const f of _hyb.fence) {
-        for (const p of f.line) _subjPx.push([toX(p.lng), toY(p.lat)]);
-        _subjPx.push([toX(f.labelPt.lng), toY(f.labelPt.lat)]);
-        // sample along the run so a line THROUGH the corner counts, not just endpoints
-        for (let t = 0.1; t < 1; t += 0.1) {
-          _subjPx.push([
-            toX(f.line[0].lng + (f.line[1].lng - f.line[0].lng) * t),
-            toY(f.line[0].lat + (f.line[1].lat - f.line[0].lat) * t),
-          ]);
-        }
-      }
-    }
-    const _dzX0 = zones.dims.left, _dzX1 = W - zones.dims.right;
-    const _cands: Array<{ x: number; y: number; bias: number }> = [
-      { x: _dzX1 - lgW + 8,  y: zones.dims.top + 6, bias: 0 },   // TR (historic default)
-      { x: _dzX0 + 6,        y: zones.dims.top + 6, bias: 1 },   // TL
-      { x: _dzX0 + 6,        y: (H - zones.dims.bottom) - lgH - 40, bias: 2 }, // BL (above scale bar)
-    ];
-    let lgX = _cands[0].x, lgY = _cands[0].y, _bestScore = Infinity;
-    for (const c of _cands) {
-      const hits = _subjPx.reduce((n, [px, py]) =>
-        n + (px >= c.x - 6 && px <= c.x + lgW + 6 && py >= c.y - 6 && py <= c.y + lgH + 6 ? 1 : 0), 0);
-      const score = hits * 10 + c.bias;
-      if (score < _bestScore) { _bestScore = score; lgX = c.x; lgY = c.y; }
-    }
-    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="${lgH}" rx="2" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
-    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="12" fill="#000"/>`);
-    els.push(drawText(lgX + lgW / 2, lgY + 8.5, 'LEGEND', { anchor: 'middle', fontSize: 6, fontWeight: 'bold', fill: '#fff', letterSpacing: 1 }));
-    lg.forEach((e, i) => {
-      const ry = lgY + 12 + i * rowH + rowH / 2;
-      els.push(`<g transform="translate(${lgX + 8},${ry})">${e.swatch}</g>`);
-      els.push(drawText(lgX + 30, ry + 2.3, e.label, { anchor: 'start', fontSize: 5.6, fill: '#1a1a1a' }));
-    });
+    // Legend lives OFF the map (Ray 2026-07-16: every on-map float eventually
+    // covers something — first the fence run, then the left-rail tables when
+    // the corner-picker dodged the fence). Emitted as a sentinel HTML block
+    // AFTER the SVG; composeDrawPage extracts it and injects it into the data
+    // rail underneath the CALLOUT SCHEDULE. Swatches reference the main SVG's
+    // defs (url(#hatch-setback)) — id lookups are document-wide, so they
+    // resolve against the drawing's defs.
+    const _lgRows = lg.map(e => `
+      <div style="display:flex;align-items:center;gap:5px;padding:1.5px 6px;">
+        <svg width="16" height="11" viewBox="-1 -6 16 12" style="flex-shrink:0;">${e.swatch}</svg>
+        <span style="font-size:6.4px;color:#1a1a1a;">${e.label}</span>
+      </div>`).join('');
+    els.push(`<!--RAIL-LEGEND-->${_lgRows}<!--/RAIL-LEGEND-->`);
   }
 
   // ── Direct equipment callouts (PV-2 only — reference-set style) ──

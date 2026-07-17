@@ -670,6 +670,20 @@ export function composeDrawPage(
        </div>`
     : '';
 
+  // ── Rail legend hand-off (Ray 2026-07-16: legend must live OFF the map) ──
+  // The drawing template emits its legend as a sentinel comment block inside
+  // the SVG; extract it here and render it in the data rail underneath the
+  // CALLOUT SCHEDULE. No sentinel → no legend block (sheets without one are
+  // untouched).
+  let railLegendHtml = '';
+  const _lgMatch = drawingSvg.match(/<!--RAIL-LEGEND-->([\s\S]*?)<!--\/RAIL-LEGEND-->/);
+  if (_lgMatch) {
+    railLegendHtml = `
+            <div class="draw-zone-hdr" style="flex-shrink:0;">LEGEND</div>
+            <div style="padding:2px 0;">${_lgMatch[1]}</div>`;
+    drawingSvg = drawingSvg.replace(_lgMatch[0], '');
+  }
+
   /* PIPELINE v47.343: draw-zone enforces fixed ratio with min-height guard.
      * draw-zone-body uses flex:1 + min-height:0 so SVG fills ALL available height.
      * data-zone uses overflow:auto so long tables scroll instead of clipping.
@@ -698,6 +712,7 @@ export function composeDrawPage(
             <div style="padding:0;font-size:7px;overflow:auto;">
               ${calloutsHtml}
             </div>
+            ${railLegendHtml}
             ${generalNotesHtml}
           </div>
         </div>
