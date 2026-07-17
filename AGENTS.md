@@ -34,7 +34,7 @@ If you skip any of the first four, you are guessing. Stop.
 
 ---
 
-## 2. Standing Rules (6 hard)
+## 2. Standing Rules (7 hard)
 
 ### R1 — Never push to `master`
 `master` deploys to production (`solarpro.solutions` / Vercel project
@@ -118,6 +118,24 @@ git -c user.name=JAMES -c user.email=<james-email> commit ...
 
 Agents may add a `Co-authored-by:` trailer on any commit to credit their
 work, including `feat:` commits.
+
+### R7 — Only push to `james-dev` (Hard rule, JAMES 2026-07-13)
+**`james-dev` is the only branch we push to in this repo.** This narrows
+R4 (which leaves the working branch to JAMES per task) into a single,
+fixed push target.
+
+- ✅ `git push origin james-dev`
+- ❌ `git push origin master` (also banned by R1)
+- ❌ `git push origin dev`, `git push origin feature/*`, `git push origin chore/*`, `git push origin <anything-else>`
+- ❌ force-push to any branch (also §3 hard no-go)
+- ❌ `git push --all`, `git push --mirror`, or any bulk push
+
+The single exception is if JAMES gives an explicit one-time green light
+for a specific other ref (e.g., "push this to a feature branch for
+review"). That exception is per-push and does not generalize.
+
+Rationale: keeps all agent work on one reviewable branch, avoids
+branch proliferation, makes revert/cherry-pick predictable.
 
 ---
 
