@@ -454,8 +454,8 @@ export function drawGroundArray(
         offX - 12, toSvgY(gMaxY), toSvgY(gMinY), 14, ftToFtIn(spanYft) + ' DEPTH'));
     }
     els.push(drawNorthArrow(vpA.x + vpA.w - 20, vpA.y + 20, 17));
-    els.push(drawScaleBar(vpA.x + 6, vpA.y + vpA.h - 6,
-      Math.max(Math.round(20 * scale), 20), '0    20 FT'));
+    els.push(drawScaleBar(vpA.x + 8, vpA.y + vpA.h - 10,
+      Math.max(Math.round(20 * scale), 40), '', { totalFt: 20 }));
   }
 
   // ── Lower split: B (side elevation) + C (pile section) fill the LEFT column,
@@ -598,6 +598,36 @@ export function drawGroundArray(
       els.push(`<path d="M ${(xStart + arcR).toFixed(1)} ${(baseY - clrPx).toFixed(1)} A ${arcR} ${arcR} 0 0 0 ${(xStart + arcR * Math.cos(tilt * Math.PI / 180)).toFixed(1)} ${(baseY - clrPx - arcR * Math.sin(tilt * Math.PI / 180)).toFixed(1)}" fill="none" stroke="#1a4a8a" stroke-width="0.8"/>`);
       els.push(drawText(xStart + arcR + 4, baseY - clrPx - 6, `${Math.round(tilt)}°`, {
         anchor: 'start', fontSize: 8, fontWeight: 'bold', fill: '#1a4a8a' }));
+
+      // ── Winter-solstice shadow GEOMETRY (Ray "next level" item 1): the
+      // Dec-21 solar-noon sun ray drawn from the module top edge to grade,
+      // with the true shadow length dimensioned — turns the "verify inter-row
+      // shading" NOTE into checkable drawing geometry. Solar-noon altitude on
+      // the solstice = 90° − latitude − 23.44° (site latitude from project).
+      const _siteLat = Math.abs(Number((input.project as { lat?: number })?.lat)) || 38.7;
+      const sunAlt = Math.max(5, 90 - _siteLat - 23.44);
+      const topFtS = clearFt + nRows * (a0.moduleLenM ?? 1.73) * metersToFt(1) * Math.sin(tilt * Math.PI / 180);
+      const shadowFt = topFtS / Math.tan(sunAlt * Math.PI / 180);
+      const ftPxB = clrPx / Math.max(clearFt, 0.5);
+      const shadowPxRaw = shadowFt * ftPxB;
+      const maxShadowPx = (vpB.x + vpB.w - 20) - A.topX;
+      const shadowPx = Math.min(shadowPxRaw, Math.max(maxShadowPx, 40));
+      const shEndX = A.topX + shadowPx;
+      // sun ray (dashed amber) from module top edge down to grade
+      els.push(`<line x1="${A.topX.toFixed(1)}" y1="${A.topY.toFixed(1)}" x2="${shEndX.toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#e5a100" stroke-width="0.9" stroke-dasharray="5,3"/>`);
+      // sun glyph on the ray, above the module top
+      const sunX = A.topX - 14, sunY = A.topY - 12;
+      els.push(`<circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="4.5" fill="#ffd34d" stroke="#e5a100" stroke-width="0.9"/>`);
+      for (let sr = 0; sr < 8; sr++) {
+        const sa = (sr * Math.PI) / 4;
+        els.push(`<line x1="${(sunX + Math.cos(sa) * 6).toFixed(1)}" y1="${(sunY + Math.sin(sa) * 6).toFixed(1)}" x2="${(sunX + Math.cos(sa) * 8.5).toFixed(1)}" y2="${(sunY + Math.sin(sa) * 8.5).toFixed(1)}" stroke="#e5a100" stroke-width="0.8"/>`);
+      }
+      // shadow extent on grade (heavy amber tick + dimension)
+      els.push(`<line x1="${A.topX.toFixed(1)}" y1="${(baseY + 2).toFixed(1)}" x2="${shEndX.toFixed(1)}" y2="${(baseY + 2).toFixed(1)}" stroke="#e5a100" stroke-width="2" opacity="0.55"/>`);
+      els.push(`<line x1="${shEndX.toFixed(1)}" y1="${(baseY - 3).toFixed(1)}" x2="${shEndX.toFixed(1)}" y2="${(baseY + 5).toFixed(1)}" stroke="#e5a100" stroke-width="1"/>`);
+      els.push(drawText((A.topX + shEndX) / 2, baseY + 12,
+        `${shadowFt.toFixed(1)}' SHADOW @ DEC 21 NOON — SUN ALT ${sunAlt.toFixed(1)}° (LAT ${_siteLat.toFixed(1)}°)`, {
+          anchor: 'middle', fontSize: 5.8, fontWeight: 'bold', fill: '#b07d00' }));
     }
   }
 
@@ -629,7 +659,15 @@ export function drawGroundArray(
     for (const s of strata) {
       const y0 = grade + (pileBot - grade) * s.f0, y1 = grade + (pileBot - grade) * s.f1;
       els.push(`<rect x="${sX0.toFixed(1)}" y="${y0.toFixed(1)}" width="${(sX1 - sX0).toFixed(1)}" height="${(y1 - y0).toFixed(1)}" fill="${s.fill}" opacity="0.55"/>`);
+      // ANSI earth-hatch ticks over each band — same soil language as PV-3G's
+      // grade treatment (item 4 consistency: one material vocabulary everywhere).
+      for (let hx = sX0 + 6; hx < sX1 - 4; hx += 13) {
+        const hy = y0 + ((hx * 7) % Math.max(y1 - y0 - 8, 4));
+        els.push(`<line x1="${hx.toFixed(1)}" y1="${hy.toFixed(1)}" x2="${(hx - 5).toFixed(1)}" y2="${(hy + 5).toFixed(1)}" stroke="#8a7040" stroke-width="0.45" opacity="0.6"/>`);
+      }
       els.push(drawText(sX0 + 4, (y0 + y1) / 2 + 2, s.label, { anchor: 'start', fontSize: 5.4, fill: '#7a6a4a' }));
+      // strata boundary line
+      els.push(`<line x1="${sX0.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${sX1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="#a08850" stroke-width="0.4" stroke-dasharray="6,3"/>`);
     }
     // Grade line + hatch ticks
     els.push(`<line x1="${sX0.toFixed(1)}" y1="${grade.toFixed(1)}" x2="${sX1.toFixed(1)}" y2="${grade.toFixed(1)}" stroke="#6b4a2a" stroke-width="2"/>`);

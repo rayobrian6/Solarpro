@@ -1515,11 +1515,9 @@ export function drawRoofPlan(
   // read as less finished than PV-1's rose.
   const scaleBarPx = Math.max(Math.round(10 * scale), 30);   // 10-foot scale bar
   const sbX = zones.dims.left + 4, sbY = H - zones.dims.bottom + 28;
-  els.push(drawScaleBar(sbX, sbY, scaleBarPx, ''));
-  // labels aligned to the graduations (was one crammed '0    10 FT' string)
-  els.push(drawText(sbX, sbY + 12, '0', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
-  els.push(drawText(sbX + scaleBarPx / 2, sbY + 12, '5', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
-  els.push(drawText(sbX + scaleBarPx, sbY + 12, '10 FT', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
+  // Segmented graphic scale with real feet at every graduation (helper draws
+  // the labels from totalFt — the old external 0/5/10 texts assumed 2 segments).
+  els.push(drawScaleBar(sbX, sbY, scaleBarPx, '', { totalFt: 10 }));
 
   // ── Compass rose (BOTH sheets) + LEGEND (PV-1 only) ───────────────────────
   {

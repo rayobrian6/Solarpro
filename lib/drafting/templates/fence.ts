@@ -331,8 +331,8 @@ export function drawFencePlan(
   // ── North arrow + scale bar (kept inside the plan zone, upper half) ──
   els.push(drawNorthArrow(planZone.x + planZone.width - 22, planZone.y + 20, 20));
   const scaleBarFt = 20;
-  els.push(drawScaleBar(planZone.x + 6, planZone.y + planZone.height - 8,
-    Math.round(scaleBarFt * scale), `0    ${scaleBarFt} FT`));
+  els.push(drawScaleBar(planZone.x + 8, planZone.y + planZone.height - 12,
+    Math.max(Math.round(scaleBarFt * scale), 40), '', { totalFt: scaleBarFt }));
 
   // ── Property-line + setback site context ────────────────────────────────────
   // The top-down alone is a thin ribbon (a fence is long + shallow), floating in
@@ -419,11 +419,15 @@ export function drawFencePlan(
         els.push(`<line x1="${(pxL + 1).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${(pxL + secPw - 1).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="#9ca3af" stroke-width="0.4"/>`);
       }
     }
-    // Wind arrow
+    // Wind arrow — with the DESIGN VALUE (Ray "next level" item 3: load
+    // arrows carry their real ASCE figures at the member they act on).
     const wY = (panTop + grade) / 2;
+    const _windMph = (engineering as { windSpeedMph?: number }).windSpeedMph
+      ?? (input.project as { ahjWindSpeedMph?: number })?.ahjWindSpeedMph ?? 115;
     els.push(`<line x1="${(rightPost + 44).toFixed(1)}" y1="${wY.toFixed(1)}" x2="${(rightPost + 10).toFixed(1)}" y2="${wY.toFixed(1)}" stroke="#c00" stroke-width="1.6"/>`);
     els.push(drawArrowhead(rightPost + 10, wY, 180, 6, '#c00'));
-    els.push(drawText(rightPost + 48, wY - 3, 'WIND', { anchor: 'start', fontSize: 6.5, fontWeight: 'bold', fill: '#c00' }));
+    els.push(drawText(rightPost + 48, wY - 3, `WIND ${_windMph} MPH Vult`, { anchor: 'start', fontSize: 6.5, fontWeight: 'bold', fill: '#c00' }));
+    els.push(drawText(rightPost + 48, wY + 5, 'ASCE 7-22 §29', { anchor: 'start', fontSize: 5.2, fill: '#c00' }));
     // Dimensions
     els.push(drawText(leftPost - 9, (panTop + grade - clrPx) / 2, `${panelHtFt.toFixed(1)}' PANEL`, { anchor: 'middle', fontSize: 6.8, fontWeight: 'bold', fill: '#1a4a8a', rotate: -90 }));
     els.push(drawText(rightPost + 10, grade + embedPx / 2, `${embedFt.toFixed(1)}' EMBED`, { anchor: 'start', fontSize: 6.8, fontWeight: 'bold', fill: '#333' }));

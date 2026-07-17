@@ -362,19 +362,43 @@ export function drawNorthArrow(
 export function drawScaleBar(
   x: number, y: number,
   barWidthPx: number,
-  label: string
+  label: string,
+  opts?: { totalFt?: number },
 ): string {
+  // Pro segmented graphic scale (Ray "next level" item 2): four alternating
+  // black/white segments with tick labels at 0 / ¼ / ½ / ¾ / full — replaces
+  // the old two-block stub whose only text was a cryptic "0    20 FT".
+  // When opts.totalFt is given, tick labels are real feet; otherwise the
+  // legacy `label` string still prints below (back-compatible callers).
   const els: string[] = [];
-  // Bar
-  els.push('<rect x="' + x + '" y="' + y + '" width="' + barWidthPx + '" height="4" fill="#000"/>');
-  // Half-bar white
-  els.push('<rect x="' + x + '" y="' + y + '" width="' + (barWidthPx / 2) + '" height="4" fill="#fff" stroke="#000" stroke-width="0.5"/>');
-  // End ticks
-  els.push('<line x1="' + x + '" y1="' + (y - 3) + '" x2="' + x + '" y2="' + (y + 7) + '" stroke="#000" stroke-width="1"/>');
-  els.push('<line x1="' + (x + barWidthPx) + '" y1="' + (y - 3) + '" x2="' + (x + barWidthPx) + '" y2="' + (y + 7) + '" stroke="#000" stroke-width="1"/>');
-  els.push(drawText(x + barWidthPx / 2, y + 14, label, {
-    anchor: 'middle', fontSize: 7, fill: '#555'
-  }));
+  const segs = 4;
+  const segW = barWidthPx / segs;
+  for (let i = 0; i < segs; i++) {
+    const fill = i % 2 === 0 ? '#000' : '#fff';
+    els.push('<rect x="' + (x + i * segW).toFixed(1) + '" y="' + y + '" width="' + segW.toFixed(1) + '" height="5" fill="' + fill + '" stroke="#000" stroke-width="0.6"/>');
+  }
+  // End + interval ticks
+  for (let i = 0; i <= segs; i++) {
+    const tx = x + i * segW;
+    els.push('<line x1="' + tx.toFixed(1) + '" y1="' + (y - 3) + '" x2="' + tx.toFixed(1) + '" y2="' + (y + 8) + '" stroke="#000" stroke-width="' + (i === 0 || i === segs ? 1 : 0.6) + '"/>');
+    if (opts?.totalFt && opts.totalFt > 0) {
+      const ftVal = (opts.totalFt * i) / segs;
+      const ftLabel = Number.isInteger(ftVal) ? String(ftVal) : ftVal.toFixed(1);
+      els.push(drawText(tx, y - 6, i === segs ? ftLabel + "'" : ftLabel, {
+        anchor: 'middle', fontSize: 5.5, fill: '#333',
+      }));
+    }
+  }
+  if (label) {
+    els.push(drawText(x + barWidthPx / 2, y + 16, label, {
+      anchor: 'middle', fontSize: 6.5, fill: '#555',
+    }));
+  }
+  if (opts?.totalFt && !label) {
+    els.push(drawText(x + barWidthPx / 2, y + 16, 'GRAPHIC SCALE — FEET', {
+      anchor: 'middle', fontSize: 5.5, fill: '#777',
+    }));
+  }
   return els.join('');
 }
 
