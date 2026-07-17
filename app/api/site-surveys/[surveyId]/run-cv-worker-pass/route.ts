@@ -4,4 +4,7 @@
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
 // ============================================================================
 
-export { runtime, dynamic, POST, GET } from '../open-source-photo-vision-pass/route';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export { POST, GET } from '../open-source-photo-vision-pass/route';
