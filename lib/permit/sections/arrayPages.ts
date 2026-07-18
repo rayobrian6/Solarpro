@@ -152,9 +152,14 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const _plan = _isMicro && panels.length > 0
     ? planMicroBranches(panels as any[], _invModel)
     : null;
+  // DC-string paths must NEVER count a micro inverter's strings: for micros,
+  // inverters[].strings is the phantom "1 string of N" carrier (panel model +
+  // count), not an electrical string — a mixed/leaked fleet printed
+  // "String 1 × 54 modules" on the roof sheet (Ray 2026-07-17).
+  const _dcInverters = (system.inverters ?? []).filter(inv => inv.type !== 'micro');
   const totalStrings = _isMicro
     ? (_plan?.count ?? microBranchCount(totalPanels, _invModel))
-    : (system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
+    : (_dcInverters.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
   const circuitWord   = _isMicro ? 'BRANCH' : 'STRING';
   const circuitWordPl = _isMicro ? 'BRANCHES' : 'STRINGS';  // proper plural (not "BRANCHS")
   const circuitLabel  = totalStrings !== 1 ? circuitWordPl : circuitWord;
@@ -324,9 +329,9 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         voc: 0,
         isc: 0,
       }))
-    : (system.inverters?.flatMap((inv, ii) =>
+    : (_dcInverters.flatMap((inv, ii) =>
         (inv.strings || []).map((str, si) => ({
-          si: ii * (system.inverters[0]?.strings?.length || 1) + si,
+          si: ii * (_dcInverters[0]?.strings?.length || 1) + si,
           label: str.label || `String ${si+1}`,
           count: str.panelCount,
           model: str.panelModel || '—',

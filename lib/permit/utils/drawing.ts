@@ -489,7 +489,9 @@ function buildSegmentPlanThumb(cad: CADModel): string | null {
   const segs = f?.segments ?? [];
   if (!f || segs.length === 0) return null;
 
-  const W = 400, H = 150, pad = 26;
+  // 760×150 ≈ the secondary strip's own aspect — a 400-wide box letterboxed
+  // into a small floating card (the "offset" look). Match the strip instead.
+  const W = 760, H = 150, pad = 26;
   const xs: number[] = [], ys: number[] = [];
   segs.forEach(s => { xs.push(s.startX, s.endX); ys.push(s.startY, s.endY); });
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -536,7 +538,8 @@ function buildRowSpacingThumb(cad: CADModel): string | null {
   const a = g?.arrays?.[0];
   if (!g || !a) return null;
 
-  const W = 400, H = 150;
+  // Same strip-aspect sizing as the fence thumb (see above).
+  const W = 760, H = 150;
   const rowCount  = Math.max(1, a.dimensions?.rowCount ?? a.rows?.length ?? 1);
   const spacingFt = (a.rowSpacingM ?? 0) * M_TO_FT;
   const tilt      = a.tiltDeg ?? 20;
@@ -661,10 +664,17 @@ export function composeDrawPage(
   // ── Secondary view strip (bottom of draw zone) ─────────────────────────────
   // Use secondaryHeader from composition (system-specific label)
   const secHeader = escapeH(comp.secondaryHeader ?? 'SECONDARY VIEW');
+  // OFFSET FIX (Ray 2026-07-17: "top down view of the fence segment plan is
+  // offset"): the parent column carries class draw-zone-body, whose CSS sets
+  // align-items:center — flex children shrink-wrap to content width instead of
+  // stretching, so this strip rendered as a narrow floating box. And without
+  // display:flex on THIS div, the inner flex:1 was inert: the SVG top-anchored
+  // and the bottom of the strip was dead space. align-self:stretch +
+  // flex-direction:column give the SVG a definite, centered, full-width cell.
   const secondaryHtml = secondarySvg
-    ? `<div style="flex:0 0 22%;border-top:var(--border);overflow:hidden;background:#f8f9ff;">
+    ? `<div style="flex:0 0 22%;align-self:stretch;display:flex;flex-direction:column;min-height:0;border-top:var(--border);overflow:hidden;background:#f8f9ff;">
          <div class="draw-zone-hdr">${secHeader}</div>
-         <div style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px;">
+         <div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px;">
            ${secondarySvg}
          </div>
        </div>`
@@ -693,7 +703,7 @@ export function composeDrawPage(
       <div class="draw-zone" style="${layout.drawStyle};min-height:320px;">
         <div class="draw-zone-hdr">${escapeH(comp.drawHeader)}</div>
         <div class="draw-zone-body" style="flex:1;display:flex;flex-direction:column;min-height:0;">
-          <div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:8px;background:#fff;">
+          <div style="flex:1;min-height:0;align-self:stretch;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:8px;background:#fff;">
             ${drawingSvg}
           </div>
           ${secondaryHtml}
