@@ -289,10 +289,14 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     svcAmps
       ? tagRow('E', `${svcAmps}A MAIN SERVICE PANEL${project.mainPanelBrand ? ' — ' + project.mainPanelBrand : ''}`)
       : '',
-    backfeedA
+    backfeedA || _ic.feederOcpd
       ? (isSupplySide
-          ? tagRow('N', `${backfeedA}A FUSED AC DISCONNECT — SUPPLY-SIDE TAP (NEC 705.11)`)
-          : tagRow('N', `${backfeedA}A BACKFEED BREAKER (NEC 705.12(B))`))
+          // Supply-side tap OCPD from the interconnection resolver → conductor
+          // authority POI block (Σ per-sub backfeed OCPDs → next std rating) —
+          // the SAME number E-1's system disconnect prints. project.backfeedBreakerA
+          // is kW-basis and printed 110A here while E-1 said 200A (2026-07-18).
+          ? tagRow('N', `${_ic.feederOcpd || backfeedA}A FUSED AC DISCONNECT — SUPPLY-SIDE TAP (NEC 705.11)`)
+          : (backfeedA ? tagRow('N', `${backfeedA}A BACKFEED BREAKER (NEC 705.12(B))`) : ''))
       : '',
     mountSys
       ? tagRow('N', mountSys.toUpperCase() + ' RACKING SYSTEM' + (_coverHybrid ? ' — ROOF' : ''))

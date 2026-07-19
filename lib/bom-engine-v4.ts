@@ -1136,13 +1136,18 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const nextFuse         = (a: number) => STD_FUSE_SIZES.find(f => f >= a) ?? Math.ceil(a / 10) * 10;
     const nextEnclosure    = (a: number) => STD_ENCLOSURES.find(e => e >= a) ?? Math.ceil(a / 100) * 100;
 
-    // Fuse size = next standard fuse ≥ required amps (fused only)
-    const fuseAmps = isFusedDisc ? nextFuse(acRequiredAmps) : null;
+    // Fuse size = next standard fuse ≥ required amps (fused only).
+    // When the caller supplies the system disconnect / tap OCPD target
+    // (conductorAuthority POI via bomForPermit — Σ per-source backfeed OCPDs),
+    // the fuse sizes from IT: the kW basis goes stale on hybrids and shipped
+    // 110A fuses against E-1's 200A tap OCPD (verify-lead, 2026-07-18).
+    const _targetDiscA = input.systemAcDisconnectA;
+    const fuseAmps = isFusedDisc ? nextFuse(_targetDiscA ?? acRequiredAmps) : null;
 
     // Enclosure size = next standard enclosure ≥ required amps
     // For fused: enclosure must hold the fuse, so enclosure ≥ fuse amps
-    // For non-fused: enclosure ≥ required amps
-    const enclosureRequirement = isFusedDisc ? (fuseAmps ?? acRequiredAmps) : acRequiredAmps;
+    // For non-fused: enclosure ≥ required amps (or the E-1 target when given)
+    const enclosureRequirement = isFusedDisc ? (fuseAmps ?? acRequiredAmps) : (_targetDiscA ?? acRequiredAmps);
     const acDiscAmps = nextEnclosure(enclosureRequirement);
 
     // Part number:
@@ -2406,12 +2411,15 @@ function generateBOMV4PerSubSystem(
     const STD_ENCLOSURES = [30, 60, 100, 200, 400, 600];
     const nextFuse = (a: number) => STD_FUSE_SIZES.find(f => f >= a) ?? Math.ceil(a / 10) * 10;
     const nextEnclosure = (a: number) => STD_ENCLOSURES.find(e => e >= a) ?? Math.ceil(a / 100) * 100;
-    const fuseAmps = isFusedDisc ? nextFuse(acRequiredAmps) : null;
     // Stage D — single-source the system disconnect to E-1: when the hybrid AC
-    // collection supplies a Σ-backfeed rating, size the enclosure to it so the
-    // BOM/SCHED disconnect equals the rating E-1 draws (NEC 705.12(B)). The fuse
-    // (supply-side) still sizes from the tap requirement. Undefined ⇒ kW basis.
+    // collection supplies a Σ-backfeed rating, size BOTH the enclosure AND the
+    // supply-side fuse to it. The fuse previously kept the AC-kW basis, which
+    // goes stale on hybrids: Stowell's legacy 19.39 kW total → 110A fuses
+    // inside the 200A disco while E-1 printed a 200A tap OCPD, and 110A is
+    // undersized for the 190A source-OCPD sum (verify-lead, 2026-07-18). The
+    // tap OCPD must carry the Σ of source backfeeds — NEC 705.11/705.12(B).
     const _targetDiscA = input.systemAcDisconnectA;
+    const fuseAmps = isFusedDisc ? nextFuse(_targetDiscA ?? acRequiredAmps) : null;
     const enclosureRequirement = isFusedDisc
       ? (fuseAmps ?? acRequiredAmps)
       : (_targetDiscA ?? acRequiredAmps);

@@ -25,6 +25,7 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { balancedBranchSizes, microBranchCount, planMicroBranches, type BranchPlanPanel } from './branching';
 import { partitionSubSystems, toSubSystemKey, isSubSystemKey, effectiveInverterSubKey, type SubSystemKey, type SubSystemPanel } from './subSystems';
+import { nextStdRating } from '@/lib/equipment/integratedBos';
 
 export type ConductorTopology = 'MICRO' | 'STRING' | 'OPTIMIZER';
 
@@ -117,6 +118,25 @@ export interface ConductorAuthority {
   };
   /** Governing branch/string OCPD used as the EGC-sizing basis. */
   governingOcpd: number;
+  /**
+   * THE point-of-interconnection / supply-side tap authority. Every sheet that
+   * prints a tap OCPD, tap fuse, or combined-output amps reads THIS block —
+   * PV-0's tap line, SCHED-2's fused-disconnect fuse, and E-1's system
+   * disconnect must all agree (they printed 110A / 110A-in-200A / 200A on the
+   * same package — verify-lead finding 2026-07-18). tapOcpdA uses the SAME
+   * nextStdRating table as resolveHybridAcCollection().disconnectA (E-1), so
+   * the two derivations are equal by construction.
+   */
+  poi: {
+    /** Σ of every sub's inverter/device output amps (continuous basis). */
+    continuousA: number;
+    /** continuousA × 1.25 — NEC 690.8(A)/705.11 conductor requirement. */
+    requiredA: number;
+    /** Σ of per-sub AC feeder OCPDs — NEC 705.12(B) backfeed basis. */
+    sumOcpdA: number;
+    /** Supply-side tap / system-disconnect OCPD = nextStdRating(sumOcpdA). */
+    tapOcpdA: number;
+  };
   /** Wave 2d — per-sub authority set (roof → ground → fence order). ALWAYS
    *  present: N=1 yields a single entry mirroring the top level, so consumers
    *  can iterate unconditionally. At N>1, every top-level field above is
@@ -319,7 +339,11 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
       },
     }];
 
-    return { topology, isMicro, microBranches, dcStrings, acFeeder, egc, governingOcpd, subSystems, isHybrid: false };
+    return {
+      topology, isMicro, microBranches, dcStrings, acFeeder, egc, governingOcpd, subSystems,
+      poi: buildPoiBlock(subSystems, feederOcpd),
+      isHybrid: false,
+    };
   }
 
   // ═════ HYBRID (N>1) — one authority per sub, aggregate derived ═════
@@ -428,15 +452,44 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
     ? { gauge: engineEgc, basisOcpd: governingOcpd, source: 'engine' as const }
     : { gauge: getEGCSize(governingOcpd), basisOcpd: governingOcpd, source: 'nec-250.122' as const };
 
+  // POI block — derived from the sub set. The top-level acFeeder above was
+  // sourced from compliance.electrical / project.backfeedBreakerA, whose AC-kW
+  // basis goes stale on hybrids (Stowell: 19.39 kW legacy total → 110A while
+  // the subs sum to 190A backfeed → 200A tap). At N>1 the interface promises
+  // every aggregate field derives from the set, so the feeder OCPD is
+  // overridden with the POI tap OCPD (= E-1's system-disconnect rating).
+  const poi = buildPoiBlock(subSystems, acFeeder.ocpdAmps);
   return {
     topology: primary.topology,
     isMicro: primary.isMicro,
     microBranches,
     dcStrings,
-    acFeeder,
+    acFeeder: { ...acFeeder, ocpdAmps: poi.tapOcpdA > 0 ? poi.tapOcpdA : acFeeder.ocpdAmps },
     egc,
     governingOcpd,
     subSystems,
+    poi,
     isHybrid: true,
+  };
+}
+
+/** POI / supply-side tap block from the per-sub feeder set (see interface doc).
+ *  sumOcpdA falls back to the top-level feeder OCPD, then to the continuous
+ *  requirement, so the block is always populated even on degraded payloads. */
+function buildPoiBlock(
+  subs: SubSystemConductorAuthority[],
+  fallbackOcpdA: number | null,
+): ConductorAuthority['poi'] {
+  const continuousA = subs.reduce((s, x) => s + (x.acSubFeeder.currentA || 0), 0);
+  const requiredA = continuousA * 1.25;
+  const sumOcpdA = subs.reduce((s, x) => s + (x.acSubFeeder.ocpdAmps ?? 0), 0)
+    || fallbackOcpdA
+    || (requiredA > 0 ? (necNextStandardOcpd(requiredA) || 0) : 0);
+  const tapOcpdA = sumOcpdA > 0 ? nextStdRating(sumOcpdA) : 0;
+  return {
+    continuousA: Math.round(continuousA * 10) / 10,
+    requiredA: Math.round(requiredA * 10) / 10,
+    sumOcpdA,
+    tapOcpdA,
   };
 }

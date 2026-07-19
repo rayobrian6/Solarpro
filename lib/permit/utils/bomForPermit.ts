@@ -663,9 +663,17 @@ export function generateBOMForPermit(
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,
-        // Stage D — hybrid system AC disconnect single-sourced to E-1's
-        // Σ-backfeed rating (undefined for single-system → legacy kW basis).
-        systemAcDisconnectA: _acCollection?.disconnectA,
+        // Stage D — system AC disconnect / supply-side tap OCPD single-sourced
+        // to the conductor authority's POI block (Σ per-sub backfeed OCPDs →
+        // next std rating — the same table E-1's resolveHybridAcCollection
+        // uses, so BOM fuse/enclosure ≡ E-1's system disconnect). The engine
+        // also sizes the supply-side FUSE from this (110A-fuse-in-200A-disco
+        // regression, 2026-07-18). _acCollection kept as fallback.
+        // Hybrid-only (Stage D contract): single-system jobs keep the legacy
+        // kW basis — their totalAcKw is consistent, and pushing the POI value
+        // through nextStdRating would bump a 110A single-system fuse to 125A.
+        systemAcDisconnectA: (_auth.isHybrid && _auth.poi.tapOcpdA > 0 ? _auth.poi.tapOcpdA : undefined)
+          ?? _acCollection?.disconnectA,
         dcOCPD:              necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.25 * 1.25),
         jurisdiction:        compliance.jurisdiction?.ahj,
         requiresACDisconnect:    project.acDisconnect !== false,

@@ -79,7 +79,10 @@ describe('wave 2d — single-system parity', () => {
   it('top-level authority output is deep-equal to the pre-change baseline', () => {
     const auth = buildConductorAuthority(clone(roofProject), null);
     // The baseline predates the per-sub set — compare the legacy projection.
-    const { subSystems, isHybrid, ...legacyView } = auth as any;
+    // `poi` (2026-07-19, supply-side tap authority) is additive like the
+    // per-sub set: single-system acFeeder stays byte-identical (asserted by
+    // the baseline fields), so only the new block is excluded here.
+    const { subSystems, isHybrid, poi, ...legacyView } = auth as any;
     expect(legacyView).toEqual(baseline);
   });
 
