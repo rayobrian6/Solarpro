@@ -32,45 +32,45 @@ contradictions get appended. Do not delete resolved entries — strike them thro
 
 ## P0 — STAMPED-PLAN ACCURACY (fix first)
 
-- [ ] **P0-1 backfeedBreakerA engine value permanently discarded.** `generatePermit.ts:231-239`
+- [x] (88fa4f07) **P0-1 backfeedBreakerA engine value permanently discarded.** `generatePermit.ts:231-239`
   seeds from a 690.8 inverter-output basis; the electrical engine's 705.12 result at
   `:823-828` is guarded `if (!project.backfeedBreakerA)` — always false. Cover +
   `sldAdapter.ts:104-105` print the estimate, never the engine value. Fix: delete the
   pre-seed; engine owns it unconditionally.
-- [ ] **P0-2 Fire-setback coverage from the FENCE panel's dims.** `page.tsx:8055-8056`
+- [x] (88fa4f07) **P0-2 Fire-setback coverage from the FENCE panel's dims.** `page.tsx:8055-8056`
   puts `inverters[0].strings[0]` (fence) dims on `project.panelLengthIn/WidthIn`;
   `arrayPages.ts:459,481` × ALL panels → decides the 18"-vs-36" band (fireSetback.ts:41).
   Fix: per-roof-sub dims resolved server-side.
-- [ ] **P0-3 Structural dead load from the fence panel's weight.** `page.tsx:8054` →
+- [x] (88fa4f07) **P0-3 Structural dead load from the fence panel's weight.** `page.tsx:8054` →
   `arrayLayout.ts:85` → `structuralInput.ts:93` → V4 engine + APP-A
   (`compliancePages.ts:790,835`). Understated gravity load = highest-liability class.
-- [ ] **P0-4 Module datasheet page prints one (fence) module for the whole hybrid.**
+- [x] (88fa4f07) **P0-4 Module datasheet page prints one (fence) module for the whole hybrid.**
   `compliancePages.ts:774-795` — Voc/dims/weight/efficiency all panel0-based.
   Fix: per-sub datasheet rows.
-- [ ] **P0-5 Three OCPD rounding laws.** (a) `electricalPages.ts:1300-1305`
+- [x] (88fa4f07) **P0-5 Three OCPD rounding laws.** (a) `electricalPages.ts:1300-1305`
   `Math.ceil(x/5)*5` — not the NEC 240.6 ladder (52A → prints 55A vs authority 60A);
   (b) `structuralPages.ts:1407-1408` prints RAW `Isc×1.25×1.25` ("19.2A" — nonexistent
   fuse); (c) ladder duplicated ~13× with different contents — `accessory-resolver.ts:331`
   OMITS 110 (105A → 125A there, 110A everywhere else); bom-engine STD_FUSE stops at 200
   vs helpers 1200. Fix: all callers → `necNextStandardOcpd`/authority values.
-- [ ] **P0-6 Stamp wattage poisoning at the SOURCE.** Ground 16/16 stamped 405 (truth
+- [x] (88fa4f07 (studio+mig 110)) **P0-6 Stamp wattage poisoning at the SOURCE.** Ground 16/16 stamped 405 (truth
   LONGi 580 — 43% error, 6.48 vs 9.28 kW); fence 18/18 stamped 430 from hardcoded
   `SolarEngine3D.tsx:5007` (truth 440, equipment-db:493). SYSTEMIC: 430-stamps in 4 more
   projects; single-system Braidon 31/31 stamped 440 vs map 405 (8.6% oversell in
   `layouts.system_size_kw`). Fix: studio stamps from equipment-db via the map (never
   literals); re-stamp on save; idempotent normalizer migration for existing rows.
-- [ ] **P0-7 Four contradictory stored system sizes for one project.**
+- [x] (88fa4f07 (nameplate fn + mig 111)) **P0-7 Four contradictory stored system sizes for one project.**
   `layouts.system_size_kw` 36.09 (stamp Σ) / `projects.system_size_kw` 37.251 (provenance
   unknown — matches nothing) / `engineering_runs` 39.07 (truth) / permit-input 38.72
   (panel0 flat math). Fix: ONE exported nameplate function used by layout save, projects
   write, runs, and permit input; backfill migration.
-- [ ] **P0-8 E-1 defaults Engineer-of-Record to "SolarPro Engineering".**
+- [x] (88fa4f07) **P0-8 E-1 defaults Engineer-of-Record to "SolarPro Engineering".**
   `electricalPages.ts:1513` `${project.designer||'SolarPro Engineering'}` — contradicts
   route.ts:1171-1173's deliberate no-vendor-EOR rule. Fix: blank fill-in.
-- [ ] **P0-9 Planset DATE = stale `config.date`.** 2026-06-16 printed on sheets
+- [x] (88fa4f07) **P0-9 Planset DATE = stale `config.date`.** 2026-06-16 printed on sheets
   generated 07-19 (`titleBlock.ts:103,111`, `peLetter.ts:50`, `sldAdapter.ts:165`).
   Fix: generation timestamp server-side; config.date is a design label.
-- [ ] **P0-10 Hybrid recompute syncs 1-of-3 owners for panel count.**
+- [x] (88fa4f07) **P0-10 Hybrid recompute syncs 1-of-3 owners for panel count.**
   `generatePermit.ts:217-220` sets only `system.totalPanels`; `cad.totalPanels` +
   `canonical.electrical.totalPanels` (read by validationPage, bomForPermit, structural,
   sitePlan) go stale. DC branch does it right — mirror it. (Introduced 352bfb20.)
@@ -79,7 +79,7 @@ contradictions get appended. Do not delete resolved entries — strike them thro
   composition differs (fence 10+8 vs engineering 9+9 → ~51V string-Voc delta). It is a
   route BACKFILL SOURCE (`route.ts:552-564`) — a stale mirror can win. Fix: regenerate
   mirror from engineering on save, or mark derived + never backfill-eligible.
-- [ ] **P0-12 `type:'ecoflow'`** stored as an inverter *type* (not micro/string/hybrid) —
+- [x] (88fa4f07) **P0-12 `type:'ecoflow'`** stored as an inverter *type* (not micro/string/hybrid) —
   every `type==='micro'` fork works by luck. Normalize enum on write + intake.
 
 ## P1 — CROSS-SHEET CONSISTENCY
@@ -138,6 +138,20 @@ contradictions get appended. Do not delete resolved entries — strike them thro
   arithmetic on hybrids.
 - [ ] **P2-10** `subSystemSheets.ts:216-217` fallback multiplies and divides by the same
   count — yields project total as "sub total" when counts coincide.
+
+## NEW (found during the attack, 2026-07-19 PM)
+
+- [ ] **N-1** `lib/drafting/templates/roof.ts:149-150,1443` — PV-1 "NEW ARRAY AREA (ACTUAL)"
+  stat still from panel0 scalars ||66x40 (true REC-405 => ~1,124 ft2 vs printed 990). Route
+  through panelSpecs (verify-lead F3).
+- [ ] **N-2** hybrid SCHED DC-string rows print "—" for Isc/OCPD when payload strings lack isc —
+  conductorAuthority dcStringRow should backfill from the sub's resolved panel spec (verify F4).
+- [ ] **N-3** `buildPermitCoverSheet.ts:50` still computes its own backfeed estimate — fold into
+  authority (w1 flag).
+- [ ] **N-4** PermitInput should formally carry `generatedAtIso?` (types.ts; local cast used).
+- [ ] **N-5** MIGRATIONS 109-112 WRITTEN, NOT RUN — Ray runs in order 109→110→111→112.
+- [ ] **N-6** 112 leaves 17 multi-segment fence layouts empty on purpose — studio re-trace list
+  in the migration header.
 
 ## FIX WAVES (proposed)
 
