@@ -173,10 +173,14 @@ describe('wave 5a — 3-lane hybrid render', () => {
     expect(count(svg, 'STRING + OPTIMIZER')).toBeGreaterThanOrEqual(1); // fence lane
     expect(count(svg, '(N) DC DISCONNECT')).toBe(1);                  // ground lane only (fence integrated)
     expect(svg).toContain('48 × IQ8M');                               // per-lane device count
-    // per-lane AC disconnects
-    expect(count(svg, '(N) AC DISCONNECT PV-R')).toBe(1);
-    expect(count(svg, '(N) AC DISCONNECT PV-G')).toBe(1);
-    expect(count(svg, '(N) AC DISCONNECT PV-F')).toBe(1);
+    // Stage C ruling (2398a260, Ray 2026-07-14): per-lane AC disconnects are
+    // DEAD — every lane lands on the shared AC combiner panel and ONE system
+    // disconnect follows it. The old per-lane assertions guarded the exact
+    // 3-disconnect layout the ruling removed.
+    expect(count(svg, '(N) AC DISCONNECT — SYSTEM')).toBe(1);
+    expect(count(svg, '(N) AC DISCONNECT PV-R')).toBe(0);
+    expect(count(svg, '(N) AC DISCONNECT PV-G')).toBe(0);
+    expect(count(svg, '(N) AC DISCONNECT PV-F')).toBe(0);
   });
 
   it('joins at ONE POI and one service tail (I-6)', () => {
@@ -191,9 +195,12 @@ describe('wave 5a — 3-lane hybrid render', () => {
 
   it('roof-only rapid shutdown note (I-7) + per-lane backfeed contributions', () => {
     expect(svg).toContain('RAPID SHUTDOWN — NEC 690.12 (ROOF ARRAY PV-R)');
-    expect(svg).toContain('PV-R: 90A');
-    expect(svg).toContain('PV-G: 35A');
-    expect(svg).toContain('PV-F: 20A');
+    // E-1 pro-pass (84c34bc6): the inline "PV-R: 90A" strings became rows of
+    // the POINT OF INTERCONNECTION — NEC 705.12(B) table (label cell + value
+    // cell). Assert each lane's row carries its own backfeed amps.
+    expect(/PV-R Backfeed<[\s\S]{0,400}?>90 A</.test(svg)).toBe(true);
+    expect(/PV-G Backfeed<[\s\S]{0,400}?>35 A</.test(svg)).toBe(true);
+    expect(/PV-F Backfeed<[\s\S]{0,400}?>20 A</.test(svg)).toBe(true);
   });
 
   it('lane order is fixed roof > ground > fence regardless of caller order', () => {
