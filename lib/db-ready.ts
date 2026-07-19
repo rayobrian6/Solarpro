@@ -184,15 +184,18 @@ function getDatabaseUrl(): string {
 }
 
 /**
- * Returns or creates the module-level Neon SQL executor singleton.
- * Logs DB_CLIENT_INIT on first creation for cold-start tracing.
+ * Returns or creates the module-level SQL executor singleton.
+ * Always uses the Neon HTTP driver (the only path that works on Vercel).
+ * Local-dev-with-`pg.Pool` support was removed in this change because the
+ * static `import { Pool } from 'pg'` at the top of this file leaked into
+ * the client bundle and broke `next build`. If local TCP Postgres support
+ * is needed again, re-add via a dynamic import + `import 'server-only'`.
  */
 function getSqlSingleton(): SqlExecutor {
   if (!_cachedSql) {
     const url = getDatabaseUrl();
-    console.log('[DB_CLIENT_INIT] Creating Neon SQL executor singleton');
     _cachedSql = neon(url) as SqlExecutor;
-    console.log('[DB_CLIENT_INIT] Neon SQL executor created successfully');
+    console.log('[DB_CLIENT_INIT] SQL executor created (Neon HTTP)');
   }
   return _cachedSql;
 }

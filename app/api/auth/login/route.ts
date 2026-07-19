@@ -47,6 +47,40 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
+    // ── Dev auth bypass (admin/admin → super_admin) ─────────────────────────
+    // Cosmetic: lets you type into the login form instead of being auto-logged in.
+    // Active only when DEV_AUTH_BYPASS=true AND VERCEL_ENV !== 'production'.
+    // Checked BEFORE Zod validation so 'admin' (no @) is accepted.
+    {
+      const { isDevAuthAllowed, getDevMeResponse } = await import('@/lib/dev-auth');
+      const rawEmail   = typeof body?.email   === 'string' ? body.email.toLowerCase().trim() : '';
+      const rawPass    = typeof body?.password === 'string' ? body.password : '';
+      if (isDevAuthAllowed() && rawEmail === 'admin' && rawPass === 'admin') {
+        const token = await signToken({
+          id:    'dev-user-bypass-001',
+          email: 'admin@localhost',
+          name:  'Admin (Dev Bypass)',
+        } as SessionUser);
+        const res = NextResponse.json(getDevMeResponse(), {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma':        'no-cache',
+            'Expires':       '0',
+          },
+        });
+        res.cookies.set(COOKIE_NAME, token, {
+          httpOnly: true,
+          secure:   process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          path:     '/',
+          maxAge:   COOKIE_MAX_AGE,
+        });
+        console.log('[DEV_AUTH_LOGIN] admin/admin accepted, super_admin session issued');
+        return res;
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     // Zod schema validation
     const { loginSchema, parseBody } = await import('@/lib/validation');
     const { data: parsed, error: validationError } = parseBody(loginSchema, body);
