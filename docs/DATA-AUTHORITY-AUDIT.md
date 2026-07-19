@@ -84,15 +84,15 @@ contradictions get appended. Do not delete resolved entries — strike them thro
 
 ## P1 — CROSS-SHEET CONSISTENCY
 
-- [ ] **P1-1** `project.panelVoc/Isc` (panel0) back compliance/electrical fallbacks
+- [x] (88fa4f07) **P1-1** `project.panelVoc/Isc` (panel0) back compliance/electrical fallbacks
   (`compliancePages.ts:539` chain, `electricalPages.ts:1018-1019`, `fieldLabels.ts:118`)
   + hardcoded `||41.6`/`||12.26` guesses (`arrayPages.ts:339-340`). Fix: engine writes
   DB-resolved specs back onto `strings[]`; delete project scalars.
-- [ ] **P1-2** SLD renderer re-derives lane OCPD/EGC/amps (`sld-professional-renderer.ts`
+- [x] (88fa4f07) **P1-2** SLD renderer re-derives lane OCPD/EGC/amps (`sld-professional-renderer.ts`
   ~8 sites) in parallel to conductorAuthority. Route adapter values through authority.
-- [ ] **P1-3** `bomForPermit.ts:677` DC OCPD from `firstStr` (fence) — use per-sub
+- [x] (88fa4f07) **P1-3** `bomForPermit.ts:677` DC OCPD from `firstStr` (fence) — use per-sub
   `dcStrings[].ocpdAmps`.
-- [ ] **P1-4** Two cold-Voc laws: β-based (`compliancePages.ts:544-573` + designTemps)
+- [x] (88fa4f07) **P1-4** Two cold-Voc laws: β-based (`compliancePages.ts:544-573` + designTemps)
   vs blanket ×1.25 (`fieldLabels.ts:125-127`, `compliancePages.ts:579`). Pick β-based.
 - [ ] **P1-5** systemType scalars: `projects`/`layouts` say roof, config says fence,
   stamps say hybrid; route crowns projects.system_type. 6 projects have mixed stamps
@@ -103,18 +103,18 @@ contradictions get appended. Do not delete resolved entries — strike them thro
 - [ ] **P1-7** Wind/snow/seismic: AHJ-DB-wins (route) vs canonical fill-only
   (generatePermit:294-315) — printed value and V4-analyzed value resolve via different
   chains. Fix: one resolution onto canonical.site before both.
-- [ ] **P1-8** `wireLength` fill-only heal: stale client scalar BLOCKS the CAD-derived
+- [x] (88fa4f07) **P1-8** `wireLength` fill-only heal: stale client scalar BLOCKS the CAD-derived
   run length (`generatePermit.ts:268,279`); `wireGauge` never healed. CAD wins.
 - [ ] **P1-9** Sub-tag resolution exists 3×: route self-heal (gated, can partially
   no-op), subScopedInput map-by-id, conductorAuthority majority-string. One resolver.
-- [ ] **P1-10** dcAcRatio: three derivations (system, engine summary, sldAdapter:232).
+- [x] (88fa4f07) **P1-10** dcAcRatio: three derivations (system, engine summary, sldAdapter:232).
 - [ ] **P1-11** Fictional per-module W: `totalDcKw/totalPanels` (electricalPages:1016,
   arrayPages:316) yields ~418W matching no real panel on mixed-wattage hybrids.
 - [ ] **P1-12** Singles not tri-synced: `cad.totalDcKw` vs `system.totalDcKw` divergence
   possible outside hybrids (sheet owner split documented in consumer audit C2).
-- [ ] **P1-13** Ground stamps tilt 25°/az 181° vs layout columns 40.16°/121.6° — both
+- [x] (88fa4f07 geometry resolver) **P1-13** Ground stamps tilt 25°/az 181° vs layout columns 40.16°/121.6° — both
   ride the permit input. **NEEDS RAY'S RULING on which is the real design.**
-- [ ] **P1-14** `layouts.fence_line = []` while 18 collinear fence panels exist (wipe
+- [x] (mig 112 written — RAY RUNS) **P1-14** `layouts.fence_line = []` while 18 collinear fence panels exist (wipe
   recovery restored panels, not the line). Reconstruct + save-time invariant.
 - [ ] **P1-15** topology/mounting/wireGauge single project-wide values on hybrids
   (client #6/#7/#8); busbar/main `||200` defaults duplicated cover vs engine.
@@ -122,13 +122,13 @@ contradictions get appended. Do not delete resolved entries — strike them thro
 ## P2 — HYGIENE / LATENT
 
 - [ ] **P2-1** String-color palette ×3 byte-identical (arrayPages/drawing/fence) — export one.
-- [ ] **P2-2** STD_ENCLOSURES + nextEnclosure duplicated twice inside bom-engine-v4.
+- [x] (88fa4f07) **P2-2** STD_ENCLOSURES + nextEnclosure duplicated twice inside bom-engine-v4.
 - [ ] **P2-3** M→FT / IN→M constants at differing precision across 8+ files — one units module.
 - [ ] **P2-4** `rec-alpha-pure-405` id collision: HJT Alpha Pure-R (equipment-db:357) vs
   TwinPeak 5 PERC (lib/db.ts:80) — finish the mig-101 unification; db.ts re-exports.
 - [ ] **P2-5** engineering_runs: unscoped 4.00 kW run interleaved with 39.07 runs —
   add scope column or exclude partial runs.
-- [ ] **P2-6** 5 stamp-hybrid projects have NO subSystems map (Carpenter, Sol Fence
+- [x] (mig 109 written — RAY RUNS) **P2-6** 5 stamp-hybrid projects have NO subSystems map (Carpenter, Sol Fence
   quote, Scam Likley, New Client, Markulis) — the §1.1 stamp-inference backfill
   migration should stop being optional. **RAY runs via Admin → System Tools.**
 - [ ] **P2-7** subSystems map trusted from the client POST; DB row should win (route
