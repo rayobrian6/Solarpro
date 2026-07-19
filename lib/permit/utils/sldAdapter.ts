@@ -14,6 +14,7 @@ import { buildConductorAuthority, type ConductorAuthority, type SubSystemConduct
 import { buildIntegratedEquipment } from './integratedEquipment';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
 import { getInverterById, getMicroinverterById, SOLAR_PANELS } from '@/lib/equipment-db';
+import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
 
@@ -229,7 +230,11 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     combinerHasIntegratedGateway: _bos.hasIntegratedGateway,
     combinerProvidesAcDisconnect: _bos.providesAcDisconnect,
     ocpdPerString:           isMicro ? 0 : dcOCPD,
-    dcAcRatio:               totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined,
+    // P1-10 (data-authority register): system.dcAcRatio is the ONE owner —
+    // read it, never a third re-derivation. Fallback recompute only when the
+    // payload carries no ratio (kept for degraded inputs, same calc the
+    // system owner uses).
+    dcAcRatio:               system?.dcAcRatio || (totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined),
 
     // Design temperatures — ASHRAE state-envelope lookup (designTemps.ts).
     // An explicit project.designTempMin (AHJ override) wins; otherwise the
@@ -327,6 +332,14 @@ export function buildSourceBranchesFromAuthority(
       : (eq.panelWatts ? `${eq.panelWatts}W Module` : 'PV Module');
     const acKw = (sub.acSubFeeder.currentA * 240) / 1000;
     const dcOcpds = sub.dcStrings.map(s => s.ocpdAmps ?? 0).filter(n => n > 0);
+    // P1-2: per-lane EGC values carried FROM the authority so the renderer
+    // consumes instead of re-deriving. Branch EGC = the governing (max-OCPD)
+    // micro branch's own NEC 250.122 result; DC EGC = 250.122 on the lane's
+    // governing DC string OCPD — derived HERE (adapter boundary), never in
+    // the renderer.
+    const _govBranch = sub.microBranches.length
+      ? sub.microBranches.reduce((a, b) => (b.ocpdAmps > a.ocpdAmps ? b : a))
+      : undefined;
     return {
       key: sub.key,
       label: `${sub.key.toUpperCase()} — ${sub.panelCount} × ${panelModel}`,
@@ -352,6 +365,8 @@ export function buildSourceBranchesFromAuthority(
       // Per-sub EGC — the authority's own NEC 250.122 result (governed by the
       // sub's AC feeder OCPD), same value the E-1 SOURCE SUMMARY prints.
       egcGauge: sub.egc.gauge,
+      branchEgcGauge: _govBranch?.egcGauge,
+      dcEgcGauge: dcOcpds.length ? getEGCSize(Math.max(...dcOcpds)) : undefined,
       // Voc temp coefficient from the equipment DB (for the NEC 690.7(A)
       // corrected-voltage table); absent ⇒ marked assumption on the sheet.
       panelTempCoeffVoc: panelTempCoeffByModel(eq.panelModel),
@@ -528,6 +543,8 @@ export function sanitizeClientSourceBranches(raw: unknown): SLDSourceBranch[] | 
     dcOCPD: num(b?.dcOCPD),
     integratedDcDisconnect: b?.integratedDcDisconnect === true || undefined,
     egcGauge: str(b?.egcGauge),
+    branchEgcGauge: str(b?.branchEgcGauge),
+    dcEgcGauge: str(b?.dcEgcGauge),
     // Signed: Voc temp coefficients are NEGATIVE — num() (≥0 only) would drop them.
     panelTempCoeffVoc: Number.isFinite(Number(b?.panelTempCoeffVoc)) ? Number(b?.panelTempCoeffVoc) : undefined,
     optimizerQty: num(b?.optimizerQty),

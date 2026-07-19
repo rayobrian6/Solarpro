@@ -13,6 +13,16 @@
  * CRITICAL: This engine ONLY generates PlacedPanel[] arrays.
  * It does NOT touch panel counting, engineering, proposals, or BOM.
  * All downstream pipeline (Design → Engineering → Proposal) remains unchanged.
+ *
+ * STAMP CONTRACT (P0-6, DATA-AUTHORITY-AUDIT): every PlacedPanel this engine
+ * emits carries `wattage`/`bifacialGain` copied from the `panel: SolarPanel`
+ * record the CALLER passes. That record MUST be the current equipment
+ * authority for the subsystem being placed (equipment-db record via the
+ * project's subSystems map / selected equipment) — never a hardcoded spec.
+ * Fence placements resolve 'panel-fence-ps1' (Philadelphia Solar
+ * PS-MNB108(HCBF)-440W — Ray's ruling 2026-07-19); this engine never
+ * invents specs of its own. Stamps are placement-time snapshots: an
+ * equipment swap AFTER placement must re-stamp on save (save-path owner).
  */
 
 import { v4 as uuidv4 } from 'uuid';

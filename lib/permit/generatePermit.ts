@@ -51,6 +51,21 @@ import { generateBOMForPermit } from './utils/bomForPermit';
 export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): string {
   const { project } = input;
 
+  // ── P0-9: planset DATE = GENERATION date (server-side authority) ──────────
+  // config.date is a design label only — a stale client date must never print
+  // on a stamped sheet. Callers may inject a fixed `generatedAtIso` for
+  // deterministic output (tests / regen harnesses); otherwise "now" governs.
+  {
+    const genIso = (input as PermitInput & { generatedAtIso?: string }).generatedAtIso;
+    const genAt = genIso ? new Date(genIso) : new Date();
+    const genDateStr = (isFinite(genAt.getTime()) ? genAt : new Date()).toLocaleDateString('en-US');
+    if (project.date && project.date !== genDateStr) {
+      console.warn('[PLANSET] DATE recompute: generation date', genDateStr,
+        'replaces client-posted', project.date, '(config.date is a design label, not the issue date)');
+    }
+    project.date = genDateStr;
+  }
+
   // ── STEP 7: Canonical pipeline entry point ─────────────────────────────
   // buildCanonical() reads layout.type/panels/geometry as single source of truth.
   // It throws if layout is missing or invalid — no silent fallbacks.
@@ -216,7 +231,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       }
       if (_subN > 0 && _subN !== input.system.totalPanels) {
         console.warn('[PLANSET] HYBRID panel-count recompute:', _subN, 'vs', input.system.totalPanels);
+        // P0-10: tri-sync all three owners (mirror the DC branch) — cad.totalPanels
+        // + canonical.electrical.totalPanels feed validationPage / bomForPermit /
+        // structural / sitePlan and went stale when only system.totalPanels moved.
         input.system.totalPanels = _subN;
+        cad.totalPanels = _subN;
+        canonical.electrical.totalPanels = _subN;
       }
     }
 
@@ -225,18 +245,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       input.system.dcAcRatio = input.system.totalDcKw / input.system.totalAcKw;
     }
 
-    // backfeedBreakerA / pvBackfeedA: NEC 690.8 sizing
-    // acOCPD = next standard breaker >= (acOutputAmps * 1.25)
-    // acOutputAmps = totalAcKw * 1000 / 240
-    if (!project.backfeedBreakerA && input.system.totalAcKw > 0) {
-      const acOutputAmps = (input.system.totalAcKw * 1000) / 240;
-      const continuousA = acOutputAmps * 1.25; // NEC 690.8
-      const ocpd = necNextStandardOcpd(continuousA);
-      project.backfeedBreakerA = ocpd;
-      if (!project.pvBackfeedA) {
-        project.pvBackfeedA = ocpd;
-      }
-    }
+    // P0-1: the 690.8 pre-seed that lived here permanently discarded the
+    // electrical engine's NEC 705.12 backfeed result (its write was guarded on
+    // `!project.backfeedBreakerA`, which this seed made always-false). The
+    // 705.12 engine result now owns backfeedBreakerA/pvBackfeedA unconditionally
+    // (see the electrical-calc block below); a 690.8 estimate fills the void
+    // ONLY when the engine produced no busbar result.
 
     // Battery fields: propagate batteryKwh and batteryBackfeedA if battery info exists
     // in project (set by the route from frontend data). Do NOT fabricate battery data.
@@ -258,24 +272,36 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   // ── Derive wire run lengths from CAD geometry ─────────────────────────────────
-  // Inject into input.project.wireLength (AC run) and per-string wireLength (DC run)
-  // only when the caller has not already provided a value (non-zero).
-  // This is additive/non-breaking: existing explicit values are always preserved.
+  // P1-8: recompute-if-contradicts — the CAD-derived run is the geometry of
+  // record. A client scalar survives only when CAD has no run for that leg or
+  // when it agrees within 20%; >20% divergence → CAD wins with an audit warn.
   try {
     const { runLengths, derivationNotes } = deriveRunLengths(cad);
     // AC run: DISCO_TO_METER_RUN → project.wireLength
     const acRunFt = runLengths.DISCO_TO_METER_RUN;
-    if (acRunFt && acRunFt > 0 && !input.project.wireLength) {
-      input.project.wireLength = acRunFt;
-      console.log('[CAD-RUN] Derived AC wire run:', acRunFt, 'ft —', derivationNotes.DISCO_TO_METER_RUN);
+    if (acRunFt && acRunFt > 0) {
+      const clientAcFt = Number(input.project.wireLength) || 0;
+      if (!clientAcFt) {
+        input.project.wireLength = acRunFt;
+        console.log('[CAD-RUN] Derived AC wire run:', acRunFt, 'ft —', derivationNotes.DISCO_TO_METER_RUN);
+      } else if (Math.abs(clientAcFt - acRunFt) > 0.2 * acRunFt) {
+        console.warn('[CAD-RUN] AC wire run recompute: CAD-derived', acRunFt,
+          'ft replaces client-posted', clientAcFt, 'ft (>20% divergence) —', derivationNotes.DISCO_TO_METER_RUN);
+        input.project.wireLength = acRunFt;
+      }
     }
-    // DC run: DC_STRING_RUN → each string's wireLength (if not already set)
+    // DC run: DC_STRING_RUN → each string's wireLength
     const dcRunFt = runLengths.DC_STRING_RUN;
     if (dcRunFt && dcRunFt > 0 && input.system?.inverters) {
       for (const inv of input.system.inverters) {
         if (inv.strings) {
           for (const str of inv.strings) {
-            if (!str.wireLength) {
+            const clientDcFt = Number(str.wireLength) || 0;
+            if (!clientDcFt) {
+              str.wireLength = dcRunFt;
+            } else if (Math.abs(clientDcFt - dcRunFt) > 0.2 * dcRunFt) {
+              console.warn('[CAD-RUN] DC string run recompute: CAD-derived', dcRunFt,
+                'ft replaces client-posted', clientDcFt, 'ft on', str.label || 'string', '(>20% divergence)');
               str.wireLength = dcRunFt;
             }
           }
@@ -820,11 +846,21 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       input.compliance.electrical = e;
 
       // ── Propagate key values to project level for downstream consumers ──
-      if (e.busbar?.backfeedBreakerRequired && !input.project.backfeedBreakerA) {
-        input.project.backfeedBreakerA = e.busbar.backfeedBreakerRequired;
-      }
-      if (e.busbar?.backfeedBreakerRequired && !input.project.pvBackfeedA) {
-        input.project.pvBackfeedA = e.busbar.backfeedBreakerRequired;
+      // P0-1: the NEC 705.12 engine result is the UNCONDITIONAL owner of
+      // backfeedBreakerA/pvBackfeedA — a client-posted (or 690.8-estimated)
+      // value must never survive over the engine of record.
+      if (e.busbar?.backfeedBreakerRequired) {
+        const engineBackfeedA = e.busbar.backfeedBreakerRequired;
+        if (input.project.backfeedBreakerA && input.project.backfeedBreakerA !== engineBackfeedA) {
+          console.warn('[PLANSET] backfeedBreakerA recompute: engine 705.12 value', engineBackfeedA,
+            'A replaces client-posted', input.project.backfeedBreakerA, 'A');
+        }
+        input.project.backfeedBreakerA = engineBackfeedA;
+        if (input.project.pvBackfeedA && input.project.pvBackfeedA !== engineBackfeedA) {
+          console.warn('[PLANSET] pvBackfeedA recompute: engine 705.12 value', engineBackfeedA,
+            'A replaces client-posted', input.project.pvBackfeedA, 'A');
+        }
+        input.project.pvBackfeedA = engineBackfeedA;
       }
 
       console.log('[PLANSET] Server-side electrical calc completed:',
@@ -837,6 +873,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   } catch (elecErr: unknown) {
     // Non-critical: permit still generates, electrical pages will show defaults
     console.warn('[PLANSET] Server-side electrical calc failed (non-critical):', (elecErr as Error)?.message ?? elecErr);
+  }
+
+  // P0-1 void-fill: the engine produced no 705.12 busbar result (failed or no
+  // inverter data) AND no client value exists — seed the NEC 690.8 estimate so
+  // sheets don't print bare hardcoded defaults. This can never mask the engine:
+  // it runs strictly AFTER the engine block and only into an empty field.
+  if (!project.backfeedBreakerA && input.system.totalAcKw > 0) {
+    const _estOcpd = necNextStandardOcpd((input.system.totalAcKw * 1000 / 240) * 1.25);
+    project.backfeedBreakerA = _estOcpd;
+    if (!project.pvBackfeedA) project.pvBackfeedA = _estOcpd;
+    console.warn('[PLANSET] backfeedBreakerA: 690.8 estimate', _estOcpd,
+      'A seeded — electrical engine produced no 705.12 result');
   }
 
   console.log('[PLANSET] CAD engine resolved systemType:', sysType, {

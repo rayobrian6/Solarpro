@@ -674,7 +674,18 @@ export function generateBOMForPermit(
         // through nextStdRating would bump a 110A single-system fuse to 125A.
         systemAcDisconnectA: (_auth.isHybrid && _auth.poi.tapOcpdA > 0 ? _auth.poi.tapOcpdA : undefined)
           ?? _acCollection?.disconnectA,
-        dcOCPD:              necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.25 * 1.25),
+        // P1-3 (data-authority register): DC OCPD from the shared authority's
+        // per-sub dcStrings (governing = max standard fuse across ALL subs) —
+        // never firstStr alone (on a hybrid firstStr is the FENCE panel, and
+        // its Isc mis-sized the ground sub's DC fuse). Fallback keeps the
+        // canonical Isc×1.56 ladder derivation for payloads with no
+        // authority strings (micro topologies never consume dcOCPD).
+        dcOCPD:              (() => {
+          const _dcOcpds = _auth.dcStrings.map(s => s.ocpdAmps ?? 0).filter(n => n > 0);
+          return _dcOcpds.length
+            ? Math.max(..._dcOcpds)
+            : necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.56);
+        })(),
         jurisdiction:        compliance.jurisdiction?.ahj,
         requiresACDisconnect:    project.acDisconnect !== false,
         requiresDCDisconnect:    true,

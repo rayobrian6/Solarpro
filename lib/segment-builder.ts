@@ -14,6 +14,7 @@ import {
   SegmentBuilderOutput,
   EngineeringIssue,
 } from './segment-model';
+import { nextStandardOcpd } from './electrical/stdSizes';
 
 // NEC 310.16 75°C Ampacity Table
 const AMPACITY_TABLE_75C: Record<string, number> = {
@@ -33,8 +34,7 @@ const AMPACITY_TABLE_75C: Record<string, number> = {
   '250 kcmil': 255,
 };
 
-// Standard OCPD ratings
-const STANDARD_OCPD: number[] = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
+// Standard OCPD ratings — single-sourced from lib/electrical/stdSizes.ts (P0-5c)
 
 // Conductor area in square inches (NEC Ch.9 Table 5)
 const CONDUCTOR_AREA_IN2: Record<string, number> = {
@@ -73,8 +73,10 @@ const CONDUIT_AREA_IN2: Record<string, number> = {
 // Helper Functions
 // ============================================================
 
+// P0-5c: delegates to stdSizes — the old local copy fell back to 300 A for
+// anything above 400 A (an UNDERSIZED rating, below its own table maximum).
 function nextStandardOCPD(requiredAmps: number): number {
-  return STANDARD_OCPD.find(rating => rating >= requiredAmps) ?? 300;
+  return nextStandardOcpd(requiredAmps);
 }
 
 function getTempDerating(

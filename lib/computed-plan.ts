@@ -21,7 +21,6 @@ import {
   EngineeringModel,
   validateEngineeringModel,
 } from './electrical-calc';
-import { nextStandardOCPD } from './manufacturer-specs';
 import { getJurisdictionInfo, parseStateFromAddress, JurisdictionInfo } from './jurisdiction';
 import { getUtilityRules, getUtilitiesByState, UtilityRuleEntry } from './utility-rules';
 import { getRecommendedInterconnection } from './utility-rules';
@@ -279,11 +278,9 @@ export function getAhjById(id: string): AhjEntry {
 let _bomIdCounter = 1;
 function bomId(): string { return `cp-bom-${(_bomIdCounter++).toString().padStart(4, '0')}`; }
 
-// ─── NEC standard OCPD lookup (local helper) ─────────────────────────────────
-const STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
-function _nextStdOCPD(amps: number): number {
-  return STANDARD_OCPD.find(s => s >= amps) ?? Math.ceil(amps / 10) * 10;
-}
+// P0-5c: the local STANDARD_OCPD copy + _nextStdOCPD helper were DEAD CODE
+// (never called) — deleted. Any future OCPD lookup here must import
+// nextStandardOcpd from '@/lib/electrical/stdSizes' (the one ladder).
 
 // ─── GEC sizing per NEC 250.66 (based on OCPD amps) ──────────────────────────
 function gecSizeForOcpd(ocpdAmps: number): string {

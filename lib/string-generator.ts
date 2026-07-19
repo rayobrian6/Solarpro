@@ -172,10 +172,11 @@ export interface StringGeneratorResult {
 }
 
 // ─── NEC standard OCPD sizes ─────────────────────────────────────────────────
-const STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
-
+// P0-5c: the local ladder copy (≤200 A) was byte-identical to the shared
+// ladder's low range and already fell back to necNextStandardOcpd — collapse
+// to the single source. Zero behavior change.
 function nextStandardOCPD(amps: number): number {
-  return STANDARD_OCPD.find(s => s >= amps) ?? necNextStandardOcpd(amps);
+  return necNextStandardOcpd(amps);
 }
 
 // ─── Main generator ──────────────────────────────────────────────────────────

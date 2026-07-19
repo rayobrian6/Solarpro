@@ -11,7 +11,7 @@ import {
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
-import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../utils/helpers';
+import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel, necNextStandardOcpd } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
@@ -1405,7 +1405,13 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => {
               const isc125 = (str.panelIsc * 1.25).toFixed(1);
-              const ocpd = (str.panelIsc * 1.25 * 1.25).toFixed(1);
+              // P0-5b (data-authority register): the OCPD column prints the
+              // conductor authority's STANDARD fuse (NEC 240.6 ladder) — the
+              // raw Isc×1.25×1.25 product ("19.2A") is a nonexistent fuse.
+              // The Isc×1.25 column stays precise (it is an ampacity basis,
+              // not an OCPD). Fallback derives on the same canonical ladder.
+              const _aStr = _schedAuth.dcStrings.find(d => d.invIdx === invIdx && d.strIdx === strIdx);
+              const ocpd = _aStr?.ocpdAmps ?? necNextStandardOcpd(str.panelIsc * 1.56);
               return `
             <tr>
               <td class="fw7">DC ${invIdx + 1}-${strIdx + 1}</td>

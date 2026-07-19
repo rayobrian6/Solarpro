@@ -86,6 +86,17 @@ import {
 // PanelPrimitiveRenderer and LODManager removed — entity-based rendering used instead
 import { batchComputeShadeFactors, precomputeDaySunPositions, clearSunCache } from '@/lib/sunVectorCache';
 
+// P0-6 (DATA-AUTHORITY-AUDIT): panel specs stamped onto placed panels come
+// from the equipment authority (equipment-db record), NEVER a hardcoded
+// literal in this component.
+import { getPanelById } from '@/lib/equipment-db';
+
+// Ray's ruling 2026-07-19: the SolFence 6-ft fence uses ONLY the Philadelphia
+// Solar PS-MNB108(HCBF)-440W. Fence placement resolves the wattage stamp from
+// this equipment-db record at placement time — the old hardcoded `430` here
+// poisoned 18/18 Stowell fence stamps (plus 4 more projects).
+const FENCE_PANEL_EQUIPMENT_ID = 'panel-fence-ps1';
+
 // API keys loaded from environment variables — never hardcode secrets in source
 const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 const CESIUM_TOKEN   = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN   ?? '';
@@ -4954,7 +4965,9 @@ function SolarEngine3D({
 
   // ── finalizeFence v47.158: SOL Fence Nexus — posts + realistic panels ──
   // SOL Fence Nexus specs (from datasheet):
-  //   Panel:   Philadelphia Solar PS-MNB108 430W, 1721x1133mm, vertical bifacial
+  //   Panel:   Philadelphia Solar PS-MNB108(HCBF)-440W, 1721x1133mm, vertical
+  //            bifacial — wattage resolved from equipment-db ('panel-fence-ps1'),
+  //            never hardcoded (P0-6)
   //   Section: 7'11" (2.413m) wide x 5'10" (1.778m) tall metal-to-metal
   //   Post:    60mm square hot-dip galvanized steel, driven/buried every section
   //   Ground clearance: 2" (0.051m) bottom of panel above grade
@@ -4978,7 +4991,17 @@ function SolarEngine3D({
     const SOL_CLEARANCE   = 0.051;  // 2" ground clearance (m)
     const PANELS_PER_SECTION = 2;   // SOL Fence Nexus: 2 panels per section
 
-    addLog('FENCE', `finalizeFence v47.158: ${pts.length} pts, fenceH=${fenceH.toFixed(2)}m orient=${orient}`);
+    // P0-6 + Ray's ruling 2026-07-19: fence panels are ALWAYS the Philadelphia
+    // Solar PS-MNB108(HCBF)-440W — resolve the wattage stamp from the
+    // equipment-db record at placement time so the stamp can never drift from
+    // the equipment authority.
+    const fencePanelRec = getPanelById(FENCE_PANEL_EQUIPMENT_ID);
+    if (!fencePanelRec?.watts) {
+      console.warn(`[EQUIP-AUTHORITY] equipment-db is missing '${FENCE_PANEL_EQUIPMENT_ID}' — fence wattage stamps fall back to the studio-selected panel`);
+    }
+    const fenceWattage = fencePanelRec?.watts ?? selectedPanelRef.current?.wattage ?? 400;
+
+    addLog('FENCE', `finalizeFence v47.158: ${pts.length} pts, fenceH=${fenceH.toFixed(2)}m orient=${orient} panel=${FENCE_PANEL_EQUIPMENT_ID}@${fenceWattage}W`);
 
     // Enforce minimum fence height — must fit at least one panel row
     const effectiveFenceH = Math.max(fenceH, dims.heightM + SOL_CLEARANCE + 0.01);
@@ -5004,7 +5027,7 @@ function SolarEngine3D({
         p2ECEF,
         fenceHeightM: effectiveFenceH,
         orientation:  orient,
-        wattage:      430, // Philadelphia Solar PS-MNB108(HCBF)-430W
+        wattage:      fenceWattage, // equipment-db 'panel-fence-ps1' (PS-MNB108(HCBF)-440W) — P0-6: never a literal
         azimuthDeg:   azimuthRef.current,
         layoutId:     `fence-seg${si}-${Date.now()}`,
       });
@@ -8392,7 +8415,12 @@ function SolarEngine3D({
       layoutId: 'layout-1',
       lat: opts.lat, lng: opts.lng, x: 0, y: 0,
       tilt: opts.tilt, azimuth: opts.azimuth,
-      wattage: selectedPanel?.wattage ?? 400,
+      // P0-6: fence panels ALWAYS stamp the equipment-db fence record (Ray's
+      // ruling 2026-07-19 — PS-MNB108(HCBF)-440W only); other system types
+      // stamp the studio-selected panel (the placement-time equipment authority).
+      wattage: opts.systemType === 'fence'
+        ? (getPanelById(FENCE_PANEL_EQUIPMENT_ID)?.watts ?? selectedPanel?.wattage ?? 400)
+        : (selectedPanel?.wattage ?? 400),
       bifacialGain: opts.systemType === 'fence' ? 1.15 : 1.0,
       row: 0, col: 0,
       height: opts.height, heading: opts.heading,

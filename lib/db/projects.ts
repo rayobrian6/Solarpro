@@ -18,6 +18,9 @@ import {
   subSystemEntryFromFlatEquipmentPatch,
 } from '@/lib/system/subSystemMirror';
 import type { SubSystemEquipmentMap, SubSystemKey } from '@/lib/system/subSystemEquipment';
+import { isSubSystemKey } from '@/lib/system/subSystemEquipment';
+import { computeNameplateKw } from '@/lib/system/nameplate';
+import { getPanelById } from '@/lib/equipment-db';
 
 // ============================================================
 // PROJECTS
@@ -548,7 +551,80 @@ export async function upsertSelectedEquipment(
       AND deleted_at IS NULL
     RETURNING id
   `;
+  if (rows.length > 0) {
+    // P0-11 (mirror side): a map-bearing equipment write just landed — re-align
+    // the stored design_electrical mirror's panelIds so the stale mirror can
+    // never win a later backfill against the map. Non-fatal by design.
+    await syncDesignElectricalPanelIds(sql, projectId, userId, mergedMap);
+  }
   return rows.length > 0;
+}
+
+// ── P0-11 (mirror side) — design_electrical is DERIVED, the map is truth ────
+// The DATA-AUTHORITY-AUDIT found layouts.design_electrical contradicting the
+// subSystems equipment map on EVERY sub (all three subs cloned rec-405 while
+// the map said 405/580/440) — and the permit route uses the mirror as a
+// BACKFILL SOURCE, so a stale mirror can win over engineering truth. Fix per
+// the register: regenerate the mirror's EQUIPMENT IDS from the map whenever
+// the map is written. Only panelIds are touched (equipment is the map's
+// domain); string composition/geometry stays design-owned. Idempotent: an
+// aligned mirror is a no-op. Contradictions are console.warn-audited.
+async function syncDesignElectricalPanelIds(
+  sql: any,
+  projectId: string,
+  userId: string,
+  map: SubSystemEquipmentMap,
+): Promise<void> {
+  try {
+    const rows = await sql`
+      SELECT id, design_electrical FROM layouts
+      WHERE project_id = ${projectId} AND user_id = ${userId}
+        AND design_electrical IS NOT NULL
+    `;
+    for (const row of rows) {
+      const raw = row.design_electrical;
+      const de = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!de || typeof de !== 'object') continue;
+      const changes: string[] = [];
+
+      // Per-sub blocks: de.subSystems is an ARRAY of {key, panelId, ...} blocks.
+      if (Array.isArray(de.subSystems)) {
+        de.subSystems = de.subSystems.map((b: any) => {
+          if (!b || !isSubSystemKey(b.key)) return b;
+          const authoritative = map[b.key as SubSystemKey]?.panelId;
+          if (authoritative && b.panelId && b.panelId !== authoritative) {
+            changes.push(`subSystems[${b.key}].panelId ${b.panelId} → ${authoritative}`);
+            return { ...b, panelId: authoritative };
+          }
+          return b;
+        });
+      }
+
+      // Flat mirror panelId follows the PRIMARY sub (§1.4 single-writer mirror).
+      const primaryKey = derivePrimaryKey(map);
+      const primaryPanelId = primaryKey ? map[primaryKey]?.panelId : undefined;
+      if (primaryPanelId && typeof de.panelId === 'string' && de.panelId && de.panelId !== primaryPanelId) {
+        changes.push(`panelId ${de.panelId} → ${primaryPanelId}`);
+        de.panelId = primaryPanelId;
+      }
+
+      if (changes.length === 0) continue;
+      console.warn(
+        '[design_electrical-mirror] P0-11 recompute-if-contradicts: mirror panelIds re-aligned to subSystems map',
+        '| project:', projectId, '| layout:', String(row.id).slice(0, 8),
+        '|', changes.join('; '),
+      );
+      await sql`
+        UPDATE layouts
+        SET design_electrical = ${JSON.stringify(de)}::jsonb
+        WHERE id = ${row.id} AND user_id = ${userId}
+      `;
+    }
+  } catch (e) {
+    // Mirror alignment must never block the equipment write (pre-mig-096 DBs
+    // lack the column entirely).
+    console.warn('[design_electrical-mirror] sync skipped (non-fatal):', (e as Error)?.message);
+  }
 }
 
 export async function softDeleteProject(id: string, userId: string): Promise<boolean> {
@@ -670,12 +746,66 @@ async function assertLayoutCoordsMatchProject(sql: any, data: UpsertLayoutData):
   }
 }
 
+// ── Nameplate authority (DATA-AUTHORITY-AUDIT P0-7 / P0-6 data side) ────────
+// upsertLayout is the single chokepoint every save path funnels through
+// (design studio, production, preliminary, version restore, system-tools), so
+// the ONE nameplate rule lives here: when the project carries a per-subsystem
+// equipment map, layouts.system_size_kw is computed from the map's panelIds
+// via equipment-db — the caller-supplied kW (client stamp math) is only a
+// fallback for map-less projects (byte-identical legacy behavior for those).
+// Contradictions are console.warn-audited, never silently absorbed.
+async function resolveNameplateSizeKw(
+  sql: any,
+  data: UpsertLayoutData,
+): Promise<number | undefined> {
+  try {
+    const rows = await sql`
+      SELECT engineering_config -> 'subSystems' AS eng_subs,
+             selected_equipment -> 'subSystems' AS sel_subs
+      FROM projects
+      WHERE id = ${data.projectId} AND user_id = ${data.userId}
+      LIMIT 1
+    `;
+    if (rows.length === 0) return undefined;
+    // engineering_config.subSystems is the doctrine owner; selected_equipment's
+    // mirror fills per-key gaps (they are kept in sync by upsertSelectedEquipment).
+    const eng = normalizeSubSystemMap(rows[0].eng_subs);
+    const sel = normalizeSubSystemMap(rows[0].sel_subs);
+    if (!eng && !sel) return undefined; // map-less project → legacy passthrough
+    const map: SubSystemEquipmentMap = { ...(sel ?? {}), ...(eng ?? {}) };
+    const np = computeNameplateKw(
+      (data.panels ?? []) as Array<{ systemType?: string; placementType?: string; wattage?: number }>,
+      map,
+      getPanelById,
+    );
+    if (
+      typeof data.systemSizeKw === 'number' &&
+      Math.abs(np.totalKw - data.systemSizeKw) > 0.005
+    ) {
+      console.warn(
+        '[nameplate] recompute-if-contradicts: layout save kW',
+        data.systemSizeKw, '→', np.totalKw,
+        '| per-sub:', np.subs.map(s => `${s.key} ${s.count}×${s.watts}W (${s.wattsSource})`).join(', '),
+        '| project:', data.projectId,
+      );
+    }
+    return np.totalKw;
+  } catch (e) {
+    // The nameplate resolution must never block a save — fall back to caller value.
+    console.warn('[nameplate] resolution failed, using caller systemSizeKw:', (e as Error)?.message);
+    return undefined;
+  }
+}
+
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
   const sql = await getDbReady();
   // Block cross-project coordinate contamination before any write (see helper above).
   await assertLayoutCoordsMatchProject(sql, data);
+  // Nameplate authority (P0-7): map-carrying projects get the equipment-db kW.
+  const nameplateKw = await resolveNameplateSizeKw(sql, data);
+  const sizeKw = nameplateKw ?? data.systemSizeKw ?? 0;
   const panelsJson = JSON.stringify(data.panels || []);
   const roofPlanesJson = data.roofPlanes ? JSON.stringify(data.roofPlanes) : null;
   const fenceLineJson = data.fenceLine ? JSON.stringify(data.fenceLine) : null;
@@ -737,7 +867,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         fence_line          = ${fenceLineJson}::jsonb,
         bifacial_optimized  = ${data.bifacialOptimized ?? false},
         total_panels        = ${data.totalPanels ?? 0},
-        system_size_kw      = ${data.systemSizeKw ?? 0},
+        system_size_kw      = ${sizeKw},
         map_center          = ${mapCenterJson}::jsonb,
         map_zoom            = ${data.mapZoom ?? null},
         updated_at          = NOW()
@@ -770,7 +900,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         ${fenceLineJson}::jsonb,
         ${data.bifacialOptimized ?? false},
         ${data.totalPanels ?? 0},
-        ${data.systemSizeKw ?? 0},
+        ${sizeKw},
         ${mapCenterJson}::jsonb,
         ${data.mapZoom ?? null}
       )

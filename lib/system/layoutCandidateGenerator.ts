@@ -40,6 +40,7 @@ import type {
   ScoreBreakdown,
 } from './inverterCapabilities';
 import { scoreLayoutCandidate } from './layoutScoring';
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 
 // ─── Generator Version ───────────────────────────────────────────────────────
 const GENERATOR_VERSION = '3.0.0';
@@ -785,15 +786,11 @@ function buildRationale(candidate: LayoutCandidate, score: ScoreBreakdown): stri
 
 // ─── Standard Breaker Sizes ───────────────────────────────────────────────────
 
-/** NEC standard circuit breaker sizes (A). */
-const STANDARD_BREAKER_SIZES = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150];
-
 /**
  * Round up to the nearest standard breaker size.
+ * P0-5c: delegates to lib/electrical/stdSizes.ts — the old local copy stopped
+ * at 150 A (not a physical cap) and invented next-10A sizes above it.
  */
 function standardBreakerSize(rawAmps: number): number {
-  for (const size of STANDARD_BREAKER_SIZES) {
-    if (size >= rawAmps) return size;
-  }
-  return Math.ceil(rawAmps / 10) * 10; // fall back for very large values
+  return nextStandardOcpd(rawAmps);
 }

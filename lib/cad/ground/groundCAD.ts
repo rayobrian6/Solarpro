@@ -23,6 +23,15 @@ import {
   Point2D, BBox,
   bbox, metersToFt, ftToMeters, fmtFt, latLngToXY,
 } from '../geometry';
+import {
+  GROUND_TILT_PLAUSIBLE_MIN_DEG,
+  GROUND_TILT_PLAUSIBLE_MAX_DEG,
+  GROUND_AZIMUTH_DIVERGENCE_MAX_DEG,
+  industryStandardGroundTilt,
+  standardGroundAzimuth,
+  hemisphereOf,
+  bearingDistanceDeg,
+} from '../../3d/ground/groundDefaults';
 
 const INCHES_TO_METERS = 0.0254;
 const DEFAULT_PANEL_LENGTH_IN = 66;
@@ -303,7 +312,15 @@ function solveGroundFromGPS(
     };
   });
 
-  // ── Row axis = principal (major) axis of the point cloud ─────
+  // ── Row axis: within-row nearest-neighbour bearings, NOT whole-cloud PCA ──
+  // PCA's major axis is the ACROSS-row axis whenever the array is deeper
+  // (N-S span) than wide — a 4-row × 10-panel fixture flipped the derived
+  // azimuth 90° east (verify-lead F1, 2026-07-19). Panels sit closer to their
+  // within-row neighbour (~one module width) than to the next row (row pitch ≥
+  // module depth + gap), so each point's nearest neighbour lies along the row
+  // axis regardless of the cloud's aspect ratio. Axial (mod-π) circular mean
+  // of those bearings = the row axis; PCA survives only as the degenerate-case
+  // fallback.
   const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
   const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
   let sxx = 0, sxy = 0, syy = 0;
@@ -311,7 +328,24 @@ function solveGroundFromGPS(
     const dx = p.x - cx, dy = p.y - cy;
     sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
   }
-  const theta    = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  let theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);   // PCA fallback
+  if (pts.length >= 2) {
+    let asx = 0, asy = 0;   // axial stats on doubled angles
+    for (let i = 0; i < pts.length; i++) {
+      let bestD = Infinity, bestJ = -1;
+      for (let j = 0; j < pts.length; j++) {
+        if (j === i) continue;
+        const dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; bestJ = j; }
+      }
+      if (bestJ >= 0) {
+        const a = Math.atan2(pts[bestJ].y - pts[i].y, pts[bestJ].x - pts[i].x);
+        asx += Math.cos(2 * a); asy += Math.sin(2 * a);
+      }
+    }
+    if (Math.hypot(asx, asy) > 1e-9) theta = 0.5 * Math.atan2(asy, asx);
+  }
   const rowDir   = { x: Math.cos(theta), y: Math.sin(theta) };
   const minorDir = { x: -rowDir.y, y: rowDir.x };
   const alongRow  = (p: { x: number; y: number }) => p.x * rowDir.x   + p.y * rowDir.y;
@@ -352,37 +386,100 @@ function solveGroundFromGPS(
   groups.sort((a, b) => avg(a.map(acrossRow)) - avg(b.map(acrossRow)));
   for (const g of groups) g.sort((a, b) => alongRow(a) - alongRow(b));
 
-  // ── Array azimuth: median of panel azimuths, else derived from row axis ──
+  // ── Azimuth: PLACED PANEL GEOMETRY is the authority (P1-13, Ray's ruling
+  // 2026-07-19). With ≥2 designed panels the row bearing is real, measured
+  // geometry — derive the array azimuth perpendicular to it, facing the
+  // equator (the downslope face of a tilted ground array in either
+  // hemisphere). Panel azimuth stamps are then VALIDATED against the
+  // geometric value: within GROUND_AZIMUTH_DIVERGENCE_MAX_DEG the stamp
+  // median wins (it carries the user-set precise bearing, e.g. Stowell 181°
+  // vs geometric ~181°); beyond it the stamp is stale — geometry wins with
+  // a warn audit line. The layout column (layouts.ground_azimuth — Stowell
+  // carried a stale 121.64°) is likewise validated and NEVER overrides
+  // geometry.
   const azSamples = rawPanels
     .map((p: any) => p.azimuth)
     .filter((a: any) => typeof a === 'number' && isFinite(a))
     .map((a: number) => ((a % 360) + 360) % 360);
-  let azimuth: number;
-  if (azSamples.length > 0) {
-    azimuth = median(azSamples);
-  } else {
-    // Perpendicular to the row axis, facing the equator (the downslope face
-    // of a tilted ground array in either hemisphere).
+  const stampAz  = azSamples.length > 0 ? median(azSamples) : null;
+  const layoutAz = (typeof layout0.azimuth === 'number' && isFinite(layout0.azimuth))
+    ? ((layout0.azimuth % 360) + 360) % 360
+    : null;
+
+  let geomAz: number | null = null;
+  if (pts.length >= 2) {
     const rowBearing = (Math.atan2(rowDir.x, rowDir.y) * 180 / Math.PI + 360) % 360;
     const cands  = [(rowBearing + 90) % 360, (rowBearing + 270) % 360];
-    const target = originLat >= 0 ? 180 : 0;
-    const angDist = (a: number) => Math.min(Math.abs(a - target), 360 - Math.abs(a - target));
-    azimuth = angDist(cands[0]) <= angDist(cands[1]) ? cands[0] : cands[1];
+    const target = standardGroundAzimuth(hemisphereOf(originLat));
+    geomAz = bearingDistanceDeg(cands[0], target) <= bearingDistanceDeg(cands[1], target)
+      ? cands[0] : cands[1];
+  }
+
+  let azimuth: number;
+  if (geomAz != null) {
+    if (stampAz != null && bearingDistanceDeg(stampAz, geomAz) <= GROUND_AZIMUTH_DIVERGENCE_MAX_DEG) {
+      azimuth = stampAz; // stamps agree with geometry — keep the precise user value
+    } else {
+      if (stampAz != null) {
+        const msg = `groundCAD: panel azimuth stamps (${stampAz.toFixed(1)}°) diverge ${bearingDistanceDeg(stampAz, geomAz).toFixed(1)}° from placed-panel geometry (${geomAz.toFixed(1)}°) — geometry wins (P1-13)`;
+        console.warn('[GROUND-GEOM]', msg);
+        warnings.push(msg);
+      }
+      azimuth = geomAz;
+    }
+    if (layoutAz != null && bearingDistanceDeg(layoutAz, azimuth) > GROUND_AZIMUTH_DIVERGENCE_MAX_DEG) {
+      const msg = `groundCAD: layout azimuth column (${layoutAz.toFixed(1)}°) diverges ${bearingDistanceDeg(layoutAz, azimuth).toFixed(1)}° from resolved azimuth (${azimuth.toFixed(1)}°) — stale column ignored (P1-13)`;
+      console.warn('[GROUND-GEOM]', msg);
+      warnings.push(msg);
+    }
+  } else if (stampAz != null) {
+    const msg = `groundCAD: <2 placed panels — azimuth from panel stamps (${stampAz.toFixed(1)}°)`;
+    console.warn('[GROUND-GEOM]', msg);
+    warnings.push(msg);
+    azimuth = stampAz;
+  } else if (layoutAz != null) {
+    const msg = `groundCAD: no geometry or stamps — azimuth from layout column (${layoutAz.toFixed(1)}°)`;
+    console.warn('[GROUND-GEOM]', msg);
+    warnings.push(msg);
+    azimuth = layoutAz;
+  } else {
+    azimuth = standardGroundAzimuth(hemisphereOf(originLat));
+    const msg = `groundCAD: no azimuth source — industry-standard equator-facing ${azimuth}°`;
+    console.warn('[GROUND-GEOM]', msg);
+    warnings.push(msg);
   }
   azimuth = Math.round(azimuth * 10) / 10;
 
   // ── Tilt: LAYOUT AUTHORITY first (the studio slider the user set and SAW
-  // rendered in 3D), then panel-stamp median, then 20. Stamps lag the slider
-  // when tilt is changed after placement — Stowell's ground panels carried
-  // tilt=25 stamps while the studio said 40.16°, so PV-1G drew a 6'3" table
-  // Ray builds at 10-12' (2026-07-16). Same stale-stamp doctrine as panel
-  // wattage: authority governs, stamps are the fallback.
+  // rendered in 3D — Stowell 40.16° is Ray-verified real), when inside the
+  // plausible fixed-rack band [10,50]°; then panel-stamp median when inside
+  // the band (stamps lag the slider when tilt is changed after placement —
+  // Stowell's ground panels carried tilt=25 stamps while the studio said
+  // 40.16°, so PV-1G drew a 6'3" table Ray builds at 10-12', 2026-07-16);
+  // then industryStandardGroundTilt(lat) (P1-13, Ray's ruling 2026-07-19).
+  // Same stale-stamp doctrine as panel wattage: authority governs, every
+  // fallback hop gets a warn audit line.
   const tiltSamples = rawPanels
     .map((p: any) => p.tilt)
-    .filter((t: any) => typeof t === 'number' && isFinite(t) && t >= 5 && t <= 60);
-  const tiltDeg = Math.round(((typeof layout0.tiltDeg === 'number' && layout0.tiltDeg >= 5 && layout0.tiltDeg <= 60)
-    ? layout0.tiltDeg
-    : (tiltSamples.length > 0 ? median(tiltSamples) : 20)) * 10) / 10; // 0.1° — raw slider floats printed "40.16186827572303°" on the sheet
+    .filter((t: any) => typeof t === 'number' && isFinite(t)
+      && t >= GROUND_TILT_PLAUSIBLE_MIN_DEG && t <= GROUND_TILT_PLAUSIBLE_MAX_DEG);
+  let tiltRaw: number;
+  if (typeof layout0.tiltDeg === 'number'
+      && layout0.tiltDeg >= GROUND_TILT_PLAUSIBLE_MIN_DEG
+      && layout0.tiltDeg <= GROUND_TILT_PLAUSIBLE_MAX_DEG) {
+    tiltRaw = layout0.tiltDeg;
+  } else if (tiltSamples.length > 0) {
+    const msg = `groundCAD: layout tilt (${layout0.tiltDeg ?? 'absent'}) implausible/absent — falling back to panel-stamp median (${median(tiltSamples).toFixed(1)}°)`;
+    console.warn('[GROUND-GEOM]', msg);
+    warnings.push(msg);
+    tiltRaw = median(tiltSamples);
+  } else {
+    tiltRaw = industryStandardGroundTilt(originLat);
+    const msg = `groundCAD: no plausible tilt from layout or stamps — industry-standard tilt for lat ${originLat.toFixed(2)}° = ${tiltRaw}° (Jacobson & Jadhav 2018 rule-of-thumb)`;
+    console.warn('[GROUND-GEOM]', msg);
+    warnings.push(msg);
+  }
+  const tiltDeg = Math.round(tiltRaw * 10) / 10; // 0.1° — raw slider floats printed "40.16186827572303°" on the sheet
 
   // ── Panels at the REAL local XY (top-left convention, as roofCAD) ──
   const allPanels: CADPanel[] = [];

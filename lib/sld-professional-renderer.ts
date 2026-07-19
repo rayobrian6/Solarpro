@@ -170,6 +170,13 @@ export interface SLDSourceBranch {
   /** Per-sub EGC gauge from the shared conductor authority (NEC 250.122 on the
    *  sub's AC feeder OCPD). Fallback: getEGCSize(lane OCPD) — same table. */
   egcGauge?: string;
+  /** P1-2 — EGC for this lane's AC BRANCH circuits (micro lanes): the
+   *  governing branch's NEC 250.122 result, carried from the conductor
+   *  authority via the sldAdapter. Renderer consumes; never re-derives. */
+  branchEgcGauge?: string;
+  /** P1-2 — EGC for this lane's DC source circuits (250.122 on the lane's
+   *  governing DC string OCPD), carried from the adapter. */
+  dcEgcGauge?: string;
   /** Panel Voc temperature coefficient, %/°C (negative) — from the equipment
    *  DB / computed panelSpec. Absent ⇒ the sheet prints a marked conservative
    *  assumption instead of silently fabricating a datasheet value. */
@@ -2510,6 +2517,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const ba = branchRun?.ocpdAmps
       ?? (input.microBranches?.length ? Math.max(...input.microBranches.map(b => b.ocpdAmps)) : 0)
       ?? 0;
+    // P1-2: input.microBranches carries the conductor authority's branch OCPDs
+    // (adapter); the recompute is a degraded-payload fallback on the one ladder.
     const baShow = ba || necNextStandardOcpd(_maxBrDev * _perMicroBrA * 1.25) || 20;
     parts.push(txt(p1x+cW/2, CALC_Y+10, 'AC BRANCH CIRCUIT INFO', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
@@ -2946,7 +2955,11 @@ function laneTopology(b: SLDSourceBranch): 'MICRO' | 'OPTIMIZER' | 'STRING' {
 }
 
 /** A lane's backfeed OCPD (A) — the single basis the AC-collection uses to size
- *  the shared panel busbar + system disconnect. */
+ *  the shared panel busbar + system disconnect.
+ *  P1-2 ruling: the ADAPTER-CARRIED authority values (backfeedAmps / acOCPD
+ *  from buildConductorAuthority) are the source; the necNextStandardOcpd tail
+ *  is a degraded-payload fallback ONLY (client `sources` posts that lack the
+ *  authority fields) and uses the one canonical NEC 240.6 ladder. */
 function laneBackfeedA(b: SLDSourceBranch): number {
   return b.backfeedAmps ?? b.acOCPD ?? necNextStandardOcpd((b.acOutputAmps ?? 0) * 1.25) ?? 0;
 }
@@ -3125,7 +3138,8 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // is the authoritative TOTAL — Σ per-physical-inverter rounded OCPDs across
   // subs INCLUDING battery bus impact (what computeMultiSystem's aggregate /
   // the permit authority carries). Structural fallback: Σ lane contributions
-  // + batteryBackfeedA.
+  // + batteryBackfeedA. (P1-2: authority-carried lane fields win; the ladder
+  // recompute is a degraded-payload fallback on the canonical NEC 240.6 table.)
   const laneBackfeed = (b: SLDSourceBranch): number =>
     b.backfeedAmps ?? b.acOCPD ?? necNextStandardOcpd((b.acOutputAmps ?? 0) * 1.25) ?? 0;
   const totalBackfeedAmps = input.backfeedAmps
@@ -3289,6 +3303,8 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       : _invRaw!;
     const laneLabel = b.label ?? `${b.key.toUpperCase()} — ${modules} × ${panelModel}`;
     const laneAcAmps = b.acOutputAmps ?? Math.round(((b.acOutputKw ?? 0) * 1000) / 240);
+    // P1-2: b.acOCPD is the authority's per-sub feeder OCPD (adapter-carried);
+    // the ladder recompute is a degraded-payload fallback only.
     const laneOcpd = b.acOCPD ?? necNextStandardOcpd(laneAcAmps * 1.25) ?? 20;
     console.log(`[SLD LANE ${tag}] topo=${g.topo} modules=${modules} inv=${invMfr} ${invModel} ocpd=${laneOcpd}A`);
 
@@ -3362,7 +3378,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
           desc: `PV-${tag} AC BRANCH CIRCUITS — ARRAY TRUNK (${nb} BRANCH${nb > 1 ? 'ES' : ''})`,
           gauge: _brGauge, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
           conduitType: 'N/A — FREE AIR', conduitSize: 'N/A',
-          egc: getEGCSize(bocpd), currentA: _brCur, baseVolts: 240,
+          egc: b.branchEgcGauge ?? getEGCSize(bocpd), currentA: _brCur, baseVolts: 240,
           runId: run ? prettyRunId(String(run.id)) : undefined,
           lenFt: run?.onewayLengthFt ?? null,
         });
@@ -3375,7 +3391,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
           desc: `PV-${tag} AC BRANCH CIRCUITS — J-BOX TO COMBINER`,
           gauge: _brGauge, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
           conduitType: 'EMT', conduitSize: conduitSizeForConductors(_brGauge, 2 * nb + 1),
-          egc: getEGCSize(bocpd), currentA: _brCur, baseVolts: 240, lenFt: null,
+          egc: b.branchEgcGauge ?? getEGCSize(bocpd), currentA: _brCur, baseVolts: 240, lenFt: null,
         });
       }
       feedX = cr.feederOutX;
@@ -3398,7 +3414,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
           desc: `PV-${tag} PV SOURCE CIRCUITS — ARRAY TO INVERTER`,
           gauge: '#10 AWG', insul: 'PV WIRE', nCond: `${_ns * 2}(${_ns}+,${_ns}−)`,
           conduitType: 'N/A — FREE AIR', conduitSize: 'N/A',
-          egc: getEGCSize(b.dcOCPD ?? 20),
+          egc: b.dcEgcGauge ?? getEGCSize(b.dcOCPD ?? 20),
           currentA: b.panelIsc ?? 0, baseVolts: Math.max(1, _pps * (b.panelVoc ?? 0)) || 240,
           runId: run ? prettyRunId(String(run.id)) : undefined,
           lenFt: run?.onewayLengthFt ?? null,
@@ -3426,7 +3442,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
           desc: `PV-${tag} PV SOURCE CIRCUITS — ARRAY TO DC DISCONNECT`,
           gauge: '#10 AWG', insul: 'PV WIRE', nCond: `${_ns0 * 2}(${_ns0}+,${_ns0}−)`,
           conduitType: 'N/A — FREE AIR', conduitSize: 'N/A',
-          egc: getEGCSize(b.dcOCPD ?? 20),
+          egc: b.dcEgcGauge ?? getEGCSize(b.dcOCPD ?? 20),
           currentA: b.panelIsc ?? 0, baseVolts: Math.max(1, _pps0 * (b.panelVoc ?? 0)) || 240,
           runId: run ? prettyRunId(String(run.id)) : undefined,
           lenFt: run?.onewayLengthFt ?? null,
@@ -3448,7 +3464,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
           gauge: '#10 AWG', insul: 'THWN-2', nCond: `${_ns1 * 2}(${_ns1}+,${_ns1}−)`,
           conduitType: b.acConduitType ?? 'EMT',
           conduitSize: conduitSizeForConductors('#10 AWG', _ns1 * 2 + 1),
-          egc: getEGCSize(b.dcOCPD ?? 20),
+          egc: b.dcEgcGauge ?? getEGCSize(b.dcOCPD ?? 20),
           currentA: b.panelIsc ?? 0, baseVolts: Math.max(1, _pps1 * (b.panelVoc ?? 0)) || 240,
           runId: run ? prettyRunId(String(run.id)) : undefined,
           lenFt: run?.onewayLengthFt ?? null,

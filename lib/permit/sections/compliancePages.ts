@@ -11,7 +11,9 @@ import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } fro
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { selectFieldLabels, type FieldLabel } from '../utils/fieldLabels';
 import { getDesignTemps } from '../utils/designTemps';
-import { isSubSystemKey } from '../utils/subSystems';
+import { isSubSystemKey, type SubSystemKey } from '../utils/subSystems';
+import { resolvePanelSpecs, coldVocFactor, type ResolvedPanelSpecs } from '../utils/panelSpecs';
+import { hybridSheetSections } from './subSystemSheets';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
@@ -536,7 +538,21 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   const acOcpd = auth.acFeeder.ocpdAmps;
   const mainA = project.mainPanelAmps || 200;
   const _str0 = system.inverters?.[0]?.strings?.[0];
-  const _panelVoc = eq.panelVoc || project.panelVoc || _str0?.panelVoc || 0;
+  // P1-1 (data-authority register): the panel Voc routes through the per-sub
+  // panel-spec authority (equipment-db via project.subSystems / the sub's own
+  // fleet) — project.panelVoc is a panel0 scalar (the FENCE module's on
+  // hybrids). Legacy chain survives only as the final fallback.
+  const _specKey: SubSystemKey = isFence(cad.systemType) ? 'fence'
+    : isGround(cad.systemType) ? 'ground' : 'roof';
+  const _ps = resolvePanelSpecs(input, cad, _specKey);
+  const _panelVoc = _ps.voc || eq.panelVoc || project.panelVoc || _str0?.panelVoc || 0;
+  // Design-low temp for the ONE cold-Voc law (shared by the hybrid branch AND
+  // the single-system fallback below — register P1-4).
+  const _projT = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
+  const _st = (_projT.state && /^[A-Za-z]{2}$/.test(_projT.state.trim()))
+    ? _projT.state.trim().toUpperCase()
+    : ((_projT.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/)?.[1]?.toUpperCase());
+  const _tMin = project.designTempMin ?? getDesignTemps(_projT.lat, _projT.lng, _st).ashraeExtremeLowC;
   // SYSTEMIC ROOT #1: on a hybrid the whole system is NOT microinverter — the
   // string/optimizer subs carry real series DC. "MAX DC SYSTEM VOLTAGE" is the
   // largest cold-corrected string Voc across those subs, never "N/A" (which
@@ -547,11 +563,6 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
     // with the equipment-DB β when the model resolves (blanket ×1.25 printed
     // 576 V here beside PV-5's 527 V for the same fence string). Unresolved
     // β keeps the conservative ×1.25.
-    const _projT = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
-    const _st = (_projT.state && /^[A-Za-z]{2}$/.test(_projT.state.trim()))
-      ? _projT.state.trim().toUpperCase()
-      : ((_projT.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/)?.[1]?.toUpperCase());
-    const _tMin = project.designTempMin ?? getDesignTemps(_projT.lat, _projT.lng, _st).ashraeExtremeLowC;
     const vals: number[] = [];
     for (const inv of system.inverters ?? []) {
       if (String(inv.type || '').toLowerCase().includes('micro')) continue;
@@ -565,19 +576,23 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
             ?? SOLAR_PANELS.find(p => m.includes(p.model.toLowerCase()) || p.model.toLowerCase().includes(m)))
           : undefined;
         const beta = typeof db?.tempCoeffVoc === 'number' ? db.tempCoeffVoc : undefined;
-        const factor = beta !== undefined ? 1 + (beta / 100) * (_tMin - 25) : 1.25;
+        const factor = coldVocFactor(beta, _tMin);  // P1-4: the ONE cold-Voc law
         vals.push(Math.round(voc * factor * n));
       }
     }
     return vals.length ? Math.max(...vals) : null;
   })();
+  // P1-4: single-system fallback uses the SAME β-based NEC 690.7(A) law as the
+  // hybrid branch above (blanket ×1.25 only when no β resolves) — two cold-Voc
+  // laws printed contradictory maxima across sheets.
+  const _coldF = coldVocFactor(_ps.tempCoeffVocPctPerC, _tMin);
   const maxDcV = _hybridMaxDcV != null
     ? `${_hybridMaxDcV} V DC`
     : (isMicro
         ? 'N/A — MICROINVERTER (MODULE-LEVEL DC ONLY)'
         : (_str0?.panelCount && _panelVoc
-            ? `${Math.round(_panelVoc * 1.25 * _str0.panelCount)} V DC`
-            : (_panelVoc ? `${Math.round(_panelVoc * 1.25)} V DC` : '____ V DC')));
+            ? `${Math.round(_panelVoc * _coldF * _str0.panelCount)} V DC`
+            : (_panelVoc ? `${Math.round(_panelVoc * _coldF)} V DC` : '____ V DC')));
   const interType = isSupply
     ? 'SUPPLY-SIDE TAP — NEC 705.11'
     : `LOAD-SIDE BACK-FED BREAKER${acOcpd ? ` (${acOcpd}A)` : ''} — NEC 705.12`;
@@ -805,13 +820,51 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const vocMax = parseFloat((voc * vocColdFactor).toFixed(1));
   const iscMax = parseFloat((isc * NEC_SAFETY).toFixed(2));
 
+  // ── P0-4 (data-authority register): on hybrids this sheet printed ONE
+  // module datasheet (panel0 — the FENCE module) for the whole system, so the
+  // roof/ground modules' Voc/dims/weight/efficiency never appeared anywhere.
+  // Render one datasheet card PER SUB from the per-sub panel-spec authority
+  // (equipment-db via project.subSystems[key].panelId → the sub's fleet).
+  // Single-system markup below is untouched.
+  const _hybridSecsA = hybridSheetSections(cad);
+  const _subModCards = _hybridSecsA.length > 1 ? _hybridSecsA.map(sec => {
+    const ps = resolvePanelSpecs(input, cad, sec.key);
+    const d = ps.db;
+    const vmpS = d?.vmp ?? (ps.voc > 0 ? parseFloat((ps.voc * 0.83).toFixed(1)) : 0);
+    const impS = d?.imp ?? (vmpS > 0 ? parseFloat((ps.watts / vmpS).toFixed(2)) : 0);
+    const effS = d?.efficiency
+      ?? ((ps.watts > 0 && ps.lengthIn > 0 && ps.widthIn > 0)
+        ? (ps.watts / (ps.lengthIn / 39.37 * ps.widthIn / 39.37)) / 10 : 0);
+    const cfS = coldVocFactor(ps.tempCoeffVocPctPerC, designTempMinC);
+    const vocMaxS = parseFloat((ps.voc * cfS).toFixed(1));
+    const iscMaxS = parseFloat((ps.isc * NEC_SAFETY).toFixed(2));
+    return `
+          <div class="section-title">PV Module — ${sec.key.toUpperCase()} ARRAY (×${sec.totalPanels})</div>
+          <table class="info-table" style="margin-bottom:5px;">
+            <tr><td class="il">Manufacturer / Model</td><td class="iv">${ps.manufacturer} ${ps.model}</td></tr>
+            <tr><td class="il">STC Power (Pmax)</td><td class="iv">${ps.watts} Wp</td></tr>
+            <tr><td class="il">Voc / Isc</td><td class="iv">${ps.voc} V / ${ps.isc} A</td></tr>
+            <tr><td class="il">Vmp / Imp</td><td class="iv">${vmpS} V / ${impS} A</td></tr>
+            <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">${ps.tempCoeffVocPctPerC ?? '—'}%/°C</td></tr>
+            <tr><td class="il">NOCT</td><td class="iv">${d?.nominalOperatingTemp ?? 45}°C ±2°C</td></tr>
+            <tr><td class="il">Module Efficiency</td><td class="iv">${effS ? effS.toFixed(1) + '%' : '—'}</td></tr>
+            <tr><td class="il">Dimensions (L × W)</td><td class="iv">${ps.lengthIn}" × ${ps.widthIn}" (${(ps.lengthIn * 25.4).toFixed(0)} × ${(ps.widthIn * 25.4).toFixed(0)} mm)</td></tr>
+            <tr><td class="il">Weight</td><td class="iv">${ps.weightLbs} lbs (${(ps.weightLbs * 0.453592).toFixed(1)} kg)</td></tr>
+            <tr><td class="il">Cell Type</td><td class="iv">${d ? `${d.cellType}${d.bifacial ? ' — Bifacial' : ''}` : '—'}</td></tr>
+            <tr><td class="il">UL Listing</td><td class="iv">${d?.ulListing || 'UL 61730 / IEC 61215'}</td></tr>
+            <tr><td class="il">NEC 690.7 Max Voc</td><td class="iv"><strong>${vocMaxS} V</strong> (×${cfS.toFixed(3)} @ ${designTempMinC}°C)</td></tr>
+            <tr><td class="il">NEC 690.8(A) Max Isc</td><td class="iv"><strong>${iscMaxS} A</strong> (×1.25)</td></tr>
+          </table>`;
+  }).join('') + `
+          <div style="font-size:7px;color:#555;margin:-2px 0 4px 0;">One module record per sub-system — resolved from the project equipment map / equipment database. Vmp/Imp and temperature coefficients are typical values — verify against the manufacturer's certified datasheet before construction.</div>` : '';
+
   return `
   <div class="page">
     ${titleBlock(input, 'APP-A', 'EQUIPMENT SPECIFICATION REFERENCE', pageNum, totalPages)}
     <div class="page-content">
       <div class="two-col-layout">
         <div class="col-left">
-          <!-- Module Datasheet Summary -->
+          ${_subModCards || `<!-- Module Datasheet Summary -->
           <div class="section-title">PV Module — Electrical Specifications</div>
           <table class="info-table" style="margin-bottom:6px;">
             <tr><td class="il">Manufacturer</td><td class="iv">${modMfr}</td></tr>
@@ -862,7 +915,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               <tr><td>Vmp (Operating)</td><td>${vmp} V</td><td>×1.0</td><td>${vmp} V</td></tr>
               <tr><td>Imp (Operating)</td><td>${imp} A</td><td>×1.0</td><td>${imp} A</td></tr>
             </tbody>
-          </table>
+          </table>`}
         </div>
 
         <div class="col-right">
@@ -889,7 +942,17 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               // a module Voc ABOVE the inverter's max DC input on the same
               // page with no flag (electrically impossible pairing shipping
               // silently). Micro topologies skipped every upstream Voc check.
-              const _mVoc = Number(vocMax); // cold-corrected per NEC 690.7 — raw Voc can pass while the corrected value exceeds the limit
+              // P0-4: on hybrids, judge each inverter against ITS OWN sub's
+              // module — the panel0 (fence) Voc/Pmax basis fired false
+              // compatibility warnings on the roof/ground lanes.
+              const _invSubKey = (inv as { subSystemKey?: string }).subSystemKey;
+              const _invPs: ResolvedPanelSpecs | null = (_hybridSecsA.length > 1 && isSubSystemKey(_invSubKey))
+                ? resolvePanelSpecs(input, cad, _invSubKey) : null;
+              const _basisVocMax = _invPs
+                ? parseFloat((_invPs.voc * coldVocFactor(_invPs.tempCoeffVocPctPerC, designTempMinC)).toFixed(1))
+                : vocMax;
+              const _basisPmax = _invPs?.watts || pmax;
+              const _mVoc = Number(_basisVocMax); // cold-corrected per NEC 690.7 — raw Voc can pass while the corrected value exceeds the limit
               const _mMax = Number(inv.maxDcVoltage);
               const _warns: string[] = [];
               if (isFinite(_mVoc) && isFinite(_mMax) && _mMax > 0 && _mVoc > _mMax) {
@@ -899,8 +962,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               // micro (DC/AC 1.7) is beyond every manufacturer pairing range
               // and shipped silently as "31 kW DC / 18 kW AC".
               const _mAcW = Number(inv.acOutputKw) * 1000;
-              if (inv.type === 'micro' && isFinite(_mAcW) && _mAcW > 0 && pmax / _mAcW > 1.55) {
-                _warns.push(`module STC power (${pmax} W) is ${(pmax / _mAcW).toFixed(2)}× this microinverter's AC rating (${Math.round(_mAcW)} W) — beyond the manufacturer's pairing range (≤1.55×); expect sustained clipping`);
+              if (inv.type === 'micro' && isFinite(_mAcW) && _mAcW > 0 && _basisPmax / _mAcW > 1.55) {
+                _warns.push(`module STC power (${_basisPmax} W) is ${(_basisPmax / _mAcW).toFixed(2)}× this microinverter's AC rating (${Math.round(_mAcW)} W) — beyond the manufacturer's pairing range (≤1.55×); expect sustained clipping`);
               }
               return _warns.length ? `
             <div style="border:2px solid #cc0000;background:#fff5f5;padding:4px 6px;margin-top:3px;font-size:8px;line-height:1.4;color:#cc0000;font-weight:700;">

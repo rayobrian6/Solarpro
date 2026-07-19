@@ -19,6 +19,7 @@ import {
 import { DC_AC_TARGET, DC_AC_CLIPPING_BANDS, getDcAcClippingSeverity } from './system/dcAcConstants';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import type { SubSystemKey } from './system/subSystemEquipment';
+import { nextStandardOcpd, nextEnclosure, prevStandardOcpd } from './electrical/stdSizes';
 
 // ─── Input Types ──────────────────────────────────────────────────────────────
 
@@ -861,14 +862,9 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // Use combined solar + battery backfeed for 120% rule check (NEC 705.12(B))
   const icSolarBreaker = input.interconnection?.solarBreaker ?? totalBackfeedWithBattery;
 
-  // Helper: nearest standard breaker at or below a value
-  const prevStandardOCPD = (amps: number): number => {
-    const standards = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
-    for (let i = standards.length - 1; i >= 0; i--) {
-      if (standards[i] <= amps) return standards[i];
-    }
-    return 15;
-  };
+  // Helper: nearest standard breaker at or below a value — single-sourced
+  // from lib/electrical/stdSizes.ts (P0-5c).
+  const prevStandardOCPD = (amps: number): number => prevStandardOcpd(amps);
 
   const interconnectionIssues: CalcIssue[] = [];
   let interconnectionPasses = false;
@@ -1366,14 +1362,14 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // Standard disconnect enclosure sizes (residential/light-commercial catalog):
   //   30A, 60A, 100A, 200A, 400A, 600A
   //
-  const STANDARD_FUSE_SIZES = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
-  const STANDARD_DISC_ENCLOSURES = [30, 60, 100, 200, 400, 600]; // standard enclosure ratings
-
+  // Fuse + enclosure ladders — single-sourced from lib/electrical/stdSizes.ts
+  // (P0-5c; the old local fuse copy stopped at 200 A with a fictional
+  // next-10A fallback above it).
   function nextFuseSize(amps: number): number {
-    return STANDARD_FUSE_SIZES.find(f => f >= amps) ?? Math.ceil(amps / 10) * 10;
+    return nextStandardOcpd(amps);
   }
   function nextEnclosureSize(amps: number): number {
-    return STANDARD_DISC_ENCLOSURES.find(e => e >= amps) ?? Math.ceil(amps / 100) * 100;
+    return nextEnclosure(amps);
   }
 
   // Determine fused vs non-fused from interconnection method

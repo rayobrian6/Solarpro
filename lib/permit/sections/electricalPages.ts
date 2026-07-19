@@ -1299,10 +1299,16 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     // NEC 690.8(A) Source Circuit Current (per microinv./string)
     const _srcIsc = panelIsc > 0 ? panelIsc : 0;
     const _srcImax = _srcIsc * 1.25;                         // NEC 690.8(A)(1)(a)
-    const _srcOcpd = _srcImax > 0 ? Math.ceil(_srcImax / 5) * 5 : branchOcpd; // next standard size
+    // P0-5a (data-authority register): OCPDs read the shared conductor
+    // authority (already on the NEC 240.6 ladder); the fallback derives via
+    // necNextStandardOcpd — NEVER ceil-to-5 (52A printed a nonexistent "55A"
+    // fuse where the authority says 60A).
+    const _srcOcpd = _sldAuth.governingOcpd
+      || (_srcImax > 0 ? (necNextStandardOcpd(_srcImax) || branchOcpd) : branchOcpd);
     // NEC 690.8(B) PV Output Circuit Current
     const _outImax = acOutputAmps * 1.25;                    // NEC 690.8(B)(1)(a)
-    const _outOcpd = _outImax > 0 ? Math.ceil(_outImax / 5) * 5 : acOCPD;     // next standard size
+    const _outOcpd = _sldAuth.acFeeder.ocpdAmps
+      ?? (_outImax > 0 ? (necNextStandardOcpd(_outImax) || acOCPD) : acOCPD);
     const rows2: [string,string][]=[
       ['AC Output (kW)',`${totalAcKw.toFixed(2)} kW`],
       ['AC Output Amps',`${acOutputAmps.toFixed(1)} A`],
@@ -1510,7 +1516,9 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(circ(tbX+TB_W/2,sealY+22,18,{fill:WHT,stroke:BLK,sw:SW_THIN}));
     parts.push(txt(tbX+TB_W/2,sealY+19,'ENGINEER',{sz:F.tiny,anc:'middle',fill:'#888'}));
     parts.push(txt(tbX+TB_W/2,sealY+28,'SEAL',{sz:F.tiny,anc:'middle',fill:'#888'}));
-    parts.push(txt(tbX+TB_W/2,sealY+44,`${esc(project.designer||'SolarPro Engineering')} — ${esc(project.date||'')}`,{sz:F.tiny,anc:'middle',fill:'#555'}));
+    // P0-8 (data-authority register): Engineer-of-Record is a BLANK fill-in
+    // like the cover (route.ts no-vendor-EOR rule) — never a vendor default.
+    parts.push(txt(tbX+TB_W/2,sealY+44,`${esc(project.designer||'')} — ${esc(project.date||'')}`,{sz:F.tiny,anc:'middle',fill:'#555'}));
 
     parts.push('</svg>');
     return parts.join('\n');

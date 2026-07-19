@@ -11,6 +11,7 @@ import {
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
+import { resolvePanelSpecs } from '../utils/panelSpecs';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
@@ -456,7 +457,26 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     const ps = ((cad.roof?.planes ?? []) as any[]).map(x => Number(x?.pitch)).filter(v => isFinite(v));
     return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : undefined;
   })();
-  const _fsCovEarly = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2Early, _fsMeanPitch);
+  // P0-2 (data-authority register): the coverage fraction that decides the
+  // 18"-vs-36" fire-setback band must use the ROOF sub's OWN module dims.
+  // project.panelLengthIn/WidthIn are panel0 scalars — client intake writes
+  // inverters[0].strings[0]'s panel there, the FENCE module on hybrids — so
+  // the band was decided by fence-panel geometry. Resolve via the per-sub
+  // panel-spec authority; single-system output is unchanged (no hybrid
+  // carriage → legacy scalars).
+  const _fsPanelDims = (() => {
+    const legacyL = (project.panelLengthIn as number) || 66;
+    const legacyW = (project.panelWidthIn as number) || 40;
+    if (!isHybridPlanset(cad)) return { L: legacyL, W: legacyW };
+    const ps = resolvePanelSpecs(input, cad, 'roof');
+    if (!(ps.lengthIn > 0 && ps.widthIn > 0)) return { L: legacyL, W: legacyW };
+    if (Math.abs(ps.lengthIn - legacyL) > 0.05 || Math.abs(ps.widthIn - legacyW) > 0.05) {
+      console.warn(`[PV-1B] fire-setback coverage recomputed from roof-sub module dims: `
+        + `${legacyL}x${legacyW}in (project panel0 scalars) → ${ps.lengthIn}x${ps.widthIn}in (${ps.model})`);
+    }
+    return { L: ps.lengthIn, W: ps.widthIn };
+  })();
+  const _fsCovEarly = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2Early, _fsMeanPitch);
   const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
 
   // Callout notes for data zone
@@ -478,7 +498,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // System-specific supplemental data \u2014 setback text from the SAME rule the
   // drawing uses (it claimed 18" per-AHJ while PV-2 hatched 3'-0" bands).
   const _fsRoofFt2 = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
-  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2, _fsMeanPitch);
+  // P0-2: same roof-sub module dims as the callout block above — never panel0.
+  const _fsCov = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2, _fsMeanPitch);
   const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
