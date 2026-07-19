@@ -181,6 +181,45 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       input.system.totalAcKw = cad.totalDcKw / 1.2;
     }
 
+    // ── HYBRID: per-sub nameplate totals GOVERN (recompute-if-contradicts) ──
+    // Two stale bases died here (2026-07-19):
+    //   DC — cad.totalDcKw Σs the CAD sections, whose dcKw is PRORATED from the
+    //   client's flat panels×inverters[0]-wattage total (Stowell: 88×440 =
+    //   38.72 kW with the FENCE panel pricing REC-405 roof modules; true
+    //   per-sub Σ = 54×405 + 16×580 + 18×440 = 39.07 kW).
+    //   AC — the string-path Σ above counts a micro fleet-record ONCE at its
+    //   per-DEVICE kW (0.29) instead of ×devices (Stowell: 19.39 vs 34.78 —
+    //   the CERT sheet printed it while E-1/PV-5 printed the true sum).
+    // subScopedInput is the §1.1 authority for both (stamps × nameplate, micro
+    // per-device × count) — Σ its subs and let that govern the project totals
+    // every title block / cover / CERT reads. Single-system paths untouched.
+    if (cad.hybrid) {
+      let _subDc = 0, _subAc = 0, _subN = 0;
+      for (const _sec of hybridSheetSections(cad)) {
+        const _s = subScopedInput(input, cad, _sec.key).system as
+          { totalDcKw?: number; totalAcKw?: number; totalPanels?: number };
+        _subDc += _s?.totalDcKw || 0;
+        _subAc += _s?.totalAcKw || 0;
+        _subN  += _s?.totalPanels || 0;
+      }
+      if (_subDc > 0 && Math.abs(_subDc - (input.system.totalDcKw || 0)) > 0.005) {
+        console.warn('[PLANSET] HYBRID DC recompute: per-sub nameplate Σ', _subDc.toFixed(2),
+          'kW replaces flat-basis', (input.system.totalDcKw || 0).toFixed(2), 'kW');
+        input.system.totalDcKw = Math.round(_subDc * 100) / 100;
+        cad.totalDcKw = input.system.totalDcKw;
+        canonical.electrical.totalDcKw = input.system.totalDcKw;
+      }
+      if (_subAc > 0 && Math.abs(_subAc - (input.system.totalAcKw || 0)) > 0.005) {
+        console.warn('[PLANSET] HYBRID AC recompute: per-sub Σ', _subAc.toFixed(2),
+          'kW replaces', (input.system.totalAcKw || 0).toFixed(2), 'kW');
+        input.system.totalAcKw = Math.round(_subAc * 100) / 100;
+      }
+      if (_subN > 0 && _subN !== input.system.totalPanels) {
+        console.warn('[PLANSET] HYBRID panel-count recompute:', _subN, 'vs', input.system.totalPanels);
+        input.system.totalPanels = _subN;
+      }
+    }
+
     // DC/AC ratio
     if (input.system.totalAcKw > 0) {
       input.system.dcAcRatio = input.system.totalDcKw / input.system.totalAcKw;
