@@ -482,9 +482,35 @@ export function getPrimaryView(
 const THUMB_SEG_COLORS = ['#2255aa', '#1a7a3a', '#8b1a1a', '#7a5500', '#4a1a7a', '#006666'];
 const M_TO_FT = 3.280839895;
 
-/** Minimal fence top-down: colored runs + module ticks + per-segment length.
- *  No title bar, no schedule — just the segment plan for the secondary strip. */
-function buildSegmentPlanThumb(cad: CADModel): string | null {
+// STRING LEGEND palette — MUST match PV-1B/PV-1BF's `stringColors` list in
+// lib/permit/sections/arrayPages.ts (not exported there; keep the two lists
+// byte-identical so CIRCUIT 1 here is the same hue as STRING 1 on PV-1BF).
+const FENCE_STRING_COLORS = ['#1b3f74','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d','#e5a100',
+                             '#134e4a','#7f1d1d','#92400e','#312e81','#155e75','#831843','#3f6212','#713f12'];
+
+/** DC-string spans for the fence run, from the SUB-SCOPED inverter fleet
+ *  (subScopedInput already filtered/synthesized it to this sub only).
+ *  Returns cumulative module-count boundaries per string, in string order —
+ *  e.g. Stowell fence 18 modules in 2×9 → [{count:9},{count:9}]. */
+function fenceStringSpans(input: PermitInput): Array<{ count: number }> {
+  const invs = (input.system?.inverters ?? []) as Array<{
+    strings?: Array<{ panelCount?: number }>;
+  }>;
+  const spans: Array<{ count: number }> = [];
+  for (const inv of invs) {
+    for (const s of inv.strings ?? []) {
+      const n = Number(s.panelCount) || 0;
+      if (n > 0) spans.push({ count: n });
+    }
+  }
+  return spans;
+}
+
+/** Minimal fence top-down, CIRCUIT-COLORED (reference PV-2 style): the run is
+ *  drawn as per-DC-string colored module cells with post tick marks, plus a
+ *  CIRCUIT legend handed to the data rail via the RAIL-LEGEND sentinel (Ray's
+ *  ruling: legends live OFF the map). No title bar, no schedule. */
+function buildSegmentPlanThumb(cad: CADModel, input: PermitInput): string | null {
   const f = cad.fence;
   const segs = f?.segments ?? [];
   if (!f || segs.length === 0) return null;
@@ -504,31 +530,91 @@ function buildSegmentPlanThumb(cad: CADModel): string | null {
   const X = (x: number) => ox + (x - minX) * scale;
   const Y = (y: number) => oyb - (y - minY) * scale;
 
+  // ── DC-string assignment: module cells in run order → string spans ────────
+  // Balanced along the run: cumulative panelCount thresholds from the scoped
+  // fleet; if the string sum ≠ placed modules, thresholds scale proportionally
+  // (never drops a cell). No strings resolvable → single-color fallback.
+  const spans = fenceStringSpans(input);
+  const totalCells = segs.reduce((s, sg) => s + Math.max(sg.panelCount ?? 0, 0), 0);
+  const spanSum = spans.reduce((s, sp) => s + sp.count, 0);
+  const bounds: number[] = [];   // cumulative cell index at each string end
+  if (spans.length > 0 && spanSum > 0 && totalCells > 0) {
+    let acc = 0;
+    for (const sp of spans) { acc += sp.count; bounds.push(Math.round(acc * totalCells / spanSum)); }
+    bounds[bounds.length - 1] = totalCells;   // exact cap
+  }
+  const stringOfCell = (ci: number): number => {
+    for (let i = 0; i < bounds.length; i++) if (ci < bounds[i]) return i;
+    return Math.max(bounds.length - 1, 0);
+  };
+  const hasStrings = bounds.length > 0;
+
   const out: string[] = [
     `<rect x="0" y="0" width="${W}" height="${H}" fill="#fff"/>`,
     // Discreet caption — the inset is the FENCE'S OWN segment plan (not the
     // roof site plan, and not the full sheet's schedule furniture).
-    `<text x="6" y="12" font-size="8" font-weight="bold" fill="#333">FENCE SEGMENT PLAN</text>`,
+    `<text x="6" y="12" font-size="8" font-weight="bold" fill="#333">FENCE SEGMENT PLAN — DC CIRCUITS</text>`,
   ];
+  let cellBase = 0;   // cumulative module index across segments (run order)
   segs.forEach((s, i) => {
     const x1 = X(s.startX), y1 = Y(s.startY), x2 = X(s.endX), y2 = Y(s.endY);
-    const col = THUMB_SEG_COLORS[i % THUMB_SEG_COLORS.length];
+    const segCol = THUMB_SEG_COLORS[i % THUMB_SEG_COLORS.length];
     const segPx = Math.hypot(x2 - x1, y2 - y1) || 1;
     const nx = -(y2 - y1) / segPx, ny = (x2 - x1) / segPx;
     const B = 8;
-    out.push(`<polygon points="${(x1 + nx * B).toFixed(1)},${(y1 + ny * B).toFixed(1)} ${(x2 + nx * B).toFixed(1)},${(y2 + ny * B).toFixed(1)} ${(x2 - nx * B).toFixed(1)},${(y2 - ny * B).toFixed(1)} ${(x1 - nx * B).toFixed(1)},${(y1 - ny * B).toFixed(1)}" fill="${col}" fill-opacity="0.12" stroke="${col}" stroke-width="0.9"/>`);
     const cells = Math.max(s.panelCount ?? 0, 1);
-    for (let c = 0; c <= cells; c++) {
-      const t = c / cells, cx = x1 + (x2 - x1) * t, cy = y1 + (y2 - y1) * t;
-      out.push(`<line x1="${(cx + nx * B).toFixed(1)}" y1="${(cy + ny * B).toFixed(1)}" x2="${(cx - nx * B).toFixed(1)}" y2="${(cy - ny * B).toFixed(1)}" stroke="${col}" stroke-width="0.6"/>`);
+
+    // Per-module cells, filled by DC string (reference: per-circuit colored run)
+    for (let c = 0; c < cells; c++) {
+      const t0 = c / cells, t1 = (c + 1) / cells;
+      const ax = x1 + (x2 - x1) * t0, ay = y1 + (y2 - y1) * t0;
+      const bx = x1 + (x2 - x1) * t1, by = y1 + (y2 - y1) * t1;
+      const col = hasStrings
+        ? FENCE_STRING_COLORS[stringOfCell(cellBase + c) % FENCE_STRING_COLORS.length]
+        : segCol;
+      out.push(`<polygon points="${(ax + nx * B).toFixed(1)},${(ay + ny * B).toFixed(1)} ${(bx + nx * B).toFixed(1)},${(by + ny * B).toFixed(1)} ${(bx - nx * B).toFixed(1)},${(by - ny * B).toFixed(1)} ${(ax - nx * B).toFixed(1)},${(ay - ny * B).toFixed(1)}" fill="${col}" fill-opacity="0.22" stroke="${col}" stroke-width="0.9"/>`);
+      // Module boundary tick
+      out.push(`<line x1="${(ax + nx * B).toFixed(1)}" y1="${(ay + ny * B).toFixed(1)}" x2="${(ax - nx * B).toFixed(1)}" y2="${(ay - ny * B).toFixed(1)}" stroke="${col}" stroke-width="0.6"/>`);
+      // Circuit-colored centreline through the cell
+      out.push(`<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="${col}" stroke-width="2.4" stroke-linecap="butt"/>`);
     }
-    out.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="2" stroke-linecap="round"/>`);
+
+    // Post tick marks at SECTION JOINTS (2 modules per SolFence section) —
+    // the reference draws these as bold rod/post ticks along the run.
+    const postSpFt = (f.postSpacingM ?? 2.44) * M_TO_FT;
+    const panelWFt = cells > 0 ? ((s.lengthM ?? 0) * M_TO_FT) / cells : 4;
+    const perSection = Math.max(1, Math.round(postSpFt / Math.max(panelWFt, 0.5)));
+    for (let c = 0; c <= cells; c += perSection) {
+      const t = Math.min(c / cells, 1);
+      const px = x1 + (x2 - x1) * t, py = y1 + (y2 - y1) * t;
+      out.push(`<rect x="${(px - 2.2).toFixed(1)}" y="${(py - 2.2).toFixed(1)}" width="4.4" height="4.4" fill="#111"/>`);
+    }
+    if ((cells % perSection) !== 0) {
+      out.push(`<rect x="${(x2 - 2.2).toFixed(1)}" y="${(y2 - 2.2).toFixed(1)}" width="4.4" height="4.4" fill="#111"/>`);
+    }
+
     const lenFt = (s.lengthM ?? 0) * M_TO_FT;
     const mx = (x1 + x2) / 2 - nx * (B + 7), my = (y1 + y2) / 2 - ny * (B + 7);
     const lbl = escapeH(String(s.label ?? s.id ?? ('S' + (i + 1))));
-    out.push(`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="7" font-weight="bold" fill="${col}">${lbl}: ${Math.round(lenFt)}'</text>`);
+    out.push(`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="7" font-weight="bold" fill="#333">${lbl}: ${Math.round(lenFt)}'</text>`);
+    cellBase += cells;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">${out.join('')}</svg>`;
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">${out.join('')}</svg>`;
+
+  // ── CIRCUIT legend → data rail (RAIL-LEGEND sentinel; never on the map) ──
+  if (!hasStrings) return svg;
+  const legendRows = spans.map((sp, i) => {
+    const col = FENCE_STRING_COLORS[i % FENCE_STRING_COLORS.length];
+    return `<div style="display:flex;align-items:center;gap:5px;padding:1px 5px;">` +
+      `<span style="display:inline-block;width:14px;height:8px;background:${col}22;border:1.5px solid ${col};"></span>` +
+      `<span style="font-size:7px;">CIRCUIT ${i + 1} — STRING ${i + 1} × ${sp.count} MODULES</span></div>`;
+  }).join('');
+  const legendExtra =
+    `<div style="display:flex;align-items:center;gap:5px;padding:1px 5px;">` +
+    `<span style="display:inline-block;width:14px;height:8px;position:relative;"><span style="position:absolute;left:5px;top:0;width:4px;height:8px;background:#111;"></span></span>` +
+    `<span style="font-size:7px;">FENCE POST — SECTION JOINT (2 MOD/SECTION)</span></div>`;
+  return svg + `<!--RAIL-LEGEND--><div style="padding:1px 0 3px;">${legendRows}${legendExtra}</div><!--/RAIL-LEGEND-->`;
 }
 
 /** Minimal ground row-spacing SIDE diagram: tilted module rows + O.C. dim.
@@ -589,7 +675,8 @@ export function getSecondaryView(
   switch (viewId) {
     case 'segment_plan':
       // Dedicated minimal fence top-down — NOT the full getArrayPlanFromCAD sheet.
-      try { return buildSegmentPlanThumb(cad); } catch { return null; }
+      // input = the SUB-SCOPED PermitInput (pageFencePlan passes it) → circuit colors.
+      try { return buildSegmentPlanThumb(cad, input); } catch { return null; }
     case 'row_layout':
       // Dedicated minimal ground row-spacing side diagram — NOT the full sheet.
       try { return buildRowSpacingThumb(cad); } catch { return null; }
@@ -661,6 +748,19 @@ export function composeDrawPage(
        </div>`
     : '';
 
+  // ── Rail legend hand-off from the SECONDARY view (fence circuit legend) ────
+  // Same sentinel contract as the primary-drawing legend below: the secondary
+  // SVG may append a RAIL-LEGEND block AFTER its closing </svg>; strip it here
+  // BEFORE the strip is embedded so the legend renders in the data rail only.
+  let secondaryLegendHtml = '';
+  if (secondarySvg) {
+    const _slg = secondarySvg.match(/<!--RAIL-LEGEND-->([\s\S]*?)<!--\/RAIL-LEGEND-->/);
+    if (_slg) {
+      secondaryLegendHtml = _slg[1];
+      secondarySvg = secondarySvg.replace(_slg[0], '');
+    }
+  }
+
   // ── Secondary view strip (bottom of draw zone) ─────────────────────────────
   // Use secondaryHeader from composition (system-specific label)
   const secHeader = escapeH(comp.secondaryHeader ?? 'SECONDARY VIEW');
@@ -687,11 +787,12 @@ export function composeDrawPage(
   // untouched).
   let railLegendHtml = '';
   const _lgMatch = drawingSvg.match(/<!--RAIL-LEGEND-->([\s\S]*?)<!--\/RAIL-LEGEND-->/);
-  if (_lgMatch) {
+  if (_lgMatch) drawingSvg = drawingSvg.replace(_lgMatch[0], '');
+  const _legendBody = (_lgMatch?.[1] ?? '') + secondaryLegendHtml;
+  if (_legendBody) {
     railLegendHtml = `
             <div class="draw-zone-hdr" style="flex-shrink:0;">LEGEND</div>
-            <div style="padding:2px 0;">${_lgMatch[1]}</div>`;
-    drawingSvg = drawingSvg.replace(_lgMatch[0], '');
+            <div style="padding:2px 0;">${_legendBody}</div>`;
   }
 
   /* PIPELINE v47.343: draw-zone enforces fixed ratio with min-height guard.

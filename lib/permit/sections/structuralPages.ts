@@ -259,7 +259,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>DEAD LOAD INTERPRETATION:</strong>
         The total added dead load of ${totalDL} PSF is distributed uniformly over the fence panel area and transferred
-        to the fence posts and concrete footings via the horizontal rail system.
+        to the fence posts and driven post foundations via the horizontal rail system.
         Post foundations are evaluated to confirm adequate capacity per ASCE 7-22 §26 and §29.4.
         Dead load does not govern for vertical fence-mounted arrays — wind uplift and overturning are the controlling load cases.
       </div>
@@ -276,14 +276,14 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
             <text x="150" y="152" text-anchor="middle" font-size="7.5" fill="#fff" font-weight="bold">FINISH GRADE</text>
             <!-- Below grade soil -->
             <rect x="0" y="158" width="300" height="82" fill="#c8a96e" stroke="#000" stroke-width="0.5"/>
-            <!-- Concrete footing around post -->
-            <ellipse cx="150" cy="230" rx="38" ry="8" fill="#aaa" stroke="#000" stroke-width="1"/>
-            <rect x="112" y="170" width="76" height="65" fill="#aaa" stroke="#000" stroke-width="1"/>
-            <text x="150" y="210" text-anchor="middle" font-size="7" fill="#333" font-weight="bold">CONC. FOOTING</text>
-            <text x="150" y="220" text-anchor="middle" font-size="6.5" fill="#333">3000 PSI MIN, 12" DIA</text>
-            <!-- Post (above and below grade) -->
-            <rect x="138" y="20" width="24" height="178" fill="#444" stroke="#000" stroke-width="1.5"/>
-            <text x="150" y="95" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold" transform="rotate(-90,150,95)">STEEL POST</text>
+            <!-- Driven inner steel post below grade (dashed = buried, no concrete) -->
+            <rect x="142" y="158" width="16" height="72" fill="#fff" stroke="#000" stroke-width="1.2" stroke-dasharray="4,2"/>
+            <polygon points="142,230 150,240 158,230" fill="#fff" stroke="#000" stroke-width="1.2" stroke-dasharray="4,2"/>
+            <text x="196" y="210" text-anchor="middle" font-size="7" fill="#333" font-weight="bold">DRIVEN STEEL POST</text>
+            <text x="196" y="220" text-anchor="middle" font-size="6.5" fill="#333">2-7/8" DIA — NO CONCRETE</text>
+            <!-- Outer post (above grade) -->
+            <rect x="138" y="20" width="24" height="140" fill="#444" stroke="#000" stroke-width="1.5"/>
+            <text x="150" y="95" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold" transform="rotate(-90,150,95)">4" DIA OUTER POST</text>
             <!-- PV Module on post -->
             <rect x="80" y="8" width="140" height="22" fill="#2255aa" stroke="#000" stroke-width="1" rx="1"/>
             <text x="150" y="22" text-anchor="middle" font-size="7.5" fill="#fff" font-weight="bold">PV MODULE</text>
@@ -311,12 +311,12 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         </div>
         <div style="font-size:var(--f-sm);line-height:1.7;">
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">FENCE POST FOUNDATION REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. Posts: Schedule 40 galvanized steel pipe or equivalent structural section — size per structural engineer.</div>
+          <div style="margin-bottom:3px;">1. Posts: 2-7/8" dia. hot-dip galvanized inner steel post (96" long) with 4" dia. outer post sleeve — per SolFence published section.</div>
           <div style="margin-bottom:3px;">2. Embedment: Min. <strong>${postEmbed} ft</strong> below finish grade per ASCE 7-22 §26 and overturning analysis.</div>
-          <div style="margin-bottom:3px;">3. Concrete: Min. 3,000 psi concrete footing — 12" diameter minimum; verify diameter with AHJ.</div>
+          <div style="margin-bottom:3px;">3. Foundation: DRIVEN with post pounder — NO concrete (manufacturer standard install); field-verify refusal.</div>
           <div style="margin-bottom:3px;">4. Post spacing: <strong>${postSpacing} ft O.C.</strong> maximum per wind load calculation — see segment table below.</div>
           <div style="margin-bottom:3px;">5. Wind design: ASCE 7-22 §29.4, Cf = 1.3, Exposure Category ${exposure}.</div>
-          <div style="margin-bottom:3px;">6. Backfill: Compact backfill in 6" lifts to 95% Proctor density for full embedment length.</div>
+          <div style="margin-bottom:3px;">6. Driving: advance post to full embedment or refusal; if refusal above min. embedment, contact engineer of record.</div>
           <div style="margin-bottom:3px;">7. Grounding: All posts bonded to EGC per NEC 250.169 — min. #6 AWG Cu bonding conductor.</div>
           <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Post diameter and wall thickness to be confirmed by engineer of record per final wind load analysis.</div>
         </div>
@@ -383,8 +383,8 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         Wind analysis per ASCE 7-22 §29.4 indicates a net lateral wind load of <strong>${windLoadPost} lbs per post</strong>
         at the design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         The overturning moment at the base of each post is ${overturnMoment} ft-lbs.
-        Fence post embedment of ${postEmbed} ft into concrete footing (3,000 psi min.) provides the required
-        resistance to overturning and lateral loads.
+        Fence post embedment of ${postEmbed} ft (driven inner steel post — no concrete, per the manufacturer's
+        published foundation) provides the required resistance to overturning and lateral loads.
         Ground snow load of ${groundSnow} psf applies to the site; roof slope reduction factors do not apply to
         vertical fence-mounted arrays — ground snow load per ASCE 7-22 §7 governs.
         Post foundation system confirmed adequate for the imposed wind and dead loads per ASCE 7-22 §29.4.
@@ -979,7 +979,7 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
           + '<td>Min. ' + embedFt + 'ft embedment, ' + postSpacingFt + 'ft O.C.</td>'
           + '<td class="tr">' + qty('fence_post') + '</td><td>' + unitOf('fence_post') + '</td>'
           + '<td style="font-size:7px;color:#555">CAD segments × post spacing</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">Horizontal Rails</td><td>SolFence Vertical Rail — Extruded Aluminum 6063-T6, 10ft sections</td>'
+    html += '<tr class="bg-lt"><td class="fw7">Horizontal Rails</td><td>SolFence Vertical Rail — Extruded Aluminum 6061-T6, 10ft sections</td>'
           + '<td>' + railCount + ' rails × fence length</td>'
           + '<td class="tr">' + qty('fence_rail') + '</td><td>' + unitOf('fence_rail') + '</td>'
           + '<td style="font-size:7px;color:#555">railCount × fenceLen ÷ 10ft sections</td></tr>';

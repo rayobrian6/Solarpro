@@ -472,13 +472,16 @@ export function drawRoofPlan(
       minLat: Math.max(aMinLat - pad, minLat), maxLat: Math.min(aMaxLat + pad, maxLat),
     };
   })();
-  const _fit = (_site && _ctxPts.length > 0)
+  // Circuit sheet (PV-1B) ALWAYS gets the tight array framing — the wiring is
+  // the hero there (see _arrayFit above); before this ordering fix a parcel-
+  // backed job dropped into the site window and rendered the circuits tiny.
+  const _fit = _arrayFit
+    ?? ((_site && _ctxPts.length > 0)
     // v21 review: the subject roof rendered at ~38% of the window (1/2.6) with
     // the neighbor's tree canopy dominating. Tighter caps keep the roof ≥ ~50%
     // (≥ 80% on big lots); nearest context still shows, SVG clips the rest.
     ? computeFitWindow({ minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.25 : 2.0 })
-    : _arrayFit
-    ?? { minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat };
+    : { minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat });
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
 
@@ -503,9 +506,18 @@ export function drawRoofPlan(
   // to the draw zone so off-window neighbors/roads can't spill onto the tables
   // or off-sheet. ──
   let _siteLegend: Array<{ swatch: string; label: string }> = [];
+  // Property-line setback ring distance — the SAME engine value the ground/fence
+  // sheets print (CADGroundModel.setbackFt ← layout.groundSetbackFt; ground.ts
+  // "Array setback X' min. from property line"). Only meaningful when yard
+  // systems exist on this plan; roof-only jobs draw no ring (a roof array has
+  // no P/L setback claim to make).
+  const _plSetbackFt: number | null = _hyb
+    ? (cad?.ground?.setbackFt ?? (layout as { groundSetbackFt?: number } | undefined)?.groundSetbackFt ?? null)
+    : null;
   if (_site) {
     try {
-      const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY);
+      const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY,
+        { plSetbackFt: _plSetbackFt, fitWin: _fit });
       if (sr.els.length) {
         els.push(`<defs><clipPath id="pv2site-clip"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
         els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
@@ -521,6 +533,22 @@ export function drawRoofPlan(
   // (Fence is NOT drawn to-scale here — it sits 100+ ft off and ballooned the
   // window; it renders in the SITE KEY inset below. Ray 2026-07-14.)
   if (_hyb) {
+    // Liang-Barsky segment/rect clip against the draw zone (fence + trench runs)
+    const clipToDz = (x1: number, y1: number, x2: number, y2: number): [number, number, number, number] | null => {
+      const dx = x2 - x1, dy = y2 - y1;
+      let t0 = 0, t1 = 1;
+      const edges: Array<[number, number]> = [
+        [-dx, x1 - dz.x], [dx, dz.x + dz.width - x1],
+        [-dy, y1 - dz.y], [dy, dz.y + dz.height - y1],
+      ];
+      for (const [p, q] of edges) {
+        if (p === 0) { if (q < 0) return null; continue; }
+        const r = q / p;
+        if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+        else { if (r < t0) return null; if (r < t1) t1 = r; }
+      }
+      return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
+    };
     const hEls: string[] = [];
     for (const g of _hyb.ground) {
       const pts = g.ring.map(p => `${toX(p.lng).toFixed(1)},${toY(p.lat).toFixed(1)}`).join(' ');
@@ -543,8 +571,8 @@ export function drawRoofPlan(
     }
     if (hEls.length) {
       els.push(`<g class="pv2-hybrid">${hEls.join('')}</g>`);
-      _siteLegend.push({ swatch: '#2b6cb0', label: 'Ground-mount array (see ground sheets)' });
-      if (_hyb.fence.length) _siteLegend.push({ swatch: '#1a7a3a', label: 'Solar fence run (see fence sheets)' });
+      _siteLegend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#2b6cb0" fill-opacity="0.14" stroke="#2b6cb0" stroke-width="1"/><line x1="7" y1="-4" x2="7" y2="4" stroke="#2b6cb0" stroke-width="0.7"/>`, label: 'GROUND-MOUNT ARRAY (SEE GROUND SHEETS)' });
+      if (_hyb.fence.length) _siteLegend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#1a7a3a" stroke-width="2.6" stroke-linecap="round"/>`, label: 'SOLAR FENCE RUN (SEE FENCE SHEETS)' });
     }
     // Fence on the main plan: draw the run's VISIBLE portion (clipped to the
     // draw zone) at its true rotated bearing. The direction arrow is only the
@@ -554,22 +582,6 @@ export function drawRoofPlan(
     // mini-map's real fence line was removed).
     const _fenceOffFrame: typeof _hyb.fence = [];
     if (_hyb.fence.length) {
-      // Liang-Barsky segment/rect clip against the draw zone
-      const clipToDz = (x1: number, y1: number, x2: number, y2: number): [number, number, number, number] | null => {
-        const dx = x2 - x1, dy = y2 - y1;
-        let t0 = 0, t1 = 1;
-        const edges: Array<[number, number]> = [
-          [-dx, x1 - dz.x], [dx, dz.x + dz.width - x1],
-          [-dy, y1 - dz.y], [dy, dz.y + dz.height - y1],
-        ];
-        for (const [p, q] of edges) {
-          if (p === 0) { if (q < 0) return null; continue; }
-          const r = q / p;
-          if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
-          else { if (r < t0) return null; if (r < t1) t1 = r; }
-        }
-        return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
-      };
       for (const f of _hyb.fence) {
         const c = clipToDz(toX(f.line[0].lng), toY(f.line[0].lat), toX(f.line[1].lng), toY(f.line[1].lat));
         // draw only when a meaningful run is visible; tiny slivers → arrow
@@ -603,6 +615,90 @@ export function drawRoofPlan(
       els.push(`<path d="M${a2x.toFixed(1)},${a2y.toFixed(1)} L${(a2x - ux * 9 - uy * 4.5).toFixed(1)},${(a2y - uy * 9 + ux * 4.5).toFixed(1)} L${(a2x - ux * 9 + uy * 4.5).toFixed(1)},${(a2y - uy * 9 - ux * 4.5).toFixed(1)} Z" fill="#1a7a3a"/>`);
       const fLen = _fenceOffFrame[0]?.label?.match(/·\s*([^·]+L\.F\.)/)?.[1]?.trim() ?? 'SOLAR FENCE';
       els.push(`<text x="${ax.toFixed(1)}" y="${(ay - 8).toFixed(1)}" font-size="7" font-weight="bold" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2.6" paint-order="stroke">SOLAR FENCE ${fLen} → SEE PV-1F</text>`);
+    }
+
+    // ── (N) TRENCH / CONDUIT ROUTES (reference: the "(N) ~ TRENCHING" runs) ──
+    // Schematic dashed orthogonal runs from each yard array group (ground +
+    // fence) toward the PV interconnection point. Drawn ONLY when the site
+    // layer actually located service equipment (meter GPS / street-side
+    // heuristic) — no service point, no invented route. Routes are explicitly
+    // schematic: label says ROUTE FIELD-VERIFIED. Clipped to the draw zone.
+    if (!isBranchColorMode && _site && _site.equipment.length && (_hyb.ground.length || _hyb.fence.length)) {
+      const _svcE = _site.equipment.find(e => e.kind === 'utility_meter') ?? _site.equipment[0];
+      const spx = toX(_svcE.pt.lng), spy = toY(_svcE.pt.lat);
+      type Pt2 = { x: number; y: number };
+      const starts: Array<{ p: Pt2; kind: 'ground' | 'fence' }> = [];
+      for (const g of _hyb.ground) {
+        let best = g.ring[0], bd = Infinity;
+        for (const p of g.ring) {
+          const d = (toX(p.lng) - spx) ** 2 + (toY(p.lat) - spy) ** 2;
+          if (d < bd) { bd = d; best = p; }
+        }
+        starts.push({ p: { x: toX(best.lng), y: toY(best.lat) }, kind: 'ground' });
+      }
+      for (const f of _hyb.fence) {
+        const c0: Pt2 = { x: toX(f.line[0].lng), y: toY(f.line[0].lat) };
+        const c1: Pt2 = { x: toX(f.line[1].lng), y: toY(f.line[1].lat) };
+        starts.push({
+          p: ((c0.x - spx) ** 2 + (c0.y - spy) ** 2) <= ((c1.x - spx) ** 2 + (c1.y - spy) ** 2) ? c0 : c1,
+          kind: 'fence',
+        });
+      }
+      // Roof bbox (screen) — routes must not read as trenching THROUGH the
+      // house: of the two orthogonal elbows, keep the one whose legs overlap
+      // the roof footprint least; labels only ride legs clear of the roof.
+      const _rbx0 = toX(minLng), _rbx1 = toX(maxLng), _rby0 = toY(maxLat), _rby1 = toY(minLat);
+      const _roofOverlap = (a: Pt2, b: Pt2): number => {
+        if (Math.abs(a.y - b.y) < 0.01) {   // horizontal leg
+          if (a.y < _rby0 || a.y > _rby1) return 0;
+          return Math.max(0, Math.min(Math.max(a.x, b.x), _rbx1) - Math.max(Math.min(a.x, b.x), _rbx0));
+        }
+        if (a.x < _rbx0 || a.x > _rbx1) return 0;
+        return Math.max(0, Math.min(Math.max(a.y, b.y), _rby1) - Math.max(Math.min(a.y, b.y), _rby0));
+      };
+      const tEls: string[] = [];
+      const _labeledKinds = new Set<string>();
+      starts.forEach((s, i) => {
+        const st = s.p;
+        if (Math.hypot(st.x - spx, st.y - spy) < 24) return;   // array abuts the wall — no run to draw
+        const off = i * 4;   // stagger shared legs so routes don't merge into one heavy line
+        const hFirst: Array<[Pt2, Pt2]> = [
+          [st, { x: spx + off, y: st.y }],
+          [{ x: spx + off, y: st.y }, { x: spx + off, y: spy }],
+        ];
+        const vFirst: Array<[Pt2, Pt2]> = [
+          [st, { x: st.x, y: spy + off }],
+          [{ x: st.x, y: spy + off }, { x: spx, y: spy + off }],
+        ];
+        const ovOf = (segs: Array<[Pt2, Pt2]>) => segs.reduce((sum, [a, b]) => sum + _roofOverlap(a, b), 0);
+        const segs = ovOf(vFirst) < ovOf(hFirst) ? vFirst : hFirst;
+        let bestSeg: [number, number, number, number] | null = null, bestScore = -Infinity;
+        for (const [a, b] of segs) {
+          const c = clipToDz(a.x, a.y, b.x, b.y);
+          if (!c) continue;
+          tEls.push(`<line x1="${c[0].toFixed(1)}" y1="${c[1].toFixed(1)}" x2="${c[2].toFixed(1)}" y2="${c[3].toFixed(1)}" stroke="#3a3f46" stroke-width="1.1" stroke-dasharray="7 3.5"/>`);
+          const L = Math.hypot(c[2] - c[0], c[3] - c[1]);
+          const score = L - 4 * _roofOverlap(a, b);   // prefer long legs CLEAR of the roof
+          if (score > bestScore) { bestScore = score; bestSeg = c; }
+        }
+        // one label per system kind, on a leg FULLY CLEAR of the roof + its
+        // dimension/callout band (a half-covered label read worse than none)
+        const _clearOfRoof = bestSeg
+          ? !(Math.min(bestSeg[0], bestSeg[2]) < _rbx1 + 25 && Math.max(bestSeg[0], bestSeg[2]) > _rbx0 - 25 &&
+              Math.min(bestSeg[1], bestSeg[3]) < _rby1 + 58 && Math.max(bestSeg[1], bestSeg[3]) > _rby0 - 25)
+          : false;
+        if (bestSeg && bestScore > 70 && _clearOfRoof && !_labeledKinds.has(s.kind)) {
+          _labeledKinds.add(s.kind);
+          const mx = (bestSeg[0] + bestSeg[2]) / 2, my = (bestSeg[1] + bestSeg[3]) / 2;
+          let ang = Math.atan2(bestSeg[3] - bestSeg[1], bestSeg[2] - bestSeg[0]) * 180 / Math.PI;
+          if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ROUTE FIELD-VERIFIED</text>`);
+        }
+      });
+      if (tEls.length) {
+        els.push(`<g class="pv1-trench">${tEls.join('')}</g>`);
+        _siteLegend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#3a3f46" stroke-width="1.1" stroke-dasharray="4 2"/>`, label: '(N) TRENCH / CONDUIT ROUTE — FIELD VERIFY' });
+      }
     }
   }
 
