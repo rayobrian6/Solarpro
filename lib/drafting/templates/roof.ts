@@ -514,13 +514,18 @@ export function drawRoofPlan(
   const _plSetbackFt: number | null = _hyb
     ? (cad?.ground?.setbackFt ?? (layout as { groundSetbackFt?: number } | undefined)?.groundSetbackFt ?? null)
     : null;
-  if (_site) {
+  // Circuit sheet (PV-1B) draws NO site layer at all: with the tight array
+  // framing the softscape/parcel/canopy chrome read as noise behind the wiring
+  // (Ray 2026-07-20, Braidon: "you fucked PV1B" — half-faded site polygons,
+  // tree-canopy blob + shading note on a circuit drawing). PV-1/PV-2 remain
+  // the site-plan sheets; PV-1B is the clean array + branch wiring.
+  if (_site && !isBranchColorMode) {
     try {
       const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY,
         { plSetbackFt: _plSetbackFt, fitWin: _fit });
       if (sr.els.length) {
         els.push(`<defs><clipPath id="pv2site-clip"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
-        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
+        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)">${sr.els.join('')}</g>`);
         _siteLegend = sr.legend;
         svgTitle = 'SITE & ROOF PLAN WITH MODULES';
       }
@@ -1195,20 +1200,30 @@ export function drawRoofPlan(
     };
     // Best axis-aligned route a→b: both Manhattan corners plus four skirts
     // around the array bbox (clamped inside the roof outline).
-    const _arrX0 = Math.min(..._pbx), _arrX1 = Math.max(..._pbx);
-    const _arrY0 = Math.min(..._pby), _arrY1 = Math.max(..._pby);
+    // Skirt bounds come from the module RECT extremes, NOT the panel-center
+    // extremes: centers put the "skirt" INSIDE the outer rows (every skirt
+    // route then scored ≥1 hit and the picker degenerated to whichever loop
+    // was measured first — Braidon's B1 homerun circled the whole array over
+    // the ridge, 2026-07-20).
+    const _arrX0 = Math.min(...modRects.map(r => r.x0)), _arrX1 = Math.max(...modRects.map(r => r.x1));
+    const _arrY0 = Math.min(...modRects.map(r => r.y0)), _arrY1 = Math.max(...modRects.map(r => r.y1));
     const _roofX0 = _allVx.length ? Math.min(..._allVx) : _arrX0, _roofX1 = _allVx.length ? Math.max(..._allVx) : _arrX1;
     const _roofY0 = _allVy.length ? Math.min(..._allVy) : _arrY0, _roofY1 = _allVy.length ? Math.max(..._allVy) : _arrY1;
-    const bestRoute = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-      const yS = Math.min(_arrY1 + 10, _roofY1 - 5), yN = Math.max(_arrY0 - 10, _roofY0 + 5);
-      const xE = Math.min(_arrX1 + 10, _roofX1 - 5), xW = Math.max(_arrX0 - 10, _roofX0 + 5);
+    const bestRoute = (a: { x: number; y: number }, b: { x: number; y: number }, opts?: { homerun?: boolean }) => {
+      const yS = Math.min(_arrY1 + 8, _roofY1 - 5), yN = Math.max(_arrY0 - 8, _roofY0 + 5);
+      const xE = Math.min(_arrX1 + 8, _roofX1 - 5), xW = Math.max(_arrX0 - 8, _roofX0 + 5);
       const cands: Array<Array<{ x: number; y: number }>> = [
         [a, { x: b.x, y: a.y }, b],
         [a, { x: a.x, y: b.y }, b],
         [a, { x: a.x, y: yS }, { x: b.x, y: yS }, b],
-        [a, { x: a.x, y: yN }, { x: b.x, y: yN }, b],
+        // Homeruns: the JB sits at the SE corner by construction, so the far
+        // (north/west) skirts can only produce a lasso around the array —
+        // exclude them and keep the south/east corridors (+ an L through the
+        // east corridor). Plane transitions keep all four skirts.
+        ...(opts?.homerun ? [] : [[a, { x: a.x, y: yN }, { x: b.x, y: yN }, b],
+                                  [a, { x: xW, y: a.y }, { x: xW, y: b.y }, b]]),
         [a, { x: xE, y: a.y }, { x: xE, y: b.y }, b],
-        [a, { x: xW, y: a.y }, { x: xW, y: b.y }, b],
+        ...(opts?.homerun ? [[a, { x: a.x, y: yS }, { x: xE, y: yS }, { x: xE, y: b.y }, b]] : []),
       ];
       let best = cands[0], bh = Infinity, bl = Infinity;
       for (const c of cands) {
@@ -1230,24 +1245,64 @@ export function drawRoofPlan(
         byPlaneKey.get(k)!.push(p);
       }
       const chainGroup = (ps: any[]): any[] => {
-        // ALWAYS geometric nearest-neighbor in SCREEN space. Global row/col
-        // indices don't reflect a rotated end-plane's local layout — sorting
-        // by them re-created the starburst INSIDE the plane group.
         const P = ps.map((p: any) => ({ p, x: toX(p.lng), y: toY(p.lat) }));
-        const used = new Array(P.length).fill(false);
-        let cur = 0;
-        for (let i = 1; i < P.length; i++) if (P[i].x + P[i].y < P[cur].x + P[cur].y) cur = i;
-        const out = [P[cur].p]; used[cur] = true;
-        for (let s = 1; s < P.length; s++) {
-          let best = -1, bestD = Infinity;
-          for (let i = 0; i < P.length; i++) {
-            if (used[i]) continue;
-            const d = (P[i].x - P[cur].x) ** 2 + (P[i].y - P[cur].y) ** 2;
-            if (d < bestD) { bestD = d; best = i; }
-          }
-          out.push(P[best].p); used[best] = true; cur = best;
+        // ROW-AWARE serpentine (2026-07-20, Braidon PV-1B): the greedy global
+        // NN chain serpentined a full row and only then jumped to a stranded
+        // module in the next row — a >3×median segment the corridor router
+        // then drew as a zero-hit LASSO around the whole array. Cluster into
+        // screen-space rows, snake them, and pick the row order + start
+        // direction that minimizes total wire and ends NEAREST THE JB (short
+        // homerun). NN survives only as the degenerate-scatter fallback.
+        const rowGapPx = Math.max(Math.min(panLenPx, panWidPx) * 0.6, 8);
+        const byY = [...P].sort((a, b) => a.y - b.y);
+        const rows: Array<typeof P> = [];
+        for (const q of byY) {
+          const last = rows[rows.length - 1];
+          if (last && Math.abs(q.y - last[last.length - 1].y) <= rowGapPx) last.push(q);
+          else rows.push([q]);
         }
-        return out;
+        const nnChain = (): typeof P => {
+          const used = new Array(P.length).fill(false);
+          let cur = 0;
+          for (let i = 1; i < P.length; i++) if (P[i].x + P[i].y < P[cur].x + P[cur].y) cur = i;
+          const out = [P[cur]]; used[cur] = true;
+          for (let s = 1; s < P.length; s++) {
+            let best = -1, bestD = Infinity;
+            for (let i = 0; i < P.length; i++) {
+              if (used[i]) continue;
+              const d = (P[i].x - P[cur].x) ** 2 + (P[i].y - P[cur].y) ** 2;
+              if (d < bestD) { bestD = d; best = i; }
+            }
+            out.push(P[best]); used[best] = true; cur = best;
+          }
+          return out;
+        };
+        let chain: typeof P;
+        if (rows.length > Math.max(2, P.length / 1.6)) {
+          chain = nnChain();   // scatter, not a grid — rows are meaningless
+        } else {
+          for (const r of rows) r.sort((a, b) => a.x - b.x);
+          const pathLen = (c: typeof P) => {
+            let L = 0;
+            for (let k = 1; k < c.length; k++) L += Math.hypot(c[k].x - c[k - 1].x, c[k].y - c[k - 1].y);
+            return L;
+          };
+          let best: typeof P | null = null, bestScore = Infinity;
+          for (const rowsOrdered of [rows, [...rows].reverse()]) {
+            for (const firstLTR of [true, false]) {
+              const c: typeof P = [];
+              rowsOrdered.forEach((r, ri) => {
+                const ltr = (ri % 2 === 0) === firstLTR;
+                c.push(...(ltr ? r : [...r].reverse()));
+              });
+              const end = c[c.length - 1];
+              const score = pathLen(c) + 0.6 * Math.hypot(end.x - jbX, end.y - jbY);
+              if (score < bestScore) { bestScore = score; best = c; }
+            }
+          }
+          chain = best ?? nnChain();
+        }
+        return chain.map(q => q.p);
       };
       // Plane-group sequence: largest first, then nearest centroid next.
       const grps = [...byPlaneKey.values()].map(ps => {
@@ -1295,7 +1350,7 @@ export function drawRoofPlan(
       // Same collision-scored routing as the plane transitions — the fixed
       // drop-then-across leg ran a north-plane homerun straight through the
       // south rows on its way to the JB.
-      const hrRoute = bestRoute(tail, { x: jbX, y: jbY });
+      const hrRoute = bestRoute(tail, { x: jbX, y: jbY }, { homerun: true });
       const hr = hrRoute.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
       els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.85" stroke-dasharray="3 2"/>`);
       els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="1.3" stroke-dasharray="3 2"/>`);
@@ -1786,30 +1841,11 @@ export function drawRoofPlan(
     const _scaleErr = Math.abs(_nearest[1] - _inPerFt) / _inPerFt;
     els.push(drawText(vtX + 22, vtY + 11, _scaleErr < 0.05 ? `SCALE: ${_nearest[0]} = 1'-0"` : 'GRAPHIC SCALE — SEE BAR', { anchor: 'start', fontSize: 6, fill: '#333' }));
   }
-  // Branch-color mode (PV-1B): the HTML draw-zone header already titles the sheet
-  // ("CIRCUIT LAYOUT — n MODULES / m BRANCHES"), so we DON'T repeat a title banner
-  // inside the drawing. Instead, a small Cannon-style CIRCUIT LEGEND keys the thin
-  // colored circuit wires to their circuit numbers (top-left, over the margin).
-  if (isBranchColorMode && branchIndexByColor.size > 0) {
-    const circuits = [...branchIndexByColor.entries()].sort((a, b) => a[1] - b[1]);
-    const lx = dz.x + 10, ly = zones.dims.top + 12;
-    const rowH = 10.5, boxW = 112, boxH = 22 + (circuits.length + 1) * rowH + 4;
-    els.push(`<rect x="${lx}" y="${ly}" width="${boxW}" height="${boxH.toFixed(1)}" fill="rgba(255,255,255,0.95)" stroke="#000" stroke-width="0.8"/>`);
-    els.push(drawText(lx + 6, ly + 12, 'CIRCUIT LEGEND', { anchor: 'start', fontSize: 6.6, fontWeight: 'bold', fill: '#000' }));
-    els.push(`<line x1="${lx}" y1="${(ly + 15).toFixed(1)}" x2="${lx + boxW}" y2="${(ly + 15).toFixed(1)}" stroke="#000" stroke-width="0.5"/>`);
-    circuits.forEach(([color, idx]) => {
-      const ry = ly + 15 + 10 + idx * rowH;
-      els.push(`<line x1="${lx + 7}" y1="${ry.toFixed(1)}" x2="${lx + 27}" y2="${ry.toFixed(1)}" stroke="${color}" stroke-width="2.2"/>`);
-      els.push(`<circle cx="${(lx + 17).toFixed(1)}" cy="${ry.toFixed(1)}" r="2.4" fill="#fff" stroke="${color}" stroke-width="0.8"/>`);
-      els.push(`<text x="${(lx + 17).toFixed(1)}" y="${(ry + 1.9).toFixed(1)}" text-anchor="middle" font-size="4.6" font-weight="700" fill="${color}">${idx + 1}</text>`);
-      els.push(drawText(lx + 33, (ry + 2.2), `CIRCUIT ${idx + 1}`, { anchor: 'start', fontSize: 6, fill: '#111' }));
-    });
-    // Device row: the IQ8 microinverter symbol drawn under each module.
-    const dry = ly + 15 + 10 + circuits.length * rowH + 3;
-    els.push(`<line x1="${lx + 4}" y1="${(dry - 6).toFixed(1)}" x2="${lx + boxW - 4}" y2="${(dry - 6).toFixed(1)}" stroke="#ccc" stroke-width="0.4"/>`);
-    els.push(`<rect x="${(lx + 10).toFixed(1)}" y="${(dry - 2.4).toFixed(1)}" width="14" height="4.8" fill="#2b2f36" stroke="#555" stroke-width="0.5" rx="0.6"/>`);
-    els.push(drawText(lx + 33, (dry + 2.0), 'IQ8 MICROINVERTER', { anchor: 'start', fontSize: 5.6, fill: '#111' }));
-  }
+  // Branch-color mode (PV-1B): NO on-map legend. The data rail already prints
+  // the BRANCH LEGEND (same colors, same order) — the floating CIRCUIT LEGEND
+  // box double-labelled it and parked an opaque panel over the drawing (Ray's
+  // ruling: legends live OFF the map; verified violation on Braidon PV-1B,
+  // 2026-07-20). The bottom caption keys the device symbol + dashing instead.
 
   // (Branch legend overlay REMOVED — it duplicated the data-zone BRANCH LEGEND
   //  table and its opaque box painted straight over the viewport title, which
@@ -1819,7 +1855,10 @@ export function drawRoofPlan(
   // explains the module shading (useful) rather than repeating the sheet title. ──
   if (isBranchColorMode) {
     els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
-      'IQ8 MICROINVERTER (▪) UNDER EACH MODULE · WIRED IN SERIES PER AC BRANCH (COLORED) · DASHED = HOMERUN TO JB · SEE CIRCUIT LEGEND', {
+      // Wording note: the planset-structural golden guards against any on-map
+      // legend overlay by asserting the literal "BRANCH LEGEND" never appears
+      // in this SVG — reference the rail table without tripping it.
+      'IQ8 MICROINVERTER (▪) UNDER EACH MODULE · WIRED IN SERIES PER AC BRANCH (COLORED) · DASHED = HOMERUN TO JB · SEE LEGEND IN DATA RAIL', {
         anchor: 'start', fontSize: 6.5, fill: '#555', italic: true,
       }));
   }
