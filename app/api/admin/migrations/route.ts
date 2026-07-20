@@ -56,6 +56,13 @@ import {
   verifyDependencyPresent,
   verifyIndexState,
 } from '@/lib/migrations/targetedNearmapRecovery';
+import {
+  DATA_AUTHORITY_SEQUENCE,
+  REQUIRED_COLUMNS,
+  analyzeDataOnlyMigration,
+  verifyTableColumns,
+  previewDataAuthorityImpact,
+} from '@/lib/migrations/targetedDataAuthority';
 import { readFileSync } from 'node:fs';
 import type { TargetedExecutionPermit } from '@/lib/migrations/types';
 import { validateMigrationManifest, discoverMigrationFiles } from '@/lib/migrations/manifest';
@@ -243,6 +250,7 @@ export async function POST(req: NextRequest) {
     'prepare-execution-batch',  // read-only: reviewed batch (canonical order + digest)
     'execute-reviewed-batch',   // mutation: run selected batch, stop-on-first-failure
     'execute-nearmap-108',      // mutation: TARGETED recovery of ONLY migration 108
+    'execute-data-authority-109-112', // mutation: TARGETED data-authority backfill (109→112, in order)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -307,11 +315,16 @@ export async function POST(req: NextRequest) {
   // execution bar: super_admin + fresh TOTP + reason + typed production
   // confirmation + production allowlist + MIGRATION_ALLOW_PRODUCTION_EXECUTION).
   const isNearmap108 = action === 'execute-nearmap-108';
+  // TARGETED data-authority backfill — executes ONLY migrations 109→112 (in
+  // order) via the canonical runner under bounded per-identifier permits. Same
+  // execution bar as the 108 path. Statically verified UPDATE-only/data-only
+  // before any permit is issued (lib/migrations/targetedDataAuthority.ts).
+  const isDataAuthority = action === 'execute-data-authority-109-112';
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
   let migrationAction: MigrationAction;
-  if (isExecute || isExecutionActivation || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108) {
+  if (isExecute || isExecutionActivation || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108 || isDataAuthority) {
     migrationAction = 'execute';
   } else if (isBaselineMutation || isBootstrap || isRecordBatch) {
     migrationAction = 'bootstrap';
@@ -322,7 +335,7 @@ export async function POST(req: NextRequest) {
   // Operator-console surface is super_admin-only (matches the page's access
   // model). The read-only operator actions need an explicit gate because
   // authorizeMigration('inspect') otherwise permits plain 'admin'.
-  if ((isOperatorReadonly || isBootstrap || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108) && adminUser.role !== 'super_admin') {
+  if ((isOperatorReadonly || isBootstrap || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108 || isDataAuthority) && adminUser.role !== 'super_admin') {
     return NextResponse.json(
       { success: false, error: `Action '${action}' requires super_admin role.` },
       { status: 403 },
@@ -343,7 +356,7 @@ export async function POST(req: NextRequest) {
   // of the "new code still says already used" replay: an authorization rejection
   // or a losing duplicate burned the step while the real error was hidden.
   let totpVerified = false;
-  if (isExecute || isExecutionActivation || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108) {
+  if (isExecute || isExecutionActivation || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108 || isDataAuthority) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
         { success: false, error: 'A fresh TOTP code is required for this action. Provide it in the "totpCode" field.' },
@@ -435,9 +448,15 @@ export async function POST(req: NextRequest) {
       // (schema introspection only). The generator asserts read-only SQL
       // internally. Returns one proposal per manifest migration for review.
       const report = await generateBaselineEvidence();
+      // Already-recorded baselines ride along so the console can LOCK those
+      // rows instead of re-proposing them as UNKNOWN — regenerating evidence
+      // was silently discarding the operator's recorded review work (Ray,
+      // 2026-07-20: "recorded 82" then the table showed UNKNOWN again).
+      const recordedBaselines = await readAllBaselineReconciliations().catch(() => ({} as Record<string, { reconciliation_status: string }>));
       return NextResponse.json({
         success: true,
         action: 'generate-baseline-evidence',
+        recorded: Object.fromEntries(Object.entries(recordedBaselines).map(([k, v]) => [k, (v as { reconciliation_status: string }).reconciliation_status])),
         environment: report.environment,
         generatedAt: report.generatedAt,
         manifestCount: report.manifestCount,
@@ -710,6 +729,104 @@ export async function POST(req: NextRequest) {
         relock: { relocked, lifecycleState: lifecycleAfter, baselineVerified: false },
         correlationId,
       }, { status: verifiedSuccess ? 200 : 409 });
+    }
+
+    if (isDataAuthority) {
+      // ── TARGETED data-authority backfill: execute ONLY 109→112, in order ──
+      // Same bar as the 108 path (super_admin + MFA + fresh TOTP + reason +
+      // typed production confirmation already enforced above). Each migration
+      // is statically verified UPDATE-only against allow-listed tables, live
+      // columns are verified, then each runs under its OWN bounded scoped
+      // permit through the CANONICAL runner (advisory lock + checksum + ledger
+      // + run history + audit), stop-on-first-failure. It NEVER runs any other
+      // migration and NEVER marks the historical baseline verified.
+      const reason = (body?.reason as string | undefined)?.trim();
+      if (!reason) {
+        return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.', correlationId }, { status: 400 });
+      }
+      const env = getCurrentEnvironment();
+      if (env === 'production' && !productionConfirmed) {
+        return NextResponse.json({ success: false, error: 'Production targeted backfill requires productionConfirmation === "production".', correlationId }, { status: 400 });
+      }
+
+      // Server-side manifest + static shape verification for ALL four before
+      // touching anything.
+      const manifest = discoverMigrationFiles();
+      const targets: Array<{ id: string; filename: string; fullPath: string; checksum: string }> = [];
+      for (const id of DATA_AUTHORITY_SEQUENCE) {
+        const f = manifest.files.find((x) => x.identifier === id);
+        if (!f) {
+          return NextResponse.json({ success: false, action, error: `Migration ${id} is missing from the manifest.`, correlationId }, { status: 409 });
+        }
+        targets.push({ id, filename: f.filename, fullPath: f.fullPath, checksum: f.checksumSha256 });
+      }
+      const shapes = targets.map((t) => analyzeDataOnlyMigration(t.id, readFileSync(t.fullPath, 'utf8')));
+      const badShape = shapes.find((s) => !s.ok);
+      if (badShape) {
+        return NextResponse.json({ success: false, action, error: `Static verification failed: ${badShape.problems.join(' ')}`, verification: shapes, correlationId }, { status: 409 });
+      }
+      // Live column verification for every table the four migrations touch.
+      const columnChecks = await Promise.all(
+        Object.entries(REQUIRED_COLUMNS).map(([table, cols]) => verifyTableColumns(table, cols)));
+      const badCols = columnChecks.find((c) => !c.ok);
+      if (badCols) {
+        return NextResponse.json({ success: false, action, error: `Live verification failed: table '${badCols.table}' (exists=${badCols.tableExists}) missing columns [${badCols.missingColumns.join(', ')}].`, columnChecks, correlationId }, { status: 409 });
+      }
+      const impact = await previewDataAuthorityImpact().catch(() => ({} as Record<string, number>));
+
+      // Sequential execution: per-identifier bounded permit, canonical runner,
+      // success read back from the LEDGER + run history. Stop on first failure.
+      const results: Array<Record<string, unknown>> = [];
+      let allOk = true;
+      for (const t of targets) {
+        // Idempotent short-circuit: already applied in the ledger → skip.
+        const pre = await readLedgerRow(t.id).catch(() => null);
+        if (pre?.status === 'applied') {
+          results.push({ identifier: t.id, alreadyApplied: true, verifiedSuccess: true });
+          continue;
+        }
+        const permit: TargetedExecutionPermit = { identifier: t.id, issuedAtMs: Date.now(), ttlMs: 3 * 60 * 1000, reason };
+        const dryRunResult = await runSinglePendingMigration(t.id, { dryRun: true, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
+        const execution = await runSinglePendingMigration(t.id, { dryRun: false, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
+        const ledgerRow = await readLedgerRow(t.id).catch(() => null);
+        const runHistory = await readMigrationRunHistory(t.id, 5).catch(() => []);
+        const appliedInLedger = ledgerRow?.status === 'applied';
+        const appliedRun = runHistory.some((r) => r.status === 'applied' && r.execution_id === execution.executionId);
+        const verifiedSuccess = appliedInLedger && appliedRun;
+        emitAuditEvent({
+          type: verifiedSuccess ? 'migration.run.completed' : 'migration.run.failed',
+          actorType: 'human', actorId: adminUser.id, environment: env,
+          executionId: execution.executionId, migrationIdentifier: t.id, filename: t.filename,
+          details: { targetedDataAuthority: true, reason, checksum: t.checksum, dryRunStatus: dryRunResult.status, ledgerStatus: ledgerRow?.status ?? null, verifiedSuccess, baselineVerified: false, correlationId },
+        });
+        results.push({
+          identifier: t.id, alreadyApplied: false, verifiedSuccess,
+          dryRun: { status: dryRunResult.status, errorCode: dryRunResult.errorCode },
+          execution: { status: execution.status, executionId: execution.executionId, durationMs: execution.durationMs, errorCode: execution.errorCode, errorSummary: execution.errorSummary },
+          ledger: ledgerRow ? { status: ledgerRow.status, appliedAt: ledgerRow.applied_at } : null,
+        });
+        if (!verifiedSuccess) { allOk = false; break; }
+      }
+
+      // Defensive relock (permits are single-use and the global lifecycle was
+      // never enabled, but never leave execution open).
+      let lifecycleAfter = (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED';
+      if (lifecycleAfter === 'EXECUTION_ENABLED') {
+        await disableExecution(adminUser.id, 'auto-relock after targeted data-authority backfill').catch(() => false);
+        lifecycleAfter = (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED';
+      }
+      logGov(allOk ? 'data-authority 109-112 applied' : 'data-authority backfill stopped on failure', { results: results.map((r) => `${r.identifier}:${r.verifiedSuccess}`) });
+
+      return NextResponse.json({
+        success: allOk,
+        action,
+        scope: 'Targeted data-authority backfill (109→112) only. Historical baseline remains incomplete.',
+        verifiedFrom: 'ledger+run_history',
+        impact,
+        results,
+        relock: { lifecycleState: lifecycleAfter, baselineVerified: false },
+        correlationId,
+      }, { status: allOk ? 200 : 409 });
     }
 
     if (isPrepareBatch || isRecordBatch) {
