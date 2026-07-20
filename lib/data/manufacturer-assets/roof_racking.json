@@ -229,5 +229,19 @@
     "verified": false,
     "notes": "Genuine Tesla-published path but NOT programmatically verifiable for the same Akamai 403 reason. Both Tile and Comp Rafter mounts are covered in this consolidated Panels install manual PDF (search snippet explicitly lists 'Tesla Panel Mount - Tile'). Mount-specific section landing page (genuine, Akamai-gated): https://energylibrary.tesla.com/docs/Public/Solar/Retrofit/InstallManual/Tile/en-us/GUID-8D6EEA59-19ED-429B-B074-D6B891AC9AC7.html . Do NOT confuse with the Tesla SOLAR ROOF (glass tile shingle) manual at .../Solar/Roof/InstallManual/ - different product. ACTION: open in a normal browser to capture the tile-roof attachment & flashing detail.",
     "asset_type": "image"
+  },
+  {
+    "equipment_id": "ironridge-xr100-rail",
+    "brand": "IronRidge",
+    "model": "XR100 Rail",
+    "category": "rail_spec",
+    "doc_title": "IronRidge XR Flush Mount System Datasheet (v2.10)",
+    "source_url": "https://files.ironridge.com/pitched-roof-mounting/resources/brochures/Flush_Mount_Data_Sheet.pdf",
+    "page_ref": "p.2 (XR Rails family - XR10/XR100/XR1000 rail profiles + spans, BOSS splices, UFO/EFO clamps, bonding hardware, attachments overview)",
+    "image_url": "/manufacturer-assets/rail_spec_ironridge-xr100-rail.png",
+    "verified": true,
+    "notes": "RAIL PRODUCT datasheet (category rail_spec) - distinct from the racking_detail ATTACHMENT page assets. Added 2026-07-20 after the DS appendix wrongly showed the FlashFoot2 attachment page (racking_detail_ironridge-xr100 p.12 of the install manual) on a RT-MINI job: RT-MINI is the attachment there, only the RAIL is IronRidge, so the rail's own product sheet is the correct visual. Official files.ironridge.com, fetched 2026-07-20 (929KB, 2pp, HTTP 200 application/pdf). Page 2 is the component family sheet: XR10 (6ft span) / XR100 (8ft span, 'the ultimate residential solar mounting rail') / XR1000 (12ft span) profiles, BOSS bonded splices, UFO/EFO/CAMO clamps, bonding hardware, HUG/FlashFoot2/Knockout Tile/Lynx attachments.",
+    "asset_type": "image",
+    "render_page": 2
   }
 ]
