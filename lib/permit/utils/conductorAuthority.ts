@@ -182,7 +182,15 @@ export function wireGaugeForOcpd(ocpdAmps: number): string {
 function microBranchRow(index: number, deviceCount: number, perMicroA: number): MicroBranch {
   const branchCurrentA = deviceCount * perMicroA;
   const continuousA = branchCurrentA * 1.25;
-  const ocpdAmps = necNextStandardOcpd(continuousA) || 20;
+  // Ray's ruling (2026-07-20): micro AC branch breakers are 20A or 30A ONLY —
+  // never 25A. Same law segment-schedule.ts:544 already enforces on the app
+  // path ("branch circuits MUST stay on 20A or 30A"). The planner's
+  // single-branch-per-plane ceiling (cap × 1.5, the 30/20 ratio) guarantees
+  // continuous ≤ 30A; anything above falls through to the standard ladder so
+  // an illegal branch prints visibly instead of being clamped quiet.
+  const ocpdAmps = continuousA <= 20 ? 20
+    : continuousA <= 30 ? 30
+    : (necNextStandardOcpd(continuousA) || 30);
   const wireGauge = wireGaugeForOcpd(ocpdAmps);
   return {
     index,

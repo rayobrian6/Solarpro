@@ -915,7 +915,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
             genPortX:bx,genPortY:cy+14};
   }
 
-  function renderCombiner(cx: number, cy: number, nBranches: number, branchOcpd: number, label: string, calloutN: number): any {
+  function renderCombiner(cx: number, cy: number, nBranches: number, branchOcpd: number, label: string, calloutN: number, branchOcpds?: number[]): any {
     const W2=80,H2=90, bx=cx-W2/2, by2=cy-H2/2, p: string[]=[];
     p.push(rect(bx,by2,W2,H2,{fill:WHT,sw:SW_MED}));
     p.push(ln(bx,by2+14,bx+W2,by2+14,{sw:SW_THIN}));
@@ -927,7 +927,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     for(let b=0;b<nShow;b++){
       const brY=by2+18+brkSpacing*(b+1);
       p.push(lug(bx+4,brY)); p.push(ln(bx+7,brY,bx+20,brY,{sw:SW_THIN}));
-      p.push(breakerSymbol(bx+29,brY,16,10,branchOcpd));
+      p.push(breakerSymbol(bx+29,brY,16,10,branchOcpds?.[b] ?? branchOcpd));
       p.push(ln(bx+37,brY,cx-5,busY,{sw:SW_THIN}));
     }
     if(nBranches>4) p.push(txt(bx+29,busY-12,`+${nBranches-4}`,{sz:5,anc:'middle',fill:'#666'}));
@@ -1036,13 +1036,28 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const batteryKwh   = hasBattery ? (project.batteryCount! * (project.batteryKwh ?? 5.0)) : 0;
     // Error 5ba fix: battery backfeed fallback — 20A per unit (typical residential), not 46
     const batteryBackfeedA = project.batteryBackfeedA ?? (hasBattery ? project.batteryCount * 20 : 0);
-    const egcNum = '10';
-    const branchOcpd = 20;
-    // PLANE-AWARE branch count — same planner as PV-2B/SLD
+    // Branch plan + EGC from the SHARED conductor authority (_sldAuth) — the
+    // same planMicroBranches result PV-1B and the wire-sizing table print.
+    // The old inline literals (egc '10', uniform 20A OCPD) fabricated values
+    // that contradicted the schedule when a plane-contained branch ran 25A.
+    const _fbBranches = _sldAuth.microBranches;
+    const egcNum = (_sldAuth.egc.gauge || '#10 AWG').replace('#','').replace(' AWG','').trim();
+    const _fbOcpds = _fbBranches.map(b => b.ocpdAmps).filter(n => n > 0);
+    const branchOcpd = _fbOcpds.length ? Math.max(..._fbOcpds) : 20;
+    const branchOcpdTxt = _fbOcpds.length && Math.min(..._fbOcpds) !== Math.max(..._fbOcpds)
+      ? `${Math.min(..._fbOcpds)}–${Math.max(..._fbOcpds)}A OCPD`
+      : `${branchOcpd}A OCPD ea.`;
+    // PLANE-AWARE branch count — same planner as PV-2B/SLD (recompute only
+    // when the authority carries no branches, e.g. non-micro degraded input)
     const _sldEPanels = (project as any).panelPositions as Array<{id:string;planeId?:string;arrayId?:string;row?:number;col?:number}> | undefined;
-    const nBranches = _sldEPanels?.length
+    const nBranches = _fbBranches.length || (_sldEPanels?.length
       ? planMicroBranches(_sldEPanels, inverterModel).count
-      : microBranchCount(totalPanels, inverterModel);
+      : microBranchCount(totalPanels, inverterModel));
+    // Real brand-integrated combiner ("the brains") — same device PV-6/SCHED
+    // print — never a hardcoded model string.
+    const _fbBos = buildIntegratedEquipment(input, cad);
+    const _fbBrains = _fbBos.brains ?? _fbBos.devices[0];
+    const combLabel = _fbBrains ? `${_fbBrains.brand} ${_fbBrains.model}` : 'AC Combiner';
     const deviceCount = totalPanels;
 
     // X positions
@@ -1098,24 +1113,28 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     parts.push(lug(jbCX-jbW/2+6,jbCY)); parts.push(lug(jbCX+jbW/2-6,jbCY));
     parts.push(txt(jbCX,jbCY-jbH/2-15,isRoof(_sldSysType) ? 'ROOF J-BOX' : 'ARRAY J-BOX',{sz:F.sub,bold:true,anc:'middle'}));  // FIX v47.295
     parts.push(txt(jbCX,jbCY-jbH/2-7,'AC JUNCTION',{sz:F.tiny,anc:'middle'}));
-    parts.push(txt(jbCX,jbCY+jbH/2+9,`${nBranches} branches`,{sz:F.tiny,anc:'middle'}));
-    parts.push(txt(jbCX,jbCY+jbH/2+18,`${branchOcpd}A OCPD ea.`,{sz:F.tiny,anc:'middle'}));
+    parts.push(txt(jbCX,jbCY+jbH/2+9,_fbBranches.length?`${nBranches} branches (${_fbBranches.map(b=>b.deviceCount).join('/')})`:`${nBranches} branches`,{sz:F.tiny,anc:'middle'}));
+    parts.push(txt(jbCX,jbCY+jbH/2+18,branchOcpdTxt,{sz:F.tiny,anc:'middle'}));
     parts.push(callout(jbCX+jbW/2+12,jbCY-jbH/2-5,2));
+
+    // Branch wire gauge(s) from the authority's own per-branch callouts —
+    // mixed plans read "#12/#10 AWG" (a 25A branch runs #10 beside #12).
+    const _fbGauges = [...new Set(_fbBranches.map(b => b.wireGauge).filter(Boolean))];
+    const _fbWireTxt = _fbGauges.length ? `${_fbGauges.join('/').replace(/ AWG/g,'')} AWG THWN-2` : '#10 AWG THWN-2';
 
     // SEGMENT 1: PV → J-Box (open air)
     parts.push(wireSeg(pvOutX,jbCX-jbW/2,resolveSegY(pvOutX,jbCX-jbW/2,BUS_Y),
-      ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','OPEN AIR — NEC 690.31'],{openAir:true}));
+      [_fbWireTxt,'1×#'+egcNum+' GRN EGC','OPEN AIR — NEC 690.31'],{openAir:true}));
 
     // NODE 3: AC COMBINER
-    const combLabel=`${inverterMfr} IQ Combiner 5C`;
-    const cr=renderCombiner(xComb,BUS_Y,nBranches,branchOcpd,combLabel,3);
+    const cr=renderCombiner(xComb,BUS_Y,nBranches,branchOcpd,combLabel,3,_fbBranches.map(b=>b.ocpdAmps));
     parts.push(cr.svg);
     parts.push(txt(xComb,cr.ty-8,'AC COMBINER',{sz:F.hdr,bold:true,anc:'middle'}));
     const node3RX=cr.feederOutX;
 
     // SEGMENT 2: J-Box → Combiner
     parts.push(wireSeg(jbCX+jbW/2,cr.lx,resolveSegY(jbCX+jbW/2,cr.lx,BUS_Y),
-      ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','IN 3/4" EMT']));
+      [_fbWireTxt,'1×#'+egcNum+' GRN EGC','IN 3/4" EMT']));
 
     // NODE 5: AC DISCONNECT — label ABOVE the enclosure (BUS_Y-40 landed on
     // renderDisco's internal header strip; two texts printed on top of each
@@ -1191,7 +1210,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const lgdItems: [number,string][] = [
       [1,`PV Array — ${totalPanels}×${panelWatts}W — ${panelVoc.toFixed(0)}Voc/${panelIsc.toFixed(1)}Isc`],
       [2,isRoof(_sldSysType) ? 'Roof J-Box (AC)' : 'Array J-Box (AC)'],
-      [3,'AC Combiner — IQ Combiner 5C'],
+      [3,`AC Combiner — ${esc(combLabel)}`],
       [4,`AC Disconnect — ${acOCPD}A Non-Fused`],
       [5,`MSP — ${mainAmps}A Main / ${pvBreakerAmps}A PV`],
       [6,'Utility Meter — 120/240V 1Ø'],
@@ -1365,7 +1384,7 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
       ['Inverter Output',`${totalAcKw.toFixed(2)} kW AC`],
       ['Branch Circuits',`${ab}`],
       ['─ System ─',''],
-      ['AC Combiner','Enphase IQ Combiner 5C'],
+      ['AC Combiner',esc(combLabel)],
       ['AC Disconnect',`${acOCPD}A Non-Fused`],
       ['Main Panel',`${mainAmps} A`],
       ['Utility',esc(utilityName)],

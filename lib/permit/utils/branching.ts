@@ -243,11 +243,12 @@ function planBranchesWithinSub(
   // SINGLE-BRANCH-PER-PLANE allowance (Ray's ruling 2026-07-20: "one string of
   // 12 on that side. Should be fine on a 30 amp breaker"): the per-model cap
   // is the 20 A-branch figure; a plane slightly over it runs as ONE branch on
-  // a larger branch OCPD instead of splitting (12 × IQ8A = 22.9 A continuous
-  // basis → 25/30 A breaker + #10 AWG — conductorAuthority.microBranchRow
-  // already sizes OCPD + wire per branch from device count, so the sheets
-  // print the real breaker, never an assumed 20 A). Ceiling = cap × 1.5
-  // (the 30 A/20 A ratio).
+  // a larger branch OCPD instead of splitting (12 × IQ8A = 21.8 A continuous
+  // basis → 30 A breaker + #10 AWG; the branch OCPD ladder is 20 A or 30 A
+  // ONLY, never 25 A — Ray's ruling 2026-07-20. conductorAuthority.
+  // microBranchRow sizes OCPD + wire per branch from device count, so the
+  // sheets print the real breaker, never an assumed 20 A). Ceiling =
+  // cap × 1.5 (the 30 A/20 A ratio).
   const singleBranchMax = Math.floor(maxPer * 1.5);
   for (const group of ordered) {
     const sorted = serp(group);

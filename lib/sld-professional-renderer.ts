@@ -1279,7 +1279,11 @@ function renderCombiner(
   cx: number, cy: number,
   nBranches: number, branchOcpd: number,
   label: string, calloutN: number,
-  opts?: {integratedGateway?: boolean; providesDisconnect?: boolean}
+  opts?: {integratedGateway?: boolean; providesDisconnect?: boolean;
+          /** Per-branch OCPDs in branch order (B1..Bn) from the shared branch
+           *  plan — a plane-contained 12-micro branch runs 25A while its
+           *  siblings run 20A, so one uniform `branchOcpd` mislabels it. */
+          branchOcpds?: number[]},
 ): {svg:string; lx:number; rx:number; ty:number; by:number;
     feederOutX:number; feederOutY:number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['ac-combiner'] = 180×160
@@ -1300,7 +1304,8 @@ function renderCombiner(
   p.push(busbar(bx+10, bx+W2-10, busY));
   p.push(txt(cx, busY-5, 'BUS', {sz:5, anc:'middle'}));
 
-  // Branch breakers — each branch circuit terminates here
+  // Branch breakers — each branch circuit terminates here, labeled with its
+  // OWN OCPD from the branch plan when provided (never one uniform figure).
   const nShow = Math.min(nBranches, 4);
   const brkSpacing = (H2-22) / (nShow+1);
   for (let b = 0; b < nShow; b++) {
@@ -1310,7 +1315,7 @@ function renderCombiner(
     // Wire lug → breaker
     p.push(ln(bx+7, brY, bx+20, brY, {sw:SW_THIN}));
     // Breaker
-    p.push(breakerSymbol(bx+29, brY, 16, 10, branchOcpd));
+    p.push(breakerSymbol(bx+29, brY, 16, 10, opts?.branchOcpds?.[b] ?? branchOcpd));
     // Wire breaker → bus
     p.push(ln(bx+37, brY, cx-5, busY, {sw:SW_THIN}));
   }
@@ -1875,9 +1880,20 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
     const nb = input.microBranches?.length ?? microBranchCount(md, input.inverterModel);
-    const bocpd = input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20;
-    parts.push(txt(jbCX, jbCY+jbH/2+9, `${nb} branches`, {sz:F.tiny, anc:'middle'}));
-    parts.push(txt(jbCX, jbCY+jbH/2+18, `${bocpd}A OCPD ea.`, {sz:F.tiny, anc:'middle'}));
+    // Branch labels come from the SHARED branch plan (input.microBranches, the
+    // same planMicroBranches result PV-1B and the wire-sizing table print) —
+    // a plane-contained 12-micro branch runs 25A beside 20A siblings, so a
+    // uniform "20A OCPD ea." fallback contradicted the schedule on the sheet.
+    const _jbSizes = input.microBranches?.map(b => b.deviceCount) ?? [];
+    const _jbOcpds = (input.microBranches?.map(b => b.ocpdAmps) ?? []).filter(n => n > 0);
+    const _jbBranchTxt = _jbSizes.length ? `${nb} branches (${_jbSizes.join('/')})` : `${nb} branches`;
+    const _jbOcpdTxt = _jbOcpds.length
+      ? (Math.min(..._jbOcpds) === Math.max(..._jbOcpds)
+          ? `${_jbOcpds[0]}A OCPD ea.`
+          : `${Math.min(..._jbOcpds)}–${Math.max(..._jbOcpds)}A OCPD`)
+      : `${input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20}A OCPD ea.`;
+    parts.push(txt(jbCX, jbCY+jbH/2+9, _jbBranchTxt, {sz:F.tiny, anc:'middle'}));
+    parts.push(txt(jbCX, jbCY+jbH/2+18, _jbOcpdTxt, {sz:F.tiny, anc:'middle'}));
   } else {
     // String count placed to the left of J-box above wire entry to avoid overlapping ground drop
     parts.push(txt(jbCX-jbW/2-5, jbCY-8, `${input.totalStrings||1}`, {sz:F.sub, bold:true, anc:'end', fill:'#1565C0'}));
@@ -1908,7 +1924,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const bocpd = input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20;
     const clabel = input.combinerModel ?? input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
     const cr = renderCombiner(xComb, BUS_Y, nb, bocpd, clabel, 3,
-      {integratedGateway: input.combinerHasIntegratedGateway, providesDisconnect: input.combinerProvidesAcDisconnect});
+      {integratedGateway: input.combinerHasIntegratedGateway, providesDisconnect: input.combinerProvidesAcDisconnect,
+       branchOcpds: input.microBranches?.map(b => b.ocpdAmps)});
     parts.push(cr.svg);
     node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
@@ -1916,7 +1933,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // SEGMENT 2: J-Box → Combiner
     {
       const run = branchRun;
-      const fb = [`${input.branchWireGauge??'#10 AWG'} THWN-2`, `1×#${egcNum} GRN EGC`, `IN ${input.branchConduitSize??'3/4"'} EMT`];
+      // Conductor gauge(s) from the branch plan's own callouts — mixed-OCPD
+      // plans carry mixed gauges (#12 for 20A branches, #10 for a 25A branch).
+      const _brGauges = [...new Set((input.microBranches ?? [])
+        .map(b => b.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
+        .filter((g): g is string => !!g))];
+      const _brWireTxt = _brGauges.length
+        ? `${_brGauges.join('/')} AWG THWN-2`
+        : `${input.branchWireGauge??'#10 AWG'} THWN-2`;
+      const fb = [_brWireTxt, `1×#${egcNum} GRN EGC`, `IN ${input.branchConduitSize??'3/4"'} EMT`];
       const {lines, cnt} = runLines(run, fb);
       const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
       console.log('[WIRE RUN CREATED] SEGMENT_2A_JBOX_TO_COMBINER: AC branch');
@@ -2518,8 +2543,24 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ?? (input.microBranches?.length ? Math.max(...input.microBranches.map(b => b.ocpdAmps)) : 0)
       ?? 0;
     // P1-2: input.microBranches carries the conductor authority's branch OCPDs
-    // (adapter); the recompute is a degraded-payload fallback on the one ladder.
-    const baShow = ba || necNextStandardOcpd(_maxBrDev * _perMicroBrA * 1.25) || 20;
+    // (adapter); the recompute is a degraded-payload fallback on the SAME
+    // 20A-or-30A branch ladder (Ray's ruling 2026-07-20 — never 25A).
+    const _baCont = _maxBrDev * _perMicroBrA * 1.25;
+    const baShow = ba || (_baCont <= 20 ? 20 : _baCont <= 30 ? 30 : (necNextStandardOcpd(_baCont) || 20));
+    // Mixed-plan display: a plane-contained 12-micro branch runs 25A/#10 while
+    // its siblings run 20A/#12 — the rows must show the plan's real spread,
+    // not the 20A-branch model cap (which the 12-branch legitimately exceeds
+    // under the larger-OCPD single-branch-per-plane rule).
+    const _brOcpds = (input.microBranches?.map(b => b.ocpdAmps) ?? []).filter(n => n > 0);
+    const _brOcpdShow = _brOcpds.length && Math.min(..._brOcpds) !== Math.max(..._brOcpds)
+      ? `${Math.min(..._brOcpds)}–${Math.max(..._brOcpds)} A`
+      : `${baShow} A`;
+    const _brGaugeSet = [...new Set((input.microBranches ?? [])
+      .map(b => b.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
+      .filter((g): g is string => !!g))];
+    const _brWireShow = _brGaugeSet.length
+      ? `${_brGaugeSet.join('/')} AWG`
+      : `${branchRun?.wireGauge ?? input.branchWireGauge ?? '#10 AWG'}`;
     parts.push(txt(p1x+cW/2, CALC_Y+10, 'AC BRANCH CIRCUIT INFO', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
       ['Topology','MICROINVERTER'],
@@ -2527,9 +2568,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['Total DC Power',`${dcKw.toFixed(2)} kW`],
       ['AC per Micro',`${((input.acOutputKw*1000)/md).toFixed(0)} W`],
       ['Branch Circuits',`${ab}`],
-      ['Max Micros/Branch',`${microMaxPerBranch(input.inverterModel)} (NEC 690.8)`],
-      ['Branch OCPD',`${baShow} A`],
-      ['Branch Wire',`${branchRun?.wireGauge ?? input.branchWireGauge ?? '#10 AWG'}`],
+      ['Max Micros/Branch',`${_maxBrDev} (NEC 690.8)`],
+      ['Branch OCPD',_brOcpdShow],
+      ['Branch Wire',_brWireShow],
       ['Feeder Wire',`${resolvedAcWire}`],
       ['Feeder Conduit',`${resolvedAcConduit} ${resolvedAcCondType}`],
       ['Module Voc',`${input.panelVoc} V`],
@@ -3346,11 +3387,20 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       const nb = b.microBranches?.length ?? microBranchCount(md, invModel);
       const bocpd = b.microBranches?.length ? Math.max(...b.microBranches.map(x => x.ocpdAmps)) : 20;
       const _brGauge = wireGaugeForOcpd(bocpd);
+      // Gauge text for the branch-trunk labels: the plan's own per-branch
+      // callouts (mixed plans read "#12/#10"), never a hardcoded 20A gauge.
+      const _brGaugeTxt = (() => {
+        const gs = [...new Set((b.microBranches ?? [])
+          .map(x => x.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
+          .filter((g): g is string => !!g))];
+        return gs.length ? `${gs.join('/')} AWG` : _brGauge;
+      })();
       const _brCur = b.microBranches?.length
         ? Math.max(...b.microBranches.map(x => x.branchCurrentA)) : bocpd / 1.25;
       const _laneCombiner = acCollection.perSource.find(s => s.key === b.key)?.combiner;
       const clabel = _laneCombiner ? `${_laneCombiner.brand} ${_laneCombiner.model}` : (b.combinerLabel ?? `${invMfr || 'PV'} AC Combiner`);
-      const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN);
+      const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN,
+        {branchOcpds: b.microBranches?.map(x => x.ocpdAmps)});
       parts.push(cr.svg);
       parts.push(txt(g.xMid1, cr.ty-8, clabel.toUpperCase(), {sz:F.hdr, bold:true, anc:'middle'}));
       // ── AC junction / transition box (Enphase SOP): the AC trunk runs
@@ -3367,10 +3417,10 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // PV → J-box (open-air branch circuits on roof), J-box → combiner (conduit)
       {
         const run = laneRun(b, 'BRANCH_RUN') ?? laneRun(b, 'ROOF_RUN');
-        // Branch circuits are sized to the 20A branch OCPD (#12), NOT the lane
-        // FEEDER gauge — b.acWireGauge is the 90A feeder's #3 and stamping it
-        // on the branches overstated them 3 sizes (audit 2026-07-16).
-        const fb = [`${nb} AC BRANCH CIRCUIT${nb>1?'S':''}`, `${wireGaugeForOcpd(20)} THWN-2 + EGC`, b.key === 'roof' ? 'NEC 690.12 RSD' : 'AT GRADE'];
+        // Branch circuits are sized to their OWN branch OCPDs from the plan,
+        // NOT the lane FEEDER gauge — b.acWireGauge is the 90A feeder's #3 and
+        // stamping it on the branches overstated them 3 sizes (audit 2026-07-16).
+        const fb = [`${nb} AC BRANCH CIRCUIT${nb>1?'S':''}`, `${_brGaugeTxt} THWN-2 + EGC`, b.key === 'roof' ? 'NEC 690.12 RSD' : 'AT GRADE'];
         const {lines} = runLines(run, fb);
         const y = resolveSegY(pvPt.x, _jbIn.x, laneY);
         parts.push(renderWireRun(buildWireRun(`LANE_${tag}_PV_TO_JBOX`, pvPt.x, y, _jbIn.x, y, run, lines, false, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'), lines));
@@ -3384,8 +3434,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
         });
       }
       {
-        // J-box → combiner still carries the individual 20A branch circuits.
-        const fb = [`${wireGaugeForOcpd(20)} THWN-2 + EGC`, `IN CONDUIT — NEC 690.31`];
+        // J-box → combiner still carries the individual branch circuits at
+        // their plan-sized gauges.
+        const fb = [`${_brGaugeTxt} THWN-2 + EGC`, `IN CONDUIT — NEC 690.31`];
         parts.push(renderWireRun(buildWireRun(`LANE_${tag}_JBOX_TO_COMBINER`, _jbOut.x, laneY, cr.lx, laneY, undefined, fb, false, 'RACEWAY'), fb));
         addTag((_jbOut.x + cr.lx) / 2, laneY + 24, {
           desc: `PV-${tag} AC BRANCH CIRCUITS — J-BOX TO COMBINER`,
