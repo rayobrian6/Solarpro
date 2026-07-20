@@ -312,9 +312,15 @@ export function drawRoofPlan(
     ...regPlanes0.flatMap((rp: any) => (rp.vertices ?? []) as Array<{ lat: number; lng: number }>),
     ...(_hybRaw?.allPts ?? []),
   ];
+  // ONE MAP TRUTH (Ray 2026-07-20: "We aren't even using the same source of
+  // truth for the map"): the rotation choice must be IDENTICAL on PV-1 and
+  // PV-1B — feeding the chooser each sheet's own usable width let PV-1B's
+  // freed left-reserve flip the building relative to PV-1. The chooser always
+  // evaluates the PV-1 aspect (leftReserve 280 basis); PV-1B then renders the
+  // SAME map, just larger.
   const planRotDeg = choosePlanRotationDeg(
     _planTilt, _subjPtsForRot,
-    dz.width - 2 * margin - leftReserve, dz.height - 2 * margin,
+    dz.width - 2 * margin - 280, dz.height - 2 * margin,
   );
   const _pvLngs = regPlanes0.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
   const _pvLats = regPlanes0.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
@@ -473,7 +479,9 @@ export function drawRoofPlan(
     // (≥ 80% on big lots); nearest context still shows, SVG clips the rest.
     // PV-1B: tighter still (1.35 → roof ≥ ~74% of the window) — the wiring is
     // the subject; sidewalks/trees remain a visible ring, never the hero.
-    ? computeFitWindow({ minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat }, _ctxPts, { maxZoomOut: isBranchColorMode ? 1.35 : (_bigLot ? 1.25 : 2.0) })
+    // Same window on BOTH sheets — PV-1B's extra scale comes from the freed
+    // left reserve alone, never from a different crop of the map.
+    ? computeFitWindow({ minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.25 : 2.0 })
     : { minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat });
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
