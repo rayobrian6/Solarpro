@@ -11,7 +11,8 @@ import type { PermitInput } from '../types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, BATTERIES } from '@/lib/equipment-db';
-import { getManufacturerAsset, type ManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, getManufacturerAssetsByCategory, type ManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getRegistryEntryV4 } from '@/lib/equipment-registry-v4';
 
 interface DatasheetEntry { label: string; asset: ManufacturerAsset; }
 
@@ -64,6 +65,31 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
   const batModel = s.battery?.model || p._canonical?.battery?.model || p.batteryModel;
   const batId = fuzz(BATTERIES, batModel)?.id;
   push('BATTERY', getManufacturerAsset(batId, 'battery_spec'));
+
+  // Racking RAIL system (Ray 2026-07-20: the IronRidge visual was MIA) —
+  // rail-paired mounts (e.g. RT-MINI pad + IronRidge XR rail) bill a rail the
+  // BOM resolves from the equipment-registry rail accessory, but only the
+  // MOUNT's manual page ever rendered (PV-3, keyed on mountingSystemId). The
+  // rail's page resolves from the SAME registry accessory the BOM bills —
+  // never a hardcoded brand. No matching verified asset → no page.
+  const mountId = (project as { mountingSystemId?: string }).mountingSystemId;
+  const railAcc = (mountId ? getRegistryEntryV4(mountId) : undefined)
+    ?.requiredAccessories?.find(a => a.category === 'rail');
+  if (railAcc?.defaultManufacturer && railAcc?.defaultModel) {
+    const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const accBrand = norm(railAcc.defaultManufacturer);
+    const accModel = norm(railAcc.defaultModel);
+    // Longest asset-model match wins ('XR1000 rail' must not lose to 'XR100 rail').
+    const railAsset = getManufacturerAssetsByCategory('racking_detail')
+      .filter(a => norm(a.brand) === accBrand
+        && accModel.includes(norm(a.model).replace(/rail$/, '')))
+      .sort((a, b) => b.model.length - a.model.length)[0] ?? null;
+    // Rail-as-primary systems (mountingSystemId = ironridge-xr100) already
+    // show this exact page on PV-3 — only a DIFFERENT rail brand/manual
+    // warrants its own appendix page (RT-MINI pad + IronRidge rail).
+    const mountAsset = getManufacturerAsset(mountId, 'racking_detail');
+    if (railAsset && railAsset.id !== mountAsset?.id) push('RACKING RAIL', railAsset);
+  }
 
   return out;
 }
