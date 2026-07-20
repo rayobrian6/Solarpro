@@ -284,7 +284,11 @@ export function drawRoofPlan(
   // — the opaque-backing patch just erased whatever linework it covered.
   // Same left reserve on BOTH sheets so PV-1B frames at the IDENTICAL zoom/position
   // as PV-1 (they're sibling views of the same roof; different zoom read as sloppy).
-  const leftReserve = 280;
+  // 280px is reserved for PV-1's left-edge tables (ROOF DESCRIPTION / ARRAY &
+  // ROOF CALC / GENERAL NOTES). PV-1B renders none of them — reserving the
+  // strip anyway silently cost ~30% of the drawing scale (the "zoom is
+  // nowhere near right" regression, Ray 2026-07-20).
+  const leftReserve = (panelColorById && panelColorById.size > 0) ? 20 : 280;
 
   // ── ONE GLOBAL PLAN ROTATION (Ray 2026-07-11: "cocking everything to the
   // side") ──────────────────────────────────────────────────────────────────
@@ -457,30 +461,19 @@ export function drawRoofPlan(
   }
   // Circuit sheet (PV-1B) frames the ARRAY, not the whole roof plane — a small
   // array on a big roof otherwise renders as a tiny cluster in a sea of white.
-  // Frame the module bbox + a margin (~14% of the array's larger dimension so
-  // module rectangles + breathing room are covered), clamped to the roof extent.
-  const _arrayFit = (() => {
-    if (!isBranchColorMode || regPanels.length === 0) return null;
-    const alng = (regPanels as any[]).map(p => p.lng).filter((v: number) => isFinite(v));
-    const alat = (regPanels as any[]).map(p => p.lat).filter((v: number) => isFinite(v));
-    if (alng.length === 0 || alat.length === 0) return null;
-    const aMinLng = Math.min(...alng), aMaxLng = Math.max(...alng);
-    const aMinLat = Math.min(...alat), aMaxLat = Math.max(...alat);
-    const pad = Math.max(aMaxLng - aMinLng, aMaxLat - aMinLat, 0.0002) * 0.14;
-    return {
-      minLng: Math.max(aMinLng - pad, minLng), maxLng: Math.min(aMaxLng + pad, maxLng),
-      minLat: Math.max(aMinLat - pad, minLat), maxLat: Math.min(aMaxLat + pad, maxLat),
-    };
-  })();
-  // Circuit sheet (PV-1B) ALWAYS gets the tight array framing — the wiring is
-  // the hero there (see _arrayFit above); before this ordering fix a parcel-
-  // backed job dropped into the site window and rendered the circuits tiny.
-  const _fit = _arrayFit
-    ?? ((_site && _ctxPts.length > 0)
+  // PV-1B framing ruling (Ray, 2026-07-20 — "the zoom is nowhere near right…
+  // we lost the visuals like in PV1"): the circuit sheet uses the SAME window
+  // as PV-1, site context and all. The earlier tight array-only fit stripped
+  // the sidewalks/trees and made the rafter grid (which only exists under the
+  // plane polygons) read as "gone" at close zoom. The wiring stays the hero
+  // via color + the annotation-free site layer (drawn at reduced opacity).
+  const _fit = ((_site && _ctxPts.length > 0)
     // v21 review: the subject roof rendered at ~38% of the window (1/2.6) with
     // the neighbor's tree canopy dominating. Tighter caps keep the roof ≥ ~50%
     // (≥ 80% on big lots); nearest context still shows, SVG clips the rest.
-    ? computeFitWindow({ minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.25 : 2.0 })
+    // PV-1B: tighter still (1.35 → roof ≥ ~74% of the window) — the wiring is
+    // the subject; sidewalks/trees remain a visible ring, never the hero.
+    ? computeFitWindow({ minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat }, _ctxPts, { maxZoomOut: isBranchColorMode ? 1.35 : (_bigLot ? 1.25 : 2.0) })
     : { minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat });
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
@@ -514,18 +507,19 @@ export function drawRoofPlan(
   const _plSetbackFt: number | null = _hyb
     ? (cad?.ground?.setbackFt ?? (layout as { groundSetbackFt?: number } | undefined)?.groundSetbackFt ?? null)
     : null;
-  // Circuit sheet (PV-1B) draws NO site layer at all: with the tight array
-  // framing the softscape/parcel/canopy chrome read as noise behind the wiring
-  // (Ray 2026-07-20, Braidon: "you fucked PV1B" — half-faded site polygons,
-  // tree-canopy blob + shading note on a circuit drawing). PV-1/PV-2 remain
-  // the site-plan sheets; PV-1B is the clean array + branch wiring.
-  if (_site && !isBranchColorMode) {
+  // Site layer on BOTH sheets — PV-1 gets the full annotated site plan;
+  // PV-1B keeps the same VISUALS (roads, sidewalks, trees, buildings, parcel
+  // line) at reduced opacity behind the wiring, but with annotations:false —
+  // no parcel dims, no PROPERTY LINE tags, no setback ring/dims, no service
+  // cluster, no trench notes. Ray 2026-07-20: "We lost the visuals like in
+  // PV1" reversed the brief no-site experiment; the furniture stays off.
+  if (_site) {
     try {
       const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY,
-        { plSetbackFt: _plSetbackFt, fitWin: _fit });
+        { plSetbackFt: _plSetbackFt, fitWin: _fit, annotations: !isBranchColorMode });
       if (sr.els.length) {
         els.push(`<defs><clipPath id="pv2site-clip"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
-        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)">${sr.els.join('')}</g>`);
+        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
         _siteLegend = sr.legend;
         svgTitle = 'SITE & ROOF PLAN WITH MODULES';
       }

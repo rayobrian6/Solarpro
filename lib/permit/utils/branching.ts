@@ -105,6 +105,9 @@ export interface BranchPlanPanel {
    *  panel must NEVER share an AC branch with a roof panel). */
   systemType?: string;
   placementType?: string;
+  /** Plane-facing stamp — the geometric plane-grouping fallback when
+   *  planeId/arrayId are absent (production payloads). */
+  azimuth?: number | null;
 }
 
 export interface BranchPlan {
@@ -203,7 +206,18 @@ function planBranchesWithinSub(
     return Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * cos);
   };
 
-  const keyOf = (p: BranchPlanPanel) => String(p.planeId ?? p.arrayId ?? '');
+  // Plane membership = the 3D design's truth (Ray, 2026-07-20: "look at the
+  // roof layout… that logic should be the source of truth, obtained from 3d
+  // design"). planeId/arrayId when stamped; production payloads often arrive
+  // without them, but every placed panel carries its plane's AZIMUTH stamp —
+  // bucket by facing (45° sectors) so a hip roof's N/S/E/W faces group
+  // correctly instead of collapsing into one global pool.
+  const keyOf = (p: BranchPlanPanel) => {
+    const k = p.planeId ?? p.arrayId;
+    if (k != null && String(k) !== '') return String(k);
+    const az = Number((p as { azimuth?: number | null }).azimuth);
+    return isFinite(az) ? 'az' + ((Math.round((((az % 360) + 360) % 360) / 45) * 45) % 360) : '';
+  };
   const groups = new Map<string, BranchPlanPanel[]>();
   for (const p of panels) {
     const k = keyOf(p);
@@ -219,16 +233,28 @@ function planBranchesWithinSub(
   // Leftover runs (per plane, already in serpentine order) awaiting merge.
   const leftovers: Array<{ ps: BranchPlanPanel[]; c: ReturnType<typeof centroid> }> = [];
 
+  // PLANE-CONTAINED BALANCED SPLIT (Ray's ruling 2026-07-20, supersedes the
+  // fill-at-max-then-pool rule for REAL planes): a plane's modules split into
+  // ceil(n/max) branches of BALANCED size, wholly within the plane. The old
+  // fill-then-pool chunking turned Braidon's 12-module face into 10 + a
+  // 2-module runt branch. Tiny groups (hip caps ≤ 4 modules) still merge with
+  // the nearest remainder — a 4-module cap must not buy its own homerun.
+  const TINY_PLANE_MAX = 4;
   for (const group of ordered) {
     const sorted = serp(group);
-    const fulls = Math.floor(sorted.length / maxPer);
-    for (let f = 0; f < fulls; f++) {
-      for (let i = 0; i < maxPer; i++) assign.set(String(sorted[f * maxPer + i].id), branchIdx);
-      sizes.push(maxPer);
-      branchIdx++;
+    if (sorted.length <= TINY_PLANE_MAX && ordered.length > 1) {
+      leftovers.push({ ps: sorted, c: centroid(sorted) });
+      continue;
     }
-    const rem = sorted.slice(fulls * maxPer);
-    if (rem.length) leftovers.push({ ps: rem, c: centroid(rem) });
+    const k = Math.ceil(sorted.length / maxPer);
+    const bs = balancedBranchSizes(sorted.length, k);
+    let off = 0;
+    for (const sz of bs) {
+      for (let i = 0; i < sz; i++) assign.set(String(sorted[off + i].id), branchIdx);
+      sizes.push(sz);
+      branchIdx++;
+      off += sz;
+    }
   }
 
   // Merge leftovers into EXACTLY ceil(R/max) remainder branches — the count

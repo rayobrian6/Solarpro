@@ -417,6 +417,12 @@ export function drawSiteContextEls(
      *  portion of clipped parcel edges so big-lot framing can't push every
      *  dimension off-frame. */
     fitWin?: { minLng: number; maxLng: number; minLat: number; maxLat: number } | null;
+    /** false → polygons/parcel-line ONLY (roads, sidewalks, trees, buildings,
+     *  driveways, the dashed property line). Suppresses every annotation:
+     *  edge dims, PROPERTY LINE tags, setback ring, setback dims, fallback
+     *  note, service cluster. PV-1B wants the PV-1 site VISUALS behind its
+     *  wiring, not the PV-1 furniture (Ray, 2026-07-20). Default true. */
+    annotations?: boolean;
   },
 ): SiteRender {
   const els: string[] = [];
@@ -514,7 +520,7 @@ export function drawSiteContextEls(
       els.push(`<polygon points="${pts}" fill="rgba(120,165,102,${(0.34 * tOp).toFixed(2)})" stroke="${over ? '#b45309' : '#5f8a4a'}" stroke-width="${over ? 1.1 : 0.7}" stroke-opacity="${tOp.toFixed(2)}"${over ? ' stroke-dasharray="3 2"' : ''}/>`);
     }
     legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="rgba(120,165,102,0.34)" stroke="#5f8a4a" stroke-width="0.7"/>`, label: 'TREE CANOPY (NEARMAP AI)' });
-    if (shades) {
+    if (shades && opts?.annotations !== false) {
       const bx = toX((roof.minLng + roof.maxLng) / 2);
       els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.maxLat) - 6).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.2" font-weight="bold" fill="#b45309" stroke="#fff" stroke-width="1.5" paint-order="stroke">TREE CANOPY NEAR ARRAY — SHADING, FIELD VERIFY</text>`);
     }
@@ -569,7 +575,7 @@ export function drawSiteContextEls(
     // line, never on it. Tiny edges (<12 ft) skip to avoid clutter. ──
     let _edgeDims = 0;      // parcel edge dims drawn (suppresses the fallback note)
     let _ringDrawn = false; // setback ring drawn (ditto)
-    if (n <= 16) {
+    if (opts?.annotations !== false && n <= 16) {
       const cenLng = P.reduce((s, p) => s + p.lng, 0) / n;
       const cenLat = P.reduce((s, p) => s + p.lat, 0) / n;
       for (let i = 0; i < n; i++) {
@@ -621,7 +627,7 @@ export function drawSiteContextEls(
     // ── SETBACK OFFSET RING — dashed inner offset of the parcel boundary at
     // the array/fence setback the engine already computed (opts.plSetbackFt;
     // never invented here). Labeled once, on its longest visible edge. ──
-    const sbFt = opts?.plSetbackFt;
+    const sbFt = opts?.annotations === false ? null : opts?.plSetbackFt;
     if (sbFt != null && sbFt > 0) {
       const inset = insetParcelRing(P, sbFt);
       if (inset) {
@@ -677,7 +683,7 @@ export function drawSiteContextEls(
     // overall dimension + callouts + viewport title, and the S dim's extension
     // line struck straight through them (Stowell "63'" through GRAPHIC SCALE).
     // The parcel edge dims + setback ring carry the south story instead.
-    const sides: Array<[number, number, number, number]> = [
+    const sides: Array<[number, number, number, number]> = opts?.annotations === false ? [] : [
       [roof.minLng, cLat, -1, 0], [roof.maxLng, cLat, 1, 0],   // W, E
       [cLng, roof.maxLat, 0, 1],                               // N
     ];
@@ -695,7 +701,7 @@ export function drawSiteContextEls(
       els.push(`<text x="${mx.toFixed(1)}" y="${(my - 1.5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.5" paint-order="stroke">${Math.round(d)}'</text>`);
       dimsDrawn++;
     }
-    if (!dimsDrawn && !_edgeDims && !_ringDrawn) {
+    if (!dimsDrawn && !_edgeDims && !_ringDrawn && opts?.annotations !== false) {
       // Nothing else told the P/L story (all off-frame) — report the closest
       // approach. When edge dims / the setback ring DID draw, this note is
       // redundant and printed straight through the overall-dimension band.
@@ -722,7 +728,7 @@ export function drawSiteContextEls(
   // street-side heuristic — provenance carried by the FIELD VERIFY note),
   // clamped just outside the roof footprint and pushed OUTWARD (away from the
   // building) so the row never covers the roof, array or fence tags. ──
-  if (site.equipment.length) {
+  if (site.equipment.length && opts?.annotations !== false) {
     const ORDER: Record<string, number> = { utility_meter: 0, msp: 1, ac_disconnect: 2 };
     const TAG: Record<string, string> = { utility_meter: 'M', msp: 'MSP', ac_disconnect: 'AC-D' };
     const clampOut = (p: FakePt): FakePt => {
