@@ -153,6 +153,17 @@ contradictions get appended. Do not delete resolved entries — strike them thro
 - [ ] **N-6** 112 leaves 17 multi-segment fence layouts empty on purpose — studio re-trace list
   in the migration header.
 
+- [ ] **N-7** Bare-vs-healed authority OCPD basis: buildConductorAuthority on an
+  un-healed input falls back to panel-watts for per-micro amps (missing
+  acOutputKw), landing large branches on a different breaker step (30 vs 25 A)
+  than the healed pipeline. Engine should write resolved per-device AC back
+  onto the input (P1-1 family) so both bases are identical.
+- [ ] **N-8** SVG id collisions across sheets (CLASS): clipPath/pattern/gradient ids
+  repeat in every embedded sheet svg; the document-global first-definition wins.
+  Fixed for roof.ts clips (sbclip*/pv2site-clip namespaced by mode, 2026-07-20 —
+  PV-1B's rafters/fire-bands were being clipped by PV-1's plane geometry). AUDIT
+  the other templates (fence/ground/SLD) for the same class.
+
 ## FIX WAVES (proposed)
 
 1. **Wave INTAKE-1 (code, no DB):** P0-1, P0-2/3/4 (per-sub panel spec resolution

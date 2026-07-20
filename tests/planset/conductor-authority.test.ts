@@ -63,8 +63,15 @@ describe('conductor authority — single source of truth', () => {
   });
 
   it('renders the same branch OCPD across PV-4A, PV-4B and SCHED (no stray hardcode)', () => {
-    const html = generatePermitHTML(clone());
-    const auth = buildConductorAuthority(clone(), null);
+    // Expectation must come from the SAME healed input the sheets render from:
+    // generatePermitHTML mutates/heals the input (AC totals etc.), and the raw
+    // fixture's missing acOutputKw falls back to panel watts — a per-micro amp
+    // basis divergence that lands 12-module branches on a different breaker
+    // step (30 vs 25 A). Exposed by the 2026-07-20 single-branch-per-plane
+    // rule; the underlying bare-vs-healed divergence is register finding N-7.
+    const input = clone();
+    const html = generatePermitHTML(input);
+    const auth = buildConductorAuthority(input, null);
     const ocpd = auth.microBranches[0]?.ocpdAmps;
     expect(ocpd).toBeGreaterThan(0);
     // All three branch schedules print the authority OCPD (…>NN A< / >NNA<).

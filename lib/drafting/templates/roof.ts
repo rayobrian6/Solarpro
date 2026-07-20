@@ -382,6 +382,18 @@ export function drawRoofPlan(
     return i >= 0 ? planeCosP[i] : 1;
   };
 
+  // SVG ids are DOCUMENT-global: PV-1, PV-1B and PV-2 all embed this svg in
+  // one planset html, and identically-named clipPaths collide — the browser
+  // resolves url(#sbclip0) to the FIRST sheet's plane polygon, so later
+  // sheets' framing/fire-bands were clipped by ANOTHER sheet's geometry
+  // (Braidon PV-1B: rafters + ridge band vanished west of PV-1's overlap —
+  // "your firewalk is cut off", 2026-07-20). Every clip id is namespaced with
+  // a per-render sequence number.
+  // Deterministic namespace: byte-identical re-renders are a legacy-sweep
+  // invariant, so a sequence counter is out. The ONLY geometry differentiator
+  // between same-document renders is branch mode (leftReserve/transform);
+  // same-mode renders share ids AND identical clip geometry (harmless).
+  const _svgNs = (panelColorById && panelColorById.size > 0) ? 'b' : 'p';
   const els: string[] = [];
   // v65: pre-compute branch-color mode flag (needed for title bar)
   const isBranchColorMode = !!(panelColorById && panelColorById.size > 0);
@@ -526,8 +538,8 @@ export function drawRoofPlan(
       const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY,
         { plSetbackFt: _plSetbackFt, fitWin: _fit, annotations: !isBranchColorMode });
       if (sr.els.length) {
-        els.push(`<defs><clipPath id="pv2site-clip"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
-        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
+        els.push(`<defs><clipPath id="pv2site-clip${_svgNs}"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
+        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip${_svgNs})"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
         _siteLegend = sr.legend;
         svgTitle = 'SITE & ROOF PLAN WITH MODULES';
       }
@@ -731,7 +743,7 @@ export function drawRoofPlan(
     //     on the eave it needs to not show") + fine line
     //   perimeter otherwise                     = RAKE   → band + fine line
     const nV = ptsXY.length;
-    const clipId = `sbclip${ri}`;
+    const clipId = `sb${_svgNs}c${ri}`;
     els.push(`<defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>`);
     const bands: string[] = [];
     const edgeLines: string[] = [];
@@ -891,7 +903,7 @@ export function drawRoofPlan(
     // Fire-access pathways belong on PV-1 (the fire/setback sheet); on PV-1B's
     // circuit map they just clutter the branch routing, so skip them here.
     if (!isBranchColorMode) {
-      els.push(`<g clip-path="url(#sbclip${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
+      els.push(`<g clip-path="url(#sb${_svgNs}c${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
       const lmx = gc * udx + ((vMin + vMax) / 2) * vdx;
       const lmy = gc * udy + ((vMin + vMax) / 2) * vdy;
       let angDeg = Math.atan2(vdy, vdx) * 180 / Math.PI;
@@ -1080,7 +1092,7 @@ export function drawRoofPlan(
         }
       });
       if (rails.length || rFeet.length || dFeet.length)
-        els.push(`<g clip-path="url(#sbclip${ri})">${rails.join('')}${rFeet.join('')}${dFeet.join('')}</g>`);
+        els.push(`<g clip-path="url(#sb${_svgNs}c${ri})">${rails.join('')}${rFeet.join('')}${dFeet.join('')}</g>`);
     });
   }
 

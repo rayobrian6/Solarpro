@@ -240,13 +240,22 @@ function planBranchesWithinSub(
   // 2-module runt branch. Tiny groups (hip caps ≤ 4 modules) still merge with
   // the nearest remainder — a 4-module cap must not buy its own homerun.
   const TINY_PLANE_MAX = 4;
+  // SINGLE-BRANCH-PER-PLANE allowance (Ray's ruling 2026-07-20: "one string of
+  // 12 on that side. Should be fine on a 30 amp breaker"): the per-model cap
+  // is the 20 A-branch figure; a plane slightly over it runs as ONE branch on
+  // a larger branch OCPD instead of splitting (12 × IQ8A = 22.9 A continuous
+  // basis → 25/30 A breaker + #10 AWG — conductorAuthority.microBranchRow
+  // already sizes OCPD + wire per branch from device count, so the sheets
+  // print the real breaker, never an assumed 20 A). Ceiling = cap × 1.5
+  // (the 30 A/20 A ratio).
+  const singleBranchMax = Math.floor(maxPer * 1.5);
   for (const group of ordered) {
     const sorted = serp(group);
     if (sorted.length <= TINY_PLANE_MAX && ordered.length > 1) {
       leftovers.push({ ps: sorted, c: centroid(sorted) });
       continue;
     }
-    const k = Math.ceil(sorted.length / maxPer);
+    const k = sorted.length <= singleBranchMax ? 1 : Math.ceil(sorted.length / maxPer);
     const bs = balancedBranchSizes(sorted.length, k);
     let off = 0;
     for (const sz of bs) {
