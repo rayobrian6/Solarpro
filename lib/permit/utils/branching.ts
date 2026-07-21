@@ -228,8 +228,9 @@ function planBranchesWithinSub(
   // Largest plane first → B1 lands on the main field.
   const ordered = [...groups.values()].sort((a, b) => b.length - a.length);
 
-  const sizes: number[] = [];
-  let branchIdx = 0;
+  // Branches carried as panel lists (not just indices) so tiny-cap leftovers
+  // can attach to a FACE branch after the plane phase (Ray's ruling below).
+  const branches: Array<{ ps: BranchPlanPanel[]; c: ReturnType<typeof centroid> }> = [];
   // Leftover runs (per plane, already in serpentine order) awaiting merge.
   const leftovers: Array<{ ps: BranchPlanPanel[]; c: ReturnType<typeof centroid> }> = [];
 
@@ -237,8 +238,7 @@ function planBranchesWithinSub(
   // fill-at-max-then-pool rule for REAL planes): a plane's modules split into
   // ceil(n/max) branches of BALANCED size, wholly within the plane. The old
   // fill-then-pool chunking turned Braidon's 12-module face into 10 + a
-  // 2-module runt branch. Tiny groups (hip caps ≤ 4 modules) still merge with
-  // the nearest remainder — a 4-module cap must not buy its own homerun.
+  // 2-module runt branch.
   const TINY_PLANE_MAX = 4;
   // SINGLE-BRANCH-PER-PLANE allowance (Ray's ruling 2026-07-20: "one string of
   // 12 on that side. Should be fine on a 30 amp breaker"): the per-model cap
@@ -260,25 +260,47 @@ function planBranchesWithinSub(
     const bs = balancedBranchSizes(sorted.length, k);
     let off = 0;
     for (const sz of bs) {
-      for (let i = 0; i < sz; i++) assign.set(String(sorted[off + i].id), branchIdx);
-      sizes.push(sz);
-      branchIdx++;
+      const ps = sorted.slice(off, off + sz);
+      branches.push({ ps, c: centroid(ps) });
       off += sz;
     }
   }
 
-  // Merge leftovers into EXACTLY ceil(R/max) remainder branches — the count
+  // TINY-CAP → NEAREST FACE BRANCH (Ray's ruling 2026-07-20): a hip cap rides
+  // the NEAREST existing face branch with room under the 30 A single-branch
+  // ceiling (cap × 1.5) — never a cross-roof cap-to-cap trunk. The plane-
+  // contained split removed main-face remainders, so without this rule the
+  // caps could only pool with EACH OTHER (Melvin's W+E caps on one branch
+  // across the ridge — violating the 2026-07-03 "not linking strings across
+  // opposite sides of the roof" ruling). The joined branch may step from a
+  // 20 A to a 30 A OCPD; microBranchRow prints the real breaker per branch.
+  const unplaced: typeof leftovers = [];
+  for (const l of leftovers) {
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < branches.length; i++) {
+      if (branches[i].ps.length + l.ps.length > singleBranchMax) continue;
+      const d = distM(branches[i].c, l.c);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best >= 0) {
+      branches[best].ps.push(...l.ps);
+      branches[best].c = centroid(branches[best].ps) ?? branches[best].c;
+    } else {
+      unplaced.push(l);
+    }
+  }
+
+  // Leftovers with NO face branch to ride (all-tiny roofs, or every branch at
+  // the ceiling) merge into EXACTLY ceil(R/max) remainder branches — the count
   // that keeps total homeruns at the theoretical minimum. Seed each branch
   // with the largest remaining leftover, then attach every other leftover to
-  // the NEAREST seed with room (panel-centroid distance), so a hip cap joins
-  // the face it actually touches instead of forming a runt branch or pairing
-  // with the far side of the roof.
-  if (leftovers.length) {
-    const totalRem = leftovers.reduce((s, l) => s + l.ps.length, 0);
+  // the NEAREST seed with room (panel-centroid distance).
+  if (unplaced.length) {
+    const totalRem = unplaced.reduce((s, l) => s + l.ps.length, 0);
     const remBranches = Math.max(1, Math.ceil(totalRem / maxPer));
-    leftovers.sort((a, b) => b.ps.length - a.ps.length);
-    const seeds = leftovers.slice(0, remBranches);
-    const rest = leftovers.slice(remBranches);
+    unplaced.sort((a, b) => b.ps.length - a.ps.length);
+    const seeds = unplaced.slice(0, remBranches);
+    const rest = unplaced.slice(remBranches);
     // Balanced capacity: without a target cap, everything gravitates to one
     // seed and the other stays a runt — the exact waste being eliminated.
     const target = Math.ceil(totalRem / remBranches);
@@ -297,12 +319,10 @@ function planBranchesWithinSub(
       seeds[best].ps.push(...l.ps);
       seeds[best].c = centroid(seeds[best].ps) ?? seeds[best].c;
     }
-    for (const s of seeds) {
-      for (const p of s.ps) assign.set(String(p.id), branchIdx);
-      sizes.push(s.ps.length);
-      branchIdx++;
-    }
+    for (const s of seeds) branches.push({ ps: s.ps, c: s.c });
   }
 
-  return { count: branchIdx || 1, sizes, assign };
+  const sizes = branches.map(b => b.ps.length);
+  branches.forEach((b, bi) => { for (const p of b.ps) assign.set(String(p.id), bi); });
+  return { count: branches.length || 1, sizes, assign };
 }

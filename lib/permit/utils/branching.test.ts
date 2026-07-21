@@ -42,16 +42,15 @@ function melvinPanels() {
 }
 
 describe('planMicroBranches — economical installer plan', () => {
-  it('plane-contained BALANCED splits at minimum per-plane count (Ray 2026-07-20)', () => {
+  it('plane-contained BALANCED splits + caps ride face branches (Ray 2026-07-20)', () => {
     const plan = planMicroBranches(melvinPanels(), 'IQ8A');
-    // N=23 → ceil(23/11)=3 balanced [8,8,7]; S=22 → 2 × [11,11];
-    // W+E caps (4+4) → one merged remainder branch of 8 → 6 homeruns total.
-    expect(plan.count).toBe(6);
+    // N=23 → ceil(23/11)=3 balanced [8,8,7]; S=22 → 2 × [11,11]; each 4-module
+    // cap rides its NEAREST face branch → 5 homeruns, the minimum with no
+    // cross-roof runs.
+    expect(plan.count).toBe(5);
     expect(plan.sizes.reduce((a, b) => a + b, 0)).toBe(53);
-    expect([...plan.sizes].sort((a, b) => a - b)).toEqual([7, 8, 8, 8, 11, 11]);
-    // no runt branches — balanced splits keep every branch ≥ 7 here
+    // no runt branches, and nothing over the 30A single-branch ceiling (cap × 1.5)
     expect(Math.min(...plan.sizes)).toBeGreaterThanOrEqual(7);
-    // no branch exceeds the 30A single-branch ceiling (cap × 1.5)
     expect(Math.max(...plan.sizes)).toBeLessThanOrEqual(16);
   });
 
@@ -62,17 +61,19 @@ describe('planMicroBranches — economical installer plan', () => {
     expect(new Set(['E-0','E-1','E-2','E-3'].map(branchOf)).size).toBe(1);
   });
 
-  // ⚠ OPEN RULING (Ray): with plane-contained balanced splits the main faces
-  // no longer shed remainders, so tiny hip caps now merge with EACH OTHER —
-  // on Melvin that pairs the W and E caps on ONE branch across the roof,
-  // which conflicts with the standing 2026-07-03 ruling ("not linking
-  // strings across opposite sides of the roof"). Options: attach caps to the
-  // nearest face branch with room (5 homeruns, no cross-roof run) or accept
-  // the cap-to-cap merge. Un-skip and pin whichever Ray rules.
-  it.skip('merges hip caps with the NEAREST face branch, not across the roof (awaiting ruling)', () => {
+  // Ray's ruling 2026-07-20 (task): tiny caps attach to the NEAREST face
+  // branch with room under the 30A single-branch ceiling — never a
+  // cap-to-cap trunk across the roof (2026-07-03: "not linking strings
+  // across opposite sides of the roof").
+  it('merges hip caps with the NEAREST face branch, not across the roof', () => {
     const plan = planMicroBranches(melvinPanels(), 'IQ8A');
     const branchOf = (id: string) => plan.assign.get(id);
+    // opposite caps never share a branch
     expect(branchOf('W-0')).not.toBe(branchOf('E-0'));
+    // each cap's branch is a FACE branch it joined (size > 4 — not a runt of its own)
+    const sizeOf = (b: number | undefined) => [...plan.assign.values()].filter(v => v === b).length;
+    expect(sizeOf(branchOf('W-0'))).toBeGreaterThan(4);
+    expect(sizeOf(branchOf('E-0'))).toBeGreaterThan(4);
   });
 
   it('single plane still chunks to minimum count', () => {
