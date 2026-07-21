@@ -10,6 +10,7 @@ import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, 
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
 import { microBranchCount, planMicroBranches } from '../utils/branching';
+import { getSnapshot } from '../snapshot/read';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { SUB_LABEL } from './subSystemSheets';
@@ -50,24 +51,31 @@ export interface InterconnectionResolution {
 }
 
 export function resolveInterconnection(input: PermitInput, cad?: CADModel | null): InterconnectionResolution {
-  const { project, system } = input;
-  const auth = buildConductorAuthority(input, cad ?? undefined);
-  const totalAcKw = Number(system?.totalAcKw || 0);
-  const busA = project.panelBusRating || project.mainPanelAmps || 200;
-  const mainA = project.mainPanelAmps || 200;
-  const feederOutputA = totalAcKw > 0 ? (totalAcKw * 1000 / 240) : (auth.acFeeder.ampacityA ?? 0);
-  const feederContinuousA = feederOutputA * 1.25;
-  const feederOcpd = auth.acFeeder.ocpdAmps
-    ?? project.backfeedBreakerA
-    ?? (feederContinuousA > 0 ? (necNextStandardOcpd(feederContinuousA) || 0) : 0);
+  // W2 PROJECTION (Ray's snapshot mandate): every figure here comes from the
+  // validated PermitDesignSnapshot — the sheet no longer derives feeder
+  // current, re-rounds OCPDs, runs its own 120% math, or RESOLVES the
+  // interconnection method (the old `|| !passes120` upgrade was a sheet
+  // making an engineering decision). The engine decided; the sheet projects.
+  const snap = getSnapshot(input);
+  const auth = buildConductorAuthority(input, cad ?? undefined); // callout text carrier until conductors carry callouts (W2 gap)
+  const busA = snap.electrical.poi.busbarA ?? 0;
+  const mainA = snap.electrical.poi.mainBreakerA ?? 0;
+  const feederOcpd = snap.electrical.feeder.ocpdA ?? 0;
+  const feederOutputA = snap.electrical.feeder.currentA ?? 0;
+  const feederContinuousA = snap.electrical.feeder.continuousA ?? feederOutputA * 1.25;
   const busLimit = busA * 1.2;
   const maxBackfeedA = busLimit - mainA;
-  const passes120 = feederOcpd > 0 ? feederOcpd <= maxBackfeedA : true;
-  // Resolve ONCE: an explicit supply-side design, OR a load-side design whose
-  // 120% busbar rule fails, resolves to a supply-side (line-side) tap.
-  const isSupplySide = isSupplySideInterconnection(input) || !passes120;
+  const passes120 = snap.electrical.poi.rulePasses ?? (feederOcpd > 0 ? feederOcpd <= maxBackfeedA : true);
+  const isSupplySide = snap.project.interconnection.rule === '705.11';
   const feederConductorCallout = auth.acFeeder.conductorCallout || `${auth.acFeeder.wireGauge} THWN-2`;
   const feederPhaseCallout = feederConductorCallout.replace(/\s*\+\s*\d*\s*#[\d/]+\s*AWG\s*GND/ig, '');
+  const feederGauge = snap.electrical.conductors.find(c => c.conductorId === snap.electrical.feeder.conductorId)?.gauge
+    ?? auth.acFeeder.wireGauge;
+  // FEEDER EGC = NEC 250.122 on the FEEDER OCPD (the IC2 #12→#6 law) — the
+  // system EGC record is branch-governed and is NOT this conductor.
+  const egcGauge = feederOcpd > 0 ? getEGCSize(feederOcpd)
+    : (snap.electrical.conductors.find(c => c.conductorId === snap.electrical.systemEgc.conductorId)?.gauge
+       ?? auth.egc.gauge);
   return {
     isSupplySide,
     methodLabel: isSupplySide ? 'Supply Side Tap — NEC 705.11' : 'Load Side — NEC 705.12(B)',
@@ -75,11 +83,11 @@ export function resolveInterconnection(input: PermitInput, cad?: CADModel | null
     feederOutputA,
     feederContinuousA,
     feederOcpd,
-    feederWireGauge: auth.acFeeder.wireGauge,
+    feederWireGauge: feederGauge,
     feederConductorCallout,
     feederPhaseCallout,
     feederAmpacityA: auth.acFeeder.ampacityA,
-    feederEgcGauge: getEGCSize(feederOcpd || auth.governingOcpd),
+    feederEgcGauge: egcGauge,
     busA,
     mainA,
     busLimit,
@@ -542,10 +550,10 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
 
       ${/* Full NEC code-reference table removed — duplicated PV-4A's
            methodology table row-for-row and displaced project content. */''}
-      <div class="section-title">Load Calculations — NEC 220.82 Optional Method</div>
+      <div class="section-title">Service &amp; Interconnection — NEC 705</div>
       ${(() => {
-        // Single-sourced from resolveInterconnection — the SAME bus/main/OCPD
-        // and resolved method PV-4A, the cover and PV-4B's AC-feeder row print.
+        // Single-sourced from resolveInterconnection (a snapshot projection) —
+        // the SAME bus/main/OCPD and method PV-4A, the cover and PV-4B print.
         const busA = _ic.busA;
         const mainA = _ic.mainA;
         const acKw = system.totalAcKw || 0;
@@ -555,23 +563,15 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const busLimit = _ic.busLimit;
         const maxBfAllowed = _ic.maxBackfeedA;
         const passes120 = _ic.passes120;
-        // Single-sourced interconnection: a supply-side tap connects LINE side
-        // of the service disconnect — NEC 705.12(B)'s 120% busbar rule does not
-        // govern, so running (and failing) it here contradicted the rest of the
-        // set. Steps 8-9 + interpretation are method-specific below. A load-side
-        // design that fails 120% resolves UP to supply-side, so the load-side
-        // branch never ships a red "EXCEEDS 120%" on an issued set.
         const _lcSupply = _ic.isSupplySide;
-        const sqft = mainA >= 200 ? 3000 : 2000;
-        const lightingVA = sqft * 3;
-        const smallApplVA = 4500;
-        const totalBeforeDemand = lightingVA + smallApplVA;
-        const demand = totalBeforeDemand <= 10000
-          ? totalBeforeDemand
-          : 10000 + (totalBeforeDemand - 10000) * 0.4;
-        const hvacVA = mainA >= 200 ? 7200 : 4320;
-        const totalLoad = demand + hvacVA;
-        const loadAmps = (totalLoad / 240).toFixed(0);
+        // D-4 (Ray, binding 2026-07-20): the former NEC 220.82 dwelling-load
+        // table FABRICATED its inputs (square footage assumed from service
+        // amps, invented appliance and HVAC loads) and is REMOVED. A load
+        // calculation renders only when verified source inputs + calculation
+        // provenance exist (none do today). The interconnection compliance
+        // path below does not require one: supply-side taps are governed by
+        // NEC 705.11, and the load-side path is governed by the 120% busbar
+        // rule — neither depends on a dwelling load calc.
         return `
         <table class="equip-table">
           <thead><tr>
@@ -581,19 +581,15 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <th style="width:25%">Result</th>
           </tr></thead>
           <tbody>
-            <tr ><td class="fw9 mono">1</td><td>General Lighting — NEC 220.82(B)(1)</td><td>${sqft.toLocaleString()} sqft (assumed from ${mainA}A service — field verify) × 3 VA/sqft</td><td class="tr fw9">${lightingVA.toLocaleString()} VA</td></tr>
-            <tr class="bg-lt"><td class="fw9 mono">2</td><td>Small Appliance + Laundry — NEC 220.52</td><td>3 circuits × 1,500 VA</td><td class="tr fw9">${smallApplVA.toLocaleString()} VA</td></tr>
-            <tr ><td class="fw9 mono">3</td><td>Demand Factor — NEC 220.82(B)</td><td>First 10 kVA @ 100% + remainder @ 40%</td><td class="tr fw9">${Math.round(demand).toLocaleString()} VA</td></tr>
-            <tr class="bg-lt"><td class="fw9 mono">4</td><td>HVAC / Largest Motor Load</td><td>${mainA >= 200 ? '5-ton' : '3-ton'} AC unit (field verify)</td><td class="tr fw9">${hvacVA.toLocaleString()} VA</td></tr>
-            <tr style="background:#fff;border-top:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:700;">Total Calculated Load</td><td>Steps 1–4 ÷ 240V service</td><td class="tr fw9">${Math.round(totalLoad).toLocaleString()} VA = ${loadAmps}A</td></tr>
-            <tr class="bg-lt"><td class="fw9 mono">6</td><td>Service Ampacity</td><td>${mainA}A panel × 240V</td><td class="tr fw9">${mainA}A available</td></tr>
-            <tr ><td class="fw9 mono">7</td><td>PV AC Output</td><td>${acKw.toFixed(2)} kW AC ÷ 240V</td><td class="tr fw9">${acAmps.toFixed(1)}A PV</td></tr>
+            <tr ><td class="fw9 mono">1</td><td>Dwelling Load Calculation</td><td>Not provided — no verified dwelling load inputs on file. Not required for the selected interconnection method (${_lcSupply ? 'NEC 705.11 supply-side tap' : 'NEC 705.12(B) 120% busbar rule'}).</td><td class="tr fw9">N/A</td></tr>
+            <tr class="bg-lt"><td class="fw9 mono">2</td><td>Service Rating</td><td>${mainA}A main service disconnect / ${busA}A busbar</td><td class="tr fw9">${mainA}A</td></tr>
+            <tr ><td class="fw9 mono">3</td><td>PV AC Output</td><td>${acKw.toFixed(2)} kW AC ÷ 240V</td><td class="tr fw9">${acAmps.toFixed(1)}A PV</td></tr>
             ${_lcSupply ? `
-            <tr class="bg-lt"><td class="fw9 mono">8</td><td>Tap OCPD — NEC 705.11 / 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A fused disconnect</td></tr>
-            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">9</td><td style="font-weight:900;">Supply-Side Connection — NEC 705.11</td><td>Tap made LINE side of the ${mainA}A service disconnect; 120% busbar rule (NEC 705.12(B)) not applicable</td><td style="font-weight:900;text-align:right;font-size:11px;">COMPLIES</td></tr>
+            <tr class="bg-lt"><td class="fw9 mono">4</td><td>Tap OCPD — NEC 705.11 / 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A fused disconnect</td></tr>
+            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:900;">Supply-Side Connection — NEC 705.11</td><td>Tap made LINE side of the ${mainA}A service disconnect; 120% busbar rule (NEC 705.12(B)) not applicable</td><td style="font-weight:900;text-align:right;font-size:11px;">COMPLIES</td></tr>
             ` : `
-            <tr class="bg-lt"><td class="fw9 mono">8</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A breaker required</td></tr>
-            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">9</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${passes120 ? 'PASS' : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQ’D'}</td></tr>
+            <tr class="bg-lt"><td class="fw9 mono">4</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A breaker required</td></tr>
+            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${passes120 ? 'PASS' : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQUIRED'}</td></tr>
             `}
           </tbody>
         </table>
@@ -1566,53 +1562,25 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
       liveSvg = null;
     }
 
-    if (!liveSvg && _sldHybrid) {
-      // I-8: never a stored single-system SVG, never the inline single-source
-      // fallback — an explicit banner beats a plausible-wrong permit sheet.
-      sldBodyHtml = `
-      <div style="border:3px solid #cc0000;background:#fff5f5;margin:12px;padding:16px;font-size:11px;line-height:1.6;">
-        <div style="font-weight:900;color:#cc0000;font-size:14px;letter-spacing:0.5px;">&#9888; HYBRID SINGLE-LINE DIAGRAM UNAVAILABLE</div>
-        This project contains ${_sldAuth.subSystems.length} sub-systems (${_sldAuth.subSystems.map(s => SUB_LABEL[s.key]).join(', ')}).
-        The live multi-source renderer did not produce a diagram, and the single-system fallbacks are suppressed for
-        hybrids — a single-lane diagram would misstate the system. Regenerate the single-line diagram before submission.
-        Per-sub source data appears below; conductor values match PV-4A / PV-4B (shared conductor authority).
-      </div>`;
-    } else if (!liveSvg && storedSldSvg && storedSldSvg.trim().startsWith('<svg')) {
-      // FIX v47.296: Sanitize stored SLD — replace roof-specific labels for non-roof systems
-      if (_sldSysType !== 'roof') {
-        storedSldSvg = storedSldSvg
-          .replace(/ROOF J-BOX/g, 'ARRAY J-BOX')
-          .replace(/Roof J-Box/g, 'Array J-Box')
-          .replace(/roof j-box/g, 'array j-box');
-      }
-      // FIX v47.341: Sanitize stored SLD — fix floating point leaks in kW/coordinate values
-      storedSldSvg = storedSldSvg.replace(
-        /\d+\.\d{2}\d{10,}/g,
-        (m: string) => parseFloat(m).toFixed(2)
-      );
-      sldBodyHtml = `
-      <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
-        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
-          ${storedSldSvg}
-        </div>
-      </div>`;
-    } else if (liveSvg) {
+    // W2 FAIL-CLOSED (Ray's snapshot mandate): E-1 renders the LIVE diagram
+    // built from current authority, or generation FAILS. The stored-SVG tier
+    // (frozen at whatever engine version rendered it — it resurrected fixed
+    // defects and can contradict the snapshot digest on every regen) and the
+    // inline buildSLD() literal-fallback tier are RETIRED. `storedSldSvg` is
+    // accepted only as provenance, never rendered.
+    void storedSldSvg;
+    if (!liveSvg) {
+      throw new Error(`[E-1] live single-line diagram generation failed for snapshot ${
+        (input as unknown as { _snapshot?: { meta?: { snapshotId?: string } } })._snapshot?.meta?.snapshotId ?? '(unstamped)'
+      } — fail closed (no stored/inline fallback renders on an authority-governed set)`);
+    }
+    {
       // Live professional SLD — render full-bleed (same layout as stored SLD)
       sldBodyHtml = `
       <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
         <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
           ${liveSvg}
         </div>
-      </div>`;
-    } else {
-      // Final fallback: inline buildSLD() — always works, uses PermitInput directly.
-      const svgContent = buildSLD();
-      if (!svgContent || svgContent.trim() === '') {
-        throw new Error('[E-1] buildSLD() returned empty content — SLD generation failed');
-      }
-      sldBodyHtml = `
-      <div style="padding:0;overflow:hidden;width:100%;margin:0;text-align:center;">
-        ${svgContent}
       </div>`;
     }
   }

@@ -185,6 +185,12 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     acConduitType:           project.conduitType ?? 'EMT',
     acOCPD,
     mainPanelAmps:           mainAmps,
+    // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot
+    // when this adapter runs inside permit generation — the renderer prints,
+    // never re-decides. Standalone routes (no snapshot) leave these unset.
+    panelBusRating:          (project as { panelBusRating?: number }).panelBusRating ?? mainAmps,
+    poiRulePasses:           ((input as unknown as { _snapshot?: { electrical?: { poi?: { rulePasses?: boolean | null } } } })
+                               ._snapshot?.electrical?.poi?.rulePasses) ?? undefined,
     backfeedAmps,
     utilityName:             utilityDisplayName(project.utilityName ?? '') || 'Utility',
     interconnection,

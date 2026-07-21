@@ -21,6 +21,7 @@ import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getSnapshot } from '../snapshot/read';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance } = input;
@@ -124,7 +125,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   // E-1 draws (system.totalAcKw is a stale top-level aggregate on hybrids —
   // 19.4 kW vs the authority's 34.8 kW on Stowell; never trust it here).
   const _acTotalA = auth.subSystems.reduce((a, s) => a + (s.acSubFeeder.currentA || 0), 0)
-    || ((system.totalAcKw || 0) * 1000) / 240;
+    || ((getSnapshot(input).derived.acWattsContinuous || (system.totalAcKw || 0) * 1000) / 240);
   if (auth.isHybrid) {
     for (const sub of auth.subSystems) {
       _acN += 1;
@@ -534,7 +535,7 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   // (system.totalAcKw is a stale aggregate on hybrids — it disagreed with
   // E-1/PV-5 by 64 A on Stowell). Fallback keeps single-system behavior.
   const acOutA = auth.subSystems.reduce((a, s) => a + (s.acSubFeeder.currentA || 0), 0)
-    || ((system.totalAcKw || 0) * 1000) / 240;
+    || (getSnapshot(input).derived.acWattsContinuous || (system.totalAcKw || 0) * 1000) / 240;
   const acOcpd = auth.acFeeder.ocpdAmps;
   const mainA = project.mainPanelAmps || 200;
   const _str0 = system.inverters?.[0]?.strings?.[0];
@@ -635,7 +636,7 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
       }
     }
   } else {
-    discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
+    discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(getSnapshot(input).derived.acWattsContinuous / 1000 || system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
   }
   if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: bos.brains ? `Hosted by the ${bos.brains.model}` : 'Adjacent to the PV AC disconnect' });
   if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });

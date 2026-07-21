@@ -216,6 +216,10 @@ export interface SLDProfessionalInput {
   acOCPD:                  number;
   mainPanelAmps:           number;
   panelBusRating?:         number;  // NEC 705.12(B) busbar ampacity — the 120% base. Defaults to mainPanelAmps if absent.
+  /** W2 (snapshot authority): the ENGINE's 120% verdict. When provided, the
+   *  renderer PRINTS it — it never re-decides. The local arithmetic remains
+   *  only as the displayed annotation of the same numbers. */
+  poiRulePasses?:          boolean;
   backfeedAmps:            number;
   utilityName:             string;
   interconnection:         string;
@@ -2642,7 +2646,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       // could never fail the old check). Mirrors computed-system.ts interconnectionPass.
       const _busAmps  = input.panelBusRating ?? input.mainPanelAmps;
       const _busLimit = _busAmps * 1.2;
-      const _120pass = _busLimit >= input.mainPanelAmps + _totalBfA;
+      const _120pass = input.poiRulePasses ?? (_busLimit >= input.mainPanelAmps + _totalBfA);
       const _rows: [string,string][] = [
         ['Interconnection','Load Side Tap'],
         ['NEC Reference','NEC 705.12(B)'],
@@ -2664,7 +2668,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['Interconnection','Backfed Breaker'] as [string,string],
       ['NEC Reference','NEC 705.12(B)(2)'] as [string,string],
       ['Backfeed Breaker',`${input.backfeedAmps} A`] as [string,string],
-      ['120% Rule',`${(input.panelBusRating ?? input.mainPanelAmps)*1.2 >= input.mainPanelAmps+input.backfeedAmps ? 'PASS ✓':'FAIL ✗'}`] as [string,string],
+      ['120% Rule',`${(input.poiRulePasses ?? ((input.panelBusRating ?? input.mainPanelAmps)*1.2 >= input.mainPanelAmps+input.backfeedAmps)) ? 'PASS ✓':'FAIL ✗'}`] as [string,string],
     ]),
   ];
   const acRh = Math.min(13, (CALC_H-17)/acRows.length);
@@ -3927,7 +3931,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const _busLimit = _busAmps * 1.2;
   // totalBackfeedAmps is already the authoritative TOTAL (incl. battery —
   // see contract above); the battery row below is informational only.
-  const _120pass = isSupplySide ? true : _busLimit >= input.mainPanelAmps + totalBackfeedAmps;
+  const _120pass = isSupplySide ? true : (input.poiRulePasses ?? (_busLimit >= input.mainPanelAmps + totalBackfeedAmps));
   const p2rows: string[][] = [
     ['Total AC Output', totalAcKw.toFixed(2) + ' kW / ' + Math.round(totalAcKw*1000/240) + ' A'],
     ...lanes.map((b): string[] => ['PV-' + LANE_TAG[b.key] + ' Backfeed', laneBackfeed(b) + ' A']),

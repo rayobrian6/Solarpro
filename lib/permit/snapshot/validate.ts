@@ -136,11 +136,16 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
     }
   }
 
-  // V15 — one thermal basis (deferred: engines converge in W2 parity)
-  if (s.project.thermal.provenance.note?.includes('legacy -10C')) {
+  // V15 — ONE thermal basis, verified against what the engine actually ran
+  // with (W2: BLOCKING on mismatch; deferred only when the engine didn't
+  // report — e.g. client-supplied compliance suppressed... which D-3 forbids).
+  const _thNote = s.project.thermal.provenance.note ?? '';
+  if (_thNote.includes('ENGINE THERMAL MISMATCH')) {
+    add('V15', 'project.thermal.designTempMinC', s.project.thermal.designTempMinC, 'runElectricalCalc',
+      ['PV-4A', 'PV-4B', 'APP-A', 'E-1'], _thNote, 'blocking');
+  } else if (_thNote.includes('not reported')) {
     add('V15', 'project.thermal', s.project.thermal.designTempMinC, 'designTemps.ts',
-      ['PV-4A', 'PV-4B', 'APP-A', 'E-1'],
-      'engines still run at legacy -10C while snapshot thermal basis is ASHRAE — unify in W2', 'deferred');
+      ['PV-4A', 'PV-4B', 'APP-A', 'E-1'], _thNote, 'deferred');
   }
 
   return v;

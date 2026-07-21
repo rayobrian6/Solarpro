@@ -56,9 +56,10 @@ add('electrical.branchOcpdMaxA', Math.max(0, ...ocpds),
   last.distinctPrinted = [...new Set(last.printedInstances.map(i => `${i.value}`))];
 }
 
-// feeder / backfeed OCPD
+// feeder / backfeed OCPD — BLOCKING as of W2 (V9 feeder class activated:
+// every sheet's feeder OCPD is a snapshot projection now)
 add('electrical.feeder.ocpdA', snap.electrical.feeder.ocpdA,
-  findAll(/(\d+)A\s*(?:PV\s*BREAKER|FUSED\s*[—-]\s*TAP OCPD|BACKFEED)/gi, m => Number(m[1])));
+  findAll(/(\d+)A\s*(?:PV\s*BREAKER|FUSED\s*[—-]\s*TAP OCPD|BACKFEED)/gi, m => Number(m[1])), true);
 
 // module count + dc watts
 add('derived.moduleCount', snap.derived.moduleCount,
@@ -84,6 +85,8 @@ const report = {
   snapshotId: sid, digest: snap.meta.digest, schemaVersion: snap.meta.schemaVersion,
   sheetCount: pages.length,
   deferredViolations: snap._violations ?? null,
+  // D-2 parity matrix — engine-of-record vs computeSystem shadow (from the snapshot)
+  parityMatrix: snap.electrical?.shadowParity ?? null,
   values: rows,
   summary: {
     total: rows.length,

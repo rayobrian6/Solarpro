@@ -161,8 +161,10 @@ export interface PermitDesignSnapshot {
     systemEgc: { conductorId: string; basisOcpdA: number | null };
     poi: { method: string; busbarA: number | null; mainBreakerA: number | null;
            backfeedA: number | null; rulePasses: boolean | null };
-    shadowParity: {                 // D-2 scaffold: computeSystem shadow vs engine-of-record
+    shadowParity: {                 // D-2: computeSystem shadow vs engine-of-record
       shadowEngine: string; ran: boolean; divergences: string[];
+      /** full parity matrix — every compared output, agree or not */
+      checks: { name: string; engineOfRecord: string; shadow: string; agree: boolean }[];
     };
     provenance: Provenance;
     gaps: string[];

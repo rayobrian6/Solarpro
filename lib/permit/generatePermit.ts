@@ -7,6 +7,7 @@ import type { PermitInput, CanonicalInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
 import { PLANSET_ENGINE_VERSION } from './constants';
 import { buildPermitDesignSnapshot } from './snapshot/build';
+import { getDesignTemps } from './utils/designTemps';
 import { validatePermitDesignSnapshot, blockingViolations, SnapshotValidationError } from './snapshot/validate';
 import { deepFreeze } from './snapshot/digest';
 import { escapeH } from './utils/drawing';
@@ -720,13 +721,28 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const panelBusRating = input.project.panelBusRating || input.project.mainPanelAmps || 200;
 
       // ── Build the full ElectricalCalcInput ──
+      // W2 THERMAL UNIFICATION (V15): the engine runs on the SAME ASHRAE
+      // basis the snapshot records and the sheets print — the legacy flat
+      // -10°C/-35°C regime is retired. AHJ override (project.designTempMin)
+      // still wins; getDesignTemps is the one resolver.
+      const _thermal = getDesignTemps(
+        input.project.lat, input.project.lng,
+        (typeof (input.project as { state?: string }).state === 'string'
+          && /^[A-Za-z]{2}$/.test(String((input.project as { state?: string }).state).trim()))
+          ? String((input.project as { state?: string }).state).trim().toUpperCase() : undefined);
+      const _engineThermal = {
+        designTempMin: input.project.designTempMin ?? _thermal.ashraeExtremeLowC,
+        designTempMax: _thermal.ashrae2pctHighC ?? 35,
+        rooftopTempAdder: 33,
+      };
+      (input as unknown as Record<string, unknown>)._engineThermal = _engineThermal;
       const electricalInput: ElectricalCalcInput = {
         inverters:          invInputs,
         mainPanelAmps:      input.project.mainPanelAmps || 200,
         systemVoltage:      240,
-        designTempMin:      input.project.designTempMin ?? -10,
-        designTempMax:      35,   // °C — typical ASHRAE 2% design temp
-        rooftopTempAdder:   35,   // °C — NEC 310.15(A)(3) rooftop adder
+        designTempMin:      _engineThermal.designTempMin,
+        designTempMax:      _engineThermal.designTempMax,
+        rooftopTempAdder:   _engineThermal.rooftopTempAdder,   // °C — NEC 310.15(A)(3)
         wireGauge:          input.project.wireGauge || '#10 AWG',
         wireLength:         input.project.wireLength || 50,
         conduitType:        input.project.conduitType || 'EMT',

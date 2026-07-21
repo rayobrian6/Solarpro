@@ -73,7 +73,7 @@ function baseSnapshot(): PermitDesignSnapshot {
                 conduit: { raceway: 'EMT', tradeSizeIn: '1-1/4"', fillPct: 29 } },
       systemEgc: { conductorId: 'c-4', basisOcpdA: 60 },
       poi: { method: 'SUPPLY_SIDE_TAP', busbarA: 200, mainBreakerA: 200, backfeedA: 60, rulePasses: true },
-      shadowParity: { shadowEngine: 'computeSystem', ran: true, divergences: [] },
+      shadowParity: { shadowEngine: 'computeSystem', ran: true, divergences: [], checks: [] },
       provenance: { source: 'test' }, gaps: [],
     },
     structural: {

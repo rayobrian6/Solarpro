@@ -26,7 +26,7 @@ import { getDesignTemps } from '../utils/designTemps';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, getPanelById } from '@/lib/equipment-db';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
-import { buildComputedRunsForPermit } from '../utils/computedRuns';
+import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 
 const fuzz = <T extends { model: string }>(list: T[], model?: string | null): T | undefined => {
@@ -193,20 +193,37 @@ export function buildPermitDesignSnapshot(
   const feederConductorId = addConductor(auth.acFeeder.wireGauge, 'THWN-2', 'electrical-engine/conductorAuthority', auth.acFeeder.ampacityA ?? null);
   const egcId = addConductor(auth.egc.gauge, null, auth.egc.source === 'engine' ? 'electrical-engine' : 'nec-250.122');
 
-  // D-2 shadow: computeSystem parity probe (report-only, never authority).
+  // D-2 shadow: computeSystem parity probe (report-only, never authority —
+  // "never two authoritative electrical results"). Every compared output
+  // lands in the parity MATRIX; disagreements also go to `divergences`.
   const shadowDivergences: string[] = [];
+  const shadowChecks: { name: string; engineOfRecord: string; shadow: string; agree: boolean }[] = [];
   let shadowRan = false;
+  const _chk = (name: string, eor: unknown, sh: unknown, agree?: boolean) => {
+    const a = agree ?? String(eor) === String(sh);
+    shadowChecks.push({ name, engineOfRecord: String(eor ?? '—'), shadow: String(sh ?? '—'), agree: a });
+    if (!a) shadowDivergences.push(`${name}: engineOfRecord=${eor} computeSystem=${sh}`);
+  };
   try {
-    const shadow = buildComputedRunsForPermit(input, cad);
+    const shadow: any = buildComputeSystemShadow(input, cad);
     if (shadow) {
       shadowRan = true;
-      const sBf = (shadow as any).backfeedBreakerAmps;
-      if (isFinite(sBf) && auth.acFeeder.ocpdAmps != null && sBf !== auth.acFeeder.ocpdAmps) {
-        shadowDivergences.push(`feeder OCPD: engineOfRecord=${auth.acFeeder.ocpdAmps}A computeSystem=${sBf}A`);
+      const sBf = shadow.backfeedBreakerAmps;
+      if (isFinite(sBf) && auth.acFeeder.ocpdAmps != null) _chk('feeder OCPD (A)', auth.acFeeder.ocpdAmps, sBf);
+      const sBr = shadow.microBranches?.length;
+      if (isMicro && isFinite(sBr)) _chk('branch count', branches.length, sBr);
+      const runs: any[] = shadow.runs ?? [];
+      const feederRun = runs.find((r: any) => ['COMBINER_TO_DISCO_RUN', 'INV_TO_DISCO_RUN'].includes(String(r?.id)));
+      if (feederRun?.wireGauge && auth.acFeeder.wireGauge) _chk('feeder gauge', auth.acFeeder.wireGauge, feederRun.wireGauge);
+      if (feederRun?.egcGauge && auth.egc.gauge) _chk('system EGC', auth.egc.gauge, feederRun.egcGauge);
+      if (isFinite(feederRun?.voltageDropPct) && isFinite(auth.acFeeder.voltageDropPct as number)) {
+        _chk('feeder V-drop (%)', auth.acFeeder.voltageDropPct, feederRun.voltageDropPct,
+          Math.abs(Number(auth.acFeeder.voltageDropPct) - Number(feederRun.voltageDropPct)) <= 0.5);
       }
-      const sBr = (shadow as any).microBranches?.length;
-      if (isMicro && isFinite(sBr) && sBr !== branches.length) {
-        shadowDivergences.push(`branch count: engineOfRecord=${branches.length} computeSystem=${sBr}`);
+      if (isMicro && shadow.microBranches?.length) {
+        const shMax = Math.max(...shadow.microBranches.map((b: any) => Number(b?.ocpdAmps) || 0));
+        const eorMax = Math.max(0, ...auth.microBranches.map(b => b.ocpdAmps));
+        if (shMax > 0) _chk('governing branch OCPD (A)', eorMax, shMax);
       }
     }
   } catch (e: any) {
@@ -262,13 +279,26 @@ export function buildPermitDesignSnapshot(
         method: proj.interconnectionMethod ?? 'LOAD_SIDE',
         rule: String(proj.interconnectionMethod ?? '').toUpperCase().includes('SUPPLY') ? '705.11' : '705.12(B)',
       },
-      thermal: {
-        designTempMinC: proj.designTempMin ?? temps.ashraeExtremeLowC,
-        designTempHighC: temps.ashrae2pctHighC ?? 35,
-        rooftopAdderC: 33,
-        source: proj.designTempMin != null ? 'ahj-override' : 'ashrae-envelope',
-        provenance: { source: 'designTemps.ts', note: 'engines still run at legacy -10C — unification is a W2 parity item' },
-      },
+      thermal: (() => {
+        const minC = proj.designTempMin ?? temps.ashraeExtremeLowC;
+        // V15 (W2): the electrical engine stashes the thermal basis it ACTUALLY
+        // ran with; any mismatch with the snapshot basis is a blocking
+        // violation — one thermal regime per package, verified not assumed.
+        const engT = (input as unknown as { _engineThermal?: { designTempMin?: number } })._engineThermal;
+        const mismatch = engT?.designTempMin != null && engT.designTempMin !== minC;
+        return {
+          designTempMinC: minC,
+          designTempHighC: temps.ashrae2pctHighC ?? 35,
+          rooftopAdderC: 33,
+          source: proj.designTempMin != null ? 'ahj-override' : 'ashrae-envelope',
+          provenance: {
+            source: 'designTemps.ts',
+            note: mismatch
+              ? `ENGINE THERMAL MISMATCH: engine ran at ${engT!.designTempMin}°C vs snapshot ${minC}°C`
+              : (engT ? undefined : 'engine thermal basis not reported this generation'),
+          },
+        };
+      })(),
       provenance: { source: 'permit-route enrichment' },
     },
     equipment: {
@@ -315,7 +345,7 @@ export function buildPermitDesignSnapshot(
         backfeedA: proj.backfeedBreakerA ?? null,
         rulePasses: (elec?.busbar as any)?.passes ?? null,
       },
-      shadowParity: { shadowEngine: 'computeSystem', ran: shadowRan, divergences: shadowDivergences },
+      shadowParity: { shadowEngine: 'computeSystem', ran: shadowRan, divergences: shadowDivergences, checks: shadowChecks },
       provenance: { source: 'runElectricalCalc + conductorAuthority + planMicroBranches(D-1)' },
       gaps: ['per-segment conduit model arrives with computeSystem engine-of-record (W2)'],
     },
