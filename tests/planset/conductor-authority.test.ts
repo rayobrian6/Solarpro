@@ -23,8 +23,9 @@ describe('conductor authority — single source of truth', () => {
   it('sizes every branch internally consistently (OCPD → gauge → EGC)', () => {
     const auth = buildConductorAuthority(clone(), null);
     for (const b of auth.microBranches) {
-      // OCPD is the next standard size above the continuous (×1.25) current
-      expect(b.ocpdAmps).toBe(necNextStandardOcpd(b.continuousA) || 20);
+      // D-1 law: 20A standard-branch floor, next standard size above that;
+      // manufacturer max enforced by the snapshot validator (V5/V5a).
+      expect(b.ocpdAmps).toBe(b.continuousA <= 20 ? 20 : (necNextStandardOcpd(b.continuousA) || 20));
       // gauge and EGC are derived from that ONE OCPD — never hardcoded
       expect(b.wireGauge).toBe(wireGaugeForOcpd(b.ocpdAmps));
       expect(b.egcGauge).toBe(getEGCSize(b.ocpdAmps));

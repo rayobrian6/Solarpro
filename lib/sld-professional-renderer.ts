@@ -2544,9 +2544,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ?? 0;
     // P1-2: input.microBranches carries the conductor authority's branch OCPDs
     // (adapter); the recompute is a degraded-payload fallback on the SAME
-    // 20A-or-30A branch ladder (Ray's ruling 2026-07-20 — never 25A).
+    // 20 A-floor manufacturer-basis law (Ray D-1 2026-07-20 — no 30 A branch
+    // allowance; over-limit branches are a snapshot-validator failure).
     const _baCont = _maxBrDev * _perMicroBrA * 1.25;
-    const baShow = ba || (_baCont <= 20 ? 20 : _baCont <= 30 ? 30 : (necNextStandardOcpd(_baCont) || 20));
+    const baShow = ba || (_baCont <= 20 ? 20 : (necNextStandardOcpd(_baCont) || 20));
     // Mixed-plan display: a plane-contained 12-micro branch runs 25A/#10 while
     // its siblings run 20A/#12 — the rows must show the plan's real spread,
     // not the 20A-branch model cap (which the 12-branch legitimately exceeds

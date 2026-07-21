@@ -40,6 +40,9 @@ function microBranchSpec(
   const maxUnits = Math.floor((brancherAmps * 0.8) / acOutputCurrentPerUnit);
   return {
     maxMicrosPerBranch: maxUnits,
+    // Manufacturer branch basis (Ray D-1): Enphase publishes the 20 A branch
+    // breaker as the branch-circuit basis for the IQ8 family. Never exceeded.
+    maxBranchOcpdA: brancherAmps,
     acOutputCurrentPerUnit,
     acOutputVoltage: 240,
     modulesPerDevice,

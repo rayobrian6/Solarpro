@@ -6,6 +6,9 @@
 import type { PermitInput, CanonicalInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
 import { PLANSET_ENGINE_VERSION } from './constants';
+import { buildPermitDesignSnapshot } from './snapshot/build';
+import { validatePermitDesignSnapshot, blockingViolations, SnapshotValidationError } from './snapshot/validate';
+import { deepFreeze } from './snapshot/digest';
 import { escapeH } from './utils/drawing';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
@@ -50,6 +53,15 @@ import { generateBOMForPermit } from './utils/bomForPermit';
 
 export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): string {
   const { project } = input;
+
+  // ── PermitDesignSnapshot req. 6: capture RAW client-posted values before any
+  // server mutation — preserved on the snapshot as sourceInputs (provenance
+  // only, never authority — D-3).
+  (input as unknown as Record<string, unknown>)._clientTotals = {
+    totalPanels: input.system?.totalPanels ?? null,
+    totalDcKw: input.system?.totalDcKw ?? null,
+    totalAcKw: input.system?.totalAcKw ?? null,
+  };
 
   // ── P0-9: planset DATE = GENERATION date (server-side authority) ──────────
   // config.date is a design label only — a stale client date must never print
@@ -475,8 +487,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // instead of "—" placeholders.
   try {
     const existingElec = input.compliance?.electrical;
-    const needsElecCalc = !existingElec
-      || (existingElec.busbar == null && existingElec.acConductorCallout == null);
+    // D-3 (Ray, binding 2026-07-20): client-posted compliance.electrical is
+    // NEVER engineering authority. It is preserved verbatim as provenance
+    // (sourceInputs.clientElectrical on the snapshot) and the server engine
+    // ALWAYS computes the authoritative result — the old gate let any client
+    // block with a busbar field suppress the engine wholesale.
+    if (existingElec) {
+      (input as unknown as Record<string, unknown>)._clientElectrical =
+        JSON.parse(JSON.stringify(existingElec));
+    }
+    (input as unknown as Record<string, unknown>)._clientBackfeedBreakerA =
+      input.project.backfeedBreakerA ?? null;
+    const needsElecCalc = true;
     if (needsElecCalc && input.system?.inverters?.length) {
       // Static imports (top of file) — the old lazy require('@/…') silently
       // failed outside webpack, leaving the electrical section blank.
@@ -962,6 +984,28 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 
   input.decisionAwareSLDMetadata = buildDecisionAwareSLDMetadata({ decisionBundle: decisionProvenance });
 
+  // ═══ PermitDesignSnapshot (W1) — THE canonical engineering authority ═══════
+  // Built once after all server engines have run; validated FAIL-CLOSED before
+  // any sheet renders; deep-frozen (immutable); stamped (id + schema + digest)
+  // into every title block. Sheets become projections wave-by-wave (W2–W6);
+  // scripts/planset-evidence.mjs measures sheet agreement in the meantime.
+  {
+    const snapshot = buildPermitDesignSnapshot(input, cad, {
+      projectId: (input as { projectId?: string }).projectId ?? null,
+    });
+    const violations = validatePermitDesignSnapshot(snapshot);
+    const blocking = blockingViolations(violations);
+    for (const viol of violations) {
+      console[viol.enforcement === 'blocking' ? 'error' : 'warn'](
+        `[SNAPSHOT ${viol.enforcement === 'blocking' ? 'VIOLATION' : 'deferred'}] ${viol.invariant} ${viol.authorityPath} = ${JSON.stringify(viol.offendingValue)} — ${viol.message}`);
+    }
+    if (blocking.length) throw new SnapshotValidationError(blocking);
+    deepFreeze(snapshot);
+    (input as unknown as { _snapshot?: unknown })._snapshot = snapshot;
+    (input as unknown as { _snapshotViolations?: unknown })._snapshotViolations = violations;
+    console.log(`[SNAPSHOT] ${snapshot.meta.snapshotId} schema ${snapshot.meta.schemaVersion} digest ${snapshot.meta.digest.slice(0, 16)}… — ${violations.length} finding(s), 0 blocking`);
+  }
+
   const engineeringStateRegistry = buildEngineeringStateRegistry({
     registryId: `${provenanceDocumentId}.engineering-state`,
     generatedAt: input.surveyEvidence?.source.normalizedAt,
@@ -1105,6 +1149,33 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       pages.push(pageCADAppendixPreview(input, cad, TOTAL, TOTAL));    // APP-CAD: non-authoritative CAD preview appendix
     } catch (appendixErr: unknown) {
       console.warn('[generatePermitHTML] CAD appendix preview omitted (non-critical):', appendixErr instanceof Error ? appendixErr.message : appendixErr);
+    }
+  }
+
+  // ═══ Render-level invariants V12 / V13 — FAIL CLOSED (W1 reqs 1, D-6) ═════
+  {
+    const snap = (input as unknown as { _snapshot?: { meta: { snapshotId: string } } })._snapshot;
+    const sid = snap?.meta.snapshotId ?? '';
+    const v12Missing = pages
+      .map((p, i) => (!p.includes(sid) || !sid ? i + 1 : -1))
+      .filter(i => i > 0);
+    if (v12Missing.length) {
+      throw new SnapshotValidationError(v12Missing.map(pn => ({
+        invariant: 'V12', authorityPath: 'meta.snapshotId', offendingValue: sid || '(none)',
+        sourceRecord: 'titleBlock', affectedProjections: [`page ${pn}`],
+        message: `sheet ${pn} does not carry the snapshot stamp`, enforcement: 'blocking' as const,
+      })));
+    }
+    const v13Missing = pages
+      .map((p, i) => (/tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p)
+        && !p.includes('PENDING ENGINEERING REVIEW') ? i + 1 : -1))
+      .filter(i => i > 0);
+    if (v13Missing.length) {
+      throw new SnapshotValidationError(v13Missing.map(pn => ({
+        invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: false,
+        sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+        message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
+      })));
     }
   }
 

@@ -1,0 +1,785 @@
+{
+  "generatedAt": "2026-07-21T04:10:21.235Z",
+  "snapshotId": "PDS-1F6CA27580EE",
+  "digest": "1f6ca27580eeac687508709c51bf951106587f2e32f4d27cd728996436fb1a7c",
+  "schemaVersion": "1.0.0",
+  "sheetCount": 18,
+  "deferredViolations": [
+    {
+      "invariant": "V10",
+      "authorityPath": "structural.attachmentCount",
+      "offendingValue": null,
+      "sourceRecord": "structural builder",
+      "affectedProjections": [
+        "PV-3",
+        "PV-4C",
+        "SCHED-2"
+      ],
+      "message": "attachment count not snapshot-carried (rackingBOM not persisted) — W3 gap",
+      "enforcement": "deferred"
+    },
+    {
+      "invariant": "V11",
+      "authorityPath": "project.ahj.adoptedCodes",
+      "offendingValue": {
+        "nec": "2023",
+        "ibc": "2021",
+        "irc": "2021",
+        "ifc": "2024",
+        "asce": "7-22"
+      },
+      "sourceRecord": "default (no AHJ record)",
+      "affectedProjections": [
+        "ALL SHEETS"
+      ],
+      "message": "code editions defaulted — AHJ record missing; sheets must mark UNVERIFIED (W4)",
+      "enforcement": "deferred"
+    },
+    {
+      "invariant": "V15",
+      "authorityPath": "project.thermal",
+      "offendingValue": -23,
+      "sourceRecord": "designTemps.ts",
+      "affectedProjections": [
+        "PV-4A",
+        "PV-4B",
+        "APP-A",
+        "E-1"
+      ],
+      "message": "engines still run at legacy -10C while snapshot thermal basis is ASHRAE — unify in W2",
+      "enforcement": "deferred"
+    }
+  ],
+  "values": [
+    {
+      "value": "snapshot.stamp",
+      "authority": "PDS-1F6CA27580EE",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "CERT",
+          "value": "PDS-1F6CA27580EE"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "PDS-1F6CA27580EE"
+        }
+      ],
+      "distinctPrinted": [
+        "PDS-1F6CA27580EE"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "value": "electrical.branchCount",
+      "authority": "3",
+      "printedInstances": [
+        {
+          "sheet": "PV-1B",
+          "value": "3"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "3"
+        }
+      ],
+      "distinctPrinted": [
+        "3"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "value": "electrical.branchOcpdMaxA",
+      "authority": "20",
+      "printedInstances": [
+        {
+          "sheet": "SCHED",
+          "value": 20
+        },
+        {
+          "sheet": "SCHED",
+          "value": 20
+        },
+        {
+          "sheet": "SCHED",
+          "value": 20
+        }
+      ],
+      "distinctPrinted": [
+        "20"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "value": "electrical.feeder.ocpdA",
+      "authority": "60",
+      "printedInstances": [
+        {
+          "sheet": "PV-4C",
+          "value": 60
+        }
+      ],
+      "distinctPrinted": [
+        "60"
+      ],
+      "agree": true,
+      "blocking": false
+    },
+    {
+      "value": "derived.moduleCount",
+      "authority": "31",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": 31
+        },
+        {
+          "sheet": "PV-0",
+          "value": 31
+        },
+        {
+          "sheet": "PV-1",
+          "value": 31
+        },
+        {
+          "sheet": "PV-1B",
+          "value": 31
+        },
+        {
+          "sheet": "PV-1B",
+          "value": 31
+        },
+        {
+          "sheet": "PV-3",
+          "value": 31
+        },
+        {
+          "sheet": "PV-3",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4A",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4B",
+          "value": 31
+        },
+        {
+          "sheet": "PV-5",
+          "value": 31
+        },
+        {
+          "sheet": "PV-5",
+          "value": 31
+        },
+        {
+          "sheet": "PV-6",
+          "value": 31
+        },
+        {
+          "sheet": "SCHED",
+          "value": 31
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": 31
+        },
+        {
+          "sheet": "APP-A",
+          "value": 31
+        },
+        {
+          "sheet": "DS-1",
+          "value": 31
+        },
+        {
+          "sheet": "DS-2",
+          "value": 31
+        },
+        {
+          "sheet": "DS-3",
+          "value": 31
+        },
+        {
+          "sheet": "DS-4",
+          "value": 31
+        },
+        {
+          "sheet": "CERT",
+          "value": 31
+        },
+        {
+          "sheet": "CERT",
+          "value": 31
+        },
+        {
+          "sheet": "PE-1",
+          "value": 31
+        }
+      ],
+      "distinctPrinted": [
+        "31"
+      ],
+      "agree": true,
+      "blocking": false
+    },
+    {
+      "value": "derived.dcKw",
+      "authority": "12.40",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "12.40"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "12.40"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "12.40"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "12.40"
+        },
+        {
+          "sheet": "CERT",
+          "value": "12.40"
+        },
+        {
+          "sheet": "CERT",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "12.40"
+        }
+      ],
+      "distinctPrinted": [
+        "12.40"
+      ],
+      "agree": true,
+      "blocking": false
+    },
+    {
+      "value": "project.ahj.adoptedCodes.nec",
+      "authority": "2023",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "2020"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "2023"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "2020"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "2023"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "2023"
+        },
+        {
+          "sheet": "CERT",
+          "value": "2023"
+        },
+        {
+          "sheet": "CERT",
+          "value": "2020"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "2023"
+        }
+      ],
+      "distinctPrinted": [
+        "2023",
+        "2020"
+      ],
+      "agree": false,
+      "blocking": false
+    },
+    {
+      "value": "structural.loads.windSpeedMph",
+      "authority": "115",
+      "printedInstances": [
+        {
+          "sheet": "PV-3",
+          "value": 90
+        },
+        {
+          "sheet": "PV-3",
+          "value": 90
+        },
+        {
+          "sheet": "PV-3",
+          "value": 115
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 115
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 115
+        },
+        {
+          "sheet": "PE-1",
+          "value": 115
+        },
+        {
+          "sheet": "PE-1",
+          "value": 115
+        }
+      ],
+      "distinctPrinted": [
+        "90",
+        "115"
+      ],
+      "agree": false,
+      "blocking": false
+    },
+    {
+      "value": "equipment.module.wattsStc",
+      "authority": "400",
+      "printedInstances": [
+        {
+          "sheet": "PV-4C",
+          "value": 400
+        }
+      ],
+      "distinctPrinted": [
+        "400"
+      ],
+      "agree": true,
+      "blocking": false
+    }
+  ],
+  "summary": {
+    "total": 9,
+    "agree": 7,
+    "disagree": [
+      "project.ahj.adoptedCodes.nec",
+      "structural.loads.windSpeedMph"
+    ],
+    "blockingDisagree": []
+  }
+}

@@ -98,7 +98,11 @@ export const fenceProject: PermitInput = {
       manufacturer: 'Enphase',
       model: 'IQ8A',
       type: 'micro',
-      acOutputKw: 10.0,
+      // Manufacturer record (D-1): IQ8A per-unit output is 0.366 kW peak /
+      // 349 VA continuous — the old fabricated `10.0` (a 10 kW "micro")
+      // cascaded to a 450 A branch OCPD, which the snapshot validator (V5a)
+      // now correctly fails closed on.
+      acOutputKw: 0.366,
       maxDcVoltage: 60,
       efficiency: 0.97,
       ulListing: 'UL 1741 SA',
