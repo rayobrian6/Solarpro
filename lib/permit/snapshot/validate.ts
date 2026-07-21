@@ -114,10 +114,34 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
   }
 
   // V9 — conductor identity across sheets (deferred until W2 projections; measured by evidence)
-  // V10 — BOM/structural quantity reconciliation (deferred until W3/W5 carry the objects)
-  if (s.structural.attachmentCount == null) {
-    add('V10', 'structural.attachmentCount', null, 'structural builder',
-      ['PV-3', 'PV-4C', 'SCHED-2'], 'attachment count not snapshot-carried (rackingBOM not persisted) — W3 gap', 'deferred');
+  // V10 — §11 ACTIVATED (W3): structural BOM quantities reconcile with the
+  // canonical objects. Object quantities are authority; any divergence from the
+  // §10 checklist or the V4 producer is a BLOCKING quantity-authority failure.
+  // (The DRAWN==snapshot render equalities — drawn module/rail/attachment counts
+  // — are enforced post-render by V12/V13 + the non-zero-exit evidence harness,
+  // since validate runs pre-render on the snapshot itself.)
+  {
+    const recon = s.structural.bomReconciliation;
+    if (recon && !recon.ok) {
+      add('V10', 'structural.bomReconciliation', recon.checks.filter(c => !c.ok).map(c => c.name),
+        'W3 §10 structural BOM', ['BOM', 'SCHED', 'SCHED-2', 'PV-3', 'PV-4C'],
+        `structural BOM does not reconcile with canonical objects: `
+        + recon.checks.filter(c => !c.ok).map(c => `${c.name}(exp ${c.expected}≠act ${c.actual})`).join(', '));
+    }
+    // Rail-based assembly must carry object-derived rail + mount rows.
+    if (s.structural.rails.length > 0) {
+      const bom = s.structural.bom ?? [];
+      if (!bom.some(r => r.key === 'rails') || !bom.some(r => r.key === 'mounts')) {
+        add('V10', 'structural.bom', bom.map(r => r.key), 'W3 §10 structural BOM',
+          ['BOM', 'SCHED', 'PV-3'], 'rail-based assembly carries rail/attachment objects but the structural BOM has no rail/mount row');
+      }
+      // Every BOM row must carry an auditable source (object IDs or aggregation).
+      const orphanRow = bom.find(r => r.sourceObjectIds === undefined && r.aggregation === undefined);
+      if (orphanRow) {
+        add('V10', `structural.bom[${orphanRow.key}]`, orphanRow.qty, 'W3 §10 structural BOM',
+          ['BOM', 'SCHED'], `BOM row '${orphanRow.key}' carries no source object IDs and no aggregation reference (§10 requires one)`);
+      }
+    }
   }
 
   // V11 — code editions from AHJ authority (deferred to W4 projections; source flagged now)
@@ -163,6 +187,132 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
     add('V18', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
       'snapshot builder', ['PV-0', 'VAL-1'],
       'estimate-grade route lengths present but not reflected as a permit-readiness blocker');
+  }
+
+  // ── W3 canonical STRUCTURAL invariants (snapshot-internal, blocking) ─────
+  const st = s.structural;
+  const gi = s.geometry.moduleInstances ?? [];
+  // V19 — module instance count == module count (when instances are carried)
+  if (gi.length > 0 && nModules > 0 && gi.length !== nModules) {
+    add('V19', 'geometry.moduleInstances.length', gi.length, 'W3 structural authority',
+      ['PV-1', 'PV-1B', 'PV-3'], `module instances (${gi.length}) ≠ module count (${nModules})`);
+  }
+  // V20 — every instance uses EXACT catalog dims (no generic size)
+  if (gi.length > 0 && mod0 && mod0.spec.widthIn != null && mod0.spec.lengthIn != null) {
+    for (const m of gi) {
+      if (m.widthIn !== mod0.spec.widthIn || m.heightIn !== mod0.spec.lengthIn) {
+        add('V20', `geometry.moduleInstances[${m.instanceId}]`, { w: m.widthIn, h: m.heightIn },
+          `equipment.modules[${mod0.model}]`, ['PV-1', 'PV-3', 'APP-A'],
+          `module footprint dims (${m.widthIn}×${m.heightIn}) ≠ catalog record (${mod0.spec.widthIn}×${mod0.spec.lengthIn}) — generic size forbidden`);
+        break;
+      }
+    }
+  }
+  // V21 — array area == Σ canonical module polygon areas (exact catalog footprint)
+  for (const m of gi) {
+    const expect = Math.round((m.widthIn * m.heightIn) / 144 * 1000) / 1000;
+    if (Math.abs(m.areaFt2 - expect) > 0.01) {
+      add('V21', `geometry.moduleInstances[${m.instanceId}].areaFt2`, m.areaFt2, 'W3 structural authority',
+        ['PV-1', 'NEW-ARRAY-AREA'], `instance area ${m.areaFt2} ≠ exact catalog footprint ${expect} ft²`);
+      break;
+    }
+  }
+  // V22 — rail ↔ attachment ↔ module referential integrity (when rails carried)
+  if (st.rails.length > 0) {
+    const railIds = new Set(st.rails.map(r => r.railId));
+    const attIds = new Set(st.attachments.map(a => a.attachmentId));
+    // §6/§11 — every attachment carries a rail AND a roof-plane reference.
+    for (const a of st.attachments) {
+      if (!a.railId || !a.roofPlaneId) {
+        add('V22', `structural.attachments[${a.attachmentId}]`, { railId: a.railId, roofPlaneId: a.roofPlaneId },
+          'W3 structural authority', ['PV-3', 'PV-4C', 'BOM'],
+          `attachment ${a.attachmentId} missing rail/roof-plane reference (referential integrity)`);
+        break;
+      }
+    }
+    // §5/§11 — every rail references ≥1 supported module and ≥1 attachment + a plane.
+    for (const r of st.rails) {
+      if (!r.roofPlaneId || r.supportedModuleIds.length === 0 || r.attachmentIds.length === 0) {
+        add('V22', `structural.rails[${r.railId}]`,
+          { plane: r.roofPlaneId, modules: r.supportedModuleIds.length, atts: r.attachmentIds.length },
+          'W3 structural authority', ['PV-3', 'BOM'],
+          `rail ${r.railId} missing plane / supported-module / attachment references (referential integrity)`);
+        break;
+      }
+    }
+    for (const a of st.attachments) {
+      if (!railIds.has(a.railId)) {
+        add('V22', `structural.attachments[${a.attachmentId}].railId`, a.railId, 'W3 structural authority',
+          ['PV-3', 'PV-4C', 'SCHED-2', 'BOM'], `attachment ${a.attachmentId} references unknown rail ${a.railId}`);
+        break;
+      }
+    }
+    let railAttSum = 0;
+    for (const r of st.rails) {
+      railAttSum += r.attachmentIds.length;
+      for (const aid of r.attachmentIds) {
+        if (!attIds.has(aid)) {
+          add('V22', `structural.rails[${r.railId}].attachmentIds`, aid, 'W3 structural authority',
+            ['PV-3', 'BOM'], `rail ${r.railId} references unknown attachment ${aid}`);
+          break;
+        }
+      }
+    }
+    if (railAttSum !== st.attachments.length) {
+      add('V22', 'structural.rails[].attachmentIds', railAttSum, 'W3 structural authority',
+        ['PV-3', 'BOM'], `Σ rail attachment refs (${railAttSum}) ≠ attachment objects (${st.attachments.length})`);
+    }
+    // every module supported by ≥1 rail
+    const supported = new Set(st.rails.flatMap(r => r.supportedModuleIds));
+    if (gi.length > 0) {
+      const orphan = gi.find(m => !supported.has(m.instanceId.replace(/^mi-/, '')) && !supported.has(m.instanceId));
+      if (orphan) {
+        add('V22', 'structural.rails[].supportedModuleIds', orphan.instanceId, 'W3 structural authority',
+          ['PV-3'], `module ${orphan.instanceId} is not supported by any canonical rail`);
+      }
+    }
+  }
+  // V23 — structural environmental values agree with the loads mirror (one source)
+  if (st.env.ultimateWindSpeedMph != null && st.loads.windSpeedMph != null
+      && st.env.ultimateWindSpeedMph !== st.loads.windSpeedMph) {
+    add('V23', 'structural.env.ultimateWindSpeedMph', st.env.ultimateWindSpeedMph, 'W3 structural authority',
+      ['PV-3', 'PV-4C', 'CERT', 'PE-1', 'COVER'],
+      `env wind ${st.env.ultimateWindSpeedMph} ≠ loads wind ${st.loads.windSpeedMph} — the 115-vs-90 disagreement must be single-sourced`);
+  }
+  // V24 — FRAMING HONESTY: an engineering-review-required result must NOT carry
+  // a fabricated framing pass, and must be reflected in permitReadiness.
+  if (st.engine.engineeringReviewRequired) {
+    const framing = st.checks.find(c => c.limitState === 'framing-capacity');
+    if (framing && framing.passes === true) {
+      add('V24', 'structural.checks[framing-capacity].passes', true, 'W3 structural engine',
+        ['PV-4C', 'CERT', 'PE-1'], 'framing check reports PASS while engineering review is required — fabricated truss capacity forbidden');
+    }
+    if (!s.permitReadiness.blockers.some(b => b.code === 'STRUCTURAL-FRAMING-UNVERIFIED')) {
+      add('V24', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code), 'W3 structural authority',
+        ['PV-0', 'VAL-1'], 'engineering review required but no STRUCTURAL-FRAMING-UNVERIFIED blocker present');
+    }
+  }
+  // V25 — REACTION HONESTY (§11): an attachment reaction exceeding its adjusted
+  // allowable capacity must NOT be reported as a passing check and must surface
+  // as a permit blocker — never a silent over-capacity. (§12: over-utilization
+  // blocks permit-ready; the planset still renders for review — so this is a
+  // consistency invariant, not a physics hard-throw.)
+  {
+    const over = st.attachments.find(a => a.upliftReactionLbs != null && a.allowableCapacityLbs != null
+      && a.upliftReactionLbs > a.allowableCapacityLbs);
+    if (over) {
+      const att = st.checks.find(c => c.limitState === 'attachment-uplift');
+      if (att && att.passes === true) {
+        add('V25', 'structural.checks[attachment-uplift].passes', true, 'W3 structural engine',
+          ['PV-3', 'PV-4C', 'PE-1'],
+          `attachment ${over.attachmentId} uplift ${over.upliftReactionLbs} > allowable ${over.allowableCapacityLbs} but the attachment check reports PASS — reaction exceeding capacity must not be hidden`);
+      }
+      if (!s.permitReadiness.blockers.some(b => b.code === 'STRUCTURAL-UTILIZATION-EXCEEDED')) {
+        add('V25', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code), 'W3 structural authority',
+          ['PV-0', 'VAL-1'],
+          `attachment reaction exceeds allowable capacity (${over.attachmentId}) but no STRUCTURAL-UTILIZATION-EXCEEDED blocker present`);
+      }
+    }
   }
 
   // V14 — pitch is degrees

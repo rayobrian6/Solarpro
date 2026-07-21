@@ -27,6 +27,7 @@ import type { DraftingInput } from '../types';
 import type { DesignIntent } from '../designIntent';
 import type { CADModel } from '../../cad/types';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { projectStructural } from '../../permit/snapshot/structuralProjection';
 import { getLayoutForSystem } from '../layoutEngine';
 import {
   drawSVGOpen, drawSVGClose, drawBackground, drawTitleBar,
@@ -146,8 +147,17 @@ export function drawRoofPlan(
 
   const totalPanels = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw        = cad?.totalDcKw   ?? engineering.totalDcKw   ?? (totalPanels * (engineering.panelWatts || 400) / 1000);
-  const panelLenIn  = project.panelLengthIn   || 66;
-  const panelWidIn  = project.panelWidthIn    || 40;
+  // ── W3 §2 — module footprint dims PROJECT from the canonical snapshot module
+  // instance (exact catalog dims). The generic 66×40 fallback is DELETED; when
+  // no snapshot is present (standalone preview) the project scalars are the
+  // last resort, never a made-up module size. panelLenIn = long dim (height),
+  // panelWidIn = width — matching the snapshot ModuleInstance convention.
+  const _sp = projectStructural(ctx?.snapshot);
+  // 0 when truly unknown (never 66/40): the snapshot fires MODULE-DIMENSIONS-
+  // UNVERIFIED and the review banner prints — the drawing degrades honestly
+  // rather than presenting a fabricated module size as real.
+  const panelLenIn  = _sp.moduleHeightIn ?? project.panelLengthIn ?? 0;
+  const panelWidIn  = _sp.moduleWidthIn  ?? project.panelWidthIn  ?? 0;
   const mountSys    = ((((project as any)._canonical?.mountSystem as string)
     || project.mountingSystem
     || 'IRONRIDGE XR100')).toUpperCase();
@@ -165,13 +175,24 @@ export function drawRoofPlan(
   const pitchNum    = project.roofPitch       || 5;
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
-  const attachSp    = (project as any).resolvedAttachSpacingIn
-    || project.attachmentSpacing
-    || 48;
-  // Railed systems (incl. RT-MINI) run RAIL FEET @ 48" O.C. STAGGERED — feet
-  // share rafters at 4 ft O.C. under a continuous rail, NOT one per module. The
-  // drawn feet + the attachment callout both use this so the plan matches labor.
-  const railFootOcIn = 48;
+  // W3 §4/§6 — attachment O.C. spacing PROJECTS from the canonical snapshot
+  // (engine-RESOLVED spacing on the rail/attachment objects), never the invented
+  // 48" literal. Feet are then geo-registered onto the real rafter grid at this
+  // canonical O.C.; their COUNT reconciles with snapshot.structural.attachments
+  // (V22). When no snapshot is present the resolved project value is the last
+  // resort (still engine-resolved, not a sheet literal).
+  const attachSp    = _sp.attachmentSpacingIn
+    ?? (project as any).resolvedAttachSpacingIn
+    ?? project.attachmentSpacing
+    ?? null;
+  // Railed systems (incl. RT-MINI) run RAIL FEET at the canonical O.C. STAGGERED —
+  // feet share rafters under a continuous rail, NOT one per module. The drawn feet
+  // + the attachment callout both use the projected spacing so the plan matches
+  // the engine-resolved layout and the BOM.
+  const railFootOcIn = _sp.attachmentSpacingIn
+    ?? (project as any).resolvedAttachSpacingIn
+    ?? project.attachmentSpacing
+    ?? 48;
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
   // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
   // (drawn as a band on every edge) and ahjRoofSetbackIn is the ACCESS PATHWAY
@@ -1966,10 +1987,14 @@ export function drawRoofStructural(
   const _mSelD = (project as any).mountingSystemId
     ? getMountingSystemById((project as any).mountingSystemId as string)
     : undefined;
-  const attachSp   = (project as any).resolvedAttachSpacingIn
-    || project.attachmentSpacing
-    || _mSelD?.mount?.maxSpacingIn
-    || 48;
+  // W3 §4 — attachment O.C. PROJECTS from the canonical snapshot (engine-
+  // resolved spacing), never a sheet literal; PV-3 and PV-1 now agree.
+  const _spD = projectStructural(ctx?.snapshot);
+  const attachSp   = _spD.attachmentSpacingIn
+    ?? (project as any).resolvedAttachSpacingIn
+    ?? project.attachmentSpacing
+    ?? _mSelD?.mount?.maxSpacingIn
+    ?? 48;
   const mountSys   = (((project as any)._canonical?.mountSystem as string)
     || project.mountingSystem
     || (_mSelD ? `${_mSelD.manufacturer} ${_mSelD.model}` : 'IRONRIDGE XR100')).toUpperCase();
@@ -1983,12 +2008,16 @@ export function drawRoofStructural(
   const _lagLenD  = Math.ceil((_embedD + 1.5) * 2) / 2;
   const lagLabelD = `${_fracD(_lagDiaD)}" DIA × ${_lagLenD}" SS LAG`;
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
-  const panelLenIn = project.panelLengthIn      || 66;
-  const panelWidIn = project.panelWidthIn       || 40;
+  // W3 §2 — exact catalog module dims from the snapshot (no generic 66×40).
+  const panelLenIn = _spD.moduleHeightIn ?? project.panelLengthIn ?? 0;
+  const panelWidIn = _spD.moduleWidthIn  ?? project.panelWidthIn  ?? 0;
   const panelWt    = project.panelWeightLbs     || 45;
   const condType   = (project.conduitType       || 'EMT').toUpperCase();
-  const windSpeedMph   = engineering.windSpeedMph  ?? project?.ahjWindSpeedMph  ?? 90;
-  const groundSnowPsf  = engineering.groundSnowPsf ?? project?.ahjGroundSnowPsf ?? 0;
+  // W3 §7 — THE 115-vs-90 FIX. Wind/snow PROJECT from the single-sourced
+  // snapshot env; the `?? 90` sheet default is DELETED. Every sheet prints the
+  // same value the cover / PV-4C / PE-1 print. em-dash-safe display below.
+  const windSpeedMph   = _spD.windSpeedMph ?? engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? null;
+  const groundSnowPsf  = _spD.groundSnowPsf ?? engineering.groundSnowPsf ?? project?.ahjGroundSnowPsf ?? null;
   const totalPanels    = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw           = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
 
@@ -2320,10 +2349,10 @@ export function drawRoofStructural(
   els.push(drawWindArrow(
     secX + roofRun + 40, midPanY,
     40, 'left',
-    `WIND ${windSpeedMph} MPH`
+    `WIND ${windSpeedMph ?? '—'} MPH`
   ));
   // Snow (vertical, pointing down onto panel)
-  if (groundSnowPsf > 0) {
+  if (groundSnowPsf != null && groundSnowPsf > 0) {
     els.push(drawWindArrow(
       detX + detW / 2, detY - 24,
       20, 'down',
@@ -2424,7 +2453,7 @@ export function drawRoofStructural(
     `MIN. LAG THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
     `LAG BOLT: ${lagLabelD}.`,
     `ATTACH. SPACING: ${ftToFtIn(attachSp / 12)} O.C. MAX.`,
-    `WIND LOAD: ${windSpeedMph} MPH — REF: ASCE 7-22`,
+    `WIND LOAD: ${windSpeedMph ?? '—'} MPH — REF: ASCE 7-22`,
     `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`,
     'REF: NEC 690.43 / IBC 1609 / ASCE 7-22',
   ];

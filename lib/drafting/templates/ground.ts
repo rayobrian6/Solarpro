@@ -43,6 +43,7 @@ import {
 } from '../callouts';
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { projectStructural } from '../../permit/snapshot/structuralProjection';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 
 // ── ARRAY COLORS (one per array, wraps) ──────────────────────────────────────
@@ -874,11 +875,13 @@ export function drawGroundStructural(
   const _canonWind = Number((project as unknown as {
     _canonical?: { site?: { windSpeed?: number } };
   })?._canonical?.site?.windSpeed) || 0;
-  const windSpeedMph  = engineering.windSpeedMph
+  // W3 §7 — single-sourced from the snapshot env (115 = standalone-only guard).
+  const windSpeedMph  = projectStructural(ctx?.snapshot).windSpeedMph
+    ?? engineering.windSpeedMph
     ?? (_canonWind > 0 ? _canonWind : undefined)
     ?? project?.ahjWindSpeedMph
     ?? 115;
-  const groundSnowPsf = engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
+  const groundSnowPsf = projectStructural(ctx?.snapshot).groundSnowPsf ?? engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
 
   const totalPanels = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw        = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;

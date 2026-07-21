@@ -43,6 +43,7 @@ import {
 } from '../callouts';
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+import { projectStructural } from '../../permit/snapshot/structuralProjection';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { getRackingById } from '../../equipment-db';
 
@@ -519,7 +520,9 @@ export function drawFencePlan(
     // Wind arrow — with the DESIGN VALUE (Ray "next level" item 3: load
     // arrows carry their real ASCE figures at the member they act on).
     const wY = (panTop + grade) / 2;
-    const _windMph = (engineering as { windSpeedMph?: number }).windSpeedMph
+    // W3 §7 — single-sourced from the snapshot env (115 = standalone-only guard).
+    const _windMph = projectStructural(ctx?.snapshot).windSpeedMph
+      ?? (engineering as { windSpeedMph?: number }).windSpeedMph
       ?? (input.project as { ahjWindSpeedMph?: number })?.ahjWindSpeedMph ?? 115;
     els.push(`<line x1="${(rightPost + 44).toFixed(1)}" y1="${wY.toFixed(1)}" x2="${(rightPost + 10).toFixed(1)}" y2="${wY.toFixed(1)}" stroke="#c00" stroke-width="1.6"/>`);
     els.push(drawArrowhead(rightPost + 10, wY, 180, 6, '#c00'));
@@ -1200,7 +1203,8 @@ export function drawFenceStructural(
   const totalLengthFt = cadFence ? metersToFt(cadFence.totalLengthM) : (layout.fenceTotalLengthFt ?? 0);
   const totalPanels   = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw          = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
-  const windSpeedMph  = engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? 115;
+  // W3 §7 — single-sourced from the snapshot env (115 = standalone-only guard).
+  const windSpeedMph  = projectStructural(ctx?.snapshot).windSpeedMph ?? engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? 115;
   const mountSys      = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
   const panelLenIn    = project?.panelLengthIn ?? 66;
   const panelWidIn    = project?.panelWidthIn  ?? 40;

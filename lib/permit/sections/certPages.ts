@@ -20,6 +20,7 @@ export interface PELetterOpts { sheetId?: string; subKey?: SubSystemKey; }
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { BUILD_VERSION } from '@/lib/version';
+import { projectStructuralFromInput, fmt, fmtStr, findCheck } from '../snapshot/structuralProjection';
 
 /** D-6 (Ray, binding 2026-07-20) / snapshot V13: certification language may
  *  activate ONLY when the snapshot carries an approved engineering-review
@@ -36,11 +37,21 @@ export function certificationGateBanner(input: PermitInput): string {
     && cert.engineeringReviewApproved.reviewedDigest === s?.meta?.digest
     && cert.engineer);
   if (approvedForDigest) return '';
+  // §12 — surface the CANONICAL structural blockers from permitReadiness so the
+  // existing gate states WHY (framing unverified, capacity source missing, …)
+  // rather than a generic pending line. One gate, wired to the snapshot.
+  const _sp = projectStructuralFromInput(input);
+  const _reasons = (_sp.banner.structuralBlockers.length ? _sp.banner.structuralBlockers : _sp.banner.blockers)
+    .slice(0, 6)
+    .map(b => `<li style="margin:0 0 1px 0;">${String(b.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('');
+  const _hasStructural = _sp.banner.structuralBlockers.length > 0;
   return `
   <div style="border:3px solid #b00000;background:#fff2f2;margin:10px 14px 6px;padding:8px 12px;text-align:center;">
     <div style="font-weight:900;font-size:13px;letter-spacing:1px;color:#b00000;">PENDING ENGINEERING REVIEW</div>
+    ${_hasStructural ? `<div style="font-weight:900;font-size:11px;letter-spacing:0.8px;color:#b00000;">STRUCTURAL ENGINEERING REVIEW REQUIRED</div>` : ''}
     <div style="font-weight:800;font-size:10px;letter-spacing:0.8px;color:#b00000;">NOT FOR PERMIT SUBMISSION &mdash; UNSIGNED / UNSEALED</div>
     <div style="font-size:7.5px;color:#7a0000;margin-top:2px;">Certification activates only upon an approved engineering-review record covering this snapshot digest, with engineer identity, license, jurisdiction and seal on file. A design change that alters the snapshot digest invalidates any prior approval.</div>
+    ${_reasons ? `<ul style="margin:4px auto 0;padding-left:16px;max-width:520px;text-align:left;font-size:7px;color:#7a0000;line-height:1.35;">${_reasons}</ul>` : ''}
   </div>`;
 }
 
@@ -227,16 +238,21 @@ function _peProjectInfo(input: PermitInput): string {
 function _peSiteLoading(input: PermitInput): string {
   const { compliance } = input;
   const structural = compliance.structural;
-  const windSpeed  = structural?.wind?.windSpeed || 'â€”';
-  const snowLoad   = structural?.snow?.groundSnowLoad || 'â€”';
-  const exposure   = structural?.wind?.exposureCategory || 'â€”';
+  // W3 §7 — site loading parameters PROJECT from the single-sourced snapshot
+  // env (wind / exposure / snow / risk category). No sheet defaults; risk
+  // category is the canonical env value, not a hardcoded "II (Residential)".
+  const _sp = projectStructuralFromInput(input);
+  const windSpeed  = _sp.present ? fmt(_sp.windSpeedMph) : (structural?.wind?.windSpeed || 'â€”');
+  const snowLoad   = _sp.present && _sp.groundSnowPsf != null ? String(_sp.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? 'â€”');
+  const exposure   = _sp.present ? fmtStr(_sp.exposure) : (structural?.wind?.exposureCategory || 'â€”');
+  const riskCat    = _sp.riskCategory ? `${_sp.riskCategory} (Residential)` : 'â€”';
   // AHJ-derived category before any default â€” the '|| D' fallback printed
   // SDC D on PE-1 while PV-0 printed the AHJ's CAT. B for the same site.
   const sdc        = compliance.structural?.seismic?.sdc || input.project.seismicCategory || 'â€”';
   return `
   <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Site Loading Parameters</td></tr>
   <tr><td class="il">Design Wind Speed (Vult)</td><td class="iv">${windSpeed} mph</td><td class="il">Exposure Category</td><td class="iv">Cat. ${exposure}</td></tr>
-  <tr><td class="il">Ground Snow Load (pg)</td><td class="iv">${snowLoad} psf</td><td class="il">Risk Category</td><td class="iv">II (Residential)</td></tr>
+  <tr><td class="il">Ground Snow Load (pg)</td><td class="iv">${snowLoad} psf</td><td class="il">Risk Category</td><td class="iv">${riskCat}</td></tr>
   <tr><td class="il">Seismic Design Category</td><td class="iv">${sdc}</td><td class="il">Importance Factor</td><td class="iv">1.0</td></tr>`;
 }
 
@@ -247,16 +263,20 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
   const ibcVer  = '2021';
   const state   = compliance.jurisdiction?.state || 'â€”';
   const structural = compliance.structural;
-
-  const windSpeed   = structural?.wind?.windSpeed || 'â€”';
+  // W3 §7/§9 — env single-sourced from the snapshot; fence overturning SF from
+  // the canonical fence-overturning CHECK (relocated fence engine).
+  const _sp = projectStructuralFromInput(input);
+  const _fenceChk = findCheck(_sp, 'fence-overturning');
+  const windSpeed   = _sp.present ? fmt(_sp.windSpeedMph) : (structural?.wind?.windSpeed || 'â€”');
   const uplift      = structural?.wind?.upliftPerAttachment?.toFixed(0) || 'â€”';
-  const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || 'â€”';
+  const safetyFact  = _fenceChk?.safetyFactor != null ? _fenceChk.safetyFactor.toFixed(2) : (structural?.attachment?.safetyFactor?.toFixed(2) || 'â€”');
+  const _fenceMinSf = _fenceChk?.requiredThreshold ?? 1.5;
   const utilization = ((structural?.rafter?.utilizationRatio || 0) * 100).toFixed(0);
 
   const postEmbed   = cad.fence?.postEmbedM  ? (cad.fence.postEmbedM  * 3.281).toFixed(1) : '3.5';
   const postSpacing = cad.fence?.postSpacingM ? (cad.fence.postSpacingM * 3.281).toFixed(1) : '8.0';
   const panelHIn    = cad.fence?.panelHeightM ? (cad.fence.panelHeightM * 39.37).toFixed(0) + '"' : '72"';
-  const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
+  const exposure    = _sp.present ? fmtStr(_sp.exposure) : (structural?.wind?.exposureCategory || project.exposureCategory || 'C');
   // Per-sub letter (hybrid): the project-wide mount string is the ROOF racking
   // (IronRidge on Stowell) â€” a fence letter must never certify it. Sub-scoped
   // letters print the fence family label; the primary/legacy path is unchanged.
@@ -305,7 +325,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
             ${_peSiteLoading(input)}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Post Foundation Capacity Analysis</td></tr>
             <tr><td class="il">Net Lateral Wind Load / Post</td><td class="iv">${uplift} lbs</td><td class="il">Post Embedment Capacity</td><td class="iv">Per ASCE 7-22 Â§29.4</td></tr>
-            <tr><td class="il">Safety Factor (Overturning)</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= 1.5 ? '#000' : '#cc0000'};">${safetyFact} (min. 1.5 req.)</td><td class="il">Post Embedment Depth</td><td class="iv">${postEmbed} ft min.</td></tr>
+            <tr><td class="il">Safety Factor (Overturning)</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= _fenceMinSf ? '#000' : '#cc0000'};">${safetyFact} (min. ${_fenceMinSf.toFixed(1)} req.)</td><td class="il">Post Embedment Depth</td><td class="iv">${postEmbed} ft min.</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 Â§2.4 â€” ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Overturning)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 Â§29.4</td></tr>
           </table>
@@ -347,8 +367,9 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
   const ibcVer  = '2021';
   const state   = compliance.jurisdiction?.state || 'â€”';
   const structural = compliance.structural;
-
-  const windSpeed   = structural?.wind?.windSpeed || 'â€”';
+  // W3 §7 — env single-sourced from the snapshot.
+  const _sp = projectStructuralFromInput(input);
+  const windSpeed   = _sp.present ? fmt(_sp.windSpeedMph) : (structural?.wind?.windSpeed || 'â€”');
   const uplift      = structural?.wind?.upliftPerAttachment?.toFixed(0) || 'â€”';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || 'â€”';
 
@@ -362,7 +383,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
   const groundClr   = arr0 ? (arr0.groundClearanceM * 39.37).toFixed(0) : '12';
   const tiltDeg     = arr0?.tiltDeg || 20;
   const structType  = 'Driven I-beam pylon (Speck PLP)';
-  const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
+  const exposure    = _sp.present ? fmtStr(_sp.exposure) : (structural?.wind?.exposureCategory || project.exposureCategory || 'C');
   // Per-sub letter (hybrid): never certify the project-wide (roof) racking
   // string on the ground letter â€” see fence letter note.
   const mountSys    = opts?.subKey
@@ -453,11 +474,14 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const ibcVer  = '2021';
   const state   = compliance.jurisdiction?.state || 'â€”';
   const structural = compliance.structural;
-
-  const windSpeed   = structural?.wind?.windSpeed || 'â€”';
-  const uplift      = structural?.wind?.upliftPerAttachment?.toFixed(0) || 'â€”';
-  const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || 'â€”';
-  const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || 'â€”';
+  // W3 §5/§7/§9 — env single-sourced; lag-bolt result from the snapshot
+  // attachment-uplift CHECK (capacity/demand/SF), not a `(safetyFactor||2)` derive.
+  const _sp = projectStructuralFromInput(input);
+  const _attChk = findCheck(_sp, 'attachment-uplift');
+  const windSpeed   = _sp.present ? fmt(_sp.windSpeedMph) : (structural?.wind?.windSpeed || 'â€”');
+  const uplift      = _attChk?.demand != null ? _attChk.demand.toFixed(0) : (structural?.wind?.upliftPerAttachment?.toFixed(0) || 'â€”');
+  const lagCap      = _attChk?.capacity != null ? _attChk.capacity.toFixed(0) : (structural?.attachment?.lagBoltCapacity?.toFixed(0) || 'â€”');
+  const safetyFact  = _attChk?.safetyFactor != null ? _attChk.safetyFactor.toFixed(2) : (structural?.attachment?.safetyFactor?.toFixed(2) || 'â€”');
   // utilizationRatio carries the GOVERNING ratio (max of bending/deflection) â€”
   // labelling it as bending utilization made PE-1 print "145%" beside a passing
   // 90% bending check. Compute each check's own ratio and certify CONDITIONALLY:
@@ -468,13 +492,14 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const _adRaw   = structural?.rafter?.allowableDeflection;
   const _bendRatio = (_bmRaw != null && _abmRaw) ? _bmRaw / _abmRaw : null;
   const _deflRatio = (_deflRaw != null && _adRaw) ? _deflRaw / _adRaw : null;
-  const _sfRaw     = structural?.attachment?.safetyFactor;
+  const _sfRaw     = _attChk?.safetyFactor ?? structural?.attachment?.safetyFactor;
   const _bendPass  = _bendRatio == null || _bendRatio <= 1.0;
   const _deflPass  = _deflRatio == null || _deflRatio <= 1.0;
   // ASD basis: demand (0.6W) and capacity (allowable) are BOTH ASD â€” the margin
-  // lives inside the allowable, so the pass bar is MIN_ATTACHMENT_SF (1.0), not
-  // a second 2.0 on top (that stale threshold printed DO-NOT-ISSUE on passing designs).
-  const _lagPass   = _sfRaw == null || _sfRaw >= MIN_ATTACHMENT_SF;
+  // lives inside the allowable, so the pass bar is the canonical attachment
+  // check threshold (MIN_ATTACHMENT_SF = 1.0), not a second 2.0 on top.
+  const _attThreshold = _attChk?.requiredThreshold ?? MIN_ATTACHMENT_SF;
+  const _lagPass   = _sfRaw == null || _sfRaw >= _attThreshold;
   const _allPass   = _bendPass && _deflPass && _lagPass;
   const bendUtil   = _bendRatio != null ? (_bendRatio * 100).toFixed(0) : 'â€”';
   const deflUtil   = _deflRatio != null ? (_deflRatio * 100).toFixed(0) : 'â€”';
@@ -513,7 +538,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const _pitchDeg   = cad.roof?.planes?.[0]?.pitch ?? project.roofPitch;
   const roofPitch   = _pitchDeg ? `${(Math.tan(_pitchDeg * Math.PI / 180) * 12).toFixed(1)}:12 (${_pitchDeg.toFixed(1)}Â°)` : 'â€”';
   const roofType    = roofTypeLabel(project.roofType);
-  const exposure    = structural?.wind?.exposureCategory || 'â€”';
+  const exposure    = _sp.present ? fmtStr(_sp.exposure) : (structural?.wind?.exposureCategory || 'â€”');
   const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'IronRidge XR100';
 
   return `
@@ -572,7 +597,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflPass ? '#000' : '#cc0000'};">${deflection} in (Î”_allow = ${allowableDefl} in â€” ${deflUtil}%)</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis â€” min. ${MIN_ATTACHMENT_SF.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} â€” ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : 'â€”'}</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis â€” min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} â€” ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : 'â€”'}</td></tr>
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 Â§2.4 â€” ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 Â§26/27</td></tr>
           </table>
@@ -608,7 +633,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 under the modeled assumptions (${rafterSize} ${_isTruss ? 'truss' : 'stick'} framing @ ${rafterSpace}" O.C., span ${rafterSpanFt} ft,
                 combined load ${totalLoadPsf} psf), the ${_governs} check exceeds its code limit
                 (bending ${bendUtil}% of allowable; deflection Î” = ${deflection} in vs Î”_allow = ${allowableDefl} in).
-                Lag bolt attachment safety factor is ${safetyFact}${_lagPass ? ' (adequate)' : ` (below the ${MIN_ATTACHMENT_SF.toFixed(1)} ASD minimum)`}.
+                Lag bolt attachment safety factor is ${safetyFact}${_lagPass ? ' (adequate)' : ` (below the ${_attThreshold.toFixed(1)} ASD minimum)`}.
                 Field-verify the actual framing type, member size, and clear span (pre-engineered trusses frequently
                 resolve this check), correct the structural inputs, and re-run the analysis â€” or provide reinforcement
                 designed by the engineer of record â€” before this letter is signed or sealed.

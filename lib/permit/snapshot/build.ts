@@ -18,6 +18,7 @@ import {
   type RailSpec, type ConductorRecord, type BranchRecord,
 } from './types';
 import { computeSnapshotDigest, snapshotIdFromDigest, deepFreeze } from './digest';
+import { buildStructuralAuthority, type StructuralRunsBundle } from './structuralAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
@@ -79,6 +80,7 @@ export function buildPermitDesignSnapshot(
         tempCoeffVocPctC: db?.tempCoeffVoc ?? null,
         lengthIn: db?.length ?? proj.panelLengthIn ?? null,
         widthIn: db?.width ?? proj.panelWidthIn ?? null,
+        thicknessIn: db?.thickness ?? null,
         weightLbs: db?.weight ?? proj.panelWeightLbs ?? null,
         ulListing: db?.ulListing ?? null,
       },
@@ -366,6 +368,61 @@ export function buildPermitDesignSnapshot(
     }
   }
 
+  // ═══ W3 CANONICAL STRUCTURAL AUTHORITY ═════════════════════════════════
+  // Built from the ENGINE OF RECORD (V4 runs stashed on input._structuralRuns
+  // by generatePermit) + equipment-db module dims + mounting-hardware-db +
+  // fire-setback engine. Never from sheet literals.
+  const structRuns = ((input as unknown as { _structuralRuns?: StructuralRunsBundle })._structuralRuns) ?? null;
+  const roofSInput = structRuns?.inputs?.roof ?? (structRuns ? Object.values(structRuns.inputs)[0] : undefined) ?? null;
+  const isRoofSystem = !!structRuns?.byKey?.roof || (cad as any)?.systemType === 'roof';
+  const windAuthoritative = proj.ahjWindSpeedMph != null;
+  const snowAuthoritative = proj.ahjGroundSnowPsf != null;
+  // §6 — fence wind engine input (solar_fence systems). Sourced from canonical
+  // structure + cad.fence geometry — the SAME inputs the former inline renderer
+  // math used, now feeding the relocated engine → snapshot check.
+  const _cadAny = cad as any;
+  const _cStruct = (proj._canonical as any)?.structure;
+  const _cSite = (proj._canonical as any)?.site;
+  const _fenceWindSpeed = _cSite?.windSpeed ?? (struct?.wind as any)?.windSpeed ?? proj.windSpeedMph ?? null;
+  const _isFenceSystem = String(_cadAny?.systemType) === 'solar_fence' || !!_cadAny?.fence;
+  const fenceWind = (_isFenceSystem && !isRoofSystem && _fenceWindSpeed != null) ? {
+    windSpeedMph: _fenceWindSpeed,
+    exposure: _cSite?.exposureCategory ?? (struct?.wind as any)?.exposureCategory ?? proj.windExposure ?? 'C',
+    panelHeightFt: _cStruct?.panelHeightFt ?? (_cadAny?.fence?.panelHeightM ? _cadAny.fence.panelHeightM * 3.28084 : 6.0),
+    postSpacingFt: _cStruct?.postSpacingFt ?? (_cadAny?.fence?.postSpacingM ? _cadAny.fence.postSpacingM * 3.28084 : 8.0),
+    postEmbedFt: _cStruct?.postEmbedFt ?? 3.5,
+    soilResistancePsf: _cStruct?.soilResistance ?? 200,
+    groundSnowPsf: _cSite?.groundSnowLoad ?? (struct?.snow as any)?.groundSnowLoad ?? proj.ahjGroundSnowPsf ?? 0,
+  } : null;
+  const structAuth = buildStructuralAuthority({
+    isRoofSystem,
+    moduleRecord: modules[0] ?? null,
+    geoModules,
+    microUnits,
+    roofPlanes,
+    cadPlanes,
+    mountSystem: mountDb ?? null,
+    structuralRuns: structRuns,
+    framing: {
+      framingType: proj.framingType ?? null,
+      rafterSize: proj.rafterSize ?? null,
+      rafterSpacing: proj.rafterSpacing ?? null,
+      rafterSpecies: proj.rafterSpecies ?? null,
+      rafterSpan: proj.rafterSpan ?? null,
+    },
+    windAuthoritative, snowAuthoritative,
+    windSpeedMph: (struct?.wind as any)?.windSpeed ?? proj.windSpeedMph ?? null,
+    exposure: (struct?.wind as any)?.exposureCategory ?? proj.windExposure ?? null,
+    snowPsf: (struct?.snow as any)?.groundSnowLoad ?? proj.ahjGroundSnowPsf ?? null,
+    riskCategory: proj.riskCategory ?? null,
+    meanRoofHeightFt: roofSInput?.meanRoofHeight ?? null,
+    asceEdition: `ASCE ${necFromRecord ? '7-22' : '7-22'}`,
+    asceSource: necFromRecord ? 'ahj-record' : 'pending-w4-ahj-authority',
+    ahjRidgeSetbackIn: (proj.ahjRidgeSetbackIn ?? proj.fireSetbackRidgeIn) ?? null,
+    roofCovering: proj.roofType ?? null,
+    fenceWind,
+  });
+
   const snapshot: PermitDesignSnapshot = {
     meta: {
       snapshotId: '', digest: '', schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -427,10 +484,13 @@ export function buildPermitDesignSnapshot(
     },
     geometry: {
       roofPlanes, modules: geoModules,
-      provenance: { source: 'project.panelPositions + cad.roof.planes' },
+      moduleInstances: structAuth.moduleInstances,
+      roofPlaneObjects: structAuth.roofPlaneObjects,
+      provenance: { source: 'project.panelPositions + cad.roof.planes + W3 structural authority' },
       gaps: [
-        'setback/pathway polygons remain sheet-computed until W3',
-        'module footprints (record dims × coordinates) not yet snapshot-owned (V8 deferred to W3)',
+        ...(structAuth.moduleInstances.length ? [] : ['module footprints unavailable — exact record dims missing (W3 blocker)']),
+        ...(structAuth.roofPlaneObjects.some(p => p.pathwayPolygons.length) ? []
+            : ['access-pathway polygons pending true routed roof geometry (width authority carried on plane object)']),
         ...equipmentIdentityConflicts.map(c => `EQUIPMENT IDENTITY CONFLICT: ${c}`),
       ],
     },
@@ -462,10 +522,17 @@ export function buildPermitDesignSnapshot(
     },
     structural: {
       mountRecordId: mount?.recordId ?? null,
-      attachmentCount: proj.attachmentCount ?? null,
-      attachmentSpacingIn: (struct?.attachment as any)?.maxAllowedSpacing ?? null,
-      railTotalFt: null, railCount: null,
-      spliceCount: null,
+      // W3: these scalars now DERIVE from the canonical rail/attachment objects
+      // (single source), replacing the null/estimate mirror.
+      attachmentCount: structAuth.attachments.length || (proj.attachmentCount ?? null),
+      attachmentSpacingIn: structAuth.attachments.length
+        ? ((structAuth.rails[0]?.spanConfigIn) ?? (struct?.attachment as any)?.maxAllowedSpacing ?? null)
+        : ((struct?.attachment as any)?.maxAllowedSpacing ?? null),
+      railTotalFt: structAuth.rails.length
+        ? Math.round(structAuth.rails.reduce((s, r) => s + r.physicalLengthIn, 0) / 12 * 100) / 100 : null,
+      railCount: structAuth.rails.length || null,
+      spliceCount: structAuth.rails.length
+        ? structAuth.rails.reduce((s, r) => s + r.spliceCount, 0) : null,
       loads: {
         windSpeedMph: (struct?.wind as any)?.windSpeed ?? proj.windSpeedMph ?? null,
         exposure: (struct?.wind as any)?.exposureCategory ?? null,
@@ -473,15 +540,25 @@ export function buildPermitDesignSnapshot(
         source: (struct?.wind as any)?.windSpeed != null ? 'structural-engine-v4' : 'default-unverified',
       },
       governing: {
-        utilization: (struct?.rafter as any)?.utilizationRatio ?? null,
+        utilization: structAuth.engine.governingUtilization ?? (struct?.rafter as any)?.utilizationRatio ?? null,
         safetyFactor: (struct?.attachment as any)?.safetyFactor ?? null,
-        passes: (struct?.rafter as any)?.utilizationRatio != null
-          ? (struct as any).rafter.utilizationRatio <= 1.0 : null,
+        passes: structAuth.engine.passes,
       },
-      provenance: { source: 'structural-engine-v4 via compliance.structural' },
+      // ── W3 canonical structural authority ──────────────────────────────
+      rackingAssembly: structAuth.rackingAssembly,
+      rails: structAuth.rails,
+      attachments: structAuth.attachments,
+      env: structAuth.env,
+      checks: structAuth.checks,
+      engine: structAuth.engine,
+      // §10 — structural BOM rows + reconciliation, derived from the objects.
+      bom: structAuth.bom,
+      bomReconciliation: structAuth.bomReconciliation,
+      provenance: { source: 'W3 structural authority (structural-engine-v4 objects + mounting-hardware-db + fire-setback engine)' },
       gaps: [
-        'attachment/rail coordinates not engine-derived (drawings place feet independently) — W3',
-        'rail totals live in rackingBOM (BOM path) and are not yet snapshot-carried — W3',
+        ...(structAuth.rails.length ? [] : ['no canonical rail objects (non-roof or rail-less/unresolved mount)']),
+        ...(structAuth.engine.engineeringReviewRequired
+          ? ['STRUCTURAL ENGINEERING REVIEW REQUIRED — ' + (structAuth.engine.reviewReasons[0] ?? 'framing unverified')] : []),
       ],
     },
     derived: {
@@ -504,6 +581,17 @@ export function buildPermitDesignSnapshot(
       // Req. 7: stored equipment-identity conflict (e.g. Braidon subSystems
       // panelId vs fleet model) BLOCKS permit-ready until operator reconciliation.
       for (const c of equipmentIdentityConflicts) blockers.push({ code: 'EQUIPMENT-IDENTITY-CONFLICT', message: c });
+      // §14 carry-forward: missing feeder raceway/conduit type authority stays
+      // visible and blocking (never weakened by W3).
+      if (cs && !(feederRun?.conduitType)) {
+        blockers.push({ code: 'FEEDER-RACEWAY-AUTHORITY',
+          message: 'Feeder raceway/conduit type not resolved on the canonical feeder segment — raceway + bonding authority required' });
+      }
+      // §12: W3 canonical structural blockers (framing unverified, missing
+      // capacity/fastener source, unsupported mixed assembly, wind/snow
+      // authority, untraceable reactions/rails, utilization failures, missing
+      // site geometry). Honest blockers are the correct Braidon outcome.
+      for (const sb of structAuth.blockers) blockers.push(sb);
       blockers.push({ code: 'ENGINEERING-REVIEW-PENDING',
         message: 'No approved engineering-review record covering this snapshot digest (D-6)' });
       return { ready: blockers.length === 0, blockers };

@@ -37,6 +37,14 @@ export function snapshotIdFromDigest(digest: string): string {
   return `PDS-${digest.slice(0, 12).toUpperCase()}`;
 }
 
+/** Short content-revision hash for a versioned record (module / racking
+ *  assembly). Embedded on the canonical object so any equipment/assembly change
+ *  propagates into the snapshot digest — the basis for approval invalidation
+ *  (W3 §2: equipment changes invalidate layout geometry and snapshot digest). */
+export function contentRevision(value: unknown): string {
+  return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex').slice(0, 12);
+}
+
 /** Deep-freeze after validation — the snapshot is immutable authority (req. 2). */
 export function deepFreeze<T>(obj: T): T {
   if (obj && typeof obj === 'object' && !Object.isFrozen(obj)) {

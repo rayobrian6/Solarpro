@@ -297,8 +297,18 @@ export function getFenceData(cad: CADModel, input?: Record<string, unknown>): {
     postSpacingFt: f?.postSpacingM ? mToFt(f.postSpacingM)  : ((p?.fencePostSpacingFt as number) || 8),
     embedFt:       f?.postEmbedM   ? mToFt(f.postEmbedM)    : ((p?.fencePostEmbedmentFt as number) || 2.5),
     railCount:     f?.railCount    ?? 2,
-    windSpeedMph:  (cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115,
+    // W3 §7 — single-sourced from the snapshot env (115 is the standalone-only guard).
+    windSpeedMph:  (snapWind(input) ?? ((cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115)),
   };
+}
+
+/** W3 §7 — canonical wind speed from the validated snapshot env (single source).
+ *  Null when no snapshot is present (standalone preview); callers fall back to
+ *  the existing chain with a documented 115 code-minimum guard. */
+function snapWind(input?: Record<string, unknown>): number | null {
+  const w = (input as { _snapshot?: { structural?: { env?: { ultimateWindSpeedMph?: number } } } } | undefined)
+    ?._snapshot?.structural?.env?.ultimateWindSpeedMph;
+  return typeof w === 'number' && isFinite(w) ? w : null;
 }
 
 export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
@@ -343,7 +353,8 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
     })(),
     structureType: 'DRIVEN PYLON — PLP',
     setbackFt:     g?.setbackFt                ?? ((lay?.groundSetbackFt as number) || 5),
-    windSpeedMph:  (cw?.windSpeed as number)   || (p?.ahjWindSpeedMph as number)   || 115,
+    // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
+    windSpeedMph:  (snapWind(input) ?? ((cw?.windSpeed as number)   || (p?.ahjWindSpeedMph as number)   || 115)),
     snowPsf:       (p?.ahjGroundSnowPsf as number) || 0,
   };
 }
@@ -469,7 +480,8 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     lagSpec:       `${_fracIn(_lagDiaIn)}" DIA × ${_lagLenIn}" MIN SS`,
     embedSpec:     `${_embedIn}" MIN THREAD EMBEDMENT`,
     conduitType:   ((p?.conduitType as string) || 'EMT').toUpperCase(),
-    windSpeedMph:  (cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115,
+    // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
+    windSpeedMph:  (snapWind(input) ?? ((cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115)),
     totalPanels:   cad.totalPanels ?? 0,
     dcKw:          (cad.totalDcKw ?? 0).toFixed(2),
   };

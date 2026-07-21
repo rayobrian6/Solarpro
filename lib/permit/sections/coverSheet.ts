@@ -15,6 +15,8 @@ import { buildSheetManifest } from '../sheetManifest';
 import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE, SUB_LABEL } from './subSystemSheets';
 import { hybridSubmissionGate } from './hybridReadiness';
 import { resolveInterconnection } from './electricalPages';
+import { projectStructuralFromInput } from '../snapshot/structuralProjection';
+import { structuralBannerHtml } from '../utils/structuralBanner';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -309,9 +311,13 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const roofLayers    = project.roofLayers    || '';
   const stories       = project.stories       || '';
   const roofLoadPsf   = project.roofLoadPsf   || '';
-  const windSpeedMph  = project.ahjWindSpeedMph || project.windSpeedMph || '';
-  const windExposure  = project.windExposure   || '';
-  const snowPsf       = project.ahjGroundSnowPsf ?? project.groundSnowPsf ?? '';
+  // W3 §7 — cover structural design criteria PROJECT from the single-sourced
+  // snapshot env so the cover, PV-3, PV-4C, CERT and PE-1 all print the SAME
+  // wind / exposure / snow (the 115-vs-90 fix reaches the cover too).
+  const _spCover = projectStructuralFromInput(input);
+  const windSpeedMph  = _spCover.windSpeedMph ?? project.ahjWindSpeedMph ?? project.windSpeedMph ?? '';
+  const windExposure  = _spCover.exposure ?? project.windExposure ?? '';
+  const snowPsf       = _spCover.groundSnowPsf ?? project.ahjGroundSnowPsf ?? project.groundSnowPsf ?? '';
   const seismic       = project.seismicCategory || '';
 
   // FIX v47.295: Roof-specific design criteria only shown for roof systems
@@ -437,6 +443,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   <div class="page">
 
     ${titleBlock(input, 'PV-0', 'COVER SHEET', pageNum, totalPages)}
+
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
 
     <!-- ═══ MAIN BODY: 2fr left | 1fr right ═══ -->
     <div class="page-body" style="grid-template-columns:2fr 1fr;">

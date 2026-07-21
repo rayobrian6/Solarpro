@@ -405,6 +405,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         try { _byKey[r.key] = runStructuralCalcV4(r.input); }
         catch (e) { console.warn(`[PLANSET] structural '${r.key}' run failed:`, (e as Error)?.message); }
       }
+      // W3: stash the canonical V4 runs (result + the exact input each ran with)
+      // so buildPermitDesignSnapshot can build snapshot-owned rail/attachment/
+      // check objects from the SAME engine result — not a re-run, not sheet math.
+      (input as unknown as Record<string, unknown>)._structuralRuns = {
+        byKey: _byKey,
+        inputs: Object.fromEntries(_runs.map(r => [r.key, r.input])),
+      };
       if (cad.hybrid) {
         if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
         const sh = (input.compliance.structural ?? {}) as Record<string, unknown>;
@@ -467,7 +474,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       s.attachment = s.attachment || {};
       // Same single-engine rule as wind: V4 overwrites when it produced values.
       if (ml?.safetyFactor)      s.attachment.safetyFactor = ml.safetyFactor;
-      if (ml?.upliftPerMountLbs) s.attachment.lagBoltCapacity = ml.upliftPerMountLbs * (ml.safetyFactor || 2);
+      // W3 §9 — lag-bolt capacity is the ENGINE's published allowable
+      // (mountCapacityLbs), NOT uplift × (safetyFactor || 2). The old `|| 2`
+      // injected a renderer-side multiplier outside the engine; the canonical
+      // attachment-uplift check (snapshot) now owns capacity/demand/SF.
+      if (ml?.mountCapacityLbs != null) s.attachment.lagBoltCapacity = ml.mountCapacityLbs;
+      else if (ml?.upliftPerMountLbs && ml?.safetyFactor) s.attachment.lagBoltCapacity = ml.upliftPerMountLbs * ml.safetyFactor;
       if (ml?.mountSpacingIn)    s.attachment.maxAllowedSpacing = ml.mountSpacingIn;
       if (ml?.upliftPerMountLbs) s.attachment.totalUpliftPerAttachment = ml.upliftPerMountLbs;
       if (!s.totalDeadLoadPsf)   s.totalDeadLoadPsf = ra.pvDeadLoadPsf + ra.roofDeadLoadPsf;
@@ -1014,6 +1026,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // any sheet renders; deep-frozen (immutable); stamped (id + schema + digest)
   // into every title block. Sheets become projections wave-by-wave (W2–W6);
   // scripts/planset-evidence.mjs measures sheet agreement in the meantime.
+  let _permitSnapshot: import('./snapshot/types').PermitDesignSnapshot | null = null;
   {
     const snapshot = buildPermitDesignSnapshot(input, cad, {
       projectId: (input as { projectId?: string }).projectId ?? null,
@@ -1028,6 +1041,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     deepFreeze(snapshot);
     (input as unknown as { _snapshot?: unknown })._snapshot = snapshot;
     (input as unknown as { _snapshotViolations?: unknown })._snapshotViolations = violations;
+    _permitSnapshot = snapshot;
     console.log(`[SNAPSHOT] ${snapshot.meta.snapshotId} schema ${snapshot.meta.schemaVersion} digest ${snapshot.meta.digest.slice(0, 16)}… — ${violations.length} finding(s), 0 blocking`);
   }
 
@@ -1061,6 +1075,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     engineeringStateRegistry,
     invalidationLineage,
     staleStateMetadata: staleMetadataForState(engineeringStateRegistry.stateRecords.find((record: any) => record.stateId === 'state:renderContext:renderContext:primary') ?? engineeringStateRegistry.stateRecords[0]),
+    snapshot: _permitSnapshot,
   });
 
   // APP-CAD (non-authoritative CAD preview appendix) removed from the deliverable

@@ -11,6 +11,12 @@ import {
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
+import { analyzeFenceWind } from '@/lib/structural/fenceWindEngine';
+import {
+  projectStructuralFromInput, fmt, fmtStr, findCheck, checkResultLabel,
+  checkThresholdLabel, type StructuralProjection,
+} from '../snapshot/structuralProjection';
+import { structuralBannerHtml } from '../utils/structuralBanner';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel, necNextStandardOcpd } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
@@ -62,6 +68,7 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
   return `
   <div class="page">
     ${titleBlock(input, 'PV-3', 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION', pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
     ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
@@ -129,11 +136,17 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   const cSite = _c?.site;
   const cStr  = _c?.structure;
 
-  // Site parameters — canonical.site is authoritative; fallback to compliance
-  const windSpdN    = cSite?.windSpeed       || Number(structural?.wind?.windSpeed) || 115;
-  const windSpeed   = windSpdN.toString();
-  const exposure    = cSite?.exposureCategory || structural?.wind?.exposureCategory || 'C';
-  const groundSnow  = cSite?.groundSnowLoad   || structural?.snow?.groundSnowLoad   || 0;
+  // ── W3 §1/§5/§6/§7 — PROJECT environmental + fence-overturning results from
+  // the canonical snapshot. Wind/exposure/snow print the SINGLE-SOURCED env
+  // (no `|| 115`, no `|| 'C'`); the load math is the RELOCATED fence engine
+  // (lib/structural/fenceWindEngine), never inline here. Where a snapshot is
+  // present its fence-overturning check is projected so PV-4C / PE-1 / CERT
+  // print one acceptance rule.
+  const _proj = projectStructuralFromInput(input);
+  const windSpeed   = _proj.present ? fmt(_proj.windSpeedMph) : (cSite?.windSpeed ? String(cSite.windSpeed) : '—');
+  const exposure    = _proj.present ? fmtStr(_proj.exposure) : (cSite?.exposureCategory || structural?.wind?.exposureCategory || '—');
+  const groundSnow  = _proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf)
+    : (cSite?.groundSnowLoad != null ? String(cSite.groundSnowLoad) : '—');
 
   // Structural geometry — canonical.structure is authoritative (CAD-patched)
   const postEmbedN  = cStr?.postEmbedFt    || 3.5;
@@ -146,37 +159,29 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   const railCount   = cad.fence?.railCount || 3;
   const fenceLenFt  = cad.fence?.totalLengthM ? (cad.fence.totalLengthM * 3.28084).toFixed(0) : '—';
 
-  // ── REAL STRUCTURAL CALCULATION ENGINE (ASCE 7-22 §29.4) ─────────────────
-  // ALL values computed from canonical — NO hardcodes
-  const Kz  = 0.85;   // exposure C, z=10ft, ASCE 7-22 Table 26.10-1
-  const Kzt = 1.0;    // flat terrain
-  const Kd  = 0.85;   // wind directionality, ASCE 7-22 Table 26.6-1
-  const Cf  = 1.3;    // force coefficient, solid fence panel, ASCE 7-22 Fig 29.4-1
-  const qz  = 0.00256 * Kz * Kzt * Kd * windSpdN * windSpdN;  // velocity pressure (psf)
-  const windPressure = qz * Cf;   // net wind pressure (psf)
-
-  // Per-panel tributary area (1 post spacing × panel height)
-  const panelArea       = panHN * postSpN;                      // ft²
-  const lateralForce    = windPressure * panelArea;             // lbs — lateral force at post
-  const overturnMomentN = lateralForce * (panHN / 2);          // ft-lbs — at grade
-
-  // Embedment check — Broms method (simplified)
-  // Required embedment from overturning: D = sqrt(2 * M / (Kp * γ * b))
-  // Simplified: requiredEmbedFt = overturnMoment / (soilRes * postSpN * 0.5 * postEmbedN)
-  // Use direct: D_req = cbrt(2 * M / (Cf_embed * unitWeight * width))
-  // Practical formula per ASCE 7-22 commentary: D_req ≈ 1.5 * (M / (200 * b))^(1/3)
-  const postWidthFt  = 0.25;   // assumed post width (ft) — 3" HSS
-  const reqEmbedFt   = 1.5 * Math.pow(overturnMomentN / (soilRes * postWidthFt), 1/3);
-  const embedStatus  = postEmbedN >= reqEmbedFt ? 'PASS' : 'FAIL';
-  const embedColor   = embedStatus === 'PASS' ? '#006600' : '#cc0000';
-  const safetyRatio  = postEmbedN / Math.max(reqEmbedFt, 0.001);
-
-  // Velocity pressure and derived display values
-  const velPressure  = qz.toFixed(2);
-  const windPresDisp = windPressure.toFixed(1);
-  const windLoadPost = lateralForce.toFixed(0);
-  const overturnMoment = overturnMomentN.toFixed(0);
-  const reqEmbedDisp = reqEmbedFt.toFixed(2);
+  // ── RELOCATED FENCE WIND ENGINE (ASCE 7-22 §29.4) — no inline load math ───
+  // The renderer holds ZERO structural calculation; it calls the lib engine and
+  // projects the numbers. Wind speed comes from the single-sourced env when the
+  // snapshot is present, else canonical (honest: em-dash if neither).
+  const windSpdN = _proj.windSpeedMph ?? cSite?.windSpeed ?? Number(structural?.wind?.windSpeed) ?? 0;
+  const _fw = analyzeFenceWind({
+    windSpeedMph: windSpdN,
+    exposure: typeof exposure === 'string' ? exposure : 'C',
+    panelHeightFt: panHN, postSpacingFt: postSpN,
+    postEmbedFt: postEmbedN, soilResistancePsf: soilRes,
+    groundSnowPsf: Number(groundSnow) || 0,
+  });
+  const Kz  = _fw.Kz, Kzt = _fw.Kzt, Kd = _fw.Kd, Cf = _fw.Cf;
+  // Prefer the snapshot's canonical fence-overturning check when carried.
+  const _fenceChk = findCheck(_proj, 'fence-overturning');
+  const embedStatus  = _fenceChk ? checkResultLabel(_fenceChk) : (_fw.passes ? 'PASS' : 'FAIL');
+  const embedColor   = embedStatus === 'PASS' ? '#006600' : embedStatus === 'FAIL' ? '#cc0000' : '#b45309';
+  const safetyRatio  = _fenceChk?.safetyFactor ?? _fw.overturningSafetyFactor;
+  const velPressure  = _fw.velocityPressurePsf.toFixed(2);
+  const windPresDisp = _fw.netWindPressurePsf.toFixed(1);
+  const windLoadPost = _fw.lateralForcePerPostLbs.toFixed(0);
+  const overturnMoment = _fw.overturningMomentFtLbs.toFixed(0);
+  const reqEmbedDisp = _fw.requiredEmbedmentFt.toFixed(2);
   const safetyFactor = safetyRatio.toFixed(2);
 
   const totalDL  = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
@@ -189,6 +194,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — SOLAR FENCE', pageNum, totalPages)}
     <div class="page-content">
+      ${structuralBannerHtml(_proj.banner)}
       <div class="section-title">Structural Analysis — ASCE 7-22 §29.4 (Fence-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -328,10 +334,13 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
             const postSpF = cad.fence!.postSpacingM * 3.28084;
             const panH    = cad.fence!.panelHeightM * 3.28084;
             const posts   = seg.posts?.length || Math.ceil(lenFt / postSpF) + 1;
-            const qzSeg   = 0.00256 * 0.85 * 1.0 * 0.85 * windSpdN * windSpdN;
-            const pSeg    = qzSeg * 1.3;
-            const wPost   = pSeg * panH * postSpF;
-            const oMoment = pSeg * panH * (panH / 2) * postSpF;
+            // Relocated engine per segment — renderer holds no load math.
+            const _seg = analyzeFenceWind({ windSpeedMph: windSpdN, exposure: typeof exposure === 'string' ? exposure : 'C',
+              panelHeightFt: panH, postSpacingFt: postSpF, postEmbedFt: postEmbedN, soilResistancePsf: soilRes, groundSnowPsf: Number(groundSnow) || 0 });
+            const qzSeg   = _seg.velocityPressurePsf;
+            const pSeg    = _seg.netWindPressurePsf;
+            const wPost   = _seg.lateralForcePerPostLbs;
+            const oMoment = _seg.overturningMomentFtLbs;
             return `<tr>
               <td class="fw7">Seg ${i+1}${seg.hasGate ? ' (GATE)' : ''}</td>
               <td>${lenFt.toFixed(1)}</td>
@@ -424,13 +433,22 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   const structural = compliance.structural;
   const ibcVer = '2021';
   const structuralRules = (rulesResult?.rules || []).filter(r => r.category === 'structural');
+  // §9 — ground pile withdrawal is a DISTINCT named limit state whose bar
+  // mirrors the engine of record (structural-engine-v4 ground pile ≥ 1.5,
+  // ASCE 7-22 §12.13) — NOT the 1.0 roof-attachment ASD bar and NOT the old
+  // self-contradicting "2.0" prose. One threshold, printed everywhere here.
+  const GROUND_PILE_MIN_SF = 1.5;
 
-  const windSpeed   = structural?.wind?.windSpeed || '—';
-  const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
+  // W3 §7 — environmental values PROJECT from the single-sourced snapshot env
+  // (no `|| 'C'` sheet default). Per-pile reactions remain on the ground
+  // estimate path (compliance.structural) — documented in the AFTER report.
+  const _proj = projectStructuralFromInput(input);
+  const windSpeed   = _proj.present ? fmt(_proj.windSpeedMph) : (structural?.wind?.windSpeed || '—');
+  const exposure    = _proj.present ? fmtStr(_proj.exposure) : (structural?.wind?.exposureCategory || project.exposureCategory || '—');
   const velPressure = structural?.wind?.velocityPressure?.toFixed(2) || '—';
   const upliftPsf   = structural?.wind?.netUpliftPressure?.toFixed(2) || '—';
   const upliftPile  = structural?.wind?.upliftPerAttachment?.toFixed(0) || '—';
-  const groundSnow  = structural?.snow?.groundSnowLoad || '—';
+  const groundSnow  = _proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—');
   const snowPile    = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
   const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
   const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
@@ -449,6 +467,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — GROUND MOUNT', pageNum, totalPages)}
     <div class="page-content">
+      ${structuralBannerHtml(_proj.banner)}
       <div class="section-title">Structural Analysis — ASCE 7-22 §27 (Ground-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -484,7 +503,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
             <tr><td>Foundation Type</td><td class="cv">${structType}</td></tr>
             <tr><td>Pile Embedment Depth</td><td class="cv">${pileDepth} ft min. (below frost)</td></tr>
             <tr><td>Pile Spacing</td><td class="cv">${pileSp} ft O.C.</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < MIN_ATTACHMENT_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${MIN_ATTACHMENT_SF.toFixed(1)})` : ''}</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < GROUND_PILE_MIN_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (pile withdrawal — min. ${GROUND_PILE_MIN_SF.toFixed(1)})` : ''}</td></tr>
             <tr><td>Wind Code Reference</td><td class="cv">ASCE 7-22 §27</td></tr>
           </table>
         </div>
@@ -588,7 +607,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
           Pile lateral capacity and moment resistance are sized for the governing wind uplift condition.
           Snow loading combination <strong>1.2D + 1.6S + 0.5W</strong> is evaluated for gravity/snow; wind uplift governs
           at most exposure categories. All pile foundations shall develop the required capacity with a minimum
-          safety factor of 2.0 against pile withdrawal per ASCE 7-22 §12.13.
+          safety factor of ${GROUND_PILE_MIN_SF.toFixed(1)} against pile withdrawal (distinct limit state; ASCE 7-22 §12.13).
         </div>
       </div>
       ${structural ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
@@ -598,13 +617,13 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ASCE 7-22 §7.` : 'Snow loading is not a controlling factor at this location.'}
         Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ASCE 7-22 §7.
         Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ASCE 7-22 §27.
-        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= MIN_ATTACHMENT_SF ? 'above' : 'BELOW'} the required ASD minimum of ${MIN_ATTACHMENT_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ASCE 7-22 §2.4).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= GROUND_PILE_MIN_SF ? 'above' : 'BELOW'} the required pile-withdrawal minimum of ${GROUND_PILE_MIN_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ASCE 7-22 §2.4 / §12.13).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
         wind uplift, snow, dead load, and pile capacity per ASCE 7-22 §27 and ${ibcVer} IBC.
-        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= MIN_ATTACHMENT_SF
+        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= GROUND_PILE_MIN_SF
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
           : structural && structural.attachment?.safetyFactor == null
@@ -645,21 +664,33 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const structuralRules = (rulesResult?.rules || []).filter(r =>
     r.category === 'structural' && !/rafter|uplift|attach/i.test(String(r.ruleId || '')));
 
-  const windSpeed   = structural?.wind?.windSpeed || '—';
-  const exposure    = structural?.wind?.exposureCategory || '—';
+  // W3 §5/§7/§9 — PROJECT from the canonical snapshot: environmental values are
+  // single-sourced (env), the lag-bolt attachment result is the snapshot
+  // attachment-uplift CHECK (demand/capacity/SF/threshold), and the framing
+  // limit state is honest (review-required when framing unverified — no
+  // fabricated truss pass). No sheet-local wind default, no `?? 2` multiplier.
+  const _proj = projectStructuralFromInput(input);
+  const _attChk = findCheck(_proj, 'attachment-uplift');
+  const _framingChk = findCheck(_proj, 'framing-capacity');
+  const _reviewRequired = _proj.engine?.engineeringReviewRequired ?? false;
+  const _attThreshold = _attChk?.requiredThreshold ?? MIN_ATTACHMENT_SF;
+  const windSpeed   = _proj.present ? fmt(_proj.windSpeedMph) : (structural?.wind?.windSpeed || '—');
+  const exposure    = _proj.present ? fmtStr(_proj.exposure) : (structural?.wind?.exposureCategory || '—');
   const velPressure = structural?.wind?.velocityPressure?.toFixed(2) || '—';
   const upliftPsf   = structural?.wind?.netUpliftPressure?.toFixed(2) || '—';
-  const upliftAtt   = structural?.wind?.upliftPerAttachment?.toFixed(0) || '—';
-  const groundSnow  = structural?.snow?.groundSnowLoad || '—';
-  const roofSnow    = structural?.snow?.roofSnowLoad?.toFixed(1) || '—';
+  const upliftAtt   = _attChk?.demand != null ? _attChk.demand.toFixed(0) : (structural?.wind?.upliftPerAttachment?.toFixed(0) || '—');
+  const groundSnow  = _proj.present && _proj.groundSnowPsf != null ? String(_proj.groundSnowPsf) : (structural?.snow?.groundSnowLoad ?? '—');
+  const roofSnow    = _proj.present && _proj.roofSnowPsf != null ? _proj.roofSnowPsf.toFixed(1) : (structural?.snow?.roofSnowLoad?.toFixed(1) || '—');
   const snowAtt     = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
   const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
   const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
   const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '—';
 
-  const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—';
-  const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
-  const maxSpacing  = structural?.attachment?.maxAllowedSpacing || '—';
+  // Lag-bolt attachment = snapshot attachment-uplift check (capacity = allowable,
+  // demand = ASD uplift, SF = capacity/demand). No `(safetyFactor||2)` derive.
+  const lagCap      = _attChk?.capacity != null ? _attChk.capacity.toFixed(0) : (structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—');
+  const safetyFact  = _attChk?.safetyFactor != null ? _attChk.safetyFactor.toFixed(2) : (structural?.attachment?.safetyFactor?.toFixed(2) || '—');
+  const maxSpacing  = _proj.attachmentSpacingIn ?? structural?.attachment?.maxAllowedSpacing ?? '—';
   const _utilRatio = structural?.rafter?.utilizationRatio; // GOVERNING ratio (max of bending/deflection)
   const utilization = _utilRatio != null ? (_utilRatio * 100).toFixed(0) : '—';
   const rafterBM    = structural?.rafter?.bendingMoment?.toFixed(0) || '—';
@@ -709,6 +740,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — ROOF MOUNT', pageNum, totalPages)}
     <div class="page-content">
+      ${structuralBannerHtml(_proj.banner)}
       <div class="section-title">Structural Analysis — ASCE 7-22 §26/27 (Roof-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -739,7 +771,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <div class="sct">${_isTruss ? 'Roof Framing Analysis — Pre-Engineered Truss' : 'Rafter Analysis — Existing Framing'}</div>
           <table class="calc-table">
             <tr><td>${_isTruss ? 'Truss @ Spacing' : 'Rafter Size'}</td><td class="cv">${rafterSize} @ ${rafterSpace}" O.C.</td></tr>
-            ${_isTruss ? `
+            ${_reviewRequired ? `
+            <tr><td>Framing Authority</td><td class="cv" style="font-weight:bold;color:#b91c1c;">UNVERIFIED</td></tr>
+            <tr><td>Capacity Basis</td><td class="cv">Code default — NOT engineering authority</td></tr>
+            <tr><td>Utilization</td><td class="cv" style="font-weight:bold;color:#b45309;">REVIEW REQ.</td></tr>
+            <tr><td>Basis</td><td class="cv">Licensed structural review of existing framing required</td></tr>
+            ` : _isTruss ? `
             <tr><td>Truss Load Capacity</td><td class="cv">${trussCapPsf} PSF</td></tr>
             <tr><td>Total Roof Load</td><td class="cv">${trussLoadPsf} PSF</td></tr>
             <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${utilization}${_utilRatio != null ? '%' : ''}</td></tr>
@@ -760,7 +797,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <table class="calc-table">
             <tr><td>Lag Bolt Capacity</td><td class="cv">${lagCap} lbs</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < MIN_ATTACHMENT_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${MIN_ATTACHMENT_SF.toFixed(1)})` : ''}</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < _attThreshold ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${_attThreshold.toFixed(1)})` : ''}</td></tr>
             <tr><td>Max Allowed Spacing</td><td class="cv">${maxSpacing}"</td></tr>
           </table>
         </div>
@@ -868,8 +905,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.4 — ASD) — ROOF-MOUNTED PV:</strong>
           The controlling load case for roof-mounted PV is <strong>0.6D + 0.6W</strong> (net uplift) for lag bolt
           withdrawal capacity, and <strong>D + S</strong> for gravity/snow loading on existing framing.
-          All lag bolt attachments shall develop the required withdrawal capacity with a minimum safety factor of 2.0
-          per ASCE 7-22 §2.4 and manufacturer installation requirements.
+          All lag bolt attachments shall develop the required withdrawal capacity with a minimum safety factor of
+          ${_attThreshold.toFixed(1)} (${_attChk ? _attChk.limitState : 'attachment-uplift'} — demand and allowable both ASD,
+          Ω-normalized capacity; ASCE 7-22 §2.4). ${_attChk ? `As analyzed: demand ${fmt(_attChk.demand)} lbs, allowable
+          ${fmt(_attChk.capacity)} lbs, SF ${fmt(_attChk.safetyFactor, 2)} — ${checkResultLabel(_attChk)}.` : ''}
         </div>
       </div>
       ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
@@ -877,19 +916,23 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         Wind analysis per ASCE 7-22 §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ASCE 7-22 §7).` : 'Snow loading is not a controlling factor at this location.'}
-        ${_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.'}
-        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= MIN_ATTACHMENT_SF ? 'meets' : 'DOES NOT MEET'} the required ASD minimum of ${MIN_ATTACHMENT_SF.toFixed(1)} (ASD demand vs allowable capacity per ASCE 7-22 §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${_reviewRequired
+          ? `<strong style="color:#b91c1c;">ROOF FRAMING UNVERIFIED — the rafter/truss capacity is computed from code defaults and is NOT engineering authority. A licensed structural review of the existing framing is required before permit submission; no framing pass is certified on this sheet.</strong>`
+          : (_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.')}
+        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= _attThreshold ? 'meets' : 'DOES NOT MEET'} the required minimum of ${_attThreshold.toFixed(1)} (ASD demand vs allowable capacity per ASCE 7-22 §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ASCE 7-22 §26/27 and ${ibcVer} IBC/IRC.
-        ${structural && structural.rafter?.utilizationRatio != null && structural.rafter.utilizationRatio <= 1.0 && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= MIN_ATTACHMENT_SF
-          ? `All structural parameters are within acceptable limits. The existing roof structure and lag bolt attachment
-             system are adequate to support the proposed PV array without modification.`
-          : structural && structural.rafter?.utilizationRatio == null && structural.attachment?.safetyFactor == null
-            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
-            : 'Review flagged structural items before proceeding with installation. Reinforcement or attachment revision may be required.'}
+        ${_reviewRequired
+          ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted). The lag-bolt attachment and rail checks pass on the analyzed inputs, but a licensed structural review of the existing framing is required before this set is submitted for permit — see the review notice above.'
+          : (_attChk?.passes === true && _framingChk?.passes === true
+            ? `All structural parameters are within acceptable limits. The existing roof structure and lag bolt attachment
+               system are adequate to support the proposed PV array without modification.`
+            : (_attChk == null && _framingChk == null
+              ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+              : 'Review flagged structural items before proceeding with installation. Reinforcement or attachment revision may be required.'))}
       </div>
 
       ${structuralRules.length > 0 ? `

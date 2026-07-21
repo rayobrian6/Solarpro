@@ -12,6 +12,8 @@ import {
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { resolvePanelSpecs } from '../utils/panelSpecs';
+import { projectStructuralFromInput } from '../snapshot/structuralProjection';
+import { structuralBannerHtml } from '../utils/structuralBanner';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
@@ -50,6 +52,7 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
   return `
   <div class="page">
     ${titleBlock(input, 'PV-1', 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS', pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -79,6 +82,7 @@ export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: 
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SITE & GROUND ARRAY PLAN', pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -113,6 +117,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
     ${composeDrawPage(comp, primarySvg, secondarySvg)}
   </div>`;
 }
@@ -465,14 +470,20 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // panel-spec authority; single-system output is unchanged (no hybrid
   // carriage → legacy scalars).
   const _fsPanelDims = (() => {
-    const legacyL = (project.panelLengthIn as number) || 66;
-    const legacyW = (project.panelWidthIn as number) || 40;
+    // W3 §2 — module footprint for the fire-setback coverage test PROJECTS from
+    // the canonical snapshot module instance (exact catalog dims). The generic
+    // 66×40 fallback is deleted; per-sub hybrids still resolve the roof sub's
+    // own dims. No snapshot (standalone) → project scalars, never a made-up size.
+    const _spDims = projectStructuralFromInput(input);
+    const snapL = _spDims.moduleHeightIn, snapW = _spDims.moduleWidthIn;
+    const legacyL = (snapL ?? (project.panelLengthIn as number)) || 0;
+    const legacyW = (snapW ?? (project.panelWidthIn as number)) || 0;
     if (!isHybridPlanset(cad)) return { L: legacyL, W: legacyW };
     const ps = resolvePanelSpecs(input, cad, 'roof');
     if (!(ps.lengthIn > 0 && ps.widthIn > 0)) return { L: legacyL, W: legacyW };
     if (Math.abs(ps.lengthIn - legacyL) > 0.05 || Math.abs(ps.widthIn - legacyW) > 0.05) {
       console.warn(`[PV-1B] fire-setback coverage recomputed from roof-sub module dims: `
-        + `${legacyL}x${legacyW}in (project panel0 scalars) → ${ps.lengthIn}x${ps.widthIn}in (${ps.model})`);
+        + `${legacyL}x${legacyW}in (snapshot/project panel0) → ${ps.lengthIn}x${ps.widthIn}in (${ps.model})`);
     }
     return { L: ps.lengthIn, W: ps.widthIn };
   })();
@@ -540,6 +551,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `ARRAY GEOMETRY & STRING LAYOUT${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
     <!-- PIPELINE v47.343: PV-2B now uses draw-zone/data-zone layout -->
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->

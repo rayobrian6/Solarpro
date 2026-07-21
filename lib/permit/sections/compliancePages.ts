@@ -22,6 +22,7 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getSnapshot } from '../snapshot/read';
+import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance } = input;
@@ -801,8 +802,12 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   // 67.8"×44.6"). The real datasheet dims also match what PV-1 draws (module
   // width is derived from design pitch ~44.5"), so this tightens cross-sheet
   // consistency rather than loosening it.
-  const panelLen = project.panelLengthIn || _dbPanel?.length || 66;
-  const panelWid = project.panelWidthIn || _dbPanel?.width  || 40;
+  // W3 §2 — exact catalog dims from the canonical snapshot module instance
+  // (single-sourced with PV-1/PV-3); DB record + project scalars are fallbacks
+  // for the standalone path, never a generic 66×40.
+  const _spSpec = projectStructuralFromInput(input);
+  const panelLen = _spSpec.moduleHeightIn ?? project.panelLengthIn ?? _dbPanel?.length ?? 66;
+  const panelWid = _spSpec.moduleWidthIn ?? project.panelWidthIn ?? _dbPanel?.width  ?? 40;
   const panelWt  = project.panelWeightLbs || _dbPanel?.weight || 44;
   // Module efficiency = manufacturer/CEC datasheet value when the DB record
   // resolves; only fall back to the geometric estimate (Pmax ÷ area) when it

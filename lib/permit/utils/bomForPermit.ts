@@ -627,10 +627,15 @@ export function generateBOMForPermit(
         conduitType,
         conduitSizeInch:     conduitSize,
         roofType:            project.roofType || 'shingle',
-        // Real structural-engine values (single source) with the old guesses as
-        // fallback only when the roof racking calc is unavailable.
-        attachmentCount:     roofMountCount || project.attachmentCount || Math.ceil(totalPanels * 1.2),
-        railSections:        roofRackingBOM?.rails.qty || project.railSections || Math.ceil(totalPanels / 2),
+        // W3 §10 — quantities derive from the CANONICAL structural objects
+        // (mount count = attachment objects; rail sections = rail-object stock
+        // segmentation), the SAME V4 run the snapshot's rail/attachment objects
+        // project. The old `Math.ceil(totalPanels*1.2)` / `/2` renderer guesses
+        // are RETIRED: absent a structural run we fall back to the operator's
+        // own value or an honest 0 (rackingBOM drives the real rows regardless)
+        // — never a fabricated quantity.
+        attachmentCount:     roofMountCount || project.attachmentCount || 0,
+        railSections:        roofRackingBOM?.rails.qty || project.railSections || 0,
         rowCount:            roofRowCount || undefined,
         rackingBOM:          roofRackingBOM,
         // Real design layout (arrayLayout selector): orientation drives the
