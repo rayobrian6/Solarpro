@@ -36,38 +36,33 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
     throw new Error(`[pageRoofStructural] getPrimaryView(${comp.primaryView}) returned empty SVG`);
   }
 
-  // ── Manufacturer attachment detail (real published cross-section) ───────────
-  // When the job's selected racking has a manufacturer detail on file
-  // (manufacturer_assets library), render the REAL published attachment
-  // cross-section as the primary detail — PE sets embed the racking maker's own
-  // detail for permit submittal. The hand-drawn CAD line-art is the fallback
-  // when no manufacturer asset exists for the mounting system.
+  // ── PV-3 is a DRAWING sheet (Ray 2026-07-20) ────────────────────────────────
+  // The primary view is ALWAYS the drawn CAD attachment cross-section. An
+  // earlier pass replaced the whole draw zone with the manufacturer's manual
+  // page as a full-bleed <img> — which made PV-3 read as a reprinted datasheet
+  // sitting at sheet 4 while the OTHER manufacturer pages lived in the DS
+  // appendix ("that looks more like a data sheet than a structure sheet").
+  // The manufacturer's published document remains the engineering basis: it is
+  // CITED here (provenance strip) and reproduced full-page in the DS appendix
+  // alongside the other manufacturer datasheets.
   const mountId = (input.project as { mountingSystemId?: string }).mountingSystemId;
   const rackAsset = getManufacturerAsset(mountId, 'racking_detail');
-  let primaryDetail = drawingSvg;
-  let detailCaption: string | null = null;
-  if (rackAsset?.imageUrl) {
-    comp.drawHeader = `ATTACHMENT DETAIL — ${rackAsset.brand} ${rackAsset.model} (MANUFACTURER PUBLISHED)`;
-    primaryDetail =
-      `<img src="${rackAsset.imageUrl}" alt="${escapeH(rackAsset.brand + ' ' + rackAsset.model + ' attachment detail')}" ` +
-      `style="max-width:100%;max-height:100%;object-fit:contain;display:block;" />`;
+  if (rackAsset) {
     const src = rackAsset.docTitle || (rackAsset.sourceUrl ? new URL(rackAsset.sourceUrl).hostname : '');
-    detailCaption =
-      `Source: ${escapeH(src)}${rackAsset.pageRef ? ' · ' + escapeH(rackAsset.pageRef) : ''}` +
-      ` · Manufacturer-published detail — field-verify against current revision.`;
-  }
-
-  // Provenance caption strip (secondary zone) when a manufacturer asset is used.
-  let captionStrip: string | null = null;
-  if (detailCaption) {
-    comp.secondaryHeader = 'DETAIL SOURCE / PROVENANCE';
-    captionStrip = `<div style="font-size:8px;line-height:1.3;color:#334;padding:2px 8px;text-align:center;width:100%;">${detailCaption}</div>`;
+    // Provenance as a GENERAL NOTE in the data rail — a one-line citation must
+    // not consume a whole secondary-view band of the draw zone.
+    comp.generalNotes = [
+      ...(comp.generalNotes ?? []),
+      `ATTACHMENT PER ${rackAsset.brand.toUpperCase()} ${rackAsset.model.toUpperCase()} MANUFACTURER DOCUMENTATION ON FILE: `
+        + `${src}${rackAsset.pageRef ? ' — ' + rackAsset.pageRef : ''}`
+        + `${rackAsset.imageUrl ? '. REPRODUCED FULL-PAGE IN THE DATASHEET APPENDIX (DS SERIES).' : '. FIELD-VERIFY AGAINST CURRENT REVISION.'}`,
+    ];
   }
 
   return `
   <div class="page">
     ${titleBlock(input, 'PV-3', 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION', pageNum, totalPages)}
-    ${composeDrawPage(comp, primaryDetail, captionStrip)}
+    ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
 
