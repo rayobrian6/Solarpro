@@ -4,11 +4,16 @@
 // all derive from this one list so they can never drift (the sheet count varies
 // per project — datasheet pages grow the set, conditional sheets add/remove).
 //
-// Reading order (grouped by discipline):
-//   cover → site/array plans → electrical (NEC · conductor · single-line)
-//         → structural (attachment · calcs) → labels → schedules/specs/datasheets
-//         → certifications → appendices
-// E-1 (single-line) sits WITH the electrical sheets, not orphaned after the certs.
+// Reading order (grouped by discipline — Ray 2026-07-20 "organize the entire
+// planset for proper flow"; matches PE-stamped reference sets):
+//   cover → site/array plans → STRUCTURAL (attachment · calcs)
+//         → ELECTRICAL (single-line first, then NEC calcs · conductor schedule)
+//         → labels/placards → schedules/specs/datasheets → certifications
+//         → appendices
+// The old order interleaved disciplines (electrical, then structural, then the
+// electrical labels) — a reviewer bounced between trades mid-set. Structural
+// now precedes electrical (how it's held up, then how it's wired), and E-1
+// LEADS the electrical section as its key sheet with PV-4A/PV-4B supporting.
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface SheetRef { id: string; title: string; }
@@ -76,14 +81,14 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     ...extras.map(sub => ({ id: hybridSheetId('PV-1', sub), title: HYBRID_PLAN_TITLE[sub] })),
     { id: 'PV-1B', title: `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION${primaryLabel}` },
     ...extras.map(sub => ({ id: hybridSheetId('PV-1B', sub), title: `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION — ${HYBRID_LABEL[sub]}` })),
-    // ── electrical ────────────────────────────────────────────────────────
-    { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
-    { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
-    { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
-    // ── structural ────────────────────────────────────────────────────────
+    // ── structural (how it's held up) ─────────────────────────────────────
     { id: 'PV-3',  title: o.pv3Title },
     ...extras.map(sub => ({ id: hybridSheetId('PV-3', sub), title: HYBRID_STRUCT_TITLE[sub] })),
     { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
+    // ── electrical (how it's wired — the single-line leads, calcs support) ─
+    { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
+    { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
+    { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
     // ── labels ────────────────────────────────────────────────────────────
     { id: 'PV-5',  title: 'WARNING LABELS & PLACARDS — NEC REQUIRED SIGNAGE' },
     { id: 'PV-6',  title: 'DISCONNECT DIRECTORY & EMERGENCY PLACARD — NEC 705.10 / 690.56(B)' },

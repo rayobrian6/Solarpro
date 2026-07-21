@@ -45,8 +45,10 @@ function roofStringProject(): any {
 }
 
 // The pinned legacy sheet sequences (post-campaign N=1 = pre-campaign set).
-const LEGACY_SEQ = ['PV-0', 'PV-1', 'PV-1B', 'PV-4A', 'PV-4B', 'E-1', 'PV-3',
-  'PV-4C', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'CERT', 'PE-1'];
+// Discipline flow (Ray 2026-07-20): plans → structural → electrical (E-1
+// leads) → labels → schedules/datasheets → certs.
+const LEGACY_SEQ = ['PV-0', 'PV-1', 'PV-1B', 'PV-3', 'PV-4C', 'E-1', 'PV-4A',
+  'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'CERT', 'PE-1'];
 const LEGACY_SEQ_NO_DS = LEGACY_SEQ.filter(id => id !== 'DS-1');
 
 const FIXTURES: Array<{ name: string; mk: () => any; seq: string[] }> = [

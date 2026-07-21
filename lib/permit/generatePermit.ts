@@ -1067,10 +1067,9 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     ..._w5Extras.map(sec => (n: number, t: number) =>
       pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t,
         { sheetId: hybridSheetId('PV-1B', sec.key), titleSuffix: ` — ${SUB_LABEL[sec.key]}` })), // PV-1BG / PV-1BF
-    // ── Reading order (2026-07-09): electrical grouped together, E-1 with them ──
-    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
-    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
-    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (was orphaned after the certs — moved up with the electrical set)
+    // ── Reading order (Ray 2026-07-20, mirrors buildSheetManifest): plans →
+    // STRUCTURAL → ELECTRICAL (E-1 leads) → labels — one discipline at a time,
+    // never interleaved. ──
     (n, t) => _w5Hybrid
       ? (_w5Primary === 'roof'
           ? pageRoofStructural(subScopedInput(input, cad, 'roof'), subScopedView(cad, 'roof'), n, t, renderCtx)
@@ -1080,6 +1079,9 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     (n, t) => _w5Hybrid
       ? pageStructural(_w5StructuralInput(_w5Primary), subScopedView(cad, _w5Primary), n, t)
       : pageStructural(input, cad, n, t),                              // PV-4C: Structural calcs (hybrid = primary sub scoped)
+    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD — the electrical section's key sheet, first
+    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
+    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
     (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
     (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)

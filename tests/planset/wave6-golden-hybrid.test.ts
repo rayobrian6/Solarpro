@@ -162,11 +162,12 @@ describe('wave 6 golden — sheet manifest', () => {
     }
   });
 
-  it('reading order: plans → circuits → electrical → structural → letters', () => {
+  it('reading order: plans → circuits → structural → electrical → letters', () => {
     expect(at('PV-1')).toBeLessThan(at('PV-1G'));
     expect(at('PV-1G')).toBeLessThan(at('PV-1F'));
-    expect(at('PV-1BF')).toBeLessThan(at('PV-4A'));
-    expect(at('E-1')).toBeLessThan(at('PV-3'));
+    expect(at('PV-1BF')).toBeLessThan(at('PV-3'));   // structural section follows the plans
+    expect(at('PV-3F')).toBeLessThan(at('E-1'));     // electrical after structural, E-1 leads
+    expect(at('E-1')).toBeLessThan(at('PV-4A'));
     expect(at('PE-1')).toBeLessThan(at('PE-1G'));
     expect(at('PE-1G')).toBeLessThan(at('PE-1F'));
   });

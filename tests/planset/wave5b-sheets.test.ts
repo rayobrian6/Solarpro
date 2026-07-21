@@ -83,14 +83,16 @@ describe('wave 5B — hybrid sheet manifest', () => {
     }
   });
 
-  it('keeps reading order: plans → circuit layouts → electrical → structural → certs', () => {
+  it('keeps reading order: plans → circuit layouts → structural → electrical → certs', () => {
     expect(at('PV-1')).toBeLessThan(at('PV-1G'));
     expect(at('PV-1G')).toBeLessThan(at('PV-1F'));
     expect(at('PV-1F')).toBeLessThan(at('PV-1B'));
-    expect(at('PV-1BF')).toBeLessThan(at('PV-4A'));
-    expect(at('E-1')).toBeLessThan(at('PV-3'));
+    expect(at('PV-1BF')).toBeLessThan(at('PV-3'));   // structural section follows the plans
     expect(at('PV-3')).toBeLessThan(at('PV-3G'));
     expect(at('PV-3F')).toBeLessThan(at('PV-4C'));
+    expect(at('PV-4C')).toBeLessThan(at('E-1'));     // electrical after structural, E-1 leads
+    expect(at('E-1')).toBeLessThan(at('PV-4A'));
+    expect(at('PV-4A')).toBeLessThan(at('PV-4B'));
     expect(at('PE-1')).toBeLessThan(at('PE-1G'));
     expect(at('PE-1G')).toBeLessThan(at('PE-1F'));
   });
