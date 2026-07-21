@@ -321,9 +321,18 @@ export function getArrayPlanFromCAD(
     return svg;
   }
   switch (cad.systemType) {
-    case 'solar_fence':
-      svg = drawFencePlan(dInput, intent, cad, ctx);
+    case 'solar_fence': {
+      // Circuit-sheet support (PV-1BF / pure-fence PV-1B): DC-string spans from
+      // the (sub-scoped) inverter fleet so the run draws per-circuit — the same
+      // fleet the rail's STRING LEGEND prints from, so colors can't contradict.
+      const _spans = (((input as { system?: { inverters?: Array<{ strings?: Array<{ panelCount?: number }> }> } })
+        .system?.inverters) ?? [])
+        .flatMap(inv => (inv.strings ?? []))
+        .map(s => ({ count: Number(s.panelCount) || 0 }))
+        .filter(s => s.count > 0);
+      svg = drawFencePlan(dInput, intent, cad, ctx, _spans.length > 0 ? { spans: _spans } : null);
       break;
+    }
     case 'ground_mount':
       svg = drawGroundArray(dInput, intent, cad, ctx, groundCircuit);
       break;

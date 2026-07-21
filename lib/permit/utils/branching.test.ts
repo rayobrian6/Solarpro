@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { microMaxPerBranch, microBranchCount, balancedBranchSizes, planMicroBranches } from './branching';
+import { microMaxPerBranch, microBranchCount, microBranchMaxOcpdA, balancedBranchSizes, planMicroBranches } from './branching';
 
 describe('microMaxPerBranch', () => {
   it('resolves per-model NEC limits from the Enphase capability profiles', () => {
-    expect(microMaxPerBranch('IQ8A')).toBe(10);
+    // IQ8A = 11 per the Enphase datasheet's published "max units per 20A
+    // branch" (continuous 349 VA basis — profile override, 2026-07-20).
+    expect(microMaxPerBranch('IQ8A')).toBe(11);
     expect(microMaxPerBranch('Enphase IQ8AC')).toBe(10);   // longest-match, not IQ8A
     expect(microMaxPerBranch('IQ8M')).toBe(11);
     expect(microMaxPerBranch('IQ8+')).toBe(13);
@@ -15,14 +17,21 @@ describe('microMaxPerBranch', () => {
   });
 });
 
+describe('microBranchMaxOcpdA — manufacturer branch OCPD authority (D-1)', () => {
+  it('IQ8A-72-2-US branch OCPD max is 20A — never 30A', () => {
+    expect(microBranchMaxOcpdA('IQ8A')).toBe(20);
+    expect(microBranchMaxOcpdA('IQ8A-72-2-US')).toBe(20);
+    expect(microBranchMaxOcpdA('Unknown')).toBe(20);
+  });
+});
+
 describe('balancedBranchSizes', () => {
   it('spreads the remainder across the first branches', () => {
     expect(balancedBranchSizes(53, 6)).toEqual([9, 9, 9, 9, 9, 8]);
   });
 });
 
-// Melvin-shaped hip roof: N=23 @ (38.7062, -90.0462), S=22 @ (38.7060, -90.0462),
-// W=4 @ (38.7061, -90.0464), E=4 @ (38.7061, -90.0460). IQ8A max 10.
+// Melvin-shaped hip roof: N=23, S=22, W=4, E=4. IQ8A max 11.
 function melvinPanels() {
   const mk = (plane: string, n: number, lat: number, lng: number) =>
     Array.from({ length: n }, (_, i) => ({
@@ -38,45 +47,81 @@ function melvinPanels() {
   ];
 }
 
-describe('planMicroBranches — economical installer plan', () => {
-  it('uses the MINIMUM branch count (never runt branches per plane)', () => {
+// Braidon-shaped roof: two planes, 19 + 12 modules. IQ8A max 11.
+function braidonPanels() {
+  const mk = (plane: string, n: number, lat: number, lng: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `${plane}-${i}`, planeId: plane,
+      row: Math.floor(i / 10), col: i % 10,
+      lat: lat + (Math.floor(i / 10)) * 1e-5, lng: lng + (i % 10) * 1e-5,
+    }));
+  return [...mk('P1', 19, 38.7062, -90.0463), ...mk('P2', 12, 38.7060, -90.0462)];
+}
+
+describe('planMicroBranches — D-1 manufacturer-authority plan (Ray 2026-07-20)', () => {
+  it('Braidon shape: 31 IQ8A resolve to THREE legal branches 11/10/10', () => {
+    const plan = planMicroBranches(braidonPanels(), 'IQ8A');
+    expect(plan.count).toBe(3);
+    expect([...plan.sizes].sort((a, b) => b - a)).toEqual([11, 10, 10]);
+    expect(plan.sizes.reduce((a, b) => a + b, 0)).toBe(31);
+    // manufacturer limit is a hard wall — never 12 on a branch
+    expect(Math.max(...plan.sizes)).toBeLessThanOrEqual(11);
+  });
+
+  it('physical roof grouping does NOT define branch boundaries (crossing allowed)', () => {
+    // 19+12 with max 11 cannot be plane-contained at 3 branches — at least one
+    // branch must span both planes, and D-1 explicitly permits it.
+    const plan = planMicroBranches(braidonPanels(), 'IQ8A');
+    const planesPerBranch = new Map<number, Set<string>>();
+    for (const p of braidonPanels()) {
+      const b = plan.assign.get(p.id)!;
+      if (!planesPerBranch.has(b)) planesPerBranch.set(b, new Set());
+      planesPerBranch.get(b)!.add(p.planeId);
+    }
+    const crossing = [...planesPerBranch.values()].filter(s => s.size > 1).length;
+    expect(crossing).toBeGreaterThanOrEqual(1);
+    // routing stays economical: at most one branch crosses on this shape
+    expect(crossing).toBe(1);
+  });
+
+  it('Melvin shape: 53 @ max 11 → 5 balanced branches, no runts, none over limit', () => {
     const plan = planMicroBranches(melvinPanels(), 'IQ8A');
-    // 53 @ max 10 → 6 homeruns, the theoretical minimum
-    expect(plan.count).toBe(6);
+    expect(plan.count).toBe(5);
     expect(plan.sizes.reduce((a, b) => a + b, 0)).toBe(53);
-    // four FULL branches on the main faces + two merged remainders
-    expect(plan.sizes.filter(s => s === 10).length).toBe(4);
-    expect([...plan.sizes].sort((a, b) => a - b)).toEqual([6, 7, 10, 10, 10, 10]);
-    // no branch smaller than 6 — a 4-module homerun is wasted wire
-    expect(Math.min(...plan.sizes)).toBeGreaterThanOrEqual(6);
+    expect([...plan.sizes].sort((a, b) => b - a)).toEqual([11, 11, 11, 10, 10]);
+    expect(Math.max(...plan.sizes)).toBeLessThanOrEqual(11);
   });
 
-  it('merges hip caps with the NEAREST face remainder, not across the roof', () => {
-    const plan = planMicroBranches(melvinPanels(), 'IQ8A');
-    const branchOf = (id: string) => plan.assign.get(id);
-    // W cap panels share one branch; E cap panels share one branch; different branches
-    const wB = branchOf('W-0'), eB = branchOf('E-0');
-    expect(new Set(['W-0','W-1','W-2','W-3'].map(branchOf)).size).toBe(1);
-    expect(new Set(['E-0','E-1','E-2','E-3'].map(branchOf)).size).toBe(1);
-    expect(wB).not.toBe(eB);   // never pair opposite hip caps together
-    // each cap's branch is filled with a MAIN-FACE remainder (size > 4)
-    const sizeOf = (b: number | undefined) => [...plan.assign.values()].filter(v => v === b).length;
-    expect(sizeOf(wB)).toBeGreaterThan(4);
-    expect(sizeOf(eB)).toBeGreaterThan(4);
-  });
-
-  it('single plane still chunks to minimum count', () => {
+  it('single plane chunks to minimum count', () => {
     const panels = Array.from({ length: 21 }, (_, i) => ({ id: `p${i}`, planeId: 'A', row: 0, col: i }));
     const plan = planMicroBranches(panels, 'IQ8A');
-    expect(plan.count).toBe(3);
-    expect(plan.sizes).toEqual([10, 10, 1].sort((a, b) => b - a).length === 3 ? plan.sizes : plan.sizes);
-    expect(plan.sizes.reduce((a, b) => a + b, 0)).toBe(21);
+    expect(plan.count).toBe(2);
+    expect([...plan.sizes].sort((a, b) => b - a)).toEqual([11, 10]);
   });
 
-  it('no planeId → one global group, still NEC-sized and minimal', () => {
+  it('a 12-module plane on IQ8A SPLITS (no 30A single-branch allowance)', () => {
+    const panels = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, planeId: 'A', row: 0, col: i }));
+    const plan = planMicroBranches(panels, 'IQ8A');
+    expect(plan.count).toBe(2);
+    expect([...plan.sizes].sort((a, b) => b - a)).toEqual([6, 6]);
+    expect(Math.max(...plan.sizes)).toBeLessThanOrEqual(11);
+  });
+
+  it('no planeId → one global group, still manufacturer-sized and minimal', () => {
     const panels = Array.from({ length: 25 }, (_, i) => ({ id: `p${i}`, row: 0, col: i }));
     const plan = planMicroBranches(panels, 'IQ8A');
     expect(plan.count).toBe(3);
-    expect(Math.max(...plan.sizes)).toBeLessThanOrEqual(10);
+    expect(Math.max(...plan.sizes)).toBeLessThanOrEqual(11);
+  });
+
+  it('every panel lands in exactly one branch (partition invariant V4)', () => {
+    const plan = planMicroBranches(melvinPanels(), 'IQ8A');
+    const seen = new Set<string>();
+    for (const p of melvinPanels()) {
+      expect(plan.assign.has(p.id)).toBe(true);
+      expect(seen.has(p.id)).toBe(false);
+      seen.add(p.id);
+    }
+    expect(seen.size).toBe(53);
   });
 });

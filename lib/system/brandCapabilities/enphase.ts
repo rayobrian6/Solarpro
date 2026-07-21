@@ -40,6 +40,9 @@ function microBranchSpec(
   const maxUnits = Math.floor((brancherAmps * 0.8) / acOutputCurrentPerUnit);
   return {
     maxMicrosPerBranch: maxUnits,
+    // Manufacturer branch basis (Ray D-1): Enphase publishes the 20 A branch
+    // breaker as the branch-circuit basis for the IQ8 family. Never exceeded.
+    maxBranchOcpdA: brancherAmps,
     acOutputCurrentPerUnit,
     acOutputVoltage: 240,
     modulesPerDevice,
@@ -152,8 +155,13 @@ export const ENPHASE_IQ8A: CapabilityProfile = {
   dcAcRatioTarget: 1.25,
 
   mpptChannels: [],
-  branchCircuit: microBranchSpec(1.53, 1),
-  // NEC 80%: floor(20 × 0.8 / 1.53) = floor(10.46) = 10 units per 20A branch.
+  // Enphase IQ8A datasheet publishes "Maximum units per 20 A branch circuit:
+  // 11" — their basis is the CONTINUOUS rating (349 VA → 1.454 A; 11 × 1.454
+  // = 16.0 A = exactly the NEC 80% limit). Our peak-current math (366 VA →
+  // 1.53 A) floors to 10, which under-filled branches and forced a 4th
+  // homerun on plane splits (Braidon 2026-07-20). NEC 690.8(A) uses the
+  // manufacturer's continuous output rating, so the published 11 governs.
+  branchCircuit: { ...microBranchSpec(1.53, 1), maxMicrosPerBranch: 11 },
 
   // IQ8 Series datasheet: max DC input voltage 60 V (all variants).
   // Module cold-corrected Voc (NEC 690.7) must stay under this.

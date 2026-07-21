@@ -2471,13 +2471,14 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <h3 className="font-semibold text-white text-sm flex items-center gap-2">
                 <TrendingUp size={15} style={{ color: primaryColor }} /> Your Savings Over Time
               </h3>
-              {/* Final savings callout — Task 3 */}
-              {netDifference_25yr > 0 ? (
+              {/* Mirrors view page (audit #14): headline = the curve's own
+                  final value; cash-basis netDifference lives in the summary tile. */}
+              {projectionData.length > 0 && projectionData[projectionData.length - 1].cumulative > 0 ? (
                 <div className="text-right flex-shrink-0">
                   <div className="text-xl font-black text-emerald-400">
-                    +${Math.round(netDifference_25yr).toLocaleString()}
+                    +${Math.round(projectionData[projectionData.length - 1].cumulative).toLocaleString()}
                   </div>
-                  <div className="text-xs text-slate-500">total est. savings</div>
+                  <div className="text-xs text-slate-500">est. 25-yr advantage incl. REC{purchaseMode === 'finance' ? ' — financed' : ''}</div>
                 </div>
               ) : null}
             </div>
@@ -2526,7 +2527,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                     strokeDasharray="4 3"
                     strokeWidth={1.5}
                     label={{
-                      value: `Break-even Yr ${payoffYear}`,
+                      // Mirrors view page: flow-walk payoff, not a curve crossing.
+                      value: `Payoff Yr ${payoffYear} — system cost recovered`,
                       position: 'insideTopRight',
                       fill: '#f59e0b',
                       fontSize: 9,

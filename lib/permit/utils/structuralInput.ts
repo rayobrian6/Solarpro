@@ -88,6 +88,9 @@ export function buildStructuralInputForPermit(
       return 'Douglas Fir-Larch';
     })(),
     panelCount: totalPanels,
+    // P0-3 (data-authority register): dims + weight arrive per-sub from
+    // resolveArrayStructuralLayout → resolvePanelSpecs (equipment-db via the
+    // §1.1 map) on sub-scoped runs — never project.panel* panel0 scalars.
     panelLengthIn: arrayLayout.panelLengthIn,
     panelWidthIn: arrayLayout.panelWidthIn,
     panelWeightLbs: arrayLayout.panelWeightLbs,

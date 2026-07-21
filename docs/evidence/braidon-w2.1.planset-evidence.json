@@ -1,0 +1,997 @@
+{
+  "generatedAt": "2026-07-21T05:17:01.700Z",
+  "snapshotId": "PDS-AA7855AA9792",
+  "digest": "aa7855aa979290eca4abbc4d3badc118a3d2e5000aca484cc0031067a247aeae",
+  "schemaVersion": "1.0.0",
+  "sheetCount": 18,
+  "deferredViolations": [
+    {
+      "invariant": "V10",
+      "authorityPath": "structural.attachmentCount",
+      "offendingValue": null,
+      "sourceRecord": "structural builder",
+      "affectedProjections": [
+        "PV-3",
+        "PV-4C",
+        "SCHED-2"
+      ],
+      "message": "attachment count not snapshot-carried (rackingBOM not persisted) — W3 gap",
+      "enforcement": "deferred"
+    },
+    {
+      "invariant": "V11",
+      "authorityPath": "project.ahj.adoptedCodes",
+      "offendingValue": {
+        "nec": "2023",
+        "ibc": "2021",
+        "irc": "2021",
+        "ifc": "2024",
+        "asce": "7-22"
+      },
+      "sourceRecord": "default (no AHJ record)",
+      "affectedProjections": [
+        "ALL SHEETS"
+      ],
+      "message": "code editions defaulted — AHJ record missing; sheets must mark UNVERIFIED (W4)",
+      "enforcement": "deferred"
+    }
+  ],
+  "parityMatrix": {
+    "legacyEngine": "runElectricalCalc",
+    "legacyRan": true,
+    "checks": [
+      {
+        "name": "feeder OCPD (A)",
+        "segmentId": "COMBINER_TO_DISCO_RUN",
+        "canonical": "60",
+        "legacyShadow": "60",
+        "agree": true,
+        "classification": "agree",
+        "resolution": "both engines apply NEC 690.8×1.25→240.6; any difference is a defect to fix in the diverging engine"
+      },
+      {
+        "name": "feeder conductor",
+        "segmentId": "COMBINER_TO_DISCO_RUN",
+        "canonical": "#6 AWG",
+        "legacyShadow": "#6 AWG",
+        "agree": true,
+        "classification": "agree",
+        "resolution": "canonical sizes on routed length + unified thermal basis"
+      },
+      {
+        "name": "feeder EGC",
+        "segmentId": "COMBINER_TO_DISCO_RUN",
+        "canonical": "#10 AWG",
+        "legacyShadow": "#14 AWG",
+        "agree": false,
+        "classification": "legacy-engine-defect",
+        "resolution": "legacy \"groundingConductor\" was an unscoped system EGC and undersized vs NEC 250.122 on the feeder OCPD; grounding is now modeled per segment+purpose (groundingObjects); legacy value shadow-only"
+      },
+      {
+        "name": "feeder V-drop (%)",
+        "segmentId": "COMBINER_TO_DISCO_RUN",
+        "canonical": "0.37",
+        "legacyShadow": "1.11",
+        "agree": false,
+        "classification": "intentional-supersession",
+        "resolution": "canonical routed segment length (route-length authority) replaces the legacy flat project-level length"
+      },
+      {
+        "name": "branch count",
+        "segmentId": "BRANCH_RUN",
+        "canonical": "3",
+        "legacyShadow": "(no per-branch model)",
+        "agree": false,
+        "classification": "model-definition-difference",
+        "resolution": "legacy engine has no per-branch model; canonical owns branches"
+      },
+      {
+        "name": "branch device assignment",
+        "segmentId": "BRANCH_RUN",
+        "canonical": "D-1 routing planner (geometry-aware)",
+        "legacyShadow": "(none)",
+        "agree": true,
+        "classification": "agree",
+        "resolution": "assignment is owned by the D-1 planner (geometry authority); canonical engine sizes must match the plan (verified: sizes match)"
+      },
+      {
+        "name": "interconnection method",
+        "segmentId": null,
+        "canonical": "SUPPLY_SIDE_TAP",
+        "legacyShadow": "Supply-Side Tap (NEC 705.11)",
+        "agree": true,
+        "classification": "agree",
+        "resolution": "method is a design decision on the project record — neither engine decides it; legacy stores a display label"
+      },
+      {
+        "name": "temperature correction basis",
+        "segmentId": "COMBINER_TO_DISCO_RUN",
+        "canonical": "ASHRAE -23°C",
+        "legacyShadow": "legacy flat -10°C regime (retired W2)",
+        "agree": false,
+        "classification": "intentional-supersession",
+        "resolution": "V15 thermal unification — one ASHRAE basis for engines and sheets"
+      }
+    ],
+    "unresolved": []
+  },
+  "groundingObjects": [
+    {
+      "groundingId": "gnd-br-1",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B1",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-br-2",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B2",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-br-3",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B3",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-feeder",
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "purpose": "feeder-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#10 AWG",
+      "sizingBasis": "NEC 250.122 @ 60A feeder OCPD",
+      "associatedOcpdA": 60,
+      "associatedEquipment": "AC feeder (combiner → disconnect → POI)",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem feeder segment"
+      }
+    },
+    {
+      "groundingId": "gnd-gec",
+      "segmentId": "SERVICE",
+      "purpose": "gec",
+      "required": false,
+      "method": "none-required",
+      "conductorMaterial": null,
+      "conductorSize": null,
+      "sizingBasis": null,
+      "associatedOcpdA": null,
+      "associatedEquipment": "Existing service grounding electrode system",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added",
+      "provenance": {
+        "source": "design rule",
+        "note": "explicit not-required record — never an invented conductor"
+      }
+    }
+  ],
+  "routeSegments": [
+    {
+      "segmentId": "ROOF_RUN",
+      "oneWayFt": 15,
+      "lengthSource": "cad-derived-estimate",
+      "gauge": "#10 AWG",
+      "egc": "#12 AWG",
+      "vdPct": 0.08283006181759794
+    },
+    {
+      "segmentId": "BRANCH_RUN",
+      "oneWayFt": 86,
+      "lengthSource": "cad-derived-estimate",
+      "gauge": "#10 AWG",
+      "egc": "#12 AWG",
+      "vdPct": 0.29818822254335264
+    },
+    {
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "oneWayFt": 20,
+      "lengthSource": "cad-derived-estimate",
+      "gauge": "#6 AWG",
+      "egc": "#10 AWG",
+      "vdPct": 0.36936055005081303
+    },
+    {
+      "segmentId": "DISCO_TO_METER_RUN",
+      "oneWayFt": 15,
+      "lengthSource": "cad-derived-estimate",
+      "gauge": "#6 AWG",
+      "egc": "#10 AWG",
+      "vdPct": 0.2770204125381098
+    },
+    {
+      "segmentId": "MSP_TO_UTILITY_RUN",
+      "oneWayFt": 5,
+      "lengthSource": "cad-derived-estimate",
+      "gauge": "#2/0 AWG",
+      "egc": "#6 AWG",
+      "vdPct": 0.0807663410969196
+    }
+  ],
+  "permitReadiness": {
+    "ready": false,
+    "blockers": [
+      {
+        "code": "ROUTE-LENGTH-ESTIMATE",
+        "message": "Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status"
+      },
+      {
+        "code": "EQUIPMENT-IDENTITY-CONFLICT",
+        "message": "subSystems.roof.panelId='rec-alpha-pure-405' (REC Group Alpha Pure-R 405W) vs fleet module 'Q.PEAK DUO BLK ML-G10+ 400W' — operator reconciliation required (migration 110 territory)"
+      },
+      {
+        "code": "ENGINEERING-REVIEW-PENDING",
+        "message": "No approved engineering-review record covering this snapshot digest (D-6)"
+      }
+    ]
+  },
+  "values": [
+    {
+      "value": "snapshot.stamp",
+      "authority": "PDS-AA7855AA9792",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "CERT",
+          "value": "PDS-AA7855AA9792"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "PDS-AA7855AA9792"
+        }
+      ],
+      "distinctPrinted": [
+        "PDS-AA7855AA9792"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "value": "electrical.branchCount",
+      "authority": "3",
+      "printedInstances": [
+        {
+          "sheet": "PV-1B",
+          "value": "3"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "3"
+        }
+      ],
+      "distinctPrinted": [
+        "3"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "value": "electrical.branchOcpdMaxA",
+      "authority": "20",
+      "printedInstances": [
+        {
+          "sheet": "SCHED",
+          "value": 20
+        },
+        {
+          "sheet": "SCHED",
+          "value": 20
+        },
+        {
+          "sheet": "SCHED",
+          "value": 20
+        }
+      ],
+      "distinctPrinted": [
+        "20"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "value": "electrical.feeder.ocpdA",
+      "authority": "60",
+      "printedInstances": [
+        {
+          "sheet": "PV-4C",
+          "value": 60
+        }
+      ],
+      "distinctPrinted": [
+        "60"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "value": "derived.moduleCount",
+      "authority": "31",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": 31
+        },
+        {
+          "sheet": "PV-0",
+          "value": 31
+        },
+        {
+          "sheet": "PV-1",
+          "value": 31
+        },
+        {
+          "sheet": "PV-1B",
+          "value": 31
+        },
+        {
+          "sheet": "PV-1B",
+          "value": 31
+        },
+        {
+          "sheet": "PV-3",
+          "value": 31
+        },
+        {
+          "sheet": "PV-3",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4A",
+          "value": 31
+        },
+        {
+          "sheet": "PV-4B",
+          "value": 31
+        },
+        {
+          "sheet": "PV-5",
+          "value": 31
+        },
+        {
+          "sheet": "PV-5",
+          "value": 31
+        },
+        {
+          "sheet": "PV-6",
+          "value": 31
+        },
+        {
+          "sheet": "SCHED",
+          "value": 31
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": 31
+        },
+        {
+          "sheet": "APP-A",
+          "value": 31
+        },
+        {
+          "sheet": "DS-1",
+          "value": 31
+        },
+        {
+          "sheet": "DS-2",
+          "value": 31
+        },
+        {
+          "sheet": "DS-3",
+          "value": 31
+        },
+        {
+          "sheet": "DS-4",
+          "value": 31
+        },
+        {
+          "sheet": "CERT",
+          "value": 31
+        },
+        {
+          "sheet": "CERT",
+          "value": 31
+        },
+        {
+          "sheet": "PE-1",
+          "value": 31
+        }
+      ],
+      "distinctPrinted": [
+        "31"
+      ],
+      "agree": true,
+      "blocking": false
+    },
+    {
+      "value": "derived.dcKw",
+      "authority": "12.40",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "12.40"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "12.40"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "12.40"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "12.40"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "12.40"
+        },
+        {
+          "sheet": "CERT",
+          "value": "12.40"
+        },
+        {
+          "sheet": "CERT",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "12.40"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "12.40"
+        }
+      ],
+      "distinctPrinted": [
+        "12.40"
+      ],
+      "agree": true,
+      "blocking": false
+    },
+    {
+      "value": "project.ahj.adoptedCodes.nec",
+      "authority": "2023",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "2020"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "2023"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "2020"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "2023"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "2020"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "2023"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "2023"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "2023"
+        },
+        {
+          "sheet": "CERT",
+          "value": "2023"
+        },
+        {
+          "sheet": "CERT",
+          "value": "2020"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "2023"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "2023"
+        }
+      ],
+      "distinctPrinted": [
+        "2023",
+        "2020"
+      ],
+      "agree": false,
+      "blocking": false
+    },
+    {
+      "value": "structural.loads.windSpeedMph",
+      "authority": "115",
+      "printedInstances": [
+        {
+          "sheet": "PV-3",
+          "value": 90
+        },
+        {
+          "sheet": "PV-3",
+          "value": 90
+        },
+        {
+          "sheet": "PV-3",
+          "value": 115
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 115
+        },
+        {
+          "sheet": "PV-4C",
+          "value": 115
+        },
+        {
+          "sheet": "PE-1",
+          "value": 115
+        },
+        {
+          "sheet": "PE-1",
+          "value": 115
+        }
+      ],
+      "distinctPrinted": [
+        "90",
+        "115"
+      ],
+      "agree": false,
+      "blocking": false
+    },
+    {
+      "value": "equipment.module.wattsStc",
+      "authority": "400",
+      "printedInstances": [
+        {
+          "sheet": "PV-4C",
+          "value": 400
+        }
+      ],
+      "distinctPrinted": [
+        "400"
+      ],
+      "agree": true,
+      "blocking": false
+    }
+  ],
+  "summary": {
+    "total": 9,
+    "agree": 7,
+    "disagree": [
+      "project.ahj.adoptedCodes.nec",
+      "structural.loads.windSpeedMph"
+    ],
+    "blockingDisagree": []
+  }
+}

@@ -19,6 +19,7 @@
 
 import type { CADModel } from '../cad/types';
 import { getMountingSystemById } from '../mounting-hardware-db';
+import { getRackingById } from '../equipment-db';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../permit/utils/fireSetback';
 
 export type SysType = 'roof' | 'ground_mount' | 'solar_fence';
@@ -510,20 +511,35 @@ function fenceComposition(
         { label: 'MODULES',        value: `${cad.totalPanels ?? 0} @ ${(cad.totalDcKw ?? 0).toFixed(2)} kWdc`, bold: true },
       ];
 
+  // Post/foundation wording mirrors the SolFence telescoping section record
+  // (SOLFENCE_SECTION, lib/drafting/templates/fence.ts) — 4"⌀ outer aluminum
+  // post over a 2-7/8"⌀ inner steel post, driven, no concrete.
   const callouts: CalloutItem[] = isPlan
     ? [
-        { n: 1, label: 'FENCE SEGMENT', sub: 'PV modules mounted vertically' },
-        { n: 2, label: 'FENCE POST', sub: `steel pipe @ ${d.postSpacingFt}' O.C.` },
+        { n: 1, label: 'FENCE SEGMENT', sub: 'PV modules mounted vertically (bifacial)' },
+        { n: 2, label: 'FENCE POST', sub: `4"⌀ outer / 2-7/8"⌀ inner steel @ ${d.postSpacingFt}' O.C.` },
         { n: 3, label: 'GATE OPENING', sub: 'structural post each side' },
         { n: 4, label: 'AZIMUTH LABEL', sub: 'panel face direction' },
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'vertical bifacial mounting' },
-        { n: 2, label: 'TOP RAIL', sub: `${d.railCount === 1 ? '1 RAIL' : d.railCount + ' RAILS'} — aluminum extrusion` },
-        { n: 3, label: 'FENCE POST', sub: `${d.embedFt}' embedment min` },
+        { n: 2, label: 'RAILS', sub: `${d.railCount === 1 ? '1 rail' : d.railCount + ' rails'} + 2"×1" mid rail — section system` },
+        { n: 3, label: 'FENCE POST', sub: `telescoping — inner post driven ${d.embedFt}' min` },
         { n: 4, label: 'GRADE LINE', sub: 'field-verified elevation' },
         { n: 5, label: 'WIND ARROWS', sub: `${d.windSpeedMph} MPH Vult — ASCE 7-22 §29` },
       ];
+
+  // GENERAL NOTES — fills the data rail below the callout schedule (the fence
+  // sheets previously left the lower rail blank; ground already does this).
+  const fenceGeneralNotes: string[] = [
+    `Vertical bifacial solar fence — ${d.totalLenFt} L.F. total run in ${d.segmentCount} segment${d.segmentCount === 1 ? '' : 's'}; modules mounted 90° vertical, side-by-side in pre-built sections.`,
+    `Foundation: 2-7/8" dia. inner steel post driven ${d.embedFt}' minimum with post pounder — no concrete; 4" dia. outer post sleeved over inner (telescoping). Field-verify refusal.`,
+    `Posts at ${d.postSpacingFt}' O.C. nominal (93-3/4" center-to-center); a post lands at every section joint — never mid-module.`,
+    'Bond all posts, rails and module frames to the equipment grounding conductor — min #6 AWG Cu (NEC 690.43 / 250.169).',
+    `Design wind ${d.windSpeedMph} MPH Vult per ASCE 7-22 §29 (freestanding wall); system rated ${getRackingById('solfence-8ft')?.maxWindSpeed ?? 115} MPH / ${getRackingById('solfence-8ft')?.maxSnowLoad ?? 113} PSF per manufacturer.`,
+    'DC circuits per the CIRCUIT legend; module-level power electronics installer-supplied per plan — see the DC CIRCUIT sheet / E-1.',
+    'All dimensions NTS — field-verify segment lengths, post locations and grades prior to installation.',
+  ];
 
   return {
     systemType:     'solar_fence',
@@ -544,10 +560,11 @@ function fenceComposition(
     drawHeader:     isPlan
       ? `SOLAR FENCE — TYPICAL 2-BAY ELEVATION OF ${d.totalLenFt} L.F. RUN | ${d.segmentCount} SEGMENTS | POST @ ${d.postSpacingFt}' O.C. | WIND: ${d.windSpeedMph} MPH`
       : `FENCE STRUCTURAL DETAILS — POST EMBED: ${d.embedFt}' MIN | WIND: ${d.windSpeedMph} MPH Vult | ASCE 7-22 | ${d.totalLenFt} L.F. RUN`,
-    secondaryHeader: isPlan ? 'SEGMENT PLAN — TOP VIEW' : 'CONNECTION + FOOTING DETAILS — NTS',
+    secondaryHeader: isPlan ? 'SEGMENT PLAN — TOP VIEW (DC CIRCUITS)' : 'CONNECTION + FOOTING DETAILS — NTS',
     dataTitle:      isPlan ? 'FENCE DATA' : 'STRUCTURAL DATA',
     dataRows,
     callouts,
+    generalNotes:   fenceGeneralNotes,
     requires:       ['fence', 'fence.segments', 'fence.totalLengthM'],
   };
 }

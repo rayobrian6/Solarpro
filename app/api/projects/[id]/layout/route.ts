@@ -61,10 +61,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const totalPanels  = panels.length;
     // v47.161: Use actual panel wattage from the panels array instead of hardcoded 400W.
     // Fence panels (Philadelphia Solar 430W) and custom panels were previously under-reported.
+    // P0-7 (DATA-AUTHORITY-AUDIT): this stamp sum is only the FALLBACK input —
+    // upsertLayout owns the nameplate rule (subSystems map → equipment-db watts)
+    // and overrides it for map-carrying projects. The authoritative value is
+    // read back from savedLayout below and used everywhere downstream.
     const avgWatts = totalPanels > 0
       ? (panels as any[]).reduce((s: number, p: any) => s + (typeof p.wattage === 'number' ? p.wattage : 400), 0) / totalPanels
       : 400;
-    const systemSizeKw = parseFloat((totalPanels * avgWatts / 1000).toFixed(2));
+    const stampSizeKw = parseFloat((totalPanels * avgWatts / 1000).toFixed(2));
 
     // UPSERT layout — never destructive
     // FIX v47.318: Priority order for systemType:
@@ -94,11 +98,16 @@ export async function POST(req: NextRequest, context: RouteContext) {
       fenceLine:          fenceLine          ?? existingLayout?.fenceLine,
       bifacialOptimized:  bifacialOptimized  ?? existingLayout?.bifacialOptimized  ?? false,
       totalPanels,
-      systemSizeKw,
+      systemSizeKw: stampSizeKw,
       mapCenter:  mapCenter  ?? existingLayout?.mapCenter,
       mapZoom:    mapZoom    ?? existingLayout?.mapZoom,
       designElectrical: designElectrical ?? (existingLayout as any)?.designElectrical,
     });
+
+    // P0-7: the nameplate function inside upsertLayout is the ONE owner of
+    // system size — everything downstream (logs, version snapshot, response)
+    // reports what was actually persisted, never a second derivation.
+    const systemSizeKw = savedLayout.systemSizeKw ?? stampSizeKw;
 
     // STEP 3 -- DB WRITE CONFIRMATION LOGGING
     console.log('[LAYOUT SAVED TO DB]', {

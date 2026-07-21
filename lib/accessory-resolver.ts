@@ -11,6 +11,7 @@ import {
   getRegistryEntry,
   getRequiredAccessories,
 } from './equipment-registry';
+import { nextStandardOcpd } from './electrical/stdSizes';
 
 // ─── Resolution Context ───────────────────────────────────────────────────────
 
@@ -328,8 +329,10 @@ export function sizeACDisconnect(
   safetyFactor: number = 1.25,
 ): number {
   const required = totalACAmps * safetyFactor;
-  const sizes = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 125, 150, 175, 200];
-  return sizes.find(s => s >= required) ?? Math.ceil(required / 10) * 10;
+  // P0-5c: single-sourced from lib/electrical/stdSizes.ts. The old local copy
+  // OMITTED 110 A (a 105 A requirement jumped to 125 A here while every other
+  // ladder said 110 A) and invented next-10A sizes above 200 A.
+  return nextStandardOcpd(required);
 }
 
 // ─── Trunk Cable Count (Enphase-style) ───────────────────────────────────────

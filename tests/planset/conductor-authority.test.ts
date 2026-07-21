@@ -23,8 +23,9 @@ describe('conductor authority — single source of truth', () => {
   it('sizes every branch internally consistently (OCPD → gauge → EGC)', () => {
     const auth = buildConductorAuthority(clone(), null);
     for (const b of auth.microBranches) {
-      // OCPD is the next standard size above the continuous (×1.25) current
-      expect(b.ocpdAmps).toBe(necNextStandardOcpd(b.continuousA) || 20);
+      // D-1 law: 20A standard-branch floor, next standard size above that;
+      // manufacturer max enforced by the snapshot validator (V5/V5a).
+      expect(b.ocpdAmps).toBe(b.continuousA <= 20 ? 20 : (necNextStandardOcpd(b.continuousA) || 20));
       // gauge and EGC are derived from that ONE OCPD — never hardcoded
       expect(b.wireGauge).toBe(wireGaugeForOcpd(b.ocpdAmps));
       expect(b.egcGauge).toBe(getEGCSize(b.ocpdAmps));
@@ -63,8 +64,15 @@ describe('conductor authority — single source of truth', () => {
   });
 
   it('renders the same branch OCPD across PV-4A, PV-4B and SCHED (no stray hardcode)', () => {
-    const html = generatePermitHTML(clone());
-    const auth = buildConductorAuthority(clone(), null);
+    // Expectation must come from the SAME healed input the sheets render from:
+    // generatePermitHTML mutates/heals the input (AC totals etc.), and the raw
+    // fixture's missing acOutputKw falls back to panel watts — a per-micro amp
+    // basis divergence that lands 12-module branches on a different breaker
+    // step (30 vs 25 A). Exposed by the 2026-07-20 single-branch-per-plane
+    // rule; the underlying bare-vs-healed divergence is register finding N-7.
+    const input = clone();
+    const html = generatePermitHTML(input);
+    const auth = buildConductorAuthority(input, null);
     const ocpd = auth.microBranches[0]?.ocpdAmps;
     expect(ocpd).toBeGreaterThan(0);
     // All three branch schedules print the authority OCPD (…>NN A< / >NNA<).

@@ -11,6 +11,7 @@
 
 // v47.9: Use getDbReady() (async, cold-start resilient) instead of getDb() (sync, no retry)
 import { getDbReady } from '@/lib/db-neon';
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 
 // Get database connection — async, retries on Neon cold start
 const getSql = () => getDbReady();
@@ -373,8 +374,9 @@ export async function autoConfigureProject(
   
   // NEC 705.12(B)(2)(1) - AC breaker size (125% of inverter AC output)
   const requiredBreakerAmps = inverterACOutput * 1.25;
-  const standardBreakerSizes = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
-  const acBreakerSize = standardBreakerSizes.find(size => size >= requiredBreakerAmps) || Math.ceil(requiredBreakerAmps);
+  // P0-5c: NEC 240.6(A) ladder single-sourced from lib/electrical/stdSizes.ts
+  // (old local copy stopped at 400 A with a raw-ceil fallback).
+  const acBreakerSize = nextStandardOcpd(requiredBreakerAmps);
   
   logs.push({
     field: 'ac_breaker_size',
@@ -423,7 +425,7 @@ export async function autoConfigureProject(
   
   // DC OCPD (typically 1.56 × Isc)
   const dcOcpd = Math.ceil(dcStringCurrent * 1.56);
-  const standardDcOcpd = standardBreakerSizes.find(size => size >= dcOcpd) || dcOcpd;
+  const standardDcOcpd = nextStandardOcpd(dcOcpd); // P0-5c single-source ladder
   logs.push({
     field: 'dc_ocpd',
     auto_value: standardDcOcpd,

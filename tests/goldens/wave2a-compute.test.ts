@@ -24,6 +24,16 @@ import { buildComputedRunsForPermit } from '../../lib/permit/utils/computedRuns'
 import { generateCADLayout } from '../../lib/cad/cadEngine';
 import { roofProject } from '../../test-fixtures/roofProject';
 import { csMicroInput, csStringInput, stripVolatile } from './wave0-fixtures';
+import { getDesignTemps } from '../../lib/permit/utils/designTemps';
+
+/** W2 thermal basis for the roofProject fixture — the SAME resolver the
+ *  permit engine + snapshot use (ASHRAE 2% high for the fixture location). */
+function _fixtureAmbientC(): number {
+  const p: any = (roofProject as any).project;
+  const st = typeof p.state === 'string' && /^[A-Za-z]{2}$/.test(p.state.trim())
+    ? p.state.trim().toUpperCase() : undefined;
+  return getDesignTemps(p.lat, p.lng, st).ashrae2pctHighC ?? 40;
+}
 
 // ─── The contract's I-3 golden hybrid: Enphase micro roof (48) + Solis string
 //     ground (26) + optimizer fence (17) ──────────────────────────────────────
@@ -345,15 +355,20 @@ describe('buildComputedRunsForPermit — per-subsystem opts (kills the hardcoded
     expect(runs.some(r => r.id === 'MSP_TO_UTILITY_RUN')).toBe(false);
     runs.forEach(r => expect(r.subSystem).toBe('fence'));
     const roofRun = runs.find(r => r.id === 'ROOF_RUN')!;
-    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(40)); // no roof bake for fence conductors
+    // W2 thermal unification: ambient = the fixture location's ASHRAE 2% high
+    // (same basis the snapshot records), not the legacy flat 40 °C. The intent
+    // pinned here is the ADDER SCOPING (0 for non-roof), which still holds.
+    const _amb = _fixtureAmbientC();
+    expect(roofRun.tempDeratingFactor).toBe(getTempDerating(_amb)); // no roof bake for fence conductors
   });
 
   it("scoped call without explicit adder derives it from systemType (roof→33, fence→0)", () => {
     const { input, cad } = mk();
     const roofScoped = buildComputedRunsForPermit(input, cad as never, { systemType: 'roof' })!;
     const fenceScoped = buildComputedRunsForPermit(input, cad as never, { systemType: 'fence' })!;
-    expect(roofScoped.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(73));
-    expect(fenceScoped.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(40));
+    const _amb = _fixtureAmbientC();
+    expect(roofScoped.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(_amb + 33));
+    expect(fenceScoped.find(r => r.id === 'ROOF_RUN')!.tempDeratingFactor).toBe(getTempDerating(_amb));
   });
 
   it('panel subset: opts.totalPanels overrides the whole-project count', () => {

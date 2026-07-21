@@ -663,10 +663,29 @@ export function generateBOMForPermit(
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,
-        // Stage D — hybrid system AC disconnect single-sourced to E-1's
-        // Σ-backfeed rating (undefined for single-system → legacy kW basis).
-        systemAcDisconnectA: _acCollection?.disconnectA,
-        dcOCPD:              necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.25 * 1.25),
+        // Stage D — system AC disconnect / supply-side tap OCPD single-sourced
+        // to the conductor authority's POI block (Σ per-sub backfeed OCPDs →
+        // next std rating — the same table E-1's resolveHybridAcCollection
+        // uses, so BOM fuse/enclosure ≡ E-1's system disconnect). The engine
+        // also sizes the supply-side FUSE from this (110A-fuse-in-200A-disco
+        // regression, 2026-07-18). _acCollection kept as fallback.
+        // Hybrid-only (Stage D contract): single-system jobs keep the legacy
+        // kW basis — their totalAcKw is consistent, and pushing the POI value
+        // through nextStdRating would bump a 110A single-system fuse to 125A.
+        systemAcDisconnectA: (_auth.isHybrid && _auth.poi.tapOcpdA > 0 ? _auth.poi.tapOcpdA : undefined)
+          ?? _acCollection?.disconnectA,
+        // P1-3 (data-authority register): DC OCPD from the shared authority's
+        // per-sub dcStrings (governing = max standard fuse across ALL subs) —
+        // never firstStr alone (on a hybrid firstStr is the FENCE panel, and
+        // its Isc mis-sized the ground sub's DC fuse). Fallback keeps the
+        // canonical Isc×1.56 ladder derivation for payloads with no
+        // authority strings (micro topologies never consume dcOCPD).
+        dcOCPD:              (() => {
+          const _dcOcpds = _auth.dcStrings.map(s => s.ocpdAmps ?? 0).filter(n => n > 0);
+          return _dcOcpds.length
+            ? Math.max(..._dcOcpds)
+            : necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.56);
+        })(),
         jurisdiction:        compliance.jurisdiction?.ahj,
         requiresACDisconnect:    project.acDisconnect !== false,
         requiresDCDisconnect:    true,

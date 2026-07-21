@@ -29,6 +29,7 @@ import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
 import { computeBatteryBusImpact, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
+import { nextStandardOcpd } from './electrical/stdSizes';
 
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
@@ -525,11 +526,11 @@ function getConduitDerating(conductorCount: number): number {
   return 0.35;
 }
 
-// NEC 240.6 — Standard OCPD sizes
-const STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
-
+// NEC 240.6 — Standard OCPD sizes. P0-5c: delegates to
+// lib/electrical/stdSizes.ts (the old local copy stopped at 400 A and
+// CLAMPED anything above to 400 A — an undersized OCPD).
 function nextStandardOCPD(amps: number): number {
-  return STANDARD_OCPD.find(s => s >= amps) ?? 400;
+  return nextStandardOcpd(amps);
 }
 
 // NEC 250.122 — EGC sizing

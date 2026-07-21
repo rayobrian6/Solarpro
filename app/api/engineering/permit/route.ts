@@ -79,6 +79,7 @@ import { fetchSiteFeatures } from '@/lib/aerial/siteFeatures';
 import { getNearmapSurfacesCached } from '@/lib/aerial/nearmapCache';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
+import { getMicroinverterById } from '@/lib/equipment-db';
 
 // Site Survey pipeline imports — survey data enriches the permit plan set
 import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/fromPhysicalData';
@@ -623,6 +624,28 @@ export async function POST(req: NextRequest) {
       }
     } catch (healErr) {
       console.log('[permit/POST] hybrid self-heal skipped (non-fatal):', (healErr as Error)?.message);
+    }
+
+    // ─── P0-12: normalize inverter `type` to the canonical enum ─────────────
+    // Clients/DB rows have stored brand strings ('ecoflow', model names) in
+    // inverter.type — every `type === 'micro'` topology fork downstream then
+    // works only by accident. Canonical values: 'micro' | 'string' | 'optimizer';
+    // hybrid all-in-one units count as 'string' for topology forks. Resolution:
+    // equipment-db micro record by inverterId wins, else a 'micro' substring,
+    // else 'string'. Empty types are left alone (topology-based forks handle them).
+    {
+      const CANONICAL_INV_TYPES = new Set(['micro', 'string', 'optimizer']);
+      for (const inv of (body.system.inverters as Array<{ type?: string; inverterId?: string }>) || []) {
+        if (!inv) continue;
+        const rawType = String(inv.type ?? '').toLowerCase().trim();
+        if (!rawType || CANONICAL_INV_TYPES.has(rawType)) continue;
+        const mapped = (inv.inverterId && getMicroinverterById(String(inv.inverterId))) ? 'micro'
+          : rawType.includes('micro') ? 'micro'
+          : 'string';
+        console.warn('[permit/POST] P0-12 inverter type normalized:', `'${inv.type}'`, '→', `'${mapped}'`,
+          inv.inverterId ? `(inverterId=${inv.inverterId})` : '(no inverterId)');
+        inv.type = mapped;
+      }
     }
 
     // ─── Auto-populate AHJ data from national database ──────────────────────

@@ -13,8 +13,32 @@ import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { buildConductorAuthority, type ConductorAuthority, type SubSystemConductorAuthority } from './conductorAuthority';
 import { buildIntegratedEquipment } from './integratedEquipment';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
-import { getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import { getInverterById, getMicroinverterById, SOLAR_PANELS } from '@/lib/equipment-db';
+import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
+import { getDesignTemps } from './designTemps';
+
+/** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
+ *  model string — the SAME records the equipment pages read. Undefined when
+ *  the model can't be matched (the sheet then prints a MARKED conservative
+ *  assumption instead of a silently fabricated datasheet value). */
+function panelTempCoeffByModel(model?: string): number | undefined {
+  const m = (model ?? '').trim().toLowerCase();
+  if (!m) return undefined;
+  const hit = SOLAR_PANELS.find(p =>
+    m === p.model.toLowerCase()
+    || m === `${p.manufacturer} ${p.model}`.toLowerCase()
+    || m.includes(p.model.toLowerCase()));
+  return typeof hit?.tempCoeffVoc === 'number' ? hit.tempCoeffVoc : undefined;
+}
+
+/** 2-letter state for the design-temp lookup: explicit field first, then the
+ *  ", ST 12345" tail of the address string. */
+function stateFromProject(project: { state?: string; address?: string }): string | undefined {
+  if (project.state && /^[A-Za-z]{2}$/.test(project.state.trim())) return project.state.trim().toUpperCase();
+  const m = (project.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/);
+  return m ? m[1].toUpperCase() : undefined;
+}
 
 /**
  * Build a live SLDProfessionalInput from PermitInput canonical data.
@@ -131,6 +155,9 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // Error 5b fix: ocpd IS declared on string type — no need for `as any`
   const dcOCPD = isMicro ? 0 : strings[0]?.ocpd ?? 20;
 
+  // ── ASHRAE design temperatures (state envelope, lat-refined) ──
+  const _temps = getDesignTemps(project.lat, project.lng, stateFromProject(project));
+
   const sldInput: SLDProfessionalInput = {
     projectName:             project.projectName ?? 'Solar PV System',
     clientName:              project.clientName ?? 'Homeowner',
@@ -158,6 +185,12 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     acConduitType:           project.conduitType ?? 'EMT',
     acOCPD,
     mainPanelAmps:           mainAmps,
+    // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot
+    // when this adapter runs inside permit generation — the renderer prints,
+    // never re-decides. Standalone routes (no snapshot) leave these unset.
+    panelBusRating:          (project as { panelBusRating?: number }).panelBusRating ?? mainAmps,
+    poiRulePasses:           ((input as unknown as { _snapshot?: { electrical?: { poi?: { rulePasses?: boolean | null } } } })
+                               ._snapshot?.electrical?.poi?.rulePasses) ?? undefined,
     backfeedAmps,
     utilityName:             utilityDisplayName(project.utilityName ?? '') || 'Utility',
     interconnection,
@@ -203,10 +236,18 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     combinerHasIntegratedGateway: _bos.hasIntegratedGateway,
     combinerProvidesAcDisconnect: _bos.providesAcDisconnect,
     ocpdPerString:           isMicro ? 0 : dcOCPD,
-    dcAcRatio:               totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined,
+    // P1-10 (data-authority register): system.dcAcRatio is the ONE owner —
+    // read it, never a third re-derivation. Fallback recompute only when the
+    // payload carries no ratio (kept for degraded inputs, same calc the
+    // system owner uses).
+    dcAcRatio:               system?.dcAcRatio || (totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined),
 
-    // Design temperature (if available from AHJ data)
-    designTempMin:           project.designTempMin ?? -10,
+    // Design temperatures — ASHRAE state-envelope lookup (designTemps.ts).
+    // An explicit project.designTempMin (AHJ override) wins; otherwise the
+    // ASHRAE extreme low drives the NEC 690.7(A) Voc correction (the old
+    // flat -10 default understated corrected Voc for the Midwest).
+    designTempMin:           project.designTempMin ?? _temps.ashraeExtremeLowC,
+    designTemps:             _temps,
   };
 
   // ── Wave 5 Lane A — hybrid source lanes (I-8: E-1 at N>1 renders the REAL
@@ -297,6 +338,14 @@ export function buildSourceBranchesFromAuthority(
       : (eq.panelWatts ? `${eq.panelWatts}W Module` : 'PV Module');
     const acKw = (sub.acSubFeeder.currentA * 240) / 1000;
     const dcOcpds = sub.dcStrings.map(s => s.ocpdAmps ?? 0).filter(n => n > 0);
+    // P1-2: per-lane EGC values carried FROM the authority so the renderer
+    // consumes instead of re-deriving. Branch EGC = the governing (max-OCPD)
+    // micro branch's own NEC 250.122 result; DC EGC = 250.122 on the lane's
+    // governing DC string OCPD — derived HERE (adapter boundary), never in
+    // the renderer.
+    const _govBranch = sub.microBranches.length
+      ? sub.microBranches.reduce((a, b) => (b.ocpdAmps > a.ocpdAmps ? b : a))
+      : undefined;
     return {
       key: sub.key,
       label: `${sub.key.toUpperCase()} — ${sub.panelCount} × ${panelModel}`,
@@ -319,6 +368,14 @@ export function buildSourceBranchesFromAuthority(
       acOutputAmps: sub.acSubFeeder.currentA > 0 ? Math.round(sub.acSubFeeder.currentA * 100) / 100 : undefined,
       acWireGauge: sub.acSubFeeder.wireGauge,
       acOCPD: sub.acSubFeeder.ocpdAmps ?? undefined,
+      // Per-sub EGC — the authority's own NEC 250.122 result (governed by the
+      // sub's AC feeder OCPD), same value the E-1 SOURCE SUMMARY prints.
+      egcGauge: sub.egc.gauge,
+      branchEgcGauge: _govBranch?.egcGauge,
+      dcEgcGauge: dcOcpds.length ? getEGCSize(Math.max(...dcOcpds)) : undefined,
+      // Voc temp coefficient from the equipment DB (for the NEC 690.7(A)
+      // corrected-voltage table); absent ⇒ marked assumption on the sheet.
+      panelTempCoeffVoc: panelTempCoeffByModel(eq.panelModel),
       backfeedAmps: subBackfeedFromInverters(sub, inverters, primaryKey),
       dcOCPD: dcOcpds.length ? Math.max(...dcOcpds) : undefined,
       // No external DC disconnect when the inverter integrates one (per its
@@ -433,6 +490,7 @@ export function buildSourceBranchesFromComputedMulti(
       acWireGauge: feeder?.wireGauge,
       acConduitType: feeder && !feeder.isOpenAir ? feeder.conduitType : undefined,
       acOCPD: cs.acOcpdAmps || undefined,
+      panelTempCoeffVoc: cs.panelSpec?.tempCoeffVoc,
       // Per-sub engine backfeed (per-inverter OCPDs + the sub's own battery
       // impact). The POI total comes from the AGGREGATE via input.backfeedAmps
       // — lanes only display their contribution.
@@ -490,6 +548,11 @@ export function sanitizeClientSourceBranches(raw: unknown): SLDSourceBranch[] | 
     backfeedAmps: num(b?.backfeedAmps),
     dcOCPD: num(b?.dcOCPD),
     integratedDcDisconnect: b?.integratedDcDisconnect === true || undefined,
+    egcGauge: str(b?.egcGauge),
+    branchEgcGauge: str(b?.branchEgcGauge),
+    dcEgcGauge: str(b?.dcEgcGauge),
+    // Signed: Voc temp coefficients are NEGATIVE — num() (≥0 only) would drop them.
+    panelTempCoeffVoc: Number.isFinite(Number(b?.panelTempCoeffVoc)) ? Number(b?.panelTempCoeffVoc) : undefined,
     optimizerQty: num(b?.optimizerQty),
     optimizerModel: str(b?.optimizerModel),
     combinerLabel: str(b?.combinerLabel),

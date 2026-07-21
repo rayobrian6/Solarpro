@@ -60,7 +60,7 @@ export default function MigrationConsolePage() {
 
   // Baseline evidence + reviewed batch.
   const [evidence, setEvidence] = useState<Json | null>(null);
-  const [reviews, setReviews] = useState<Record<string, { status: string; notes: string; selected: boolean }>>({});
+  const [reviews, setReviews] = useState<Record<string, { status: string; notes: string; selected: boolean; recorded?: boolean }>>({});
   const [batchDigest, setBatchDigest] = useState<string | null>(null);
 
   // Activation countdown.
@@ -135,9 +135,17 @@ export default function MigrationConsolePage() {
     const r = await call('generate-baseline-evidence');
     if (r.success) {
       setEvidence(r);
-      const init: Record<string, { status: string; notes: string; selected: boolean }> = {};
+      const init: Record<string, { status: string; notes: string; selected: boolean; recorded?: boolean }> = {};
       for (const p of r.proposals ?? []) {
-        init[p.identifier] = { status: p.proposedStatus, notes: '', selected: !p.manualReviewRequired };
+        // Rows already RECORDED in the baseline ledger are LOCKED — shown with
+        // their recorded status, excluded from the next batch. Regenerating
+        // evidence previously re-proposed them as UNKNOWN and silently wiped
+        // the operator's recorded work (the "recorded 82 then everything reset"
+        // loop, 2026-07-20).
+        const rec = r.recorded?.[p.identifier];
+        init[p.identifier] = rec && rec !== 'UNKNOWN'
+          ? { status: rec, notes: '', selected: false, recorded: true }
+          : { status: p.proposedStatus, notes: '', selected: !p.manualReviewRequired };
       }
       setReviews(init);
       setBatchDigest(null);
@@ -250,6 +258,34 @@ export default function MigrationConsolePage() {
         })} className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-sm font-medium">Run migration 108…</button>
       </section>
 
+      {/* Targeted data-authority backfill — migrations 109-112 */}
+      <section className="rounded-xl border border-sky-500/40 bg-sky-500/5 p-4 mb-4">
+        <div className="flex items-center gap-3 mb-1">
+          <h2 className="text-lg font-semibold text-white">Targeted data-authority backfill — migrations 109 → 112</h2>
+          <Pill ok={null}>SCOPED</Pill>
+        </div>
+        <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
+          Runs ONLY 109, 110, 111, 112 — in order, stop on first failure. Historical baseline remains incomplete.
+        </div>
+        <p className="text-xs text-slate-400 mb-3">
+          The DATA-AUTHORITY-AUDIT backfills: <b>109</b> subSystems-map inference for map-less hybrid projects ·
+          <b> 110</b> panel stamp-wattage normalizer (map is the wattage authority) · <b>111</b> system-size nameplate
+          backfill · <b>112</b> fence-line reconstruction. Server-side each is statically verified <b>UPDATE-only</b>
+          (no DDL / DELETE / INSERT) against allow-listed tables (<code>projects</code>, <code>layouts</code>), live
+          columns are verified, then each runs under its own bounded scoped permit through the canonical runner
+          (ledger + run history + audit). Idempotent — already-applied migrations are skipped. Does <b>not</b> require
+          the historical baseline, does <b>not</b> run anything else, and never marks the baseline verified. Requires
+          super_admin + MFA + fresh TOTP + reason + typed production confirmation.
+        </p>
+        <button disabled={!!busy} onClick={() => openMutation('Execute targeted data-authority backfill (109 → 112)', !!rd?.isProduction, async ({ totpCode, reason, productionConfirmation, idempotencyKey }) => {
+          const r = await call('execute-data-authority-109-112', { totpCode, reason, productionConfirmation, idempotencyKey });
+          const cid = r.correlationId ? ` [${r.correlationId}]` : '';
+          const per = (r.results ?? []).map((x: Json) =>
+            `${x.identifier}=${x.alreadyApplied ? 'already-applied' : (x.verifiedSuccess ? 'APPLIED' : `FAILED(${x.execution?.errorCode ?? x.execution?.status ?? '?'})`)}`).join(' · ');
+          logMsg(`Data-authority 109-112: ${r.success ? 'ALL APPLIED' : (r.error || 'stopped on failure')}${per ? ` — ${per}` : ''}${cid}`, !!r.success);
+        })} className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-sm font-medium">Run migrations 109 → 112…</button>
+      </section>
+
       {/* Step actions */}
       <section className="grid md:grid-cols-2 gap-4 mb-4">
         {/* Bootstrap */}
@@ -323,7 +359,20 @@ export default function MigrationConsolePage() {
               <tbody>
                 {(evidence.proposals ?? []).map((p: Json) => {
                   const rev = reviews[p.identifier];
-                  const needsNote = rev && (rev.status === 'UNKNOWN' || rev.status === 'PARTIALLY_APPLIED') && !rev.notes.trim();
+                  const needsNote = rev && !rev.recorded && (rev.status === 'UNKNOWN' || rev.status === 'PARTIALLY_APPLIED') && !rev.notes.trim();
+                  if (rev?.recorded) {
+                    // Already recorded in the baseline ledger — locked row.
+                    return (
+                      <tr key={p.identifier} className="border-t border-slate-800 opacity-70">
+                        <td className="p-1 text-emerald-400">✓</td>
+                        <td className="p-1 font-mono">{p.identifier}</td>
+                        <td className="p-1"><Pill ok={true}>RECORDED</Pill></td>
+                        <td className="p-1">—</td>
+                        <td className="p-1 text-slate-300">{rev.status}</td>
+                        <td className="p-1 text-slate-500 text-[10px]">recorded in baseline ledger — no action needed</td>
+                      </tr>
+                    );
+                  }
                   return (
                     <tr key={p.identifier} className={`border-t border-slate-800 ${needsNote ? 'bg-red-500/5' : ''}`}>
                       <td className="p-1"><input type="checkbox" checked={rev?.selected ?? false} onChange={(e) => setReviews((s) => ({ ...s, [p.identifier]: { ...s[p.identifier], selected: e.target.checked } }))} /></td>

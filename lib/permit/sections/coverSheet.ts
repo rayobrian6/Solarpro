@@ -68,18 +68,18 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     ? `${(Math.tan(_pitchDegCover * Math.PI / 180) * 12).toFixed(1)}:12`
     : '';
 
-  // ── Derived electrical values ──────────────────────────────────────
-  // Error 6d fix: Prefer project.backfeedBreakerA (already NEC-computed by generatePermit.ts)
-  // over recomputing from acKw. Also fix 120% rule to use separate bus rating and main breaker.
-  const busRating   = project.panelBusRating || project.mainPanelAmps || 200;
-  const mainBreaker = project.mainPanelAmps || 200;
-  const backfeedA = project.backfeedBreakerA ?? project.pvBackfeedA
-    ?? ((acKw !== null && acKw > 0) ? necNextStandardOcpd(acKw * 1000 / 240 * 1.25) : null);
-  const busLimit     = busRating ? Math.round(busRating * 1.2) : null;
-  const maxPvBreaker = busLimit !== null ? busLimit - mainBreaker : null;
-  const rulePass     = (backfeedA !== null && maxPvBreaker !== null)
-    ? backfeedA <= maxPvBreaker
-    : null;
+  // ── Derived electrical values — W2 SNAPSHOT PROJECTION ─────────────
+  // The cover's former local 120% math + backfeed re-derivation (one of six
+  // parallel implementations the audit flagged) is gone: bus/main/backfeed
+  // and the rule verdict come from resolveInterconnection, which projects the
+  // validated PermitDesignSnapshot.
+  const _icTop = resolveInterconnection(input, cad);
+  const busRating   = _icTop.busA || null;
+  const mainBreaker = _icTop.mainA || null;
+  const backfeedA   = _icTop.feederOcpd || null;
+  const busLimit     = busRating ? Math.round(_icTop.busLimit) : null;
+  const maxPvBreaker = busLimit !== null ? Math.round(_icTop.maxBackfeedA) : null;
+  const rulePass     = _icTop.isSupplySide ? null : _icTop.passes120;
 
   // ── Interconnection ───────────────────────────────────────────────────────
   // Resolved ONCE (shared with PV-4A/PV-4B via resolveInterconnection): a
@@ -88,7 +88,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // backfeed line now read the SAME method every electrical sheet prints —
   // never "supply-side required" on the cover while PV-4A draws a load-side
   // breaker, and never a red FAIL/QA flag on an issued set.
-  const _ic = resolveInterconnection(input, cad);
+  const _ic = _icTop;
   const isSupplySide = _ic.isSupplySide;
   const interconn = _ic.methodLabel;
 
@@ -289,10 +289,14 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     svcAmps
       ? tagRow('E', `${svcAmps}A MAIN SERVICE PANEL${project.mainPanelBrand ? ' — ' + project.mainPanelBrand : ''}`)
       : '',
-    backfeedA
+    backfeedA || _ic.feederOcpd
       ? (isSupplySide
-          ? tagRow('N', `${backfeedA}A FUSED AC DISCONNECT — SUPPLY-SIDE TAP (NEC 705.11)`)
-          : tagRow('N', `${backfeedA}A BACKFEED BREAKER (NEC 705.12(B))`))
+          // Supply-side tap OCPD from the interconnection resolver → conductor
+          // authority POI block (Σ per-sub backfeed OCPDs → next std rating) —
+          // the SAME number E-1's system disconnect prints. project.backfeedBreakerA
+          // is kW-basis and printed 110A here while E-1 said 200A (2026-07-18).
+          ? tagRow('N', `${_ic.feederOcpd || backfeedA}A FUSED AC DISCONNECT — SUPPLY-SIDE TAP (NEC 705.11)`)
+          : (backfeedA ? tagRow('N', `${backfeedA}A BACKFEED BREAKER (NEC 705.12(B))`) : ''))
       : '',
     mountSys
       ? tagRow('N', mountSys.toUpperCase() + ' RACKING SYSTEM' + (_coverHybrid ? ' — ROOF' : ''))

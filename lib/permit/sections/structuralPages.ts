@@ -11,7 +11,7 @@ import {
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
-import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../utils/helpers';
+import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel, necNextStandardOcpd } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import {  isFence, isGround, isRoof, getInverterTopology, topologyToLegacy } from '@/lib/system';
@@ -36,38 +36,33 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
     throw new Error(`[pageRoofStructural] getPrimaryView(${comp.primaryView}) returned empty SVG`);
   }
 
-  // ── Manufacturer attachment detail (real published cross-section) ───────────
-  // When the job's selected racking has a manufacturer detail on file
-  // (manufacturer_assets library), render the REAL published attachment
-  // cross-section as the primary detail — PE sets embed the racking maker's own
-  // detail for permit submittal. The hand-drawn CAD line-art is the fallback
-  // when no manufacturer asset exists for the mounting system.
+  // ── PV-3 is a DRAWING sheet (Ray 2026-07-20) ────────────────────────────────
+  // The primary view is ALWAYS the drawn CAD attachment cross-section. An
+  // earlier pass replaced the whole draw zone with the manufacturer's manual
+  // page as a full-bleed <img> — which made PV-3 read as a reprinted datasheet
+  // sitting at sheet 4 while the OTHER manufacturer pages lived in the DS
+  // appendix ("that looks more like a data sheet than a structure sheet").
+  // The manufacturer's published document remains the engineering basis: it is
+  // CITED here (provenance strip) and reproduced full-page in the DS appendix
+  // alongside the other manufacturer datasheets.
   const mountId = (input.project as { mountingSystemId?: string }).mountingSystemId;
   const rackAsset = getManufacturerAsset(mountId, 'racking_detail');
-  let primaryDetail = drawingSvg;
-  let detailCaption: string | null = null;
-  if (rackAsset?.imageUrl) {
-    comp.drawHeader = `ATTACHMENT DETAIL — ${rackAsset.brand} ${rackAsset.model} (MANUFACTURER PUBLISHED)`;
-    primaryDetail =
-      `<img src="${rackAsset.imageUrl}" alt="${escapeH(rackAsset.brand + ' ' + rackAsset.model + ' attachment detail')}" ` +
-      `style="max-width:100%;max-height:100%;object-fit:contain;display:block;" />`;
+  if (rackAsset) {
     const src = rackAsset.docTitle || (rackAsset.sourceUrl ? new URL(rackAsset.sourceUrl).hostname : '');
-    detailCaption =
-      `Source: ${escapeH(src)}${rackAsset.pageRef ? ' · ' + escapeH(rackAsset.pageRef) : ''}` +
-      ` · Manufacturer-published detail — field-verify against current revision.`;
-  }
-
-  // Provenance caption strip (secondary zone) when a manufacturer asset is used.
-  let captionStrip: string | null = null;
-  if (detailCaption) {
-    comp.secondaryHeader = 'DETAIL SOURCE / PROVENANCE';
-    captionStrip = `<div style="font-size:8px;line-height:1.3;color:#334;padding:2px 8px;text-align:center;width:100%;">${detailCaption}</div>`;
+    // Provenance as a GENERAL NOTE in the data rail — a one-line citation must
+    // not consume a whole secondary-view band of the draw zone.
+    comp.generalNotes = [
+      ...(comp.generalNotes ?? []),
+      `ATTACHMENT PER ${rackAsset.brand.toUpperCase()} ${rackAsset.model.toUpperCase()} MANUFACTURER DOCUMENTATION ON FILE: `
+        + `${src}${rackAsset.pageRef ? ' — ' + rackAsset.pageRef : ''}`
+        + `${rackAsset.imageUrl ? '. REPRODUCED FULL-PAGE IN THE DATASHEET APPENDIX (DS SERIES).' : '. FIELD-VERIFY AGAINST CURRENT REVISION.'}`,
+    ];
   }
 
   return `
   <div class="page">
     ${titleBlock(input, 'PV-3', 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION', pageNum, totalPages)}
-    ${composeDrawPage(comp, primaryDetail, captionStrip)}
+    ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
 
@@ -259,7 +254,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>DEAD LOAD INTERPRETATION:</strong>
         The total added dead load of ${totalDL} PSF is distributed uniformly over the fence panel area and transferred
-        to the fence posts and concrete footings via the horizontal rail system.
+        to the fence posts and driven post foundations via the horizontal rail system.
         Post foundations are evaluated to confirm adequate capacity per ASCE 7-22 §26 and §29.4.
         Dead load does not govern for vertical fence-mounted arrays — wind uplift and overturning are the controlling load cases.
       </div>
@@ -276,14 +271,14 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
             <text x="150" y="152" text-anchor="middle" font-size="7.5" fill="#fff" font-weight="bold">FINISH GRADE</text>
             <!-- Below grade soil -->
             <rect x="0" y="158" width="300" height="82" fill="#c8a96e" stroke="#000" stroke-width="0.5"/>
-            <!-- Concrete footing around post -->
-            <ellipse cx="150" cy="230" rx="38" ry="8" fill="#aaa" stroke="#000" stroke-width="1"/>
-            <rect x="112" y="170" width="76" height="65" fill="#aaa" stroke="#000" stroke-width="1"/>
-            <text x="150" y="210" text-anchor="middle" font-size="7" fill="#333" font-weight="bold">CONC. FOOTING</text>
-            <text x="150" y="220" text-anchor="middle" font-size="6.5" fill="#333">3000 PSI MIN, 12" DIA</text>
-            <!-- Post (above and below grade) -->
-            <rect x="138" y="20" width="24" height="178" fill="#444" stroke="#000" stroke-width="1.5"/>
-            <text x="150" y="95" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold" transform="rotate(-90,150,95)">STEEL POST</text>
+            <!-- Driven inner steel post below grade (dashed = buried, no concrete) -->
+            <rect x="142" y="158" width="16" height="72" fill="#fff" stroke="#000" stroke-width="1.2" stroke-dasharray="4,2"/>
+            <polygon points="142,230 150,240 158,230" fill="#fff" stroke="#000" stroke-width="1.2" stroke-dasharray="4,2"/>
+            <text x="196" y="210" text-anchor="middle" font-size="7" fill="#333" font-weight="bold">DRIVEN STEEL POST</text>
+            <text x="196" y="220" text-anchor="middle" font-size="6.5" fill="#333">2-7/8" DIA — NO CONCRETE</text>
+            <!-- Outer post (above grade) -->
+            <rect x="138" y="20" width="24" height="140" fill="#444" stroke="#000" stroke-width="1.5"/>
+            <text x="150" y="95" text-anchor="middle" font-size="7" fill="#fff" font-weight="bold" transform="rotate(-90,150,95)">4" DIA OUTER POST</text>
             <!-- PV Module on post -->
             <rect x="80" y="8" width="140" height="22" fill="#2255aa" stroke="#000" stroke-width="1" rx="1"/>
             <text x="150" y="22" text-anchor="middle" font-size="7.5" fill="#fff" font-weight="bold">PV MODULE</text>
@@ -311,12 +306,12 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         </div>
         <div style="font-size:var(--f-sm);line-height:1.7;">
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">FENCE POST FOUNDATION REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. Posts: Schedule 40 galvanized steel pipe or equivalent structural section — size per structural engineer.</div>
+          <div style="margin-bottom:3px;">1. Posts: 2-7/8" dia. hot-dip galvanized inner steel post (96" long) with 4" dia. outer post sleeve — per SolFence published section.</div>
           <div style="margin-bottom:3px;">2. Embedment: Min. <strong>${postEmbed} ft</strong> below finish grade per ASCE 7-22 §26 and overturning analysis.</div>
-          <div style="margin-bottom:3px;">3. Concrete: Min. 3,000 psi concrete footing — 12" diameter minimum; verify diameter with AHJ.</div>
+          <div style="margin-bottom:3px;">3. Foundation: DRIVEN with post pounder — NO concrete (manufacturer standard install); field-verify refusal.</div>
           <div style="margin-bottom:3px;">4. Post spacing: <strong>${postSpacing} ft O.C.</strong> maximum per wind load calculation — see segment table below.</div>
           <div style="margin-bottom:3px;">5. Wind design: ASCE 7-22 §29.4, Cf = 1.3, Exposure Category ${exposure}.</div>
-          <div style="margin-bottom:3px;">6. Backfill: Compact backfill in 6" lifts to 95% Proctor density for full embedment length.</div>
+          <div style="margin-bottom:3px;">6. Driving: advance post to full embedment or refusal; if refusal above min. embedment, contact engineer of record.</div>
           <div style="margin-bottom:3px;">7. Grounding: All posts bonded to EGC per NEC 250.169 — min. #6 AWG Cu bonding conductor.</div>
           <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Post diameter and wall thickness to be confirmed by engineer of record per final wind load analysis.</div>
         </div>
@@ -383,8 +378,8 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         Wind analysis per ASCE 7-22 §29.4 indicates a net lateral wind load of <strong>${windLoadPost} lbs per post</strong>
         at the design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         The overturning moment at the base of each post is ${overturnMoment} ft-lbs.
-        Fence post embedment of ${postEmbed} ft into concrete footing (3,000 psi min.) provides the required
-        resistance to overturning and lateral loads.
+        Fence post embedment of ${postEmbed} ft (driven inner steel post — no concrete, per the manufacturer's
+        published foundation) provides the required resistance to overturning and lateral loads.
         Ground snow load of ${groundSnow} psf applies to the site; roof slope reduction factors do not apply to
         vertical fence-mounted arrays — ground snow load per ASCE 7-22 §7 governs.
         Post foundation system confirmed adequate for the imposed wind and dead loads per ASCE 7-22 §29.4.
@@ -979,7 +974,7 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
           + '<td>Min. ' + embedFt + 'ft embedment, ' + postSpacingFt + 'ft O.C.</td>'
           + '<td class="tr">' + qty('fence_post') + '</td><td>' + unitOf('fence_post') + '</td>'
           + '<td style="font-size:7px;color:#555">CAD segments × post spacing</td></tr>';
-    html += '<tr class="bg-lt"><td class="fw7">Horizontal Rails</td><td>SolFence Vertical Rail — Extruded Aluminum 6063-T6, 10ft sections</td>'
+    html += '<tr class="bg-lt"><td class="fw7">Horizontal Rails</td><td>SolFence Vertical Rail — Extruded Aluminum 6061-T6, 10ft sections</td>'
           + '<td>' + railCount + ' rails × fence length</td>'
           + '<td class="tr">' + qty('fence_rail') + '</td><td>' + unitOf('fence_rail') + '</td>'
           + '<td style="font-size:7px;color:#555">railCount × fenceLen ÷ 10ft sections</td></tr>';
@@ -1405,7 +1400,13 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => {
               const isc125 = (str.panelIsc * 1.25).toFixed(1);
-              const ocpd = (str.panelIsc * 1.25 * 1.25).toFixed(1);
+              // P0-5b (data-authority register): the OCPD column prints the
+              // conductor authority's STANDARD fuse (NEC 240.6 ladder) — the
+              // raw Isc×1.25×1.25 product ("19.2A") is a nonexistent fuse.
+              // The Isc×1.25 column stays precise (it is an ampacity basis,
+              // not an OCPD). Fallback derives on the same canonical ladder.
+              const _aStr = _schedAuth.dcStrings.find(d => d.invIdx === invIdx && d.strIdx === strIdx);
+              const ocpd = _aStr?.ocpdAmps ?? necNextStandardOcpd(str.panelIsc * 1.56);
               return `
             <tr>
               <td class="fw7">DC ${invIdx + 1}-${strIdx + 1}</td>

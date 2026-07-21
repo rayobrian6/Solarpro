@@ -16,6 +16,8 @@ import type { CADModel } from '@/lib/cad/types';
 import { hasRealBattery, isSupplySideInterconnection } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { buildConductorAuthority } from './conductorAuthority';
+import { getDesignTemps } from './designTemps';
+import { SOLAR_PANELS } from '@/lib/equipment-db';
 
 interface RawLabel {
   id: string;
@@ -121,9 +123,26 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
   // Values are NUMBERS ONLY — the label templates already carry the unit
   // after each blank ("____ V DC", "____ A"), so filling a unit here would
   // double it ("16.5 A A"). Unknowns stay as a fill-in blank.
+  // P1-4 (data-authority register): ONE cold-Voc law — NEC 690.7(A) β-based
+  // temperature correction, Voc × (1 + β/100 × (Tmin − 25)), the SAME law
+  // compliancePages/PV-5/E-1 print. The old blanket ×1.25 here was a second
+  // law and disagreed with the sheets (576V vs 527V class). Unresolved β
+  // keeps ×1.25 as the conservative marked assumption, matching compliancePages.
+  const _lblPanelModel = ((eq.panelModel && eq.panelModel !== '—' ? eq.panelModel : str0?.panelModel) ?? '').toLowerCase().trim();
+  const _lblDb = _lblPanelModel
+    ? (SOLAR_PANELS.find(p => p.model.toLowerCase() === _lblPanelModel)
+      ?? SOLAR_PANELS.find(p => _lblPanelModel.includes(p.model.toLowerCase()) || p.model.toLowerCase().includes(_lblPanelModel)))
+    : undefined;
+  const _lblBeta = typeof _lblDb?.tempCoeffVoc === 'number' ? _lblDb.tempCoeffVoc : undefined;
+  const _lblProj = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
+  const _lblSt = (_lblProj.state && /^[A-Za-z]{2}$/.test(_lblProj.state.trim()))
+    ? _lblProj.state.trim().toUpperCase()
+    : ((_lblProj.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/)?.[1]?.toUpperCase());
+  const _lblTMin = project.designTempMin ?? getDesignTemps(_lblProj.lat, _lblProj.lng, _lblSt).ashraeExtremeLowC;
+  const _vocFactor = _lblBeta !== undefined ? 1 + (_lblBeta / 100) * (_lblTMin - 25) : 1.25;
   const maxSysVdc = !isMicro && panelVoc && panelsPerString
-    ? `${Math.round(panelVoc * 1.25 * panelsPerString)}`
-    : (panelVoc ? `${Math.round(panelVoc * 1.25)}` : '____');
+    ? `${Math.round(panelVoc * _vocFactor * panelsPerString)}`
+    : (panelVoc ? `${Math.round(panelVoc * _vocFactor)}` : '____');
   const iscCont = panelIsc ? `${(panelIsc * 1.25).toFixed(1)}` : '____';
   const impV = (project as any).panelImp ? `${(project as any).panelImp}` : '____';
   const vmpV = (project as any).panelVmp ? `${(project as any).panelVmp}` : '____';

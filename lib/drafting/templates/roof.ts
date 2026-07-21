@@ -284,7 +284,11 @@ export function drawRoofPlan(
   // — the opaque-backing patch just erased whatever linework it covered.
   // Same left reserve on BOTH sheets so PV-1B frames at the IDENTICAL zoom/position
   // as PV-1 (they're sibling views of the same roof; different zoom read as sloppy).
-  const leftReserve = 280;
+  // 280px is reserved for PV-1's left-edge tables (ROOF DESCRIPTION / ARRAY &
+  // ROOF CALC / GENERAL NOTES). PV-1B renders none of them — reserving the
+  // strip anyway silently cost ~30% of the drawing scale (the "zoom is
+  // nowhere near right" regression, Ray 2026-07-20).
+  const leftReserve = (panelColorById && panelColorById.size > 0) ? 20 : 280;
 
   // ── ONE GLOBAL PLAN ROTATION (Ray 2026-07-11: "cocking everything to the
   // side") ──────────────────────────────────────────────────────────────────
@@ -308,9 +312,15 @@ export function drawRoofPlan(
     ...regPlanes0.flatMap((rp: any) => (rp.vertices ?? []) as Array<{ lat: number; lng: number }>),
     ...(_hybRaw?.allPts ?? []),
   ];
+  // ONE MAP TRUTH (Ray 2026-07-20: "We aren't even using the same source of
+  // truth for the map"): the rotation choice must be IDENTICAL on PV-1 and
+  // PV-1B — feeding the chooser each sheet's own usable width let PV-1B's
+  // freed left-reserve flip the building relative to PV-1. The chooser always
+  // evaluates the PV-1 aspect (leftReserve 280 basis); PV-1B then renders the
+  // SAME map, just larger.
   const planRotDeg = choosePlanRotationDeg(
     _planTilt, _subjPtsForRot,
-    dz.width - 2 * margin - leftReserve, dz.height - 2 * margin,
+    dz.width - 2 * margin - 280, dz.height - 2 * margin,
   );
   const _pvLngs = regPlanes0.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lng));
   const _pvLats = regPlanes0.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
@@ -372,6 +382,18 @@ export function drawRoofPlan(
     return i >= 0 ? planeCosP[i] : 1;
   };
 
+  // SVG ids are DOCUMENT-global: PV-1, PV-1B and PV-2 all embed this svg in
+  // one planset html, and identically-named clipPaths collide — the browser
+  // resolves url(#sbclip0) to the FIRST sheet's plane polygon, so later
+  // sheets' framing/fire-bands were clipped by ANOTHER sheet's geometry
+  // (Braidon PV-1B: rafters + ridge band vanished west of PV-1's overlap —
+  // "your firewalk is cut off", 2026-07-20). Every clip id is namespaced with
+  // a per-render sequence number.
+  // Deterministic namespace: byte-identical re-renders are a legacy-sweep
+  // invariant, so a sequence counter is out. The ONLY geometry differentiator
+  // between same-document renders is branch mode (leftReserve/transform);
+  // same-mode renders share ids AND identical clip geometry (harmless).
+  const _svgNs = (panelColorById && panelColorById.size > 0) ? 'b' : 'p';
   const els: string[] = [];
   // v65: pre-compute branch-color mode flag (needed for title bar)
   const isBranchColorMode = !!(panelColorById && panelColorById.size > 0);
@@ -457,28 +479,22 @@ export function drawRoofPlan(
   }
   // Circuit sheet (PV-1B) frames the ARRAY, not the whole roof plane — a small
   // array on a big roof otherwise renders as a tiny cluster in a sea of white.
-  // Frame the module bbox + a margin (~14% of the array's larger dimension so
-  // module rectangles + breathing room are covered), clamped to the roof extent.
-  const _arrayFit = (() => {
-    if (!isBranchColorMode || regPanels.length === 0) return null;
-    const alng = (regPanels as any[]).map(p => p.lng).filter((v: number) => isFinite(v));
-    const alat = (regPanels as any[]).map(p => p.lat).filter((v: number) => isFinite(v));
-    if (alng.length === 0 || alat.length === 0) return null;
-    const aMinLng = Math.min(...alng), aMaxLng = Math.max(...alng);
-    const aMinLat = Math.min(...alat), aMaxLat = Math.max(...alat);
-    const pad = Math.max(aMaxLng - aMinLng, aMaxLat - aMinLat, 0.0002) * 0.14;
-    return {
-      minLng: Math.max(aMinLng - pad, minLng), maxLng: Math.min(aMaxLng + pad, maxLng),
-      minLat: Math.max(aMinLat - pad, minLat), maxLat: Math.min(aMaxLat + pad, maxLat),
-    };
-  })();
-  const _fit = (_site && _ctxPts.length > 0)
+  // PV-1B framing ruling (Ray, 2026-07-20 — "the zoom is nowhere near right…
+  // we lost the visuals like in PV1"): the circuit sheet uses the SAME window
+  // as PV-1, site context and all. The earlier tight array-only fit stripped
+  // the sidewalks/trees and made the rafter grid (which only exists under the
+  // plane polygons) read as "gone" at close zoom. The wiring stays the hero
+  // via color + the annotation-free site layer (drawn at reduced opacity).
+  const _fit = ((_site && _ctxPts.length > 0)
     // v21 review: the subject roof rendered at ~38% of the window (1/2.6) with
     // the neighbor's tree canopy dominating. Tighter caps keep the roof ≥ ~50%
     // (≥ 80% on big lots); nearest context still shows, SVG clips the rest.
+    // PV-1B: tighter still (1.35 → roof ≥ ~74% of the window) — the wiring is
+    // the subject; sidewalks/trees remain a visible ring, never the hero.
+    // Same window on BOTH sheets — PV-1B's extra scale comes from the freed
+    // left reserve alone, never from a different crop of the map.
     ? computeFitWindow({ minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat }, _ctxPts, { maxZoomOut: _bigLot ? 1.25 : 2.0 })
-    : _arrayFit
-    ?? { minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat };
+    : { minLng: subjMinLng, maxLng: subjMaxLng, minLat: subjMinLat, maxLat: subjMaxLat });
   const fitLatSpan = _fit.maxLat - _fit.minLat || 0.001;
   const fitLngSpan = _fit.maxLng - _fit.minLng || 0.001;
 
@@ -503,12 +519,27 @@ export function drawRoofPlan(
   // to the draw zone so off-window neighbors/roads can't spill onto the tables
   // or off-sheet. ──
   let _siteLegend: Array<{ swatch: string; label: string }> = [];
+  // Property-line setback ring distance — the SAME engine value the ground/fence
+  // sheets print (CADGroundModel.setbackFt ← layout.groundSetbackFt; ground.ts
+  // "Array setback X' min. from property line"). Only meaningful when yard
+  // systems exist on this plan; roof-only jobs draw no ring (a roof array has
+  // no P/L setback claim to make).
+  const _plSetbackFt: number | null = _hyb
+    ? (cad?.ground?.setbackFt ?? (layout as { groundSetbackFt?: number } | undefined)?.groundSetbackFt ?? null)
+    : null;
+  // Site layer on BOTH sheets — PV-1 gets the full annotated site plan;
+  // PV-1B keeps the same VISUALS (roads, sidewalks, trees, buildings, parcel
+  // line) at reduced opacity behind the wiring, but with annotations:false —
+  // no parcel dims, no PROPERTY LINE tags, no setback ring/dims, no service
+  // cluster, no trench notes. Ray 2026-07-20: "We lost the visuals like in
+  // PV1" reversed the brief no-site experiment; the furniture stays off.
   if (_site) {
     try {
-      const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY);
+      const sr = drawSiteContextEls(_site, { minLng, maxLng, minLat, maxLat }, toX, toY,
+        { plSetbackFt: _plSetbackFt, fitWin: _fit, annotations: !isBranchColorMode });
       if (sr.els.length) {
-        els.push(`<defs><clipPath id="pv2site-clip"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
-        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip)"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
+        els.push(`<defs><clipPath id="pv2site-clip${_svgNs}"><rect x="${dz.x}" y="${dz.y}" width="${dz.width}" height="${dz.height}"/></clipPath></defs>`);
+        els.push(`<g class="pv2-site" clip-path="url(#pv2site-clip${_svgNs})"${isBranchColorMode ? ' opacity="0.5"' : ''}>${sr.els.join('')}</g>`);
         _siteLegend = sr.legend;
         svgTitle = 'SITE & ROOF PLAN WITH MODULES';
       }
@@ -521,6 +552,22 @@ export function drawRoofPlan(
   // (Fence is NOT drawn to-scale here — it sits 100+ ft off and ballooned the
   // window; it renders in the SITE KEY inset below. Ray 2026-07-14.)
   if (_hyb) {
+    // Liang-Barsky segment/rect clip against the draw zone (fence + trench runs)
+    const clipToDz = (x1: number, y1: number, x2: number, y2: number): [number, number, number, number] | null => {
+      const dx = x2 - x1, dy = y2 - y1;
+      let t0 = 0, t1 = 1;
+      const edges: Array<[number, number]> = [
+        [-dx, x1 - dz.x], [dx, dz.x + dz.width - x1],
+        [-dy, y1 - dz.y], [dy, dz.y + dz.height - y1],
+      ];
+      for (const [p, q] of edges) {
+        if (p === 0) { if (q < 0) return null; continue; }
+        const r = q / p;
+        if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+        else { if (r < t0) return null; if (r < t1) t1 = r; }
+      }
+      return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
+    };
     const hEls: string[] = [];
     for (const g of _hyb.ground) {
       const pts = g.ring.map(p => `${toX(p.lng).toFixed(1)},${toY(p.lat).toFixed(1)}`).join(' ');
@@ -543,8 +590,8 @@ export function drawRoofPlan(
     }
     if (hEls.length) {
       els.push(`<g class="pv2-hybrid">${hEls.join('')}</g>`);
-      _siteLegend.push({ swatch: '#2b6cb0', label: 'Ground-mount array (see ground sheets)' });
-      if (_hyb.fence.length) _siteLegend.push({ swatch: '#1a7a3a', label: 'Solar fence run (see fence sheets)' });
+      _siteLegend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="#2b6cb0" fill-opacity="0.14" stroke="#2b6cb0" stroke-width="1"/><line x1="7" y1="-4" x2="7" y2="4" stroke="#2b6cb0" stroke-width="0.7"/>`, label: 'GROUND-MOUNT ARRAY (SEE GROUND SHEETS)' });
+      if (_hyb.fence.length) _siteLegend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#1a7a3a" stroke-width="2.6" stroke-linecap="round"/>`, label: 'SOLAR FENCE RUN (SEE FENCE SHEETS)' });
     }
     // Fence on the main plan: draw the run's VISIBLE portion (clipped to the
     // draw zone) at its true rotated bearing. The direction arrow is only the
@@ -554,22 +601,6 @@ export function drawRoofPlan(
     // mini-map's real fence line was removed).
     const _fenceOffFrame: typeof _hyb.fence = [];
     if (_hyb.fence.length) {
-      // Liang-Barsky segment/rect clip against the draw zone
-      const clipToDz = (x1: number, y1: number, x2: number, y2: number): [number, number, number, number] | null => {
-        const dx = x2 - x1, dy = y2 - y1;
-        let t0 = 0, t1 = 1;
-        const edges: Array<[number, number]> = [
-          [-dx, x1 - dz.x], [dx, dz.x + dz.width - x1],
-          [-dy, y1 - dz.y], [dy, dz.y + dz.height - y1],
-        ];
-        for (const [p, q] of edges) {
-          if (p === 0) { if (q < 0) return null; continue; }
-          const r = q / p;
-          if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
-          else { if (r < t0) return null; if (r < t1) t1 = r; }
-        }
-        return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
-      };
       for (const f of _hyb.fence) {
         const c = clipToDz(toX(f.line[0].lng), toY(f.line[0].lat), toX(f.line[1].lng), toY(f.line[1].lat));
         // draw only when a meaningful run is visible; tiny slivers → arrow
@@ -604,6 +635,90 @@ export function drawRoofPlan(
       const fLen = _fenceOffFrame[0]?.label?.match(/·\s*([^·]+L\.F\.)/)?.[1]?.trim() ?? 'SOLAR FENCE';
       els.push(`<text x="${ax.toFixed(1)}" y="${(ay - 8).toFixed(1)}" font-size="7" font-weight="bold" fill="#1a7a3a" text-anchor="middle" stroke="#fff" stroke-width="2.6" paint-order="stroke">SOLAR FENCE ${fLen} → SEE PV-1F</text>`);
     }
+
+    // ── (N) TRENCH / CONDUIT ROUTES (reference: the "(N) ~ TRENCHING" runs) ──
+    // Schematic dashed orthogonal runs from each yard array group (ground +
+    // fence) toward the PV interconnection point. Drawn ONLY when the site
+    // layer actually located service equipment (meter GPS / street-side
+    // heuristic) — no service point, no invented route. Routes are explicitly
+    // schematic: label says ROUTE FIELD-VERIFIED. Clipped to the draw zone.
+    if (!isBranchColorMode && _site && _site.equipment.length && (_hyb.ground.length || _hyb.fence.length)) {
+      const _svcE = _site.equipment.find(e => e.kind === 'utility_meter') ?? _site.equipment[0];
+      const spx = toX(_svcE.pt.lng), spy = toY(_svcE.pt.lat);
+      type Pt2 = { x: number; y: number };
+      const starts: Array<{ p: Pt2; kind: 'ground' | 'fence' }> = [];
+      for (const g of _hyb.ground) {
+        let best = g.ring[0], bd = Infinity;
+        for (const p of g.ring) {
+          const d = (toX(p.lng) - spx) ** 2 + (toY(p.lat) - spy) ** 2;
+          if (d < bd) { bd = d; best = p; }
+        }
+        starts.push({ p: { x: toX(best.lng), y: toY(best.lat) }, kind: 'ground' });
+      }
+      for (const f of _hyb.fence) {
+        const c0: Pt2 = { x: toX(f.line[0].lng), y: toY(f.line[0].lat) };
+        const c1: Pt2 = { x: toX(f.line[1].lng), y: toY(f.line[1].lat) };
+        starts.push({
+          p: ((c0.x - spx) ** 2 + (c0.y - spy) ** 2) <= ((c1.x - spx) ** 2 + (c1.y - spy) ** 2) ? c0 : c1,
+          kind: 'fence',
+        });
+      }
+      // Roof bbox (screen) — routes must not read as trenching THROUGH the
+      // house: of the two orthogonal elbows, keep the one whose legs overlap
+      // the roof footprint least; labels only ride legs clear of the roof.
+      const _rbx0 = toX(minLng), _rbx1 = toX(maxLng), _rby0 = toY(maxLat), _rby1 = toY(minLat);
+      const _roofOverlap = (a: Pt2, b: Pt2): number => {
+        if (Math.abs(a.y - b.y) < 0.01) {   // horizontal leg
+          if (a.y < _rby0 || a.y > _rby1) return 0;
+          return Math.max(0, Math.min(Math.max(a.x, b.x), _rbx1) - Math.max(Math.min(a.x, b.x), _rbx0));
+        }
+        if (a.x < _rbx0 || a.x > _rbx1) return 0;
+        return Math.max(0, Math.min(Math.max(a.y, b.y), _rby1) - Math.max(Math.min(a.y, b.y), _rby0));
+      };
+      const tEls: string[] = [];
+      const _labeledKinds = new Set<string>();
+      starts.forEach((s, i) => {
+        const st = s.p;
+        if (Math.hypot(st.x - spx, st.y - spy) < 24) return;   // array abuts the wall — no run to draw
+        const off = i * 4;   // stagger shared legs so routes don't merge into one heavy line
+        const hFirst: Array<[Pt2, Pt2]> = [
+          [st, { x: spx + off, y: st.y }],
+          [{ x: spx + off, y: st.y }, { x: spx + off, y: spy }],
+        ];
+        const vFirst: Array<[Pt2, Pt2]> = [
+          [st, { x: st.x, y: spy + off }],
+          [{ x: st.x, y: spy + off }, { x: spx, y: spy + off }],
+        ];
+        const ovOf = (segs: Array<[Pt2, Pt2]>) => segs.reduce((sum, [a, b]) => sum + _roofOverlap(a, b), 0);
+        const segs = ovOf(vFirst) < ovOf(hFirst) ? vFirst : hFirst;
+        let bestSeg: [number, number, number, number] | null = null, bestScore = -Infinity;
+        for (const [a, b] of segs) {
+          const c = clipToDz(a.x, a.y, b.x, b.y);
+          if (!c) continue;
+          tEls.push(`<line x1="${c[0].toFixed(1)}" y1="${c[1].toFixed(1)}" x2="${c[2].toFixed(1)}" y2="${c[3].toFixed(1)}" stroke="#3a3f46" stroke-width="1.1" stroke-dasharray="7 3.5"/>`);
+          const L = Math.hypot(c[2] - c[0], c[3] - c[1]);
+          const score = L - 4 * _roofOverlap(a, b);   // prefer long legs CLEAR of the roof
+          if (score > bestScore) { bestScore = score; bestSeg = c; }
+        }
+        // one label per system kind, on a leg FULLY CLEAR of the roof + its
+        // dimension/callout band (a half-covered label read worse than none)
+        const _clearOfRoof = bestSeg
+          ? !(Math.min(bestSeg[0], bestSeg[2]) < _rbx1 + 25 && Math.max(bestSeg[0], bestSeg[2]) > _rbx0 - 25 &&
+              Math.min(bestSeg[1], bestSeg[3]) < _rby1 + 58 && Math.max(bestSeg[1], bestSeg[3]) > _rby0 - 25)
+          : false;
+        if (bestSeg && bestScore > 70 && _clearOfRoof && !_labeledKinds.has(s.kind)) {
+          _labeledKinds.add(s.kind);
+          const mx = (bestSeg[0] + bestSeg[2]) / 2, my = (bestSeg[1] + bestSeg[3]) / 2;
+          let ang = Math.atan2(bestSeg[3] - bestSeg[1], bestSeg[2] - bestSeg[0]) * 180 / Math.PI;
+          if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ROUTE FIELD-VERIFIED</text>`);
+        }
+      });
+      if (tEls.length) {
+        els.push(`<g class="pv1-trench">${tEls.join('')}</g>`);
+        _siteLegend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#3a3f46" stroke-width="1.1" stroke-dasharray="4 2"/>`, label: '(N) TRENCH / CONDUIT ROUTE — FIELD VERIFY' });
+      }
+    }
   }
 
   // ── Draw roof planes ──
@@ -628,7 +743,7 @@ export function drawRoofPlan(
     //     on the eave it needs to not show") + fine line
     //   perimeter otherwise                     = RAKE   → band + fine line
     const nV = ptsXY.length;
-    const clipId = `sbclip${ri}`;
+    const clipId = `sb${_svgNs}c${ri}`;
     els.push(`<defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>`);
     const bands: string[] = [];
     const edgeLines: string[] = [];
@@ -788,7 +903,7 @@ export function drawRoofPlan(
     // Fire-access pathways belong on PV-1 (the fire/setback sheet); on PV-1B's
     // circuit map they just clutter the branch routing, so skip them here.
     if (!isBranchColorMode) {
-      els.push(`<g clip-path="url(#sbclip${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
+      els.push(`<g clip-path="url(#sb${_svgNs}c${ri})"><polygon points="${poly}" fill="#1a7a2e" opacity="0.10" stroke="#1a7a2e" stroke-width="1" stroke-dasharray="6 3"/></g>`);
       const lmx = gc * udx + ((vMin + vMax) / 2) * vdx;
       const lmy = gc * udy + ((vMin + vMax) / 2) * vdy;
       let angDeg = Math.atan2(vdy, vdx) * 180 / Math.PI;
@@ -977,7 +1092,7 @@ export function drawRoofPlan(
         }
       });
       if (rails.length || rFeet.length || dFeet.length)
-        els.push(`<g clip-path="url(#sbclip${ri})">${rails.join('')}${rFeet.join('')}${dFeet.join('')}</g>`);
+        els.push(`<g clip-path="url(#sb${_svgNs}c${ri})">${rails.join('')}${rFeet.join('')}${dFeet.join('')}</g>`);
     });
   }
 
@@ -1099,20 +1214,30 @@ export function drawRoofPlan(
     };
     // Best axis-aligned route a→b: both Manhattan corners plus four skirts
     // around the array bbox (clamped inside the roof outline).
-    const _arrX0 = Math.min(..._pbx), _arrX1 = Math.max(..._pbx);
-    const _arrY0 = Math.min(..._pby), _arrY1 = Math.max(..._pby);
+    // Skirt bounds come from the module RECT extremes, NOT the panel-center
+    // extremes: centers put the "skirt" INSIDE the outer rows (every skirt
+    // route then scored ≥1 hit and the picker degenerated to whichever loop
+    // was measured first — Braidon's B1 homerun circled the whole array over
+    // the ridge, 2026-07-20).
+    const _arrX0 = Math.min(...modRects.map(r => r.x0)), _arrX1 = Math.max(...modRects.map(r => r.x1));
+    const _arrY0 = Math.min(...modRects.map(r => r.y0)), _arrY1 = Math.max(...modRects.map(r => r.y1));
     const _roofX0 = _allVx.length ? Math.min(..._allVx) : _arrX0, _roofX1 = _allVx.length ? Math.max(..._allVx) : _arrX1;
     const _roofY0 = _allVy.length ? Math.min(..._allVy) : _arrY0, _roofY1 = _allVy.length ? Math.max(..._allVy) : _arrY1;
-    const bestRoute = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-      const yS = Math.min(_arrY1 + 10, _roofY1 - 5), yN = Math.max(_arrY0 - 10, _roofY0 + 5);
-      const xE = Math.min(_arrX1 + 10, _roofX1 - 5), xW = Math.max(_arrX0 - 10, _roofX0 + 5);
+    const bestRoute = (a: { x: number; y: number }, b: { x: number; y: number }, opts?: { homerun?: boolean }) => {
+      const yS = Math.min(_arrY1 + 8, _roofY1 - 5), yN = Math.max(_arrY0 - 8, _roofY0 + 5);
+      const xE = Math.min(_arrX1 + 8, _roofX1 - 5), xW = Math.max(_arrX0 - 8, _roofX0 + 5);
       const cands: Array<Array<{ x: number; y: number }>> = [
         [a, { x: b.x, y: a.y }, b],
         [a, { x: a.x, y: b.y }, b],
         [a, { x: a.x, y: yS }, { x: b.x, y: yS }, b],
-        [a, { x: a.x, y: yN }, { x: b.x, y: yN }, b],
+        // Homeruns: the JB sits at the SE corner by construction, so the far
+        // (north/west) skirts can only produce a lasso around the array —
+        // exclude them and keep the south/east corridors (+ an L through the
+        // east corridor). Plane transitions keep all four skirts.
+        ...(opts?.homerun ? [] : [[a, { x: a.x, y: yN }, { x: b.x, y: yN }, b],
+                                  [a, { x: xW, y: a.y }, { x: xW, y: b.y }, b]]),
         [a, { x: xE, y: a.y }, { x: xE, y: b.y }, b],
-        [a, { x: xW, y: a.y }, { x: xW, y: b.y }, b],
+        ...(opts?.homerun ? [[a, { x: a.x, y: yS }, { x: xE, y: yS }, { x: xE, y: b.y }, b]] : []),
       ];
       let best = cands[0], bh = Infinity, bl = Infinity;
       for (const c of cands) {
@@ -1134,24 +1259,64 @@ export function drawRoofPlan(
         byPlaneKey.get(k)!.push(p);
       }
       const chainGroup = (ps: any[]): any[] => {
-        // ALWAYS geometric nearest-neighbor in SCREEN space. Global row/col
-        // indices don't reflect a rotated end-plane's local layout — sorting
-        // by them re-created the starburst INSIDE the plane group.
         const P = ps.map((p: any) => ({ p, x: toX(p.lng), y: toY(p.lat) }));
-        const used = new Array(P.length).fill(false);
-        let cur = 0;
-        for (let i = 1; i < P.length; i++) if (P[i].x + P[i].y < P[cur].x + P[cur].y) cur = i;
-        const out = [P[cur].p]; used[cur] = true;
-        for (let s = 1; s < P.length; s++) {
-          let best = -1, bestD = Infinity;
-          for (let i = 0; i < P.length; i++) {
-            if (used[i]) continue;
-            const d = (P[i].x - P[cur].x) ** 2 + (P[i].y - P[cur].y) ** 2;
-            if (d < bestD) { bestD = d; best = i; }
-          }
-          out.push(P[best].p); used[best] = true; cur = best;
+        // ROW-AWARE serpentine (2026-07-20, Braidon PV-1B): the greedy global
+        // NN chain serpentined a full row and only then jumped to a stranded
+        // module in the next row — a >3×median segment the corridor router
+        // then drew as a zero-hit LASSO around the whole array. Cluster into
+        // screen-space rows, snake them, and pick the row order + start
+        // direction that minimizes total wire and ends NEAREST THE JB (short
+        // homerun). NN survives only as the degenerate-scatter fallback.
+        const rowGapPx = Math.max(Math.min(panLenPx, panWidPx) * 0.6, 8);
+        const byY = [...P].sort((a, b) => a.y - b.y);
+        const rows: Array<typeof P> = [];
+        for (const q of byY) {
+          const last = rows[rows.length - 1];
+          if (last && Math.abs(q.y - last[last.length - 1].y) <= rowGapPx) last.push(q);
+          else rows.push([q]);
         }
-        return out;
+        const nnChain = (): typeof P => {
+          const used = new Array(P.length).fill(false);
+          let cur = 0;
+          for (let i = 1; i < P.length; i++) if (P[i].x + P[i].y < P[cur].x + P[cur].y) cur = i;
+          const out = [P[cur]]; used[cur] = true;
+          for (let s = 1; s < P.length; s++) {
+            let best = -1, bestD = Infinity;
+            for (let i = 0; i < P.length; i++) {
+              if (used[i]) continue;
+              const d = (P[i].x - P[cur].x) ** 2 + (P[i].y - P[cur].y) ** 2;
+              if (d < bestD) { bestD = d; best = i; }
+            }
+            out.push(P[best]); used[best] = true; cur = best;
+          }
+          return out;
+        };
+        let chain: typeof P;
+        if (rows.length > Math.max(2, P.length / 1.6)) {
+          chain = nnChain();   // scatter, not a grid — rows are meaningless
+        } else {
+          for (const r of rows) r.sort((a, b) => a.x - b.x);
+          const pathLen = (c: typeof P) => {
+            let L = 0;
+            for (let k = 1; k < c.length; k++) L += Math.hypot(c[k].x - c[k - 1].x, c[k].y - c[k - 1].y);
+            return L;
+          };
+          let best: typeof P | null = null, bestScore = Infinity;
+          for (const rowsOrdered of [rows, [...rows].reverse()]) {
+            for (const firstLTR of [true, false]) {
+              const c: typeof P = [];
+              rowsOrdered.forEach((r, ri) => {
+                const ltr = (ri % 2 === 0) === firstLTR;
+                c.push(...(ltr ? r : [...r].reverse()));
+              });
+              const end = c[c.length - 1];
+              const score = pathLen(c) + 0.6 * Math.hypot(end.x - jbX, end.y - jbY);
+              if (score < bestScore) { bestScore = score; best = c; }
+            }
+          }
+          chain = best ?? nnChain();
+        }
+        return chain.map(q => q.p);
       };
       // Plane-group sequence: largest first, then nearest centroid next.
       const grps = [...byPlaneKey.values()].map(ps => {
@@ -1199,7 +1364,7 @@ export function drawRoofPlan(
       // Same collision-scored routing as the plane transitions — the fixed
       // drop-then-across leg ran a north-plane homerun straight through the
       // south rows on its way to the JB.
-      const hrRoute = bestRoute(tail, { x: jbX, y: jbY });
+      const hrRoute = bestRoute(tail, { x: jbX, y: jbY }, { homerun: true });
       const hr = hrRoute.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
       els.push(`<polyline points="${hr}" fill="none" stroke="#fff" stroke-width="2.6" opacity="0.85" stroke-dasharray="3 2"/>`);
       els.push(`<polyline points="${hr}" fill="none" stroke="${g.color}" stroke-width="1.3" stroke-dasharray="3 2"/>`);
@@ -1515,11 +1680,9 @@ export function drawRoofPlan(
   // read as less finished than PV-1's rose.
   const scaleBarPx = Math.max(Math.round(10 * scale), 30);   // 10-foot scale bar
   const sbX = zones.dims.left + 4, sbY = H - zones.dims.bottom + 28;
-  els.push(drawScaleBar(sbX, sbY, scaleBarPx, ''));
-  // labels aligned to the graduations (was one crammed '0    10 FT' string)
-  els.push(drawText(sbX, sbY + 12, '0', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
-  els.push(drawText(sbX + scaleBarPx / 2, sbY + 12, '5', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
-  els.push(drawText(sbX + scaleBarPx, sbY + 12, '10 FT', { anchor: 'middle', fontSize: 5.5, fill: '#1a1a1a' }));
+  // Segmented graphic scale with real feet at every graduation (helper draws
+  // the labels from totalFt — the old external 0/5/10 texts assumed 2 segments).
+  els.push(drawScaleBar(sbX, sbY, scaleBarPx, '', { totalFt: 10 }));
 
   // ── Compass rose (BOTH sheets) + LEGEND (PV-1 only) ───────────────────────
   {
@@ -1589,51 +1752,19 @@ export function drawRoofPlan(
       // parcel was drawn on this sheet.
       ..._siteLegend,
     ];
-    const lgW = 128, rowH = 13;
-    const lgH = 13 + lg.length * rowH;
-    // Corner-pick the legend: the fixed top-right float sat ON TOP of the
-    // fence run on the Stowell site sheet (Ray 2026-07-16: "the legend
-    // covering where the [fence] should be"). Score each candidate corner by
-    // how many SUBJECT points (modules, ground rings, fence line, labels)
-    // fall under the panel; take the emptiest. Bottom-right is excluded —
-    // the compass rose + SYSTEM REFERENCE live there.
-    const _subjPx: Array<[number, number]> = [];
-    for (const p of regPanels as any[]) if (isFinite(p?.lng) && isFinite(p?.lat)) _subjPx.push([toX(p.lng), toY(p.lat)]);
-    if (_hyb) {
-      for (const g of _hyb.ground) for (const p of g.ring) _subjPx.push([toX(p.lng), toY(p.lat)]);
-      for (const f of _hyb.fence) {
-        for (const p of f.line) _subjPx.push([toX(p.lng), toY(p.lat)]);
-        _subjPx.push([toX(f.labelPt.lng), toY(f.labelPt.lat)]);
-        // sample along the run so a line THROUGH the corner counts, not just endpoints
-        for (let t = 0.1; t < 1; t += 0.1) {
-          _subjPx.push([
-            toX(f.line[0].lng + (f.line[1].lng - f.line[0].lng) * t),
-            toY(f.line[0].lat + (f.line[1].lat - f.line[0].lat) * t),
-          ]);
-        }
-      }
-    }
-    const _dzX0 = zones.dims.left, _dzX1 = W - zones.dims.right;
-    const _cands: Array<{ x: number; y: number; bias: number }> = [
-      { x: _dzX1 - lgW + 8,  y: zones.dims.top + 6, bias: 0 },   // TR (historic default)
-      { x: _dzX0 + 6,        y: zones.dims.top + 6, bias: 1 },   // TL
-      { x: _dzX0 + 6,        y: (H - zones.dims.bottom) - lgH - 40, bias: 2 }, // BL (above scale bar)
-    ];
-    let lgX = _cands[0].x, lgY = _cands[0].y, _bestScore = Infinity;
-    for (const c of _cands) {
-      const hits = _subjPx.reduce((n, [px, py]) =>
-        n + (px >= c.x - 6 && px <= c.x + lgW + 6 && py >= c.y - 6 && py <= c.y + lgH + 6 ? 1 : 0), 0);
-      const score = hits * 10 + c.bias;
-      if (score < _bestScore) { _bestScore = score; lgX = c.x; lgY = c.y; }
-    }
-    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="${lgH}" rx="2" fill="rgba(255,255,255,0.95)" stroke="#2b2f36" stroke-width="0.8"/>`);
-    els.push(`<rect x="${lgX}" y="${lgY}" width="${lgW}" height="12" fill="#000"/>`);
-    els.push(drawText(lgX + lgW / 2, lgY + 8.5, 'LEGEND', { anchor: 'middle', fontSize: 6, fontWeight: 'bold', fill: '#fff', letterSpacing: 1 }));
-    lg.forEach((e, i) => {
-      const ry = lgY + 12 + i * rowH + rowH / 2;
-      els.push(`<g transform="translate(${lgX + 8},${ry})">${e.swatch}</g>`);
-      els.push(drawText(lgX + 30, ry + 2.3, e.label, { anchor: 'start', fontSize: 5.6, fill: '#1a1a1a' }));
-    });
+    // Legend lives OFF the map (Ray 2026-07-16: every on-map float eventually
+    // covers something — first the fence run, then the left-rail tables when
+    // the corner-picker dodged the fence). Emitted as a sentinel HTML block
+    // AFTER the SVG; composeDrawPage extracts it and injects it into the data
+    // rail underneath the CALLOUT SCHEDULE. Swatches reference the main SVG's
+    // defs (url(#hatch-setback)) — id lookups are document-wide, so they
+    // resolve against the drawing's defs.
+    const _lgRows = lg.map(e => `
+      <div style="display:flex;align-items:center;gap:5px;padding:1.5px 6px;">
+        <svg width="16" height="11" viewBox="-1 -6 16 12" style="flex-shrink:0;">${e.swatch}</svg>
+        <span style="font-size:6.4px;color:#1a1a1a;">${e.label}</span>
+      </div>`).join('');
+    els.push(`<!--RAIL-LEGEND-->${_lgRows}<!--/RAIL-LEGEND-->`);
   }
 
   // ── Direct equipment callouts (PV-2 only — reference-set style) ──
@@ -1724,30 +1855,11 @@ export function drawRoofPlan(
     const _scaleErr = Math.abs(_nearest[1] - _inPerFt) / _inPerFt;
     els.push(drawText(vtX + 22, vtY + 11, _scaleErr < 0.05 ? `SCALE: ${_nearest[0]} = 1'-0"` : 'GRAPHIC SCALE — SEE BAR', { anchor: 'start', fontSize: 6, fill: '#333' }));
   }
-  // Branch-color mode (PV-1B): the HTML draw-zone header already titles the sheet
-  // ("CIRCUIT LAYOUT — n MODULES / m BRANCHES"), so we DON'T repeat a title banner
-  // inside the drawing. Instead, a small Cannon-style CIRCUIT LEGEND keys the thin
-  // colored circuit wires to their circuit numbers (top-left, over the margin).
-  if (isBranchColorMode && branchIndexByColor.size > 0) {
-    const circuits = [...branchIndexByColor.entries()].sort((a, b) => a[1] - b[1]);
-    const lx = dz.x + 10, ly = zones.dims.top + 12;
-    const rowH = 10.5, boxW = 112, boxH = 22 + (circuits.length + 1) * rowH + 4;
-    els.push(`<rect x="${lx}" y="${ly}" width="${boxW}" height="${boxH.toFixed(1)}" fill="rgba(255,255,255,0.95)" stroke="#000" stroke-width="0.8"/>`);
-    els.push(drawText(lx + 6, ly + 12, 'CIRCUIT LEGEND', { anchor: 'start', fontSize: 6.6, fontWeight: 'bold', fill: '#000' }));
-    els.push(`<line x1="${lx}" y1="${(ly + 15).toFixed(1)}" x2="${lx + boxW}" y2="${(ly + 15).toFixed(1)}" stroke="#000" stroke-width="0.5"/>`);
-    circuits.forEach(([color, idx]) => {
-      const ry = ly + 15 + 10 + idx * rowH;
-      els.push(`<line x1="${lx + 7}" y1="${ry.toFixed(1)}" x2="${lx + 27}" y2="${ry.toFixed(1)}" stroke="${color}" stroke-width="2.2"/>`);
-      els.push(`<circle cx="${(lx + 17).toFixed(1)}" cy="${ry.toFixed(1)}" r="2.4" fill="#fff" stroke="${color}" stroke-width="0.8"/>`);
-      els.push(`<text x="${(lx + 17).toFixed(1)}" y="${(ry + 1.9).toFixed(1)}" text-anchor="middle" font-size="4.6" font-weight="700" fill="${color}">${idx + 1}</text>`);
-      els.push(drawText(lx + 33, (ry + 2.2), `CIRCUIT ${idx + 1}`, { anchor: 'start', fontSize: 6, fill: '#111' }));
-    });
-    // Device row: the IQ8 microinverter symbol drawn under each module.
-    const dry = ly + 15 + 10 + circuits.length * rowH + 3;
-    els.push(`<line x1="${lx + 4}" y1="${(dry - 6).toFixed(1)}" x2="${lx + boxW - 4}" y2="${(dry - 6).toFixed(1)}" stroke="#ccc" stroke-width="0.4"/>`);
-    els.push(`<rect x="${(lx + 10).toFixed(1)}" y="${(dry - 2.4).toFixed(1)}" width="14" height="4.8" fill="#2b2f36" stroke="#555" stroke-width="0.5" rx="0.6"/>`);
-    els.push(drawText(lx + 33, (dry + 2.0), 'IQ8 MICROINVERTER', { anchor: 'start', fontSize: 5.6, fill: '#111' }));
-  }
+  // Branch-color mode (PV-1B): NO on-map legend. The data rail already prints
+  // the BRANCH LEGEND (same colors, same order) — the floating CIRCUIT LEGEND
+  // box double-labelled it and parked an opaque panel over the drawing (Ray's
+  // ruling: legends live OFF the map; verified violation on Braidon PV-1B,
+  // 2026-07-20). The bottom caption keys the device symbol + dashing instead.
 
   // (Branch legend overlay REMOVED — it duplicated the data-zone BRANCH LEGEND
   //  table and its opaque box painted straight over the viewport title, which
@@ -1757,7 +1869,10 @@ export function drawRoofPlan(
   // explains the module shading (useful) rather than repeating the sheet title. ──
   if (isBranchColorMode) {
     els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
-      'IQ8 MICROINVERTER (▪) UNDER EACH MODULE · WIRED IN SERIES PER AC BRANCH (COLORED) · DASHED = HOMERUN TO JB · SEE CIRCUIT LEGEND', {
+      // Wording note: the planset-structural golden guards against any on-map
+      // legend overlay by asserting the literal "BRANCH LEGEND" never appears
+      // in this SVG — reference the rail table without tripping it.
+      'IQ8 MICROINVERTER (▪) UNDER EACH MODULE · WIRED IN SERIES PER AC BRANCH (COLORED) · DASHED = HOMERUN TO JB · SEE LEGEND IN DATA RAIL', {
         anchor: 'start', fontSize: 6.5, fill: '#555', italic: true,
       }));
   }

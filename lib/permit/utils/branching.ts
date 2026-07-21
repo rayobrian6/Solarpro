@@ -82,6 +82,24 @@ export function microBranchCount(totalModules: number, inverterModel?: string | 
   return Math.max(1, Math.ceil(totalModules / microMaxPerBranch(inverterModel, manufacturer)));
 }
 
+/** MANUFACTURER's maximum branch OCPD for the model (Ray D-1: never exceeded;
+ *  the snapshot validator fails closed on any branch above it). Enphase
+ *  profiles carry the published figure; unknown models default to the 20 A
+ *  standard residential branch basis. */
+export function microBranchMaxOcpdA(inverterModel?: string | null, manufacturer?: string | null): number {
+  const m = _norm(String(inverterModel ?? ''));
+  let best: number | null = null;
+  let bestLen = -1;
+  for (const prof of ENPHASE_CAPABILITY_PROFILES) {
+    const key = _norm(prof.modelName);
+    if (key && m.includes(key) && key.length > bestLen) {
+      const v = (prof.branchCircuit as { maxBranchOcpdA?: number } | undefined)?.maxBranchOcpdA;
+      if (typeof v === 'number' && v > 0) { best = v; bestLen = key.length; }
+    }
+  }
+  return best ?? 20;
+}
+
 /**
  * Balanced branch sizes — first (total % n) branches get one extra module.
  * 53 modules / 6 branches → [9, 9, 9, 9, 9, 8], never [14, 14, 14, 11].
@@ -105,6 +123,9 @@ export interface BranchPlanPanel {
    *  panel must NEVER share an AC branch with a roof panel). */
   systemType?: string;
   placementType?: string;
+  /** Plane-facing stamp — the geometric plane-grouping fallback when
+   *  planeId/arrayId are absent (production payloads). */
+  azimuth?: number | null;
 }
 
 export interface BranchPlan {
@@ -117,32 +138,19 @@ export interface BranchPlan {
 }
 
 /**
- * ECONOMICAL branch plan — installer common sense (Ray, 2026-07-03: "the
- * math needs to be logical... owners aren't going to spend extra money on
- * wire to run 5 strings of 4").
+ * BRANCH PLAN — Ray's binding D-1 ruling (2026-07-20, PermitDesignSnapshot
+ * campaign): MANUFACTURER AUTHORITY governs. Branch count = ceil(N / the
+ * manufacturer's max units per branch), sizes balanced, and the assignment
+ * optimizes ROUTING (plane-contiguous serpentine walk, nearest-plane chain)
+ * while never letting physical roof grouping define an electrical branch
+ * boundary. 31 IQ8A → 11/10/10 @ 20 A. Economy still holds (minimum
+ * homeruns — Ray 2026-07-03), but no plane rule may create an extra branch
+ * or an over-limit branch.
  *
- * Rules, in priority order:
- *   1. MINIMUM homeruns: branch count = ceil(total / per-model NEC max) —
- *      never more. Every extra branch is trunk cable, a terminator, and a
- *      breaker slot the owner pays for.
- *   2. Fill within a plane first: each face contributes floor(n/max) FULL
- *      branches wired serpentine on that face.
- *   3. Leftovers merge with the NEAREST leftover group (panel-centroid
- *      distance) — a hip-cap's 4 modules ride the adjacent face's remainder
- *      across one hip, not a runt branch of their own and never a diagonal
- *      run across the whole roof.
- *
- * Melvin (23/22/4/4 @ max 10): 10+10 north, 10+10 south, then 3N+4W and
- * 2S+4E → 6 branches total, the theoretical minimum.
- *
- * Plane grouping key: planeId, else arrayId; no keys at all → one global
- * group (legacy payloads — still NEC-sized, still minimal count).
- *
- * Wave 2d SUB-SYSTEM FENCING (Invariant I-4): panels are partitioned by their
- * placement-stamped systemType FIRST (roof → ground → fence), and the plane/
- * array grouping + leftover-merge runs WITHIN each sub-system only. The
- * leftover-merge can therefore never join fence panels onto a roof branch.
- * Single-system payloads (every panel one sub) take the exact legacy path.
+ * Wave 2d SUB-SYSTEM FENCING (Invariant I-4) is unchanged: panels partition
+ * by placement-stamped systemType FIRST (roof → ground → fence) and the plan
+ * runs WITHIN each sub-system — a fence panel never shares an AC branch with
+ * a roof panel.
  */
 export function planMicroBranches(
   panels: BranchPlanPanel[],
@@ -203,7 +211,18 @@ function planBranchesWithinSub(
     return Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * cos);
   };
 
-  const keyOf = (p: BranchPlanPanel) => String(p.planeId ?? p.arrayId ?? '');
+  // Plane membership = the 3D design's truth (Ray, 2026-07-20: "look at the
+  // roof layout… that logic should be the source of truth, obtained from 3d
+  // design"). planeId/arrayId when stamped; production payloads often arrive
+  // without them, but every placed panel carries its plane's AZIMUTH stamp —
+  // bucket by facing (45° sectors) so a hip roof's N/S/E/W faces group
+  // correctly instead of collapsing into one global pool.
+  const keyOf = (p: BranchPlanPanel) => {
+    const k = p.planeId ?? p.arrayId;
+    if (k != null && String(k) !== '') return String(k);
+    const az = Number((p as { azimuth?: number | null }).azimuth);
+    return isFinite(az) ? 'az' + ((Math.round((((az % 360) + 360) % 360) / 45) * 45) % 360) : '';
+  };
   const groups = new Map<string, BranchPlanPanel[]>();
   for (const p of panels) {
     const k = keyOf(p);
@@ -211,62 +230,51 @@ function planBranchesWithinSub(
     groups.get(k)!.push(p);
   }
 
-  // Largest plane first → B1 lands on the main field.
-  const ordered = [...groups.values()].sort((a, b) => b.length - a.length);
-
-  const sizes: number[] = [];
-  let branchIdx = 0;
-  // Leftover runs (per plane, already in serpentine order) awaiting merge.
-  const leftovers: Array<{ ps: BranchPlanPanel[]; c: ReturnType<typeof centroid> }> = [];
-
-  for (const group of ordered) {
-    const sorted = serp(group);
-    const fulls = Math.floor(sorted.length / maxPer);
-    for (let f = 0; f < fulls; f++) {
-      for (let i = 0; i < maxPer; i++) assign.set(String(sorted[f * maxPer + i].id), branchIdx);
-      sizes.push(maxPer);
-      branchIdx++;
-    }
-    const rem = sorted.slice(fulls * maxPer);
-    if (rem.length) leftovers.push({ ps: rem, c: centroid(rem) });
-  }
-
-  // Merge leftovers into EXACTLY ceil(R/max) remainder branches — the count
-  // that keeps total homeruns at the theoretical minimum. Seed each branch
-  // with the largest remaining leftover, then attach every other leftover to
-  // the NEAREST seed with room (panel-centroid distance), so a hip cap joins
-  // the face it actually touches instead of forming a runt branch or pairing
-  // with the far side of the roof.
-  if (leftovers.length) {
-    const totalRem = leftovers.reduce((s, l) => s + l.ps.length, 0);
-    const remBranches = Math.max(1, Math.ceil(totalRem / maxPer));
-    leftovers.sort((a, b) => b.ps.length - a.ps.length);
-    const seeds = leftovers.slice(0, remBranches);
-    const rest = leftovers.slice(remBranches);
-    // Balanced capacity: without a target cap, everything gravitates to one
-    // seed and the other stays a runt — the exact waste being eliminated.
-    const target = Math.ceil(totalRem / remBranches);
-    for (const l of rest) {
-      let best = -1, bestD = Infinity;
-      for (const cap of [target, maxPer]) {
-        for (let i = 0; i < seeds.length; i++) {
-          if (seeds[i].ps.length + l.ps.length > cap) continue;
-          const d = distM(seeds[i].c, l.c);
-          if (d < bestD) { bestD = d; best = i; }
-        }
-        if (best >= 0) break;
+  // ═══ D-1 MANUFACTURER-AUTHORITY PLAN (Ray's binding ruling 2026-07-20) ═══
+  // "Physical roof grouping does not define electrical branch boundaries. The
+  // branch-assignment engine must optimize routing while satisfying
+  // manufacturer limits." Supersedes the plane-contained split, the
+  // single-branch-per-plane ×1.5/30 A allowance, and the tiny-cap merge rules.
+  //
+  //   1. Branch count = ceil(N / manufacturer maxPerBranch) — the minimum
+  //      legal homerun count. 31 IQ8A (max 11) → 3 branches.
+  //   2. Sizes are BALANCED (11/10/10, never 11/11/9-runt shapes).
+  //   3. ROUTING: planes are a routing preference only. Order planes largest
+  //      first, then chain each next plane by nearest centroid; serpentine
+  //      within each plane; concatenate into one walk and chunk it into the
+  //      balanced sizes. Branches stay plane-contiguous except at chunk
+  //      boundaries, where a branch may cross onto the adjacent plane —
+  //      which D-1 explicitly permits.
+  //
+  // Every branch is ≤ maxPer, so every branch OCPD is within the
+  // manufacturer's published branch basis (validated fail-closed by the
+  // snapshot validator, V5/V5a).
+  const ordered: BranchPlanPanel[][] = [];
+  {
+    const remaining = [...groups.values()].sort((a, b) => b.length - a.length);
+    let cursor = remaining.shift();
+    while (cursor) {
+      ordered.push(cursor);
+      if (!remaining.length) break;
+      const cc = centroid(cursor);
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < remaining.length; i++) {
+        const d = distM(cc, centroid(remaining[i]));
+        if (d < bd) { bd = d; bi = i; }
       }
-      // Nothing fits even at NEC max (many tiny planes) → most room wins.
-      if (best < 0) best = seeds.reduce((m, s, i) => s.ps.length < seeds[m].ps.length ? i : m, 0);
-      seeds[best].ps.push(...l.ps);
-      seeds[best].c = centroid(seeds[best].ps) ?? seeds[best].c;
-    }
-    for (const s of seeds) {
-      for (const p of s.ps) assign.set(String(p.id), branchIdx);
-      sizes.push(s.ps.length);
-      branchIdx++;
+      cursor = remaining.splice(bi, 1)[0];
     }
   }
 
-  return { count: branchIdx || 1, sizes, assign };
+  const walk: BranchPlanPanel[] = [];
+  for (const group of ordered) walk.push(...serp(group));
+
+  const k = Math.max(1, Math.ceil(walk.length / maxPer));
+  const sizes = balancedBranchSizes(walk.length, k);
+  let off = 0;
+  sizes.forEach((sz, bi) => {
+    for (let i = 0; i < sz; i++) assign.set(String(walk[off + i].id), bi);
+    off += sz;
+  });
+  return { count: sizes.length || 1, sizes, assign };
 }

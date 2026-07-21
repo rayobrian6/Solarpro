@@ -8137,7 +8137,17 @@ function EngineeringPageInner() {
                 return { id: `seg-${i}`, startPoint: pt, endPoint: ep, lengthFt: lenFt, azimuth: az, panelCount: 0 };
               })
             : undefined,
-          groundArrays: (effectiveSys === 'ground' || effectiveSys === 'ground_mount') ? [{ id: 'ground-1' }] : undefined,
+          groundArrays: [{
+            // AUTHORITY VALUES (Ray 2026-07-16): the studio's ground tilt /
+            // clearance / row-spacing ride to the CAD layer for EVERY system
+            // that may carry ground panels (hybrids were dropping them, so
+            // groundCAD fell back to stale per-panel tilt stamps + an 18"
+            // clearance default — PV-1G drew a 6'3" table Ray builds at 10-12').
+            id: 'ground-1',
+            tiltDeg: (projectLayout as any)?.groundTilt || undefined,
+            groundClearanceIn: (projectLayout as any)?.groundHeight ? (projectLayout as any).groundHeight * 39.3701 : undefined,
+            rowSpacingFt: (projectLayout as any)?.rowSpacing ? (projectLayout as any).rowSpacing * 3.28084 : undefined,
+          }],
           panels: (projectLayout.panels || []).map((p: any) => ({
             id:  p.id,
             lat: p.lat,
@@ -15577,7 +15587,12 @@ function EngineeringPageInner() {
                                         return { id: `seg-${i}`, startPoint: pt, endPoint: ep, lengthFt: lenFt, azimuth: az, panelCount: 0 };
                                       })
                                     : undefined,
-                                  groundArrays: (effectiveSys2 === 'ground' || effectiveSys2 === 'ground_mount') ? [{ id: 'ground-1' }] : undefined,
+                                  groundArrays: [{
+                                    id: 'ground-1',
+                                    tiltDeg: (projectLayout as any)?.groundTilt || undefined,
+                                    groundClearanceIn: (projectLayout as any)?.groundHeight ? (projectLayout as any).groundHeight * 39.3701 : undefined,
+                                    rowSpacingFt: (projectLayout as any)?.rowSpacing ? (projectLayout as any).rowSpacing * 3.28084 : undefined,
+                                  }],
                                   panels: (projectLayout.panels || []).map((p: any) => ({
                                     id: p.id, lat: p.lat, lng: p.lng, x: p.x, y: p.y,
                                     systemType: p.systemType || p.placementType || undefined,

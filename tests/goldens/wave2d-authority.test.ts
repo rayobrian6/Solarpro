@@ -79,7 +79,10 @@ describe('wave 2d — single-system parity', () => {
   it('top-level authority output is deep-equal to the pre-change baseline', () => {
     const auth = buildConductorAuthority(clone(roofProject), null);
     // The baseline predates the per-sub set — compare the legacy projection.
-    const { subSystems, isHybrid, ...legacyView } = auth as any;
+    // `poi` (2026-07-19, supply-side tap authority) is additive like the
+    // per-sub set: single-system acFeeder stays byte-identical (asserted by
+    // the baseline fields), so only the new block is excluded here.
+    const { subSystems, isHybrid, poi, ...legacyView } = auth as any;
     expect(legacyView).toEqual(baseline);
   });
 
@@ -259,15 +262,21 @@ describe('wave 2d — branch fencing + capability profiles', () => {
 
 // ═════ 5. generatePermit — per-sub electrical fleet ════════════════════════
 describe('wave 2d — generatePermit per-sub InverterInputs', () => {
-  it('hybrid tagged fleet reaches the compliance run per-sub (micro deviceCount from ITS sub)', () => {
+  it('hybrid tagged fleet reaches the electrical run per-sub (micro deviceCount from ITS sub)', () => {
     const input = mkHybrid();
     generatePermitHTML(input);
-    const e: any = input.compliance?.electrical;
-    expect(e).toBeTruthy();
-    expect(e.inverters).toHaveLength(3);
+    // W2.1: compliance.electrical is the computeSystem projection; the per-sub
+    // fleet plumbing this test guards now lands in the LEGACY SHADOW stash
+    // (runElectricalCalc still receives the per-sub InverterInputs — it just
+    // no longer feeds authority). Same intent, authority-correct read.
+    const shadow: any = (input as any)._legacyElectricalShadow;
+    expect(shadow).toBeTruthy();
+    expect(shadow.inverters).toHaveLength(3);
     // Micro fleet sized from the ROOF sub (4 modules × 0.33), not 12 modules;
     // totalAcKw = 1.32 (roof) + 6.0 (ground) + 3.8 (fence) = 11.12 kW.
-    expect(e.summary?.totalAcKw).toBeCloseTo(4 * 0.33 + 6.0 + 3.8, 2);
+    expect(shadow.summary?.totalAcKw).toBeCloseTo(4 * 0.33 + 6.0 + 3.8, 2);
+    // And the canonical projection exists with a 705.12 result of its own.
+    expect(input.compliance?.electrical?.busbar?.backfeedBreakerRequired).toBeGreaterThan(0);
   });
 
   it('legacy single-system permit generation is unaffected (fixture regression)', () => {

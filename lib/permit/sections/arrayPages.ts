@@ -11,6 +11,7 @@ import {
 } from '@/lib/drafting/sheetComposition';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
+import { resolvePanelSpecs } from '../utils/panelSpecs';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
@@ -152,9 +153,14 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const _plan = _isMicro && panels.length > 0
     ? planMicroBranches(panels as any[], _invModel)
     : null;
+  // DC-string paths must NEVER count a micro inverter's strings: for micros,
+  // inverters[].strings is the phantom "1 string of N" carrier (panel model +
+  // count), not an electrical string — a mixed/leaked fleet printed
+  // "String 1 × 54 modules" on the roof sheet (Ray 2026-07-17).
+  const _dcInverters = (system.inverters ?? []).filter(inv => inv.type !== 'micro');
   const totalStrings = _isMicro
     ? (_plan?.count ?? microBranchCount(totalPanels, _invModel))
-    : (system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
+    : (_dcInverters.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
   const circuitWord   = _isMicro ? 'BRANCH' : 'STRING';
   const circuitWordPl = _isMicro ? 'BRANCHES' : 'STRINGS';  // proper plural (not "BRANCHS")
   const circuitLabel  = totalStrings !== 1 ? circuitWordPl : circuitWord;
@@ -198,7 +204,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const _azDir = (az: number) => az >= 337.5 || az < 22.5 ? 'N' :
     az < 67.5 ? 'NE' : az < 112.5 ? 'E' : az < 157.5 ? 'SE' :
     az < 202.5 ? 'S' : az < 247.5 ? 'SW' : az < 292.5 ? 'W' : 'NW';
-  const _multiAz = _azList.length > 1
+  // Gate on isRoof: _azList reads cad.roof.planes, which a hybrid CAD still
+  // carries on GROUND/FENCE circuit sheets — PV-1BG printed the ROOF's
+  // "MULTI — E/W (SEE PLANE LABELS)" as the ground array's azimuth while the
+  // ground faces 181° (S) (Ray, 2026-07-16).
+  const _multiAz = isRoof(cadSystemType) && _azList.length > 1
     && new Set(_azList.map(_azDir)).size > 1;
   const avgAz = isRoof(cadSystemType) && roofPlane0?.azimuth != null
     ? roofPlane0.azimuth.toFixed(0)
@@ -320,9 +330,9 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         voc: 0,
         isc: 0,
       }))
-    : (system.inverters?.flatMap((inv, ii) =>
+    : (_dcInverters.flatMap((inv, ii) =>
         (inv.strings || []).map((str, si) => ({
-          si: ii * (system.inverters[0]?.strings?.length || 1) + si,
+          si: ii * (_dcInverters[0]?.strings?.length || 1) + si,
           label: str.label || `String ${si+1}`,
           count: str.panelCount,
           model: str.panelModel || '—',
@@ -447,7 +457,26 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     const ps = ((cad.roof?.planes ?? []) as any[]).map(x => Number(x?.pitch)).filter(v => isFinite(v));
     return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : undefined;
   })();
-  const _fsCovEarly = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2Early, _fsMeanPitch);
+  // P0-2 (data-authority register): the coverage fraction that decides the
+  // 18"-vs-36" fire-setback band must use the ROOF sub's OWN module dims.
+  // project.panelLengthIn/WidthIn are panel0 scalars — client intake writes
+  // inverters[0].strings[0]'s panel there, the FENCE module on hybrids — so
+  // the band was decided by fence-panel geometry. Resolve via the per-sub
+  // panel-spec authority; single-system output is unchanged (no hybrid
+  // carriage → legacy scalars).
+  const _fsPanelDims = (() => {
+    const legacyL = (project.panelLengthIn as number) || 66;
+    const legacyW = (project.panelWidthIn as number) || 40;
+    if (!isHybridPlanset(cad)) return { L: legacyL, W: legacyW };
+    const ps = resolvePanelSpecs(input, cad, 'roof');
+    if (!(ps.lengthIn > 0 && ps.widthIn > 0)) return { L: legacyL, W: legacyW };
+    if (Math.abs(ps.lengthIn - legacyL) > 0.05 || Math.abs(ps.widthIn - legacyW) > 0.05) {
+      console.warn(`[PV-1B] fire-setback coverage recomputed from roof-sub module dims: `
+        + `${legacyL}x${legacyW}in (project panel0 scalars) → ${ps.lengthIn}x${ps.widthIn}in (${ps.model})`);
+    }
+    return { L: ps.lengthIn, W: ps.widthIn };
+  })();
+  const _fsCovEarly = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2Early, _fsMeanPitch);
   const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
 
   // Callout notes for data zone
@@ -469,7 +498,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // System-specific supplemental data \u2014 setback text from the SAME rule the
   // drawing uses (it claimed 18" per-AHJ while PV-2 hatched 3'-0" bands).
   const _fsRoofFt2 = ((cad.roof?.planes ?? []) as any[]).reduce((s, x) => s + (Number(x?.areaSqM) || 0), 0) * 10.7639;
-  const _fsCov = arrayCoverageFrac(totalPanels, (project.panelLengthIn as number) || 66, (project.panelWidthIn as number) || 40, _fsRoofFt2, _fsMeanPitch);
+  // P0-2: same roof-sub module dims as the callout block above — never panel0.
+  const _fsCov = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2, _fsMeanPitch);
   const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
@@ -528,7 +558,25 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
             <tr><td>${_isMicro ? 'AC Branches' : 'Strings'}</td><td>${totalStrings}</td></tr>
             <tr><td>Tilt</td><td>${avgTilt}\xb0</td></tr>
             <tr><td>Azimuth</td><td>${azDisplay}</td></tr>
-            <tr><td>Rows</td><td>${rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels))}</td></tr>
+            <tr><td>Rows</td><td>${(() => {
+              // Studio ground/fence panels often all carry row=0 — the stamp
+              // grouping then said "Rows 1" while GROUND ARRAY DETAILS said
+              // "Row Count 2" on the same rail (Ray, 2026-07-16). When stamps
+              // are degenerate, band the modules geometrically by latitude
+              // (same clustering the ground top-view draws with).
+              if (rowNums.length > 1) return rowNums.length;
+              const latsM = panels.map(p => p.lat * 111320).filter(v => isFinite(v)).sort((a, b) => a - b);
+              if (latsM.length > 1) {
+                // cluster in meters: a new row starts when the N-S gap exceeds
+                // 0.8 m (ground row pitch is ≥1.5 m; within-row jitter ≪ 0.5 m)
+                let geo = 1;
+                for (let gi = 1; gi < latsM.length; gi++) {
+                  if (latsM[gi] - latsM[gi - 1] > 0.8) geo++;
+                }
+                if (geo > 1) return geo;
+              }
+              return rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels));
+            })()}</td></tr>
             <tr><td>System</td><td>${isFence(cadSystemType) ? 'FENCE' : isGround(cadSystemType) ? 'GROUND' : 'ROOF'}</td></tr>
             <tr><td>Orient.</td><td>${panels[0]?.orientation?.toUpperCase() || 'PORTRAIT'}</td></tr>
             <tr class="row-bold"><td>DC kW</td><td>${system.totalDcKw?.toFixed(2) || '\u2014'}</td></tr>

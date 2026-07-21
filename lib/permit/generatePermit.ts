@@ -6,6 +6,12 @@
 import type { PermitInput, CanonicalInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
 import { PLANSET_ENGINE_VERSION } from './constants';
+import { buildPermitDesignSnapshot } from './snapshot/build';
+import { getDesignTemps } from './utils/designTemps';
+import { buildComputeSystemShadow } from './utils/computedRuns';
+import { mapComputedSystemToCompliance } from './snapshot/computeSystemProjection';
+import { validatePermitDesignSnapshot, blockingViolations, SnapshotValidationError } from './snapshot/validate';
+import { deepFreeze } from './snapshot/digest';
 import { escapeH } from './utils/drawing';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
@@ -50,6 +56,30 @@ import { generateBOMForPermit } from './utils/bomForPermit';
 
 export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): string {
   const { project } = input;
+
+  // ── PermitDesignSnapshot req. 6: capture RAW client-posted values before any
+  // server mutation — preserved on the snapshot as sourceInputs (provenance
+  // only, never authority — D-3).
+  (input as unknown as Record<string, unknown>)._clientTotals = {
+    totalPanels: input.system?.totalPanels ?? null,
+    totalDcKw: input.system?.totalDcKw ?? null,
+    totalAcKw: input.system?.totalAcKw ?? null,
+  };
+
+  // ── P0-9: planset DATE = GENERATION date (server-side authority) ──────────
+  // config.date is a design label only — a stale client date must never print
+  // on a stamped sheet. Callers may inject a fixed `generatedAtIso` for
+  // deterministic output (tests / regen harnesses); otherwise "now" governs.
+  {
+    const genIso = (input as PermitInput & { generatedAtIso?: string }).generatedAtIso;
+    const genAt = genIso ? new Date(genIso) : new Date();
+    const genDateStr = (isFinite(genAt.getTime()) ? genAt : new Date()).toLocaleDateString('en-US');
+    if (project.date && project.date !== genDateStr) {
+      console.warn('[PLANSET] DATE recompute: generation date', genDateStr,
+        'replaces client-posted', project.date, '(config.date is a design label, not the issue date)');
+    }
+    project.date = genDateStr;
+  }
 
   // ── STEP 7: Canonical pipeline entry point ─────────────────────────────
   // buildCanonical() reads layout.type/panels/geometry as single source of truth.
@@ -181,23 +211,61 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       input.system.totalAcKw = cad.totalDcKw / 1.2;
     }
 
+    // ── HYBRID: per-sub nameplate totals GOVERN (recompute-if-contradicts) ──
+    // Two stale bases died here (2026-07-19):
+    //   DC — cad.totalDcKw Σs the CAD sections, whose dcKw is PRORATED from the
+    //   client's flat panels×inverters[0]-wattage total (Stowell: 88×440 =
+    //   38.72 kW with the FENCE panel pricing REC-405 roof modules; true
+    //   per-sub Σ = 54×405 + 16×580 + 18×440 = 39.07 kW).
+    //   AC — the string-path Σ above counts a micro fleet-record ONCE at its
+    //   per-DEVICE kW (0.29) instead of ×devices (Stowell: 19.39 vs 34.78 —
+    //   the CERT sheet printed it while E-1/PV-5 printed the true sum).
+    // subScopedInput is the §1.1 authority for both (stamps × nameplate, micro
+    // per-device × count) — Σ its subs and let that govern the project totals
+    // every title block / cover / CERT reads. Single-system paths untouched.
+    if (cad.hybrid) {
+      let _subDc = 0, _subAc = 0, _subN = 0;
+      for (const _sec of hybridSheetSections(cad)) {
+        const _s = subScopedInput(input, cad, _sec.key).system as
+          { totalDcKw?: number; totalAcKw?: number; totalPanels?: number };
+        _subDc += _s?.totalDcKw || 0;
+        _subAc += _s?.totalAcKw || 0;
+        _subN  += _s?.totalPanels || 0;
+      }
+      if (_subDc > 0 && Math.abs(_subDc - (input.system.totalDcKw || 0)) > 0.005) {
+        console.warn('[PLANSET] HYBRID DC recompute: per-sub nameplate Σ', _subDc.toFixed(2),
+          'kW replaces flat-basis', (input.system.totalDcKw || 0).toFixed(2), 'kW');
+        input.system.totalDcKw = Math.round(_subDc * 100) / 100;
+        cad.totalDcKw = input.system.totalDcKw;
+        canonical.electrical.totalDcKw = input.system.totalDcKw;
+      }
+      if (_subAc > 0 && Math.abs(_subAc - (input.system.totalAcKw || 0)) > 0.005) {
+        console.warn('[PLANSET] HYBRID AC recompute: per-sub Σ', _subAc.toFixed(2),
+          'kW replaces', (input.system.totalAcKw || 0).toFixed(2), 'kW');
+        input.system.totalAcKw = Math.round(_subAc * 100) / 100;
+      }
+      if (_subN > 0 && _subN !== input.system.totalPanels) {
+        console.warn('[PLANSET] HYBRID panel-count recompute:', _subN, 'vs', input.system.totalPanels);
+        // P0-10: tri-sync all three owners (mirror the DC branch) — cad.totalPanels
+        // + canonical.electrical.totalPanels feed validationPage / bomForPermit /
+        // structural / sitePlan and went stale when only system.totalPanels moved.
+        input.system.totalPanels = _subN;
+        cad.totalPanels = _subN;
+        canonical.electrical.totalPanels = _subN;
+      }
+    }
+
     // DC/AC ratio
     if (input.system.totalAcKw > 0) {
       input.system.dcAcRatio = input.system.totalDcKw / input.system.totalAcKw;
     }
 
-    // backfeedBreakerA / pvBackfeedA: NEC 690.8 sizing
-    // acOCPD = next standard breaker >= (acOutputAmps * 1.25)
-    // acOutputAmps = totalAcKw * 1000 / 240
-    if (!project.backfeedBreakerA && input.system.totalAcKw > 0) {
-      const acOutputAmps = (input.system.totalAcKw * 1000) / 240;
-      const continuousA = acOutputAmps * 1.25; // NEC 690.8
-      const ocpd = necNextStandardOcpd(continuousA);
-      project.backfeedBreakerA = ocpd;
-      if (!project.pvBackfeedA) {
-        project.pvBackfeedA = ocpd;
-      }
-    }
+    // P0-1: the 690.8 pre-seed that lived here permanently discarded the
+    // electrical engine's NEC 705.12 backfeed result (its write was guarded on
+    // `!project.backfeedBreakerA`, which this seed made always-false). The
+    // 705.12 engine result now owns backfeedBreakerA/pvBackfeedA unconditionally
+    // (see the electrical-calc block below); a 690.8 estimate fills the void
+    // ONLY when the engine produced no busbar result.
 
     // Battery fields: propagate batteryKwh and batteryBackfeedA if battery info exists
     // in project (set by the route from frontend data). Do NOT fabricate battery data.
@@ -219,24 +287,36 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   // ── Derive wire run lengths from CAD geometry ─────────────────────────────────
-  // Inject into input.project.wireLength (AC run) and per-string wireLength (DC run)
-  // only when the caller has not already provided a value (non-zero).
-  // This is additive/non-breaking: existing explicit values are always preserved.
+  // P1-8: recompute-if-contradicts — the CAD-derived run is the geometry of
+  // record. A client scalar survives only when CAD has no run for that leg or
+  // when it agrees within 20%; >20% divergence → CAD wins with an audit warn.
   try {
     const { runLengths, derivationNotes } = deriveRunLengths(cad);
     // AC run: DISCO_TO_METER_RUN → project.wireLength
     const acRunFt = runLengths.DISCO_TO_METER_RUN;
-    if (acRunFt && acRunFt > 0 && !input.project.wireLength) {
-      input.project.wireLength = acRunFt;
-      console.log('[CAD-RUN] Derived AC wire run:', acRunFt, 'ft —', derivationNotes.DISCO_TO_METER_RUN);
+    if (acRunFt && acRunFt > 0) {
+      const clientAcFt = Number(input.project.wireLength) || 0;
+      if (!clientAcFt) {
+        input.project.wireLength = acRunFt;
+        console.log('[CAD-RUN] Derived AC wire run:', acRunFt, 'ft —', derivationNotes.DISCO_TO_METER_RUN);
+      } else if (Math.abs(clientAcFt - acRunFt) > 0.2 * acRunFt) {
+        console.warn('[CAD-RUN] AC wire run recompute: CAD-derived', acRunFt,
+          'ft replaces client-posted', clientAcFt, 'ft (>20% divergence) —', derivationNotes.DISCO_TO_METER_RUN);
+        input.project.wireLength = acRunFt;
+      }
     }
-    // DC run: DC_STRING_RUN → each string's wireLength (if not already set)
+    // DC run: DC_STRING_RUN → each string's wireLength
     const dcRunFt = runLengths.DC_STRING_RUN;
     if (dcRunFt && dcRunFt > 0 && input.system?.inverters) {
       for (const inv of input.system.inverters) {
         if (inv.strings) {
           for (const str of inv.strings) {
-            if (!str.wireLength) {
+            const clientDcFt = Number(str.wireLength) || 0;
+            if (!clientDcFt) {
+              str.wireLength = dcRunFt;
+            } else if (Math.abs(clientDcFt - dcRunFt) > 0.2 * dcRunFt) {
+              console.warn('[CAD-RUN] DC string run recompute: CAD-derived', dcRunFt,
+                'ft replaces client-posted', clientDcFt, 'ft on', str.label || 'string', '(>20% divergence)');
               str.wireLength = dcRunFt;
             }
           }
@@ -410,8 +490,18 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // instead of "—" placeholders.
   try {
     const existingElec = input.compliance?.electrical;
-    const needsElecCalc = !existingElec
-      || (existingElec.busbar == null && existingElec.acConductorCallout == null);
+    // D-3 (Ray, binding 2026-07-20): client-posted compliance.electrical is
+    // NEVER engineering authority. It is preserved verbatim as provenance
+    // (sourceInputs.clientElectrical on the snapshot) and the server engine
+    // ALWAYS computes the authoritative result — the old gate let any client
+    // block with a busbar field suppress the engine wholesale.
+    if (existingElec) {
+      (input as unknown as Record<string, unknown>)._clientElectrical =
+        JSON.parse(JSON.stringify(existingElec));
+    }
+    (input as unknown as Record<string, unknown>)._clientBackfeedBreakerA =
+      input.project.backfeedBreakerA ?? null;
+    const needsElecCalc = true;
     if (needsElecCalc && input.system?.inverters?.length) {
       // Static imports (top of file) — the old lazy require('@/…') silently
       // failed outside webpack, leaving the electrical section blank.
@@ -633,13 +723,28 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const panelBusRating = input.project.panelBusRating || input.project.mainPanelAmps || 200;
 
       // ── Build the full ElectricalCalcInput ──
+      // W2 THERMAL UNIFICATION (V15): the engine runs on the SAME ASHRAE
+      // basis the snapshot records and the sheets print — the legacy flat
+      // -10°C/-35°C regime is retired. AHJ override (project.designTempMin)
+      // still wins; getDesignTemps is the one resolver.
+      const _thermal = getDesignTemps(
+        input.project.lat, input.project.lng,
+        (typeof (input.project as { state?: string }).state === 'string'
+          && /^[A-Za-z]{2}$/.test(String((input.project as { state?: string }).state).trim()))
+          ? String((input.project as { state?: string }).state).trim().toUpperCase() : undefined);
+      const _engineThermal = {
+        designTempMin: input.project.designTempMin ?? _thermal.ashraeExtremeLowC,
+        designTempMax: _thermal.ashrae2pctHighC ?? 35,
+        rooftopTempAdder: 33,
+      };
+      (input as unknown as Record<string, unknown>)._engineThermal = _engineThermal;
       const electricalInput: ElectricalCalcInput = {
         inverters:          invInputs,
         mainPanelAmps:      input.project.mainPanelAmps || 200,
         systemVoltage:      240,
-        designTempMin:      input.project.designTempMin ?? -10,
-        designTempMax:      35,   // °C — typical ASHRAE 2% design temp
-        rooftopTempAdder:   35,   // °C — NEC 310.15(A)(3) rooftop adder
+        designTempMin:      _engineThermal.designTempMin,
+        designTempMax:      _engineThermal.designTempMax,
+        rooftopTempAdder:   _engineThermal.rooftopTempAdder,   // °C — NEC 310.15(A)(3)
         wireGauge:          input.project.wireGauge || '#10 AWG',
         wireLength:         input.project.wireLength || 50,
         conduitType:        input.project.conduitType || 'EMT',
@@ -778,17 +883,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         };
       }
 
-      input.compliance.electrical = e;
+      // ═══ W2.1 (Ray, binding): runElectricalCalc is SHADOW-ONLY ═══════════
+      // Its mapped result is stashed for the classified parity matrix and
+      // NOTHING else — it never feeds compliance, sheets, BOM, scalars, or
+      // the snapshot. computeSystem (below) is the sole canonical engine.
+      (input as unknown as Record<string, unknown>)._legacyElectricalShadow = e;
 
-      // ── Propagate key values to project level for downstream consumers ──
-      if (e.busbar?.backfeedBreakerRequired && !input.project.backfeedBreakerA) {
-        input.project.backfeedBreakerA = e.busbar.backfeedBreakerRequired;
-      }
-      if (e.busbar?.backfeedBreakerRequired && !input.project.pvBackfeedA) {
-        input.project.pvBackfeedA = e.busbar.backfeedBreakerRequired;
-      }
-
-      console.log('[PLANSET] Server-side electrical calc completed:',
+      console.log('[PLANSET] legacy electrical engine (SHADOW ONLY):',
         'status=', elecResult.status,
         '| busbar=', elecResult.busbar?.passes ? 'PASS' : 'FAIL',
         '| backfeedA=', elecResult.busbar?.backfeedBreakerRequired,
@@ -796,8 +897,41 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         '| vDrop=', elecResult.acVoltageDrop?.toFixed(2) + '%');
     }
   } catch (elecErr: unknown) {
-    // Non-critical: permit still generates, electrical pages will show defaults
-    console.warn('[PLANSET] Server-side electrical calc failed (non-critical):', (elecErr as Error)?.message ?? elecErr);
+    // Shadow failure is non-critical by definition — parity simply records it.
+    console.warn('[PLANSET] legacy shadow engine failed (parity will note it):', (elecErr as Error)?.message ?? elecErr);
+  }
+
+  // ═══ W2.1 CANONICAL ELECTRICAL ENGINE — computeSystem ══════════════════════
+  // Runs on canonical routed segment lengths (deriveRunLengths(cad)) and the
+  // unified ASHRAE thermal basis; its projection IS compliance.electrical.
+  // FAIL CLOSED when it cannot produce a result — no estimate seeding, no
+  // legacy fallback, no sheet defaults.
+  {
+    const csFull = buildComputeSystemShadow(input, cad);
+    if (!csFull) {
+      throw new Error('[PLANSET] canonical electrical engine (computeSystem) produced no result — fail closed (W2.1: no legacy fallback, no estimates)');
+    }
+    (input as unknown as Record<string, unknown>)._computeSystem = csFull;
+    input.compliance.electrical = mapComputedSystemToCompliance(csFull, {
+      busRatingA: input.project.panelBusRating ?? input.project.mainPanelAmps ?? null,
+      mainBreakerA: input.project.mainPanelAmps ?? null,
+      interconnectionMethod: input.project.interconnectionMethod ?? 'LOAD_SIDE',
+    });
+    // Engine-owned scalars (P0-1, now computeSystem's): backfeed breaker.
+    const engineBackfeedA = csFull.backfeedBreakerAmps;
+    if (engineBackfeedA > 0) {
+      if (input.project.backfeedBreakerA && input.project.backfeedBreakerA !== engineBackfeedA) {
+        console.warn('[PLANSET] backfeedBreakerA recompute: computeSystem 705.12 value', engineBackfeedA,
+          'A replaces client-posted', input.project.backfeedBreakerA, 'A');
+      }
+      input.project.backfeedBreakerA = engineBackfeedA;
+      input.project.pvBackfeedA = engineBackfeedA;
+    }
+    console.log('[PLANSET] canonical electrical engine (computeSystem):',
+      'backfeedA=', engineBackfeedA,
+      '| acWire=', input.compliance.electrical.acConductorCallout,
+      '| vDrop=', input.compliance.electrical.acVoltageDrop?.toFixed?.(2) + '%',
+      '| 120%=', input.compliance.electrical.busbar?.passes ? 'PASS' : 'FAIL');
   }
 
   console.log('[PLANSET] CAD engine resolved systemType:', sysType, {
@@ -874,6 +1008,28 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   input.decisionAwareSLDMetadata = buildDecisionAwareSLDMetadata({ decisionBundle: decisionProvenance });
+
+  // ═══ PermitDesignSnapshot (W1) — THE canonical engineering authority ═══════
+  // Built once after all server engines have run; validated FAIL-CLOSED before
+  // any sheet renders; deep-frozen (immutable); stamped (id + schema + digest)
+  // into every title block. Sheets become projections wave-by-wave (W2–W6);
+  // scripts/planset-evidence.mjs measures sheet agreement in the meantime.
+  {
+    const snapshot = buildPermitDesignSnapshot(input, cad, {
+      projectId: (input as { projectId?: string }).projectId ?? null,
+    });
+    const violations = validatePermitDesignSnapshot(snapshot);
+    const blocking = blockingViolations(violations);
+    for (const viol of violations) {
+      console[viol.enforcement === 'blocking' ? 'error' : 'warn'](
+        `[SNAPSHOT ${viol.enforcement === 'blocking' ? 'VIOLATION' : 'deferred'}] ${viol.invariant} ${viol.authorityPath} = ${JSON.stringify(viol.offendingValue)} — ${viol.message}`);
+    }
+    if (blocking.length) throw new SnapshotValidationError(blocking);
+    deepFreeze(snapshot);
+    (input as unknown as { _snapshot?: unknown })._snapshot = snapshot;
+    (input as unknown as { _snapshotViolations?: unknown })._snapshotViolations = violations;
+    console.log(`[SNAPSHOT] ${snapshot.meta.snapshotId} schema ${snapshot.meta.schemaVersion} digest ${snapshot.meta.digest.slice(0, 16)}… — ${violations.length} finding(s), 0 blocking`);
+  }
 
   const engineeringStateRegistry = buildEngineeringStateRegistry({
     registryId: `${provenanceDocumentId}.engineering-state`,
@@ -980,10 +1136,9 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     ..._w5Extras.map(sec => (n: number, t: number) =>
       pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t,
         { sheetId: hybridSheetId('PV-1B', sec.key), titleSuffix: ` — ${SUB_LABEL[sec.key]}` })), // PV-1BG / PV-1BF
-    // ── Reading order (2026-07-09): electrical grouped together, E-1 with them ──
-    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
-    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
-    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD (was orphaned after the certs — moved up with the electrical set)
+    // ── Reading order (Ray 2026-07-20, mirrors buildSheetManifest): plans →
+    // STRUCTURAL → ELECTRICAL (E-1 leads) → labels — one discipline at a time,
+    // never interleaved. ──
     (n, t) => _w5Hybrid
       ? (_w5Primary === 'roof'
           ? pageRoofStructural(subScopedInput(input, cad, 'roof'), subScopedView(cad, 'roof'), n, t, renderCtx)
@@ -993,6 +1148,9 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     (n, t) => _w5Hybrid
       ? pageStructural(_w5StructuralInput(_w5Primary), subScopedView(cad, _w5Primary), n, t)
       : pageStructural(input, cad, n, t),                              // PV-4C: Structural calcs (hybrid = primary sub scoped)
+    (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD — the electrical section's key sheet, first
+    (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
+    (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
     (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
     (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
@@ -1016,6 +1174,33 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       pages.push(pageCADAppendixPreview(input, cad, TOTAL, TOTAL));    // APP-CAD: non-authoritative CAD preview appendix
     } catch (appendixErr: unknown) {
       console.warn('[generatePermitHTML] CAD appendix preview omitted (non-critical):', appendixErr instanceof Error ? appendixErr.message : appendixErr);
+    }
+  }
+
+  // ═══ Render-level invariants V12 / V13 — FAIL CLOSED (W1 reqs 1, D-6) ═════
+  {
+    const snap = (input as unknown as { _snapshot?: { meta: { snapshotId: string } } })._snapshot;
+    const sid = snap?.meta.snapshotId ?? '';
+    const v12Missing = pages
+      .map((p, i) => (!p.includes(sid) || !sid ? i + 1 : -1))
+      .filter(i => i > 0);
+    if (v12Missing.length) {
+      throw new SnapshotValidationError(v12Missing.map(pn => ({
+        invariant: 'V12', authorityPath: 'meta.snapshotId', offendingValue: sid || '(none)',
+        sourceRecord: 'titleBlock', affectedProjections: [`page ${pn}`],
+        message: `sheet ${pn} does not carry the snapshot stamp`, enforcement: 'blocking' as const,
+      })));
+    }
+    const v13Missing = pages
+      .map((p, i) => (/tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p)
+        && !p.includes('PENDING ENGINEERING REVIEW') ? i + 1 : -1))
+      .filter(i => i > 0);
+    if (v13Missing.length) {
+      throw new SnapshotValidationError(v13Missing.map(pn => ({
+        invariant: 'V13', authorityPath: 'certification.engineeringReviewApproved', offendingValue: false,
+        sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
+        message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
+      })));
     }
   }
 

@@ -155,8 +155,28 @@ export function subScopedInput(input: PermitInput, cad: CADModel, key: SubSystem
   const totalPanels = subPositions.length || sec?.totalPanels || 0;
 
   const allInverters = input.system?.inverters ?? [];
-  const subInverters = allInverters.filter(inv =>
-    inverterSubKey(inv as { subSystemKey?: string }, primary) === key);
+  // UNTAGGED-FLEET LEAK (Ray 2026-07-17: roof PV-1B printed a STRING LEGEND
+  // with all 5 subs' strings — 9/9 fence + phantom "String 1 × 54" roof micro
+  // + 8/8 ground — and DC kW 23.76 priced the roof at the FENCE's 440W): when
+  // a payload's inverters lost their subSystemKey tags, inverterSubKey sends
+  // EVERY inverter to the primary sub, so the primary's sheet enumerates the
+  // whole hybrid fleet (non-primary subs stay correct via synthesis below).
+  // The §1.1 equipment-authority map (project.subSystems[key].inverterId) still
+  // knows each inverter's owner — resolve untagged inverters through it by
+  // inverterId (same rule as the permit route's hybrid self-heal) before
+  // falling back to the primary-inherit rule.
+  const _subsMap = (input.project as {
+    subSystems?: Record<string, { inverterId?: string }> })?.subSystems ?? {};
+  const _invIdToKey = new Map<string, SubSystemKey>();
+  for (const [k, v] of Object.entries(_subsMap)) {
+    if (isSubSystemKey(k) && v?.inverterId) _invIdToKey.set(String(v.inverterId), k);
+  }
+  const subInverters = allInverters.filter(inv => {
+    const rec = inv as { subSystemKey?: string; inverterId?: string };
+    if (isSubSystemKey(rec.subSystemKey)) return rec.subSystemKey === key;
+    const mapped = rec.inverterId ? _invIdToKey.get(String(rec.inverterId)) : undefined;
+    return (mapped ?? primary) === key;
+  });
 
   // ── SYSTEMIC ROOT #2 FIX — per-sub DC kW = the sub's OWN modules × nameplate
   //    watts (Σ per sub), NEVER projectDcKw × panelFraction. Both the CAD
@@ -179,7 +199,13 @@ export function subScopedInput(input: PermitInput, cad: CADModel, key: SubSystem
   let sumWatts = 0;
   for (const p of subPositions) {
     const w = Number((p as { wattage?: number }).wattage);
-    sumWatts += (isFinite(w) && w > 0) ? w : nameplateW;
+    // §1.1: within a sub the equipment-authority nameplate GOVERNS — a sub is
+    // by-contract panel-homogeneous, and per-panel wattage stamps go stale
+    // when the panel is swapped after placement. Ray's live PV-1BG (2026-07-16):
+    // 16 ground modules stamped 405W (pre-swap) while the map + STRING LEGEND
+    // said 580W → "DC kW 6.48" printed beside "9.28 kWdc" on the same sheet.
+    // Stamps remain the fallback when no map/string nameplate resolves.
+    sumWatts += nameplateW > 0 ? nameplateW : ((isFinite(w) && w > 0) ? w : 0);
   }
   const computedDcKw = subPositions.length
     ? Math.round(sumWatts) / 1000

@@ -17,6 +17,7 @@
 
 import { latLngToXY } from '@/lib/cad/geometry';
 import { locateEquipment } from '@/lib/permit/utils/equipmentLocator';
+import { ftToFtIn } from '../primitives';
 
 const M_TO_FT = 3.280_839_895;
 const FAKE_DEG_OFFSET = 10; // must match lib/cad/adapter.ts xyToFakeDeg
@@ -305,6 +306,95 @@ function ptSegDist(p: FakePt, a: FakePt, b: FakePt): number {
   return Math.hypot(p.lng - (a.lng + t * abx), p.lat - (a.lat + t * aby));
 }
 
+/** Liang-Barsky clip of segment a→b to a fake-degree window. Null = fully out. */
+function clipSegToWin(
+  a: FakePt, b: FakePt,
+  win: { minLng: number; maxLng: number; minLat: number; maxLat: number },
+): [FakePt, FakePt] | null {
+  const dx = b.lng - a.lng, dy = b.lat - a.lat;
+  let t0 = 0, t1 = 1;
+  const edges: Array<[number, number]> = [
+    [-dx, a.lng - win.minLng], [dx, win.maxLng - a.lng],
+    [-dy, a.lat - win.minLat], [dy, win.maxLat - a.lat],
+  ];
+  for (const [p, q] of edges) {
+    if (p === 0) { if (q < 0) return null; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+    else { if (r < t0) return null; if (r < t1) t1 = r; }
+  }
+  return [
+    { lng: a.lng + t0 * dx, lat: a.lat + t0 * dy },
+    { lng: a.lng + t1 * dx, lat: a.lat + t1 * dy },
+  ];
+}
+
+/** Point-in-ring (fake-degree), ray cast. */
+function ptInFakeRing(p: FakePt, ring: FakePt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].lng, yi = ring[i].lat, xj = ring[j].lng, yj = ring[j].lat;
+    if (((yi > p.lat) !== (yj > p.lat)) && (p.lng < ((xj - xi) * (p.lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+function ringArea2(P: FakePt[]): number {
+  let s = 0;
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i], b = P[(i + 1) % P.length];
+    s += a.lng * b.lat - b.lng * a.lat;
+  }
+  return s;   // signed ×2
+}
+
+/**
+ * Inward offset ("setback ring") of a parcel polygon by d ft — miter join via
+ * offset-line intersection. GEOMETRY-ONLY derivation from the county-GIS ring;
+ * returns null whenever the result is degenerate (self-fold, vertex escaping
+ * the parcel, miter explosion) so we never draw a wrong ring. Good for the
+ * simple convex-ish lots parcels actually are; weird lots simply skip it.
+ */
+export function insetParcelRing(P0: FakePt[], d: number): FakePt[] | null {
+  // drop consecutive near-duplicate vertices (they break edge normals)
+  const P: FakePt[] = [];
+  for (const p of P0) {
+    const prev = P[P.length - 1];
+    if (!prev || Math.hypot(p.lng - prev.lng, p.lat - prev.lat) > 1) P.push(p);
+  }
+  while (P.length > 1 && Math.hypot(P[0].lng - P[P.length - 1].lng, P[0].lat - P[P.length - 1].lat) <= 1) P.pop();
+  const n = P.length;
+  if (n < 3 || !(d > 0)) return null;
+  const a2 = ringArea2(P);
+  if (Math.abs(a2) < 4 * d * d) return null;      // lot too small vs the offset
+  const ccw = a2 > 0;
+  const lines: Array<{ px: number; py: number; dx: number; dy: number }> = [];
+  for (let i = 0; i < n; i++) {
+    const a = P[i], b = P[(i + 1) % n];
+    const dx = b.lng - a.lng, dy = b.lat - a.lat;
+    const L = Math.hypot(dx, dy);
+    // inward normal: left of travel when CCW, right when CW
+    const nx = (ccw ? -dy : dy) / L, ny = (ccw ? dx : -dx) / L;
+    lines.push({ px: a.lng + nx * d, py: a.lat + ny * d, dx, dy });
+  }
+  const out: FakePt[] = [];
+  for (let i = 0; i < n; i++) {
+    const A = lines[(i - 1 + n) % n], B = lines[i];
+    const den = A.dx * B.dy - A.dy * B.dx;
+    if (Math.abs(den) < 1e-9) { out.push({ lng: B.px, lat: B.py }); continue; }
+    const t = ((B.px - A.px) * B.dy - (B.py - A.py) * B.dx) / den;
+    out.push({ lng: A.px + t * A.dx, lat: A.py + t * A.dy });
+  }
+  // validate: shrunk area, every vertex inside the parcel, miter sanity
+  const outA2 = ringArea2(out);
+  if (!(Math.abs(outA2) > 0) || Math.abs(outA2) >= Math.abs(a2)) return null;
+  for (let i = 0; i < n; i++) {
+    if (!ptInFakeRing(out[i], P)) return null;
+    if (Math.hypot(out[i].lng - P[i].lng, out[i].lat - P[i].lat) > 8 * d) return null;
+  }
+  return out;
+}
+
 export interface SiteRender { els: string[]; legend: Array<{ swatch: string; label: string }> }
 
 /**
@@ -317,6 +407,23 @@ export function drawSiteContextEls(
   roof: { minLng: number; maxLng: number; minLat: number; maxLat: number },
   toX: (lng: number) => number,
   toY: (lat: number) => number,
+  opts?: {
+    /** Ground/fence array setback from property line (ft) — comes from the SAME
+     *  engine value the ground/fence sheets print (CADGroundModel.setbackFt /
+     *  layout.groundSetbackFt). Draws the dashed inner offset ring. Never a
+     *  number invented here. */
+    plSetbackFt?: number | null;
+    /** The sheet's fit window (fake-deg) — labels are placed on the VISIBLE
+     *  portion of clipped parcel edges so big-lot framing can't push every
+     *  dimension off-frame. */
+    fitWin?: { minLng: number; maxLng: number; minLat: number; maxLat: number } | null;
+    /** false → polygons/parcel-line ONLY (roads, sidewalks, trees, buildings,
+     *  driveways, the dashed property line). Suppresses every annotation:
+     *  edge dims, PROPERTY LINE tags, setback ring, setback dims, fallback
+     *  note, service cluster. PV-1B wants the PV-1 site VISUALS behind its
+     *  wiring, not the PV-1 furniture (Ray, 2026-07-20). Default true. */
+    annotations?: boolean;
+  },
 ): SiteRender {
   const els: string[] = [];
   const legend: SiteRender['legend'] = [];
@@ -413,7 +520,7 @@ export function drawSiteContextEls(
       els.push(`<polygon points="${pts}" fill="rgba(120,165,102,${(0.34 * tOp).toFixed(2)})" stroke="${over ? '#b45309' : '#5f8a4a'}" stroke-width="${over ? 1.1 : 0.7}" stroke-opacity="${tOp.toFixed(2)}"${over ? ' stroke-dasharray="3 2"' : ''}/>`);
     }
     legend.push({ swatch: `<rect x="0" y="-4" width="14" height="8" fill="rgba(120,165,102,0.34)" stroke="#5f8a4a" stroke-width="0.7"/>`, label: 'TREE CANOPY (NEARMAP AI)' });
-    if (shades) {
+    if (shades && opts?.annotations !== false) {
       const bx = toX((roof.minLng + roof.maxLng) / 2);
       els.push(`<text x="${bx.toFixed(1)}" y="${(toY(roof.maxLat) - 6).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.2" font-weight="bold" fill="#b45309" stroke="#fff" stroke-width="1.5" paint-order="stroke">TREE CANOPY NEAR ARRAY — SHADING, FIELD VERIFY</text>`);
     }
@@ -460,17 +567,94 @@ export function drawSiteContextEls(
     els.push(`<polygon points="${ptsStr}" fill="none" stroke="#2b2f36" stroke-width="1.1" stroke-dasharray="11 6"/>`);
     legend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#2b2f36" stroke-width="1.1" stroke-dasharray="4 2"/>`, label: 'PROPERTY LINE (COUNTY GIS)' });
 
-    // Parcel edge dimensions (ft) — only for simple lots so labels don't clutter.
-    if (n <= 8) {
+    // ── PROPERTY-LINE SEGMENT DIMENSIONS (reference style: 227'-7" along each
+    // dashed edge). Full surveyed-length of the edge, labeled at the midpoint
+    // of its VISIBLE portion (big-lot framing clips the parcel — a label at the
+    // true midpoint would land off-frame), rotated along the edge bearing and
+    // nudged OUTWARD (away from the lot interior) so it rides beside the dashed
+    // line, never on it. Tiny edges (<12 ft) skip to avoid clutter. ──
+    let _edgeDims = 0;      // parcel edge dims drawn (suppresses the fallback note)
+    let _ringDrawn = false; // setback ring drawn (ditto)
+    if (opts?.annotations !== false && n <= 16) {
+      const cenLng = P.reduce((s, p) => s + p.lng, 0) / n;
+      const cenLat = P.reduce((s, p) => s + p.lat, 0) / n;
       for (let i = 0; i < n; i++) {
         const a = P[i], b = P[(i + 1) % n];
         const ft = Math.hypot(b.lng - a.lng, b.lat - a.lat); // fake-deg = ft
-        if (ft < 8) continue;
-        const ax = xy[i], bx = xy[(i + 1) % n];
-        const mx = (ax.x + bx.x) / 2, my = (ax.y + bx.y) / 2;
-        let ang = Math.atan2(bx.y - ax.y, bx.x - ax.x) * 180 / Math.PI;
+        if (ft < 12) continue;
+        const vis = opts?.fitWin ? clipSegToWin(a, b, opts.fitWin) : [a, b] as [FakePt, FakePt];
+        if (!vis) continue;
+        const va = px(vis[0]), vb = px(vis[1]);
+        if (Math.hypot(vb.x - va.x, vb.y - va.y) < 42) continue;   // sliver on-screen
+        let mx = (va.x + vb.x) / 2, my = (va.y + vb.y) / 2;
+        let ang = Math.atan2(vb.y - va.y, vb.x - va.x) * 180 / Math.PI;
         if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-        els.push(`<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.6" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.6" paint-order="stroke">${Math.round(ft)}'</text>`);
+        // outward offset: perpendicular that points away from the lot centroid
+        const cq = px({ lat: cenLat, lng: cenLng });
+        let nx2 = -(vb.y - va.y), ny2 = vb.x - va.x;
+        const nm2 = Math.hypot(nx2, ny2) || 1; nx2 /= nm2; ny2 /= nm2;
+        if ((mx - cq.x) * nx2 + (my - cq.y) * ny2 < 0) { nx2 = -nx2; ny2 = -ny2; }
+        mx += nx2 * 7; my += ny2 * 7;
+        els.push(`<text x="${mx.toFixed(1)}" y="${(my + 2).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="6" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.7" paint-order="stroke">${ftToFtIn(ft)}</text>`);
+        _edgeDims++;
+      }
+      // "PROPERTY LINE" name tags (reference style) — on the two longest
+      // VISIBLE edges, at the 30% point of the visible span so they never sit
+      // on the mid-span dimension; offset to the opposite (inner) side.
+      const _plEdges: Array<{ L: number; mx: number; my: number; ang: number }> = [];
+      for (let i = 0; i < n; i++) {
+        const a = P[i], b = P[(i + 1) % n];
+        const vis = opts?.fitWin ? clipSegToWin(a, b, opts.fitWin) : [a, b] as [FakePt, FakePt];
+        if (!vis) continue;
+        const va = px(vis[0]), vb = px(vis[1]);
+        const L = Math.hypot(vb.x - va.x, vb.y - va.y);
+        if (L < 140) continue;
+        let tx = va.x + (vb.x - va.x) * 0.3, ty = va.y + (vb.y - va.y) * 0.3;
+        let ang = Math.atan2(vb.y - va.y, vb.x - va.x) * 180 / Math.PI;
+        if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+        const cq = px({ lat: cenLat, lng: cenLng });
+        let nx2 = -(vb.y - va.y), ny2 = vb.x - va.x;
+        const nm2 = Math.hypot(nx2, ny2) || 1; nx2 /= nm2; ny2 /= nm2;
+        if ((tx - cq.x) * nx2 + (ty - cq.y) * ny2 > 0) { nx2 = -nx2; ny2 = -ny2; }   // point INWARD
+        tx += nx2 * 6.5; ty += ny2 * 6.5;
+        _plEdges.push({ L, mx: tx, my: ty, ang });
+      }
+      _plEdges.sort((a, b) => b.L - a.L).slice(0, 2).forEach(e => {
+        els.push(`<text x="${e.mx.toFixed(1)}" y="${(e.my + 2).toFixed(1)}" transform="rotate(${e.ang.toFixed(1)} ${e.mx.toFixed(1)} ${e.my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5" font-weight="700" letter-spacing="1.2" fill="#50565e" stroke="#fff" stroke-width="1.4" paint-order="stroke">PROPERTY LINE</text>`);
+      });
+    }
+
+    // ── SETBACK OFFSET RING — dashed inner offset of the parcel boundary at
+    // the array/fence setback the engine already computed (opts.plSetbackFt;
+    // never invented here). Labeled once, on its longest visible edge. ──
+    const sbFt = opts?.annotations === false ? null : opts?.plSetbackFt;
+    if (sbFt != null && sbFt > 0) {
+      const inset = insetParcelRing(P, sbFt);
+      if (inset) {
+        _ringDrawn = true;
+        const ixy = inset.map(px);
+        const iStr = ixy.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+        els.push(`<polygon points="${iStr}" fill="none" stroke="#ffffff" stroke-width="2.0" opacity="0.7" stroke-dasharray="4 3"/>`);
+        els.push(`<polygon points="${iStr}" fill="none" stroke="#50565e" stroke-width="0.8" stroke-dasharray="4 3"/>`);
+        // longest VISIBLE inset edge carries the one label
+        let bl = -1, bmx = 0, bmy = 0, bang = 0;
+        for (let i = 0; i < inset.length; i++) {
+          const a = inset[i], b = inset[(i + 1) % inset.length];
+          const vis = opts?.fitWin ? clipSegToWin(a, b, opts.fitWin) : [a, b] as [FakePt, FakePt];
+          if (!vis) continue;
+          const va = px(vis[0]), vb = px(vis[1]);
+          const L = Math.hypot(vb.x - va.x, vb.y - va.y);
+          if (L > bl) {
+            bl = L; bmx = (va.x + vb.x) / 2; bmy = (va.y + vb.y) / 2;
+            bang = Math.atan2(vb.y - va.y, vb.x - va.x) * 180 / Math.PI;
+            if (bang > 90) bang -= 180; else if (bang < -90) bang += 180;
+          }
+        }
+        if (bl > 70) {
+          const sbTxt = `${sbFt % 1 === 0 ? sbFt : sbFt.toFixed(1)}' SETBACK FROM PROPERTY LINE`;
+          els.push(`<text x="${bmx.toFixed(1)}" y="${(bmy - 3).toFixed(1)}" transform="rotate(${bang.toFixed(1)} ${bmx.toFixed(1)} ${bmy.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#50565e" stroke="#fff" stroke-width="1.5" paint-order="stroke">${sbTxt}</text>`);
+        }
+        legend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#50565e" stroke-width="0.8" stroke-dasharray="3 2"/>`, label: `${sbFt % 1 === 0 ? sbFt : sbFt.toFixed(1)}' SETBACK FROM P/L (ARRAY/FENCE)` });
       }
     }
 
@@ -495,9 +679,13 @@ export function drawSiteContextEls(
       return isFinite(best) ? best : null;
     };
     const cLng = (roof.minLng + roof.maxLng) / 2, cLat = (roof.minLat + roof.maxLat) / 2;
-    const sides: Array<[number, number, number, number]> = [
+    // NO screen-downward (S) dim: the band under the roof ALWAYS carries the
+    // overall dimension + callouts + viewport title, and the S dim's extension
+    // line struck straight through them (Stowell "63'" through GRAPHIC SCALE).
+    // The parcel edge dims + setback ring carry the south story instead.
+    const sides: Array<[number, number, number, number]> = opts?.annotations === false ? [] : [
       [roof.minLng, cLat, -1, 0], [roof.maxLng, cLat, 1, 0],   // W, E
-      [cLng, roof.minLat, 0, -1], [cLng, roof.maxLat, 0, 1],   // S, N
+      [cLng, roof.maxLat, 0, 1],                               // N
     ];
     let dimsDrawn = 0;
     for (const [sx, sy, dx, dy] of sides) {
@@ -513,8 +701,10 @@ export function drawSiteContextEls(
       els.push(`<text x="${mx.toFixed(1)}" y="${(my - 1.5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#2b2f36" stroke="#fff" stroke-width="1.5" paint-order="stroke">${Math.round(d)}'</text>`);
       dimsDrawn++;
     }
-    if (!dimsDrawn) {
-      // Big/shared lot — P/L off-frame; report the closest approach instead.
+    if (!dimsDrawn && !_edgeDims && !_ringDrawn && opts?.annotations !== false) {
+      // Nothing else told the P/L story (all off-frame) — report the closest
+      // approach. When edge dims / the setback ring DID draw, this note is
+      // redundant and printed straight through the overall-dimension band.
       let minFt = Infinity;
       const bcorners: FakePt[] = [
         { lat: roof.minLat, lng: roof.minLng }, { lat: roof.minLat, lng: roof.maxLng },
@@ -532,10 +722,15 @@ export function drawSiteContextEls(
     if (dimsDrawn) legend.push({ swatch: `<line x1="0" y1="0" x2="14" y2="0" stroke="#2b2f36" stroke-width="0.6"/><line x1="0" y1="-2.5" x2="0" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/><line x1="14" y1="-2.5" x2="14" y2="2.5" stroke="#2b2f36" stroke-width="0.6"/>`, label: 'SETBACK (APPROX)' });
   }
 
-  // ── Service-equipment tags (UM / MSP / AC) on the wall — clamped just outside
-  // the roof footprint so they read; drawn last so nothing covers them. ──
-  if (site.equipment.length) {
-    const TAG: Record<string, string> = { utility_meter: 'UM', msp: 'MSP', ac_disconnect: 'AC' };
+  // ── SERVICE-EQUIPMENT CLUSTER at the interconnection wall (reference style:
+  // the compact M | MSP | AC-D | INV box row + "PV INTERCONNECTION POINT"
+  // leader note). Anchored on the located meter (survey-photo GPS or the
+  // street-side heuristic — provenance carried by the FIELD VERIFY note),
+  // clamped just outside the roof footprint and pushed OUTWARD (away from the
+  // building) so the row never covers the roof, array or fence tags. ──
+  if (site.equipment.length && opts?.annotations !== false) {
+    const ORDER: Record<string, number> = { utility_meter: 0, msp: 1, ac_disconnect: 2 };
+    const TAG: Record<string, string> = { utility_meter: 'M', msp: 'MSP', ac_disconnect: 'AC-D' };
     const clampOut = (p: FakePt): FakePt => {
       let lng = p.lng, lat = p.lat;
       if (lng > roof.minLng && lng < roof.maxLng && lat > roof.minLat && lat < roof.maxLat) {
@@ -546,13 +741,45 @@ export function drawSiteContextEls(
       }
       return { lat, lng };
     };
-    for (const e of site.equipment) {
-      const q = px(clampOut(e.pt));
-      const tag = TAG[e.kind] ?? '?';
-      els.push(`<rect x="${(q.x - 4).toFixed(1)}" y="${(q.y - 4).toFixed(1)}" width="8" height="8" fill="#ffffff" stroke="#111" stroke-width="0.9"/>`);
-      els.push(`<text x="${q.x.toFixed(1)}" y="${(q.y + 2.2).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${tag.length > 2 ? '4.4' : '5.4'}" font-weight="900" fill="#111">${tag}</text>`);
+    const eq = [...site.equipment].sort((a, b) => (ORDER[a.kind] ?? 9) - (ORDER[b.kind] ?? 9));
+    const anchorE = eq.find(e => e.kind === 'utility_meter') ?? eq[0];
+    const wall = px(clampOut(anchorE.pt));           // the wall point (leader target)
+    // outward direction: away from the roof center, screen space
+    const rc = px({ lat: (roof.minLat + roof.maxLat) / 2, lng: (roof.minLng + roof.maxLng) / 2 });
+    let ox = wall.x - rc.x, oy = wall.y - rc.y;
+    const om = Math.hypot(ox, oy) || 1; ox /= om; oy /= om;
+    // box row: located existing gear + the (N) inverter at the same wall
+    const tags = [...new Set(eq.map(e => TAG[e.kind] ?? '?')), 'INV'];
+    const bh = 9;
+    const widths = tags.map(t => Math.max(11, t.length * 4.2 + 4.5));
+    const totW = widths.reduce((s, w) => s + w, 0);
+    const rcx = wall.x + ox * 22, rcy = wall.y + oy * 22;   // row center
+    const rx0 = rcx - totW / 2, ry0 = rcy - bh / 2;
+    // leader: wall point ● → row edge
+    els.push(`<circle cx="${wall.x.toFixed(1)}" cy="${wall.y.toFixed(1)}" r="1.5" fill="#111"/>`);
+    els.push(`<line x1="${wall.x.toFixed(1)}" y1="${wall.y.toFixed(1)}" x2="${(rcx - ox * (totW / 2 + 2)).toFixed(1)}" y2="${(rcy - oy * (bh / 2 + 2)).toFixed(1)}" stroke="#111" stroke-width="0.7"/>`);
+    let cx0 = rx0;
+    for (let i = 0; i < tags.length; i++) {
+      els.push(`<rect x="${cx0.toFixed(1)}" y="${ry0.toFixed(1)}" width="${widths[i].toFixed(1)}" height="${bh}" fill="#ffffff" stroke="#111" stroke-width="0.9"/>`);
+      els.push(`<text x="${(cx0 + widths[i] / 2).toFixed(1)}" y="${(ry0 + bh / 2 + 1.8).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${tags[i].length > 2 ? '4.4' : '5'}" font-weight="900" fill="#111">${tags[i]}</text>`);
+      cx0 += widths[i];
     }
-    legend.push({ swatch: `<rect x="3" y="-4" width="8" height="8" fill="#fff" stroke="#111" stroke-width="0.9"/>`, label: 'SERVICE EQUIP — UM/MSP/AC (FIELD VERIFY)' });
+    // interconnection note — stacked under (or above) the row, away from the roof
+    const noteLines = [
+      'PV INTERCONNECTION POINT',
+      '(E) METER MAIN · (N) AC DISCONNECT · (N) INVERTER(S)',
+      'AT EXTERIOR WALL — FIELD VERIFY',
+    ];
+    const noteBelow = oy >= 0;   // row sits below the house → note goes further down
+    const nY0 = noteBelow ? ry0 + bh + 7.5 : ry0 - 5 - (noteLines.length - 1) * 6.5;
+    // note block shifts OUTWARD horizontally too — the roof's own bottom
+    // callouts (rail feet / dim band) live directly under the array, and a
+    // centered note tail was colliding with them
+    const noteX = rcx + (rcx < rc.x ? -20 : 20);
+    noteLines.forEach((ln, i) => {
+      els.push(`<text x="${noteX.toFixed(1)}" y="${(nY0 + i * 6.5).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${i === 0 ? '5.4' : '4.8'}" font-weight="${i === 0 ? '900' : 'normal'}" fill="#111" stroke="#fff" stroke-width="1.5" paint-order="stroke">${ln}</text>`);
+    });
+    legend.push({ swatch: `<rect x="0" y="-4" width="6" height="8" fill="#fff" stroke="#111" stroke-width="0.8"/><rect x="6" y="-4" width="6" height="8" fill="#fff" stroke="#111" stroke-width="0.8"/>`, label: 'SERVICE EQUIP — M / MSP / AC-D / INV (FIELD VERIFY)' });
   }
 
   return { els, legend };

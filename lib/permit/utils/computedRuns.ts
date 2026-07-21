@@ -24,6 +24,8 @@ import { computeSystem, type ComputedSystemInput, type RunSegment } from '@/lib/
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { toSubSystemKey, type SubSystemKey } from '@/lib/system/subSystemEquipment';
+import { microMaxPerBranch } from './branching';
+import { getDesignTemps } from './designTemps';
 
 /**
  * Wave 2a (contract §3, 2a Compute): per-subsystem scoping for the permit-path
@@ -59,6 +61,10 @@ export function buildComputedRunsForPermit(
 ): RunSegment[] | null {
   try {
     const eq = getEquipmentContext(input, cad);
+    const _projTh = input.project as { lat?: number; lng?: number; state?: string };
+    const _temps = getDesignTemps(_projTh.lat, _projTh.lng,
+      (typeof _projTh.state === 'string' && /^[A-Za-z]{2}$/.test(_projTh.state.trim()))
+        ? _projTh.state.trim().toUpperCase() : undefined);
     const topo = String(topologyToLegacy(getInverterTopology(input))).toLowerCase() as 'micro' | 'optimizer' | 'string';
     // Panel subset: an explicit per-subsystem count beats the project total.
     const hasSubset = typeof opts?.totalPanels === 'number' && opts.totalPanels > 0;
@@ -134,9 +140,11 @@ export function buildComputedRunsForPermit(
         ? (acKw * 1000) / 240 / Math.max(1, totalPanels)
         : (acKw * 1000) / 240,
       inverterModulesPerDevice: 1,
-      inverterBranchLimit: 13, // IQ8/IQ8+ @ 20 A — sourced (trunk-cable research)
-      ambientTempC: 40,
-      designTempMin: -10,
+      // W2: per-MODEL manufacturer branch limit (D-1 authority) — never a
+      // flat 13; and the SAME ASHRAE thermal basis the snapshot records.
+      inverterBranchLimit: microMaxPerBranch(eq.inverterModel, eq.inverterManufacturer),
+      ambientTempC: _temps.ashrae2pctHighC ?? 40,
+      designTempMin: (input.project as { designTempMin?: number }).designTempMin ?? _temps.ashraeExtremeLowC,
       rooftopTempAdderC, // per-subsystem env (roof adder / 0 for ground+fence); legacy unscoped = 33
       // REAL lengths where geometry allowed; engine defaults elsewhere.
       runLengths: {
@@ -158,9 +166,24 @@ export function buildComputedRunsForPermit(
     };
 
     const cs = computeSystem(csInput);
+    _lastFullResult = cs;
     return cs.runs && cs.runs.length > 0 ? cs.runs : null;
   } catch (err) {
     console.warn('[computedRuns] computeSystem failed (BOM falls back to flat lengths):', (err as Error)?.message ?? err);
     return null;
   }
+}
+
+// ── D-2 parity shadow (W2) ───────────────────────────────────────────────────
+// The snapshot builder needs the FULL computeSystem result (backfeed, branch
+// plan, per-segment runs) to build the engine-parity matrix — not just the
+// stamped RunSegment[] the BOM consumes. Same csInput assembly, full return.
+let _lastFullResult: ReturnType<typeof computeSystem> | null = null;
+export function buildComputeSystemShadow(
+  input: PermitInput,
+  cad: CADModel | null | undefined,
+): ReturnType<typeof computeSystem> | null {
+  _lastFullResult = null;
+  buildComputedRunsForPermit(input, cad ?? undefined);
+  return _lastFullResult;
 }

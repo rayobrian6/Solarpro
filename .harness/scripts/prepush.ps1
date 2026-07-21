@@ -9,9 +9,7 @@
 #   - No new env var without doc update
 #   - No new dependency without justification
 #   - Commit message format is correct
-#   - Branch is james-dev (R7 hard rule, 2026-07-13). Master is banned by R1.
-#     Per-push override: SOLARPRO_PUSH_OVERRIDE=1 (JAMES standing green light
-#     for a specific non-james-dev ref).
+#   - Branch is dev (never master)
 #
 # Exit codes:
 #   0 = all good, JAMES may push
@@ -32,21 +30,16 @@ Write-Host "=== Solarpro agent pre-push ===" -ForegroundColor Cyan
 Write-Host "Repo: $(Get-Location)"
 Write-Host ""
 
-# 1. Branch guard (R7 - JAMES 2026-07-13): only james-dev is a legal push
-#    target. Master is still banned by R1. Other branches fail closed unless
-#    SOLARPRO_PUSH_OVERRIDE=1 is set in the environment (per-push JAMES
-#    standing green light for a specific non-james-dev ref).
+# 1. NOT on master (R1, R4 - JAMES picks the working branch; master is the
+#    only hard ban. Soft-warn if not 'dev' since dev remains the default.)
 $branch = git branch --show-current
-$SOLARPRO_PUSH_OVERRIDE = $env:SOLARPRO_PUSH_OVERRIDE -eq '1'
-
 if ($branch -eq 'master') {
-    Check-Fail "on branch: master (forbidden per AGENTS.md R1 - refusing to push)"
-} elseif ($branch -eq 'james-dev') {
-    Check-Ok "on branch: $branch (R7: only legal push target)"
-} elseif ($SOLARPRO_PUSH_OVERRIDE) {
-    Check-Warn "on branch: $branch (R7 violation, but SOLARPRO_PUSH_OVERRIDE=1 is set - proceeding with caution)"
+    Check-Fail "on branch: master (forbidden per AGENTS.md R1/R4 - refusing to push)"
 } else {
-    Check-Fail "on branch: $branch (R7: only 'james-dev' is a legal push target. To override for a per-push JAMES green light, set SOLARPRO_PUSH_OVERRIDE=1.)"
+    Check-Ok "on branch: $branch (not master, OK per R4)"
+    if ($branch -ne 'dev') {
+        Check-Warn "non-default working branch: '$branch' (dev is the default per AI-AGENT-README.md §9; JAMES's standing override allows this)"
+    }
 }
 
 # 2. Commit message format — Conventional Commits (must be parsed before R6)

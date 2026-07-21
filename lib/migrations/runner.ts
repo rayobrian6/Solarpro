@@ -365,12 +365,15 @@ export function authorizeMigration(params: {
 /**
  * The hard allowlist of migration identifiers that may be run via a bounded
  * TARGETED recovery permit (bypassing the global EXECUTION_ENABLED window).
- * This is intentionally a single-purpose escape hatch — currently only the
- * Nearmap proximity-index migration (108), whose dependency (102) is already
- * applied in production. NOTHING else — not 102, not any historical migration,
- * not "all pending" — can be run through the targeted path.
+ * This is intentionally a narrow escape hatch:
+ *   - 108: the Nearmap proximity index (dependency 102 verified applied).
+ *   - 109-112: the DATA-AUTHORITY-AUDIT backfills (2026-07-19) — statically
+ *     verified UPDATE-only/data-only against allow-listed tables by
+ *     lib/migrations/targetedDataAuthority.ts before any permit is issued.
+ * NOTHING else — not 102, not any historical migration, not "all pending" —
+ * can be run through the targeted path.
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['108']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['108', '109', '110', '111', '112']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;

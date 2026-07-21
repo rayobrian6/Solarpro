@@ -21,6 +21,7 @@ import {
   BOMStageDefinition,
 } from './topology-manager';
 import { resolveIntegratedEquipment } from './equipment/integratedBos';
+import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
 import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
@@ -256,9 +257,10 @@ export interface BOMDerivationEntry {
 
 // ─── Standard OCPD Sizes ──────────────────────────────────────────────────────
 
+// P0-5c: delegates to lib/electrical/stdSizes.ts — the old local copy stopped
+// at 200 A and fell back to non-standard next-10A sizes above it.
 function nextStandardBreaker(amps: number): number {
-  const sizes = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200]; // NEC 240.6(A) — 110A added
-  return sizes.find(s => s >= amps) ?? Math.ceil(amps / 10) * 10;
+  return nextStandardOcpd(amps);
 }
 
 // ─── Wire Length with Fitting Allowance ──────────────────────────────────────
@@ -1130,19 +1132,25 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // Step 3: Determine fused or non-fused from interconnection method
     const isFusedDisc = isSupplySideTap; // supply-side = fused; load-side = non-fused
 
-    // Step 4: Standard sizes
-    const STD_FUSE_SIZES   = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
-    const STD_ENCLOSURES   = [30, 60, 100, 200, 400, 600];
-    const nextFuse         = (a: number) => STD_FUSE_SIZES.find(f => f >= a) ?? Math.ceil(a / 10) * 10;
-    const nextEnclosure    = (a: number) => STD_ENCLOSURES.find(e => e >= a) ?? Math.ceil(a / 100) * 100;
+    // Step 4: Standard sizes — single-sourced from lib/electrical/stdSizes.ts
+    // (P0-5c/P2-2; the old local fuse copy stopped at 200 A with a fictional
+    // next-10A fallback). NEC 240.6(A) fuse sizes; Littelfuse LLNRK Class RK5
+    // is catalogued through 600 A — above that the generic part-number
+    // fallback (`DPF-…`) already flags a non-standard pick for review.
+    const nextFuse = (a: number) => nextStandardOcpd(a);
 
-    // Fuse size = next standard fuse ≥ required amps (fused only)
-    const fuseAmps = isFusedDisc ? nextFuse(acRequiredAmps) : null;
+    // Fuse size = next standard fuse ≥ required amps (fused only).
+    // When the caller supplies the system disconnect / tap OCPD target
+    // (conductorAuthority POI via bomForPermit — Σ per-source backfeed OCPDs),
+    // the fuse sizes from IT: the kW basis goes stale on hybrids and shipped
+    // 110A fuses against E-1's 200A tap OCPD (verify-lead, 2026-07-18).
+    const _targetDiscA = input.systemAcDisconnectA;
+    const fuseAmps = isFusedDisc ? nextFuse(_targetDiscA ?? acRequiredAmps) : null;
 
     // Enclosure size = next standard enclosure ≥ required amps
     // For fused: enclosure must hold the fuse, so enclosure ≥ fuse amps
-    // For non-fused: enclosure ≥ required amps
-    const enclosureRequirement = isFusedDisc ? (fuseAmps ?? acRequiredAmps) : acRequiredAmps;
+    // For non-fused: enclosure ≥ required amps (or the E-1 target when given)
+    const enclosureRequirement = isFusedDisc ? (fuseAmps ?? acRequiredAmps) : (_targetDiscA ?? acRequiredAmps);
     const acDiscAmps = nextEnclosure(enclosureRequirement);
 
     // Part number:
@@ -2402,16 +2410,18 @@ function generateBOMV4PerSubSystem(
     const acContCurrent = ((input.acOutputKw ?? input.systemKw) * 1000) / acVoltage;
     const acRequiredAmps = acContCurrent * 1.25;
     const isFusedDisc = isSupplySideTap;
-    const STD_FUSE_SIZES = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
-    const STD_ENCLOSURES = [30, 60, 100, 200, 400, 600];
-    const nextFuse = (a: number) => STD_FUSE_SIZES.find(f => f >= a) ?? Math.ceil(a / 10) * 10;
-    const nextEnclosure = (a: number) => STD_ENCLOSURES.find(e => e >= a) ?? Math.ceil(a / 100) * 100;
-    const fuseAmps = isFusedDisc ? nextFuse(acRequiredAmps) : null;
+    // Standard sizes — single-sourced from lib/electrical/stdSizes.ts
+    // (P0-5c/P2-2; was the second in-file copy of the fuse/enclosure ladders).
+    const nextFuse = (a: number) => nextStandardOcpd(a);
     // Stage D — single-source the system disconnect to E-1: when the hybrid AC
-    // collection supplies a Σ-backfeed rating, size the enclosure to it so the
-    // BOM/SCHED disconnect equals the rating E-1 draws (NEC 705.12(B)). The fuse
-    // (supply-side) still sizes from the tap requirement. Undefined ⇒ kW basis.
+    // collection supplies a Σ-backfeed rating, size BOTH the enclosure AND the
+    // supply-side fuse to it. The fuse previously kept the AC-kW basis, which
+    // goes stale on hybrids: Stowell's legacy 19.39 kW total → 110A fuses
+    // inside the 200A disco while E-1 printed a 200A tap OCPD, and 110A is
+    // undersized for the 190A source-OCPD sum (verify-lead, 2026-07-18). The
+    // tap OCPD must carry the Σ of source backfeeds — NEC 705.11/705.12(B).
     const _targetDiscA = input.systemAcDisconnectA;
+    const fuseAmps = isFusedDisc ? nextFuse(_targetDiscA ?? acRequiredAmps) : null;
     const enclosureRequirement = isFusedDisc
       ? (fuseAmps ?? acRequiredAmps)
       : (_targetDiscA ?? acRequiredAmps);

@@ -1603,13 +1603,18 @@ function PublicProposalView({
               <h3 className="font-semibold text-white text-sm flex items-center gap-2">
                 <TrendingUp size={15} style={{ color: primaryColor }} /> Your Savings Over Time
               </h3>
-              {/* Final savings callout — Task 3 */}
-              {netDifference_25yr > 0 ? (
+              {/* Final savings callout — bound to the CURVE's own final value
+                  (audit #14: the headline printed cash-basis netDifference
+                  while the curve is finance-shaped — it plateaued ~$40k short
+                  of its own headline). The cash-basis figure lives in the
+                  25-Year Financial Summary tile; this one describes the line
+                  the customer is looking at. */}
+              {projectionData.length > 0 && projectionData[projectionData.length - 1].cumulative > 0 ? (
                 <div className="text-right flex-shrink-0">
                   <div className="text-xl font-black text-emerald-400">
-                    +${Math.round(netDifference_25yr).toLocaleString()}
+                    +${Math.round(projectionData[projectionData.length - 1].cumulative).toLocaleString()}
                   </div>
-                  <div className="text-xs text-slate-500">total est. savings</div>
+                  <div className="text-xs text-slate-500">est. 25-yr advantage incl. REC{purchaseMode === 'finance' ? ' — financed' : ''}</div>
                 </div>
               ) : null}
             </div>
@@ -1658,7 +1663,10 @@ function PublicProposalView({
                     strokeDasharray="4 3"
                     strokeWidth={1.5}
                     label={{
-                      value: `Break-even Yr ${payoffYear}`,
+                      // "Payoff": the flow-walk answer (cumulative energy value
+                      // + REC income ≥ system cost) — NOT a crossing of this
+                      // advantage curve, so don't call it "break-even" here.
+                      value: `Payoff Yr ${payoffYear} — system cost recovered`,
                       position: 'insideTopRight',
                       fill: '#f59e0b',
                       fontSize: 9,

@@ -858,23 +858,34 @@ export function buildCanonicalProposal(
     energyValueBreakdown,
   };
 
-  // Assertion: netDifference must be consistent
+  // Assertion: netDifference must be consistent (SREC-inclusive since the
+  // 2026-07-16 SREC audit — the old formula omitted the srec term and this
+  // "truth violation" fired on EVERY srec-bearing build, poisoning hasWarnings).
   assertTruth(
-    Math.abs(netDifference - (proj25.utility_cost_without_solar_25yr - proj25.solar_cost_total - proj25.remaining_utility_cost_total)) < 1,
+    Math.abs(netDifference - (proj25.utility_cost_without_solar_25yr - proj25.solar_cost_total - proj25.remaining_utility_cost_total + (proj25.srec_income_25yr ?? 0))) < 1,
     `netDifference calculation inconsistency detected`,
     warnings
   );
 
   // v47.250 SPEC §5: projectionChart derived from yearlyFlow — no inline recomputation.
-  // Each year's savings = total_energy_value from the iterative model.
-  // cumulative = cumulative_without_solar - cumulative_with_solar (net advantage at that year).
+  // Each year's savings = total_energy_value + that year's SREC income.
+  // cumulative = (without − with) + SREC-to-date. SREC-INCLUSIVE (task #14,
+  // audit 2026-07-16): the headline "+$130,198 total est. savings" above this
+  // chart is the SREC-inclusive netDifference, but the curve excluded SREC —
+  // it plateaued ~$38k short of its own headline and the "Break-even Yr N"
+  // marker (payoff walk INCLUDES the REC schedule) sat on a curve that
+  // crossed nothing at year N. Same class as the fixed $130k/$140k bug.
   const yearlyFlow: CanonicalEnergyFlowYear[] = proj25.yearlyFlow.map(mapEnergyFlowYear);
 
-  const projectionChart = yearlyFlow.map((yr, i) => ({
-    year:       `Yr ${i + 1}`,
-    savings:    Math.round(yr.total_energy_value),
-    cumulative: Math.round(yr.cumulative_without_solar - yr.cumulative_with_solar),
-  }));
+  let _srecToDate = 0;
+  const projectionChart = yearlyFlow.map((yr, i) => {
+    _srecToDate += yr.srec_income ?? 0;
+    return {
+      year:       `Yr ${i + 1}`,
+      savings:    Math.round(yr.total_energy_value + (yr.srec_income ?? 0)),
+      cumulative: Math.round(yr.cumulative_without_solar - yr.cumulative_with_solar + _srecToDate),
+    };
+  });
 
   const truth25yr = {
     utilityCostWithoutSolar: proj25.utility_cost_without_solar_25yr,

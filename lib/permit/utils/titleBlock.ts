@@ -124,7 +124,23 @@ export function titleBlock(
     <div class="tbs-id">
       <div class="tb-sheet-id">${sheetId}</div>
     </div>
+    ${_snapshotStampHtml(input)}
   </div>`;
+}
+
+/** PermitDesignSnapshot stamp (V12 — Ray W1 req. 1): every rendered sheet
+ *  carries the SAME snapshot id, schema version and SHA-256 digest. Absent
+ *  snapshot ⇒ explicit UNSTAMPED marker (never silently blank); the post-
+ *  render assertion in generatePermit fails closed on it. */
+function _snapshotStampHtml(input: PermitInput): string {
+  const s = (input as unknown as { _snapshot?: { meta?: { snapshotId?: string; schemaVersion?: string; digest?: string } } })._snapshot;
+  const m = s?.meta;
+  if (!m?.snapshotId || !m?.digest) {
+    return `<div class="tb-snapshot" style="font-size:5.5px;color:#a00;padding:1px 4px;border-top:1px solid #000;">SNAPSHOT: UNSTAMPED — NOT AN AUTHORITY-VERIFIED SHEET</div>`;
+  }
+  return `<div class="tb-snapshot" style="font-size:5.5px;color:#333;padding:1px 4px;border-top:1px solid #000;line-height:1.35;">`
+    + `SNAPSHOT ${escapeH(m.snapshotId)} &middot; SCHEMA ${escapeH(m.schemaVersion ?? '')}<br/>`
+    + `SHA-256 ${escapeH((m.digest ?? '').slice(0, 20))}&hellip;</div>`;
 }
 
 // ─── Construction Notes (NEC-specific, system-config-aware) ──────────────────

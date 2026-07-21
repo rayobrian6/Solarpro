@@ -102,6 +102,14 @@ export interface BranchCircuitSpec {
    */
   maxMicrosPerBranch: number;
   /**
+   * MANUFACTURER's maximum branch OCPD (A). Ray's ruling D-1 (2026-07-20):
+   * manufacturer authority governs — for IQ8A-72-2-US the published branch
+   * basis is a 20 A breaker; larger branch OCPDs are NOT permitted regardless
+   * of module grouping. The snapshot validator (V5) fails closed on any
+   * branch exceeding this.
+   */
+  maxBranchOcpdA: number;
+  /**
    * AC output current per micro-inverter unit (A).
    * Used to compute branch loading and OCPD sizing.
    */

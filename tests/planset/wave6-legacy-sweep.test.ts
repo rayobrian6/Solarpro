@@ -45,14 +45,23 @@ function roofStringProject(): any {
 }
 
 // The pinned legacy sheet sequences (post-campaign N=1 = pre-campaign set).
-const LEGACY_SEQ = ['PV-0', 'PV-1', 'PV-1B', 'PV-4A', 'PV-4B', 'E-1', 'PV-3',
-  'PV-4C', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'CERT', 'PE-1'];
-const LEGACY_SEQ_NO_DS = LEGACY_SEQ.filter(id => id !== 'DS-1');
+// Discipline flow (Ray 2026-07-20): plans → structural → electrical (E-1
+// leads) → labels → schedules/datasheets → certs. DS series: equipment pages
+// + RACKING MOUNT (the manufacturer page PV-3 formerly reprinted inline —
+// PV-3 is a DRAWING sheet again) + RACKING RAIL (rail_spec product sheet).
+const LEGACY_SEQ = ['PV-0', 'PV-1', 'PV-1B', 'PV-3', 'PV-4C', 'E-1', 'PV-4A',
+  'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'DS-2', 'DS-3',
+  'CERT', 'PE-1'];
+// Fence: no racking-mount image asset (SolFence has no public doc) and no
+// registry rail accessory → equipment DS page only.
+const LEGACY_SEQ_ONE_DS = LEGACY_SEQ.filter(id => id !== 'DS-2' && id !== 'DS-3');
+// Ground: no datasheet images resolve for the fixture's equipment at all.
+const LEGACY_SEQ_NO_DS = LEGACY_SEQ.filter(id => !id.startsWith('DS-'));
 
 const FIXTURES: Array<{ name: string; mk: () => any; seq: string[] }> = [
   { name: 'roof micro',  mk: () => clone(roofProject),   seq: LEGACY_SEQ },
   { name: 'roof string', mk: roofStringProject,          seq: LEGACY_SEQ },
-  { name: 'pure fence',  mk: () => clone(fenceProject),  seq: LEGACY_SEQ },
+  { name: 'pure fence',  mk: () => clone(fenceProject),  seq: LEGACY_SEQ_ONE_DS },
   { name: 'pure ground', mk: () => clone(groundProject), seq: LEGACY_SEQ_NO_DS },
 ];
 

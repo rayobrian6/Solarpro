@@ -11,7 +11,8 @@ import type { PermitInput } from '../types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, BATTERIES } from '@/lib/equipment-db';
-import { getManufacturerAsset, type ManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, getManufacturerAssetsByCategory, type ManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getRegistryEntryV4 } from '@/lib/equipment-registry-v4';
 
 interface DatasheetEntry { label: string; asset: ManufacturerAsset; }
 
@@ -64,6 +65,35 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
   const batModel = s.battery?.model || p._canonical?.battery?.model || p.batteryModel;
   const batId = fuzz(BATTERIES, batModel)?.id;
   push('BATTERY', getManufacturerAsset(batId, 'battery_spec'));
+
+  // Racking pages (Ray 2026-07-20): ALL full-page manufacturer documents live
+  // together in the DS appendix — PV-3 stays a DRAWING sheet that cites them.
+  //
+  // 1. The MOUNT's manufacturer page (attachment/install cross-section doc),
+  //    keyed on mountingSystemId — the page PV-3 formerly reprinted inline.
+  const mountId = (project as { mountingSystemId?: string }).mountingSystemId;
+  push('RACKING MOUNT', getManufacturerAsset(mountId, 'racking_detail'));
+
+  // 2. The RAIL product datasheet for rail-paired mounts (e.g. RT-MINI pad +
+  //    IronRidge XR rail): resolved from the SAME equipment-registry rail
+  //    accessory the BOM bills — never a hardcoded brand — against the
+  //    RAIL-PRODUCT assets ('rail_spec'). NEVER 'racking_detail': those are
+  //    ATTACHMENT pages, and showing e.g. the IronRidge FlashFoot2 attachment
+  //    instructions on a RT-MINI-pad job misstates the attachment product
+  //    (Ray caught exactly this, 2026-07-20). No matching asset → no page.
+  const railAcc = (mountId ? getRegistryEntryV4(mountId) : undefined)
+    ?.requiredAccessories?.find(a => a.category === 'rail');
+  if (railAcc?.defaultManufacturer && railAcc?.defaultModel) {
+    const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const accBrand = norm(railAcc.defaultManufacturer);
+    const accModel = norm(railAcc.defaultModel);
+    // Longest asset-model match wins ('XR1000 Rail' must not lose to 'XR100 Rail').
+    const railAsset = getManufacturerAssetsByCategory('rail_spec')
+      .filter(a => norm(a.brand) === accBrand
+        && accModel.includes(norm(a.model).replace(/rail$/, '')))
+      .sort((a, b) => b.model.length - a.model.length)[0] ?? null;
+    push('RACKING RAIL', railAsset);
+  }
 
   return out;
 }

@@ -22,6 +22,8 @@
 
 import type { PermitInput } from '../types';
 import { classifyPanel } from './subSystems';
+import { resolvePanelSpecs } from './panelSpecs';
+import type { HybridEquipmentCarrier } from './helpers';
 import type { CADModel } from '@/lib/cad/types';
 
 export type ArrayOrientation = 'portrait' | 'landscape';
@@ -61,7 +63,7 @@ function normalizeOrientation(raw: unknown): ArrayOrientation | undefined {
  */
 export function resolveArrayStructuralLayout(
   input: PermitInput,
-  cad?: Pick<CADModel, 'panelWidthM' | 'panelHeightM' | 'totalPanels'>,
+  cad?: Pick<CADModel, 'panelWidthM' | 'panelHeightM' | 'totalPanels'> & HybridEquipmentCarrier,
   /** Hybrid (P2): scope the layout to ONE sub-system's panels. Unscoped, a
    *  hybrid's roof structural run would size rails/feet for fence+ground
    *  panels too. Uses the same classifyPanel as the partition. */
@@ -74,15 +76,30 @@ export function resolveArrayStructuralLayout(
   }>;
   if (subSystemKey) positions = positions.filter(p => classifyPanel(p) === subSystemKey);
 
-  // ── Panel physical dimensions (single-sourced: CAD panel dims from the
-  //    selected equipment, else the project fallback). Long ≥ short always. ──
+  // ── P0-3 (data-authority register): sub-scoped runs resolve the SUB's OWN
+  //    module dims + weight through the per-sub panel-spec authority
+  //    (equipment-db via project.subSystems[key].panelId → the sub's fleet).
+  //    project.panelWeightLbs / cad.panel*M are panel0 carriers — the FENCE
+  //    module's on hybrids — and an understated roof dead load is the
+  //    highest-liability class. Unscoped (single-system) calls keep the
+  //    legacy chain byte-identical. ──
+  const subSpecs = subSystemKey ? resolvePanelSpecs(input, cad ?? null, subSystemKey) : null;
+
+  // ── Panel physical dimensions (single-sourced: per-sub authority when
+  //    scoped, else CAD panel dims from the selected equipment, else the
+  //    project fallback). Long ≥ short always. ──
   const rawW = (cad?.panelWidthM ?? 0) > 0 ? cad!.panelWidthM * M_TO_IN : (project.panelWidthIn || 0);
   const rawH = (cad?.panelHeightM ?? 0) > 0 ? cad!.panelHeightM * M_TO_IN : (project.panelLengthIn || 0);
-  const dimA = rawW > 0 ? rawW : 40.9;
-  const dimB = rawH > 0 ? rawH : 66.9;
+  const dimA = (subSpecs?.widthIn ?? 0) > 0 ? subSpecs!.widthIn : (rawW > 0 ? rawW : 40.9);
+  const dimB = (subSpecs?.lengthIn ?? 0) > 0 ? subSpecs!.lengthIn : (rawH > 0 ? rawH : 66.9);
   const panelLengthIn = Math.max(dimA, dimB);
   const panelWidthIn = Math.min(dimA, dimB);
-  const panelWeightLbs = project.panelWeightLbs || 50;
+  const _legacyWeight = project.panelWeightLbs || 50;
+  const panelWeightLbs = (subSpecs?.weightLbs ?? 0) > 0 ? subSpecs!.weightLbs : _legacyWeight;
+  if (subSpecs && subSpecs.weightLbs > 0 && Math.abs(subSpecs.weightLbs - _legacyWeight) > 0.05) {
+    console.warn(`[arrayLayout] ${subSystemKey} dead-load module weight recomputed: `
+      + `${_legacyWeight} lbs (project panel0 scalar) → ${subSpecs.weightLbs} lbs (${subSpecs.model})`);
+  }
 
   const fallbackCount =
     input.system?.totalPanels || cad?.totalPanels || project.panelPositions?.length || 1;

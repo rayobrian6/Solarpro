@@ -19,6 +19,8 @@
 // against the manufacturer datasheet before relying on them for procurement.
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
+
 export type BosKind =
   | 'integrated_combiner'   // combiner + gateway (+/- disconnect) in one enclosure
   | 'gateway'               // standalone monitoring/metering gateway (Envoy)
@@ -339,9 +341,12 @@ export function resolveIntegratedEquipment(ctx: SystemBosContext): IntegratedEqu
 // → point of interconnection. Replaces "one AC disconnect per lane".
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Standard OCPD / busbar ratings (A), NEC 240.6(A).
-const STD_RATINGS = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
-const nextStdRating = (a: number): number => STD_RATINGS.find(r => r >= a) ?? Math.ceil(a / 50) * 50;
+// Standard OCPD / busbar ratings (A), NEC 240.6(A) — single-sourced from
+// lib/electrical/stdSizes.ts (P0-5c; the old local table stopped at 400 with a
+// non-standard next-50A fallback above it).
+// Exported: conductorAuthority's POI block sizes the supply-side tap OCPD with
+// THIS function so E-1's system disconnect and the authority can never diverge.
+export const nextStdRating = (a: number): number => nextStandardOcpd(a);
 
 export interface AcCombinerPanelPlan extends ResolvedBosDevice {
   /** Busbar continuous rating (A). */

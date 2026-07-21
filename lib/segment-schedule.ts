@@ -14,6 +14,8 @@
 //   Ch9 T5   — Conductor cross-sectional areas
 // ============================================================
 
+import { nextStandardOcpd } from './electrical/stdSizes';
+
 // ─── Conductor Bundle ────────────────────────────────────────────────────────
 // Represents one or more identical conductors in a raceway
 
@@ -178,10 +180,11 @@ function getConduitDerating(currentCarryingCount: number): number {
   return 0.35;
 }
 
-// NEC 240.6 — Standard OCPD sizes (all standard sizes, used for feeder/service sizing)
-const STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
+// NEC 240.6 — Standard OCPD sizes (feeder/service sizing). P0-5c: delegates to
+// lib/electrical/stdSizes.ts — the old local copy CLAMPED anything above 400 A
+// to 400 A (an undersized OCPD).
 function nextStandardOCPD(amps: number): number {
-  return STANDARD_OCPD.find(s => s >= amps) ?? 400;
+  return nextStandardOcpd(amps);
 }
 
 // 240V double-pole breaker sizes available in residential/commercial panels.

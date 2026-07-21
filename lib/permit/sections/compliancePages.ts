@@ -8,8 +8,12 @@ import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
-import { buildConductorAuthority } from '../utils/conductorAuthority';
+import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { selectFieldLabels, type FieldLabel } from '../utils/fieldLabels';
+import { getDesignTemps } from '../utils/designTemps';
+import { isSubSystemKey, type SubSystemKey } from '../utils/subSystems';
+import { resolvePanelSpecs, coldVocFactor, type ResolvedPanelSpecs } from '../utils/panelSpecs';
+import { hybridSheetSections } from './subSystemSheets';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import type { CanonicalSysType } from '../types';
@@ -17,6 +21,7 @@ import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getSnapshot } from '../snapshot/read';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance } = input;
@@ -30,6 +35,138 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   // interconnection, battery and rapid-shutdown, resolved to this NEC edition.
   const labels = selectFieldLabels(input, cad);
   const requiredLabels = labels.filter(l => l.required);
+  const necYear = String(necVer).match(/20\d\d/)?.[0] || '2020';
+
+  // ── SITE-COMPUTED RATING LABELS (per sub-system) ─────────────────────────
+  // The dataset's fill-in ratings labels (DC PV power source / AC disconnect)
+  // carry ONE whole-system value set — wrong on a hybrid where each sub has
+  // its own string length, module and feeder. Values below come from the SAME
+  // per-sub conductor authority E-1/PV-4B print (never re-derived) + the
+  // equipment DB datasheet records (Vmp/Imp/β) matched by the sub's OWN model.
+  const { project, system } = input;
+  const auth = buildConductorAuthority(input, cad);
+  const _projX = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
+  const _stateAbbr = (() => {
+    if (_projX.state && /^[A-Za-z]{2}$/.test(_projX.state.trim())) return _projX.state.trim().toUpperCase();
+    const m = (_projX.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/);
+    return m ? m[1].toUpperCase() : undefined;
+  })();
+  const _temps = getDesignTemps(_projX.lat, _projX.lng, _stateAbbr);
+  // Explicit AHJ design-temp override wins over the ASHRAE state envelope.
+  const tMinC = project.designTempMin ?? _temps.ashraeExtremeLowC;
+
+  const _panelDb = (model?: string) => {
+    const m = (model || '').toLowerCase().trim();
+    if (!m) return undefined;
+    return SOLAR_PANELS.find(p => p.model.toLowerCase() === m)
+      ?? SOLAR_PANELS.find(p => m.includes(p.model.toLowerCase()) || p.model.toLowerCase().includes(m));
+  };
+  const _subName = (k: string) => k === 'roof' ? 'ROOF ARRAY' : k === 'ground' ? 'GROUND ARRAY' : k === 'fence' ? 'FENCE ARRAY' : k.toUpperCase();
+  const _invListX = ((system.inverters ?? []) as Array<{ subSystemKey?: string; type?: string; model?: string; strings?: Array<{ panelCount?: number }> }>);
+  const _primaryKey = auth.subSystems[0]?.key;
+
+  interface RatingCard {
+    kind: 'dc' | 'ac';
+    id: string;
+    title: string;
+    subTitle: string;
+    rows: Array<{ k: string; v: string }>;
+    note?: string;
+    loc: string;
+    code: string;
+  }
+  const ratingCards: RatingCard[] = [];
+  let _dcN = 0; let _acN = 0;
+  let _betaAssumed = false;
+
+  for (const sub of auth.subSystems) {
+    if (sub.isMicro) continue;
+    const eqS = sub.equipment;
+    const db = _panelDb(eqS.panelModel);
+    const voc = eqS.panelVoc || db?.voc || 0;
+    const isc = eqS.panelIsc || db?.isc || 0;
+    const vmp = db?.vmp ?? (voc ? parseFloat((voc * 0.83).toFixed(1)) : 0);
+    const imp = db?.imp ?? (vmp && eqS.panelWatts ? parseFloat((eqS.panelWatts / vmp).toFixed(2)) : 0);
+    const beta = typeof db?.tempCoeffVoc === 'number' ? db.tempCoeffVoc : undefined; // %/°C (negative)
+    // String composition from the sub's OWN tagged inverters (contract §1.3).
+    const own = _invListX.filter(inv =>
+      ((isSubSystemKey(inv?.subSystemKey) ? inv.subSystemKey : _primaryKey) === sub.key)
+      && String(inv?.type || '').toLowerCase() !== 'micro');
+    let nPer = 0; let nStrings = 0;
+    for (const inv of own) for (const s of inv.strings ?? []) {
+      if ((s.panelCount || 0) > 0) { nStrings += 1; nPer = Math.max(nPer, s.panelCount || 0); }
+    }
+    if (!nPer) { nStrings = Math.max(1, sub.dcStrings.length); nPer = Math.ceil(sub.panelCount / nStrings); }
+    // NEC 690.7(A): Voc × (1 + β(Tmin − 25)). β unresolved ⇒ MARKED ×1.25.
+    const factor = beta !== undefined ? 1 + (beta / 100) * (tMinC - 25) : 1.25;
+    if (beta === undefined) _betaAssumed = true;
+    const maxSysV = voc * factor * nPer;
+    _dcN += 1;
+    ratingCards.push({
+      kind: 'dc',
+      id: `DC-L${_dcN}`,
+      title: 'PHOTOVOLTAIC SYSTEM DC DISCONNECT',
+      subTitle: `${_subName(sub.key)} — ${nStrings} STRING${nStrings === 1 ? '' : 'S'} × ${nPer} MODULES (${(eqS.panelModel || 'PV MODULE').toUpperCase()})`,
+      rows: [
+        { k: 'OPERATING VOLTAGE', v: voc && vmp ? `${(vmp * nPer).toFixed(1)} VDC` : '____ VDC' },
+        { k: 'OPERATING CURRENT', v: imp ? `${imp.toFixed(2)} AMPS` : '____ AMPS' },
+        { k: 'MAX SYSTEM VOLTAGE', v: voc ? `${maxSysV.toFixed(1)} VDC` : '____ VDC' },
+        { k: 'SHORT CIRCUIT CURRENT', v: isc ? `${(isc * 1.25).toFixed(2)} AMPS` : '____ AMPS' },
+      ],
+      note: beta !== undefined
+        ? `MAX SYSTEM VOLTAGE = VOC × (1 + β(TMIN−25)) · β = ${beta}%/°C @ ${tMinC}°C · ISC × 1.25 PER NEC 690.8(A)`
+        : `MAX SYSTEM VOLTAGE = VOC × 1.25 († β UNRESOLVED — CONSERVATIVE) @ ${tMinC}°C · ISC × 1.25 PER NEC 690.8(A)`,
+      loc: `Inverter and DC disconnecting means serving the ${sub.key} array${auth.isHybrid ? ` (${sub.key.toUpperCase()} sub-system)` : ''}.`,
+      code: `NEC ${necYear}: 690.53, 690.13(B)`,
+    });
+  }
+
+  // Combined POI current = Σ per-sub feeder currents from the SAME authority
+  // E-1 draws (system.totalAcKw is a stale top-level aggregate on hybrids —
+  // 19.4 kW vs the authority's 34.8 kW on Stowell; never trust it here).
+  const _acTotalA = auth.subSystems.reduce((a, s) => a + (s.acSubFeeder.currentA || 0), 0)
+    || ((getSnapshot(input).derived.acWattsContinuous || (system.totalAcKw || 0) * 1000) / 240);
+  if (auth.isHybrid) {
+    for (const sub of auth.subSystems) {
+      _acN += 1;
+      const devTxt = sub.isMicro
+        ? `${sub.deviceCount} × ${(sub.equipment.inverterModel !== '—' ? sub.equipment.inverterModel : 'MICROINVERTERS').toUpperCase()}`
+        : (sub.equipment.inverterModel !== '—' ? sub.equipment.inverterModel.toUpperCase() : 'STRING INVERTER');
+      ratingCards.push({
+        kind: 'ac',
+        id: `AC-L${_acN}`,
+        title: 'PHOTOVOLTAIC AC DISCONNECT',
+        subTitle: `${_subName(sub.key)} CIRCUIT — ${devTxt}`,
+        rows: [
+          { k: 'MAX AC OPERATING CURRENT', v: sub.acSubFeeder.currentA > 0 ? `${sub.acSubFeeder.currentA.toFixed(1)} AMPS` : '____ AMPS' },
+          { k: 'NOMINAL OPERATING AC VOLTAGE', v: '240 VAC' },
+        ],
+        loc: `PV AC combiner panel breaker for the ${sub.key} circuit; sub-system AC disconnect (if installed).`,
+        code: `NEC ${necYear}: 690.54`,
+      });
+    }
+  }
+  ratingCards.push({
+    kind: 'ac',
+    id: 'AC-SYS',
+    title: 'PHOTOVOLTAIC SYSTEM AC DISCONNECT',
+    subTitle: auth.isHybrid ? 'COMBINED SYSTEM OUTPUT — POINT OF INTERCONNECTION' : 'SYSTEM OUTPUT — POINT OF INTERCONNECTION',
+    rows: [
+      { k: 'MAX AC OPERATING CURRENT', v: _acTotalA > 0 ? `${_acTotalA.toFixed(1)} AMPS` : '____ AMPS' },
+      { k: 'NOMINAL OPERATING AC VOLTAGE', v: '240 VAC' },
+    ],
+    loc: 'Inverter, AC disconnect(s), and the photovoltaic system point of interconnection.',
+    code: `NEC ${necYear}: 690.54`,
+  });
+
+  // These dataset labels are SUPERSEDED on this sheet by the site-computed
+  // cards / the multiple-power-sources placard (still listed in the schedule).
+  const SUPERSEDED = new Set([
+    'dc-photovoltaic-power-source-ratings',
+    'ac-point-of-connection-disconnect',
+    'multiple-sources-of-power-directory',
+  ]);
+  const gridLabels = requiredLabels.filter(l => !SUPERSEDED.has(l.refId));
 
   // Render each item as what it physically IS — a peel-and-stick field DECAL
   // (adhesive vinyl / reflective label) that gets applied to a specific piece
@@ -52,6 +189,16 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
         'DO NOT DISCONNECT OR REMOVE.',
         'Bonds the PV system to the building grounding electrode system.',
         'Green / green-yellow identification per NEC 250.119; sized per NEC 250.66 / 690.47.',
+      ],
+      // Title-only marking labels — supply body copy so the decal reads as a
+      // complete label (and points at the site-computed ratings labels).
+      'pv-system-dc-disconnect': [
+        'IDENTIFIES THE PV SYSTEM DC DISCONNECTING MEANS.',
+        'Ratings per the site-computed DC DISCONNECT labels (DC-L#) on this sheet.',
+      ],
+      'ac-disconnect-marking': [
+        'IDENTIFIES THE EXTERIOR PV AC DISCONNECTING MEANS.',
+        'Ratings per the site-computed AC DISCONNECT labels (AC-L# / AC-SYS) on this sheet.',
       ],
     };
     const _rest0 = lbl.lines.slice(1);
@@ -127,126 +274,235 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     }
 
     return `<div style="page-break-inside:avoid;">` +
-      // spec caption (id + code) — annotation above the decal
-      `<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:6.8px;color:#666;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;padding:0 1px;">` +
-        `<span>${escapeH(lbl.id)}</span><span style="font-family:var(--mono);">${escapeH(lbl.necRef)}</span>` +
-      `</div>` +
       decal +
-      // AFFIX-TO tag (this decal sticks to a specific piece of equipment) + full location
-      `<div style="display:flex;align-items:center;gap:5px;margin-top:3px;padding:0 1px;">` +
-        `<span style="flex:0 0 auto;background:#111;color:#fff;font-size:6.4px;font-weight:800;letter-spacing:0.5px;padding:1.5px 5px;border-radius:8px;">AFFIX TO: ${escapeH(affix)}</span>` +
-        `<span style="font-size:6.6px;color:#444;line-height:1.3;">${escapeH(lbl.placement)}</span>` +
-      `</div>` +
+      labelCaption(lbl.id, `AFFIX TO ${affix}: ${lbl.placement}`, lbl.necRef) +
     `</div>`;
   }
 
-  function buildLabelRows(lblList: FieldLabel[]): string {
+  // Reference-style caption under every label: LABEL LOCATION + PER CODE(S).
+  function labelCaption(id: string, loc: string, code: string): string {
+    return `<div style="margin-top:3px;padding:0 1px;">` +
+      `<div style="font-size:6.5px;font-weight:900;letter-spacing:0.4px;color:#111;text-decoration:underline;">${escapeH(id)} — LABEL LOCATION:</div>` +
+      `<div style="font-size:6.5px;color:#333;line-height:1.35;">${escapeH(loc)}</div>` +
+      `<div style="font-size:6.5px;font-weight:800;color:#111;margin-top:1px;">PER CODE(S): <span style="font-family:var(--mono);font-weight:700;">${escapeH(code)}</span></div>` +
+    `</div>`;
+  }
+
+  // Site-computed ratings decal (reference E-2 style): solid red field, white
+  // keyline, centered KEY: VALUE rows with the value underlined.
+  function renderRatingCard(c: RatingCard): string {
+    const sheenR = `<div style="position:absolute;top:0;left:0;right:0;height:42%;background:linear-gradient(180deg,rgba(255,255,255,0.18),rgba(255,255,255,0));pointer-events:none;"></div>`;
+    const rows = c.rows.map(r =>
+      `<div style="font-size:8.4px;font-weight:900;letter-spacing:0.2px;line-height:1.6;color:#fff;">${escapeH(r.k)}: ` +
+      `<span style="text-decoration:underline;text-underline-offset:2px;font-family:var(--mono);white-space:nowrap;">${escapeH(r.v)}</span></div>`).join('');
+    return `<div style="page-break-inside:avoid;">` +
+      `<div style="position:relative;border-radius:6px;overflow:hidden;background:#c1121f;border:1.5px solid #7d0b12;box-shadow:0 1.5px 3px rgba(0,0,0,0.4);padding:7px 8px;text-align:center;min-height:80px;box-sizing:border-box;">` +
+        sheenR +
+        `<div style="position:absolute;top:3px;left:3px;right:3px;bottom:3px;border:1px solid rgba(255,255,255,0.55);border-radius:4px;pointer-events:none;"></div>` +
+        `<div style="font-size:10px;font-weight:900;letter-spacing:0.6px;color:#fff;line-height:1.2;">&#9888; ${escapeH(c.title)} &#9888;</div>` +
+        `<div style="font-size:6.6px;font-weight:800;letter-spacing:0.3px;color:#ffd9dc;margin:2px 0 3px;line-height:1.3;">${escapeH(c.subTitle)}</div>` +
+        rows +
+        (c.note ? `<div style="font-size:6.2px;font-weight:700;color:#ffc9cd;margin-top:3px;line-height:1.3;">${escapeH(c.note)}</div>` : '') +
+      `</div>` +
+      labelCaption(c.id, c.loc, c.code) +
+    `</div>`;
+  }
+
+  // 4-across card grid (site-computed rating cards lead, then generic decals).
+  function buildCardGrid(cells: string[]): string {
     let html = '';
-    for (let i = 0; i < lblList.length; i += 3) {
-      const row = lblList.slice(i, i + 3);
+    for (let i = 0; i < cells.length; i += 4) {
+      const row = cells.slice(i, i + 4);
       html += '<tr>';
-      for (const lbl of row) {
-        html += `<td style="width:33.33%;padding:5px 7px 10px;vertical-align:top;">${renderLabel(lbl)}</td>`;
-      }
-      for (let p = row.length; p < 3; p++) {
-        html += '<td style="width:33.33%;padding:5px 7px 10px;"></td>';
-      }
+      for (const c of row) html += `<td style="width:25%;padding:5px 6px 13px;vertical-align:top;">${c}</td>`;
+      for (let p = row.length; p < 4; p++) html += '<td style="width:25%;padding:5px 6px 13px;"></td>';
       html += '</tr>';
     }
-    return html;
+    return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tbody>${html}</tbody></table>`;
   }
+  // Keep the dataset inverter-listing label's amp figure consistent with the
+  // authority sum (its upstream fill reads the stale totalAcKw aggregate).
+  const gridLabelsFixed = gridLabels.map(l =>
+    l.refId === 'inverter-listing-label' && _acTotalA > 0
+      ? { ...l, lines: l.lines.map(t => t.replace(/[\d.]+\s*A\s*@\s*240\s*V/i, `${_acTotalA.toFixed(1)} A @ 240 V`)) }
+      : l);
+  const cardCells = [
+    ...ratingCards.map(renderRatingCard),
+    ...gridLabelsFixed.map(renderLabel),
+  ];
+
+  // ── MULTIPLE POWER SOURCES placard (NEC 705.10 / 690.56(B)) ──────────────
+  // Hybrid systems are multi-source by definition — the placard lists every
+  // source + its disconnecting means. (The site map lives on PV-1/PV-2; this
+  // placard carries the structured source directory only.)
+  const hasBatteryW = hasRealBattery(project);
+  const mainAW = project.mainPanelAmps || 200;
+  const battKwhW = hasBatteryW ? (project.batteryCount || 1) * (project.batteryKwh ?? 5.0) : 0;
+  interface SrcRow { name: string; rating: string; disco: string; }
+  const srcRows: SrcRow[] = [{
+    name: 'UTILITY GRID SERVICE',
+    rating: `${mainAW} A &middot; 120/240 V 1&#966;`,
+    disco: 'Main service disconnect &mdash; at utility meter / service entrance',
+  }];
+  for (const sub of auth.subSystems) {
+    const kw = (sub.acSubFeeder.currentA * 240) / 1000;
+    const topoTxt = sub.isMicro ? 'MICROINVERTERS' : sub.topology === 'OPTIMIZER' ? 'OPTIMIZER INVERTER' : 'STRING INVERTER';
+    srcRows.push({
+      name: `${_subName(sub.key)} &mdash; SOLAR PV (${topoTxt})`,
+      rating: `${kw > 0 ? kw.toFixed(1) : '&mdash;'} kW AC &middot; ${sub.panelCount} MODULES`,
+      disco: auth.isHybrid
+        ? `${sub.key.charAt(0).toUpperCase() + sub.key.slice(1)} circuit breaker at the PV AC combiner panel &#8594; PV system disconnect at the point of interconnection`
+        : 'PV AC disconnect &mdash; adjacent to utility meter (see PV-1)',
+    });
+  }
+  if (hasBatteryW) {
+    srcRows.push({
+      name: 'ENERGY STORAGE SYSTEM (ESS)',
+      rating: `${battKwhW.toFixed(1)} kWh${project.batteryBrand ? ` &middot; ${project.batteryBrand}` : ''}`,
+      disco: 'ESS disconnect &mdash; at the battery / ESS enclosure',
+    });
+  }
+  const placardHtml =
+    `<div style="border:2.5px solid #000;background:#fff;page-break-inside:avoid;">` +
+      `<div style="padding:6px 10px 5px;text-align:center;border-bottom:2px solid #000;">` +
+        `<div style="font-size:24px;font-weight:900;letter-spacing:1px;line-height:1;">CAUTION:</div>` +
+        `<div style="font-size:10.5px;font-weight:800;line-height:1.35;margin-top:3px;">POWER TO THIS BUILDING IS ALSO SUPPLIED FROM THE FOLLOWING SOURCES WITH DISCONNECTS AS SHOWN</div>` +
+      `</div>` +
+      `<table class="equip-table" style="margin:0;">` +
+        `<thead><tr>` +
+          `<th style="width:6%;text-align:center;">#</th>` +
+          `<th style="width:33%;">POWER SOURCE</th>` +
+          `<th style="width:24%;">RATING</th>` +
+          `<th>DISCONNECTING MEANS / LOCATION</th>` +
+        `</tr></thead>` +
+        `<tbody>` +
+        srcRows.map((s, i) =>
+          `<tr${i % 2 === 1 ? ' class="bg-lt"' : ''}>` +
+          `<td class="fw9 mono" style="text-align:center;">${i + 1}</td>` +
+          `<td class="fw7" style="font-size:7.6px;">${s.name}</td>` +
+          `<td class="mono" style="font-size:7.2px;">${s.rating}</td>` +
+          `<td style="font-size:7.2px;">${s.disco}</td>` +
+          `</tr>`).join('') +
+        `</tbody>` +
+      `</table>` +
+    `</div>` +
+    labelCaption('PL-1', 'At each service equipment location and at each power-source disconnecting means; group with all on-site power-source directories (see also PV-6 permanent plaque).', `NEC ${necYear}: 705.10, 690.56(B)`);
+
+  // ── PERMANENT SIGNAGE NOTES (reference E-2 standard) ─────────────────────
+  const signageNotes = [
+    `Not all placards shown may be required by the local AHJ. Owner / installer shall verify placard requirements with the local AHJ before installation.`,
+    `All plaques and signage shall comply with the adopted edition of the National Electrical Code (NEC ${necVer}) and local amendments.`,
+    `Alternate power-source placards shall be metallic or plastic, engraved or machine-printed, with letters in a contrasting color to the plaque. Placards shall be attached by pop rivets, screws, or another approved permanent method &mdash; adhesive-only attachment is not permitted where prohibited by the AHJ.`,
+    `Directory placard marking content and format: red background, white lettering, minimum 3/8" letter height, all capital letters, Arial or similar non-bold font, reflective, weather-resistant material suitable for the environment (UL 969).`,
+    `Field-applied labels on conduit / raceways shall appear at intervals not exceeding 10 ft (3 m), at every turn, and above/below each penetration per NEC 690.31(D).`,
+  ];
+  const signageHtml =
+    `<div style="border:var(--border);padding:5px 7px;font-size:7.4px;line-height:1.5;">` +
+    signageNotes.map((n, i) => `<div style="display:flex;gap:5px;margin-bottom:2px;"><span style="font-weight:900;font-family:var(--mono);flex:0 0 auto;">${i + 1}.</span><span>${n}</span></div>`).join('') +
+    `</div>`;
+
+  // ── Label schedule (all labels incl. N/A + superseded → computed cards) ──
+  const scheduleHtml = (() => {
+    const _row = (lbl: typeof labels[number], idx: number) =>
+      `<tr style="${!lbl.required ? 'opacity:0.45;' : ''}background:${idx % 2 === 0 ? '#fff' : '#f5f5f5'};">` +
+      `<td class="fw9 mono" style="font-size:6.8px;">${lbl.id}</td>` +
+      `<td style="font-family:monospace;font-size:6.4px;">${lbl.necRef}</td>` +
+      `<td style="text-align:center;font-weight:900;font-family:monospace;font-size:6.6px;">${lbl.required ? (SUPERSEDED.has(lbl.refId) ? 'YES*' : 'YES') : 'N/A'}</td>` +
+      `<td style="font-size:6.6px;">${lbl.placement}</td>` +
+      `</tr>`;
+    const _head = `<thead><tr>` +
+      `<th style="width:9%;">LABEL</th>` +
+      `<th style="width:26%;">CODE REF</th>` +
+      `<th style="width:9%;text-align:center;">REQ'D</th>` +
+      `<th>PLACEMENT LOCATION</th>` +
+      `</tr></thead>`;
+    return `<table class="equip-table" style="margin:0;">${_head}<tbody>${labels.map(_row).join('')}</tbody></table>` +
+      `<div style="font-size:6.2px;color:#555;margin-top:2px;">* Rendered on this sheet with site-computed ratings (DC/AC disconnect labels) or as the multiple-power-sources placard above.${_betaAssumed ? ' &nbsp;&dagger; Module Voc temperature coefficient unresolved in the equipment DB &mdash; conservative NEC 690.7 &times;1.25 applied; field-verify against the module datasheet.' : ''}</div>`;
+  })();
 
   return `
   <div class="page">
     ${titleBlock(input, 'PV-5', 'WARNING LABELS & REQUIRED PLACARDS', pageNum, totalPages)}
-    <div class=\"page-content\">
+    <div class="page-content">
 
-      <div class=\"note-bar\" style=\"margin-bottom:7px;\">
-        ALL WARNING LABELS SHALL BE PERMANENTLY INSTALLED, WEATHER-RESISTANT, AND MEET MINIMUM CHARACTER HEIGHT REQUIREMENTS PER NEC ${necVer}.
-        LETTERING SHALL BE MINIMUM 3/8" HEIGHT FOR FIELD-APPLIED LABELS, OR AS SPECIFIED BY MANUFACTURER FOR LISTED LABELS.
+      <div class="note-bar" style="margin-bottom:6px;">
+        ALL WARNING LABELS SHALL BE PERMANENTLY INSTALLED, WEATHER-RESISTANT (UL 969), AND MEET MINIMUM CHARACTER HEIGHT REQUIREMENTS PER NEC ${necVer} &mdash;
+        LETTERING MIN. 3/8" HEIGHT FOR FIELD-APPLIED LABELS, OR AS SPECIFIED BY MANUFACTURER FOR LISTED LABELS.
         COLOR: WHITE LETTERING ON RED BACKGROUND (${necVer === '2023' ? 'NEC 690.12(D)' : 'NEC 690.56'}) UNLESS OTHERWISE NOTED.
+        RATED VALUES ON THIS SHEET ARE SITE-COMPUTED FROM THE APPROVED DESIGN &mdash; DESIGN LOW TEMP ${tMinC}&deg;C (${escapeH(_temps.source).toUpperCase()}).
       </div>
 
-      <div class=\"sec-hdr-dark\" style=\"margin-bottom:5px;\">
-        REQUIRED LABELS &mdash; ${requiredLabels.length} OF ${labels.length} APPLICABLE TO THIS SYSTEM
-      </div>
+      <div style="display:grid;grid-template-columns:59fr 41fr;gap:10px;align-items:start;">
 
-      <table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:10px;">
-        <tbody>
-          ${buildLabelRows(requiredLabels)}
-        </tbody>
-      </table>
-
-      <!-- General Notes -->
-      <div class="sec-hdr-dark" style="margin-bottom:4px;\\">
-        GENERAL NOTES &mdash; INSTALLATION REQUIREMENTS
-      </div>
-      <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.55;border:var(--border);margin-bottom:8px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div>
-            <div style="font-weight:900;font-size:8px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">ELECTRICAL</div>
-            <div style="margin-bottom:2px;">1. All electrical work shall be performed by a licensed electrician in accordance with NEC ${necVer}.</div>
-            <div style="margin-bottom:2px;">2. All equipment shall be UL-listed and labeled for the intended application.</div>
-            <div style="margin-bottom:2px;">3. All conductor terminations shall be torqued to manufacturer specifications.</div>
-            <div style="margin-bottom:2px;">4. Conduit penetrations through fire-rated assemblies shall be firestopped per IBC 714.</div>
-            <div style="margin-bottom:2px;">5. Anti-islanding protection per IEEE 1547 and UL 1741 SA is integral to the inverter.</div>
+        <!-- LEFT: the label set -->
+        <div>
+          <div class="sec-hdr-dark" style="margin-bottom:4px;">
+            REQUIRED LABELS &mdash; ${ratingCards.length} SITE-COMPUTED + ${gridLabels.length} STANDARD (${requiredLabels.length} OF ${labels.length} DATASET LABELS APPLY)
           </div>
-          <div>
-            <div style="font-weight:900;font-size:8px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">STRUCTURAL / INSTALLATION</div>
-            <div style=\"margin-bottom:2px;\">1. Contractor shall verify ${_isRoof ? 'roof framing type, size, spacing, and condition prior to installation' : _isFence ? 'fence post layout, spacing, and foundation conditions prior to installation' : 'ground mount pile layout, soil conditions, and site grades prior to installation'}.</div>\n
-            <div style="margin-bottom:2px;">2. Any deviation from the approved design shall be reported to the engineer of record.</div>
-            <div style=\"margin-bottom:2px;\">3. ${_isRoof ? 'All roof penetrations shall be waterproofed per roofing manufacturer requirements.' : 'All below-grade conduit and conductors shall be rated for wet/direct burial locations per NEC 300.5.'}</div>\n
-            <div style="margin-bottom:2px;">4. Module and racking installation per manufacturer instructions and UL 2703 listing.</div>
-            <div style="margin-bottom:2px;">5. Maintain fire access per IFC \u00a71204.2.1: 36" access pathways and the ridge setback shown on PV-1 (18" permitted only where array \u2264 33% of roof area).</div>
+          ${buildCardGrid(cardCells)}
+        </div>
+
+        <!-- RIGHT: multi-source placard / signage rules / QA tables -->
+        <div>
+          <div class="sec-hdr-dark" style="margin-bottom:4px;">
+            MULTIPLE POWER SOURCES &mdash; PERMANENT PLACARD (NEC 705.10)
+          </div>
+          ${placardHtml}
+
+          <div class="sec-hdr-dark" style="margin:6px 0 4px;">
+            PERMANENT SIGNAGE NOTES
+          </div>
+          ${signageHtml}
+
+          <div class="sec-hdr-dark" style="margin:6px 0 4px;">
+            INSPECTION HOLD POINTS
+          </div>
+          <table class="equip-table" style="margin:0;">
+            <thead><tr><th style="width:6%;">#</th><th style="width:26%;">Inspection Point</th><th style="width:50%;">Verification Requirements</th><th style="width:18%;">Code Ref</th></tr></thead>
+            <tbody>
+              <tr><td class="fw9 mono">1</td><td class="fw7" style="font-size:7px;">Rough Electrical</td><td style="font-size:7px;">Conductor sizing, conduit routing, grounding connections, junction box accessibility</td><td class="mono" style="font-size:6.6px;">NEC 690, 250</td></tr>
+              <tr class="bg-lt"><td class="fw9 mono">2</td><td class="fw7" style="font-size:7px;">${_isRoof ? 'Structural / Roof' : _isFence ? 'Structural / Fence' : 'Structural / Ground Mount'}</td><td style="font-size:7px;">${_isRoof ? 'Attachment to structural members, lag bolt embedment, flashing, rail alignment' : _isFence ? 'Fence post embedment, concrete footing pour, post plumb/alignment, module mounting' : 'Pile embedment, ground clearance, tilt angle, module mounting'}</td><td class="mono" style="font-size:6.6px;">IBC 16, IRC R301</td></tr>
+              <tr><td class="fw9 mono">3</td><td class="fw7" style="font-size:7px;">Module Installation</td><td style="font-size:7px;">Module mounting, clamp torque, bonding connections, setback compliance</td><td class="mono" style="font-size:6.6px;">UL 2703, IFC 1204</td></tr>
+              <tr class="bg-lt"><td class="fw9 mono">4</td><td class="fw7" style="font-size:7px;">Final Electrical</td><td style="font-size:7px;">Labeling, rapid shutdown, disconnect operation, grounding continuity, Voc/Isc verification</td><td class="mono" style="font-size:6.6px;">NEC 690.12, 690.54</td></tr>
+              <tr><td class="fw9 mono">5</td><td class="fw7" style="font-size:7px;">Utility Interconnection</td><td style="font-size:7px;">Meter configuration, net metering enrollment, anti-islanding test (if required by AHJ)</td><td class="mono" style="font-size:6.6px;">IEEE 1547, NEC 705</td></tr>
+            </tbody>
+          </table>
+
+          <div class="sec-hdr-dark" style="margin:6px 0 4px;">
+            LABEL SCHEDULE &mdash; ALL LABELS
+          </div>
+          ${scheduleHtml}
+
+          <div class="sec-hdr-dark" style="margin:6px 0 4px;">
+            GENERAL NOTES &mdash; INSTALLATION REQUIREMENTS
+          </div>
+          <div style="padding:var(--xs);font-size:6.8px;line-height:1.4;border:var(--border);">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div>
+                <div style="font-weight:900;font-size:7.4px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">ELECTRICAL</div>
+                <div style="margin-bottom:2px;">1. All electrical work shall be performed by a licensed electrician in accordance with NEC ${necVer}.</div>
+                <div style="margin-bottom:2px;">2. All equipment shall be UL-listed and labeled for the intended application.</div>
+                <div style="margin-bottom:2px;">3. All conductor terminations shall be torqued to manufacturer specifications.</div>
+                <div style="margin-bottom:2px;">4. Conduit penetrations through fire-rated assemblies shall be firestopped per IBC 714.</div>
+                <div style="margin-bottom:2px;">5. Anti-islanding protection per IEEE 1547 and UL 1741 SA is integral to the inverter.</div>
+              </div>
+              <div>
+                <div style="font-weight:900;font-size:7.4px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">STRUCTURAL / INSTALLATION</div>
+                <div style="margin-bottom:2px;">1. Contractor shall verify ${_isRoof ? 'roof framing type, size, spacing, and condition prior to installation' : _isFence ? 'fence post layout, spacing, and foundation conditions prior to installation' : 'ground mount pile layout, soil conditions, and site grades prior to installation'}.</div>
+                <div style="margin-bottom:2px;">2. Any deviation from the approved design shall be reported to the engineer of record.</div>
+                <div style="margin-bottom:2px;">3. ${_isRoof ? 'All roof penetrations shall be waterproofed per roofing manufacturer requirements.' : 'All below-grade conduit and conductors shall be rated for wet/direct burial locations per NEC 300.5.'}</div>
+                <div style="margin-bottom:2px;">4. Module and racking installation per manufacturer instructions and UL 2703 listing.</div>
+                <div style="margin-bottom:2px;">5. Maintain fire-access pathways and ridge setbacks per IFC &sect;1204.2.1 as shown on PV-1.</div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Inspection Hold Points -->
-      <div class="sec-hdr-dark" style="margin-bottom:4px;\\">
-        INSPECTION HOLD POINTS
       </div>
-      <table class="equip-table">
-        <thead><tr><th style="width:6%;">#</th><th style="width:22%;">Inspection Point</th><th style="width:42%;">Verification Requirements</th><th style="width:15%;">Code Reference</th><th style="width:15%;text-align:center;">Inspector</th></tr></thead>
-        <tbody>
-          <tr><td class="fw9 mono">1</td><td class="fw7">Rough Electrical</td><td>Verify conductor sizing, conduit routing, grounding connections, junction box accessibility</td><td class="mono" style="font-size:8px;">NEC 690, 250</td><td class="center">\u25a1</td></tr>
-          <tr class=\"bg-lt\"><td class=\"fw9 mono\">2</td><td class=\"fw7\">${_isRoof ? 'Structural / Roof' : _isFence ? 'Structural / Fence' : 'Structural / Ground Mount'}</td><td>${_isRoof ? 'Verify attachment to structural members, lag bolt embedment, flashing installation, rail alignment' : _isFence ? 'Verify fence post embedment depth, concrete footing pour, post plumb/alignment, and module mounting' : 'Verify pile embedment, ground clearance, tilt angle, and module mounting'}</td><td class=\"mono\" style=\"font-size:8px;\">IBC Ch. 16, IRC R301</td><td class=\"center\">\u25a1</td></tr>\n
-          <tr><td class="fw9 mono">3</td><td class="fw7">Module Installation</td><td>Verify module mounting, clamp torque, bonding connections, setback compliance</td><td class="mono" style="font-size:8px;">UL 2703, IFC §1204</td><td class="center">\u25a1</td></tr>
-          <tr class="bg-lt"><td class="fw9 mono">4</td><td class="fw7">Final Electrical</td><td>Verify labeling, rapid shutdown, disconnect operation, grounding continuity, Voc/Isc verification</td><td class="mono" style="font-size:8px;">NEC 690.12, 690.54</td><td class="center">\u25a1</td></tr>
-          <tr><td class="fw9 mono">5</td><td class="fw7">Utility Interconnection</td><td>Verify meter configuration, net metering enrollment, anti-islanding test (if required by AHJ)</td><td class="mono" style="font-size:8px;">IEEE 1547, NEC 705</td><td class="center">\u25a1</td></tr>
-        </tbody>
-      </table>
-
-      <div class=\"sec-hdr-dark\" style=\"margin-bottom:4px;\">
-        LABEL SCHEDULE &mdash; ALL LABELS
-      </div>
-      ${(() => {
-        // Two side-by-side half tables — the single full-width table ran 81px
-        // past the page bottom once a battery made all 13 labels applicable.
-        const _row = (lbl: typeof labels[number], idx: number) =>
-          `<tr style="${!lbl.required ? 'opacity:0.45;' : ''}background:${idx % 2 === 0 ? '#fff' : '#f5f5f5'};">` +
-          `<td class="fw9 mono">${lbl.id}</td>` +
-          `<td style="font-family:monospace;font-size:7px;">${lbl.necRef}</td>` +
-          `<td style="text-align:center;font-weight:900;font-family:monospace;">${lbl.required ? 'YES' : 'N/A'}</td>` +
-          `<td style="font-size:8px;">${lbl.placement}</td>` +
-          `</tr>`;
-        const _head = `<thead><tr>` +
-          `<th style="width:10%;">LABEL</th>` +
-          `<th style="width:24%;">CODE REF</th>` +
-          `<th style="width:9%;text-align:center;">REQ'D</th>` +
-          `<th>PLACEMENT LOCATION</th>` +
-          `</tr></thead>`;
-        const _half = Math.ceil(labels.length / 2);
-        const _tbl = (ls: typeof labels) =>
-          `<table class="equip-table" style="margin:0;">${_head}<tbody>${ls.map(_row).join('')}</tbody></table>`;
-        return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);align-items:start;">` +
-          `${_tbl(labels.slice(0, _half))}${_tbl(labels.slice(_half))}</div>`;
-      })()}
 
     </div>
   </div>`;
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 // PV-6: DISCONNECT DIRECTORY & EMERGENCY PLACARD
@@ -275,35 +531,69 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   const invCount = isMicro ? (system.totalPanels || 0) : (system.inverters?.length || 1);
 
   // ── Ratings (single-sourced) ──────────────────────────────────
-  const acOutA = ((system.totalAcKw || 0) * 1000) / 240;
+  // Rated AC output = Σ per-sub feeder currents from the shared authority
+  // (system.totalAcKw is a stale aggregate on hybrids — it disagreed with
+  // E-1/PV-5 by 64 A on Stowell). Fallback keeps single-system behavior.
+  const acOutA = auth.subSystems.reduce((a, s) => a + (s.acSubFeeder.currentA || 0), 0)
+    || (getSnapshot(input).derived.acWattsContinuous || (system.totalAcKw || 0) * 1000) / 240;
   const acOcpd = auth.acFeeder.ocpdAmps;
   const mainA = project.mainPanelAmps || 200;
   const _str0 = system.inverters?.[0]?.strings?.[0];
-  const _panelVoc = eq.panelVoc || project.panelVoc || _str0?.panelVoc || 0;
+  // P1-1 (data-authority register): the panel Voc routes through the per-sub
+  // panel-spec authority (equipment-db via project.subSystems / the sub's own
+  // fleet) — project.panelVoc is a panel0 scalar (the FENCE module's on
+  // hybrids). Legacy chain survives only as the final fallback.
+  const _specKey: SubSystemKey = isFence(cad.systemType) ? 'fence'
+    : isGround(cad.systemType) ? 'ground' : 'roof';
+  const _ps = resolvePanelSpecs(input, cad, _specKey);
+  const _panelVoc = _ps.voc || eq.panelVoc || project.panelVoc || _str0?.panelVoc || 0;
+  // Design-low temp for the ONE cold-Voc law (shared by the hybrid branch AND
+  // the single-system fallback below — register P1-4).
+  const _projT = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
+  const _st = (_projT.state && /^[A-Za-z]{2}$/.test(_projT.state.trim()))
+    ? _projT.state.trim().toUpperCase()
+    : ((_projT.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/)?.[1]?.toUpperCase());
+  const _tMin = project.designTempMin ?? getDesignTemps(_projT.lat, _projT.lng, _st).ashraeExtremeLowC;
   // SYSTEMIC ROOT #1: on a hybrid the whole system is NOT microinverter — the
   // string/optimizer subs carry real series DC. "MAX DC SYSTEM VOLTAGE" is the
   // largest cold-corrected string Voc across those subs, never "N/A" (which
   // reads the roof-micro winner as the whole system).
   const _hybridMaxDcV = (() => {
     if (!auth.isHybrid) return null;
+    // SAME cold-Voc basis as PV-5 / E-1: NEC 690.7(A) Voc × (1 + β(Tmin−25))
+    // with the equipment-DB β when the model resolves (blanket ×1.25 printed
+    // 576 V here beside PV-5's 527 V for the same fence string). Unresolved
+    // β keeps the conservative ×1.25.
     const vals: number[] = [];
     for (const inv of system.inverters ?? []) {
       if (String(inv.type || '').toLowerCase().includes('micro')) continue;
       for (const s of inv.strings ?? []) {
         const voc = s.panelVoc || 0;
         const n = s.panelCount || 0;
-        if (voc > 0 && n > 0) vals.push(Math.round(voc * 1.25 * n));
+        if (!(voc > 0 && n > 0)) continue;
+        const m = (s.panelModel || '').toLowerCase().trim();
+        const db = m
+          ? (SOLAR_PANELS.find(p => p.model.toLowerCase() === m)
+            ?? SOLAR_PANELS.find(p => m.includes(p.model.toLowerCase()) || p.model.toLowerCase().includes(m)))
+          : undefined;
+        const beta = typeof db?.tempCoeffVoc === 'number' ? db.tempCoeffVoc : undefined;
+        const factor = coldVocFactor(beta, _tMin);  // P1-4: the ONE cold-Voc law
+        vals.push(Math.round(voc * factor * n));
       }
     }
     return vals.length ? Math.max(...vals) : null;
   })();
+  // P1-4: single-system fallback uses the SAME β-based NEC 690.7(A) law as the
+  // hybrid branch above (blanket ×1.25 only when no β resolves) — two cold-Voc
+  // laws printed contradictory maxima across sheets.
+  const _coldF = coldVocFactor(_ps.tempCoeffVocPctPerC, _tMin);
   const maxDcV = _hybridMaxDcV != null
     ? `${_hybridMaxDcV} V DC`
     : (isMicro
         ? 'N/A — MICROINVERTER (MODULE-LEVEL DC ONLY)'
         : (_str0?.panelCount && _panelVoc
-            ? `${Math.round(_panelVoc * 1.25 * _str0.panelCount)} V DC`
-            : (_panelVoc ? `${Math.round(_panelVoc * 1.25)} V DC` : '____ V DC')));
+            ? `${Math.round(_panelVoc * _coldF * _str0.panelCount)} V DC`
+            : (_panelVoc ? `${Math.round(_panelVoc * _coldF)} V DC` : '____ V DC')));
   const interType = isSupply
     ? 'SUPPLY-SIDE TAP — NEC 705.11'
     : `LOAD-SIDE BACK-FED BREAKER${acOcpd ? ` (${acOcpd}A)` : ''} — NEC 705.12`;
@@ -346,7 +636,7 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
       }
     }
   } else {
-    discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
+    discos.push({ name: `${isMicro ? 'MICROINVERTERS' : 'INVERTER'}${invCount > 1 ? ` (×${invCount})` : ''}`, rating: `${(getSnapshot(input).derived.acWattsContinuous / 1000 || system.totalAcKw || 0).toFixed(1)} kW AC · ${invMfr} ${invModel}`.trim(), loc: isMicro ? 'On the array — one per module' : 'At the inverter location' });
   }
   if (project.rapidShutdown) discos.push({ name: 'RAPID SHUTDOWN INITIATOR', rating: isMicro ? 'MODULE-LEVEL (PVRSS)' : 'ARRAY-LEVEL', loc: bos.brains ? `Hosted by the ${bos.brains.model}` : 'Adjacent to the PV AC disconnect' });
   if (hasBattery) discos.push({ name: 'ENERGY STORAGE (ESS) DISCONNECT', rating: `${battKwh.toFixed(1)} kWh · ${project.batteryBrand || 'ESS'}`.trim(), loc: 'At the battery/ESS enclosure' });
@@ -531,13 +821,51 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const vocMax = parseFloat((voc * vocColdFactor).toFixed(1));
   const iscMax = parseFloat((isc * NEC_SAFETY).toFixed(2));
 
+  // ── P0-4 (data-authority register): on hybrids this sheet printed ONE
+  // module datasheet (panel0 — the FENCE module) for the whole system, so the
+  // roof/ground modules' Voc/dims/weight/efficiency never appeared anywhere.
+  // Render one datasheet card PER SUB from the per-sub panel-spec authority
+  // (equipment-db via project.subSystems[key].panelId → the sub's fleet).
+  // Single-system markup below is untouched.
+  const _hybridSecsA = hybridSheetSections(cad);
+  const _subModCards = _hybridSecsA.length > 1 ? _hybridSecsA.map(sec => {
+    const ps = resolvePanelSpecs(input, cad, sec.key);
+    const d = ps.db;
+    const vmpS = d?.vmp ?? (ps.voc > 0 ? parseFloat((ps.voc * 0.83).toFixed(1)) : 0);
+    const impS = d?.imp ?? (vmpS > 0 ? parseFloat((ps.watts / vmpS).toFixed(2)) : 0);
+    const effS = d?.efficiency
+      ?? ((ps.watts > 0 && ps.lengthIn > 0 && ps.widthIn > 0)
+        ? (ps.watts / (ps.lengthIn / 39.37 * ps.widthIn / 39.37)) / 10 : 0);
+    const cfS = coldVocFactor(ps.tempCoeffVocPctPerC, designTempMinC);
+    const vocMaxS = parseFloat((ps.voc * cfS).toFixed(1));
+    const iscMaxS = parseFloat((ps.isc * NEC_SAFETY).toFixed(2));
+    return `
+          <div class="section-title">PV Module — ${sec.key.toUpperCase()} ARRAY (×${sec.totalPanels})</div>
+          <table class="info-table" style="margin-bottom:5px;">
+            <tr><td class="il">Manufacturer / Model</td><td class="iv">${ps.manufacturer} ${ps.model}</td></tr>
+            <tr><td class="il">STC Power (Pmax)</td><td class="iv">${ps.watts} Wp</td></tr>
+            <tr><td class="il">Voc / Isc</td><td class="iv">${ps.voc} V / ${ps.isc} A</td></tr>
+            <tr><td class="il">Vmp / Imp</td><td class="iv">${vmpS} V / ${impS} A</td></tr>
+            <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">${ps.tempCoeffVocPctPerC ?? '—'}%/°C</td></tr>
+            <tr><td class="il">NOCT</td><td class="iv">${d?.nominalOperatingTemp ?? 45}°C ±2°C</td></tr>
+            <tr><td class="il">Module Efficiency</td><td class="iv">${effS ? effS.toFixed(1) + '%' : '—'}</td></tr>
+            <tr><td class="il">Dimensions (L × W)</td><td class="iv">${ps.lengthIn}" × ${ps.widthIn}" (${(ps.lengthIn * 25.4).toFixed(0)} × ${(ps.widthIn * 25.4).toFixed(0)} mm)</td></tr>
+            <tr><td class="il">Weight</td><td class="iv">${ps.weightLbs} lbs (${(ps.weightLbs * 0.453592).toFixed(1)} kg)</td></tr>
+            <tr><td class="il">Cell Type</td><td class="iv">${d ? `${d.cellType}${d.bifacial ? ' — Bifacial' : ''}` : '—'}</td></tr>
+            <tr><td class="il">UL Listing</td><td class="iv">${d?.ulListing || 'UL 61730 / IEC 61215'}</td></tr>
+            <tr><td class="il">NEC 690.7 Max Voc</td><td class="iv"><strong>${vocMaxS} V</strong> (×${cfS.toFixed(3)} @ ${designTempMinC}°C)</td></tr>
+            <tr><td class="il">NEC 690.8(A) Max Isc</td><td class="iv"><strong>${iscMaxS} A</strong> (×1.25)</td></tr>
+          </table>`;
+  }).join('') + `
+          <div style="font-size:7px;color:#555;margin:-2px 0 4px 0;">One module record per sub-system — resolved from the project equipment map / equipment database. Vmp/Imp and temperature coefficients are typical values — verify against the manufacturer's certified datasheet before construction.</div>` : '';
+
   return `
   <div class="page">
     ${titleBlock(input, 'APP-A', 'EQUIPMENT SPECIFICATION REFERENCE', pageNum, totalPages)}
     <div class="page-content">
       <div class="two-col-layout">
         <div class="col-left">
-          <!-- Module Datasheet Summary -->
+          ${_subModCards || `<!-- Module Datasheet Summary -->
           <div class="section-title">PV Module — Electrical Specifications</div>
           <table class="info-table" style="margin-bottom:6px;">
             <tr><td class="il">Manufacturer</td><td class="iv">${modMfr}</td></tr>
@@ -588,7 +916,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               <tr><td>Vmp (Operating)</td><td>${vmp} V</td><td>×1.0</td><td>${vmp} V</td></tr>
               <tr><td>Imp (Operating)</td><td>${imp} A</td><td>×1.0</td><td>${imp} A</td></tr>
             </tbody>
-          </table>
+          </table>`}
         </div>
 
         <div class="col-right">
@@ -615,7 +943,17 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               // a module Voc ABOVE the inverter's max DC input on the same
               // page with no flag (electrically impossible pairing shipping
               // silently). Micro topologies skipped every upstream Voc check.
-              const _mVoc = Number(vocMax); // cold-corrected per NEC 690.7 — raw Voc can pass while the corrected value exceeds the limit
+              // P0-4: on hybrids, judge each inverter against ITS OWN sub's
+              // module — the panel0 (fence) Voc/Pmax basis fired false
+              // compatibility warnings on the roof/ground lanes.
+              const _invSubKey = (inv as { subSystemKey?: string }).subSystemKey;
+              const _invPs: ResolvedPanelSpecs | null = (_hybridSecsA.length > 1 && isSubSystemKey(_invSubKey))
+                ? resolvePanelSpecs(input, cad, _invSubKey) : null;
+              const _basisVocMax = _invPs
+                ? parseFloat((_invPs.voc * coldVocFactor(_invPs.tempCoeffVocPctPerC, designTempMinC)).toFixed(1))
+                : vocMax;
+              const _basisPmax = _invPs?.watts || pmax;
+              const _mVoc = Number(_basisVocMax); // cold-corrected per NEC 690.7 — raw Voc can pass while the corrected value exceeds the limit
               const _mMax = Number(inv.maxDcVoltage);
               const _warns: string[] = [];
               if (isFinite(_mVoc) && isFinite(_mMax) && _mMax > 0 && _mVoc > _mMax) {
@@ -625,8 +963,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               // micro (DC/AC 1.7) is beyond every manufacturer pairing range
               // and shipped silently as "31 kW DC / 18 kW AC".
               const _mAcW = Number(inv.acOutputKw) * 1000;
-              if (inv.type === 'micro' && isFinite(_mAcW) && _mAcW > 0 && pmax / _mAcW > 1.55) {
-                _warns.push(`module STC power (${pmax} W) is ${(pmax / _mAcW).toFixed(2)}× this microinverter's AC rating (${Math.round(_mAcW)} W) — beyond the manufacturer's pairing range (≤1.55×); expect sustained clipping`);
+              if (inv.type === 'micro' && isFinite(_mAcW) && _mAcW > 0 && _basisPmax / _mAcW > 1.55) {
+                _warns.push(`module STC power (${_basisPmax} W) is ${(_basisPmax / _mAcW).toFixed(2)}× this microinverter's AC rating (${Math.round(_mAcW)} W) — beyond the manufacturer's pairing range (≤1.55×); expect sustained clipping`);
               }
               return _warns.length ? `
             <div style="border:2px solid #cc0000;background:#fff5f5;padding:4px 6px;margin-top:3px;font-size:8px;line-height:1.4;color:#cc0000;font-weight:700;">

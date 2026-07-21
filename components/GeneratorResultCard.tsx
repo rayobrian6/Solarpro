@@ -18,8 +18,11 @@ export default function ResultCard({
   const { picks, recommendedKw, rawRecommendedKw, catalogCeilingKw, breakdown, totalPeakWatts, totalRunningWatts, largestMotorStartingWatts, installedCostLow, installedCostHigh, billPeakKw, exceedsCatalog, loadProfile, demandFactor } = estimate;
   const totalItems = Object.values(appliances).reduce((s, q) => s + q, 0);
   const best = picks.bestValue;
+  // Real nested route — this built the pre-nest bare '/proposal' URL, which
+  // only worked via a global redirect that hijacked the top-level path
+  // (removed in the 2026-07-04 review); Ray hit the 404 from this button.
   const proposalHref =
-    `/proposal?brand=${encodeURIComponent(best.brand)}` +
+    `/engineering/generator-estimator/proposal?brand=${encodeURIComponent(best.brand)}` +
     `&model=${encodeURIComponent(best.model)}` +
     `&kw=${best.kw}` +
     `&msrp=${best.msrp}` +

@@ -59,7 +59,16 @@ function arrayColor(i: number): string {
 // at the N-S midpoint" of the TABLE, one tilted strongback per pylon carrying
 // BOTH the south and north row. The two rows of a table are adjacent (shared
 // strongback); the row-spacing gap is BETWEEN tables, not within one.
-const PLP_ROWS_PER_TABLE = 2;
+// CONSTANTS IMPORTED from the ground reality engine — the drawing must never
+// carry its own copies (Ray 2026-07-16: a drifted local copy drew 2 rails
+// instead of the engine's 4 and a cantilevered pylon layout the engine
+// doesn't build).
+import {
+  PLP_ROW_COUNT,
+  PLP_BAY_SPAN_M,
+  PLP_CLAMP_INSET_FRAC,
+} from '@/lib/3d/ground/groundMountRealityEngine';
+const PLP_ROWS_PER_TABLE = PLP_ROW_COUNT;
 
 // ── Ground mount-system name resolution (STEP 9 cross-contamination block) ────
 // A ground sheet must NEVER brand the project-wide ROOF racking. project
@@ -264,11 +273,18 @@ export function drawGroundArray(
     const toSvgX = (xM: number) => offX + (xM - gMinX) * metersToFt(1) * scale;
     const toSvgY = (yM: number) => offY + (yM - gMinY) * metersToFt(1) * scale;
 
-    // Property setback boundary (dashed) around the actual array field
+    // Property setback boundary (dashed) around the actual array field —
+    // CLAMPED to viewport A. Unclamped, a large setback at this scale ran off
+    // the band and its dashes bled across viewport B's elevation below
+    // (visible on the Stowell sheet, Ray's PV-1G overhaul review).
     const sbPx = setbackFt * scale;
     if (sbPx > 1) {
-      els.push(`<rect x="${(offX - sbPx).toFixed(1)}" y="${(offY - sbPx).toFixed(1)}" width="${(contentWpx + 2 * sbPx).toFixed(1)}" height="${(contentHpx + 2 * sbPx).toFixed(1)}" fill="none" class="line-setbk"/>`);
-      els.push(drawText(offX - sbPx + 3, offY - sbPx - 3,
+      const sbX0 = Math.max(offX - sbPx, vpA.x + 4);
+      const sbY0 = Math.max(offY - sbPx, vpA.y + 4);
+      const sbX1 = Math.min(offX + contentWpx + sbPx, vpA.x + vpA.w - 4);
+      const sbY1 = Math.min(offY + contentHpx + sbPx, vpA.y + vpA.h - 4);
+      els.push(`<rect x="${sbX0.toFixed(1)}" y="${sbY0.toFixed(1)}" width="${(sbX1 - sbX0).toFixed(1)}" height="${(sbY1 - sbY0).toFixed(1)}" fill="none" class="line-setbk"/>`);
+      els.push(drawText(sbX0 + 3, sbY0 - 3,
         `${setbackFt}' SETBACK (TYP.)`, {
           anchor: 'start', fontSize: 6.5, fill: '#cc0000', fontWeight: 'bold',
         }));
@@ -312,16 +328,22 @@ export function drawGroundArray(
       const rowBands = [...rowMap.values()].sort(
         (a, b) => Math.min(...a.map(r => r.y)) - Math.min(...b.map(r => r.y)));
 
-      // Modules: clean flat CAD rectangles (circuit mode → fill by DC string).
+      // Modules: framed CAD rectangles — outer FRAME stroke + inset laminate
+      // line so each module reads as hardware, not a washed-out grid cell
+      // (Ray 2026-07-16 PV-1G overhaul: "flat blue slabs").
       for (const r of rects) {
         const x = toSvgX(r.x), y = toSvgY(r.y);
         const w = Math.max(r.w * metersToFt(1) * scale, 3);
         const h = Math.max(r.h * metersToFt(1) * scale, 2);
         const sIdx = rectString.get(r);
-        const mColor = (circuit && sIdx != null) ? circuit.colors[sIdx % circuit.colors.length] : color;
-        const mFill  = (circuit && sIdx != null) ? mColor : '#cfe0f4';
+        const mColor = (circuit && sIdx != null) ? circuit.colors[sIdx % circuit.colors.length] : '#2c4a75';
+        const mFill  = (circuit && sIdx != null) ? mColor : '#dbe7f6';
         const mFillOp = (circuit && sIdx != null) ? '0.20' : '1';
-        els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${mFill}" fill-opacity="${mFillOp}" stroke="${mColor}" stroke-width="0.9"/>`);
+        els.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${mFill}" fill-opacity="${mFillOp}" stroke="${mColor}" stroke-width="1.2"/>`);
+        if (w > 8 && h > 8) {
+          // laminate inset (module frame)
+          els.push(`<rect x="${(x + 1.6).toFixed(1)}" y="${(y + 1.6).toFixed(1)}" width="${(w - 3.2).toFixed(1)}" height="${(h - 3.2).toFixed(1)}" fill="none" stroke="${mColor}" stroke-width="0.4" opacity="0.65"/>`);
+        }
         if (h > 6) {
           els.push(`<line x1="${x.toFixed(1)}" y1="${(y + h / 2).toFixed(1)}" x2="${(x + w).toFixed(1)}" y2="${(y + h / 2).toFixed(1)}" stroke="${mColor}" stroke-width="0.35" opacity="0.5"/>`);
         }
@@ -333,17 +355,13 @@ export function drawGroundArray(
         }
       }
 
-      // ── Speck PLP POWER DRIVE™ structure — matches the Design Studio ground
-      // reality engine (lib/3d/ground/groundMountRealityEngine.ts). Driven I-beam
-      // PYLONS, ONE per bay at the table's N-S midpoint (bay span ≈ 20 ft), a
-      // tilted N-S STRONGBACK on each pylon, and CONTINUOUS E-W PLP rails that
-      // cantilever past the end pylons. NOT a generic front/rear double-post grid.
-      const PLP_BAY_SPAN_M = 6.10;    // ~20 ft between pylons (engine constant)
-      const PLP_MAX_CANT_M = 1.50;    // max rail overhang past end pylon
-      const PLP_CLAMP_INSET = 0.15;   // rail inset from table N/S edge (frac of depth)
-      // Group the module rows into 2-high PLP tables — ONE pylon line per table
-      // at its true N-S midpoint (the shared row seam), not one line per module
-      // row. Each table = up to PLP_ROWS_PER_TABLE consecutive row-bands.
+      // ── Speck PLP POWER DRIVE™ structure — drawn from the SAME constants and
+      // formulas as the Design Studio ground reality engine (imported, never
+      // copied — Ray 2026-07-16: "reference design", the copied version drew
+      // 2 rails instead of 4 and invented a cantilevered 2-pylon layout).
+      //   rails:  2 per portrait row × PLP_ROW_COUNT rows (engine railDefs)
+      //   pylons: nPylons = max(2, ceil(rowSpan / PLP_BAY_SPAN_M) + 1),
+      //           evenly spaced EDGE TO EDGE (engine frac = i/(n−1))
       const tableGroups: Rect[][] = [];
       for (let ti = 0; ti < rowBands.length; ti += PLP_ROWS_PER_TABLE)
         tableGroups.push(rowBands.slice(ti, ti + PLP_ROWS_PER_TABLE).flat());
@@ -355,33 +373,58 @@ export function drawGroundArray(
         }
         const wM = bMaxX - bMinX, depthM = bMaxY - bMinY;
         const cyM = (bMinY + bMaxY) / 2;                    // table N-S midpoint (pylon line = row seam)
-        // Pylon E-W positions: end cantilevers ≤ PLP_MAX_CANT_M, interior bays ≤ span.
-        const cant = Math.min(PLP_MAX_CANT_M, wM * 0.14);
-        const innerW = Math.max(wM - 2 * cant, 0.1);
-        const nSpans = Math.max(1, Math.ceil(innerW / PLP_BAY_SPAN_M));
+        // Pylons per the ENGINE formula: edge-to-edge, no invented cantilever.
+        const nPylons = Math.max(2, Math.ceil(wM / PLP_BAY_SPAN_M) + 1);
         const pylonXs: number[] = [];
-        for (let i = 0; i <= nSpans; i++) pylonXs.push(bMinX + cant + (innerW * i) / nSpans);
-        // Continuous E-W PLP rails (2), at the clamp zones, cantilevering to module edges.
-        const railYs = [bMinY + depthM * PLP_CLAMP_INSET, bMaxY - depthM * PLP_CLAMP_INSET];
+        for (let i = 0; i < nPylons; i++)
+          pylonXs.push(bMinX + (wM * i) / Math.max(nPylons - 1, 1));
+        const baySpanM = wM / Math.max(nPylons - 1, 1);
+        // PX rails per the ENGINE railDefs: 2 per portrait row (15%/85% clamp
+        // insets of EACH row's span) = 4 lines on a 2-high table.
+        const railYs: number[] = [];
+        const rowDepthM = depthM / PLP_ROWS_PER_TABLE;
+        for (let ri = 0; ri < PLP_ROWS_PER_TABLE; ri++) {
+          const rowY0 = bMinY + ri * rowDepthM;
+          railYs.push(rowY0 + rowDepthM * PLP_CLAMP_INSET_FRAC);
+          railYs.push(rowY0 + rowDepthM * (1 - PLP_CLAMP_INSET_FRAC));
+        }
         for (const ryM of railYs) {
           const ry = toSvgY(ryM);
-          els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="#5a6478" stroke-width="1.1"/>`);
+          // PX rails: heavy double line so structure reads over module strokes
+          els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="#39445c" stroke-width="1.7"/>`);
+          els.push(`<line x1="${toSvgX(bMinX).toFixed(1)}" y1="${(ry + 1.4).toFixed(1)}" x2="${toSvgX(bMaxX).toFixed(1)}" y2="${(ry + 1.4).toFixed(1)}" stroke="#39445c" stroke-width="0.5"/>`);
         }
         // Strongback (tilted N-S beam) on each pylon — spans the table depth.
         const cy = toSvgY(cyM);
         for (const xm of pylonXs) {
           const px = toSvgX(xm);
-          els.push(`<line x1="${px.toFixed(1)}" y1="${toSvgY(bMinY).toFixed(1)}" x2="${px.toFixed(1)}" y2="${toSvgY(bMaxY).toFixed(1)}" stroke="#44506a" stroke-width="1.1"/>`);
-          // Driven I-beam pylon (plan: short W-section) at the N-S midpoint.
-          const pw = 4.0, ph = 2.6;
-          els.push(`<rect x="${(px - pw / 2).toFixed(1)}" y="${(cy - ph / 2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1"/>`);
+          els.push(`<line x1="${px.toFixed(1)}" y1="${toSvgY(bMinY).toFixed(1)}" x2="${px.toFixed(1)}" y2="${toSvgY(bMaxY).toFixed(1)}" stroke="#2c3444" stroke-width="1.8"/>`);
+          // Driven I-beam pylon (plan: W-section) at the N-S midpoint — drawn
+          // big enough to SEE (the 4px marker vanished at sheet scale).
+          const pw = 8.0, ph = 5.2;
+          els.push(`<rect x="${(px - pw / 2).toFixed(1)}" y="${(cy - ph / 2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#ffffff" stroke="#111" stroke-width="1.2"/>`);
           els.push(`<rect x="${(px - pw / 2).toFixed(1)}" y="${(cy - ph / 2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="url(#hatch-steel)"/>`);
+          // web line across the section so it reads as an I-beam, not a dot
+          els.push(`<line x1="${(px - pw / 2).toFixed(1)}" y1="${cy.toFixed(1)}" x2="${(px + pw / 2).toFixed(1)}" y2="${cy.toFixed(1)}" stroke="#111" stroke-width="0.7"/>`);
         }
         // One label per table (northern edge).
         els.push(drawText(toSvgX(pylonXs[Math.floor(pylonXs.length / 2)]), toSvgY(bMinY) - 4,
-          `${pylonXs.length} PLP PYLONS @ ${(innerW / nSpans * 3.28084).toFixed(0)}' O.C.`, {
+          `${nPylons} PLP PYLONS @ ${ftToFtIn(baySpanM * 3.28084)} O.C. · ${railYs.length} PX RAILS`, {
             anchor: 'middle', fontSize: 6, fill: '#44506a', fontWeight: 'bold',
           }));
+        // Pylon BAY dimension string (first→last pylon, with count), below the
+        // table — the O.C. figure gets real dimension geometry, not just text.
+        if (pylonXs.length >= 2) {
+          const d1 = toSvgX(pylonXs[0]), d2 = toSvgX(pylonXs[pylonXs.length - 1]);
+          const dy = toSvgY(bMaxY) + 9;
+          els.push(`<line x1="${d1.toFixed(1)}" y1="${dy.toFixed(1)}" x2="${d2.toFixed(1)}" y2="${dy.toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>`);
+          for (const dx of pylonXs.map(toSvgX)) {
+            els.push(`<line x1="${dx.toFixed(1)}" y1="${(dy - 3.5).toFixed(1)}" x2="${dx.toFixed(1)}" y2="${(dy + 3.5).toFixed(1)}" stroke="#44506a" stroke-width="0.7"/>`);
+          }
+          els.push(drawText((d1 + d2) / 2, dy + 8, `${nPylons - 1} BAY${nPylons > 2 ? 'S' : ''} @ ${ftToFtIn(baySpanM * 3.28084)}`, {
+            anchor: 'middle', fontSize: 6, fill: '#44506a', fontWeight: 'bold',
+          }));
+        }
       });
 
       // Row labels (left of each band)
@@ -423,8 +466,8 @@ export function drawGroundArray(
         offX - 12, toSvgY(gMaxY), toSvgY(gMinY), 14, ftToFtIn(spanYft) + ' DEPTH'));
     }
     els.push(drawNorthArrow(vpA.x + vpA.w - 20, vpA.y + 20, 17));
-    els.push(drawScaleBar(vpA.x + 6, vpA.y + vpA.h - 6,
-      Math.max(Math.round(20 * scale), 20), '0    20 FT'));
+    els.push(drawScaleBar(vpA.x + 8, vpA.y + vpA.h - 10,
+      Math.max(Math.round(20 * scale), 40), '', { totalFt: 20 }));
   }
 
   // ── Lower split: B (side elevation) + C (pile section) fill the LEFT column,
@@ -471,10 +514,12 @@ export function drawGroundArray(
     const STRUT_FRAC = 0.35;   // engine PLP_STRUT_FRAC — strut attach on pylon body
     const nRows = PLP_ROWS_PER_TABLE;                   // portrait rows carried per table
     const tableRun = nRows * run, tableRise = nRows * rise;   // strongback slant span
-    // Center the table group in the available width so a single 2-high table is
-    // not marooned in the far-left corner with a long empty ground line.
+    // Center the table group; reserve the right third for callout leaders when
+    // only ONE table renders (the single-table case previously left a bare
+    // ground line and a stick figure — Ray 2026-07-16 PV-1G overhaul).
     const contentW = (showTables - 1) * pitchPx + tableRun;
-    const xStart   = vpB.x + mL + Math.max(0, (avail - contentW) / 2);
+    const xStart   = vpB.x + mL + Math.max(0, (avail - contentW) * (showTables === 1 ? 0.30 : 0.5));
+    let _annot: { pylonX: number; pylonTopY: number; strutMidX: number; strutMidY: number; sbMidX: number; sbMidY: number; knX: number; knY: number; railPts: Array<[number, number]>; topX: number; topY: number } | null = null;
     for (let t = 0; t < showTables; t++) {
       const bx = xStart + t * pitchPx, by = baseY - clrPx;   // south (low) end of strongback
       // ONE pylon per table at the array CENTER OF GRAVITY (strongback midpoint) —
@@ -482,21 +527,48 @@ export function drawGroundArray(
       // braces the south cantilever; pylon+strut+strongback = the PLP "4" profile.
       const pylonX = bx + tableRun * 0.5;
       const pylonTopY = by - tableRise * 0.5;
-      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${pylonX.toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="2.4"/>`);
+      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${pylonX.toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="3"/>`);
       // I-beam flange edges (twin lines) so the post reads as a W-section, not a pipe.
-      els.push(`<line x1="${(pylonX-1.6).toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${(pylonX-1.6).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="0.5"/>`);
-      els.push(`<line x1="${(pylonX+1.6).toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${(pylonX+1.6).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="0.5"/>`);
-      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${pylonX.toFixed(1)}" y2="${pileBotY.toFixed(1)}" stroke="#111" stroke-width="1.5" stroke-dasharray="3,2"/>`);
+      els.push(`<line x1="${(pylonX-2.2).toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${(pylonX-2.2).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="0.6"/>`);
+      els.push(`<line x1="${(pylonX+2.2).toFixed(1)}" y1="${pylonTopY.toFixed(1)}" x2="${(pylonX+2.2).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="#111" stroke-width="0.6"/>`);
+      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${pylonX.toFixed(1)}" y2="${pileBotY.toFixed(1)}" stroke="#111" stroke-width="1.8" stroke-dasharray="3,2"/>`);
       // KNUCKLE: tilt bracket clamping the strongback to the pylon top (slotted).
-      els.push(`<rect x="${(pylonX-3).toFixed(1)}" y="${(pylonTopY-2).toFixed(1)}" width="6" height="4" fill="#2c3444" stroke="#111" stroke-width="0.6"/>`);
+      els.push(`<rect x="${(pylonX-4).toFixed(1)}" y="${(pylonTopY-2.6).toFixed(1)}" width="8" height="5.2" fill="#2c3444" stroke="#111" stroke-width="0.7" rx="1"/>`);
       // Diagonal strut: pylon body (~35% up) → strongback south end.
       const strutBaseY = baseY - (baseY - pylonTopY) * STRUT_FRAC;
-      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${strutBaseY.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#44506a" stroke-width="1.3"/>`);
+      els.push(`<line x1="${pylonX.toFixed(1)}" y1="${strutBaseY.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#44506a" stroke-width="1.8"/>`);
       // Strongback beam (full slant), then each module (edge view) riding it.
-      els.push(`<line x1="${bx.toFixed(1)}" y1="${by.toFixed(1)}" x2="${(bx + tableRun).toFixed(1)}" y2="${(by - tableRise).toFixed(1)}" stroke="#44506a" stroke-width="2"/>`);
+      els.push(`<line x1="${bx.toFixed(1)}" y1="${by.toFixed(1)}" x2="${(bx + tableRun).toFixed(1)}" y2="${(by - tableRise).toFixed(1)}" stroke="#44506a" stroke-width="2.6"/>`);
       for (let m = 0; m < nRows; m++) {
         const a = m + 0.03, b = m + 0.97;                 // small seam gap between stacked modules
-        els.push(`<line x1="${(bx + run * a).toFixed(1)}" y1="${(by - rise * a).toFixed(1)}" x2="${(bx + run * b).toFixed(1)}" y2="${(by - rise * b).toFixed(1)}" stroke="#1a4a8a" stroke-width="4" stroke-linecap="round"/>`);
+        els.push(`<line x1="${(bx + run * a).toFixed(1)}" y1="${(by - rise * a).toFixed(1)}" x2="${(bx + run * b).toFixed(1)}" y2="${(by - rise * b).toFixed(1)}" stroke="#1a4a8a" stroke-width="5.5" stroke-linecap="butt"/>`);
+        // module frame edge (thin light line above the laminate stroke)
+        els.push(`<line x1="${(bx + run * a).toFixed(1)}" y1="${(by - rise * a - 3.2).toFixed(1)}" x2="${(bx + run * b).toFixed(1)}" y2="${(by - rise * b - 3.2).toFixed(1)}" stroke="#7fa4d4" stroke-width="0.8"/>`);
+      }
+      // PX rail cross-sections: rails run E-W, so in this N-S section they are
+      // POINTS on the strongback — TWO PER PORTRAIT ROW at the engine's clamp
+      // insets (railDefs: 15%/85% of EACH row's span) = 4 on a 2-high table.
+      // (Ray 2026-07-16: the drawing showed 2 — "missing a rail per row".)
+      const railPts: Array<[number, number]> = [];
+      for (let ri = 0; ri < nRows; ri++) {
+        for (const rf of [PLP_CLAMP_INSET_FRAC, 1 - PLP_CLAMP_INSET_FRAC]) {
+          const f = (ri + rf) / nRows;
+          railPts.push([bx + tableRun * f, by - tableRise * f] as [number, number]);
+        }
+      }
+      for (const [rx, ry2] of railPts) {
+        els.push(`<circle cx="${rx.toFixed(1)}" cy="${(ry2 + 3.4).toFixed(1)}" r="2.6" fill="#fff" stroke="#39445c" stroke-width="1.3"/>`);
+        els.push(`<circle cx="${rx.toFixed(1)}" cy="${(ry2 + 3.4).toFixed(1)}" r="0.9" fill="#39445c"/>`);
+      }
+      if (t === 0) {
+        _annot = {
+          pylonX, pylonTopY,
+          strutMidX: (pylonX + bx) / 2, strutMidY: (strutBaseY + by) / 2,
+          sbMidX: bx + tableRun * 0.62, sbMidY: by - tableRise * 0.62,
+          knX: pylonX, knY: pylonTopY - 2.6,
+          railPts,
+          topX: bx + tableRun, topY: by - tableRise,
+        };
       }
     }
     // O.C. dimension only when there are ≥2 tables to space (row-spacing gap is
@@ -509,50 +581,138 @@ export function drawGroundArray(
       els.push(drawText((dx1 + dx2) / 2, dy - 3, `${spacingFt.toFixed(1)}' O.C. (TABLE)`, {
         anchor: 'middle', fontSize: 7, fontWeight: 'bold', fill: '#c00' }));
     }
-    els.push(drawText(xStart + tableRun + 6, baseY - clrPx - tableRise - 4, `${Math.round(tilt)}° TILT`, {
-      anchor: 'start', fontSize: 8, fontWeight: 'bold', fill: '#1a4a8a' }));
-    els.push(drawText(xStart - 6, baseY - clrPx / 2 + 2, `${clearFt.toFixed(1)}' CLR`, {
-      anchor: 'end', fontSize: 7, fill: '#333' }));
+    // ── Component callouts with leaders (single-table case has the room) ──
+    if (_annot) {
+      const A = _annot;
+      const lead = (x1: number, y1: number, x2: number, y2: number) => {
+        els.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#333" stroke-width="0.6"/>`);
+        els.push(`<circle cx="${x1.toFixed(1)}" cy="${y1.toFixed(1)}" r="1.2" fill="#333"/>`);
+      };
+      const cX = Math.min(A.topX + 46, vpB.x + vpB.w - 150);   // callout text column
+      let cY = vpB.y + 14;
+      const co = (px: number, py: number, label: string, sub: string) => {
+        lead(px, py, cX - 4, cY + 2);
+        els.push(drawText(cX, cY + 2, label, { anchor: 'start', fontSize: 6.6, fontWeight: 'bold', fill: '#1a2332' }));
+        if (sub) els.push(drawText(cX, cY + 9.5, sub, { anchor: 'start', fontSize: 5.6, fill: '#555' }));
+        cY += 22;
+      };
+      co(A.knX, A.knY, 'TILT KNUCKLE', `slotted bracket — ${Math.round(tilt)}° set`);
+      co(A.sbMidX, A.sbMidY - 4, 'STRONGBACK (N-S)', 'PLP POWER DRIVE™ — HDG steel');
+      co(A.railPts[A.railPts.length - 1][0], A.railPts[A.railPts.length - 1][1] + 4,
+        `PX RAIL ×${A.railPts.length} (CONT. E-W)`, '2 per row — 14′ sections, spliced');
+      co(A.strutMidX, A.strutMidY, 'DIAGONAL STRUT', 'braces south cantilever');
+      co(A.pylonX + 2, (A.pylonTopY + baseY) / 2 + 8, 'DRIVEN I-BEAM PYLON', 'W6 HDG — see section C');
+      // Height + clearance dimensions (left of the table)
+      const dimX = xStart - 16;
+      els.push(`<line x1="${dimX.toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${dimX.toFixed(1)}" y2="${(baseY - clrPx - tableRise).toFixed(1)}" stroke="#333" stroke-width="0.6"/>`);
+      for (const yy of [baseY, baseY - clrPx, baseY - clrPx - tableRise]) {
+        els.push(`<line x1="${(dimX - 3).toFixed(1)}" y1="${yy.toFixed(1)}" x2="${(dimX + 3).toFixed(1)}" y2="${yy.toFixed(1)}" stroke="#333" stroke-width="0.6"/>`);
+      }
+      els.push(drawText(dimX - 4, baseY - clrPx / 2 + 2, `${clearFt.toFixed(1)}' CLR`, {
+        anchor: 'end', fontSize: 6.4, fill: '#333' }));
+      // Top-of-table height from PLAN geometry: CAD panel heightM is the
+      // plan-PROJECTED N-S extent, so rise = plan depth × tan(tilt) (slope
+      // length × sin ≡ plan × tan). The old 1.73 m slope default printed
+      // "9.3' TOP" on a table that stands ~11.5' (Ray 2026-07-16: "a typical
+      // PLP ground mount is going to be somewhere around 10 to 12 feet").
+      const _rowPlanM = Number((a0._cadPanels?.[0]?.heightM)) || Number(a0.rows?.[0]?.panels?.[0]?.heightM) || 1.74;
+      const topFt = clearFt + nRows * _rowPlanM * metersToFt(1) * Math.tan(tilt * Math.PI / 180);
+      els.push(drawText(dimX - 4, baseY - clrPx - tableRise / 2, `${topFt.toFixed(1)}' TOP`, {
+        anchor: 'end', fontSize: 6.4, fill: '#333' }));
+      // Tilt arc at the south (low) end
+      const arcR = 22;
+      els.push(`<path d="M ${(xStart + arcR).toFixed(1)} ${(baseY - clrPx).toFixed(1)} A ${arcR} ${arcR} 0 0 0 ${(xStart + arcR * Math.cos(tilt * Math.PI / 180)).toFixed(1)} ${(baseY - clrPx - arcR * Math.sin(tilt * Math.PI / 180)).toFixed(1)}" fill="none" stroke="#1a4a8a" stroke-width="0.8"/>`);
+      els.push(drawText(xStart + arcR + 4, baseY - clrPx - 6, `${Math.round(tilt)}°`, {
+        anchor: 'start', fontSize: 8, fontWeight: 'bold', fill: '#1a4a8a' }));
+
+      // (Solstice sun/shadow overlay REMOVED — Ray 2026-07-16: "wtf is the
+      // sun about". Inter-row shading stays a NOTE; the drawing shows the
+      // structure, not an astronomy lesson.)
+    }
   }
 
   // ── Viewport C: TYPICAL PILE FOUNDATION SECTION ─────────────────────────────
   vpHeader(dz.x, vy, leftW, 'C · TYPICAL PILE FOUNDATION SECTION'); vy += VP_HDR;
   const vpC = { x: dz.x, y: vy, w: leftW, h: hC };
   {
+    // A true PILE section — W6 I-beam profile driven through soil strata, with
+    // a plan-view W6 cross-section detail beside it. The old viewport was the
+    // side elevation AGAIN with a fatter post (Ray 2026-07-16: B/C read as
+    // duplicates — the same dead-space disease PV-3F had).
     const a0: any = arrays[0] ?? {};
-    const tilt    = a0.tiltDeg ?? 25;
-    const embedFt = (a0.pileDepthM ?? 1.5) * metersToFt(1);
+    const embedFt = Math.max((a0.pileDepthM ?? 1.5) * metersToFt(1), 5);
     const clearFt = (a0.groundClearanceM ?? 0.46) * metersToFt(1);
-    const cx      = vpC.x + vpC.w * 0.44;
-    const grade   = vpC.y + vpC.h * 0.46;
-    const ftPx    = Math.min((vpC.y + vpC.h - 20 - grade) / Math.max(embedFt, 1), 26);
-
-    // Grade line + hatch
-    els.push(`<line x1="${(vpC.x + 20).toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(vpC.x + vpC.w - 20).toFixed(1)}" y2="${grade.toFixed(1)}" stroke="#6b4a2a" stroke-width="1.8"/>`);
-    for (let i = 0; i < 18; i++) {
-      const gx = vpC.x + 24 + i * ((vpC.w - 48) / 18);
-      els.push(`<line x1="${gx.toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(gx - 5).toFixed(1)}" y2="${(grade + 6).toFixed(1)}" stroke="#6b4a2a" stroke-width="0.5"/>`);
-    }
-    // Driven pile: above grade (solid) + below grade (dashed)
-    const pileTop = grade - vpC.h * 0.34;
+    const cx      = vpC.x + vpC.w * 0.30;
+    const grade   = vpC.y + vpC.h * 0.30;
+    const botPad  = 24;
+    const ftPx    = (vpC.y + vpC.h - botPad - grade) / Math.max(embedFt, 1);
     const pileBot = grade + embedFt * ftPx;
-    els.push(`<rect x="${(cx - 3.5).toFixed(1)}" y="${pileTop.toFixed(1)}" width="7" height="${(grade - pileTop).toFixed(1)}" fill="#8a8a8a" stroke="#333" stroke-width="1"/>`);
-    els.push(`<rect x="${(cx - 3.5).toFixed(1)}" y="${grade.toFixed(1)}" width="7" height="${(pileBot - grade).toFixed(1)}" fill="#707070" stroke="#333" stroke-width="1" stroke-dasharray="4,2"/>`);
-    // Tilted module bearing on the pile head
-    const modLen = Math.min(vpC.w * 0.30, 130);
-    const rise = Math.sin(tilt * Math.PI / 180) * modLen, run = Math.cos(tilt * Math.PI / 180) * modLen;
-    const mbx = cx - run / 2, mby = pileTop + rise / 2, mtx = cx + run / 2, mty = pileTop - rise / 2;
-    els.push(`<line x1="${mbx.toFixed(1)}" y1="${mby.toFixed(1)}" x2="${mtx.toFixed(1)}" y2="${mty.toFixed(1)}" stroke="#1a4a8a" stroke-width="6" stroke-linecap="round"/>`);
-    // Embed dimension line (right of pile) + labels
-    els.push(`<line x1="${(cx + 16).toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(cx + 16).toFixed(1)}" y2="${pileBot.toFixed(1)}" stroke="#333" stroke-width="0.7"/>`);
-    els.push(drawText(cx + 20, (grade + pileBot) / 2, `${embedFt.toFixed(1)}' EMBED (MIN)`, {
-      anchor: 'start', fontSize: 7.5, fontWeight: 'bold', fill: '#333' }));
-    els.push(drawText(cx - 12, (pileTop + grade) / 2, `${clearFt.toFixed(1)}' CLR`, {
-      anchor: 'end', fontSize: 7.5, fill: '#333' }));
-    els.push(drawText(mtx + 6, mty - 2, `${Math.round(tilt)}° MODULE`, {
-      anchor: 'start', fontSize: 7.5, fontWeight: 'bold', fill: '#1a4a8a' }));
-    els.push(drawText(vpC.x + vpC.w / 2, pileBot + 13,
-      'DRIVEN STEEL PILE — NO CONCRETE — FIELD VERIFY REFUSAL DEPTH', {
+    const pileTop = grade - Math.min(vpC.h * 0.20, clearFt * ftPx + 18);
+
+    // Soil strata: three hatched bands below grade (topsoil / subsoil / native)
+    const strata = [
+      { f0: 0, f1: 0.22, fill: '#f0e2c8', label: 'TOPSOIL' },
+      { f0: 0.22, f1: 0.58, fill: '#e6d2ae', label: 'SUBSOIL' },
+      { f0: 0.58, f1: 1.0, fill: '#dcc79c', label: 'NATIVE — DRIVE TO REFUSAL' },
+    ];
+    const sX0 = vpC.x + 18, sX1 = vpC.x + vpC.w * 0.58;
+    for (const s of strata) {
+      const y0 = grade + (pileBot - grade) * s.f0, y1 = grade + (pileBot - grade) * s.f1;
+      els.push(`<rect x="${sX0.toFixed(1)}" y="${y0.toFixed(1)}" width="${(sX1 - sX0).toFixed(1)}" height="${(y1 - y0).toFixed(1)}" fill="${s.fill}" opacity="0.55"/>`);
+      // ANSI earth-hatch ticks over each band — same soil language as PV-3G's
+      // grade treatment (item 4 consistency: one material vocabulary everywhere).
+      for (let hx = sX0 + 6; hx < sX1 - 4; hx += 13) {
+        const hy = y0 + ((hx * 7) % Math.max(y1 - y0 - 8, 4));
+        els.push(`<line x1="${hx.toFixed(1)}" y1="${hy.toFixed(1)}" x2="${(hx - 5).toFixed(1)}" y2="${(hy + 5).toFixed(1)}" stroke="#8a7040" stroke-width="0.45" opacity="0.6"/>`);
+      }
+      els.push(drawText(sX0 + 4, (y0 + y1) / 2 + 2, s.label, { anchor: 'start', fontSize: 5.4, fill: '#7a6a4a' }));
+      // strata boundary line
+      els.push(`<line x1="${sX0.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${sX1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="#a08850" stroke-width="0.4" stroke-dasharray="6,3"/>`);
+    }
+    // Grade line + hatch ticks
+    els.push(`<line x1="${sX0.toFixed(1)}" y1="${grade.toFixed(1)}" x2="${sX1.toFixed(1)}" y2="${grade.toFixed(1)}" stroke="#6b4a2a" stroke-width="2"/>`);
+    for (let i = 0; i < 14; i++) {
+      const gx = sX0 + 4 + i * ((sX1 - sX0 - 8) / 14);
+      els.push(`<line x1="${gx.toFixed(1)}" y1="${grade.toFixed(1)}" x2="${(gx - 5).toFixed(1)}" y2="${(grade + 6).toFixed(1)}" stroke="#6b4a2a" stroke-width="0.6"/>`);
+    }
+    els.push(drawText(sX1 - 4, grade - 4, 'GRADE', { anchor: 'end', fontSize: 6, fill: '#6b4a2a', fontWeight: 'bold' }));
+
+    // W6 pylon (front view): web + flange edge lines, solid above grade,
+    // dashed below; knuckle stub at the head ties back to section B.
+    const pw = 9;
+    els.push(`<rect x="${(cx - pw / 2).toFixed(1)}" y="${pileTop.toFixed(1)}" width="${pw}" height="${(grade - pileTop).toFixed(1)}" fill="#b8bec9" stroke="#111" stroke-width="1.2"/>`);
+    els.push(`<rect x="${(cx - pw / 2).toFixed(1)}" y="${grade.toFixed(1)}" width="${pw}" height="${(pileBot - grade).toFixed(1)}" fill="#9aa2b0" stroke="#111" stroke-width="1.2" stroke-dasharray="4,2"/>`);
+    for (const fx of [cx - pw / 2 + 1.8, cx + pw / 2 - 1.8]) {
+      els.push(`<line x1="${fx.toFixed(1)}" y1="${pileTop.toFixed(1)}" x2="${fx.toFixed(1)}" y2="${pileBot.toFixed(1)}" stroke="#111" stroke-width="0.5" opacity="0.7"/>`);
+    }
+    els.push(`<rect x="${(cx - 6).toFixed(1)}" y="${(pileTop - 4).toFixed(1)}" width="12" height="5" fill="#2c3444" stroke="#111" stroke-width="0.7" rx="1"/>`);
+    els.push(drawText(cx + 10, pileTop - 5, 'KNUCKLE — SEE B', { anchor: 'start', fontSize: 5.6, fill: '#555' }));
+
+    // Embed + clearance dimensions
+    const dimX = cx + pw / 2 + 14;
+    els.push(`<line x1="${dimX.toFixed(1)}" y1="${grade.toFixed(1)}" x2="${dimX.toFixed(1)}" y2="${pileBot.toFixed(1)}" stroke="#333" stroke-width="0.7"/>`);
+    for (const yy of [grade, pileBot]) {
+      els.push(`<line x1="${(dimX - 3.5).toFixed(1)}" y1="${yy.toFixed(1)}" x2="${(dimX + 3.5).toFixed(1)}" y2="${yy.toFixed(1)}" stroke="#333" stroke-width="0.7"/>`);
+    }
+    els.push(drawText(dimX + 5, (grade + pileBot) / 2, `${embedFt.toFixed(1)}' EMBED (MIN) — FIELD-VERIFY REFUSAL`, {
+      anchor: 'start', fontSize: 6.8, fontWeight: 'bold', fill: '#333' }));
+    els.push(drawText(cx - pw / 2 - 5, (pileTop + grade) / 2 + 2, `${clearFt.toFixed(1)}' CLR`, {
+      anchor: 'end', fontSize: 6.4, fill: '#333' }));
+
+    // ── W6 CROSS-SECTION detail (circle inset, right side): true I-profile ──
+    const dcx = vpC.x + vpC.w * 0.78, dcy = vpC.y + vpC.h * 0.44, dr = Math.min(vpC.h * 0.30, 46);
+    els.push(`<circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="${dr.toFixed(1)}" fill="#fff" stroke="#111" stroke-width="1"/>`);
+    const fw = dr * 1.0, fh = dr * 0.16, webW = dr * 0.14, webH = dr * 1.05;
+    els.push(`<rect x="${(dcx - fw / 2).toFixed(1)}" y="${(dcy - webH / 2 - fh).toFixed(1)}" width="${fw.toFixed(1)}" height="${fh.toFixed(1)}" fill="#8a92a2" stroke="#111" stroke-width="0.8"/>`);
+    els.push(`<rect x="${(dcx - fw / 2).toFixed(1)}" y="${(dcy + webH / 2).toFixed(1)}" width="${fw.toFixed(1)}" height="${fh.toFixed(1)}" fill="#8a92a2" stroke="#111" stroke-width="0.8"/>`);
+    els.push(`<rect x="${(dcx - webW / 2).toFixed(1)}" y="${(dcy - webH / 2).toFixed(1)}" width="${webW.toFixed(1)}" height="${webH.toFixed(1)}" fill="#8a92a2" stroke="#111" stroke-width="0.8"/>`);
+    els.push(drawText(dcx, dcy + dr + 10, 'W6 HDG I-BEAM — SECTION', { anchor: 'middle', fontSize: 6.2, fontWeight: 'bold', fill: '#1a2332' }));
+    els.push(drawText(dcx, dcy + dr + 18, 'PLP POWER DRIVE™ PYLON', { anchor: 'middle', fontSize: 5.6, fill: '#555' }));
+    // section cut reference: tie the detail to the pile with a leader
+    els.push(`<line x1="${(cx + pw / 2).toFixed(1)}" y1="${((grade + pileBot) / 2).toFixed(1)}" x2="${(dcx - dr).toFixed(1)}" y2="${dcy.toFixed(1)}" stroke="#888" stroke-width="0.5" stroke-dasharray="3,2"/>`);
+
+    els.push(drawText(vpC.x + vpC.w / 2, pileBot + 14,
+      'DRIVEN STEEL PYLON — NO CONCRETE — FIELD VERIFY REFUSAL DEPTH PER GEOTECH', {
         anchor: 'middle', fontSize: 6.5, fill: '#888', italic: true }));
   }
 
@@ -604,7 +764,7 @@ export function drawGroundArray(
         ['Modules', `${totalPanels} @ ${(dcKw / Math.max(1, totalPanels) * 1000).toFixed(0)}W`],
         ['Tilt / Azimuth', `${_tilt}° / ${_az}°`],
         ['Row spacing', `${_rs}' O.C.`],
-        ['Ground clearance', `18" min. below lowest module`],
+        ['Ground clearance', `${Math.round(((arrays[0]?.groundClearanceM ?? 0.46) * 39.3701))}" min. below lowest module`],
         ['Pile embedment', `5' min. — field-verify refusal`],
         ['Property setback', `${setbackFt}' min. from line`],
         ['Bonding', 'All metalwork to EGC — NEC 690.43'],
@@ -617,6 +777,35 @@ export function drawGroundArray(
         els.push(drawText(rightX + 6, ry + 7, k, { anchor: 'start', fontSize: 6.2, fill: '#555' }));
         els.push(drawText(rightX + rightW - 6, ry + 7, v, { anchor: 'end', fontSize: 6.2, fill: '#1a2332', fontWeight: 'bold' }));
       });
+      // ── PLP COMPONENT KEY — fills the dead band under DESIGN CRITERIA with
+      // the glyph → name map for the structure drawn in A/B/C. ──
+      let ky = cy + crit.length * 13 + 10;
+      const keyBottom = dz.y + dz.height - 6;
+      if (keyBottom - ky > 60) {
+        els.push(drawRectFilled(rightX, ky, rightW, 13, '#1a2332', '#1a2332', 0));
+        els.push(drawText(rightX + 7, ky + 9, 'PLP POWER DRIVE™ COMPONENT KEY', {
+          anchor: 'start', fontSize: 7, fontWeight: '900', fill: '#fff' }));
+        ky += 19;
+        const keyRows: Array<[string, string, string]> = [
+          [`<rect x="0" y="-3" width="14" height="6" fill="#b8bec9" stroke="#111" stroke-width="0.8"/><line x1="2" y1="-3" x2="2" y2="3" stroke="#111" stroke-width="0.4"/><line x1="12" y1="-3" x2="12" y2="3" stroke="#111" stroke-width="0.4"/>`,
+            'DRIVEN I-BEAM PYLON', 'W6 HDG steel — 1 per bay'],
+          [`<line x1="0" y1="2" x2="14" y2="-3" stroke="#44506a" stroke-width="2.4"/>`,
+            'STRONGBACK', 'tilted N-S beam on pylon'],
+          [`<line x1="0" y1="0" x2="14" y2="0" stroke="#39445c" stroke-width="2"/><line x1="0" y1="1.6" x2="14" y2="1.6" stroke="#39445c" stroke-width="0.5"/>`,
+            'PX RAIL — 2 PER ROW (CONT. E-W)', '4 per 2-high table · 14′ + splices'],
+          [`<rect x="3" y="-2.6" width="8" height="5.2" fill="#2c3444" stroke="#111" stroke-width="0.6" rx="1"/>`,
+            'TILT KNUCKLE', 'slotted tilt-set bracket'],
+          [`<line x1="1" y1="3" x2="12" y2="-3" stroke="#44506a" stroke-width="1.4"/>`,
+            'DIAGONAL STRUT', 'braces south cantilever'],
+        ];
+        for (const [glyph, name, sub] of keyRows) {
+          if (ky + 18 > keyBottom) break;
+          els.push(`<g transform="translate(${rightX + 8},${ky + 6})">${glyph}</g>`);
+          els.push(drawText(rightX + 28, ky + 5, name, { anchor: 'start', fontSize: 6.2, fontWeight: 'bold', fill: '#1a2332' }));
+          els.push(drawText(rightX + 28, ky + 12.5, sub, { anchor: 'start', fontSize: 5.4, fill: '#666' }));
+          ky += 19;
+        }
+      }
     }
   }
 
