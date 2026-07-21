@@ -88,6 +88,62 @@ export interface BranchRecord {
   conductorId: string; egcConductorId: string | null;
 }
 
+/** W2.1 — grounding is modeled PER SEGMENT AND PURPOSE. There is no single
+ *  "system EGC". A listed integrated grounding method that requires no
+ *  separate conductor is represented EXPLICITLY, never as an invented gauge. */
+export interface GroundingRecord {
+  groundingId: string;
+  segmentId: string;                 // canonical run/segment this applies to
+  purpose: 'branch-egc' | 'feeder-egc' | 'raceway-bond' | 'gec' | 'integrated-listed-method';
+  required: boolean;                 // false ⇒ explicitly not required (with basis)
+  method: 'conductor' | 'raceway' | 'integrated-listed' | 'none-required';
+  conductorMaterial: 'Cu' | 'Al' | null;
+  conductorSize: string | null;      // null when method !== 'conductor'
+  sizingBasis: string | null;        // e.g. 'NEC 250.122 @ 20A OCPD'
+  associatedOcpdA: number | null;
+  associatedEquipment: string | null;
+  manufacturerListingBasis: string | null;  // record ref when integrated-listed
+  codeBasis: string;                 // e.g. 'NEC 250.122', 'NEC 250.118(4)'
+  provenance: Provenance;
+}
+
+/** W2.1 — canonical route-length authority: every electrical run is a
+ *  segment with ONE authoritative length and a recorded source. */
+export interface RouteSegmentRecord {
+  segmentId: string;                 // engine RunSegment id (e.g. 'COMBINER_TO_DISCO_RUN')
+  from: string; to: string;
+  oneWayFt: number | null;
+  lengthSource: 'cad-route' | 'cad-derived-estimate' | 'field-measurement' | 'operator-entry' | 'unknown';
+  raceway: string | null;            // 'EMT' | 'PVC' | 'FREE_AIR' …
+  tradeSizeIn: string | null;
+  fillPct: number | null;
+  conductorGauge: string | null;
+  conductorCallout: string | null;
+  egcGauge: string | null;           // the EGC carried IN this segment, if any
+  voltageDropPct: number | null;
+  ocpdA: number | null;
+  tempDeratingFactor: number | null;
+  provenance: Provenance;
+}
+
+export type ParityClassification =
+  | 'agree'
+  | 'legacy-engine-defect'
+  | 'computeSystem-defect'
+  | 'missing-input'
+  | 'model-definition-difference'
+  | 'intentional-supersession';
+
+export interface ParityCheck {
+  name: string;
+  segmentId: string | null;          // object-level scope, null = project-level
+  canonical: string;                 // computeSystem (engine of record)
+  legacyShadow: string;              // runElectricalCalc
+  agree: boolean;
+  classification: ParityClassification;
+  resolution: string;                // REQUIRED for every non-agree row
+}
+
 export interface PermitDesignSnapshot {
   meta: {
     snapshotId: string;             // content-derived: 'PDS-' + digest prefix
@@ -158,13 +214,18 @@ export interface PermitDesignSnapshot {
     feeder: { conductorId: string; ocpdA: number | null; continuousA: number | null;
               currentA: number | null; voltageDropPct: number | null;
               conduit: { raceway: string | null; tradeSizeIn: string | null; fillPct: number | null } };
-    systemEgc: { conductorId: string; basisOcpdA: number | null };
+    /** W2.1: per-purpose grounding objects — replaces the retired
+     *  "system EGC" abstraction entirely. */
+    groundingObjects: GroundingRecord[];
+    /** W2.1: canonical route-length + per-segment conductor authority
+     *  (computeSystem runs — sheets/engines may not substitute lengths). */
+    routeSegments: RouteSegmentRecord[];
     poi: { method: string; busbarA: number | null; mainBreakerA: number | null;
            backfeedA: number | null; rulePasses: boolean | null };
-    shadowParity: {                 // D-2: computeSystem shadow vs engine-of-record
-      shadowEngine: string; ran: boolean; divergences: string[];
-      /** full parity matrix — every compared output, agree or not */
-      checks: { name: string; engineOfRecord: string; shadow: string; agree: boolean }[];
+    parity: {                       // W2.1: canonical=computeSystem vs legacy shadow
+      legacyEngine: string; legacyRan: boolean;
+      checks: ParityCheck[];
+      unresolved: string[];         // MUST be empty for permit-critical rows
     };
     provenance: Provenance;
     gaps: string[];
@@ -196,6 +257,15 @@ export interface PermitDesignSnapshot {
     engineeringReviewApproved: false | { reviewedDigest: string; approvedAtIso: string };
     engineer: { name: string; licenseNo: string; licenseState: string;
                 expiresIso: string; sealAssetId: string } | null;
+  };
+
+  /** W2.1 req. 3/7: unresolved authority gaps BLOCK permit-ready status —
+   *  never silently degraded. (Distinct from validation violations: these are
+   *  known-missing authorities, e.g. no true routed geometry, unreconciled
+   *  stored equipment identity.) */
+  permitReadiness: {
+    ready: boolean;
+    blockers: { code: string; message: string }[];
   };
 }
 

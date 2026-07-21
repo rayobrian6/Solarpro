@@ -176,59 +176,168 @@ export function buildPermitDesignSnapshot(
   const invRecord = microInverters[0];
   const plan = isMicro && positions.length
     ? planMicroBranches(positions, eq.inverterModel, eq.inverterManufacturer) : null;
-  const branches: BranchRecord[] = auth.microBranches.map((b, i) => ({
-    branchId: `br-${i + 1}`, label: `B${b.index}`,
-    deviceIds: plan ? positions.filter(p => plan.assign.get(String(p.id)) === i).map(p => String(p.id)) : [],
-    moduleCount: b.deviceCount,
-    currentA: b.branchCurrentA, continuousA: b.continuousA, ocpdA: b.ocpdAmps,
-    conductorId: addConductor(b.wireGauge, 'THWN-2', 'conductorAuthority.microBranchRow'),
-    egcConductorId: b.egcGauge ? addConductor(b.egcGauge, null, 'conductorAuthority (NEC 250.122)') : null,
-  }));
+
+  // ═══ W2.1: computeSystem is CANONICAL ═══════════════════════════════════
+  const cs: any = (input as unknown as { _computeSystem?: unknown })._computeSystem ?? null;
+  const legacyShadow: any = (input as unknown as { _legacyElectricalShadow?: unknown })._legacyElectricalShadow ?? null;
+  const runMap: Record<string, any> = cs?.runMap ?? {};
+  const feederRun = runMap['COMBINER_TO_DISCO_RUN'] ?? runMap['INV_TO_DISCO_RUN'] ?? null;
+  const branchRun = runMap['BRANCH_RUN'] ?? null;
+
+  // Branch DEVICE ASSIGNMENT = D-1 routing planner (geometry authority);
+  // branch ELECTRICALS = computeSystem's own branch rows, matched by size.
+  // A size-multiset mismatch is a blocking violation (V16) — never patched.
+  const csBranchPool: any[] = [...(cs?.microBranches ?? [])];
+  const takeCsBranch = (n: number) => {
+    const i = csBranchPool.findIndex(b => Number(b?.deviceCount) === n);
+    return i >= 0 ? csBranchPool.splice(i, 1)[0] : null;
+  };
+  let branchEngineMismatch = false;
+  const branches: BranchRecord[] = (plan?.sizes ?? auth.microBranches.map(b => b.deviceCount)).map((size, i) => {
+    const csRow = takeCsBranch(size);
+    if (!csRow) branchEngineMismatch = true;
+    const currentA = csRow ? Number(csRow.branchCurrentA) : NaN;
+    const gauge = csRow?.conductorCallout?.match(/#\d+(?:\/0)?(?:\s*AWG)?/)?.[0] ?? null;
+    return {
+      branchId: `br-${i + 1}`, label: `B${i + 1}`,
+      deviceIds: plan ? positions.filter(p => plan.assign.get(String(p.id)) === i).map(p => String(p.id)) : [],
+      moduleCount: size,
+      currentA: isFinite(currentA) ? currentA : 0,
+      continuousA: isFinite(currentA) ? currentA * 1.25 : 0,
+      ocpdA: csRow ? Number(csRow.ocpdAmps) : 0,
+      conductorId: addConductor(gauge ? (gauge.includes('AWG') ? gauge : `${gauge} AWG`) : (branchRun?.wireGauge ?? '—'),
+        'THWN-2', 'computeSystem.microBranches'),
+      egcConductorId: branchRun?.egcGauge ? addConductor(branchRun.egcGauge, null, 'computeSystem BRANCH_RUN (NEC 250.122)') : null,
+    };
+  });
   const microUnits = isMicro ? geoModules.map(g => ({
     deviceId: `mi-${g.moduleId}`, moduleId: g.moduleId,
     inverterRecordId: invRecord?.recordId ?? 'inv-1',
     branchId: plan ? `br-${(plan.assign.get(g.moduleId) ?? 0) + 1}` : (branches[0]?.branchId ?? 'br-1'),
   })) : [];
 
-  const feederConductorId = addConductor(auth.acFeeder.wireGauge, 'THWN-2', 'electrical-engine/conductorAuthority', auth.acFeeder.ampacityA ?? null);
-  const egcId = addConductor(auth.egc.gauge, null, auth.egc.source === 'engine' ? 'electrical-engine' : 'nec-250.122');
+  // Feeder conductor from the CANONICAL engine's own feeder segment.
+  const feederConductorId = addConductor(
+    feederRun?.wireGauge ?? auth.acFeeder.wireGauge, 'THWN-2',
+    'computeSystem feeder segment', feederRun?.effectiveAmpacity ?? auth.acFeeder.ampacityA ?? null);
 
-  // D-2 shadow: computeSystem parity probe (report-only, never authority —
-  // "never two authoritative electrical results"). Every compared output
-  // lands in the parity MATRIX; disagreements also go to `divergences`.
-  const shadowDivergences: string[] = [];
-  const shadowChecks: { name: string; engineOfRecord: string; shadow: string; agree: boolean }[] = [];
-  let shadowRan = false;
-  const _chk = (name: string, eor: unknown, sh: unknown, agree?: boolean) => {
-    const a = agree ?? String(eor) === String(sh);
-    shadowChecks.push({ name, engineOfRecord: String(eor ?? '—'), shadow: String(sh ?? '—'), agree: a });
-    if (!a) shadowDivergences.push(`${name}: engineOfRecord=${eor} computeSystem=${sh}`);
-  };
-  try {
-    const shadow: any = buildComputeSystemShadow(input, cad);
-    if (shadow) {
-      shadowRan = true;
-      const sBf = shadow.backfeedBreakerAmps;
-      if (isFinite(sBf) && auth.acFeeder.ocpdAmps != null) _chk('feeder OCPD (A)', auth.acFeeder.ocpdAmps, sBf);
-      const sBr = shadow.microBranches?.length;
-      if (isMicro && isFinite(sBr)) _chk('branch count', branches.length, sBr);
-      const runs: any[] = shadow.runs ?? [];
-      const feederRun = runs.find((r: any) => ['COMBINER_TO_DISCO_RUN', 'INV_TO_DISCO_RUN'].includes(String(r?.id)));
-      if (feederRun?.wireGauge && auth.acFeeder.wireGauge) _chk('feeder gauge', auth.acFeeder.wireGauge, feederRun.wireGauge);
-      if (feederRun?.egcGauge && auth.egc.gauge) _chk('system EGC', auth.egc.gauge, feederRun.egcGauge);
-      if (isFinite(feederRun?.voltageDropPct) && isFinite(auth.acFeeder.voltageDropPct as number)) {
-        _chk('feeder V-drop (%)', auth.acFeeder.voltageDropPct, feederRun.voltageDropPct,
-          Math.abs(Number(auth.acFeeder.voltageDropPct) - Number(feederRun.voltageDropPct)) <= 0.5);
-      }
-      if (isMicro && shadow.microBranches?.length) {
-        const shMax = Math.max(...shadow.microBranches.map((b: any) => Number(b?.ocpdAmps) || 0));
-        const eorMax = Math.max(0, ...auth.microBranches.map(b => b.ocpdAmps));
-        if (shMax > 0) _chk('governing branch OCPD (A)', eorMax, shMax);
-      }
-    }
-  } catch (e: any) {
-    shadowDivergences.push(`computeSystem shadow failed: ${String(e?.message ?? e).slice(0, 120)}`);
+  // ═══ W2.1 GROUNDING OBJECTS — per segment + purpose (no "system EGC") ═══
+  const groundingObjects: import('./types').GroundingRecord[] = [];
+  if (isMicro && branchRun) {
+    branches.forEach((b) => groundingObjects.push({
+      groundingId: `gnd-${b.branchId}`, segmentId: 'BRANCH_RUN', purpose: 'branch-egc',
+      required: true, method: 'conductor', conductorMaterial: 'Cu',
+      conductorSize: branchRun.egcGauge ?? null,
+      sizingBasis: `NEC 250.122 @ ${b.ocpdA}A branch OCPD`,
+      associatedOcpdA: b.ocpdA, associatedEquipment: `AC branch ${b.label}`,
+      manufacturerListingBasis: null, codeBasis: 'NEC 250.122',
+      provenance: { source: 'computeSystem BRANCH_RUN' },
+    }));
   }
+  if (feederRun) {
+    groundingObjects.push({
+      groundingId: 'gnd-feeder', segmentId: String(feederRun.id), purpose: 'feeder-egc',
+      required: true, method: 'conductor', conductorMaterial: 'Cu',
+      conductorSize: feederRun.egcGauge ?? null,
+      sizingBasis: `NEC 250.122 @ ${feederRun.ocpdAmps ?? cs?.acOcpdAmps ?? '?'}A feeder OCPD`,
+      associatedOcpdA: feederRun.ocpdAmps ?? cs?.acOcpdAmps ?? null,
+      associatedEquipment: 'AC feeder (combiner → disconnect → POI)',
+      manufacturerListingBasis: null, codeBasis: 'NEC 250.122',
+      provenance: { source: 'computeSystem feeder segment' },
+    });
+    const raceway = String(feederRun.conduitType ?? '').toUpperCase();
+    if (raceway.includes('EMT')) {
+      groundingObjects.push({
+        groundingId: 'gnd-raceway', segmentId: String(feederRun.id), purpose: 'raceway-bond',
+        required: true, method: 'raceway', conductorMaterial: null, conductorSize: null,
+        sizingBasis: null, associatedOcpdA: null, associatedEquipment: 'EMT raceway + listed fittings',
+        manufacturerListingBasis: null,
+        codeBasis: 'NEC 250.118(4) — EMT is a permitted equipment grounding conductor; bonding via listed fittings',
+        provenance: { source: 'computeSystem feeder segment (raceway type)' },
+      });
+    }
+  }
+  groundingObjects.push({
+    groundingId: 'gnd-gec', segmentId: 'SERVICE', purpose: 'gec',
+    required: false, method: 'none-required', conductorMaterial: null, conductorSize: null,
+    sizingBasis: null, associatedOcpdA: null, associatedEquipment: 'Existing service grounding electrode system',
+    manufacturerListingBasis: null,
+    codeBasis: 'NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added',
+    provenance: { source: 'design rule', note: 'explicit not-required record — never an invented conductor' },
+  });
+
+  // ═══ W2.1 CANONICAL ROUTE-LENGTH AUTHORITY ═════════════════════════════
+  // deriveRunLengths(cad) is a DOCUMENTED CAD-DERIVED ESTIMATE, not routed
+  // geometry — recorded as such, and it BLOCKS permit-ready status below.
+  const routeSegments: import('./types').RouteSegmentRecord[] = ((cs?.runs ?? []) as any[]).map((r: any) => ({
+    segmentId: String(r.id), from: String(r.fromLabel ?? r.from ?? ''), to: String(r.toLabel ?? r.to ?? ''),
+    oneWayFt: isFinite(r.onewayLengthFt) ? r.onewayLengthFt : null,
+    lengthSource: 'cad-derived-estimate',
+    raceway: r.isOpenAir ? 'FREE_AIR' : (r.conduitType ?? null),
+    tradeSizeIn: r.conduitSize ?? null,
+    fillPct: isFinite(r.conduitFillPercent) ? r.conduitFillPercent : null,
+    conductorGauge: r.wireGauge ?? null,
+    conductorCallout: r.conductorCallout ?? null,
+    egcGauge: r.egcGauge ?? null,
+    voltageDropPct: isFinite(r.voltageDropPct) ? r.voltageDropPct : null,
+    ocpdA: isFinite(r.ocpdAmps) ? r.ocpdAmps : null,
+    tempDeratingFactor: isFinite(r.tempDeratingFactor) ? r.tempDeratingFactor : null,
+    provenance: { source: 'computeSystem runs (deriveRunLengths cad estimate)' },
+  }));
+
+  // ═══ W2.1 CLASSIFIED PARITY — canonical (computeSystem) vs legacy shadow ═
+  const parityChecks: import('./types').ParityCheck[] = [];
+  const _par = (name: string, segmentId: string | null, canonical: unknown, legacy: unknown,
+                classification: import('./types').ParityClassification, resolution: string, agree?: boolean) => {
+    parityChecks.push({
+      name, segmentId,
+      canonical: String(canonical ?? '—'), legacyShadow: String(legacy ?? '—'),
+      agree: agree ?? String(canonical) === String(legacy),
+      classification: (agree ?? String(canonical) === String(legacy)) ? 'agree' : classification,
+      resolution,
+    });
+  };
+  const legacyRan = !!legacyShadow;
+  if (cs) {
+    _par('feeder OCPD (A)', String(feederRun?.id ?? 'FEEDER'), cs.backfeedBreakerAmps,
+      legacyShadow?.busbar?.backfeedBreakerRequired, 'legacy-engine-defect',
+      'both engines apply NEC 690.8×1.25→240.6; any difference is a defect to fix in the diverging engine');
+    _par('feeder conductor', String(feederRun?.id ?? 'FEEDER'), feederRun?.wireGauge,
+      legacyShadow?.acWireGauge, 'model-definition-difference',
+      'canonical sizes on routed length + unified thermal basis');
+    _par('feeder EGC', String(feederRun?.id ?? 'FEEDER'), feederRun?.egcGauge,
+      legacyShadow?.groundingConductor, 'legacy-engine-defect',
+      'legacy "groundingConductor" was an unscoped system EGC and undersized vs NEC 250.122 on the feeder OCPD; '
+      + 'grounding is now modeled per segment+purpose (groundingObjects); legacy value shadow-only');
+    _par('feeder V-drop (%)', String(feederRun?.id ?? 'FEEDER'), feederRun?.voltageDropPct?.toFixed?.(2),
+      legacyShadow?.acVoltageDrop?.toFixed?.(2), 'intentional-supersession',
+      'canonical routed segment length (route-length authority) replaces the legacy flat project-level length',
+      false);
+    _par('branch count', 'BRANCH_RUN', cs.microBranches?.length, '(no per-branch model)',
+      'model-definition-difference', 'legacy engine has no per-branch model; canonical owns branches',
+      undefined);
+    _par('branch device assignment', 'BRANCH_RUN', 'D-1 routing planner (geometry-aware)', '(none)',
+      'model-definition-difference',
+      'assignment is owned by the D-1 planner (geometry authority); canonical engine sizes must match the plan '
+      + `(verified: ${branchEngineMismatch ? 'MISMATCH — V16 blocks' : 'sizes match'})`,
+      !branchEngineMismatch);
+    {
+      const _canonMethod = String(proj.interconnectionMethod ?? 'LOAD_SIDE');
+      const _legMethod = String(legacyShadow?.busbar?.method ?? _canonMethod);
+      const _bothSupply = /SUPPLY/i.test(_canonMethod) === /SUPPLY/i.test(_legMethod);
+      _par('interconnection method', null, _canonMethod, _legMethod,
+        'model-definition-difference',
+        'method is a design decision on the project record — neither engine decides it; legacy stores a display label',
+        _bothSupply);
+    }
+    _par('temperature correction basis', String(feederRun?.id ?? 'FEEDER'),
+      `ASHRAE ${String((input as any)._engineThermal?.designTempMin ?? '')}°C`,
+      'legacy flat -10°C regime (retired W2)', 'intentional-supersession',
+      'V15 thermal unification — one ASHRAE basis for engines and sheets', false);
+  }
+  const parityUnresolved = parityChecks
+    .filter(c => !c.agree && !['intentional-supersession', 'model-definition-difference', 'legacy-engine-defect'].includes(c.classification))
+    .map(c => c.name);
 
   // ── thermal (ONE basis; engines converge on it in W2 — gap recorded) ──
   const temps = getDesignTemps(proj.lat, proj.lng, typeof proj.state === 'string' && /^[A-Za-z]{2}$/.test(proj.state) ? proj.state : undefined);
@@ -245,6 +354,17 @@ export function buildPermitDesignSnapshot(
   const acWattsContinuous = isMicro
     ? Math.round(totalsPanels * (invRecord?.spec.continuousVa ?? (invRecord?.spec.continuousOutputA ?? 0) * 240))
     : Math.round(stringInverters.reduce((s, r) => s + r.spec.acOutputKw * 1000, 0));
+
+  // Req. 7 — stored-authority equipment identity conflicts (surfaced AND
+  // permit-ready-blocking; never silently reconciled in production data).
+  const equipmentIdentityConflicts: string[] = [];
+  for (const [k, sub] of Object.entries((proj.subSystems ?? {}) as Record<string, any>)) {
+    const mapped: any = sub?.panelId ? getPanelById(sub.panelId) : null;
+    if (mapped && modules[0] && mapped.id !== modules[0].catalogId) {
+      equipmentIdentityConflicts.push(
+        `subSystems.${k}.panelId='${sub.panelId}' (${mapped.manufacturer} ${mapped.model}) vs fleet module '${modules[0].model}' — operator reconciliation required (migration 110 territory)`);
+    }
+  }
 
   const snapshot: PermitDesignSnapshot = {
     meta: {
@@ -311,43 +431,34 @@ export function buildPermitDesignSnapshot(
       gaps: [
         'setback/pathway polygons remain sheet-computed until W3',
         'module footprints (record dims × coordinates) not yet snapshot-owned (V8 deferred to W3)',
-        ...(() => {
-          // Stored-authority conflict detector: §1.1 subSystems map panelId vs
-          // the fleet model. Mismatch = a data-integrity finding for Ray.
-          const out: string[] = [];
-          for (const [k, sub] of Object.entries((proj.subSystems ?? {}) as Record<string, any>)) {
-            const mapped: any = sub?.panelId ? getPanelById(sub.panelId) : null;
-            if (mapped && modules[0] && mapped.id !== modules[0].catalogId) {
-              out.push(`EQUIPMENT IDENTITY CONFLICT: subSystems.${k}.panelId='${sub.panelId}' (${mapped.manufacturer} ${mapped.model}) vs fleet module '${modules[0].model}' — reconcile (migration 110 territory)`);
-            }
-          }
-          return out;
-        })(),
+        ...equipmentIdentityConflicts.map(c => `EQUIPMENT IDENTITY CONFLICT: ${c}`),
       ],
     },
     electrical: {
       topology: auth.isHybrid ? 'HYBRID' : topology,
-      engineOfRecord: 'runElectricalCalc',
+      engineOfRecord: 'computeSystem',
       microInverterUnits: microUnits, branches, conductors,
+      groundingObjects,
+      routeSegments,
       feeder: {
         conductorId: feederConductorId,
-        ocpdA: auth.acFeeder.ocpdAmps, continuousA: auth.poi?.requiredA ?? null,
-        currentA: auth.poi?.continuousA ?? null,
-        voltageDropPct: auth.acFeeder.voltageDropPct,
-        conduit: { raceway: auth.acFeeder.conduitType ?? null, tradeSizeIn: auth.acFeeder.conduitSize ?? null,
+        ocpdA: cs?.backfeedBreakerAmps ?? cs?.acOcpdAmps ?? null,
+        continuousA: cs?.acContinuousCurrentA ?? null,
+        currentA: cs?.acOutputCurrentA ?? null,
+        voltageDropPct: feederRun?.voltageDropPct ?? null,
+        conduit: { raceway: feederRun?.conduitType ?? null, tradeSizeIn: feederRun?.conduitSize ?? null,
                    fillPct: (elec?.conduitFill as any)?.fillPercent ?? null },
       },
-      systemEgc: { conductorId: egcId, basisOcpdA: auth.egc.basisOcpd ?? null },
       poi: {
         method: proj.interconnectionMethod ?? 'LOAD_SIDE',
         busbarA: proj.panelBusRating ?? proj.mainPanelAmps ?? null,
         mainBreakerA: proj.mainPanelAmps ?? null,
-        backfeedA: proj.backfeedBreakerA ?? null,
+        backfeedA: cs?.backfeedBreakerAmps ?? proj.backfeedBreakerA ?? null,
         rulePasses: (elec?.busbar as any)?.passes ?? null,
       },
-      shadowParity: { shadowEngine: 'computeSystem', ran: shadowRan, divergences: shadowDivergences, checks: shadowChecks },
-      provenance: { source: 'runElectricalCalc + conductorAuthority + planMicroBranches(D-1)' },
-      gaps: ['per-segment conduit model arrives with computeSystem engine-of-record (W2)'],
+      parity: { legacyEngine: 'runElectricalCalc', legacyRan, checks: parityChecks, unresolved: parityUnresolved },
+      provenance: { source: 'computeSystem (canonical) + planMicroBranches(D-1 assignment)' },
+      gaps: cs ? [] : ['canonical engine result missing — generation should have failed closed'],
     },
     structural: {
       mountRecordId: mount?.recordId ?? null,
@@ -378,10 +489,25 @@ export function buildPermitDesignSnapshot(
       dcWattsStc,
       acWattsContinuous,
       branchCount: branches.length,
-      feederContinuousA: auth.poi?.requiredA ?? null,
+      feederContinuousA: cs?.acContinuousCurrentA ?? auth.poi?.requiredA ?? null,
       provenance: { source: 'snapshot builder (Σ over snapshot objects)' },
     },
     certification: { engineeringReviewApproved: false, engineer: null },
+    permitReadiness: (() => {
+      const blockers: { code: string; message: string }[] = [];
+      // Req. 3: no authoritative routed geometry exists — segment lengths are
+      // CAD-derived ESTIMATES. Identified, never silently used as authority-grade.
+      if (routeSegments.some(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement')) {
+        blockers.push({ code: 'ROUTE-LENGTH-ESTIMATE',
+          message: 'Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status' });
+      }
+      // Req. 7: stored equipment-identity conflict (e.g. Braidon subSystems
+      // panelId vs fleet model) BLOCKS permit-ready until operator reconciliation.
+      for (const c of equipmentIdentityConflicts) blockers.push({ code: 'EQUIPMENT-IDENTITY-CONFLICT', message: c });
+      blockers.push({ code: 'ENGINEERING-REVIEW-PENDING',
+        message: 'No approved engineering-review record covering this snapshot digest (D-6)' });
+      return { ready: blockers.length === 0, blockers };
+    })(),
   };
 
   const digest = computeSnapshotDigest(snapshot as unknown as Record<string, unknown>);

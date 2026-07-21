@@ -85,8 +85,13 @@ const report = {
   snapshotId: sid, digest: snap.meta.digest, schemaVersion: snap.meta.schemaVersion,
   sheetCount: pages.length,
   deferredViolations: snap._violations ?? null,
-  // D-2 parity matrix — engine-of-record vs computeSystem shadow (from the snapshot)
-  parityMatrix: snap.electrical?.shadowParity ?? null,
+  // W2.1 parity matrix — canonical computeSystem vs legacy shadow, classified
+  parityMatrix: snap.electrical?.parity ?? null,
+  groundingObjects: snap.electrical?.groundingObjects ?? null,
+  routeSegments: (snap.electrical?.routeSegments ?? []).map(r => ({
+    segmentId: r.segmentId, oneWayFt: r.oneWayFt, lengthSource: r.lengthSource,
+    gauge: r.conductorGauge, egc: r.egcGauge, vdPct: r.voltageDropPct })),
+  permitReadiness: snap.permitReadiness ?? null,
   values: rows,
   summary: {
     total: rows.length,

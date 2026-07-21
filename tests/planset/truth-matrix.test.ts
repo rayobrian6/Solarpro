@@ -21,7 +21,7 @@ const instancesOf = (re: RegExp) => {
 describe('truth matrix — activated classes (W2)', () => {
   it('snapshot exists and is the render authority', () => {
     expect(snap?.meta?.snapshotId).toMatch(/^PDS-/);
-    expect(snap.electrical.engineOfRecord).toBe('runElectricalCalc');
+    expect(snap.electrical.engineOfRecord).toBe('computeSystem');
   });
 
   it('feeder/backfeed OCPD: every printed instance equals snapshot.electrical.feeder.ocpdA', () => {
@@ -52,9 +52,29 @@ describe('truth matrix — activated classes (W2)', () => {
     expect(html).toContain('Not provided — no verified dwelling load inputs on file');
   });
 
-  it('D-2 parity matrix ran and is carried on the snapshot', () => {
-    expect(snap.electrical.shadowParity.ran).toBe(true);
-    expect(snap.electrical.shadowParity.checks.length).toBeGreaterThan(0);
+  it('W2.1: canonical=computeSystem; classified parity carried; no unresolved rows', () => {
+    expect(snap.electrical.engineOfRecord).toBe('computeSystem');
+    expect(snap.electrical.parity.checks.length).toBeGreaterThan(0);
+    for (const c of snap.electrical.parity.checks) {
+      expect(c.classification, `${c.name} must be classified`).toBeTruthy();
+      expect(c.resolution, `${c.name} must carry a resolution`).toBeTruthy();
+    }
+    expect(snap.electrical.parity.unresolved).toEqual([]);
+  });
+
+  it('W2.1: grounding is per-purpose objects — no invented conductors', () => {
+    const g = snap.electrical.groundingObjects;
+    expect(g.find(x => x.purpose === 'feeder-egc')?.conductorSize).toBeTruthy();
+    const gec = g.find(x => x.purpose === 'gec');
+    expect(gec?.required).toBe(false);
+    expect(gec?.conductorSize).toBeNull();
+  });
+
+  it('W2.1: route-length authority — every segment has a length + source; estimates block permit-ready', () => {
+    expect(snap.electrical.routeSegments.length).toBeGreaterThan(0);
+    for (const r of snap.electrical.routeSegments) expect(r.lengthSource).toBeTruthy();
+    expect(snap.permitReadiness.ready).toBe(false);
+    expect(snap.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')).toBe(true);
   });
 
   it('V15: engine thermal basis matches the snapshot (no legacy -10C regime)', () => {

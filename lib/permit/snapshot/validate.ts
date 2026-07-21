@@ -128,6 +128,43 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
 
   // V12/V13 are render-level — enforced post-render in generatePermit.
 
+  // ── W2.1 invariants ────────────────────────────────────────────────────
+  // V16 — canonical engine identity + plan/engine branch reconciliation.
+  if (s.electrical.engineOfRecord !== 'computeSystem') {
+    add('V16', 'electrical.engineOfRecord', s.electrical.engineOfRecord, 'snapshot builder',
+      SHEETS_ELECTRICAL, 'computeSystem is the sole canonical electrical engine (W2.1 binding)');
+  }
+  if (isMicro) {
+    for (const b of s.electrical.branches) {
+      if (!(b.ocpdA > 0) || !(b.currentA > 0)) {
+        add('V16', `electrical.branches[${b.label}]`, { ocpdA: b.ocpdA, currentA: b.currentA },
+          'computeSystem.microBranches ↔ planMicroBranches',
+          SHEETS_ELECTRICAL,
+          `branch ${b.label} has no matching canonical-engine row (plan/engine size-multiset mismatch)`);
+      }
+    }
+  }
+  // V17 — classified parity: no unresolved permit-critical rows may remain.
+  if (s.electrical.parity.unresolved.length) {
+    add('V17', 'electrical.parity.unresolved', s.electrical.parity.unresolved, 'parity matrix',
+      SHEETS_ELECTRICAL, `unresolved parity rows: ${s.electrical.parity.unresolved.join(', ')} — classify or fix`);
+  }
+  // V18 — route-length authority: every segment carries a length + source;
+  // estimate-grade sources must be reflected in permitReadiness blockers.
+  for (const r of s.electrical.routeSegments) {
+    if (r.oneWayFt == null || !r.lengthSource) {
+      add('V18', `electrical.routeSegments[${r.segmentId}]`, { oneWayFt: r.oneWayFt, lengthSource: r.lengthSource },
+        'computeSystem runs', ['E-1', 'PV-4B', 'SCHED', 'BOM'],
+        `segment ${r.segmentId} lacks an authoritative length/source`);
+    }
+  }
+  if (s.electrical.routeSegments.some(r => r.lengthSource === 'cad-derived-estimate' || r.lengthSource === 'unknown')
+      && !s.permitReadiness.blockers.some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')) {
+    add('V18', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+      'snapshot builder', ['PV-0', 'VAL-1'],
+      'estimate-grade route lengths present but not reflected as a permit-readiness blocker');
+  }
+
   // V14 — pitch is degrees
   for (const p of s.geometry.roofPlanes) {
     if (p.pitchDeg != null && (p.pitchDeg < 0 || p.pitchDeg > 60)) {

@@ -53,7 +53,7 @@ function baseSnapshot(): PermitDesignSnapshot {
       modules: mods, provenance: { source: 'test' }, gaps: [],
     },
     electrical: {
-      topology: 'MICRO', engineOfRecord: 'runElectricalCalc',
+      topology: 'MICRO', engineOfRecord: 'computeSystem',
       microInverterUnits: units,
       branches: [
         { branchId: 'br-1', label: 'B1', deviceIds: units.slice(0, 11).map(u => u.deviceId),
@@ -71,9 +71,25 @@ function baseSnapshot(): PermitDesignSnapshot {
       ],
       feeder: { conductorId: 'c-4', ocpdA: 60, continuousA: 56.3, currentA: 45.1, voltageDropPct: 1.1,
                 conduit: { raceway: 'EMT', tradeSizeIn: '1-1/4"', fillPct: 29 } },
-      systemEgc: { conductorId: 'c-4', basisOcpdA: 60 },
+      groundingObjects: [
+        { groundingId: 'gnd-feeder', segmentId: 'COMBINER_TO_DISCO_RUN', purpose: 'feeder-egc',
+          required: true, method: 'conductor', conductorMaterial: 'Cu', conductorSize: '#10 AWG',
+          sizingBasis: 'NEC 250.122 @ 60A feeder OCPD', associatedOcpdA: 60,
+          associatedEquipment: 'AC feeder', manufacturerListingBasis: null,
+          codeBasis: 'NEC 250.122', provenance: { source: 'test' } },
+        { groundingId: 'gnd-gec', segmentId: 'SERVICE', purpose: 'gec', required: false,
+          method: 'none-required', conductorMaterial: null, conductorSize: null, sizingBasis: null,
+          associatedOcpdA: null, associatedEquipment: 'Existing GES', manufacturerListingBasis: null,
+          codeBasis: 'NEC 250.64', provenance: { source: 'test' } },
+      ],
+      routeSegments: [
+        { segmentId: 'COMBINER_TO_DISCO_RUN', from: 'combiner', to: 'disconnect', oneWayFt: 14,
+          lengthSource: 'cad-derived-estimate', raceway: 'EMT', tradeSizeIn: '1-1/4"', fillPct: 29,
+          conductorGauge: '#6 AWG', conductorCallout: '#6 AWG THWN-2', egcGauge: '#10 AWG',
+          voltageDropPct: 0.4, ocpdA: 60, tempDeratingFactor: 0.91, provenance: { source: 'test' } },
+      ],
       poi: { method: 'SUPPLY_SIDE_TAP', busbarA: 200, mainBreakerA: 200, backfeedA: 60, rulePasses: true },
-      shadowParity: { shadowEngine: 'computeSystem', ran: true, divergences: [], checks: [] },
+      parity: { legacyEngine: 'runElectricalCalc', legacyRan: true, checks: [], unresolved: [] },
       provenance: { source: 'test' }, gaps: [],
     },
     structural: {
@@ -86,6 +102,10 @@ function baseSnapshot(): PermitDesignSnapshot {
     derived: { moduleCount: 31, dcWattsStc: 12400, acWattsContinuous: 10819,
                branchCount: 3, feederContinuousA: 56.3, provenance: { source: 'test' } },
     certification: { engineeringReviewApproved: false, engineer: null },
+    permitReadiness: { ready: false, blockers: [
+      { code: 'ROUTE-LENGTH-ESTIMATE', message: 'cad-derived estimates' },
+      { code: 'ENGINEERING-REVIEW-PENDING', message: 'no review record' },
+    ] },
   };
 }
 

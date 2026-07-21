@@ -8,6 +8,8 @@ import type { CADModel } from '@/lib/cad/types';
 import { PLANSET_ENGINE_VERSION } from './constants';
 import { buildPermitDesignSnapshot } from './snapshot/build';
 import { getDesignTemps } from './utils/designTemps';
+import { buildComputeSystemShadow } from './utils/computedRuns';
+import { mapComputedSystemToCompliance } from './snapshot/computeSystemProjection';
 import { validatePermitDesignSnapshot, blockingViolations, SnapshotValidationError } from './snapshot/validate';
 import { deepFreeze } from './snapshot/digest';
 import { escapeH } from './utils/drawing';
@@ -881,27 +883,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         };
       }
 
-      input.compliance.electrical = e;
+      // ═══ W2.1 (Ray, binding): runElectricalCalc is SHADOW-ONLY ═══════════
+      // Its mapped result is stashed for the classified parity matrix and
+      // NOTHING else — it never feeds compliance, sheets, BOM, scalars, or
+      // the snapshot. computeSystem (below) is the sole canonical engine.
+      (input as unknown as Record<string, unknown>)._legacyElectricalShadow = e;
 
-      // ── Propagate key values to project level for downstream consumers ──
-      // P0-1: the NEC 705.12 engine result is the UNCONDITIONAL owner of
-      // backfeedBreakerA/pvBackfeedA — a client-posted (or 690.8-estimated)
-      // value must never survive over the engine of record.
-      if (e.busbar?.backfeedBreakerRequired) {
-        const engineBackfeedA = e.busbar.backfeedBreakerRequired;
-        if (input.project.backfeedBreakerA && input.project.backfeedBreakerA !== engineBackfeedA) {
-          console.warn('[PLANSET] backfeedBreakerA recompute: engine 705.12 value', engineBackfeedA,
-            'A replaces client-posted', input.project.backfeedBreakerA, 'A');
-        }
-        input.project.backfeedBreakerA = engineBackfeedA;
-        if (input.project.pvBackfeedA && input.project.pvBackfeedA !== engineBackfeedA) {
-          console.warn('[PLANSET] pvBackfeedA recompute: engine 705.12 value', engineBackfeedA,
-            'A replaces client-posted', input.project.pvBackfeedA, 'A');
-        }
-        input.project.pvBackfeedA = engineBackfeedA;
-      }
-
-      console.log('[PLANSET] Server-side electrical calc completed:',
+      console.log('[PLANSET] legacy electrical engine (SHADOW ONLY):',
         'status=', elecResult.status,
         '| busbar=', elecResult.busbar?.passes ? 'PASS' : 'FAIL',
         '| backfeedA=', elecResult.busbar?.backfeedBreakerRequired,
@@ -909,20 +897,41 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         '| vDrop=', elecResult.acVoltageDrop?.toFixed(2) + '%');
     }
   } catch (elecErr: unknown) {
-    // Non-critical: permit still generates, electrical pages will show defaults
-    console.warn('[PLANSET] Server-side electrical calc failed (non-critical):', (elecErr as Error)?.message ?? elecErr);
+    // Shadow failure is non-critical by definition — parity simply records it.
+    console.warn('[PLANSET] legacy shadow engine failed (parity will note it):', (elecErr as Error)?.message ?? elecErr);
   }
 
-  // P0-1 void-fill: the engine produced no 705.12 busbar result (failed or no
-  // inverter data) AND no client value exists — seed the NEC 690.8 estimate so
-  // sheets don't print bare hardcoded defaults. This can never mask the engine:
-  // it runs strictly AFTER the engine block and only into an empty field.
-  if (!project.backfeedBreakerA && input.system.totalAcKw > 0) {
-    const _estOcpd = necNextStandardOcpd((input.system.totalAcKw * 1000 / 240) * 1.25);
-    project.backfeedBreakerA = _estOcpd;
-    if (!project.pvBackfeedA) project.pvBackfeedA = _estOcpd;
-    console.warn('[PLANSET] backfeedBreakerA: 690.8 estimate', _estOcpd,
-      'A seeded — electrical engine produced no 705.12 result');
+  // ═══ W2.1 CANONICAL ELECTRICAL ENGINE — computeSystem ══════════════════════
+  // Runs on canonical routed segment lengths (deriveRunLengths(cad)) and the
+  // unified ASHRAE thermal basis; its projection IS compliance.electrical.
+  // FAIL CLOSED when it cannot produce a result — no estimate seeding, no
+  // legacy fallback, no sheet defaults.
+  {
+    const csFull = buildComputeSystemShadow(input, cad);
+    if (!csFull) {
+      throw new Error('[PLANSET] canonical electrical engine (computeSystem) produced no result — fail closed (W2.1: no legacy fallback, no estimates)');
+    }
+    (input as unknown as Record<string, unknown>)._computeSystem = csFull;
+    input.compliance.electrical = mapComputedSystemToCompliance(csFull, {
+      busRatingA: input.project.panelBusRating ?? input.project.mainPanelAmps ?? null,
+      mainBreakerA: input.project.mainPanelAmps ?? null,
+      interconnectionMethod: input.project.interconnectionMethod ?? 'LOAD_SIDE',
+    });
+    // Engine-owned scalars (P0-1, now computeSystem's): backfeed breaker.
+    const engineBackfeedA = csFull.backfeedBreakerAmps;
+    if (engineBackfeedA > 0) {
+      if (input.project.backfeedBreakerA && input.project.backfeedBreakerA !== engineBackfeedA) {
+        console.warn('[PLANSET] backfeedBreakerA recompute: computeSystem 705.12 value', engineBackfeedA,
+          'A replaces client-posted', input.project.backfeedBreakerA, 'A');
+      }
+      input.project.backfeedBreakerA = engineBackfeedA;
+      input.project.pvBackfeedA = engineBackfeedA;
+    }
+    console.log('[PLANSET] canonical electrical engine (computeSystem):',
+      'backfeedA=', engineBackfeedA,
+      '| acWire=', input.compliance.electrical.acConductorCallout,
+      '| vDrop=', input.compliance.electrical.acVoltageDrop?.toFixed?.(2) + '%',
+      '| 120%=', input.compliance.electrical.busbar?.passes ? 'PASS' : 'FAIL');
   }
 
   console.log('[PLANSET] CAD engine resolved systemType:', sysType, {

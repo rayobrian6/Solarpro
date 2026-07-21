@@ -71,11 +71,12 @@ export function resolveInterconnection(input: PermitInput, cad?: CADModel | null
   const feederPhaseCallout = feederConductorCallout.replace(/\s*\+\s*\d*\s*#[\d/]+\s*AWG\s*GND/ig, '');
   const feederGauge = snap.electrical.conductors.find(c => c.conductorId === snap.electrical.feeder.conductorId)?.gauge
     ?? auth.acFeeder.wireGauge;
-  // FEEDER EGC = NEC 250.122 on the FEEDER OCPD (the IC2 #12→#6 law) — the
-  // system EGC record is branch-governed and is NOT this conductor.
-  const egcGauge = feederOcpd > 0 ? getEGCSize(feederOcpd)
-    : (snap.electrical.conductors.find(c => c.conductorId === snap.electrical.systemEgc.conductorId)?.gauge
-       ?? auth.egc.gauge);
+  // FEEDER EGC = the snapshot's per-purpose grounding object for the feeder
+  // segment (W2.1 — no "system EGC" abstraction). The 250.122 recompute is
+  // retained only as a defensive floor when the object is absent.
+  const _feederGnd = snap.electrical.groundingObjects.find(g => g.purpose === 'feeder-egc');
+  const egcGauge = _feederGnd?.conductorSize
+    ?? (feederOcpd > 0 ? getEGCSize(feederOcpd) : auth.egc.gauge);
   return {
     isSupplySide,
     methodLabel: isSupplySide ? 'Supply Side Tap — NEC 705.11' : 'Load Side — NEC 705.12(B)',
