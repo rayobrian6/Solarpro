@@ -1,21 +1,23 @@
 /**
- * Targeted Nearmap recovery (migration 108) — real-PostgreSQL validation.
+ * Targeted authority-registry deployment (migrations 113 + 114) — real-PostgreSQL
+ * validation.
  *
- * Migration 102 created the durable nearmap_ai_cache table (lat/lng columns);
- * migration 108 adds the proximity index nearmap_ai_cache_lat_lng_idx that the
- * fail-closed cache needs so re-renders stop re-billing the metered AI quota.
- * Production evidence: 102 CONFIRMED_APPLIED, 108 CONFIRMED_NOT_APPLIED. This
- * suite exercises the dedicated `execute-nearmap-108` route action + the
- * 108-scoped bounded permit against an isolated local PostgreSQL schema and
- * proves:
+ * Migration 113 creates manufacturer_document_registry (the versioned authority-
+ * document store, W4 §8). Migration 114 creates equipment_reconciliation_audit +
+ * snapshot_digest_invalidations (the immutable reconciliation-audit tables, W4
+ * §7). Both are additive CREATE-TABLE-only DDL: idempotent, non-destructive, seed
+ * no rows. This suite exercises the dedicated `execute-registry-113` and
+ * `execute-reconciliation-114` route actions + their identifier-scoped bounded
+ * permits against an isolated local PostgreSQL schema and proves:
  *
- *   1. Dependency verification denies when 102's table/columns are absent.
- *   2. Absent-index detection + execution through the CANONICAL runner.
- *   3. Idempotency — a second targeted run is a safe no-op.
+ *   1. Absent-table detection + execution of 113 through the CANONICAL runner.
+ *   2. Absent-tables detection + execution of 114 (BOTH tables) via the runner.
+ *   3. Idempotency — a second targeted run is a safe no-op (alreadyApplied).
  *   4. Durable audit of the targeted execution.
  *   5. Relock — lifecycle is not EXECUTION_ENABLED and baseline is NOT verified.
- *   6. The bounded permit authorizes ONLY 108 — every other identifier (015,
- *      040, 042, 102, 105, 106, 107) is denied.
+ *   6. The bounded permit authorizes ONLY its own identifier — a 113 permit
+ *      cannot run 114/108/102/anything, and vice versa; retired ids (108, 109-
+ *      112) are no longer allowlisted at all.
  *   7. The ordinary full-baseline execution route stays blocked.
  *
  * Requires TEST_DATABASE_URL. Skipped otherwise. Never connects to production.
@@ -23,8 +25,6 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { Pool } from 'pg';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { AdminUser } from '@/lib/adminAuth';
 
 vi.mock('@neondatabase/serverless', async () => {
@@ -45,7 +45,7 @@ vi.mock('@/lib/adminAuth', async () => {
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || '';
 const HAS_TEST_DB = TEST_DATABASE_URL.length > 0;
-const TEST_SCHEMA = 'targeted_nearmap_108_test';
+const TEST_SCHEMA = 'targeted_registry_113_114_test';
 const describeOrSkip = HAS_TEST_DB ? describe : describe.skip;
 
 const TEST_MFA_ENCRYPTION_KEY = '8fBSXkP+QbS3JtJ9wT1xJtRRbjpJjJ+bc0NwCBl+yP8=';
@@ -101,23 +101,17 @@ async function codeAt(offsetMs = 0): Promise<string> {
   const { generateTOTPCode } = await import('../lib/mfa');
   return generateTOTPCode(TOTP_SECRET, Date.now() + offsetMs);
 }
-/** Simulate "migration 102 already applied in production" by running its exact
- *  SQL into the isolated test schema. */
-async function apply102(): Promise<void> {
-  const sql102 = readFileSync(join(process.cwd(), 'lib', 'migrations', '102_nearmap_ai_cache.sql'), 'utf8');
-  await rawExec(sql102);
-}
 async function bootstrapLedger(): Promise<void> {
   const { bootstrapMigrationLedger } = await import('../lib/migrations/ledger');
   await bootstrapMigrationLedger('human', 'test-super-admin');
 }
-async function runTargeted(offsetMs = 0, reason = 'nearmap quota recovery'): Promise<{ status: number; body: any }> {
+async function runRegistry(action: string, offsetMs = 0, reason = 'deploy authority registry'): Promise<{ status: number; body: any }> {
   const { POST } = await import('../app/api/admin/migrations/route');
-  const res = await POST(makePost({ action: 'execute-nearmap-108', reason, totpCode: await codeAt(offsetMs), productionConfirmation: 'production' }) as any);
+  const res = await POST(makePost({ action, reason, totpCode: await codeAt(offsetMs), productionConfirmation: 'production' }) as any);
   return { status: res.status, body: await res.json() };
 }
 
-describeOrSkip('Targeted Nearmap recovery (migration 108) — real Postgres', () => {
+describeOrSkip('Targeted authority-registry deployment (113 + 114) — real Postgres', () => {
   beforeAll(async () => {
     if (!HAS_TEST_DB) return;
     setupEnv();
@@ -151,83 +145,80 @@ describeOrSkip('Targeted Nearmap recovery (migration 108) — real Postgres', ()
     setupEnv();
     setMockAdminUser(SUPER_ADMIN);
     await insertAdminWithMfa('test-super-admin');
-    await bootstrapLedger(); // Ray bootstraps before running 108 (real flow).
+    await bootstrapLedger(); // Ray bootstraps before running 113/114 (real flow).
     vi.restoreAllMocks();
   }, 20000);
 
-  // 1 ─ Dependency verification.
-  it('denies when the dependency (102) table/columns are absent', async () => {
-    // 102 NOT applied — nearmap_ai_cache does not exist.
-    const { status, body } = await runTargeted();
-    expect(status).toBe(409);
-    expect(body.success).toBe(false);
-    expect(body.error).toMatch(/dependency|nearmap_ai_cache|102/i);
-    expect(body.verification?.dependencyPresent).toBe(false);
-  });
-
-  // 2 ─ Absent-index detection + execution via the canonical runner.
-  it('detects the absent index and applies 108 through the canonical runner', async () => {
-    await apply102();
-    // Precondition: index absent.
-    const before = await rawExec(`SELECT to_regclass('nearmap_ai_cache_lat_lng_idx') IS NOT NULL AS present`);
+  // 1 ─ Absent-table apply of 113 via the canonical runner.
+  it('detects the absent table and applies 113 through the canonical runner', async () => {
+    const before = await rawExec(`SELECT to_regclass('manufacturer_document_registry') IS NOT NULL AS present`);
     expect(before[0].present).toBe(false);
 
-    const { status, body } = await runTargeted();
+    const { status, body } = await runRegistry('execute-registry-113');
     expect(status).toBe(200);
     expect(body.success).toBe(true);
-    expect(body.verification.indexAbsentBefore).toBe(true);
+    expect(body.identifier).toBe('113');
     expect(body.verification.idempotent).toBe(true);
     expect(body.verification.nonDestructive).toBe(true);
-    expect(body.verification.dependencyPresent).toBe(true);
-
-    // Ledger + run-history say applied.
+    expect(body.verification.tablesMatchExpected).toBe(true);
+    expect(body.tablesPresentAfter).toBe(true);
     expect(body.ledger?.status).toBe('applied');
     expect(body.runHistory.some((r: any) => r.status === 'applied')).toBe(true);
-    expect(body.indexPresentAfter).toBe(true);
 
-    // The actual index now exists on the expected table.
-    const after = await rawExec(`SELECT to_regclass('nearmap_ai_cache_lat_lng_idx') IS NOT NULL AS present`);
+    const after = await rawExec(`SELECT to_regclass('manufacturer_document_registry') IS NOT NULL AS present`);
     expect(after[0].present).toBe(true);
-    // Ledger row for 108 is applied.
-    const ledger = await rawExec(`SELECT status FROM schema_migrations WHERE migration_identifier = '108'`);
+    const ledger = await rawExec(`SELECT status FROM schema_migrations WHERE migration_identifier = '113'`);
     expect(ledger[0]?.status).toBe('applied');
-    // Run-history has an applied record for 108.
-    const runs = await rawExec(`SELECT status FROM schema_migration_runs WHERE migration_identifier = '108' AND status = 'applied'`);
+    const runs = await rawExec(`SELECT status FROM schema_migration_runs WHERE migration_identifier = '113' AND status = 'applied'`);
     expect(runs.length).toBeGreaterThanOrEqual(1);
   });
 
+  // 2 ─ Absent-tables apply of 114 (BOTH tables) via the canonical runner.
+  it('applies 114 and creates BOTH reconciliation tables', async () => {
+    const { status, body } = await runRegistry('execute-reconciliation-114');
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.identifier).toBe('114');
+    expect(body.tablesPresentAfter).toBe(true);
+    expect(body.ledger?.status).toBe('applied');
+
+    const a = await rawExec(`SELECT to_regclass('equipment_reconciliation_audit') IS NOT NULL AS present`);
+    const b = await rawExec(`SELECT to_regclass('snapshot_digest_invalidations') IS NOT NULL AS present`);
+    expect(a[0].present).toBe(true);
+    expect(b[0].present).toBe(true);
+    const ledger = await rawExec(`SELECT status FROM schema_migrations WHERE migration_identifier = '114'`);
+    expect(ledger[0]?.status).toBe('applied');
+  });
+
   // 3 ─ Idempotency.
-  it('is idempotent — a second targeted run is a safe no-op', async () => {
-    await apply102();
-    const first = await runTargeted(0);
+  it('is idempotent — a second targeted run of 113 is a safe no-op', async () => {
+    const first = await runRegistry('execute-registry-113', 0);
     expect(first.body.success).toBe(true);
     // Second run with a NEXT-step code (avoid a same-window TOTP replay).
-    const second = await runTargeted(30_000);
+    const second = await runRegistry('execute-registry-113', 30_000);
     expect(second.status).toBe(200);
     expect(second.body.success).toBe(true);
     expect(second.body.alreadyApplied).toBe(true);
     // Still exactly one applied ledger row.
-    const ledger = await rawExec(`SELECT count(*)::int AS n FROM schema_migrations WHERE migration_identifier = '108' AND status = 'applied'`);
+    const ledger = await rawExec(`SELECT count(*)::int AS n FROM schema_migrations WHERE migration_identifier = '113' AND status = 'applied'`);
     expect(ledger[0].n).toBe(1);
   });
 
   // 4 ─ Durable audit.
   it('writes a durable audit record for the targeted execution', async () => {
-    await apply102();
-    await runTargeted();
+    await runRegistry('execute-registry-113');
     await new Promise((r) => setTimeout(r, 200)); // drain fire-and-forget audit
     const rows = await rawExec(`
       SELECT action, metadata::text AS meta FROM audit_log
       WHERE action IN ('migration_run_completed', 'migration_applied', 'migration_governance_state_change')
       ORDER BY id DESC LIMIT 20`);
-    const has108 = rows.some((r) => r.meta && r.meta.includes('108'));
-    expect(has108).toBe(true);
+    const has113 = rows.some((r) => r.meta && r.meta.includes('113'));
+    expect(has113).toBe(true);
   });
 
   // 5 ─ Relock; baseline NOT verified.
   it('relocks — lifecycle is not EXECUTION_ENABLED and baseline is not verified', async () => {
-    await apply102();
-    const { body } = await runTargeted();
+    const { body } = await runRegistry('execute-reconciliation-114');
     expect(body.relock.relocked).toBe(true);
     expect(body.relock.baselineVerified).toBe(false);
     const { getGovernanceLifecycleState } = await import('../lib/migrations/ledger');
@@ -236,47 +227,55 @@ describeOrSkip('Targeted Nearmap recovery (migration 108) — real Postgres', ()
     expect(life).not.toBe('BASELINE_VERIFIED');
   });
 
-  // 6 ─ The bounded permit authorizes ONLY 108.
-  it('denies the bounded permit for every identifier other than 108', async () => {
+  // 6 ─ The bounded permit authorizes ONLY its own identifier.
+  it('scopes the bounded permit to exactly its own identifier', async () => {
     const { isTargetedPermitValid, authorizeMigration, runSinglePendingMigration } = await import('../lib/migrations/runner');
     const now = Date.now();
-    for (const id of ['015', '040', '042', '102', '105', '106', '107']) {
-      // A permit naming a non-108 identifier is invalid.
-      expect(isTargetedPermitValid({ identifier: id, issuedAtMs: now, ttlMs: 60_000, reason: 'x' }, id)).toBe(false);
-      // A 108 permit used to run a different identifier is invalid.
-      expect(isTargetedPermitValid({ identifier: '108', issuedAtMs: now, ttlMs: 60_000, reason: 'x' }, id)).toBe(false);
 
-      // Through the canonical runner, a non-108 permit does NOT bypass the gate
+    // Own-identifier permits are valid.
+    expect(isTargetedPermitValid({ identifier: '113', issuedAtMs: now, ttlMs: 60_000, reason: 'x' }, '113')).toBe(true);
+    expect(isTargetedPermitValid({ identifier: '114', issuedAtMs: now, ttlMs: 60_000, reason: 'x' }, '114')).toBe(true);
+
+    // A 113 permit cannot run 114 (and vice versa).
+    expect(isTargetedPermitValid({ identifier: '113', issuedAtMs: now, ttlMs: 60_000, reason: 'x' }, '114')).toBe(false);
+    expect(isTargetedPermitValid({ identifier: '114', issuedAtMs: now, ttlMs: 60_000, reason: 'x' }, '113')).toBe(false);
+
+    // Retired / non-allowlisted identifiers are rejected even with a matching permit.
+    for (const id of ['108', '109', '110', '111', '112', '102', '015']) {
+      expect(isTargetedPermitValid({ identifier: id, issuedAtMs: now, ttlMs: 60_000, reason: 'x' }, id)).toBe(false);
+      // Through the canonical runner, such a permit does NOT bypass the gate
       // (lifecycle is BASELINE_REQUIRED) — execution is blocked.
       const auth = authorizeMigration({ action: 'execute', actorType: 'human', actorId: 'test-super-admin', adminUser: SUPER_ADMIN, dryRun: false, totpVerified: true });
       const res = await runSinglePendingMigration(id, { dryRun: false, authorization: auth, targetedPermit: { identifier: id, issuedAtMs: Date.now(), ttlMs: 60_000, reason: 'x' } } as any);
       expect(res.status).toBe('failed');
       expect(res.errorCode).toBe('MIGRATION_BASELINE_REQUIRED');
     }
-    // An expired 108 permit is invalid.
-    expect(isTargetedPermitValid({ identifier: '108', issuedAtMs: Date.now() - 600_000, ttlMs: 60_000, reason: 'x' }, '108')).toBe(false);
-    // A 108 permit IS valid for 108.
-    expect(isTargetedPermitValid({ identifier: '108', issuedAtMs: Date.now(), ttlMs: 60_000, reason: 'x' }, '108')).toBe(true);
+
+    // A 113 permit used to run 114 through the runner is also blocked.
+    const auth2 = authorizeMigration({ action: 'execute', actorType: 'human', actorId: 'test-super-admin', adminUser: SUPER_ADMIN, dryRun: false, totpVerified: true });
+    const cross = await runSinglePendingMigration('114', { dryRun: false, authorization: auth2, targetedPermit: { identifier: '113', issuedAtMs: Date.now(), ttlMs: 60_000, reason: 'x' } } as any);
+    expect(cross.status).toBe('failed');
+    expect(cross.errorCode).toBe('MIGRATION_BASELINE_REQUIRED');
+
+    // An expired own-identifier permit is invalid.
+    expect(isTargetedPermitValid({ identifier: '113', issuedAtMs: Date.now() - 600_000, ttlMs: 60_000, reason: 'x' }, '113')).toBe(false);
   });
 
   // 7 ─ The ordinary full-baseline execution route stays blocked.
   it('keeps the ordinary full-baseline execution route blocked', async () => {
-    await apply102();
     const { POST } = await import('../app/api/admin/migrations/route');
     // Ordinary run-single (no targeted permit) — blocked because the lifecycle
     // is BASELINE_REQUIRED (baseline not verified, execution not enabled).
-    const single = await POST(makePost({ action: 'run-single', identifier: '108', totpCode: await codeAt(0) }) as any);
+    const single = await POST(makePost({ action: 'run-single', identifier: '113', totpCode: await codeAt(0) }) as any);
     const sBody = await single.json();
     expect(sBody.success).toBe(false);
     expect(sBody.result?.errorCode).toBe('MIGRATION_BASELINE_REQUIRED');
 
     // Ordinary run-pending — applies NOTHING (the lifecycle gate blocks every
-    // pending migration). run-pending reports failed=0 when nothing runs, so the
-    // real proof is that zero migrations were applied.
+    // pending migration).
     const pending = await POST(makePost({ action: 'run-pending', totpCode: await codeAt(30_000) }) as any);
     const pBody = await pending.json();
     expect(pBody.result?.applied ?? 0).toBe(0);
-    // No migration was actually applied to the ledger by the ordinary route.
     const applied = await rawExec(`SELECT count(*)::int AS n FROM schema_migrations WHERE status = 'applied'`);
     expect(applied[0].n).toBe(0);
   });

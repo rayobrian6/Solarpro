@@ -365,15 +365,20 @@ export function authorizeMigration(params: {
 /**
  * The hard allowlist of migration identifiers that may be run via a bounded
  * TARGETED recovery permit (bypassing the global EXECUTION_ENABLED window).
- * This is intentionally a narrow escape hatch:
- *   - 108: the Nearmap proximity index (dependency 102 verified applied).
- *   - 109-112: the DATA-AUTHORITY-AUDIT backfills (2026-07-19) — statically
- *     verified UPDATE-only/data-only against allow-listed tables by
- *     lib/migrations/targetedDataAuthority.ts before any permit is issued.
- * NOTHING else — not 102, not any historical migration, not "all pending" —
- * can be run through the targeted path.
+ * This is intentionally a narrow escape hatch and holds ONLY the currently
+ * runnable targets:
+ *   - 113: manufacturer_document_registry — the versioned authority-document
+ *     store (W4 §8). Statically verified idempotent CREATE-TABLE-only and
+ *     non-destructive by lib/migrations/targetedRegistryDeployment.ts before any
+ *     permit is issued.
+ *   - 114: equipment_reconciliation_audit + snapshot_digest_invalidations — the
+ *     immutable reconciliation-audit tables (W4 §7). Same static gate.
+ * NOTHING else — not any historical migration, not "all pending" — can be run
+ * through the targeted path. (The retired 108 Nearmap-index and 109-112
+ * data-authority targeted cards were removed 2026-07-21; their identifiers are
+ * no longer runnable through this escape hatch.)
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['108', '109', '110', '111', '112']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['113', '114']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;

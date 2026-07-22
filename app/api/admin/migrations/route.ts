@@ -50,19 +50,10 @@ import {
   failGovernedAction,
 } from '@/lib/migrations/governedTotpAction';
 import {
-  TARGET_IDENTIFIER,
-  DEPENDENCY_IDENTIFIER,
-  analyzeTargetedMigrations,
-  verifyDependencyPresent,
-  verifyIndexState,
-} from '@/lib/migrations/targetedNearmapRecovery';
-import {
-  DATA_AUTHORITY_SEQUENCE,
-  REQUIRED_COLUMNS,
-  analyzeDataOnlyMigration,
-  verifyTableColumns,
-  previewDataAuthorityImpact,
-} from '@/lib/migrations/targetedDataAuthority';
+  REGISTRY_DEPLOYMENT,
+  analyzeRegistryMigration,
+  verifyTablesState,
+} from '@/lib/migrations/targetedRegistryDeployment';
 import { readFileSync } from 'node:fs';
 import type { TargetedExecutionPermit } from '@/lib/migrations/types';
 import { validateMigrationManifest, discoverMigrationFiles } from '@/lib/migrations/manifest';
@@ -249,8 +240,8 @@ export async function POST(req: NextRequest) {
     'execute-reviewed-single',  // mutation: run ONE migration (canonical runner)
     'prepare-execution-batch',  // read-only: reviewed batch (canonical order + digest)
     'execute-reviewed-batch',   // mutation: run selected batch, stop-on-first-failure
-    'execute-nearmap-108',      // mutation: TARGETED recovery of ONLY migration 108
-    'execute-data-authority-109-112', // mutation: TARGETED data-authority backfill (109→112, in order)
+    'execute-registry-113',     // mutation: TARGETED deployment of ONLY migration 113 (document registry)
+    'execute-reconciliation-114', // mutation: TARGETED deployment of ONLY migration 114 (reconciliation audit + digest invalidations)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -310,21 +301,21 @@ export async function POST(req: NextRequest) {
   const isExecuteReviewed = action === 'execute-reviewed-single';
   const isPrepareExecBatch = action === 'prepare-execution-batch';
   const isExecuteReviewedBatch = action === 'execute-reviewed-batch';
-  // TARGETED Nearmap recovery — executes ONLY migration 108 via the canonical
-  // runner under a bounded 108-scoped permit. It is a real execution (full
-  // execution bar: super_admin + fresh TOTP + reason + typed production
-  // confirmation + production allowlist + MIGRATION_ALLOW_PRODUCTION_EXECUTION).
-  const isNearmap108 = action === 'execute-nearmap-108';
-  // TARGETED data-authority backfill — executes ONLY migrations 109→112 (in
-  // order) via the canonical runner under bounded per-identifier permits. Same
-  // execution bar as the 108 path. Statically verified UPDATE-only/data-only
-  // before any permit is issued (lib/migrations/targetedDataAuthority.ts).
-  const isDataAuthority = action === 'execute-data-authority-109-112';
+  // TARGETED authority-registry deployment — each action executes ONLY its one
+  // migration (113 document registry, or 114 reconciliation audit + digest
+  // invalidations) via the canonical runner under a bounded, identifier-scoped
+  // permit. Real execution (full bar: super_admin + fresh TOTP + reason + typed
+  // production confirmation + production allowlist + MIGRATION_ALLOW_PRODUCTION_
+  // EXECUTION). Statically verified idempotent CREATE-TABLE-only + non-
+  // destructive before any permit is issued (targetedRegistryDeployment.ts).
+  const isRegistry113 = action === 'execute-registry-113';
+  const isReconciliation114 = action === 'execute-reconciliation-114';
+  const isRegistryDeploy = isRegistry113 || isReconciliation114;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
   let migrationAction: MigrationAction;
-  if (isExecute || isExecutionActivation || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108 || isDataAuthority) {
+  if (isExecute || isExecutionActivation || isExecuteReviewed || isExecuteReviewedBatch || isRegistryDeploy) {
     migrationAction = 'execute';
   } else if (isBaselineMutation || isBootstrap || isRecordBatch) {
     migrationAction = 'bootstrap';
@@ -335,7 +326,7 @@ export async function POST(req: NextRequest) {
   // Operator-console surface is super_admin-only (matches the page's access
   // model). The read-only operator actions need an explicit gate because
   // authorizeMigration('inspect') otherwise permits plain 'admin'.
-  if ((isOperatorReadonly || isBootstrap || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108 || isDataAuthority) && adminUser.role !== 'super_admin') {
+  if ((isOperatorReadonly || isBootstrap || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isRegistryDeploy) && adminUser.role !== 'super_admin') {
     return NextResponse.json(
       { success: false, error: `Action '${action}' requires super_admin role.` },
       { status: 403 },
@@ -356,7 +347,7 @@ export async function POST(req: NextRequest) {
   // of the "new code still says already used" replay: an authorization rejection
   // or a losing duplicate burned the step while the real error was hidden.
   let totpVerified = false;
-  if (isExecute || isExecutionActivation || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isNearmap108 || isDataAuthority) {
+  if (isExecute || isExecutionActivation || isRecordBatch || isExecuteReviewed || isExecuteReviewedBatch || isRegistryDeploy) {
     if (!totpCode || typeof totpCode !== 'string') {
       return NextResponse.json(
         { success: false, error: 'A fresh TOTP code is required for this action. Provide it in the "totpCode" field.' },
@@ -608,91 +599,90 @@ export async function POST(req: NextRequest) {
       }, result.success);
     }
 
-    if (isNearmap108) {
-      // ── TARGETED Nearmap recovery: execute ONLY migration 108 ─────────────
+    if (isRegistryDeploy) {
+      // ── TARGETED authority-registry deployment: execute ONLY 113 or 114 ────
       // super_admin + active MFA + fresh TOTP + production allowlist +
       // MIGRATION_ALLOW_PRODUCTION_EXECUTION=true are ALREADY enforced above
       // (super_admin gate + shared fresh-TOTP gate + authorizeMigration('execute')).
-      // Here: reason + typed production confirmation, read-only dependency /
-      // absent-index / idempotency / non-destructive verification, then a bounded
-      // 108-scoped permit through the CANONICAL runner (advisory lock + checksum +
-      // ledger + run-history + durable audit), success read back from the ledger
-      // and the actual index, and an automatic relock. It NEVER runs 102, never
-      // "all pending", and never marks the historical baseline verified.
+      // Here: reason + typed production confirmation, read-only static analysis
+      // (idempotent CREATE-TABLE-only + non-destructive + creates exactly the
+      // expected table(s)) and a tables-present check, then a bounded,
+      // identifier-scoped permit through the CANONICAL runner (advisory lock +
+      // checksum + ledger + run-history + durable audit). Success is read back
+      // from the ledger + run-history + the ACTUAL tables, with an automatic
+      // relock. Each action is HARDCODED to its one identifier (body.identifier
+      // is ignored). It NEVER runs any other migration, never "all pending", and
+      // never marks the historical baseline verified. Idempotent: if the
+      // table(s) already exist it is a safe no-op.
+      const identifier = isRegistry113 ? '113' : '114';
+      const spec = REGISTRY_DEPLOYMENT[identifier];
       const reason = (body?.reason as string | undefined)?.trim();
       if (!reason) {
-        return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.', correlationId }, { status: 400 });
+        return NextResponse.json({ success: false, action, error: 'A non-empty "reason" is required.', correlationId }, { status: 400 });
       }
       const env = getCurrentEnvironment();
       if (env === 'production' && !productionConfirmed) {
-        return NextResponse.json({ success: false, error: 'Production targeted recovery requires productionConfirmation === "production".', correlationId }, { status: 400 });
+        return NextResponse.json({ success: false, action, error: 'Production targeted deployment requires productionConfirmation === "production".', correlationId }, { status: 400 });
       }
 
-      // Read migrations 102 (dependency) + 108 (target) from the canonical
-      // manifest, server-side — exact SQL, no client input.
+      // Read the target migration from the canonical manifest, server-side —
+      // exact SQL, no client input; body.identifier is deliberately ignored.
       const manifest = discoverMigrationFiles();
-      const file108 = manifest.files.find((f) => f.identifier === TARGET_IDENTIFIER);
-      const file102 = manifest.files.find((f) => f.identifier === DEPENDENCY_IDENTIFIER);
-      if (!file108 || !file102) {
-        return NextResponse.json({ success: false, action: 'execute-nearmap-108', error: `Targeted recovery requires both migration ${DEPENDENCY_IDENTIFIER} and ${TARGET_IDENTIFIER} in the manifest.`, correlationId }, { status: 409 });
+      const file = manifest.files.find((f) => f.identifier === identifier);
+      if (!file) {
+        return NextResponse.json({ success: false, action, error: `Migration ${identifier} is missing from the manifest.`, correlationId }, { status: 409 });
       }
-      const sql108 = readFileSync(file108.fullPath, 'utf8');
-      const sql102 = readFileSync(file102.fullPath, 'utf8');
+      const sql = readFileSync(file.fullPath, 'utf8');
 
-      // Static analysis: 108 idempotent + non-destructive, dependency bound to 102.
-      const shape = analyzeTargetedMigrations(sql102, sql108);
-      if (!shape.ok || !shape.indexName || !shape.tableName) {
-        return NextResponse.json({ success: false, action: 'execute-nearmap-108', error: `Static verification failed: ${shape.problems.join(' ')}`, verification: shape, correlationId }, { status: 409 });
+      // Static analysis: idempotent CREATE-TABLE-only, non-destructive, creates
+      // exactly the expected table(s).
+      const shape = analyzeRegistryMigration(identifier, sql, spec.expectedTables);
+      if (!shape.ok) {
+        return NextResponse.json({ success: false, action, error: `Static verification failed: ${shape.problems.join(' ')}`, verification: shape, correlationId }, { status: 409 });
       }
 
-      // Read-only production verification: dependency present, target index absent.
-      const dep = await verifyDependencyPresent(shape.tableName, shape.indexColumns);
-      const idxBefore = await verifyIndexState(shape.indexName, shape.tableName);
+      // Read-only table state before.
+      const before = await verifyTablesState(spec.expectedTables);
       const verification = {
         idempotent: shape.idempotent,
         nonDestructive: shape.nonDestructive,
-        dependencyMigration: DEPENDENCY_IDENTIFIER,
-        dependencyTable: shape.tableName,
-        dependencyColumns: shape.indexColumns,
-        dependencyPresent: dep.ok,
-        missingColumns: dep.missingColumns,
-        targetIndex: shape.indexName,
-        indexAbsentBefore: !idxBefore.exists,
+        expectedTables: spec.expectedTables,
+        createdTables: shape.createdTables,
+        tablesMatchExpected: shape.tablesMatchExpected,
+        tablesPresentBefore: before.presentTables,
+        tablesAbsentBefore: before.absentTables,
       };
 
-      if (!dep.ok) {
-        return NextResponse.json({ success: false, action: 'execute-nearmap-108', error: `Dependency migration ${DEPENDENCY_IDENTIFIER} is not fully applied in this environment: table '${shape.tableName}' (exists=${dep.tableExists}) missing columns [${dep.missingColumns.join(', ')}]. Refusing to run 108.`, verification, correlationId }, { status: 409 });
-      }
-
-      // Idempotent short-circuit: if the index already exists, 108 is effectively
-      // applied — do nothing (never re-run, never touch 102).
-      if (idxBefore.exists) {
-        logGov('nearmap-108 index already present — no-op', {});
-        emitAuditEvent({ type: 'migration.migration.skipped', actorType: 'human', actorId: adminUser.id, environment: env, executionId: null, migrationIdentifier: TARGET_IDENTIFIER, filename: file108.filename, details: { targetedRecovery: true, reason, note: 'index already present (idempotent no-op)', correlationId } });
+      // Idempotent short-circuit: if ALL expected tables already exist, the
+      // migration is effectively applied — do nothing (never re-run).
+      if (before.allPresent) {
+        logGov(`registry-${identifier} tables already present — no-op`, {});
+        emitAuditEvent({ type: 'migration.migration.skipped', actorType: 'human', actorId: adminUser.id, environment: env, executionId: null, migrationIdentifier: identifier, filename: file.filename, details: { targetedRegistryDeployment: true, reason, note: 'expected table(s) already present (idempotent no-op)', correlationId } });
         return NextResponse.json({
-          success: true, action: 'execute-nearmap-108', identifier: TARGET_IDENTIFIER, alreadyApplied: true,
-          scope: 'Targeted Nearmap recovery only. Historical baseline remains incomplete.',
-          verification, indexPresentAfter: true,
+          success: true, action, identifier, alreadyApplied: true,
+          scope: 'Targeted authority-registry deployment only. Historical baseline remains incomplete.',
+          verification, tablesPresentAfter: true,
           lifecycleState: (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED',
           correlationId,
         }, { status: 200 });
       }
 
-      // Bounded, 108-scoped permit (the activation window). Bypasses ONLY the
-      // global EXECUTION_ENABLED gate — never "run all pending", never 102.
-      const permit: TargetedExecutionPermit = { identifier: TARGET_IDENTIFIER, issuedAtMs: Date.now(), ttlMs: 3 * 60 * 1000, reason };
+      // Bounded, identifier-scoped permit (the activation window). Bypasses ONLY
+      // the global EXECUTION_ENABLED gate — never "run all pending", never
+      // another identifier.
+      const permit: TargetedExecutionPermit = { identifier, issuedAtMs: Date.now(), ttlMs: 3 * 60 * 1000, reason };
 
       // Canonical runner: forced dry-run first (proof, not execution), then run.
-      const dryRunResult = await runSinglePendingMigration(TARGET_IDENTIFIER, { dryRun: true, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
-      const execution = await runSinglePendingMigration(TARGET_IDENTIFIER, { dryRun: false, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
+      const dryRunResult = await runSinglePendingMigration(identifier, { dryRun: true, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
+      const execution = await runSinglePendingMigration(identifier, { dryRun: false, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
 
-      // Success from the LEDGER + run-history + the ACTUAL index — never HTTP.
-      const ledgerRow = await readLedgerRow(TARGET_IDENTIFIER).catch(() => null);
-      const runHistory = await readMigrationRunHistory(TARGET_IDENTIFIER, 5).catch(() => []);
+      // Success from the LEDGER + run-history + the ACTUAL tables — never HTTP.
+      const ledgerRow = await readLedgerRow(identifier).catch(() => null);
+      const runHistory = await readMigrationRunHistory(identifier, 5).catch(() => []);
       const appliedInLedger = ledgerRow?.status === 'applied';
       const appliedRun = runHistory.some((r) => r.status === 'applied' && r.execution_id === execution.executionId);
-      const idxAfter = await verifyIndexState(shape.indexName, shape.tableName);
-      const verifiedSuccess = appliedInLedger && appliedRun && idxAfter.exists && idxAfter.onExpectedTable;
+      const after = await verifyTablesState(spec.expectedTables);
+      const verifiedSuccess = appliedInLedger && appliedRun && after.allPresent;
 
       // Automatic relock: the permit is single-use and consumed, and the global
       // lifecycle was NEVER enabled — so execution is not left open. Defensive:
@@ -700,7 +690,7 @@ export async function POST(req: NextRequest) {
       // advance/verify the historical baseline.
       let lifecycleAfter = (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED';
       if (lifecycleAfter === 'EXECUTION_ENABLED') {
-        await disableExecution(adminUser.id, 'auto-relock after targeted Nearmap 108 recovery').catch(() => false);
+        await disableExecution(adminUser.id, `auto-relock after targeted registry deployment of ${identifier}`).catch(() => false);
         lifecycleAfter = (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED';
       }
       const relocked = lifecycleAfter !== 'EXECUTION_ENABLED';
@@ -708,125 +698,27 @@ export async function POST(req: NextRequest) {
       emitAuditEvent({
         type: verifiedSuccess ? 'migration.run.completed' : 'migration.run.failed',
         actorType: 'human', actorId: adminUser.id, environment: env,
-        executionId: execution.executionId, migrationIdentifier: TARGET_IDENTIFIER, filename: file108.filename,
-        details: { targetedRecovery: true, reason, checksum: file108.checksumSha256, verification, ledgerStatus: ledgerRow?.status ?? null, verifiedSuccess, relocked, lifecycleAfter, baselineVerified: false, correlationId },
+        executionId: execution.executionId, migrationIdentifier: identifier, filename: file.filename,
+        details: { targetedRegistryDeployment: true, reason, checksum: file.checksumSha256, verification: { ...verification, tablesPresentAfter: after.presentTables }, ledgerStatus: ledgerRow?.status ?? null, verifiedSuccess, relocked, lifecycleAfter, baselineVerified: false, correlationId },
       });
-      logGov(verifiedSuccess ? 'nearmap-108 applied' : 'nearmap-108 failed', { ledgerStatus: ledgerRow?.status ?? null, relocked });
+      logGov(verifiedSuccess ? `registry-${identifier} applied` : `registry-${identifier} failed`, { ledgerStatus: ledgerRow?.status ?? null, relocked });
 
       return NextResponse.json({
         success: verifiedSuccess,
-        action: 'execute-nearmap-108',
-        identifier: TARGET_IDENTIFIER,
-        scope: 'Targeted Nearmap recovery only. Historical baseline remains incomplete.',
-        verifiedFrom: 'ledger+run_history+index',
-        checksum: file108.checksumSha256,
-        verification,
+        action,
+        identifier,
+        scope: 'Targeted authority-registry deployment only. Historical baseline remains incomplete.',
+        verifiedFrom: 'ledger+run_history+tables',
+        checksum: file.checksumSha256,
+        verification: { ...verification, tablesPresentAfter: after.presentTables, tablesAbsentAfter: after.absentTables },
         dryRun: { status: dryRunResult.status, errorCode: dryRunResult.errorCode },
         execution: { status: execution.status, executionId: execution.executionId, durationMs: execution.durationMs, errorCode: execution.errorCode, errorSummary: execution.errorSummary },
         ledger: ledgerRow ? { status: ledgerRow.status, appliedAt: ledgerRow.applied_at, executionId: ledgerRow.execution_id } : null,
         runHistory: runHistory.map((r) => ({ status: r.status, executionId: r.execution_id, completedAt: r.completed_at, errorCode: r.error_code })),
-        indexPresentAfter: idxAfter.exists && idxAfter.onExpectedTable,
+        tablesPresentAfter: after.allPresent,
         relock: { relocked, lifecycleState: lifecycleAfter, baselineVerified: false },
         correlationId,
       }, { status: verifiedSuccess ? 200 : 409 });
-    }
-
-    if (isDataAuthority) {
-      // ── TARGETED data-authority backfill: execute ONLY 109→112, in order ──
-      // Same bar as the 108 path (super_admin + MFA + fresh TOTP + reason +
-      // typed production confirmation already enforced above). Each migration
-      // is statically verified UPDATE-only against allow-listed tables, live
-      // columns are verified, then each runs under its OWN bounded scoped
-      // permit through the CANONICAL runner (advisory lock + checksum + ledger
-      // + run history + audit), stop-on-first-failure. It NEVER runs any other
-      // migration and NEVER marks the historical baseline verified.
-      const reason = (body?.reason as string | undefined)?.trim();
-      if (!reason) {
-        return NextResponse.json({ success: false, error: 'A non-empty "reason" is required.', correlationId }, { status: 400 });
-      }
-      const env = getCurrentEnvironment();
-      if (env === 'production' && !productionConfirmed) {
-        return NextResponse.json({ success: false, error: 'Production targeted backfill requires productionConfirmation === "production".', correlationId }, { status: 400 });
-      }
-
-      // Server-side manifest + static shape verification for ALL four before
-      // touching anything.
-      const manifest = discoverMigrationFiles();
-      const targets: Array<{ id: string; filename: string; fullPath: string; checksum: string }> = [];
-      for (const id of DATA_AUTHORITY_SEQUENCE) {
-        const f = manifest.files.find((x) => x.identifier === id);
-        if (!f) {
-          return NextResponse.json({ success: false, action, error: `Migration ${id} is missing from the manifest.`, correlationId }, { status: 409 });
-        }
-        targets.push({ id, filename: f.filename, fullPath: f.fullPath, checksum: f.checksumSha256 });
-      }
-      const shapes = targets.map((t) => analyzeDataOnlyMigration(t.id, readFileSync(t.fullPath, 'utf8')));
-      const badShape = shapes.find((s) => !s.ok);
-      if (badShape) {
-        return NextResponse.json({ success: false, action, error: `Static verification failed: ${badShape.problems.join(' ')}`, verification: shapes, correlationId }, { status: 409 });
-      }
-      // Live column verification for every table the four migrations touch.
-      const columnChecks = await Promise.all(
-        Object.entries(REQUIRED_COLUMNS).map(([table, cols]) => verifyTableColumns(table, cols)));
-      const badCols = columnChecks.find((c) => !c.ok);
-      if (badCols) {
-        return NextResponse.json({ success: false, action, error: `Live verification failed: table '${badCols.table}' (exists=${badCols.tableExists}) missing columns [${badCols.missingColumns.join(', ')}].`, columnChecks, correlationId }, { status: 409 });
-      }
-      const impact = await previewDataAuthorityImpact().catch(() => ({} as Record<string, number>));
-
-      // Sequential execution: per-identifier bounded permit, canonical runner,
-      // success read back from the LEDGER + run history. Stop on first failure.
-      const results: Array<Record<string, unknown>> = [];
-      let allOk = true;
-      for (const t of targets) {
-        // Idempotent short-circuit: already applied in the ledger → skip.
-        const pre = await readLedgerRow(t.id).catch(() => null);
-        if (pre?.status === 'applied') {
-          results.push({ identifier: t.id, alreadyApplied: true, verifiedSuccess: true });
-          continue;
-        }
-        const permit: TargetedExecutionPermit = { identifier: t.id, issuedAtMs: Date.now(), ttlMs: 3 * 60 * 1000, reason };
-        const dryRunResult = await runSinglePendingMigration(t.id, { dryRun: true, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
-        const execution = await runSinglePendingMigration(t.id, { dryRun: false, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
-        const ledgerRow = await readLedgerRow(t.id).catch(() => null);
-        const runHistory = await readMigrationRunHistory(t.id, 5).catch(() => []);
-        const appliedInLedger = ledgerRow?.status === 'applied';
-        const appliedRun = runHistory.some((r) => r.status === 'applied' && r.execution_id === execution.executionId);
-        const verifiedSuccess = appliedInLedger && appliedRun;
-        emitAuditEvent({
-          type: verifiedSuccess ? 'migration.run.completed' : 'migration.run.failed',
-          actorType: 'human', actorId: adminUser.id, environment: env,
-          executionId: execution.executionId, migrationIdentifier: t.id, filename: t.filename,
-          details: { targetedDataAuthority: true, reason, checksum: t.checksum, dryRunStatus: dryRunResult.status, ledgerStatus: ledgerRow?.status ?? null, verifiedSuccess, baselineVerified: false, correlationId },
-        });
-        results.push({
-          identifier: t.id, alreadyApplied: false, verifiedSuccess,
-          dryRun: { status: dryRunResult.status, errorCode: dryRunResult.errorCode },
-          execution: { status: execution.status, executionId: execution.executionId, durationMs: execution.durationMs, errorCode: execution.errorCode, errorSummary: execution.errorSummary },
-          ledger: ledgerRow ? { status: ledgerRow.status, appliedAt: ledgerRow.applied_at } : null,
-        });
-        if (!verifiedSuccess) { allOk = false; break; }
-      }
-
-      // Defensive relock (permits are single-use and the global lifecycle was
-      // never enabled, but never leave execution open).
-      let lifecycleAfter = (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED';
-      if (lifecycleAfter === 'EXECUTION_ENABLED') {
-        await disableExecution(adminUser.id, 'auto-relock after targeted data-authority backfill').catch(() => false);
-        lifecycleAfter = (await getGovernanceLifecycleState().catch(() => null)) ?? 'UNBOOTSTRAPPED';
-      }
-      logGov(allOk ? 'data-authority 109-112 applied' : 'data-authority backfill stopped on failure', { results: results.map((r) => `${r.identifier}:${r.verifiedSuccess}`) });
-
-      return NextResponse.json({
-        success: allOk,
-        action,
-        scope: 'Targeted data-authority backfill (109→112) only. Historical baseline remains incomplete.',
-        verifiedFrom: 'ledger+run_history',
-        impact,
-        results,
-        relock: { lifecycleState: lifecycleAfter, baselineVerified: false },
-        correlationId,
-      }, { status: allOk ? 200 : 409 });
     }
 
     if (isPrepareBatch || isRecordBatch) {
