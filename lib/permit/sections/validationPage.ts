@@ -10,6 +10,7 @@ import { PLANSET_ENGINE_VERSION } from '../constants';
 import { isFence, isGround, isRoof, getEquipmentContext } from '@/lib/system';
 import { getInverterTopology, topologyToLegacy } from '@/lib/system/systemAccessors';
 import { topologyDisplayLabel } from '../utils/helpers';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -30,6 +31,8 @@ export function pageValidationSummary(
   // jurisdiction is OPTIONAL on PermitInput (types.ts) — AHJ enrichment can miss;
   // a bare cast crashed VAL-1 (and the whole planset) on `.ahj` when undefined.
   const jurisdiction = (compliance.jurisdiction ?? {}) as Record<string, any>;
+  const _cpVal = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
+  const _asce = _cpVal.asceLabel;
   const _isFence = isFence(sys);
   const _isGround = isGround(sys);
   const _isRoof = isRoof(sys);
@@ -106,9 +109,9 @@ export function pageValidationSummary(
       note:   'From compliance engine — 0 psf is valid for warm climates',
     },
     {
-      label:  _isFence ? 'Structural Method: Fence Post Embedment (ASCE 7-22 §29.4)'
-               : _isGround ? 'Structural Method: Ground Mount Pile/Pier (ASCE 7-22 §27)'
-               : 'Structural Method: Roof Lag Bolt Attachment (ASCE 7-22 §26/27)',
+      label:  _isFence ? `Structural Method: Fence Post Embedment (${_asce} §29.4)`
+               : _isGround ? `Structural Method: Ground Mount Pile/Pier (${_asce} §27)`
+               : `Structural Method: Roof Lag Bolt Attachment (${_asce} §26/27)`,
       value:  _isFence
                ? `qz=${qzDisp} | p=${windPressDisp} | F=${windForce} | M=${windMoment} | D_req=${reqEmbed} | D_prov=${provEmbed}`
                : _isGround
@@ -399,7 +402,7 @@ export function pageValidationSummary(
           <div style="font-size:8px;line-height:1.4;">
             <div>AHJ: <strong>${jurisdiction.ahj || '—'}</strong></div>
             <div>State: <strong>${jurisdiction.state || '—'}</strong></div>
-            <div>NEC: <strong>${jurisdiction.necVersion || '—'}</strong></div>
+            <div>NEC: <strong>${_cpVal.tag('nec')}</strong></div>
           </div>
         </div>
       </div>
@@ -549,7 +552,7 @@ export function pageValidationSummary(
 
       <!-- Structural Calculation Summary — fence-specific detail table -->
       ${_isFence ? `
-      <div class="section-title" style="margin-top:var(--sm);">Fence Structural Calculation Summary — ASCE 7-22 §29.4</div>
+      <div class="section-title" style="margin-top:var(--sm);">Fence Structural Calculation Summary — ${_asce} §29.4</div>
       <table class="equip-table" style="width:100%;">
         <thead><tr><th>Parameter</th><th>Formula</th><th>Input Values</th><th>Result</th></tr></thead>
         <tbody>

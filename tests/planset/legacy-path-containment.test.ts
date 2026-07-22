@@ -1,145 +1,91 @@
+/**
+ * tests/planset/legacy-path-containment.test.ts
+ *
+ * W4 §6 — PERMANENT RESOLUTION of the parallel lib/plan-set/* planset path.
+ *
+ * The W3.1 §3 interim containment (fail-closed LEGACY banner via
+ * legacy-path-guard) has been SUPERSEDED by permanent deletion:
+ *   - the /api/engineering/plan-set route is now an HTTP 410 tombstone;
+ *   - the snapshot-blind sheet builders and the legacy-path-guard are deleted;
+ *   - the only production planset authority is /api/engineering/permit.
+ *
+ * These tests prove the bypass is gone for good: the route can no longer
+ * generate a permit artifact, and no PASS-capable legacy builder remains
+ * importable.
+ */
 import { describe, it, expect } from 'vitest';
-import {
-  resolveLegacyPathStatus,
-  isSnapshotPermitValid,
-  isLegacyStructuralStatus,
-  LEGACY_PATH_BANNER,
-  LEGACY_STRUCTURAL_STATUS,
-} from '@/lib/plan-set/legacy-path-guard';
-import { buildStructuralSheet, type StructuralSheetInput } from '@/lib/plan-set/structural-sheet';
-import { buildComplianceSheet, type ComplianceSheetInput } from '@/lib/plan-set/compliance-sheet';
-import type { TitleBlockData } from '@/lib/plan-set/title-block';
-import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
+import fs from 'node:fs';
+import path from 'node:path';
+import { NextRequest } from 'next/server';
+import { GET, POST } from '@/app/api/engineering/plan-set/route';
 
-// ── fixtures ─────────────────────────────────────────────────────────────────
-const tb: TitleBlockData = {
-  companyName: 'SolarPro', companyAddress: 'City, ST', companyPhone: '', companyEmail: '',
-  companyLicense: '', projectName: 'Test', clientName: 'Client', siteAddress: '1 Main',
-  city: 'City', state: 'ST', zip: '00000', ahj: 'City Building Dept', utilityName: 'Utility',
-  systemKw: 12.4, panelCount: 31, panelModel: 'Q.PEAK', inverterModel: 'IQ8A',
-  mountType: 'Roof Mount', sheetTitle: 'S', sheetNumber: 'S-1', totalSheets: 7,
-  revision: '0', preparedBy: 'SolarPro', preparedDate: '2026-07-21', necVersion: 'NEC 2020',
-  ibcVersion: 'IBC 2021', asceVersion: 'ASCE 7-22',
-};
+const ROOT = path.resolve(__dirname, '../..');
 
-function structInput(status: string): StructuralSheetInput {
-  return {
-    tb: { ...tb, sheetTitle: 'Structural', sheetNumber: 'S-1' },
-    stateCode: 'ST', city: 'City', county: 'County', address: '1 Main',
-    roofType: 'shingle', roofPitchDeg: 20, roofPitchRatio: '4:12', rafterSize: '2×6',
-    rafterSpacingIn: 24, rafterSpanFt: 16, rafterSpecies: 'DF-L #2', sheathingType: '7/16" OSB',
-    stories: 1, windSpeedMph: 115, windExposureCategory: 'C', groundSnowPsf: 0, flatRoofSnowPsf: 0,
-    seismicCategory: 'C', importance: 'II', panelWeightLbs: 45, panelCount: 31, panelLengthIn: 74,
-    panelWidthIn: 41, panelThicknessIn: 1.5, mountingSystem: 'RT-MINI', railWeightLbsPerFt: 0.5,
-    attachmentType: 'Lag Bolt to Rafter', lagBoltSize: '5/16" × 3"', lagBoltSpacingFt: 4,
-    flashingType: 'Self-flashing', panelDeadLoadPsf: 2.5, mountingDeadLoadPsf: 1.5,
-    totalDeadLoadPsf: 14, existingDeadLoadPsf: 10, liveLoadPsf: 20, snowLoadPsf: 0,
-    windUpliftPsf: 25, windDownPsf: 15, governingLoadPsf: 40, rafterCapacityPsf: 52,
-    structuralStatus: status, ridgeSetbackIn: 18, eaveSetbackIn: 18, valleySetbackIn: 18,
-    pathwayWidthIn: 36, pathwayRequired: true, setbackCodeRef: 'IRC R324.4',
-  };
+function req(method: 'GET' | 'POST'): NextRequest {
+  return new NextRequest('http://localhost/api/engineering/plan-set', { method });
 }
 
-function compInput(status: string): ComplianceSheetInput {
-  return {
-    tb: { ...tb, sheetTitle: 'Compliance', sheetNumber: 'C-1' },
-    systemKw: 12.4, panelCount: 31, inverterType: 'micro', inverterModel: 'IQ8A',
-    necVersion: 'NEC 2020', stateCode: 'ST', city: 'City', stringVoc: 400, stringIsc: 10,
-    dcWireGauge: '#10 AWG', acWireGauge: '#8 AWG', acBreakerAmps: 40, backfeedBreakerAmps: 40,
-    mainPanelBusAmps: 200, mainPanelBreakerAmps: 200, interconnectionType: 'load-side',
-    rapidShutdownRequired: true, rapidShutdownDevice: 'IQ8A integrated', groundWireGauge: '#8 AWG',
-    structuralStatus: status, rafterCapacityPsf: 52, governingLoadPsf: 40,
-    ridgeSetbackIn: 18, eaveSetbackIn: 18, pathwayWidthIn: 36, pathwayRequired: true,
-  };
-}
-
-const validSnapshot = {
-  meta: { snapshotId: 'PDS-0123456789abcdef', digest: '0'.repeat(64) },
-  permitReadiness: { ready: true, blockers: [] },
-} as unknown as PermitDesignSnapshot;
-
-describe('W3.1 §3 — parallel plan-set path is contained (fail closed)', () => {
-  it('no snapshot ⇒ LEGACY, never PASS or permit-ready', () => {
-    const r = resolveLegacyPathStatus(null);
-    expect(r.isLegacy).toBe(true);
-    expect(r.structuralStatus).toBe(LEGACY_STRUCTURAL_STATUS);
-    expect(r.structuralStatus).not.toBe('STRUCTURAL_PASS');
-    expect(r.permitReady).toBe(false);
-    expect(r.approved).toBe(false);
-    expect(r.compliant).toBe(false);
-    expect(r.overallCompliance).toBe(LEGACY_PATH_BANNER);
-    expect(r.overallCompliance).not.toBe('PASS');
-    expect(r.banner).toBe(LEGACY_PATH_BANNER);
+describe('W4 §6 — legacy /api/engineering/plan-set route is retired (410 Gone)', () => {
+  it('GET returns 410 with the retirement code — no artifact, no PASS', async () => {
+    const res = await GET(req('GET'));
+    expect(res.status).toBe(410);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.code).toBe('PLAN_SET_ROUTE_RETIRED');
+    expect(body.canonicalRoute).toBe('/api/engineering/permit');
+    // The retired route never emits a structural PASS / permit-ready artifact.
+    expect(JSON.stringify(body)).not.toContain('STRUCTURAL_PASS');
+    expect(body.permitReady).toBeUndefined();
   });
 
-  it('every INVALID snapshot shape fails closed to LEGACY (never PASS)', () => {
-    const invalids: unknown[] = [
-      undefined,
-      {},
-      { meta: {} },
-      { meta: { snapshotId: 'PDS-x', digest: 'short' }, permitReadiness: { ready: true, blockers: [] } },
-      { meta: { snapshotId: 'not-pds', digest: '0'.repeat(64) }, permitReadiness: { ready: true, blockers: [] } },
-      { meta: { snapshotId: 'PDS-x', digest: '0'.repeat(64) }, permitReadiness: { ready: false, blockers: [] } },
-      { meta: { snapshotId: 'PDS-x', digest: '0'.repeat(64) }, permitReadiness: { ready: true, blockers: [{ code: 'X', message: 'y' }] } },
-      { meta: { snapshotId: 'PDS-x', digest: '0'.repeat(64) } }, // no permitReadiness
-    ];
-    for (const s of invalids) {
-      expect(isSnapshotPermitValid(s as PermitDesignSnapshot)).toBe(false);
-      const r = resolveLegacyPathStatus(s as PermitDesignSnapshot);
-      expect(r.isLegacy, `input ${JSON.stringify(s)} must be legacy`).toBe(true);
-      expect(r.structuralStatus).toBe(LEGACY_STRUCTURAL_STATUS);
-      expect(r.permitReady).toBe(false);
-      expect(r.overallCompliance).not.toBe('PASS');
-    }
+  it('POST returns 410 with the retirement code — the generator cannot run', async () => {
+    const res = await POST(req('POST'));
+    expect(res.status).toBe(410);
+    const body = await res.json();
+    expect(body.code).toBe('PLAN_SET_ROUTE_RETIRED');
+    expect(res.headers.get('X-Canonical-Route')).toBe('/api/engineering/permit');
   });
 
-  it('a VALID canonical snapshot is the ONLY way to reach PASS (gate is real, not always-legacy)', () => {
-    expect(isSnapshotPermitValid(validSnapshot)).toBe(true);
-    const r = resolveLegacyPathStatus(validSnapshot);
-    expect(r.isLegacy).toBe(false);
-    expect(r.structuralStatus).toBe('STRUCTURAL_PASS');
-    expect(r.permitReady).toBe(true);
-    expect(r.compliant).toBe(true);
-    expect(r.overallCompliance).toBe('PASS');
-    expect(r.banner).toBeNull();
+  it('route source contains no snapshot-blind sheet generation', () => {
+    const src = fs.readFileSync(
+      path.join(ROOT, 'app/api/engineering/plan-set/route.ts'),
+      'utf8',
+    );
+    // No sheet builders imported, no compute/PDF pipeline, no PASS declaration.
+    expect(src).not.toContain('buildStructuralSheet');
+    expect(src).not.toContain('buildComplianceSheet');
+    expect(src).not.toContain('generatePdfFromHtml');
+    expect(src).not.toContain('resolveLegacyPathStatus');
+    expect(src).not.toContain('computeSystem');
+    expect(src).not.toContain('STRUCTURAL_PASS');
   });
 });
 
-describe('W3.1 §3 — S-1 structural sheet reflects containment', () => {
-  it('legacy status ⇒ banner shown, no "STRUCTURAL PASS" declared', () => {
-    const html = buildStructuralSheet(structInput(LEGACY_STRUCTURAL_STATUS));
-    expect(html).toContain(LEGACY_PATH_BANNER);
-    expect(html).toContain('LEGACY PATH — NOT FOR PERMIT');
-    expect(html).not.toContain('STRUCTURAL PASS');
+describe('W4 §6 — the PASS-capable legacy builders are deleted (not importable)', () => {
+  const deleted = [
+    'lib/plan-set/legacy-path-guard.ts',
+    'lib/plan-set/cover-sheet.ts',
+    'lib/plan-set/electrical-sheet.ts',
+    'lib/plan-set/structural-sheet.ts',
+    'lib/plan-set/equipment-schedule.ts',
+    'lib/plan-set/site-layout-sheet.ts',
+    'lib/plan-set/mounting-details-sheet.ts',
+    'lib/plan-set/compliance-sheet.ts',
+    'lib/plan-set/title-block.ts',
+  ];
+
+  it.each(deleted)('deleted file no longer exists: %s', (rel) => {
+    expect(fs.existsSync(path.join(ROOT, rel))).toBe(false);
   });
 
-  it('canonical PASS status ⇒ PASS box, no legacy banner (proves the sheet is not hardwired)', () => {
-    const html = buildStructuralSheet(structInput('STRUCTURAL_PASS'));
-    expect(html).toContain('STRUCTURAL PASS');
-    expect(html).not.toContain(LEGACY_PATH_BANNER);
-  });
-});
-
-describe('W3.1 §3 — C-1 compliance sheet reflects containment', () => {
-  it('legacy status ⇒ NOT-FOR-PERMIT banner + no compliance certification', () => {
-    const html = buildComplianceSheet(compInput(LEGACY_STRUCTURAL_STATUS));
-    expect(html).toContain(LEGACY_PATH_BANNER);
-    expect(html).toContain('This checklist was generated by the legacy plan-set path');
-    expect(html).not.toContain('I hereby certify that this photovoltaic system design complies');
+  it('the legacy-path-guard module cannot be imported', async () => {
+    // Non-literal specifier: the module is deleted, so tsc/vite must not resolve
+    // it statically — resolution fails at runtime, which is exactly the proof.
+    const spec = ['@/lib', 'plan-set', 'legacy-path-guard'].join('/');
+    await expect(import(/* @vite-ignore */ spec)).rejects.toBeTruthy();
   });
 
-  it('non-legacy status still certifies (control)', () => {
-    const html = buildComplianceSheet(compInput('PASS'));
-    expect(html).not.toContain(LEGACY_PATH_BANNER);
-    expect(html).toContain('I hereby certify that this photovoltaic system design complies');
-  });
-});
-
-describe('W3.1 §3 — isLegacyStructuralStatus helper', () => {
-  it('only the legacy enum is legacy', () => {
-    expect(isLegacyStructuralStatus(LEGACY_STRUCTURAL_STATUS)).toBe(true);
-    expect(isLegacyStructuralStatus('STRUCTURAL_PASS')).toBe(false);
-    expect(isLegacyStructuralStatus('PASS')).toBe(false);
-    expect(isLegacyStructuralStatus(null)).toBe(false);
+  it('permit-system-model (pure ComputedSystem bridge, still used by /api/engineering/sld) is retained', () => {
+    expect(fs.existsSync(path.join(ROOT, 'lib/plan-set/permit-system-model.ts'))).toBe(true);
   });
 });

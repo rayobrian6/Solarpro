@@ -1,0 +1,1656 @@
+{
+  "generatedAt": "2026-07-22T02:38:01.685Z",
+  "wave": "W4",
+  "mode": "live",
+  "evidenceRole": "CURRENT live database design — W4 authority + cross-sheet agreement + bypass scan on the live Braidon project.",
+  "supersedes": null,
+  "snapshotId": "PDS-78865C4C4C5F",
+  "digest": "78865c4c4c5f523298d5c6d6d69b7477889c7c3c4375dfd234658b2f385ff871",
+  "schemaVersion": "1.0.0",
+  "project": "BRAIDON (GreenLancer feedback-session planset)",
+  "sheetCount": 19,
+  "sheetIds": [
+    "PV-0",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "DS-4",
+    "CERT",
+    "PE-1"
+  ],
+  "fixtureGeometryDisclaimer": "The frozen braidon-original-audit-fixture roof-plane VERTICES and edge TYPES are DETERMINISTIC TEST-FIXTURE geometry, reconstructed as the axis-aligned bounding box (padded ~6 ft) of each plane's recovered member-panel lat/lngs with nominal [eave, rake, ridge, rake] edges. They were NOT recovered from the original historical W1 snapshot (which did not persist them) and DO NOT prove the exact historical roof geometry. Recovered module POSITIONS (lat/lng) are unaltered; if exact surveyed roof edges are ever recovered they supersede these bounding boxes. (Live-mode evidence reads the current DB design and carries no such reconstruction.)",
+  "codeAuthority": {
+    "schemaVersion": "1.0.0",
+    "ahjName": "Madison County Building & Zoning",
+    "jurisdictionType": "county",
+    "stateCode": "IL",
+    "county": "Madison",
+    "city": "Unincorporated",
+    "ahjRecordId": "il-madison-county",
+    "utility": {
+      "name": "il-ameren-illinois",
+      "id": null
+    },
+    "editions": {
+      "nec": {
+        "edition": "2020",
+        "source": "ahj-record"
+      },
+      "ibc": {
+        "edition": null,
+        "source": "unknown"
+      },
+      "irc": {
+        "edition": null,
+        "source": "unknown"
+      },
+      "ifc": {
+        "edition": null,
+        "source": "unknown"
+      },
+      "asce": {
+        "edition": "7-22",
+        "source": "structural-engine-basis"
+      }
+    },
+    "localAmendments": [],
+    "verificationStatus": "incomplete",
+    "verifiedBy": null,
+    "sourceHash": null,
+    "incompleteEditions": [
+      "ibc",
+      "irc",
+      "ifc"
+    ],
+    "recordProvenance": "curated",
+    "applicabilityNotes": [
+      "Adopted edition unknown for: IBC, IRC, IFC — printed as PENDING; no edition inferred.",
+      "Adoption document not archived/verified — editions are provisional pending the W4-D document registry."
+    ]
+  },
+  "v11": {
+    "everyEditionIdenticalAcrossSheets": true,
+    "everyEditionMatchesAuthority": true,
+    "perKind": {
+      "nec": {
+        "label": "NEC 2020",
+        "distinct": [
+          "NEC 2020"
+        ],
+        "agree": true,
+        "printedCount": 21
+      },
+      "ibc": {
+        "label": "IBC PENDING",
+        "distinct": [
+          "IBC PENDING"
+        ],
+        "agree": true,
+        "printedCount": 20
+      },
+      "irc": {
+        "label": "IRC PENDING",
+        "distinct": [
+          "IRC PENDING"
+        ],
+        "agree": true,
+        "printedCount": 20
+      },
+      "ifc": {
+        "label": "IFC PENDING",
+        "distinct": [
+          "IFC PENDING"
+        ],
+        "agree": true,
+        "printedCount": 20
+      },
+      "asce": {
+        "label": "ASCE 7-22",
+        "distinct": [
+          "ASCE 7-22"
+        ],
+        "agree": true,
+        "printedCount": 20
+      }
+    },
+    "zeroCodeEditionLiteralsInRenderers": true,
+    "codeLiteralHits": [],
+    "ahjSingleSourced": true,
+    "governingCodesRefCarriesNoEditionLiteral": true
+  },
+  "projectAuthority": {
+    "schemaVersion": "1.0.0",
+    "systemType": "ROOF MOUNT",
+    "ahjName": "Madison County Building & Zoning",
+    "utilityName": "il-ameren-illinois",
+    "capacities": {
+      "dcKw": 12.4,
+      "acKw": 10.818999999999999,
+      "moduleCount": 31
+    },
+    "designer": "",
+    "contractor": null,
+    "equipmentSummary": {
+      "moduleManufacturer": "Q CELLS",
+      "moduleModel": "Q.PEAK DUO BLK ML-G10+ 400W",
+      "moduleWatts": 400,
+      "inverterManufacturer": "Enphase",
+      "inverterModel": "IQ8A",
+      "inverterType": "MICROINVERTER",
+      "mountManufacturer": "Roof Tech",
+      "mountModel": "RT-MINI",
+      "batteryBrand": null,
+      "batteryModel": null,
+      "batteryCount": null,
+      "combinerLabel": "Enphase IQ Combiner 6C"
+    },
+    "issueState": "PENDING ENGINEERING REVIEW",
+    "engineerReviewStatus": "PENDING — no approved engineering-review record",
+    "issueStateBasis": {
+      "authorityGapDomains": [
+        "electrical",
+        "equipment",
+        "structural",
+        "code"
+      ],
+      "reviewCoversCurrentDigest": false,
+      "reviewStale": false,
+      "reviewedDigest": null,
+      "reason": "authority gaps span [electrical, equipment, structural, code] — full engineering review required"
+    },
+    "issuedForPermitGate": {
+      "pass": false,
+      "preconditions": [
+        {
+          "id": "blocking-validators",
+          "satisfied": false,
+          "detail": "blocking snapshot violation(s) present"
+        },
+        {
+          "id": "equipment-identity",
+          "satisfied": false,
+          "detail": "EQUIPMENT-IDENTITY-CONFLICT unresolved"
+        },
+        {
+          "id": "code-authority",
+          "satisfied": false,
+          "detail": "code authority unverified / incomplete"
+        },
+        {
+          "id": "manufacturer-documents",
+          "satisfied": false,
+          "detail": "document-registry archival state not resolved (closer hook — snapshot_digest_invalidations / documents DB)"
+        },
+        {
+          "id": "structural-applicability",
+          "satisfied": false,
+          "detail": "structural applicability not established"
+        },
+        {
+          "id": "engineer-review-current-digest",
+          "satisfied": false,
+          "detail": "no approved review covering the current digest"
+        },
+        {
+          "id": "signature-seal",
+          "satisfied": false,
+          "detail": "signature / seal requirements not satisfied"
+        }
+      ]
+    },
+    "governingCodesRef": {
+      "source": "snapshot.codeAuthority",
+      "schemaVersion": "1.0.0",
+      "verificationStatus": "incomplete",
+      "ahjName": "Madison County Building & Zoning"
+    },
+    "sheetIndexLength": 19
+  },
+  "issueStateIsPending": true,
+  "issueStateForbidden": false,
+  "truthMatrix": [
+    {
+      "quantity": "authority.ahj",
+      "authority": "Madison County Building & Zoning",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "E-1",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "CERT",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "CERT",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "Madison County Building & Zoning"
+        }
+      ],
+      "distinctPrinted": [
+        "Madison County Building & Zoning"
+      ],
+      "agree": true,
+      "blocking": true,
+      "singleSource": true,
+      "note": "projectAuthority.ahjName === codeAuthority.ahjName ? true"
+    },
+    {
+      "quantity": "authority.utility",
+      "authority": "il-ameren-illinois",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "E-1",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "CERT",
+          "value": "il-ameren-illinois"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "il-ameren-illinois"
+        }
+      ],
+      "distinctPrinted": [
+        "il-ameren-illinois"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "quantity": "code.edition.nec",
+      "authority": "NEC 2020",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "E-1",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "CERT",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "NEC 2020"
+        }
+      ],
+      "distinctPrinted": [
+        "NEC 2020"
+      ],
+      "agree": true,
+      "blocking": true,
+      "note": "codeAuthority.editions.nec.edition = 2020; must be identical on every sheet that prints it"
+    },
+    {
+      "quantity": "code.edition.ibc",
+      "authority": "IBC PENDING",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "E-1",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "CERT",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "IBC PENDING"
+        }
+      ],
+      "distinctPrinted": [
+        "IBC PENDING"
+      ],
+      "agree": true,
+      "blocking": true,
+      "note": "codeAuthority.editions.ibc.edition = null (PENDING); must be identical on every sheet that prints it"
+    },
+    {
+      "quantity": "code.edition.irc",
+      "authority": "IRC PENDING",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "E-1",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "CERT",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "IRC PENDING"
+        }
+      ],
+      "distinctPrinted": [
+        "IRC PENDING"
+      ],
+      "agree": true,
+      "blocking": true,
+      "note": "codeAuthority.editions.irc.edition = null (PENDING); must be identical on every sheet that prints it"
+    },
+    {
+      "quantity": "code.edition.ifc",
+      "authority": "IFC PENDING",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "E-1",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "CERT",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "IFC PENDING"
+        }
+      ],
+      "distinctPrinted": [
+        "IFC PENDING"
+      ],
+      "agree": true,
+      "blocking": true,
+      "note": "codeAuthority.editions.ifc.edition = null (PENDING); must be identical on every sheet that prints it"
+    },
+    {
+      "quantity": "code.edition.asce",
+      "authority": "ASCE 7-22",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "E-1",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "CERT",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "ASCE 7-22"
+        }
+      ],
+      "distinctPrinted": [
+        "ASCE 7-22"
+      ],
+      "agree": true,
+      "blocking": true,
+      "note": "codeAuthority.editions.asce.edition = 7-22; must be identical on every sheet that prints it"
+    },
+    {
+      "quantity": "authority.system-type",
+      "authority": "ROOF MOUNT",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "ROOF MOUNT"
+        }
+      ],
+      "distinctPrinted": [
+        "ROOF MOUNT"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "quantity": "authority.module-model",
+      "authority": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "E-1",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "CERT",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        }
+      ],
+      "distinctPrinted": [
+        "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "quantity": "authority.inverter-model",
+      "authority": "Enphase IQ8A",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "E-1",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "CERT",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "Enphase IQ8A"
+        }
+      ],
+      "distinctPrinted": [
+        "Enphase IQ8A"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "quantity": "authority.racking-assembly",
+      "authority": "RT-MINI",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "RT-MINI"
+        }
+      ],
+      "distinctPrinted": [
+        "RT-MINI"
+      ],
+      "agree": true,
+      "blocking": false,
+      "note": "structural.rackingAssembly.mountModel = RT-MINI (assemblyId assembly-rooftech-mini); object authority — printed occurrences must all match"
+    },
+    {
+      "quantity": "authority.issue-status",
+      "authority": "PENDING ENGINEERING REVIEW",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "E-1",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "CERT",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "PENDING ENGINEERING REVIEW"
+        }
+      ],
+      "distinctPrinted": [
+        "PENDING ENGINEERING REVIEW"
+      ],
+      "agree": true,
+      "blocking": true
+    },
+    {
+      "quantity": "authority.snapshot-id",
+      "authority": "PDS-78865C4C4C5F",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "E-1",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "CERT",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "PDS-78865C4C4C5F"
+        },
+        {
+          "sheet": "E-1(SLD stamp)",
+          "value": "PDS-78865C4C4C5F"
+        }
+      ],
+      "distinctPrinted": [
+        "PDS-78865C4C4C5F"
+      ],
+      "agree": true,
+      "blocking": true,
+      "note": "title-block data-project-field=\"snapshot-id\" AND the SLD data-sld-snapshot-id stamp must equal meta.snapshotId"
+    },
+    {
+      "quantity": "authority.digest",
+      "authority": "78865c4c4c5f523298d5… (full 78865c4c4c5f…)",
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-1",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-1B",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-3",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "E-1",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-4A",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-4B",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-5",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PV-6",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "SCHED",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "SCHED-2",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "APP-A",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "DS-1",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "DS-2",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "DS-3",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "DS-4",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "CERT",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "PE-1",
+          "value": "78865c4c4c5f523298d5"
+        },
+        {
+          "sheet": "E-1(SLD stamp)",
+          "value": "78865c4c4c5f523298d5"
+        }
+      ],
+      "distinctPrinted": [
+        "78865c4c4c5f523298d5"
+      ],
+      "agree": true,
+      "blocking": true,
+      "note": "title-block + SLD-stamp digest identical AND a prefix of meta.digest"
+    },
+    {
+      "quantity": "authority.sheet-index",
+      "authority": "19 sheets",
+      "printedInstances": [
+        {
+          "sheet": "ALL",
+          "value": "19 rendered"
+        }
+      ],
+      "distinctPrinted": [
+        "rendered 19",
+        "manifest 19"
+      ],
+      "agree": true,
+      "blocking": true,
+      "renderedIds": [
+        "PV-0",
+        "PV-1",
+        "PV-1B",
+        "PV-3",
+        "PV-4C",
+        "E-1",
+        "PV-4A",
+        "PV-4B",
+        "PV-5",
+        "PV-6",
+        "SCHED",
+        "SCHED-2",
+        "APP-A",
+        "DS-1",
+        "DS-2",
+        "DS-3",
+        "DS-4",
+        "CERT",
+        "PE-1"
+      ],
+      "manifestIds": [
+        "PV-0",
+        "PV-1",
+        "PV-1B",
+        "PV-3",
+        "PV-4C",
+        "E-1",
+        "PV-4A",
+        "PV-4B",
+        "PV-5",
+        "PV-6",
+        "SCHED",
+        "SCHED-2",
+        "APP-A",
+        "DS-1",
+        "DS-2",
+        "DS-3",
+        "DS-4",
+        "CERT",
+        "PE-1"
+      ],
+      "note": "rendered title-block sheet ids (incl. E-1 SLD) === projectAuthority.sheetIndex (the computePlansetManifest output). Order + values identical."
+    }
+  ],
+  "deletionProofs": {
+    "buildPermitCoverSheet": {
+      "fileDeleted": true,
+      "reactComponentDeleted": true,
+      "reachableCallers": [],
+      "docPointer": "docs/W4-COVER-AUTHORITY.md §4"
+    },
+    "buildSLD": {
+      "implementationPresent": false,
+      "callPresent": false,
+      "docPointer": "docs/W4-SLD-DELETION.md (832 lines removed)",
+      "note": "pageSingleLineDiagram consumes generateLiveSLD (canonical) and fails closed; every SLD carries the snapshot id/schema/digest stamp."
+    },
+    "legacyPlanSet": {
+      "resolution": "DELETED (W4 §6, option B)",
+      "routeTombstone410": true,
+      "builderFilesPresent": [],
+      "reachableImportersOrFetches": [],
+      "retainedNonAuthorityModule": "lib/plan-set/permit-system-model.ts (pure view bridge; external SLD-route consumer)",
+      "docPointer": "docs/W4-PLANSET-PATH-RESOLUTION.md"
+    }
+  },
+  "authorityInfrastructure": {
+    "documentRegistry": {
+      "module": "lib/documents/registry.ts",
+      "migration": "lib/migrations/113_manufacturer_document_registry.sql",
+      "resolver": "resolveRackingCapacityDocument (wired: generatePermit POST route → buildRackingAssembly, fail-soft)"
+    },
+    "reconciliation": {
+      "module": "lib/reconciliation/reconcile.ts",
+      "migration": "lib/migrations/114_equipment_reconciliation_audit.sql",
+      "ledgerRead": "listActiveInvalidations (wired into the ISSUED-FOR-PERMIT gate, fail-soft)"
+    },
+    "migrationsRunByRay": false,
+    "note": "Migrations 113 (manufacturer_document_registry) and 114 (equipment_reconciliation_audit + snapshot_digest_invalidations) are WRITTEN but NOT yet run by Ray. Until then the async document/ledger reads fail soft to the not-satisfied state — no document is archived, so the RT-MINI blockers stay firing and ISSUED FOR PERMIT is unreachable."
+  },
+  "rtMiniIngestion": {
+    "mountModel": "RT-MINI",
+    "capacityAllowableLbs": 600,
+    "documentHash": null,
+    "archivedInRepo": false,
+    "blockersActive": [
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP"
+    ],
+    "note": "ingestion path present (lib/documents) — a generic brochure/flashing report does NOT clear the blocker; only a verified document covering the exact assembly + installation condition does. None archived today."
+  },
+  "directMount": {
+    "directMountAttachmentsOnThisSnapshot": 0,
+    "supportedModuleIdPromotedToType": true,
+    "moduleAttachmentIdsPromotedToType": true,
+    "note": "Braidon is rail-based (RT-MINI, rail-paired per Ray ruling) so there are no att-dm-* attachments here; direct-mount canonical coordinate authority + fields are exercised by tests/planset/direct-mount-authority.test.ts."
+  },
+  "electricalBlockers": {
+    "ROUTE-LENGTH-ESTIMATE": true,
+    "FEEDER-RACEWAY-AUTHORITY": false,
+    "RACEWAY-BONDING-AUTHORITY": false,
+    "EQUIPMENT-IDENTITY-CONFLICT": true
+  },
+  "coordinateParity": {
+    "idCoverageOk": true,
+    "coordinateParityOk": true,
+    "maxDrawnVsTransformDeltaSheetUnits": 0,
+    "structuralObjectsPlaced": 111,
+    "source": "docs/evidence/braidon-live-w3.planset-evidence.json"
+  },
+  "failureClasses": [
+    {
+      "defect": "wind 115-vs-90",
+      "w1w2Symptom": "PV-3 printed 90 mph while PV-4C/PE-1 printed 115 — two wind authorities",
+      "w31Status": "corrected",
+      "mustCorrect": true,
+      "provingCheck": "V23 structural.env.ultimateWindSpeedMph === structural.loads.windSpeedMph",
+      "result": "env 115 == loads 115 mph (single-sourced)",
+      "ok": true
+    },
+    {
+      "defect": "safety-factor 1.0-vs-2.0",
+      "w1w2Symptom": "attachment SF was a renderer × (safetyFactor||2) multiplier outside the engine",
+      "w31Status": "corrected",
+      "mustCorrect": true,
+      "provingCheck": "attachment SF + allowable capacity are structural-engine-v4 owned (attachment.provenance)",
+      "result": "SF 1.487, allowable 600 lb from engine",
+      "ok": true
+    },
+    {
+      "defect": "invented 48\" feet",
+      "w1w2Symptom": "attachment spacing was a hardcoded 48\" O.C. renderer literal",
+      "w31Status": "corrected",
+      "mustCorrect": true,
+      "provingCheck": "attachmentSpacingIn derives from canonical rail objects (rails[0].spanConfigIn), not a literal",
+      "result": "attachmentSpacingIn 48\" from 8 rail objects",
+      "ok": true
+    },
+    {
+      "defect": "generic module dims",
+      "w1w2Symptom": "module footprints used a generic 66×40 / literal size",
+      "w31Status": "corrected",
+      "mustCorrect": true,
+      "provingCheck": "V20 every moduleInstance footprint === exact equipment-db catalog dims",
+      "result": "31 instances @ 41.7×70.9 (catalog Q.PEAK DUO BLK ML-G10+ 400W)",
+      "ok": true
+    },
+    {
+      "defect": "renderer-owned setbacks",
+      "w1w2Symptom": "fire setbacks were computed by the sheet renderer with local literals",
+      "w31Status": "corrected",
+      "mustCorrect": true,
+      "provingCheck": "setbacks on roofPlaneObjects from the slope-space fireSetback engine; renderer carries no wind/48\"/66 literals (grep proof)",
+      "result": "2 plane objects carry engine setbacks; renderer literal hits: none",
+      "ok": true
+    },
+    {
+      "defect": "BOM guesses",
+      "w1w2Symptom": "racking BOM quantities were renderer/registry guesses",
+      "w31Status": "corrected",
+      "mustCorrect": true,
+      "provingCheck": "V10 structural BOM reconciles with canonical rail/attachment/module objects",
+      "result": "bomReconciliation PASS (basis object-vs-engine)",
+      "ok": true
+    },
+    {
+      "defect": "equipment-identity REC-vs-Qcells",
+      "w1w2Symptom": "subSystems.roof.panelId (REC 405W) diverged from the fleet module (Qcells 400W)",
+      "w31Status": "blocking-carried (production unresolved)",
+      "mustCorrect": false,
+      "provingCheck": "permitReadiness.blockers EQUIPMENT-IDENTITY-CONFLICT",
+      "result": "EQUIPMENT-IDENTITY-CONFLICT present and blocking (operator reconciliation required)",
+      "ok": true
+    }
+  ],
+  "failureClassesAllCorrected": true,
+  "mountingHardwareDbFlag": {
+    "issue": "mounting-hardware-db labels rooftech-mini-s / rooftech-mini-t / rooftech-mini-m (RT-MINI-M Metal) as systemType \"rail_less\", contradicting the RT-MINI = rail-paired ruling.",
+    "entries": [
+      {
+        "id": "rooftech-mini",
+        "model": "RT-MINI",
+        "systemType": "rail_based",
+        "ruling": "correct"
+      },
+      {
+        "id": "rooftech-mini-s",
+        "model": "RT-MINI-S",
+        "systemType": "rail_less",
+        "ruling": "CONTRADICTS rail-paired ruling"
+      },
+      {
+        "id": "rooftech-mini-t",
+        "model": "RT-MINI-T",
+        "systemType": "rail_less",
+        "ruling": "CONTRADICTS rail-paired ruling"
+      },
+      {
+        "id": "rooftech-mini-m",
+        "model": "RT-MINI-M (Metal)",
+        "systemType": "rail_less",
+        "ruling": "CONTRADICTS rail-paired ruling"
+      }
+    ],
+    "disposition": "RAY DECISION — production data NOT changed by the closer (boundary: no production equipment alterations). Flagged for Ray to confirm whether these RT-MINI variants are truly rail-less or should be rail_based."
+  },
+  "expectedBlockers": {
+    "mode": "live",
+    "expected": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING"
+    ],
+    "present": [
+      "ROUTE-LENGTH-ESTIMATE",
+      "EQUIPMENT-IDENTITY-CONFLICT",
+      "WIND-SNOW-AUTHORITY-UNRESOLVED",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING"
+    ],
+    "missing": []
+  },
+  "authorityBypasses": [],
+  "summary": {
+    "truthRows": 15,
+    "agree": 15,
+    "coverageOnly": 0,
+    "disagree": [],
+    "blockingDisagree": [],
+    "codeEditionsIdentical": true,
+    "zeroCodeLiterals": true,
+    "reachableBypasses": 0,
+    "issueState": "PENDING ENGINEERING REVIEW",
+    "issueStateOk": true,
+    "issueStateForbidden": false,
+    "renderedEqualsManifest": true,
+    "missingExpectedBlockers": [],
+    "honestBlockers": [
+      "ROUTE-LENGTH-ESTIMATE",
+      "EQUIPMENT-IDENTITY-CONFLICT",
+      "WIND-SNOW-AUTHORITY-UNRESOLVED",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "CODE-AUTHORITY-INCOMPLETE",
+      "ENGINEERING-REVIEW-PENDING"
+    ]
+  }
+}

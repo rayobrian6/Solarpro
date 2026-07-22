@@ -15,7 +15,7 @@ import type {
 import type { StructuralResultV4, StructuralInputV4 } from '@/lib/structural-engine-v4';
 import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
-import { buildRackingAssembly } from './rackingAssembly';
+import { buildRackingAssembly, type RackingCapacityDocumentEvidence } from './rackingAssembly';
 import { runSnapshotStructuralEngine, type FramingInputs } from './structuralEngine';
 import {
   deriveStructuralBom, reconcileStructuralBom,
@@ -54,6 +54,11 @@ export interface StructuralAuthorityCtx {
    *  fence-overturning check is emitted from the relocated fence engine so
    *  PV-4C / PE-1 / CERT all project ONE acceptance rule. */
   fenceWind: FenceWindInput | null;
+  /** §9 (W4 closer) — the async-resolved VERIFIED racking-capacity document for
+   *  the selected mount (lib/documents). null ⇒ none archived / DB unavailable ⇒
+   *  RT-MINI blockers stay firing (fail-soft). */
+  capacityDocument?: RackingCapacityDocumentEvidence | null;
+  projectJurisdiction?: string | null;
 }
 
 export interface StructuralAuthorityBundle {
@@ -80,7 +85,10 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
   const roofInput = ctx.structuralRuns?.inputs['roof']
     ?? (ctx.structuralRuns ? Object.values(ctx.structuralRuns.inputs)[0] : undefined) ?? null;
 
-  const rackingAssembly = buildRackingAssembly(ctx.mountSystem);
+  const rackingAssembly = buildRackingAssembly(ctx.mountSystem, {
+    capacityDocument: ctx.capacityDocument ?? null,
+    projectJurisdiction: ctx.projectJurisdiction ?? null,
+  });
   const framingVerified = !!(ctx.framing.framingType && ctx.framing.rafterSize
     && ctx.framing.rafterSpacing && ctx.framing.rafterSpecies && ctx.framing.rafterSpan);
 
@@ -302,6 +310,34 @@ function buildRailsAndAttachments(
 ): { rails: RailObject[]; attachments: AttachmentObject[] } {
   const sys = ctx.mountSystem;
   const railBased = !!sys && (sys.systemType === 'rail_based' || sys.systemType === 'standing_seam');
+  // §10 — genuine RAIL-LESS / DIRECT-MOUNT roof products (per mounting-hardware-db
+  // systemType, the single source): each module is fastened DIRECTLY to the roof
+  // at per-module mount points (the module frame is the load path — there is NO
+  // rail). We derive canonical attachment objects + CS-SITE-PLAN-FT coordinates
+  // from the module footprints × the product's attachment pattern. railObjects
+  // stay EMPTY (no phantom rails); the module→attachment relation is carried on
+  // each attachment (`supportedModuleId`). RT-MINI-class rail-PAIRED mounts
+  // (systemType 'rail_based') do NOT come here (Ray ruling) — they are railed.
+  const directMount = !!sys && sys.systemType === 'rail_less' && ctx.isRoofSystem;
+  if (run && directMount) {
+    const dmAttachments = buildDirectMountAttachments(ctx, run, input, framingVerified, moduleInstances, transform);
+    // W4 closer — back-fill the module→attachment relation onto each supported
+    // ModuleInstance (there is no rail carrying it for direct-mount). Only
+    // populated here (direct-mount); rail-based modules keep attachmentIds
+    // undefined so their serialization/digest is unchanged.
+    const byModule = new Map<string, string[]>();
+    for (const at of dmAttachments) {
+      if (!at.supportedModuleId) continue;
+      const arr = byModule.get(at.supportedModuleId) ?? [];
+      arr.push(at.attachmentId);
+      byModule.set(at.supportedModuleId, arr);
+    }
+    for (const mi of moduleInstances) {
+      const ids = byModule.get(mi.instanceId);
+      if (ids && ids.length) mi.attachmentIds = ids;
+    }
+    return { rails: [], attachments: dmAttachments };
+  }
   if (!run || !railBased) return { rails: [], attachments: [] };
 
   const ag = run.arrayGeometry;
@@ -443,6 +479,97 @@ function buildRailsAndAttachments(
   return { rails, attachments };
 }
 
+// ── §10 direct-mount attachment objects (rail-less; NO rail objects) ────────
+// W4 closer: the module→attachment relation is now carried by the PROMOTED
+// canonical fields — AttachmentObject.supportedModuleId (the module a direct-
+// mount attachment supports) and ModuleInstance.attachmentIds (back-filled
+// below). Rail-based systems continue to carry the relation on the rail
+// (supportedModuleIds/attachmentIds); the former local AttachmentObjectExt is
+// retired. Both fields are optional so rail-based serialization/digest is
+// unchanged; direct-mount serialization is byte-identical to the prior Ext form.
+function buildDirectMountAttachments(
+  ctx: StructuralAuthorityCtx, run: StructuralResultV4, input: StructuralInputV4 | null,
+  framingVerified: boolean, moduleInstances: ModuleInstance[], transform: DrawingTransform,
+): AttachmentObject[] {
+  const sys = ctx.mountSystem;
+  if (!sys) return [];
+  const ml = run.mountLayout ?? null;
+  const coordFrame: CoordinateMeta['sourceFrame'] =
+    moduleInstances.some(m => m.polygon.frame === 'plan-ft') ? 'plan-ft' : 'schematic-ft';
+  const substrate = framingVerified
+    ? `${input?.framingType === 'truss' ? 'truss' : 'rafter'} ${input?.rafterSize ?? ''}`.trim()
+    : 'unverified-framing';
+  // §10 manufacturer attachment pattern (single source = mounting-hardware-db):
+  // per-module mount POINTS derived from the module's up-slope span and the
+  // product's max mount spacing — min 2 supports per long frame edge (the two
+  // frame rails), 2 edges. Fastener model/count/embedment/method + capacity
+  // basis all read from the SAME mount record. Nothing invented.
+  const maxSpacingIn = sys.mount.maxSpacingIn && sys.mount.maxSpacingIn > 0 ? sys.mount.maxSpacingIn : 48;
+  const fastenerCount = sys.mount.fastenersPerMount ?? null;
+  const capBasis = sys.mount.capacityBasis;
+  // Design PRESSURE basis is the engine of record (V4 mountLayout): per-mount
+  // reaction ÷ its tributary = the ASD design pressure; we re-apply that SAME
+  // pressure to the geometry-honest per-attachment tributary (module footprint ÷
+  // mounts-on-module), so the load basis is single-sourced while the count +
+  // coordinates are geometry-derived. Capacity = the mount record allowable
+  // (count-independent). Absent an engine layout, reactions are honestly null.
+  const pUplift = ml && ml.tributaryAreaPerMountFt2 > 0 ? ml.upliftPerMountLbs / ml.tributaryAreaPerMountFt2 : null;
+  const pDown = ml && ml.tributaryAreaPerMountFt2 > 0 ? ml.downwardPerMountLbs / ml.tributaryAreaPerMountFt2 : null;
+  const capacity = ml && ml.mountCapacityLbs > 0
+    ? ml.mountCapacityLbs
+    : (sys.mount.upliftCapacityLbs && sys.mount.upliftCapacityLbs > 0 ? sys.mount.upliftCapacityLbs : null);
+
+  const out: AttachmentObject[] = [];
+  for (const mi of moduleInstances) {
+    const poly = (mi.drawnPolygon?.points?.length ? mi.drawnPolygon : mi.polygon)?.points ?? [];
+    if (poly.length < 4) continue;   // no footprint → no attachment (honest skip)
+    const C = { x: avg(poly.map(p => p.x)), y: avg(poly.map(p => p.y)) };
+    // half-axes from the oriented footprint corners [(-u-v),(+u-v),(+u+v),(-u+v)]
+    const uH = { x: (poly[1].x - poly[0].x) / 2, y: (poly[1].y - poly[0].y) / 2 }; // up-slope half-axis
+    const vH = { x: (poly[3].x - poly[0].x) / 2, y: (poly[3].y - poly[0].y) / 2 }; // along-eave half-axis
+    const upSlopeIn = mi.orientation === 'portrait' ? mi.heightIn : mi.widthIn;
+    const perEdge = Math.max(2, Math.ceil(upSlopeIn / maxSpacingIn));   // supports per long frame edge
+    const perModule = perEdge * 2;                                       // two frame edges
+    const tributaryFt2 = perModule > 0 ? mi.areaFt2 / perModule : null;
+    const upliftLbs = pUplift != null && tributaryFt2 != null ? r3(pUplift * tributaryFt2) : null;
+    const downwardLbs = pDown != null && tributaryFt2 != null ? r3(pDown * tributaryFt2) : null;
+    const sf = upliftLbs != null && upliftLbs > 0 && capacity != null ? r3(capacity / upliftLbs) : null;
+    const rawModuleId = mi.instanceId.replace(/^mi-/, '');
+    let n = 0;
+    for (const s of [-1, 1] as const) {
+      for (let i = 0; i < perEdge; i++) {
+        n++;
+        const upFrac = 2 * ((i + 0.5) / perEdge - 0.5);   // ±0.5 @ perEdge=2 (module quarter points)
+        const ax = C.x + s * 0.5 * vH.x + upFrac * uH.x;
+        const ay = C.y + s * 0.5 * vH.y + upFrac * uH.y;
+        out.push({
+          attachmentId: `att-dm-${rawModuleId}-${n}`,
+          railId: '',                                     // no rail (direct-mount) — honest empty
+          roofPlaneId: mi.roofPlaneId,
+          supportedModuleId: mi.instanceId,               // module→attachment relation (Ext)
+          xy: { x: r3(ax), y: r3(ay) },
+          roofZone: run.wind.roofZone ?? null,
+          substrateMember: substrate,
+          attachmentMethod: sys.mount.attachmentMethod ?? null,
+          fastenerModel: sys.hardware.lagBolt ?? null,
+          fastenerCount,
+          embedmentIn: sys.mount.fastenerEmbedmentIn ?? null,
+          tributaryAreaFt2: tributaryFt2 != null ? r3(tributaryFt2) : null,
+          upliftReactionLbs: upliftLbs,
+          downwardReactionLbs: downwardLbs,
+          lateralReactionLbs: null,
+          allowableCapacityLbs: capacity != null ? r3(capacity) : null,
+          adjustmentFactors: { omegaUltimateToAllowable: capBasis === 'allowable' ? 1 : 3.0 },
+          utilization: sf != null && sf > 0 ? r3(1 / sf) : null, safetyFactor: sf,
+          coord: coordMetaFor(transform, coordFrame, 'direct-mount attachment coordinate in canonical site-plan-ft (per-module mount point from module footprint × product pattern)'),
+          provenance: PROV(`direct-mount attachment: coordinate from module footprint × mounting-hardware-db pattern (${sys.id}: ${sys.mount.attachmentMethod}, maxSpacing ${maxSpacingIn}", ${fastenerCount ?? '?'} fastener/mount, ${perEdge}/edge); reaction = engine-of-record design pressure × geometry tributary; capacity = mount-record allowable`),
+        });
+      }
+    }
+  }
+  return out;
+}
+
 // ── §6 fence-overturning check (relocated fence engine → snapshot) ──────────
 function buildFenceChecks(ctx: StructuralAuthorityCtx): StructuralCheck[] {
   if (!ctx.fenceWind) return [];
@@ -499,6 +626,7 @@ function collectBlockers(
   if (!ctx.isRoofSystem) return b;
   const railBased = !!ctx.mountSystem
     && (ctx.mountSystem.systemType === 'rail_based' || ctx.mountSystem.systemType === 'standing_seam');
+  const directMount = !!ctx.mountSystem && ctx.mountSystem.systemType === 'rail_less';
 
   if (a.engine.engineeringReviewRequired) {
     b.push({ code: 'STRUCTURAL-FRAMING-UNVERIFIED',
@@ -524,8 +652,25 @@ function collectBlockers(
         + `snow ${ctx.snowAuthoritative ? 'ok' : 'unverified'}) — AHJ-confirmed values required` });
   }
   if (a.moduleInstances.length > 0 && a.attachments.length === 0) {
-    b.push({ code: 'REACTIONS-UNTRACEABLE',
-      message: 'Module instances present but no canonical attachment objects — reactions not traceable' });
+    // §10 — direct-mount geometry that could not be derived (product pattern
+    // unknown or plane unresolved) is an HONEST BLOCKING GAP; other systems keep
+    // the generic reactions-untraceable blocker. Both block permit-ready.
+    if (directMount) {
+      b.push({ code: 'DIRECT-MOUNT-GEOMETRY-MISSING',
+        message: 'Rail-less/direct-mount system but no canonical attachment objects could be derived '
+          + '(module footprint or attachment pattern unresolved) — mount coordinates and reactions not traceable' });
+    } else {
+      b.push({ code: 'REACTIONS-UNTRACEABLE',
+        message: 'Module instances present but no canonical attachment objects — reactions not traceable' });
+    }
+  }
+  // §11 (V25) — an attachment reaction exceeding its allowable capacity must
+  // actively block permit-ready (rail-based or direct-mount alike).
+  if (a.attachments.some(at => at.upliftReactionLbs != null && at.allowableCapacityLbs != null
+      && at.upliftReactionLbs > at.allowableCapacityLbs)
+      && !b.some(x => x.code === 'STRUCTURAL-UTILIZATION-EXCEEDED')) {
+    b.push({ code: 'STRUCTURAL-UTILIZATION-EXCEEDED',
+      message: 'Attachment uplift reaction exceeds allowable capacity — structural review required before permit' });
   }
   if (railBased && a.rails.length === 0) {
     b.push({ code: 'RAIL-QUANTITY-UNTRACEABLE',

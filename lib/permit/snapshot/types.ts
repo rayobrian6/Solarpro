@@ -14,6 +14,10 @@
 
 import type { StructuralBomRow, StructuralBomReconciliation } from './structuralBom';
 export type { StructuralBomRow, StructuralBomReconciliation } from './structuralBom';
+import type { CodeAuthorityRecord } from './codeAuthority';
+export type { CodeAuthorityRecord, CodeEdition, CodeEditionKind, CodeVerificationStatus } from './codeAuthority';
+import type { ProjectAuthorityRecord } from './projectAuthority';
+export type { ProjectAuthorityRecord, ProjectIssueState } from './projectAuthority';
 
 export const SNAPSHOT_SCHEMA_VERSION = '1.0.0';
 
@@ -263,6 +267,13 @@ export interface ModuleInstance {
   mountingEdgeOrientation: 'along-rail' | 'across-slope' | null;
   electricalDeviceId: string | null;
   branchId: string | null;
+  /** §10 DIRECT-MOUNT ONLY — the canonical attachment objects that directly
+   *  support this module (the module frame is the load path; there is no rail
+   *  carrying the relation). Undefined on rail-based systems, where the module→
+   *  attachment relation is carried by RailObject.supportedModuleIds/attachmentIds.
+   *  Kept optional so rail-based ModuleInstance serialization (and its digest) is
+   *  unchanged. */
+  attachmentIds?: string[];
   coord: CoordinateMeta;            // §2 canonical coordinate authority
   provenance: Provenance;
 }
@@ -350,6 +361,12 @@ export interface RailObject {
 export interface AttachmentObject {
   attachmentId: string;
   railId: string; roofPlaneId: string;
+  /** §10 DIRECT-MOUNT ONLY — the module instance this attachment directly
+   *  supports (there is no rail; the module frame is the load path). Undefined
+   *  on rail-based attachments, whose relation is carried by the rail. Promoted
+   *  from the former local AttachmentObjectExt (W4 closer) — digest-neutral: the
+   *  field was already serialized on direct-mount attachments. */
+  supportedModuleId?: string | null;
   xy: { x: number; y: number };
   roofZone: string | null;            // ASCE C&C zone
   substrateMember: string | null;     // rafter/truss — 'unverified-framing' when defaulted
@@ -428,6 +445,20 @@ export interface StructuralEngineResult {
 }
 
 export interface PermitDesignSnapshot {
+  /** W4 §1 — THE canonical AHJ + code-authority record. Every printed code
+   *  edition (NEC/IBC/IRC/IFC/ASCE) projects from here (codeAuthorityProjection).
+   *  Unknown adoptions are honestly null and drive CODE-AUTHORITY-INCOMPLETE. */
+  codeAuthority: CodeAuthorityRecord;
+
+  /** W4 §3/§12 — THE canonical project/cover authority. Every project-facing
+   *  value (project name, customer, address, APN, AHJ, utility, system type,
+   *  capacities, equipment summary, designer, contractor, engineer-review
+   *  status, ISSUE STATUS, revision history, SHEET INDEX, governing-codes ref,
+   *  general notes) projects from here (projectAuthorityProjection). The issue
+   *  state is derived from permitReadiness blockers by domain + the review
+   *  record; the sheet index is the ACTUAL generated manifest. */
+  projectAuthority: ProjectAuthorityRecord;
+
   meta: {
     snapshotId: string;             // content-derived: 'PDS-' + digest prefix
     digest: string;                 // SHA-256 hex of canonical JSON (digest+snapshotId excluded)
@@ -461,6 +492,9 @@ export interface PermitDesignSnapshot {
       recordCapturedAtIso: string;
     };
     interconnection: { method: string; rule: '705.12(B)' | '705.11' };
+    /** W4 §1 — reference to the canonical code-authority record's edition
+     *  projection. adoptedCodes are DERIVED from snapshot.codeAuthority (single
+     *  source); a null adoption prints '—'/PENDING, never a fabricated year. */
     thermal: {
       designTempMinC: number; designTempHighC: number; rooftopAdderC: number;
       source: string;

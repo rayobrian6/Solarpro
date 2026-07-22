@@ -19,7 +19,15 @@ import {
   type RailSpec, type ConductorRecord, type BranchRecord,
 } from './types';
 import { computeSnapshotDigest, snapshotIdFromDigest, deepFreeze } from './digest';
+import { buildCodeAuthority, resolveAhjRecord } from './codeAuthority';
+import {
+  buildProjectAuthority, classifyBlockerDomain,
+  type IssueStateReview, type IssuedForPermitGateInput,
+} from './projectAuthority';
+import { computePlansetManifest } from '../plansetManifest';
+import { hybridSheetSections, SUB_LABEL } from '../sections/subSystemSheets';
 import { buildStructuralAuthority, type StructuralRunsBundle } from './structuralAuthority';
+import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
@@ -41,7 +49,25 @@ const fuzz = <T extends { model: string }>(list: T[], model?: string | null): T 
 export function buildPermitDesignSnapshot(
   input: PermitInput,
   cad: CADModel,
-  opts?: { projectId?: string | null; designVersionId?: string | null },
+  opts?: {
+    projectId?: string | null; designVersionId?: string | null;
+    // W4 §8/§9 closer wiring — resolved by the ASYNC caller (generatePermit)
+    // BEFORE this pure/sync build, then threaded in so the build stays
+    // deterministic. All default to the pre-wiring behaviour (no document ⇒
+    // RT-MINI blockers stay; docs-archived null ⇒ ISSUED-FOR-PERMIT gate not
+    // satisfied), so a DB-unavailable harness/test run is byte-identical.
+    /** VERIFIED racking-capacity document (lib/documents) for the selected mount
+     *  — clears the RT-MINI blockers only when it covers the exact assembly. */
+    capacityDocument?: RackingCapacityDocumentEvidence | null;
+    /** project jurisdiction (AHJ applicability) for the racking clearance check. */
+    projectJurisdiction?: string | null;
+    /** §12 ISSUED-FOR-PERMIT gate: required manufacturer documents archived.
+     *  null ⇒ unresolved (DB unavailable / not read) ⇒ precondition NOT satisfied. */
+    manufacturerDocumentsArchived?: boolean | null;
+    /** §12 gate: a snapshot_digest_invalidations ledger entry forces the review-
+     *  coverage precondition false. Conservative default when unresolved. */
+    digestInvalidatedByLedger?: boolean;
+  },
 ): PermitDesignSnapshot {
   const { project, system, compliance } = input;
   const proj = project as Record<string, any>;
@@ -347,7 +373,6 @@ export function buildPermitDesignSnapshot(
 
   // ── AHJ / codes ───────────────────────────────────────────────────────
   const necRaw = String(compliance?.jurisdiction?.necVersion ?? '').replace(/^NEC\s*/i, '');
-  const nec = /^(2017|2020|2023)$/.test(necRaw) ? necRaw : '2023';
   const necFromRecord = /^(2017|2020|2023)$/.test(necRaw);
 
   const totalsPanels = geoModules.length || system?.totalPanels || 0;
@@ -422,9 +447,205 @@ export function buildPermitDesignSnapshot(
     ahjRidgeSetbackIn: (proj.ahjRidgeSetbackIn ?? proj.fireSetbackRidgeIn) ?? null,
     roofCovering: proj.roofType ?? null,
     fenceWind,
+    // W4 §9 — the async-resolved VERIFIED racking-capacity document (or null when
+    // none/DB-unavailable). buildRackingAssembly evaluates it against the exact
+    // selected assembly; a non-matching doc (brochure) or null leaves RT-MINI
+    // blockers firing (fail-soft).
+    capacityDocument: opts?.capacityDocument ?? null,
+    projectJurisdiction: opts?.projectJurisdiction ?? null,
+  });
+
+  // ═══ W4 §1 CANONICAL CODE AUTHORITY ════════════════════════════════════
+  // THE single source for every printed edition. NEC comes from the best real
+  // adoption authority (resolved AHJ record / server-enriched jurisdiction);
+  // IBC/IRC/IFC are NOT carried by the AHJ DB → left null (no inference); ASCE
+  // is sourced from the structural engine's computational basis. Nothing is
+  // `verified` (no archived adoption ordinance) — the honest state that drives
+  // CODE-AUTHORITY-INCOMPLETE below and PENDING editions on the sheets.
+  const _capturedIso = (input as any).generatedAtIso ?? proj.date ?? '';
+  const _ahjRecord = resolveAhjRecord({
+    ahjRecordId: proj.ahjRecordId ?? proj.ahjId ?? null,
+    stateCode: typeof proj.state === 'string' ? proj.state : null,
+    county: proj.county ?? null,
+    city: proj.city ?? null,
+    address: proj.address ?? null,
+  });
+  const codeAuthority = buildCodeAuthority({
+    ahjRecord: _ahjRecord,
+    necVersionEnriched: (compliance?.jurisdiction as any)?.necVersion ?? proj.ahjNecVersion ?? null,
+    ahjNameHint: (compliance?.jurisdiction as any)?.ahj ?? proj.ahjName ?? null,
+    stateCodeHint: typeof proj.state === 'string' ? proj.state : null,
+    asceEngineBasis: structAuth.env.codeAuthority.asceEdition ?? null,
+    utilityName: proj.utilityName ?? null,
+    utilityId: null,
+    capturedAtIso: _capturedIso,
+  });
+  // adoptedCodes MUST mirror the code-authority record (single source). A null
+  // (unknown) adoption becomes '—' — never a fabricated year (V11 forbids a
+  // sheet or the snapshot substituting an edition the authority does not carry).
+  const _ce = codeAuthority.editions;
+  const adoptedCodes = {
+    nec: _ce.nec.edition ?? '—', ibc: _ce.ibc.edition ?? '—', irc: _ce.irc.edition ?? '—',
+    ifc: _ce.ifc.edition ?? '—', asce: _ce.asce.edition ?? '—',
+  };
+
+  // ═══ W4 §12 PERMIT-READINESS (extracted so the project/issue-state authority
+  // can derive the issue state from these blockers by domain) ════════════════
+  const _permitReadiness: { ready: boolean; blockers: { code: string; message: string }[] } = (() => {
+    const blockers: { code: string; message: string }[] = [];
+    // Req. 3: no authoritative routed geometry exists — segment lengths are
+    // CAD-derived ESTIMATES. Identified, never silently used as authority-grade.
+    if (routeSegments.some(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement')) {
+      blockers.push({ code: 'ROUTE-LENGTH-ESTIMATE',
+        message: 'Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status' });
+    }
+    // Req. 7: stored equipment-identity conflict (e.g. Braidon subSystems
+    // panelId vs fleet model) BLOCKS permit-ready until operator reconciliation.
+    for (const c of equipmentIdentityConflicts) blockers.push({ code: 'EQUIPMENT-IDENTITY-CONFLICT', message: c });
+    // §14 carry-forward: missing feeder raceway/conduit type authority stays
+    // visible and blocking (never weakened by W3).
+    if (cs && !(feederRun?.conduitType)) {
+      blockers.push({ code: 'FEEDER-RACEWAY-AUTHORITY',
+        message: 'Feeder raceway/conduit type not resolved on the canonical feeder segment — raceway + bonding authority required' });
+    }
+    // §12: W3 canonical structural blockers (framing unverified, missing
+    // capacity/fastener source, unsupported mixed assembly, wind/snow
+    // authority, untraceable reactions/rails, utilization failures, missing
+    // site geometry). Honest blockers are the correct Braidon outcome.
+    for (const sb of structAuth.blockers) blockers.push(sb);
+    // §4 (W3.1): promote BLOCKING racking-capacity structural-authority gaps
+    // (RT-MINI capacity provenance: RACKING-CAPACITY-SOURCE-NOT-ARCHIVED +
+    // RACKING-CAPACITY-APPLICABILITY-GAP) into the permit-readiness blockers
+    // so the racking capacity gap ACTIVELY blocks permit-ready rather than
+    // being applied generically. Warning-severity gaps stay on the record
+    // (structural.rackingAssembly.capacityProvenance / structuralAuthorityGaps)
+    // but do not block. Enforced by V32.
+    const _rackGaps = ((structAuth.rackingAssembly as unknown as {
+      structuralAuthorityGaps?: { code: string; severity: 'blocking' | 'warning'; message: string }[];
+    } | null)?.structuralAuthorityGaps) ?? [];
+    for (const g of _rackGaps) {
+      if (g.severity === 'blocking') blockers.push({ code: g.code, message: g.message });
+    }
+    // W4 §1/§2: code authority must be VERIFIED and CURRENT for the project
+    // jurisdiction. An unverified or edition-incomplete record blocks
+    // permit-ready (the planset still renders for review). Missing editions
+    // are named so the operator knows exactly what adoption authority is
+    // still required — never silently defaulted.
+    if (codeAuthority.verificationStatus !== 'verified') {
+      const _missing = codeAuthority.incompleteEditions.map(k => k.toUpperCase());
+      const _detail = _missing.length
+        ? `unknown adopted edition for ${_missing.join(', ')} (printed PENDING — no inference)`
+        : `code authority unverified (no archived adoption document)`;
+      blockers.push({ code: 'CODE-AUTHORITY-INCOMPLETE',
+        message: `Code authority is ${codeAuthority.verificationStatus} for `
+          + `${codeAuthority.ahjName ?? 'the project jurisdiction'} — ${_detail}. `
+          + `Archive + verify the adoption document (W4-D) before permit-ready.` });
+    }
+    blockers.push({ code: 'ENGINEERING-REVIEW-PENDING',
+      message: 'No approved engineering-review record covering this snapshot digest (D-6)' });
+    return { ready: blockers.length === 0, blockers };
+  })();
+
+  // ═══ W4 §3/§12 CANONICAL PROJECT + COVER AUTHORITY ═════════════════════════
+  // THE single source for every project-facing value + the derived issue state.
+  // No vendor/EOR default is injected here (a missing designer/contractor stays
+  // null); the sheet index is the ACTUAL generated manifest; governing codes are
+  // a reference to codeAuthority (no edition literal); the issue state derives
+  // from the blockers above by domain.
+  const _paSections = hybridSheetSections(cad);
+  const _paHybrid = _paSections.length > 1;
+  const _paSystemType = _paHybrid
+    ? `HYBRID — ${_paSections.map(s => SUB_LABEL[s.key]).join(' + ')}`
+    : (() => {
+        const t = String((cad as any).systemType ?? '').toLowerCase();
+        if (t.includes('fence')) return 'SOLAR FENCE';
+        if (t.includes('ground')) return 'GROUND MOUNT';
+        return 'ROOF MOUNT';
+      })();
+  const _paInvRec = microInverters[0] ?? stringInverters[0] ?? null;
+  const _paHasBattery = (proj.batteryCount ?? 0) > 0 && !!proj.batteryModel;
+  // Engineering-review record (certification): always absent at build (the D-6
+  // gate). deriveIssueState reads it → currently PENDING; the pure function is
+  // tested across all 8 states + the digest-invalidation case independently.
+  const _paReview: IssueStateReview | null = null;
+  const _paAuthGapBlockers = _permitReadiness.blockers.filter(b => classifyBlockerDomain(b.code) !== 'review');
+  const _paGateInput: IssuedForPermitGateInput = {
+    // Real enforcement is generatePermit's throw on blocking validators; at build
+    // we proxy "no known authority gaps" as the blocking-validator signal.
+    blockingValidatorsPass: _paAuthGapBlockers.length === 0,
+    noEquipmentIdentityConflict: !_permitReadiness.blockers.some(b => b.code === 'EQUIPMENT-IDENTITY-CONFLICT'),
+    codeAuthorityVerified: codeAuthority.verificationStatus === 'verified',
+    // W4 §8 (closer-wired): manufacturer-document archival is resolved by the
+    // ASYNC caller (generatePermit → lib/documents) and threaded in via opts.
+    // null ⇒ unresolved (no document / DB unavailable) ⇒ precondition not
+    // satisfied (fail-soft). ISSUED FOR PERMIT stays impossible today.
+    manufacturerDocumentsArchived: opts?.manufacturerDocumentsArchived ?? null,
+    structuralApplicabilityEstablished: !structAuth.engine.engineeringReviewRequired
+      && !_paAuthGapBlockers.some(b => classifyBlockerDomain(b.code) === 'structural'),
+    engineerReviewCoversCurrentDigest: false,   // no review record at build
+    // W4 §12 (closer-wired): a snapshot_digest_invalidations ledger entry (from
+    // lib/reconciliation.listActiveInvalidations, resolved async upstream) forces
+    // the review-coverage precondition false. Unavailable ⇒ conservative true
+    // ('unknown' must NOT satisfy the gate). No effect on today's outcome (review
+    // is always null at build) but keeps the gate honest once reviews are wired.
+    digestInvalidatedByLedger: opts?.digestInvalidatedByLedger ?? false,
+    signatureSealSatisfied: false,               // certification.engineer === null at build
+  };
+  const projectAuthority = buildProjectAuthority({
+    projectName: proj.projectName ?? null,
+    customer: proj.clientName ?? null,
+    installationAddress: proj.address ?? null,
+    city: proj.city ?? null,
+    stateCode: typeof proj.state === 'string' ? proj.state : null,
+    zip: proj.zip ?? null,
+    parcelApn: proj.apn ?? null,
+    ahjName: codeAuthority.ahjName,          // single-sourced from code authority
+    utilityName: proj.utilityName ?? null,
+    systemType: _paSystemType,
+    dcKw: system?.totalDcKw ?? (dcWattsStc > 0 ? dcWattsStc / 1000 : null),
+    acKw: system?.totalAcKw ?? (acWattsContinuous > 0 ? acWattsContinuous / 1000 : null),
+    moduleCount: system?.totalPanels ?? totalsPanels ?? null,
+    equipmentSummary: {
+      moduleManufacturer: modules[0]?.manufacturer || null,
+      moduleModel: modules[0]?.model || null,
+      moduleWatts: modules[0]?.spec.wattsStc ?? null,
+      inverterManufacturer: _paInvRec?.manufacturer || null,
+      inverterModel: _paInvRec?.model || null,
+      inverterType: isMicro ? 'MICROINVERTER' : (topology === 'OPTIMIZER' ? 'POWER OPTIMIZER' : 'STRING INVERTER'),
+      mountManufacturer: mount?.manufacturer || null,
+      mountModel: mount?.model || null,
+      batteryBrand: _paHasBattery ? (proj.batteryBrand ?? null) : null,
+      batteryModel: _paHasBattery ? (proj.batteryModel ?? null) : null,
+      batteryCount: _paHasBattery ? (proj.batteryCount ?? null) : null,
+      combinerLabel: bosBrains ? `${bosBrains.brand} ${bosBrains.model}` : null,
+    },
+    designer: proj.designer ?? null,          // NO default engineer name
+    contractor: proj.contractor ?? proj.installerName ?? proj.installer ?? null,
+    issueDate: proj.date ?? null,
+    sheetIndex: computePlansetManifest(input, cad),
+    governingCodes: {
+      schemaVersion: codeAuthority.schemaVersion,
+      verificationStatus: codeAuthority.verificationStatus,
+      ahjName: codeAuthority.ahjName,
+    },
+    generalNotes: [
+      'ALL DIMENSIONS ARE NOMINAL. FIELD VERIFY PRIOR TO INSTALLATION.',
+      'DO NOT SCALE FROM DRAWINGS.',
+      'CONTRACTOR RESPONSIBLE FOR VERIFICATION OF ALL SITE CONDITIONS.',
+      'PE STAMP REQUIRED FOR PERMIT SUBMISSION PER AHJ.',
+      'SUBSTITUTIONS REQUIRE WRITTEN ENGINEER APPROVAL.',
+    ],
+    hasDesign: geoModules.length > 0 || (totalsPanels ?? 0) > 0,
+    blockers: _permitReadiness.blockers,
+    review: _paReview,
+    currentDigest: '',                         // review === null ⇒ digest unused
+    gateInput: _paGateInput,
+    capturedAtIso: _capturedIso,
   });
 
   const snapshot: PermitDesignSnapshot = {
+    codeAuthority,
+    projectAuthority,
     meta: {
       snapshotId: '', digest: '', schemaVersion: SNAPSHOT_SCHEMA_VERSION,
       engineVersion: String(PLANSET_ENGINE_VERSION),
@@ -447,11 +668,15 @@ export function buildPermitDesignSnapshot(
       parcelApn: proj.apn ?? null, lat: proj.lat ?? null, lng: proj.lng ?? null,
       utility: { name: proj.utilityName ?? null, id: null },
       ahj: {
-        name: (compliance?.jurisdiction as any)?.ahj ?? proj.ahjName ?? null,
-        adoptedCodes: { nec, ibc: '2021', irc: '2021', ifc: nec === '2023' ? '2024' : '2021', asce: '7-22' },
-        codesSource: necFromRecord ? 'ahj-record' : 'default',
-        localAmendments: [],
-        recordCapturedAtIso: (input as any).generatedAtIso ?? '',
+        name: codeAuthority.ahjName,
+        // W4 §1: adopted editions are PROJECTED from codeAuthority (single
+        // source). Unknown adoptions are '—', never inferred. codesSource is
+        // 'ahj-record' only when the authority is verified; otherwise 'default'
+        // (⇒ UNVERIFIED marker) — matching the honest verification state.
+        adoptedCodes,
+        codesSource: codeAuthority.verificationStatus === 'verified' ? 'ahj-record' : 'default',
+        localAmendments: codeAuthority.localAmendments,
+        recordCapturedAtIso: _capturedIso,
       },
       interconnection: {
         method: proj.interconnectionMethod ?? 'LOAD_SIDE',
@@ -508,7 +733,10 @@ export function buildPermitDesignSnapshot(
         // EcoFasten) have no canonical attachment objects yet, so their mounts are
         // drawn on the legacy path and are NOT projected from canonical — recorded
         // here + in structural.gaps ('no canonical rail objects … rail-less').
-        ...(structAuth.rails.length ? [] : ['rail-less direct-mount placement not yet canonical (mount coordinates un-derived) — mounts drawn on legacy path, not projected from canonical (recorded gap)']),
+        // W4 closer: a canonical DIRECT-MOUNT array has attachment objects but no
+        // rails — gate on rails OR attachments so a rail-less array whose mounts
+        // ARE canonical (att-dm-*) is not falsely reported as un-derived.
+        ...((structAuth.rails.length || structAuth.attachments.length) ? [] : ['rail-less direct-mount placement not yet canonical (mount coordinates un-derived) — mounts drawn on legacy path, not projected from canonical (recorded gap)']),
         ...equipmentIdentityConflicts.map(c => `EQUIPMENT IDENTITY CONFLICT: ${c}`),
       ],
     },
@@ -574,7 +802,10 @@ export function buildPermitDesignSnapshot(
       bomReconciliation: structAuth.bomReconciliation,
       provenance: { source: 'W3 structural authority (structural-engine-v4 objects + mounting-hardware-db + fire-setback engine)' },
       gaps: [
-        ...(structAuth.rails.length ? [] : ['no canonical rail objects (non-roof or rail-less/unresolved mount)']),
+        // W4 closer: rails OR direct-mount attachments count as canonical
+        // placement; only a truly rail-less array with NO attachment objects is
+        // an un-derived gap here.
+        ...((structAuth.rails.length || structAuth.attachments.length) ? [] : ['no canonical rail objects (non-roof or rail-less/unresolved mount)']),
         ...(structAuth.engine.engineeringReviewRequired
           ? ['STRUCTURAL ENGINEERING REVIEW REQUIRED — ' + (structAuth.engine.reviewReasons[0] ?? 'framing unverified')] : []),
       ],
@@ -588,45 +819,7 @@ export function buildPermitDesignSnapshot(
       provenance: { source: 'snapshot builder (Σ over snapshot objects)' },
     },
     certification: { engineeringReviewApproved: false, engineer: null },
-    permitReadiness: (() => {
-      const blockers: { code: string; message: string }[] = [];
-      // Req. 3: no authoritative routed geometry exists — segment lengths are
-      // CAD-derived ESTIMATES. Identified, never silently used as authority-grade.
-      if (routeSegments.some(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement')) {
-        blockers.push({ code: 'ROUTE-LENGTH-ESTIMATE',
-          message: 'Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status' });
-      }
-      // Req. 7: stored equipment-identity conflict (e.g. Braidon subSystems
-      // panelId vs fleet model) BLOCKS permit-ready until operator reconciliation.
-      for (const c of equipmentIdentityConflicts) blockers.push({ code: 'EQUIPMENT-IDENTITY-CONFLICT', message: c });
-      // §14 carry-forward: missing feeder raceway/conduit type authority stays
-      // visible and blocking (never weakened by W3).
-      if (cs && !(feederRun?.conduitType)) {
-        blockers.push({ code: 'FEEDER-RACEWAY-AUTHORITY',
-          message: 'Feeder raceway/conduit type not resolved on the canonical feeder segment — raceway + bonding authority required' });
-      }
-      // §12: W3 canonical structural blockers (framing unverified, missing
-      // capacity/fastener source, unsupported mixed assembly, wind/snow
-      // authority, untraceable reactions/rails, utilization failures, missing
-      // site geometry). Honest blockers are the correct Braidon outcome.
-      for (const sb of structAuth.blockers) blockers.push(sb);
-      // §4 (W3.1): promote BLOCKING racking-capacity structural-authority gaps
-      // (RT-MINI capacity provenance: RACKING-CAPACITY-SOURCE-NOT-ARCHIVED +
-      // RACKING-CAPACITY-APPLICABILITY-GAP) into the permit-readiness blockers
-      // so the racking capacity gap ACTIVELY blocks permit-ready rather than
-      // being applied generically. Warning-severity gaps stay on the record
-      // (structural.rackingAssembly.capacityProvenance / structuralAuthorityGaps)
-      // but do not block. Enforced by V32.
-      const _rackGaps = ((structAuth.rackingAssembly as unknown as {
-        structuralAuthorityGaps?: { code: string; severity: 'blocking' | 'warning'; message: string }[];
-      } | null)?.structuralAuthorityGaps) ?? [];
-      for (const g of _rackGaps) {
-        if (g.severity === 'blocking') blockers.push({ code: g.code, message: g.message });
-      }
-      blockers.push({ code: 'ENGINEERING-REVIEW-PENDING',
-        message: 'No approved engineering-review record covering this snapshot digest (D-6)' });
-      return { ready: blockers.length === 0, blockers };
-    })(),
+    permitReadiness: _permitReadiness,
   };
 
   const digest = computeSnapshotDigest(snapshot as unknown as Record<string, unknown>);

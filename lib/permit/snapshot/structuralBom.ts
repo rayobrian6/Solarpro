@@ -89,41 +89,47 @@ const FLASHING_METHODS = new Set([
 ]);
 
 /** Derive every structural/racking BOM row from the canonical objects. Returns
- *  an empty list when no structural objects exist (non-roof / rail-less /
- *  unresolved mount) — an HONEST empty, never a fabricated fallback. */
+ *  an empty list when NO attachment objects exist (non-roof / unresolved mount)
+ *  — an HONEST empty, never a fabricated fallback. RAIL-LESS / DIRECT-MOUNT
+ *  systems (attachments present, rails empty) emit mount / fastener / bonding /
+ *  ground-lug / flashing rows from the attachment + module objects; the rail /
+ *  splice / T-bolt / clamp rows (a railed-assembly concept) are omitted. */
 export function deriveStructuralBom(o: StructuralBomObjects): StructuralBomRow[] {
   const { rails, attachments, moduleInstances, rackingAssembly } = o;
-  if (rails.length === 0 || attachments.length === 0) return [];
+  if (attachments.length === 0) return [];
+  const railed = rails.length > 0;
 
   const rows: StructuralBomRow[] = [];
   const railIds = rails.map(r => r.railId);
   const attIds = attachments.map(a => a.attachmentId);
   const modIds = moduleInstances.map(m => m.instanceId);
 
-  // ── Rails: stock sections = Σ ceil(physical length ÷ stock length) ─────────
-  const railStockQty = rails.reduce(
-    (s, r) => s + (r.stockLengthIn && r.stockLengthIn > 0 ? Math.ceil(r.physicalLengthIn / r.stockLengthIn) : 1), 0);
-  rows.push({
-    key: 'rails', category: 'rail', item: `${rackingAssembly?.railModel ?? 'Rail'} (stock sections)`,
-    qty: railStockQty, unit: 'ea', partNumber: rackingAssembly?.railSku ?? rackingAssembly?.railModel ?? null,
-    aggregation: 'rails:total-length÷stock', objectCount: rails.length,
-    derivedFrom: `Σ ceil(rail.physicalLengthIn ÷ rail.stockLengthIn) over ${rails.length} canonical rail objects`,
-    provenance: PROV('rail stock qty from rail objects (physical length ÷ manufacturer stock length)'),
-  });
+  if (railed) {
+    // ── Rails: stock sections = Σ ceil(physical length ÷ stock length) ───────
+    const railStockQty = rails.reduce(
+      (s, r) => s + (r.stockLengthIn && r.stockLengthIn > 0 ? Math.ceil(r.physicalLengthIn / r.stockLengthIn) : 1), 0);
+    rows.push({
+      key: 'rails', category: 'rail', item: `${rackingAssembly?.railModel ?? 'Rail'} (stock sections)`,
+      qty: railStockQty, unit: 'ea', partNumber: rackingAssembly?.railSku ?? rackingAssembly?.railModel ?? null,
+      aggregation: 'rails:total-length÷stock', objectCount: rails.length,
+      derivedFrom: `Σ ceil(rail.physicalLengthIn ÷ rail.stockLengthIn) over ${rails.length} canonical rail objects`,
+      provenance: PROV('rail stock qty from rail objects (physical length ÷ manufacturer stock length)'),
+    });
 
-  // ── Rail splices: Σ per-rail segmentation splices ─────────────────────────
-  const spliceQty = rails.reduce((s, r) => s + r.spliceCount, 0);
-  rows.push({
-    key: 'railSplices', category: 'splice', item: `${rackingAssembly?.splice ?? 'Rail Splice'}`,
-    qty: spliceQty, unit: 'ea', partNumber: rackingAssembly?.splice ?? null,
-    sourceObjectIds: railIds,
-    derivedFrom: `Σ rail.spliceCount over ${rails.length} rail objects (stock segmentation)`,
-    provenance: PROV('splice qty from rail-object segmentation'),
-  });
+    // ── Rail splices: Σ per-rail segmentation splices ───────────────────────
+    const spliceQty = rails.reduce((s, r) => s + r.spliceCount, 0);
+    rows.push({
+      key: 'railSplices', category: 'splice', item: `${rackingAssembly?.splice ?? 'Rail Splice'}`,
+      qty: spliceQty, unit: 'ea', partNumber: rackingAssembly?.splice ?? null,
+      sourceObjectIds: railIds,
+      derivedFrom: `Σ rail.spliceCount over ${rails.length} rail objects (stock segmentation)`,
+      provenance: PROV('splice qty from rail-object segmentation'),
+    });
+  }
 
-  // ── Mounts / L-feet: one per attachment object ────────────────────────────
+  // ── Mounts / L-feet / direct-mount bases: one per attachment object ───────
   rows.push({
-    key: 'mounts', category: 'mount', item: `${rackingAssembly?.mountModel ?? 'Mount / L-Foot'}`,
+    key: 'mounts', category: 'mount', item: `${rackingAssembly?.mountModel ?? (railed ? 'Mount / L-Foot' : 'Direct-Mount Base')}`,
     qty: attachments.length, unit: 'ea', partNumber: rackingAssembly?.mountSku ?? rackingAssembly?.mountModel ?? null,
     sourceObjectIds: attIds,
     derivedFrom: `one mount per canonical attachment object (${attachments.length})`,
@@ -140,35 +146,37 @@ export function deriveStructuralBom(o: StructuralBomObjects): StructuralBomRow[]
     provenance: PROV('fastener qty from attachment installation method × count'),
   });
 
-  // ── Rail T-bolts: one mount-to-rail bolt per attachment (rail-based) ──────
-  rows.push({
-    key: 'mountingBolts', category: 'mount_hardware', item: `${rackingAssembly?.tBoltFastener ?? 'Rail T-Bolt'}`,
-    qty: attachments.length, unit: 'ea', partNumber: null,
-    sourceObjectIds: attIds,
-    derivedFrom: `one mount-to-rail bolt per attachment object (${attachments.length})`,
-    provenance: PROV('T-bolt qty = attachment-object count (rail-based)'),
-  });
+  if (railed) {
+    // ── Rail T-bolts: one mount-to-rail bolt per attachment (rail-based) ────
+    rows.push({
+      key: 'mountingBolts', category: 'mount_hardware', item: `${rackingAssembly?.tBoltFastener ?? 'Rail T-Bolt'}`,
+      qty: attachments.length, unit: 'ea', partNumber: null,
+      sourceObjectIds: attIds,
+      derivedFrom: `one mount-to-rail bolt per attachment object (${attachments.length})`,
+      provenance: PROV('T-bolt qty = attachment-object count (rail-based)'),
+    });
 
-  // ── Mid clamps: ACTUAL module adjacency in each rail's supported row ──────
-  // Between two modules adjacent on a rail there is exactly one shared mid clamp.
-  const midQty = rails.reduce((s, r) => s + Math.max(0, r.supportedModuleIds.length - 1), 0);
-  rows.push({
-    key: 'midClamps', category: 'mid_clamp', item: `${rackingAssembly?.midClamp ?? 'Mid Clamp'}`,
-    qty: midQty, unit: 'ea', partNumber: rackingAssembly?.midClamp ?? null,
-    sourceObjectIds: railIds,
-    derivedFrom: `Σ (modules_on_rail − 1) over rails = module adjacency (moduleInstances=${moduleInstances.length})`,
-    provenance: PROV('mid clamps from actual module adjacency in rail rows'),
-  });
+    // ── Mid clamps: ACTUAL module adjacency in each rail's supported row ────
+    // Between two modules adjacent on a rail there is exactly one shared mid clamp.
+    const midQty = rails.reduce((s, r) => s + Math.max(0, r.supportedModuleIds.length - 1), 0);
+    rows.push({
+      key: 'midClamps', category: 'mid_clamp', item: `${rackingAssembly?.midClamp ?? 'Mid Clamp'}`,
+      qty: midQty, unit: 'ea', partNumber: rackingAssembly?.midClamp ?? null,
+      sourceObjectIds: railIds,
+      derivedFrom: `Σ (modules_on_rail − 1) over rails = module adjacency (moduleInstances=${moduleInstances.length})`,
+      provenance: PROV('mid clamps from actual module adjacency in rail rows'),
+    });
 
-  // ── End clamps: two per rail end (row edges) ──────────────────────────────
-  const endQty = rails.reduce((s, r) => s + (r.supportedModuleIds.length > 0 ? 2 : 0), 0);
-  rows.push({
-    key: 'endClamps', category: 'end_clamp', item: `${rackingAssembly?.endClamp ?? 'End Clamp'}`,
-    qty: endQty, unit: 'ea', partNumber: rackingAssembly?.endClamp ?? null,
-    sourceObjectIds: railIds,
-    derivedFrom: `2 end clamps per rail supporting modules (${rails.length} rails)`,
-    provenance: PROV('end clamps = 2 × rail objects (row edges)'),
-  });
+    // ── End clamps: two per rail end (row edges) ────────────────────────────
+    const endQty = rails.reduce((s, r) => s + (r.supportedModuleIds.length > 0 ? 2 : 0), 0);
+    rows.push({
+      key: 'endClamps', category: 'end_clamp', item: `${rackingAssembly?.endClamp ?? 'End Clamp'}`,
+      qty: endQty, unit: 'ea', partNumber: rackingAssembly?.endClamp ?? null,
+      sourceObjectIds: railIds,
+      derivedFrom: `2 end clamps per rail supporting modules (${rails.length} rails)`,
+      provenance: PROV('end clamps = 2 × rail objects (row edges)'),
+    });
+  }
 
   // ── Bonding clips: one per module (UL 2703 topology) ─────────────────────
   rows.push({
@@ -218,25 +226,32 @@ export function reconcileStructuralBom(
   if (rows.length === 0) {
     return { ok: true, basis: 'no-structural-objects', checks: [] };
   }
+  const railed = o.rails.length > 0;
   const qty = (k: string): number => rows.find(r => r.key === k)?.qty ?? 0;
   const checks: StructuralBomReconCheck[] = [];
   const push = (name: string, expected: number | null, actual: number, basis: string) =>
     checks.push({ name, expected, actual, ok: expected == null ? true : expected === actual, basis });
 
-  // Object-internal geometry basis (always checkable).
-  const railGeomQty = o.rails.reduce(
-    (s, r) => s + (r.stockLengthIn && r.stockLengthIn > 0 ? Math.ceil(r.physicalLengthIn / r.stockLengthIn) : 1), 0);
-  const spliceGeomQty = o.rails.reduce((s, r) => s + r.spliceCount, 0);
-  const midAdjQty = o.rails.reduce((s, r) => s + Math.max(0, r.supportedModuleIds.length - 1), 0);
+  // Object-internal geometry basis.
   const fastenerQty = o.attachments.reduce((s, a) => s + (a.fastenerCount ?? 0), 0);
 
-  push('rails-vs-rail-geometry', railGeomQty, qty('rails'), 'Σ ceil(rail.len÷stock)');
+  // Attachment/module checks apply to EVERY structural system (rail-based AND
+  // direct-mount). The rail/splice/clamp checks are a RAILED concept — running
+  // them for a rail-less array (0 rails) would fire spuriously, so they are
+  // gated on `railed`.
   push('mounts-vs-attachment-objects', o.attachments.length, qty('mounts'), 'attachment-object count');
-  push('splices-vs-rail-segmentation', spliceGeomQty, qty('railSplices'), 'Σ rail.spliceCount');
-  push('midclamps-vs-module-adjacency', midAdjQty, qty('midClamps'), 'Σ (modules_on_rail−1)');
-  push('endclamps-vs-rail-ends', 2 * o.rails.filter(r => r.supportedModuleIds.length > 0).length, qty('endClamps'), '2 × rails');
   push('fasteners-vs-attachment-method', fastenerQty, qty('lagBolts'), 'Σ attachment.fastenerCount');
   push('bonding-vs-module-topology', o.moduleInstances.length, qty('bondingClips'), 'one per module');
+  if (railed) {
+    const railGeomQty = o.rails.reduce(
+      (s, r) => s + (r.stockLengthIn && r.stockLengthIn > 0 ? Math.ceil(r.physicalLengthIn / r.stockLengthIn) : 1), 0);
+    const spliceGeomQty = o.rails.reduce((s, r) => s + r.spliceCount, 0);
+    const midAdjQty = o.rails.reduce((s, r) => s + Math.max(0, r.supportedModuleIds.length - 1), 0);
+    push('rails-vs-rail-geometry', railGeomQty, qty('rails'), 'Σ ceil(rail.len÷stock)');
+    push('splices-vs-rail-segmentation', spliceGeomQty, qty('railSplices'), 'Σ rail.spliceCount');
+    push('midclamps-vs-module-adjacency', midAdjQty, qty('midClamps'), 'Σ (modules_on_rail−1)');
+    push('endclamps-vs-rail-ends', 2 * o.rails.filter(r => r.supportedModuleIds.length > 0).length, qty('endClamps'), '2 × rails');
+  }
 
   // Engine-producer basis: cross-check against V4 calcRackingBOM ONLY when the
   // producer covers the SAME panel scope as the objects. On a hybrid the roof
@@ -246,7 +261,14 @@ export function reconcileStructuralBom(
   let basis: StructuralBomReconciliation['basis'] = 'object-internal';
   let note: string | undefined;
   const scopeOk = opts?.scopeMatchesV4 !== false;
-  if (v4 && scopeOk) {
+  if (!railed) {
+    // Rail-less / direct-mount: the V4 calcRackingBOM is a rail-grid producer, so
+    // its rail/splice/clamp figures do not apply; the object-internal mount /
+    // fastener / bonding reconciliation is the authority here.
+    note = 'Direct-mount (rail-less) system: object-internal reconciliation over mount / fastener / '
+      + 'bonding objects. Rail / splice / clamp checks and the V4 calcRackingBOM (rail-grid) cross-check '
+      + 'do not apply — there are no rails.';
+  } else if (v4 && scopeOk) {
     basis = 'object-vs-engine';
     push('rails-vs-v4-calcRackingBOM', v4.rails?.qty ?? null, qty('rails'), 'V4 calcRackingBOM.rails');
     push('mounts-vs-v4-calcRackingBOM', v4.mounts?.qty ?? null, qty('mounts'), 'V4 calcRackingBOM.mounts');

@@ -14,6 +14,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import { CANONICAL_COORDINATE_SYSTEM_ID, type PermitDesignSnapshot, type SnapshotViolation, type CoordinateMeta } from './types';
 import { transformDigestOf } from './coordinateAuthority';
+import { deriveIssueState } from './projectAuthority';
 
 const SHEETS_ELECTRICAL = ['E-1', 'PV-4A', 'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'BOM'];
 
@@ -145,10 +146,57 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
     }
   }
 
-  // V11 — code editions from AHJ authority (deferred to W4 projections; source flagged now)
-  if (s.project.ahj.codesSource === 'default') {
-    add('V11', 'project.ahj.adoptedCodes', s.project.ahj.adoptedCodes, 'default (no AHJ record)',
-      ['ALL SHEETS'], 'code editions defaulted — AHJ record missing; sheets must mark UNVERIFIED (W4)', 'deferred');
+  // ── V11 (W4 §2) — CODE-AUTHORITY SINGLE SOURCE — ACTIVATED, BLOCKING ──────
+  // Every displayed code edition must come from the ONE snapshot codeAuthority
+  // record; the snapshot may not fabricate an edition the authority lacks; and
+  // an unverified/incomplete authority must be surfaced as a permit blocker
+  // (planset still renders for review). Cross-sheet identical editions +
+  // renderer literal-freedom are the RENDER-level half of V11, enforced by the
+  // data-code-edition harness + the source-scan test (like V12/V13). This
+  // validator owns the SNAPSHOT-level consistency half.
+  {
+    const ca = (s as unknown as { codeAuthority?: {
+      schemaVersion?: string; verificationStatus?: string; incompleteEditions?: string[];
+      localAmendments?: string[];
+      editions?: Record<string, { edition: string | null }>;
+    } }).codeAuthority;
+    if (!ca || !ca.schemaVersion || !ca.editions) {
+      add('V11', 'codeAuthority', ca ?? null, 'W4 code-authority builder',
+        ['ALL SHEETS'], 'snapshot carries no canonical codeAuthority record — every sheet would lack a single edition source (W4 §1)');
+    } else {
+      const kinds: ('nec' | 'ibc' | 'irc' | 'ifc' | 'asce')[] = ['nec', 'ibc', 'irc', 'ifc', 'asce'];
+      const adopted = s.project.ahj.adoptedCodes as Record<string, string>;
+      for (const k of kinds) {
+        const authEd = ca.editions[k]?.edition ?? null;
+        const printed = adopted?.[k] ?? null;
+        // Single source: adoptedCodes must mirror the authority exactly ('—' for null).
+        const expected = authEd ?? '—';
+        if (printed !== expected) {
+          add('V11', `project.ahj.adoptedCodes.${k}`, printed, 'W4 code-authority projection',
+            ['COVER', 'E-1', 'PV-4C', 'CERT', 'PE-1', 'TITLE-BLOCK'],
+            `adopted ${k.toUpperCase()} '${printed}' ≠ codeAuthority edition '${expected}' — editions must single-source from codeAuthority`);
+        }
+        // No fabrication: a null (unknown) authority edition may never print as a year.
+        if (authEd == null && printed != null && printed !== '—') {
+          add('V11', `project.ahj.adoptedCodes.${k}`, printed, 'W4 code-authority projection',
+            ['ALL SHEETS'],
+            `adopted ${k.toUpperCase()} '${printed}' fabricated — authority has no adoption for this code family (must be '—'/PENDING)`);
+        }
+      }
+      // Amendments attached to the applicable code record (single source).
+      if ((ca.localAmendments ?? []).join('|') !== (s.project.ahj.localAmendments ?? []).join('|')) {
+        add('V11', 'project.ahj.localAmendments', s.project.ahj.localAmendments, 'W4 code-authority record',
+          ['COVER', 'CERT'], 'project amendments diverge from the code-authority record — amendments must attach to the code record');
+      }
+      // Verification currency: unverified/incomplete ⇒ CODE-AUTHORITY-INCOMPLETE
+      // blocker MUST be present (honest surfacing, never silently permit-ready).
+      if (ca.verificationStatus !== 'verified'
+          && !s.permitReadiness.blockers.some(b => b.code === 'CODE-AUTHORITY-INCOMPLETE')) {
+        add('V11', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          'W4 code authority', ['PV-0', 'VAL-1'],
+          `code authority is ${ca.verificationStatus} but no CODE-AUTHORITY-INCOMPLETE blocker present — the gap must actively block permit-ready`);
+      }
+    }
   }
 
   // V12/V13 are render-level — enforced post-render in generatePermit.
@@ -409,6 +457,89 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
   } else if (_thNote.includes('not reported')) {
     add('V15', 'project.thermal', s.project.thermal.designTempMinC, 'designTemps.ts',
       ['PV-4A', 'PV-4B', 'APP-A', 'E-1'], _thNote, 'deferred');
+  }
+
+  // ═══ W4 §3/§12 — PROJECT / COVER AUTHORITY + ISSUE-STATE invariants ════════
+  {
+    const pa = (s as unknown as { projectAuthority?: PermitDesignSnapshot['projectAuthority'] }).projectAuthority;
+    const COVER_SHEETS = ['PV-0', 'CERT', 'PE-1'];
+    if (pa) {
+      const reviewObj = s.certification.engineeringReviewApproved;
+      const review = (reviewObj && typeof reviewObj === 'object')
+        ? { reviewedDigest: reviewObj.reviewedDigest } : null;
+      const hasCurrentReview = !!review && review.reviewedDigest === s.meta.digest;
+      const hasDesign = s.geometry.modules.length > 0 || s.derived.moduleCount > 0;
+
+      // V33 — ISSUE-STATE DERIVATION CONSISTENCY: the stored issue state must
+      // equal deriveIssueState() over the SAME permitReadiness blockers + review
+      // record. A stored state that does not derive from the blockers is a
+      // fabricated status (the "REV A: ISSUED FOR PERMIT" cover lie).
+      const expected = deriveIssueState({
+        hasDesign,
+        blockers: s.permitReadiness.blockers,
+        review,
+        currentDigest: s.meta.digest,
+        gatePasses: pa.issuedForPermitGate.pass,
+      });
+      if (expected.state !== pa.issueState) {
+        add('V33', 'projectAuthority.issueState', pa.issueState, 'buildProjectAuthority',
+          COVER_SHEETS, `stored issue state '${pa.issueState}' ≠ derived '${expected.state}' — the issue state must be DERIVED from permitReadiness blockers by domain, never fabricated`);
+      }
+
+      // V34 — ISSUED-FOR-PERMIT GATE INTEGRITY (§12).
+      // REVIEWED / PERMIT-READY / ISSUED FOR PERMIT require an approved review
+      // that references the CURRENT snapshot digest.
+      if ((pa.issueState === 'REVIEWED' || pa.issueState === 'PERMIT-READY' || pa.issueState === 'ISSUED FOR PERMIT')
+          && !hasCurrentReview) {
+        add('V34', 'projectAuthority.issueState', pa.issueState, 'buildProjectAuthority',
+          COVER_SHEETS, `issue state '${pa.issueState}' requires an approved engineering-review record referencing the current snapshot digest, but none is present`);
+      }
+      // ISSUED FOR PERMIT ⇒ the gate passes with EVERY precondition satisfied.
+      if (pa.issueState === 'ISSUED FOR PERMIT') {
+        const failed = pa.issuedForPermitGate.preconditions.filter(p => !p.satisfied).map(p => p.id);
+        if (!pa.issuedForPermitGate.pass || failed.length) {
+          add('V34', 'projectAuthority.issuedForPermitGate', { pass: pa.issuedForPermitGate.pass, failed },
+            'evaluateIssuedForPermitGate', COVER_SHEETS,
+            `ISSUED FOR PERMIT but the gate is not fully satisfied (unsatisfied: ${failed.join(', ') || 'gate.pass=false'})`);
+        }
+      }
+      // Digest-invalidation rule: a passing gate must reference the current digest.
+      if (pa.issuedForPermitGate.pass && !hasCurrentReview) {
+        add('V34', 'projectAuthority.issuedForPermitGate.pass', true, 'evaluateIssuedForPermitGate',
+          COVER_SHEETS, 'ISSUED-FOR-PERMIT gate reports pass but no review covers the current digest — a digest change invalidates prior approval unless a new review covers it');
+      }
+
+      // V35 — COVER / TITLE-BLOCK SINGLE-SOURCING (no independent values).
+      // Sheet index is the ACTUAL manifest (never an independent/hardcoded list).
+      if (hasDesign && pa.sheetIndex.length === 0) {
+        add('V35', 'projectAuthority.sheetIndex', pa.sheetIndex.length, 'computePlansetManifest',
+          ['PV-0'], 'sheet index is empty on a package with modules — the cover index must be the generated manifest, never an independent list');
+      }
+      // Governing codes is a REFERENCE only — NO edition literal (V11 rule).
+      const gcs = JSON.stringify(pa.governingCodesRef ?? {});
+      if (/\b20(1[0-9]|2[0-9])\b|\b7-(1[0-9]|2[0-9])\b/.test(gcs)) {
+        add('V35', 'projectAuthority.governingCodesRef', pa.governingCodesRef, 'buildProjectAuthority',
+          COVER_SHEETS, 'governing-codes reference carries a code edition literal — editions must live ONLY on snapshot.codeAuthority (V11)');
+      }
+      // Equipment summary is single-sourced from the versioned equipment records
+      // (no stale/independent equipment on the cover).
+      const modRec = s.equipment.modules[0];
+      if (modRec && pa.equipmentSummary.moduleModel && pa.equipmentSummary.moduleModel !== modRec.model) {
+        add('V35', 'projectAuthority.equipmentSummary.moduleModel', pa.equipmentSummary.moduleModel, 'buildProjectAuthority',
+          COVER_SHEETS, `cover module '${pa.equipmentSummary.moduleModel}' ≠ snapshot equipment record '${modRec.model}' — stale/independent equipment on the cover`);
+      }
+      const invRec = s.equipment.microInverters[0] ?? s.equipment.stringInverters[0];
+      if (invRec && pa.equipmentSummary.inverterModel && pa.equipmentSummary.inverterModel !== invRec.model) {
+        add('V35', 'projectAuthority.equipmentSummary.inverterModel', pa.equipmentSummary.inverterModel, 'buildProjectAuthority',
+          COVER_SHEETS, `cover inverter '${pa.equipmentSummary.inverterModel}' ≠ snapshot equipment record '${invRec.model}' — stale/independent equipment on the cover`);
+      }
+      // AHJ single-sourced from the code-authority record (one AHJ everywhere).
+      // Guard: a snapshot with no codeAuthority is a V11 concern, not V35.
+      if (s.codeAuthority && pa.ahjName !== s.codeAuthority.ahjName) {
+        add('V35', 'projectAuthority.ahjName', pa.ahjName, 'buildProjectAuthority',
+          COVER_SHEETS, `projectAuthority AHJ '${pa.ahjName}' ≠ codeAuthority AHJ '${s.codeAuthority.ahjName}' — AHJ must be single-sourced from the code authority`);
+      }
+    }
   }
 
   return v;

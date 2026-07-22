@@ -23,10 +23,13 @@ import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getSnapshot } from '../snapshot/read';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance } = input;
-  const necVer = compliance.jurisdiction?.necVersion || '2020';
+  // W4 §2: NEC edition projects from the snapshot codeAuthority (single source).
+  const cp = projectCodeAuthorityFromInput(input);
+  const necVer = cp.nec ?? 'PENDING';
   const _isRoof = isRoof(cad.systemType);
   const _isFence = isFence(cad.systemType);
   const _isGround = isGround(cad.systemType);
@@ -36,7 +39,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   // interconnection, battery and rapid-shutdown, resolved to this NEC edition.
   const labels = selectFieldLabels(input, cad);
   const requiredLabels = labels.filter(l => l.required);
-  const necYear = String(necVer).match(/20\d\d/)?.[0] || '2020';
+  const necYear = cp.nec ?? 'PENDING';
 
   // ── SITE-COMPUTED RATING LABELS (per sub-system) ─────────────────────────
   // The dataset's fill-in ratings labels (DC PV power source / AC disconnect)
@@ -519,8 +522,10 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
 
 export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
-  const necVerRaw = compliance.jurisdiction?.necVersion || '2020';
-  const is2023 = String(necVerRaw).includes('2023');
+  // W4 §2: NEC edition + edition-keyed clause selection project from codeAuthority.
+  const cp = projectCodeAuthorityFromInput(input);
+  const necVerRaw = cp.nec ?? 'PENDING';
+  const is2023 = cp.nec === '2023';
   const hasBattery = hasRealBattery(project);
   const isMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
   const isSupply = isSupplySideInterconnection(input);
@@ -751,7 +756,7 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
           <tr class="bg-lt"><td class="fw7">Letter Height</td><td>Title / signal words min. 3/8" (9.5 mm); body text min. 3/16" (4.8 mm); high-contrast, non-handwritten.</td></tr>
           <tr><td class="fw7">Location</td><td>At the main service disconnect (readily visible, eye level). Group with all on-site power-source directories.</td></tr>
           <tr class="bg-lt"><td class="fw7">Color</td><td>CAUTION header per ANSI Z535 (black on safety yellow); the rapid-shutdown band is white on red as mandated by ${rsdRef}.</td></tr>
-          <tr><td class="fw7">Code Basis</td><td class="mono" style="font-size:8px;">NEC ${is2023 ? '2023' : necVerRaw} — 705.10 (power-source directory) · 690.56(B) (PV disconnect-location plaque) · ${rsdRef} (rapid-shutdown building placard)${hasBattery ? ' · 706 / IFC 1207 (ESS)' : ''}</td></tr>
+          <tr><td class="fw7">Code Basis</td><td class="mono" style="font-size:8px;">NEC ${necVerRaw} — 705.10 (power-source directory) · 690.56(B) (PV disconnect-location plaque) · ${rsdRef} (rapid-shutdown building placard)${hasBattery ? ' · 706 / IFC 1207 (ESS)' : ''}</td></tr>
         </tbody>
       </table>
 
@@ -764,6 +769,7 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
 
 export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system } = input;
+  const cp = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
   const _isRoof = isRoof(cad.systemType);   // FIX v47.296
   const _isFence = isFence(cad.systemType);
   const _isGround = isGround(cad.systemType);
@@ -1028,7 +1034,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             ${_isRoof ? `<tr><td class="il">Lag Bolt</td><td class="iv">${_fr(_lagDia)}" DIA × ${_lagLen}" Min. Stainless Steel</td></tr>` : ''}
             ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">Min. ${_embed}" thread embedment into rafter</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
             <tr><td class="il">UL Listing</td><td class="iv">${_mSel?.mount?.ul2703Listed === false ? 'See manufacturer listing' : 'UL 2703'}${_mSel?.mount?.iccEsReport ? ` / ${_mSel.mount.iccEsReport}` : ''}</td></tr>
-            <tr><td class="il">Wind Rating</td><td class="iv">Per ASCE 7-22 (see PV-4C)</td></tr>
+            <tr><td class="il">Wind Rating</td><td class="iv">Per ${cp.asceLabel} (see PV-4C)</td></tr>
           </table>`;
           })()}
 

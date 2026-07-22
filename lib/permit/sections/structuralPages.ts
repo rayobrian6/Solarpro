@@ -17,6 +17,7 @@ import {
   checkThresholdLabel, type StructuralProjection,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel, necNextStandardOcpd } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
@@ -117,9 +118,9 @@ export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: 
 // ══════════════════════════════════════════════════════════════════════════════
 // PV-4C STRUCTURAL CALCULATION SHEET — THREE ISOLATED SYSTEM FAMILIES
 // ══════════════════════════════════════════════════════════════════════════════
-// pageStructuralFence  — ASCE 7-22 §29.4  fence post/foundation only
-// pageStructuralGround — ASCE 7-22 §27    pile/pier only
-// pageStructuralRoof   — ASCE 7-22 §26+27 rafter + attachment + snow
+// pageStructuralFence  — ${asce} §29.4  fence post/foundation only
+// pageStructuralGround — ${asce} §27    pile/pier only
+// pageStructuralRoof   — ${asce} §26+27 rafter + attachment + snow
 // pageStructural()     — dispatcher: reads cad.systemType → calls correct family
 // NO shared structural narrative blocks. NO cross-family conditionals in bodies.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -128,7 +129,8 @@ export function pageFenceStructural(input: PermitInput, cad: CADModel, pageNum: 
 export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance, rulesResult, project } = input;
   const structural = compliance.structural;
-  const ibcVer = '2021';
+  const cp = projectCodeAuthorityFromInput(input); const asce = cp.asceLabel;  // W4 §2 single-source
+  const ibcVer = cp.ibc ?? 'PENDING';
   const structuralRules = (rulesResult?.rules || []).filter(r => r.category === 'structural');
 
   // ── Read from canonical (authoritative) ───────────────────────────────────
@@ -159,7 +161,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   const railCount   = cad.fence?.railCount || 3;
   const fenceLenFt  = cad.fence?.totalLengthM ? (cad.fence.totalLengthM * 3.28084).toFixed(0) : '—';
 
-  // ── RELOCATED FENCE WIND ENGINE (ASCE 7-22 §29.4) — no inline load math ───
+  // ── RELOCATED FENCE WIND ENGINE (${asce} §29.4) — no inline load math ───
   // The renderer holds ZERO structural calculation; it calls the lib engine and
   // projects the numbers. Wind speed comes from the single-sourced env when the
   // snapshot is present, else canonical (honest: em-dash if neither).
@@ -195,16 +197,16 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — SOLAR FENCE', pageNum, totalPages)}
     <div class="page-content">
       ${structuralBannerHtml(_proj.banner)}
-      <div class="section-title">Structural Analysis — ASCE 7-22 §29.4 (Fence-Mounted PV)</div>
+      <div class="section-title">Structural Analysis — ${asce} §29.4 (Fence-Mounted PV)</div>
 
       <div class="struct-grid">
         <!-- Wind Analysis — COMPUTED FROM CANONICAL -->
         <div class="struct-card">
-          <div class="sct">Wind Analysis — ASCE 7-22 §29.4</div>
+          <div class="sct">Wind Analysis — ${asce} §29.4</div>
           <table class="calc-table">
             <tr><td>Design Wind Speed (V)</td><td class="cv">${windSpeed} mph</td></tr>
             <tr><td>Exposure Category</td><td class="cv">Cat. ${exposure} (Kz = ${Kz})</td></tr>
-            <tr><td>Directionality (Kd)</td><td class="cv">${Kd} (ASCE 7-22 Table 26.6-1)</td></tr>
+            <tr><td>Directionality (Kd)</td><td class="cv">${Kd} (${asce} Table 26.6-1)</td></tr>
             <tr><td>Velocity Pressure (qz)</td><td class="cv">${velPressure} psf</td></tr>
             <tr><td>Force Coefficient (Cf)</td><td class="cv">${Cf} (solid panel, Fig. 29.4-1)</td></tr>
             <tr><td>Net Wind Pressure (p = qz·Cf)</td><td class="cv" style="font-weight:bold;">${windPresDisp} psf</td></tr>
@@ -225,12 +227,12 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
 
         <!-- Snow / Ground Load -->
         <div class="struct-card">
-          <div class="sct">Snow Load — ASCE 7-22 §7</div>
+          <div class="sct">Snow Load — ${asce} §7</div>
           <table class="calc-table">
             <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf</td></tr>
             <tr><td>Slope Reduction</td><td class="cv">N/A — vertical fence panels</td></tr>
             <tr><td>Controlling Load Case</td><td class="cv">0.9D + 1.0W (wind uplift governs)</td></tr>
-            <tr><td>Snow Code Reference</td><td class="cv">ASCE 7-22 §7 (ground snow)</td></tr>
+            <tr><td>Snow Code Reference</td><td class="cv">${asce} §7 (ground snow)</td></tr>
           </table>
         </div>
 
@@ -261,7 +263,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         <strong>DEAD LOAD INTERPRETATION:</strong>
         The total added dead load of ${totalDL} PSF is distributed uniformly over the fence panel area and transferred
         to the fence posts and driven post foundations via the horizontal rail system.
-        Post foundations are evaluated to confirm adequate capacity per ASCE 7-22 §26 and §29.4.
+        Post foundations are evaluated to confirm adequate capacity per ${asce} §26 and §29.4.
         Dead load does not govern for vertical fence-mounted arrays — wind uplift and overturning are the controlling load cases.
       </div>
 
@@ -313,10 +315,10 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         <div style="font-size:var(--f-sm);line-height:1.7;">
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">FENCE POST FOUNDATION REQUIREMENTS</div>
           <div style="margin-bottom:3px;">1. Posts: 2-7/8" dia. hot-dip galvanized inner steel post (96" long) with 4" dia. outer post sleeve — per SolFence published section.</div>
-          <div style="margin-bottom:3px;">2. Embedment: Min. <strong>${postEmbed} ft</strong> below finish grade per ASCE 7-22 §26 and overturning analysis.</div>
+          <div style="margin-bottom:3px;">2. Embedment: Min. <strong>${postEmbed} ft</strong> below finish grade per ${asce} §26 and overturning analysis.</div>
           <div style="margin-bottom:3px;">3. Foundation: DRIVEN with post pounder — NO concrete (manufacturer standard install); field-verify refusal.</div>
           <div style="margin-bottom:3px;">4. Post spacing: <strong>${postSpacing} ft O.C.</strong> maximum per wind load calculation — see segment table below.</div>
-          <div style="margin-bottom:3px;">5. Wind design: ASCE 7-22 §29.4, Cf = 1.3, Exposure Category ${exposure}.</div>
+          <div style="margin-bottom:3px;">5. Wind design: ${asce} §29.4, Cf = 1.3, Exposure Category ${exposure}.</div>
           <div style="margin-bottom:3px;">6. Driving: advance post to full embedment or refusal; if refusal above min. embedment, contact engineer of record.</div>
           <div style="margin-bottom:3px;">7. Grounding: All posts bonded to EGC per NEC 250.169 — min. #6 AWG Cu bonding conductor.</div>
           <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Post diameter and wall thickness to be confirmed by engineer of record per final wind load analysis.</div>
@@ -325,7 +327,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
 
       <!-- Fence Segment Wind Load Table -->
       ${cad.fence ? `
-      <div class="section-title">Fence Segment Wind Load Analysis — ASCE 7-22 §29.4</div>
+      <div class="section-title">Fence Segment Wind Load Analysis — ${asce} §29.4</div>
       <table class="equip-table">
         <thead><tr><th>Segment</th><th>Length (ft)</th><th>Panels</th><th>Posts</th><th>Panel Ht (ft)</th><th>qz (psf)</th><th>p = qz·Cf (psf)</th><th>Wind / Post (lbs)</th><th>Overturning (ft-lbs)</th></tr></thead>
         <tbody>
@@ -356,7 +358,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         </tbody>
       </table>
       <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.5;border:var(--border);border-top:none;background:#f0f4f8;">
-        <strong>WIND LOAD FORMULA (ASCE 7-22 §29.4) — ALL VALUES FROM CANONICAL:</strong><br/>
+        <strong>WIND LOAD FORMULA (${asce} §29.4) — ALL VALUES FROM CANONICAL:</strong><br/>
         <span style="font-family:monospace;">qz = 0.00256 × Kz(${Kz}) × Kzt(${Kzt}) × Kd(${Kd}) × V²(${windSpeed}²) = <strong>${velPressure} psf</strong></span><br/>
         <span style="font-family:monospace;">p = qz × Cf(${Cf}) = <strong>${windPresDisp} psf</strong> &nbsp;|&nbsp; Area/Post = H(${panelHFt} ft) × S(${postSpacing} ft) = ${(panHN*postSpN).toFixed(2)} ft²</span><br/>
         <span style="font-family:monospace;">F = p × Area = <strong>${windLoadPost} lbs</strong> &nbsp;|&nbsp; M = F × H/2 = <strong>${overturnMoment} ft-lbs</strong></span><br/>
@@ -365,42 +367,42 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
       </div>` : ''}
 
       <!-- Governing Load Combination — Fence -->
-      <div class="section-title">Governing Load Combination — ASCE 7-22 §2.3</div>
+      <div class="section-title">Governing Load Combination — ${asce} §2.3</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
-          <tr><td class="il" style="width:100px;">ASCE 7-22</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
+          <tr><td class="il" style="width:100px;">${asce}</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
           <tr><td class="il">${ibcVer} IBC</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
           <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
-          <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.3) — FENCE-MOUNTED PV:</strong>
+          <strong>GOVERNING LOAD COMBINATION (${asce} §2.3) — FENCE-MOUNTED PV:</strong>
           The controlling load case for fence-mounted PV is <strong>0.9D + 1.0W</strong> (wind overturning governs).
           Post embedment depth and footing diameter are sized to resist the governing overturning moment with a
           minimum safety factor of 1.5 against overturning. Dead load combination <strong>1.2D + 1.6S</strong> is
           evaluated for gravity loading on post foundations; wind governs at all exposure categories.
           All post foundations shall develop the required capacity with a minimum safety factor of 1.5 (overturning)
-          and 2.0 (sliding) per ASCE 7-22 §12.13.
+          and 2.0 (sliding) per ${asce} §12.13.
         </div>
       </div>
       ${structural ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — FENCE:</strong>
-        Wind analysis per ASCE 7-22 §29.4 indicates a net lateral wind load of <strong>${windLoadPost} lbs per post</strong>
+        Wind analysis per ${asce} §29.4 indicates a net lateral wind load of <strong>${windLoadPost} lbs per post</strong>
         at the design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         The overturning moment at the base of each post is ${overturnMoment} ft-lbs.
         Fence post embedment of ${postEmbed} ft (driven inner steel post — no concrete, per the manufacturer's
         published foundation) provides the required resistance to overturning and lateral loads.
         Ground snow load of ${groundSnow} psf applies to the site; roof slope reduction factors do not apply to
-        vertical fence-mounted arrays — ground snow load per ASCE 7-22 §7 governs.
-        Post foundation system confirmed adequate for the imposed wind and dead loads per ASCE 7-22 §29.4.
+        vertical fence-mounted arrays — ground snow load per ${asce} §7 governs.
+        Post foundation system confirmed adequate for the imposed wind and dead loads per ${asce} §29.4.
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — FENCE STRUCTURAL ANALYSIS:</strong>
         The proposed solar fence photovoltaic array and post foundation system have been analyzed for wind
-        overturning, dead load, and post embedment capacity per ASCE 7-22 §29.4 and ${ibcVer} IBC.
+        overturning, dead load, and post embedment capacity per ${asce} §29.4 and ${ibcVer} IBC.
         ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 1.5
           ? `All structural parameters are within acceptable limits. The fence post foundation system is adequate
              to support the proposed solar fence PV array without modification. Post embedment and footing
-             dimensions confirmed per ASCE 7-22 §29.4 wind overturning analysis.`
+             dimensions confirmed per ${asce} §29.4 wind overturning analysis.`
           : structural && structural.attachment?.safetyFactor == null
             ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
             : 'Review flagged structural items before proceeding with installation. Foundation sizing may require revision.'}
@@ -431,11 +433,12 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
 export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance, rulesResult, project } = input;
   const structural = compliance.structural;
-  const ibcVer = '2021';
+  const cp = projectCodeAuthorityFromInput(input); const asce = cp.asceLabel;  // W4 §2 single-source
+  const ibcVer = cp.ibc ?? 'PENDING';
   const structuralRules = (rulesResult?.rules || []).filter(r => r.category === 'structural');
   // §9 — ground pile withdrawal is a DISTINCT named limit state whose bar
   // mirrors the engine of record (structural-engine-v4 ground pile ≥ 1.5,
-  // ASCE 7-22 §12.13) — NOT the 1.0 roof-attachment ASD bar and NOT the old
+  // ${asce} §12.13) — NOT the 1.0 roof-attachment ASD bar and NOT the old
   // self-contradicting "2.0" prose. One threshold, printed everywhere here.
   const GROUND_PILE_MIN_SF = 1.5;
 
@@ -468,31 +471,31 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — GROUND MOUNT', pageNum, totalPages)}
     <div class="page-content">
       ${structuralBannerHtml(_proj.banner)}
-      <div class="section-title">Structural Analysis — ASCE 7-22 §27 (Ground-Mounted PV)</div>
+      <div class="section-title">Structural Analysis — ${asce} §27 (Ground-Mounted PV)</div>
 
       <div class="struct-grid">
         <!-- Wind Analysis -->
         <div class="struct-card">
-          <div class="sct">Wind Analysis — ASCE 7-22 §27/29.4</div>
+          <div class="sct">Wind Analysis — ${asce} §27/29.4</div>
           <table class="calc-table">
             <tr><td>Design Wind Speed (Vult)</td><td class="cv">${windSpeed} mph</td></tr>
             <tr><td>Exposure Category</td><td class="cv">Cat. ${exposure}</td></tr>
             <tr><td>Velocity Pressure (qz)</td><td class="cv">${velPressure} psf</td></tr>
             <tr><td>Net Uplift Pressure</td><td class="cv">${upliftPsf} psf</td></tr>
             <tr><td>Uplift / Pile</td><td class="cv" style="font-weight:bold;">${upliftPile} lbs</td></tr>
-            <tr><td>Wind Code Reference</td><td class="cv">ASCE 7-22 §27 + §29.4</td></tr>
+            <tr><td>Wind Code Reference</td><td class="cv">${asce} §27 + §29.4</td></tr>
           </table>
         </div>
 
         <!-- Snow Analysis -->
         <div class="struct-card">
-          <div class="sct">Snow Load — ASCE 7-22 §7</div>
+          <div class="sct">Snow Load — ${asce} §7</div>
           <table class="calc-table">
             <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf</td></tr>
             <tr><td>Slope Reduction</td><td class="cv">Per array tilt (${tiltDeg}°)</td></tr>
             <tr><td>Snow Load / Pile</td><td class="cv">${snowPile} lbs</td></tr>
             <tr><td>Note</td><td class="cv">Roof slope reduction N/A — ground array</td></tr>
-            <tr><td>Snow Code Reference</td><td class="cv">ASCE 7-22 §7 (ground snow)</td></tr>
+            <tr><td>Snow Code Reference</td><td class="cv">${asce} §7 (ground snow)</td></tr>
           </table>
         </div>
 
@@ -504,7 +507,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
             <tr><td>Pile Embedment Depth</td><td class="cv">${pileDepth} ft min. (below frost)</td></tr>
             <tr><td>Pile Spacing</td><td class="cv">${pileSp} ft O.C.</td></tr>
             <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < GROUND_PILE_MIN_SF ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (pile withdrawal — min. ${GROUND_PILE_MIN_SF.toFixed(1)})` : ''}</td></tr>
-            <tr><td>Wind Code Reference</td><td class="cv">ASCE 7-22 §27</td></tr>
+            <tr><td>Wind Code Reference</td><td class="cv">${asce} §27</td></tr>
           </table>
         </div>
 
@@ -535,8 +538,8 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         <strong>DEAD LOAD INTERPRETATION:</strong>
         The total added dead load of ${totalDL} PSF is distributed uniformly over the array footprint.
         This load is transferred to the ground mount piles/piers and foundations via the racking structure.
-        Foundations are evaluated to confirm adequate capacity for the combined loading condition per ASCE 7-22 §26 and §27.
-        Dead load is combined with wind and snow per ASCE 7-22 §2.3 governing load combinations.
+        Foundations are evaluated to confirm adequate capacity for the combined loading condition per ${asce} §26 and §27.
+        Dead load is combined with wind and snow per ${asce} §2.3 governing load combinations.
       </div>
 
       <!-- Standard Detail: Ground Mount Pile -->
@@ -589,40 +592,40 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
           <div style="margin-bottom:3px;">5. Tilt angle: <strong>${tiltDeg}°</strong> from horizontal — verify per final array design.</div>
           <div style="margin-bottom:3px;">6. Grounding: Drive ground rod per NEC 690.47 — bond all metallic structure per NEC 250.97.</div>
           <div style="margin-bottom:3px;">7. Geotechnical: Pile capacity shall be confirmed by geotechnical engineer before final design.</div>
-          <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Frost depth varies by location — verify with local building department and ASCE 7-22 §C3.3.</div>
+          <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Frost depth varies by location — verify with local building department and ${asce} §C3.3.</div>
         </div>
       </div>
 
       <!-- Governing Load Combination — Ground Mount -->
-      <div class="section-title">Governing Load Combination — ASCE 7-22 §2.3</div>
+      <div class="section-title">Governing Load Combination — ${asce} §2.3</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
-          <tr><td class="il" style="width:100px;">ASCE 7-22</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
+          <tr><td class="il" style="width:100px;">${asce}</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
           <tr><td class="il">${ibcVer} IBC</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
           <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
-          <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.3) — GROUND-MOUNTED PV:</strong>
+          <strong>GOVERNING LOAD COMBINATION (${asce} §2.3) — GROUND-MOUNTED PV:</strong>
           The controlling load case for ground-mounted PV is <strong>0.9D + 1.0W</strong> (net uplift on array).
           Pile lateral capacity and moment resistance are sized for the governing wind uplift condition.
           Snow loading combination <strong>1.2D + 1.6S + 0.5W</strong> is evaluated for gravity/snow; wind uplift governs
           at most exposure categories. All pile foundations shall develop the required capacity with a minimum
-          safety factor of ${GROUND_PILE_MIN_SF.toFixed(1)} against pile withdrawal (distinct limit state; ASCE 7-22 §12.13).
+          safety factor of ${GROUND_PILE_MIN_SF.toFixed(1)} against pile withdrawal (distinct limit state; ${asce} §12.13).
         </div>
       </div>
       ${structural ? `<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — GROUND MOUNT:</strong>
-        Wind analysis per ASCE 7-22 §27 indicates a net uplift of ${upliftPile} lbs per pile at the design wind speed
+        Wind analysis per ${asce} §27 indicates a net uplift of ${upliftPile} lbs per pile at the design wind speed
         of ${windSpeed} mph (Exposure Category ${exposure}).
-        ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ASCE 7-22 §7.` : 'Snow loading is not a controlling factor at this location.'}
-        Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ASCE 7-22 §7.
-        Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ASCE 7-22 §27.
-        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= GROUND_PILE_MIN_SF ? 'above' : 'BELOW'} the required pile-withdrawal minimum of ${GROUND_PILE_MIN_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ASCE 7-22 §2.4 / §12.13).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ${asce} §7.` : 'Snow loading is not a controlling factor at this location.'}
+        Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ${asce} §7.
+        Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ${asce} §27.
+        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= GROUND_PILE_MIN_SF ? 'above' : 'BELOW'} the required pile-withdrawal minimum of ${GROUND_PILE_MIN_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ${asce} §2.4 / §12.13).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
-        wind uplift, snow, dead load, and pile capacity per ASCE 7-22 §27 and ${ibcVer} IBC.
+        wind uplift, snow, dead load, and pile capacity per ${asce} §27 and ${ibcVer} IBC.
         ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= GROUND_PILE_MIN_SF
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
@@ -656,7 +659,8 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
 export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance, rulesResult, project } = input;
   const structural = compliance.structural;
-  const ibcVer = '2021';
+  const cp = projectCodeAuthorityFromInput(input); const asce = cp.asceLabel;  // W4 §2 single-source
+  const ibcVer = cp.ibc ?? 'PENDING';
   // Structural engine V4 (compliance.structural) is the engine of record on
   // this sheet — drop rules-engine rows that carry their OWN rafter/uplift
   // numbers, which contradicted the V4 tables printed right beside them
@@ -741,12 +745,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — ROOF MOUNT', pageNum, totalPages)}
     <div class="page-content">
       ${structuralBannerHtml(_proj.banner)}
-      <div class="section-title">Structural Analysis — ASCE 7-22 §26/27 (Roof-Mounted PV)</div>
+      <div class="section-title">Structural Analysis — ${asce} §26/27 (Roof-Mounted PV)</div>
 
       <div class="struct-grid">
         <!-- Wind Analysis -->
         <div class="struct-card">
-          <div class="sct">Wind Analysis — ASCE 7-22 §26/27</div>
+          <div class="sct">Wind Analysis — ${asce} §26/27</div>
           <table class="calc-table">
             <tr><td>Design Wind Speed (Vult)</td><td class="cv">${windSpeed} mph</td></tr>
             <tr><td>Exposure Category</td><td class="cv">Cat. ${exposure}</td></tr>
@@ -758,7 +762,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
 
         <!-- Snow Analysis -->
         <div class="struct-card">
-          <div class="sct">Snow Analysis — ASCE 7-22 §7</div>
+          <div class="sct">Snow Analysis — ${asce} §7</div>
           <table class="calc-table">
             <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf</td></tr>
             <tr><td>Roof Snow Load (ps)</td><td class="cv">${roofSnow} psf</td></tr>
@@ -894,37 +898,37 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <!-- Governing Load Combination — Roof. ASD (§2.4) combos — the rafter/lag
            capacities on this sheet are allowable-stress values; quoting the
            LRFD §2.3 factored combos beside them contradicted PE-1/CERT. -->
-      <div class="section-title">Governing Load Combination — ASCE 7-22 §2.4 (ASD)</div>
+      <div class="section-title">Governing Load Combination — ${asce} §2.4 (ASD)</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);border-top:none;">
         <table class="info-table" style="margin-bottom:var(--xs);">
-          <tr><td class="il" style="width:100px;">ASCE 7-22</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
+          <tr><td class="il" style="width:100px;">${asce}</td><td class="iv">Minimum Design Loads and Associated Criteria for Buildings and Other Structures</td></tr>
           <tr><td class="il">${ibcVer} IBC</td><td class="iv">International Building Code — Chapter 16: Structural Design</td></tr>
           <tr><td class="il">${ibcVer} IRC</td><td class="iv">International Residential Code — Section R301: Design Criteria</td></tr>
         </table>
         <div style="font-size:var(--f-sm);color:#000;">
-          <strong>GOVERNING LOAD COMBINATION (ASCE 7-22 §2.4 — ASD) — ROOF-MOUNTED PV:</strong>
+          <strong>GOVERNING LOAD COMBINATION (${asce} §2.4 — ASD) — ROOF-MOUNTED PV:</strong>
           The controlling load case for roof-mounted PV is <strong>0.6D + 0.6W</strong> (net uplift) for lag bolt
           withdrawal capacity, and <strong>D + S</strong> for gravity/snow loading on existing framing.
           All lag bolt attachments shall develop the required withdrawal capacity with a minimum safety factor of
           ${_attThreshold.toFixed(1)} (${_attChk ? _attChk.limitState : 'attachment-uplift'} — demand and allowable both ASD,
-          Ω-normalized capacity; ASCE 7-22 §2.4). ${_attChk ? `As analyzed: demand ${fmt(_attChk.demand)} lbs, allowable
+          Ω-normalized capacity; ${asce} §2.4). ${_attChk ? `As analyzed: demand ${fmt(_attChk.demand)} lbs, allowable
           ${fmt(_attChk.capacity)} lbs, SF ${fmt(_attChk.safetyFactor, 2)} — ${checkResultLabel(_attChk)}.` : ''}
         </div>
       </div>
       ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — ROOF MOUNT:</strong>
-        Wind analysis per ASCE 7-22 §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
+        Wind analysis per ${asce} §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
-        ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ASCE 7-22 §7).` : 'Snow loading is not a controlling factor at this location.'}
+        ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ${asce} §7).` : 'Snow loading is not a controlling factor at this location.'}
         ${_reviewRequired
           ? `<strong style="color:#b91c1c;">ROOF FRAMING UNVERIFIED — the rafter/truss capacity is computed from code defaults and is NOT engineering authority. A licensed structural review of the existing framing is required before permit submission; no framing pass is certified on this sheet.</strong>`
           : (_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.')}
-        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= _attThreshold ? 'meets' : 'DOES NOT MEET'} the required minimum of ${_attThreshold.toFixed(1)} (ASD demand vs allowable capacity per ASCE 7-22 §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= _attThreshold ? 'meets' : 'DOES NOT MEET'} the required minimum of ${_attThreshold.toFixed(1)} (ASD demand vs allowable capacity per ${asce} §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
-        wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ASCE 7-22 §26/27 and ${ibcVer} IBC/IRC.
+        wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ${asce} §26/27 and ${ibcVer} IBC/IRC.
         ${_reviewRequired
           ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted). The lag-bolt attachment and rail checks pass on the analyzed inputs, but a licensed structural review of the existing framing is required before this set is submitted for permit — see the review notice above.'
           : (_attChk?.passes === true && _framingChk?.passes === true
@@ -1258,7 +1262,7 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   html += 'This system BOM contains ' + flat.length + ' line items across ' + stageCount + ' stages. ';
   html += requiredCount + ' items are required per NEC / manufacturer specification. ';
   html += 'All quantities are derived from CAD geometry and equipment registry — no manual estimates. ';
-  html += 'Structural items are computed from array layout per ASCE 7-22 / IBC 2021. ';
+  html += 'Structural items are computed from array layout per the governing structural code editions (see cover sheet GOVERNING CODES). ';
   html += 'Electrical items are sized per NEC 690.8, 705.12, 310.15 and equipment registry rules.';
   html += '</div>';
 
@@ -1279,6 +1283,7 @@ export function pageEquipmentScheduleCont(input: PermitInput, cad: CADModel, pag
 
 export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { system, bom, project, compliance } = input;
+  const _cpEq = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
   // CAD-sourced equipment counts
   const cadTotalPanels = cad.totalPanels;
   const cadTotalDcKw   = cad.totalDcKw;
@@ -1496,7 +1501,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           : `This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
         rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each`} for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
         All equipment is UL-listed and installed per manufacturer specifications. Wire sizing has been verified per NEC 690.8 with appropriate derating applied.
-        The equipment selection complies with NEC ${compliance?.jurisdiction?.necVersion || '2020'} and applicable UL standards (UL 1741, UL 61730, UL 2703).
+        The equipment selection complies with NEC ${_cpEq.nec ?? 'PENDING'} and applicable UL standards (UL 1741, UL 61730, UL 2703).
       </div>
     </div>
   </div>`;

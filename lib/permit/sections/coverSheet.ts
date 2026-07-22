@@ -9,13 +9,13 @@ import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { escapeH } from '../utils/drawing';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, hasRealBattery, resolveEquipmentBySubSystem, type SysType } from '../utils/helpers';
-import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './structuralPages';
-import { equipmentDatasheetIndexRows } from './datasheetAppendix';
-import { buildSheetManifest } from '../sheetManifest';
-import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE, SUB_LABEL } from './subSystemSheets';
+import { hybridSheetSections, SUB_LABEL } from './subSystemSheets';
 import { hybridSubmissionGate } from './hybridReadiness';
 import { resolveInterconnection } from './electricalPages';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import { computePlansetManifest } from '../plansetManifest';
 import { structuralBannerHtml } from '../utils/structuralBanner';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
@@ -31,24 +31,33 @@ import { PLANSET_ENGINE_VERSION } from '../constants';
 export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
 
-  // ── Jurisdiction / code versions ──────────────────────────────────────────
-  // Strip any 'NEC ' prefix (some AHJ records carry 'NEC 2023' not '2023') so
-  // the code line never doubles to 'NEC NEC 2023' AND the IFC cycle derives the
-  // same way the title block does (cover printed IFC 2021 while the title block
-  // printed IFC 2024 because the un-stripped compare fell through to else).
-  const necVer  = (compliance.jurisdiction?.necVersion || '2020').replace(/^NEC\s+/i, '');
-  const ibcVer  = '2021';
-  const ifcVer  = necVer === '2023' ? '2024' : '2021';
+  // ── Jurisdiction / code versions — W4 §2 SINGLE SOURCE ────────────────────
+  // Every edition projects from the ONE snapshot codeAuthority record; the cover
+  // and title block can no longer disagree (the IFC 2021-vs-2024 fight is gone)
+  // and no edition is inferred. Unknown adoptions render PENDING.
+  const cp = projectCodeAuthorityFromInput(input);
+  // ── Project / cover authority — W4 §3 SINGLE SOURCE ───────────────────────
+  // Project identity, equipment summary, issue status and the SHEET INDEX all
+  // project from the ONE snapshot projectAuthority record (no vendor default, no
+  // stale equipment, no default engineer name, no independent sheet index).
+  const pa = projectProjectAuthorityFromInput(input);
+  const necVer  = cp.nec ?? 'PENDING';
+  const ibcVer  = cp.ibc ?? 'PENDING';
+  const ircVer  = cp.irc ?? 'PENDING';
+  const ifcVer  = cp.ifc ?? 'PENDING';
+  const asceVer = cp.asce ?? 'PENDING';
   const state   = compliance.jurisdiction?.state || '';
-  const ahj     = compliance.jurisdiction?.ahj   || '';
-  // FIX v47.341: Convert utility slug to display name
-  const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '');
-  const apn     = project.apn || '';
+  const ahj     = pa.ahj ?? '';        // W4 §3: AHJ from projectAuthority
+  const utility = pa.utility ?? '';    // W4 §3: utility from projectAuthority (already display-named)
+  const apn     = pa.apn ?? '';
 
-  // ── Equipment (4-source resolver) ─────────────────────────────────────────
+  // ── Equipment summary — W4 §3 from projectAuthority (single-source, versioned
+  // records). The 4-source resolver is retained ONLY for hybrid per-sub rows +
+  // watts. The single-system module/inverter identity now comes from the
+  // authority, tagged for the truth matrix.
   const eq = getEquipmentContext(input, cad);
-  const moduleDisplay   = [eq.panelManufacturer, eq.panelModel].filter(s => s && s !== '—').join(' ') || '';
-  const inverterDisplay = [eq.inverterManufacturer, eq.inverterModel].filter(s => s && s !== '—').join(' ') || '';
+  const moduleDisplay   = pa.moduleDisplay ?? ([eq.panelManufacturer, eq.panelModel].filter(s => s && s !== '—').join(' ') || '');
+  const inverterDisplay = pa.inverterDisplay ?? ([eq.inverterManufacturer, eq.inverterModel].filter(s => s && s !== '—').join(' ') || '');
 
   // ── System values ─────────────────────────────────────────────────────────
   const totalPanels = system.totalPanels  || 0;
@@ -162,32 +171,14 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     }
   }
 
-  // ── Sheet index ───────────────────────────────────────────────────────────
-  // APP-CAD removed from the deliverable (Ray, 2026-07-09) — match generatePermit's
-  // distinct internal opt-in so the cover index and page set stay in sync.
-  const includeCADAppendixPreview = (input.permitOptions as { includeCadAppendixInternal?: boolean } | undefined)?.includeCadAppendixInternal === true;
-  // Mirror generatePermit's dynamic page assembly EXACTLY — a hardcoded list
-  // here shipped a 16-sheet set whose cover index listed only 15.
-  const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
-    || input.planSetOptions?.includeInternalValidation === true;
-  const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
-  // Single source of truth for order/titles/count — same manifest generatePermit
-  // and the engineering-page sheet status derive from, so they can't drift.
-  // Wave 5B: hybrid sets grow per-sub detail sheets — mirror generatePermit's
-  // sub loop by passing the SAME ordered present-sub list.
-  const _tocSubs = hybridSheetSections(cad).map(s => s.key);
-  const _tocPrimaryType = _tocSubs.length > 1
-    ? SUB_KEY_TO_CAD_TYPE[_tocSubs[0]]
-    : (cad.systemType as SysType);
-  const sheets = buildSheetManifest({
-    pv1Title: pv2Title(_tocPrimaryType as SysType),
-    pv3Title: pv3Title(_tocPrimaryType as SysType),
-    datasheets: equipmentDatasheetIndexRows(input),
-    includeSchedCont,
-    includeValidation: includeInternalValidation,
-    includeCadAppendix: includeCADAppendixPreview,
-    ...(_tocSubs.length > 1 ? { hybridSubs: _tocSubs } : {}),
-  });
+  // ── Sheet index — W4 §3 SINGLE SOURCE ─────────────────────────────────────
+  // THE actual generated sheet manifest is carried on projectAuthority (computed
+  // once at snapshot build via computePlansetManifest, the SAME builder
+  // generatePermit's page assembly mirrors). The cover no longer computes an
+  // independent index — the "cover said 15, set shipped 16" class of drift is
+  // gone. Fallback to the SAME shared computation only when no snapshot is
+  // present (standalone/preview) — never a separate hardcoded list.
+  const sheets = pa.sheetIndex.length ? pa.sheetIndex : computePlansetManifest(input, cad);
 
   // ── Wave 5B: hybrid per-sub cover data ────────────────────────────────────
   // Present sub-systems (roof > ground > fence). >1 ⇒ hybrid cover: hybrid
@@ -244,6 +235,18 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   }
 
   
+
+  // W4 §3 — row whose VALUE is pre-formatted HTML (a data-project-field tagged
+  // span from the projectAuthority accessor). The label is escaped; the value is
+  // injected raw (the accessor already escaped the underlying text). Hidden when
+  // the underlying plain value is absent — never a fabricated default.
+  function rawInfoRow(label: string, rawValueHtml: string, plain: string | null | undefined): string {
+    if (plain === null || plain === undefined || plain === '' || plain === '—') return '';
+    return `<tr>
+      <td class="il">${escapeH(label)}</td>
+      <td class="iv">${rawValueHtml}</td>
+    </tr>`;
+  }
 
   // (N)/(E) tag rows — only shown when value is confirmed
   function tagRow(tag: string, value: string): string {
@@ -358,11 +361,11 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
 
   // ── Governing Codes ───────────────────────────────────────────────────────
   const codesList: Array<[string, string]> = [
-    [`IBC ${ibcVer}`, 'INTERNATIONAL BUILDING CODE'],
-    [`IRC ${ibcVer}`, 'INTERNATIONAL RESIDENTIAL CODE'],
-    [`IFC ${ifcVer}`, 'INTERNATIONAL FIRE CODE — §1204 SOLAR PV SYSTEMS'],
-    [`NEC ${necVer}`, 'NATIONAL ELECTRICAL CODE (NFPA 70)'],
-    ['ASCE 7-22', 'MINIMUM DESIGN LOADS & ASSOCIATED CRITERIA'],
+    [cp.tag('ibc'), 'INTERNATIONAL BUILDING CODE'],
+    [cp.tag('irc'), 'INTERNATIONAL RESIDENTIAL CODE'],
+    [cp.tag('ifc'), 'INTERNATIONAL FIRE CODE — §1204 SOLAR PV SYSTEMS'],
+    [cp.tag('nec'), 'NATIONAL ELECTRICAL CODE (NFPA 70)'],
+    [cp.tag('asce'), 'MINIMUM DESIGN LOADS & ASSOCIATED CRITERIA'],
     ['IEEE 1547', 'INTERCONNECTION & INTEROPERABILITY OF DER'],
     ['UL 1741 SA', 'INVERTERS, CONVERTERS, CONTROLLERS (SMART INVERTER)'],
     ['UL 2703', 'MOUNTING SYSTEMS, RACKING — BONDING & GROUNDING'],
@@ -399,31 +402,40 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     </div>`;
 
   // ── Right strip: project info ─────────────────────────────────────────────
+  // W4 §3: project identity projects from the ONE projectAuthority record and is
+  // TAGGED (data-project-field) so the truth matrix can prove single-sourcing.
   const projInfoRows = [
-    infoRow('PROJECT',     project.projectName || ''),
-    infoRow('CLIENT',      project.clientName  || ''),
-    infoRow('ADDRESS',     project.address     || ''),
+    rawInfoRow('PROJECT',  pa.tag('project-name'), pa.projectName),
+    rawInfoRow('CLIENT',   pa.tag('customer'),     pa.customer),
+    rawInfoRow('ADDRESS',  pa.tag('address'),      pa.address),
     infoRow('CITY/STATE',  [project.city || '', state].filter(Boolean).join(', ')),
-    infoRow('APN',         apn),
-    infoRow('AHJ',         ahj),
-    infoRow('UTILITY',     utility),
-    infoRow('DESIGNER',    project.designer || ''),
-    infoRow('DATE',        project.date     || ''),
+    rawInfoRow('APN',      pa.tag('apn'),          pa.apn),
+    rawInfoRow('AHJ',      pa.tag('ahj'),          pa.ahj),
+    rawInfoRow('UTILITY',  pa.tag('utility'),      pa.utility),
+    rawInfoRow('DESIGNER', pa.tag('designer'),     pa.designer),
+    infoRow('DATE',        pa.issueDate || ''),
   ].join('');
 
   const sysInfoRows = [
+    // W4 §3: system type + issue status project from projectAuthority, tagged for
+    // the truth matrix (data-project-field="system-type" / "issue-status").
+    rawInfoRow('SYSTEM TYPE',  pa.tag('system-type'), pa.systemType),
     infoRow('DC SYSTEM SIZE',  dcKw  !== null ? `${dcKw.toFixed(2)} kW DC`  : ''),
     infoRow('AC SYSTEM SIZE',  acKw  !== null ? `${acKw.toFixed(2)} kW AC`  : ''),
     // Hybrid: no single project-wide module/inverter/mount row — each sub has
-    // its own equipment (SYSTEM SUMMARY carries the per-sub lines).
-    infoRow('MODULE',          _coverHybrid
-      ? (totalPanels > 0 ? `${totalPanels} MODULES — ${_coverSubRows.length} SUB-SYSTEMS (SEE SUMMARY)` : '')
-      : (totalPanels > 0 && moduleDisplay ? `${totalPanels} × ${moduleDisplay}` : '')),
-    infoRow('INVERTER',        _coverHybrid
-      ? `${_coverSubRows.length} SUB-SYSTEM FLEETS (SEE SUMMARY)`
-      : (inverterDisplay ? `${inverterDisplay} — ${topologyLabel}` : '')),
+    // its own equipment (SYSTEM SUMMARY carries the per-sub lines). Single-system
+    // module/inverter identity is TAGGED from the authority (no stale equipment).
+    _coverHybrid
+      ? infoRow('MODULE', totalPanels > 0 ? `${totalPanels} MODULES — ${_coverSubRows.length} SUB-SYSTEMS (SEE SUMMARY)` : '')
+      : rawInfoRow('MODULE', `${totalPanels} × ${pa.tag('module-model')}`, totalPanels > 0 ? pa.moduleDisplay : null),
+    _coverHybrid
+      ? infoRow('INVERTER', `${_coverSubRows.length} SUB-SYSTEM FLEETS (SEE SUMMARY)`)
+      : rawInfoRow('INVERTER', `${pa.tag('inverter-model')} — ${escapeH(topologyLabel)}`, pa.inverterDisplay),
     infoRow('MOUNTING',        _coverHybrid ? `HYBRID — ${_coverSubRows.map(r => r.label).join(' + ')}` : mountLabel),
     infoRow('INTERCONNECTION', interconn),
+    // §12 — the derived project issue status prints here (tagged) and drives the
+    // REVISIONS description below; never a hardcoded "ISSUED FOR PERMIT".
+    rawInfoRow('ISSUE STATUS', pa.tag('issue-status'), pa.issueStatus),
     // Never print an unresolved QA flag on the AHJ deliverable. Supply-side:
     // the 120% busbar rule does not govern (NEC 705.11). Load-side fail:
     // state the remedy and point at the PV-4B analysis.
@@ -580,7 +592,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
           <div class="sec-hdr">ENGINEERING SUMMARY</div>
           <div class="sec-body" style="font-size:var(--f-md);line-height:1.45;padding:var(--xs);">
             ${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}, designed per
-            NEC ${necVer}, ASCE 7-22, IBC ${ibcVer}, and applicable local amendments.
+            NEC ${necVer}, ASCE ${asceVer}, IBC ${ibcVer}, and applicable local amendments.
             Issued for permit review — requires PE review and wet stamp before AHJ submission.
           </div>
         </div>
@@ -677,8 +689,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
               </tr>
               <tr>
                 <td class="il" style="width:28px;border-right:var(--border);font-family:var(--mono);font-weight:900;">A</td>
-                <td class="iv" style="border-right:var(--border);">ISSUED FOR PERMIT</td>
-                <td class="iv">${project.date || ''}</td>
+                <td class="iv" style="border-right:var(--border);">${escapeH(pa.issueStatus ?? 'DESIGN DRAFT')}</td>
+                <td class="iv">${pa.issueDate || ''}</td>
               </tr>
               <tr><td colspan="3" class="iv">&nbsp;</td></tr>
               <tr><td colspan="3" class="iv">&nbsp;</td></tr>

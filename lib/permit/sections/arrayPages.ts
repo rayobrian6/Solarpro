@@ -13,6 +13,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { resolvePanelSpecs } from '../utils/panelSpecs';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
@@ -136,6 +137,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 
 export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: { sheetId?: string; titleSuffix?: string }): string {
   const { project, system } = input;
+  const _cpArr = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
   // CAD-sourced: use cad.totalPanels as authoritative count
   const cadTotalPanels = cad.totalPanels;
   const cadSystemType = cad.systemType;
@@ -515,8 +517,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const agSupplemental = isRoof(cadSystemType) ? `
     <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 IFC 2021 \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
-      <div>\u2022 18" clear at hips/valleys \u2014 IFC 2021 \xa71204.2.1.2</div>
+      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 ${_cpArr.ifcLabel} \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
+      <div>\u2022 18" clear at hips/valleys \u2014 ${_cpArr.ifcLabel} \xa71204.2.1.2</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
       <div>\u2022 36" access pathway per AHJ</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>

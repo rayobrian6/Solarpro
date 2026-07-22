@@ -28,6 +28,7 @@ import type { DesignIntent } from '../designIntent';
 import type { CADModel } from '../../cad/types';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
 import { projectStructural } from '../../permit/snapshot/structuralProjection';
+import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { applyAffine, fitAffine, emitPlacementManifestComment } from '../../permit/snapshot/coordinateAuthority';
 import type { PlacementEntry } from '../../permit/snapshot/types';
 import { getLayoutForSystem } from '../layoutEngine';
@@ -1051,36 +1052,17 @@ export function drawRoofPlan(
       const micCy = py + ph * 0.20;
       els.push(`<rect x="${(px - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
     } else {
-      // ── System-aware rail + foot logic ──
-      // RAILED (RT-MINI, IronRidge, most): continuous row rails + feet at framing
-      // crossings — drawn in the per-plane pass AFTER this loop (so rails run the
-      // full row and feet land on rafters at O.C., not one per module).
-      // RAIL-LESS (RT-APEX / E Mount AIR / S-5 / EcoFasten): 4 direct mounts under
-      // the module's long-side frame edges at the quarter points, X SNAPPED to the
-      // framing grid (mounts bolt into rafters/chords).
-      const hostIdx = hostPlaneIdx(p);
-      const grid = hostIdx >= 0 ? framingGrids[hostIdx] : null;
-      const snapX = (x: number): number => {
-        if (!grid || rot !== 0 || grid.fAz !== 0) return x;
-        const s = grid.bcx + Math.round((x - grid.bcx) / grid.spacingPx) * grid.spacingPx;
-        return Math.max(x0 + 1, Math.min(x0 + pw - 1, s));
-      };
-      const fy1 = y0 + ph * 0.25, fy2 = y0 + ph * 0.75;
-      let hardware = '';
-      if (isRailless) {
-        // Rail-less: 4 direct mounts at the module's frame quarter points.
-        const mx1 = snapX(x0 + pw * 0.25), mx2 = snapX(x0 + pw * 0.75);
-        for (const mxp of [mx1, mx2]) for (const myp of [fy1, fy2]) {
-          hardware += `<rect x="${(mxp - 1.4).toFixed(1)}" y="${(myp - 1.4).toFixed(1)}" width="2.8" height="2.8" fill="#2a5db0" stroke="#173a7a" stroke-width="0.4"/>`;
-        }
-      } else {
-        // Railed: continuous rails + rafter feet drawn in the per-plane pass below.
-      }
-      // §2 — RAILED modules with a snapshot: draw the outline as a PURE PROJECTION
-      // of the canonical drawnPolygon (viewport∘DT-SITE) + record the manifest
-      // entry. Rail-less keeps its legacy rect (its direct mounts are not yet
-      // canonical — recorded gap). No snapshot ⇒ legacy rect (preview/tests).
-      const _mi = (!isRailless && !isBranchColorMode && _projVp && _projDTM) ? _miByRawId.get(String(p.id)) : null;
+      // ── Module outline (system-agnostic) ──
+      // W4 §10: the procedural per-module DIRECT-MOUNT placement (the old
+      // rail-less 4-dot generator) is DELETED. Mounts — RAILED and RAIL-LESS
+      // alike — are now drawn ONLY as pure projections of the canonical snapshot
+      // attachment objects (viewport∘DT-SITE) in the structural pass below, with
+      // data-object-id tags + placement-manifest entries (V29/V30/V31). The
+      // renderer never invents mount coordinates for any system type.
+      // §2 — draw the outline as a PURE PROJECTION of the canonical drawnPolygon
+      // (viewport∘DT-SITE) + record the manifest entry, for both railed and
+      // rail-less products. No snapshot ⇒ legacy rect (preview/tests only).
+      const _mi = (!isBranchColorMode && _projVp && _projDTM) ? _miByRawId.get(String(p.id)) : null;
       if (_mi && (_mi.drawnPolygon?.points?.length)) {
         const proj = _mi.drawnPolygon.points.map((c: any) => _projectCanon(c));
         const ptsStr = proj.map((c: any) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
@@ -1094,7 +1076,6 @@ export function drawRoofPlan(
         els.push(
           `${gOpen}` +
           `<rect${canonicalObjIdAttr(p)} x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
-          hardware +
           `</g>`);
       }
     }
@@ -1110,7 +1091,12 @@ export function drawRoofPlan(
   // a placement manifest; generatePermit's post-render checkRenderParity enforces
   // drawn == transform(canonical) (+ no-omission) as a BLOCKING invariant.
   const _deckMountUsed = false;   // deck-foot heuristic retired with procedural placement
-  if (!isRailless && !isBranchColorMode && _projVp && _projDTM && ctx?.snapshot) {
+  // W4 §10 — snapshot-DRIVEN structural placement for EVERY roof system: railed
+  // arrays draw canonical rails + attachment feet + splices; rail-less/direct-
+  // mount arrays have EMPTY rails and draw canonical direct-mount attachment
+  // feet. Both are pure projections (viewport∘DT-SITE) with manifest parity —
+  // the `isRailless` name flag no longer gates PV-1 mount placement.
+  if (!isBranchColorMode && _projVp && _projDTM && ctx?.snapshot) {
     const snap = ctx.snapshot;
     const cAtts = snap.structural.attachments ?? [];
     const cRails = snap.structural.rails ?? [];
@@ -2016,6 +2002,7 @@ export function drawRoofStructural(
   // W3 §4 — attachment O.C. PROJECTS from the canonical snapshot (engine-
   // resolved spacing), never a sheet literal; PV-3 and PV-1 now agree.
   const _spD = projectStructural(ctx?.snapshot);
+  const _cpRf = projectCodeAuthority(ctx?.snapshot);   // W4 §2 code editions
   const attachSp   = _spD.attachmentSpacingIn
     ?? (project as any).resolvedAttachSpacingIn
     ?? project.attachmentSpacing
@@ -2479,9 +2466,9 @@ export function drawRoofStructural(
     `MIN. LAG THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
     `LAG BOLT: ${lagLabelD}.`,
     `ATTACH. SPACING: ${ftToFtIn(attachSp / 12)} O.C. MAX.`,
-    `WIND LOAD: ${windSpeedMph ?? '—'} MPH — REF: ASCE 7-22`,
+    `WIND LOAD: ${windSpeedMph ?? '—'} MPH — REF: ${_cpRf.asceLabel}`,
     `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`,
-    'REF: NEC 690.43 / IBC 1609 / ASCE 7-22',
+    `REF: NEC 690.43 / IBC 1609 / ${_cpRf.asceLabel}`,
   ];
   notes.forEach((note, i) => {
     els.push(drawText(schedLeft, noteY + 10 + i * 9, note, {

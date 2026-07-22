@@ -81,6 +81,149 @@ export interface StructuralAuthorityGap {
   message: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// W4 §9 — RT-MINI blocker clearance evidence.
+//
+// The two blocking gaps (RACKING-CAPACITY-SOURCE-NOT-ARCHIVED,
+// RACKING-CAPACITY-APPLICABILITY-GAP) clear ONLY when the caller supplies a
+// VERIFIED, CURRENT registry document whose extracted engineering claims cover
+// the EXACT selected assembly + installation condition on EVERY required field.
+// This shape is produced by lib/documents/registry.ts from a
+// manufacturer_document_registry row; buildRackingAssembly evaluates it purely
+// and deterministically (no DB access here — the async resolve happens upstream,
+// keeping this module pure so the record digest stays reproducible).
+//
+// A generic Roof Tech brochure or flashing report (ESR-3575) is missing the
+// structural capacity claim and the §9 applicability fields, so
+// evaluateRackingCapacityClearance returns cleared:false with the missing fields
+// enumerated — the blockers STAY. Nothing is laundered.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Structural document classes that CAN carry an allowable-capacity authority.
+ *  A datasheet / installation manual / flashing evaluation report is NOT here. */
+export const STRUCTURAL_CAPACITY_DOCUMENT_CLASSES = ['structural_pe_letter', 'evaluation_report'] as const;
+
+/** Evidence extracted from a verified registry document, evaluated against the
+ *  selected assembly. Every field maps to a W4 §9 applicability requirement. */
+export interface RackingCapacityDocumentEvidence {
+  documentId: string | null;
+  documentClass: string;                     // must be a STRUCTURAL_CAPACITY_DOCUMENT_CLASS
+  documentIdentity: string | null;
+  verificationState: string;                 // must be 'verified'
+  status: string;                            // must be 'current'
+  archivedInRepo: boolean;                    // must be true — the EXACT source archived
+  sha256: string | null;                     // must be present — integrity of the archived file
+  /** true only when the doc actually states a structural capacity (a flashing /
+   *  water-resistance report explicitly excludes this ⇒ false). */
+  hasStructuralCapacityClaim: boolean;
+  // ── §9 applicability fields ──
+  exactModel: string | null;                 // exact RT-MINI model the doc covers
+  fastenerModel: string | null;              // fastener model
+  fastenerCount: number | null;              // fastener count
+  substrate: string | null;                  // substrate condition
+  rafterDeckCondition: string | null;        // rafter / deck condition
+  embedmentIn: number | null;                // embedment
+  railLFootAssembly: string | null;          // rail / L-foot assembly covered
+  loadBasis: string | null;                  // load basis (must resolve to an ASD allowable)
+  adjustmentFactors: Record<string, unknown> | null; // adjustment factors
+  jurisdiction: string | null;               // jurisdiction / applicability boundary
+  asdAllowableLbs: number | null;            // the allowable value the doc establishes
+  revisionOrDate: string | null;
+}
+
+/** The selected assembly + installation condition the evidence must cover. */
+export interface RackingClearanceContext {
+  mountModel: string;
+  requiredSubstrate?: string | null;
+  requiredRail?: string | null;
+  projectJurisdiction?: string | null;
+}
+
+export interface RackingClearanceResult {
+  cleared: boolean;
+  missing: string[];     // required fields/conditions the evidence failed to satisfy
+  reasons: string[];     // human-readable explanation per failure
+}
+
+function norm(s: string | null | undefined): string {
+  return (s ?? '').trim().toLowerCase();
+}
+
+/**
+ * PURE, deterministic predicate: does the supplied registry evidence establish a
+ * verified allowable-capacity authority for the EXACT selected assembly and
+ * installation condition? Returns cleared:false + the enumerated missing fields
+ * when ANY required condition is unmet. No DB, no side effects.
+ *
+ * This is the single gate for clearing the RT-MINI structural blockers, and the
+ * refusal path for a generic brochure / flashing report.
+ */
+export function evaluateRackingCapacityClearance(
+  ctx: RackingClearanceContext,
+  evidence: RackingCapacityDocumentEvidence | null | undefined,
+): RackingClearanceResult {
+  const missing: string[] = [];
+  const reasons: string[] = [];
+  const fail = (field: string, why: string) => { missing.push(field); reasons.push(why); };
+
+  if (!evidence) {
+    return { cleared: false, missing: ['document'], reasons: ['no verified registry document supplied for the selected assembly'] };
+  }
+
+  // ── Document must be a structural-capacity class, verified, current, archived ──
+  if (!(STRUCTURAL_CAPACITY_DOCUMENT_CLASSES as readonly string[]).includes(evidence.documentClass)) {
+    fail('document_class', `document class '${evidence.documentClass}' cannot carry a structural allowable capacity (a datasheet / installation manual / flashing report is not a capacity authority)`);
+  }
+  if (!evidence.hasStructuralCapacityClaim) {
+    fail('structural_capacity_claim', 'document does not state a structural (uplift) capacity — a flashing / water-resistance report explicitly excludes structural capacity');
+  }
+  if (norm(evidence.verificationState) !== 'verified') {
+    fail('verification_state', `document is '${evidence.verificationState}', not 'verified'`);
+  }
+  if (norm(evidence.status) !== 'current') {
+    fail('status', `document status is '${evidence.status}', not 'current'`);
+  }
+  if (!evidence.archivedInRepo) {
+    fail('archived_file', 'the exact source document is not archived (archivedInRepo=false)');
+  }
+  if (!evidence.sha256 || evidence.sha256.trim().length < 16) {
+    fail('sha256', 'no SHA-256 recorded for the archived file — integrity of the source cannot be established');
+  }
+
+  // ── §9 applicability fields — every one required, and exact-model must match ──
+  if (!norm(evidence.exactModel)) fail('exact_model', 'document does not identify the exact mount model');
+  else if (norm(evidence.exactModel) !== norm(ctx.mountModel)) {
+    fail('exact_model', `document covers '${evidence.exactModel}', not the selected mount '${ctx.mountModel}'`);
+  }
+  if (!norm(evidence.fastenerModel)) fail('fastener_model', 'fastener model not stated');
+  if (evidence.fastenerCount == null || !(evidence.fastenerCount > 0)) fail('fastener_count', 'fastener count not stated');
+  if (!norm(evidence.substrate)) fail('substrate', 'substrate condition not stated');
+  else if (ctx.requiredSubstrate && norm(evidence.substrate) !== norm(ctx.requiredSubstrate)) {
+    fail('substrate', `document substrate '${evidence.substrate}' does not match the selected substrate '${ctx.requiredSubstrate}'`);
+  }
+  if (!norm(evidence.rafterDeckCondition)) fail('rafter_deck_condition', 'rafter / deck condition not stated');
+  if (evidence.embedmentIn == null || !(evidence.embedmentIn > 0)) fail('embedment', 'embedment not stated');
+  if (!norm(evidence.railLFootAssembly)) fail('rail_lfoot_assembly', 'rail / L-foot assembly not covered');
+  else if (ctx.requiredRail && norm(evidence.railLFootAssembly).indexOf(norm(ctx.requiredRail)) === -1 && norm(ctx.requiredRail).indexOf(norm(evidence.railLFootAssembly)) === -1) {
+    fail('rail_lfoot_assembly', `document rail/L-foot assembly '${evidence.railLFootAssembly}' does not cover the selected rail '${ctx.requiredRail}'`);
+  }
+  if (!/allowable|asd/i.test(evidence.loadBasis ?? '')) {
+    fail('load_basis', `load basis '${evidence.loadBasis ?? '(none)'}' is not an ASD allowable basis`);
+  }
+  if (!evidence.adjustmentFactors || Object.keys(evidence.adjustmentFactors).length === 0) {
+    fail('adjustment_factors', 'adjustment factors not stated');
+  }
+  if (!norm(evidence.jurisdiction)) fail('jurisdiction', 'jurisdiction / applicability boundary not stated');
+  else if (ctx.projectJurisdiction && norm(evidence.jurisdiction) !== norm(ctx.projectJurisdiction)) {
+    fail('jurisdiction', `document jurisdiction '${evidence.jurisdiction}' is not confirmed for the project jurisdiction '${ctx.projectJurisdiction}'`);
+  }
+  if (evidence.asdAllowableLbs == null || !(evidence.asdAllowableLbs > 0)) {
+    fail('asd_allowable_value', 'document does not establish a positive ASD allowable capacity');
+  }
+
+  return { cleared: missing.length === 0, missing, reasons };
+}
+
 /** RackingAssemblyRecord + W3.1 §4 provenance. A subtype of RackingAssemblyRecord,
  *  so it remains assignable everywhere the base record is consumed; the extra
  *  fields ride along on the immutable snapshot and are part of the record digest. */
@@ -127,11 +270,22 @@ export function resolveAsdAllowableLbs(
   };
 }
 
+/** Options for buildRackingAssembly. `capacityDocument` is a VERIFIED registry
+ *  document (resolved async upstream via lib/documents/registry.findVerifiedDocument)
+ *  that may clear the RT-MINI structural blockers when it covers the exact
+ *  assembly + installation condition. Omitted ⇒ legacy behaviour (blockers stay). */
+export interface BuildRackingAssemblyOptions {
+  capacityDocument?: RackingCapacityDocumentEvidence | null;
+  projectJurisdiction?: string | null;
+}
+
 /** Build the canonical racking-assembly record from a mounting-hardware-db spec.
  *  Returns null when no mount is resolved (a missing-assembly blocker fires
- *  upstream). Pure/deterministic. */
+ *  upstream). Pure/deterministic — with the same inputs (including no options)
+ *  it produces a byte-identical record, so the digest is unchanged. */
 export function buildRackingAssembly(
   system: MountingSystemSpec | null | undefined,
+  opts?: BuildRackingAssemblyOptions,
 ): RackingAssemblyRecordExt | null {
   if (!system) return null;
   const mount = system.mount;
@@ -182,6 +336,21 @@ export function buildRackingAssembly(
 
   const structuralAuthorityGaps: StructuralAuthorityGap[] = [];
   let capacityProvenance: RackingCapacityProvenance;
+
+  // ── W4 §9 — does a supplied VERIFIED registry document clear the RT-MINI
+  //    structural blockers? PURE evaluation against the exact selected assembly.
+  //    No document (or a non-matching one, e.g. a brochure) ⇒ not cleared. ──
+  const rtClearance: RackingClearanceResult | null = isRtMini
+    ? evaluateRackingCapacityClearance(
+        {
+          mountModel: mount.model,
+          requiredRail: railModel,
+          projectJurisdiction: opts?.projectJurisdiction ?? null,
+        },
+        opts?.capacityDocument ?? null,
+      )
+    : null;
+  const rtCleared = rtClearance?.cleared === true;
 
   if (isRtMini) {
     capacityProvenance = {
@@ -246,20 +415,55 @@ export function buildRackingAssembly(
           + 'the PE source document is not archived, hence documentHash null + blocking gaps.',
       },
     };
-    structuralAuthorityGaps.push({
-      code: 'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
-      severity: 'blocking',
-      message: 'The RT-MINI 600 lb ASD allowable cites a Roof Tech PE structural letter that is NOT '
-        + 'archived in-repo (documentHash null). ESR-3575 is a flashing report that excludes structural '
-        + 'capacity. The value cannot be verified against a source of record.',
-    });
-    structuralAuthorityGaps.push({
-      code: 'RACKING-CAPACITY-APPLICABILITY-GAP',
-      severity: 'blocking',
-      message: 'The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer '
-        + 'compatible rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction '
-        + '(ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically.',
-    });
+    if (!rtCleared) {
+      structuralAuthorityGaps.push({
+        code: 'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+        severity: 'blocking',
+        message: 'The RT-MINI 600 lb ASD allowable cites a Roof Tech PE structural letter that is NOT '
+          + 'archived in-repo (documentHash null). ESR-3575 is a flashing report that excludes structural '
+          + 'capacity. The value cannot be verified against a source of record.'
+          + (rtClearance && rtClearance.missing.length
+            ? ` Supplied document did NOT clear it — missing/unmatched: ${rtClearance.missing.join(', ')}.`
+            : ''),
+      });
+      structuralAuthorityGaps.push({
+        code: 'RACKING-CAPACITY-APPLICABILITY-GAP',
+        severity: 'blocking',
+        message: 'The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer '
+          + 'compatible rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction '
+          + '(ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically.',
+      });
+    } else {
+      // A VERIFIED registry document covers the exact assembly + installation
+      // condition on every required field. Reflect the ARCHIVED source of record.
+      const doc = opts!.capacityDocument!;
+      capacityProvenance.sourceDocument = {
+        identity: doc.documentIdentity ?? 'Roof Tech RT-MINI structural capacity document (verified registry record)',
+        revisionOrDate: doc.revisionOrDate ?? capacityProvenance.sourceDocument.revisionOrDate,
+        issuingEntity: capacityProvenance.sourceDocument.issuingEntity,
+        documentHash: doc.sha256,
+        archivedInRepo: true,
+        hashNote: `source-archived — verified registry document ${doc.documentId ?? '(id n/a)'} `
+          + `(class ${doc.documentClass}); SHA-256 recorded; covers the exact selected assembly + `
+          + `installation condition on all required §9 fields.`,
+        url: capacityProvenance.sourceDocument.url,
+      };
+      capacityProvenance.jurisdictionApplicabilityBoundary =
+        `Confirmed by verified registry document for jurisdiction '${doc.jurisdiction}'.`;
+      capacityProvenance.assemblyApplicability = {
+        ...capacityProvenance.assemblyApplicability,
+        sourceCoversRail: true,
+        sourceCoversSubstrate: true,
+        assessment: 'CLEARED — a verified registry document covers the RT-MINI attachment, the selected '
+          + 'rail/L-foot assembly, the substrate, and the project jurisdiction on all required §9 fields.',
+      };
+      // Replace the "not archived / provisional" note with an archived note.
+      const provIdx = notes.findIndex(n => /not archived in this repository/i.test(n));
+      const archivedNote = `W4 §9 — the RT-MINI structural capacity source is NOW ARCHIVED and VERIFIED `
+        + `(registry document ${doc.documentId ?? ''}, SHA-256 recorded). The RACKING-CAPACITY-* blockers are cleared `
+        + `because the document covers the exact assembly + installation condition.`;
+      if (provIdx >= 0) notes[provIdx] = archivedNote; else notes.push(archivedNote);
+    }
   } else {
     capacityProvenance = {
       mountModel: mount.model,

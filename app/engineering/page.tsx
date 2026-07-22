@@ -7543,7 +7543,6 @@ function EngineeringPageInner() {
 
   // ── Generate Full Permit Package ──────────────────────────────────────────────
   const [permitLoading, setPermitLoading] = useState(false);
-  const [planSetLoading, setPlanSetLoading] = useState(false);
   // projectLayout moved to top of component (near config state) so the
   // panel-count source of truth resolver can read it from totalPanels
   // computation time. See declaration near `config`.
@@ -7601,9 +7600,6 @@ function EngineeringPageInner() {
     projectLayout?.fenceLine,
     subSystemCounts.isHybrid,
   ]);
-  const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
-  const [planSetError, setPlanSetError] = useState<string | null>(null);
-  const [planSetPreviewSheet, setPlanSetPreviewSheet] = useState<string | null>(null); // sheet id being previewed
 
   // ── SYNC PIPELINE ──────────────────────────────────────────────────────────
   // Calls /api/engineering/sync-pipeline which:
@@ -8211,325 +8207,12 @@ function EngineeringPageInner() {
     }
   };
 
-  // ── Generate Permit-Grade Plan Set (v43.0) ─────────────────────────────────
-  const handleGeneratePlanSet = async () => {
-    console.log('[PLANSET V43 ENTRY]', {
-      timestamp: Date.now(),
-      systemType: config.systemType,
-      totalPanels: projectLayout?.panels?.length ?? totalPanels,
-      hasLayout: !!(projectLayout?.panels && projectLayout.panels.length > 0),
-    });
-    setPlanSetLoading(true);
-    setPlanSetError(null);
-    setPlanSetResult(null);
-    try {
-      // Ensure we have the accurate SLD before building the plan set.
-      // If sldSvg is null (user hasn't clicked Generate SLD this session),
-      // fetch it now so E-1 always uses renderSLDProfessional(), never the fallback.
-      // Wave 5A / I-8: hybrids WITH usable source lanes attach a genuine
-      // multi-lane SVG (fetchSLDSvg now sends sources); only a hybrid whose
-      // lanes can't be built keeps the passthrough suppressed — the permit
-      // engine's own generateLiveSLD renders E-1 multi-lane server-side.
-      const _sldPassthroughOk = !subSystemCounts.isHybrid || !!hybridSldSources;
-      // STALE-CACHE FIX (Ray, hybrid planset showed "INVERTER NOT SELECTED" on
-      // all 3 lanes AFTER re-picking equipment): the session-cached sldSvg is a
-      // snapshot from the last "Generate SLD" click and goes stale the moment
-      // equipment changes. The plan set is a FINAL deliverable — always render a
-      // FRESH SLD from current config, never embed the session cache.
-      let activeSldSvg: string | null = null;
-      if (_sldPassthroughOk) {
-        console.log('[handleGeneratePlanSet] rendering FRESH SLD from current config for plan-set...');
-        activeSldSvg = await fetchSLDSvg();
-        if (activeSldSvg) {
-          setSldSvg(activeSldSvg);
-        } else {
-          console.warn('[handleGeneratePlanSet] SLD fetch returned null — E-1 will use fallback renderer');
-        }
-      }
-      if (subSystemCounts.isHybrid && !_sldPassthroughOk) {
-        console.warn('[handleGeneratePlanSet] hybrid project without usable source lanes — client SLD passthrough suppressed (I-8); permit engine owns E-1 handling');
-      }
-
-      // Gather all system data
-      const firstInv = config.inverters[0];
-      const firstStr = firstInv?.strings[0];
-      const invData  = getInvById(firstInv?.inverterId || '', firstInv?.type || 'string') as any;
-      const panelData= getPanelById(firstStr?.panelId || '') as any;
-
-      // Build strings array for plan set — use computedSystem.strings (engine output) when available
-      const csStrings = cs.strings ?? [];
-      const csDcRun   = csRun('DC_STRING_RUN');
-      const planStrings = csStrings.length > 0
-        ? csStrings.map((s: any, i: number) => ({
-            id:          `S${i + 1}`,
-            label:       `S${i + 1}`,
-            panelCount:  s.panelCount,
-            panelWatts:  s.panelWatts ?? (panelData as any)?.watts ?? 400,
-            wireGauge:   s.wireGauge  ?? (csDcRun as any)?.wireGauge ?? '#10 AWG',
-            conduitType: s.conduitType ?? config.conduitType ?? '3/4" EMT',
-            wireLength:  config.inverters[0]?.strings[i]?.wireLength ?? config.wireLength ?? 50,
-            ocpdAmps:    s.ocpdAmps   ?? cs.acOcpdAmps ?? 15,
-            stringVoc:   s.stringVoc  ?? ((panelData as any)?.voc ?? 41.6) * s.panelCount,
-            stringVmp:   s.stringVmp  ?? ((panelData as any)?.vmp ?? 34.5) * s.panelCount,
-            stringIsc:   s.stringIsc  ?? (panelData as any)?.isc ?? 12.26,
-            stringImp:   s.stringImp  ?? (panelData as any)?.imp ?? 11.5,
-          }))
-        : config.inverters.flatMap(inv =>
-            inv.strings.map(str => {
-              const pd = getPanelById(str.panelId) as any;
-              return {
-                id: str.id, label: str.label,
-                panelCount:  str.panelCount,
-                panelWatts:  pd?.watts || 400,
-                wireGauge:   str.wireGauge || (csDcRun as any)?.wireGauge || config.wireGauge || '#10 AWG',
-                conduitType: config.conduitType || '3/4" EMT',
-                wireLength:  str.wireLength || config.wireLength || 50,
-                ocpdAmps:    (csStrings[0] as any)?.ocpdAmps ?? compliance.stringConfig?.ocpdPerString ?? 15,
-                stringVoc:   (csStrings[0] as any)?.stringVoc ?? (pd?.voc || 41.6) * str.panelCount,
-                stringVmp:   (csStrings[0] as any)?.stringVmp ?? (pd?.vmp || 34.5) * str.panelCount,
-                stringIsc:   (csStrings[0] as any)?.stringIsc ?? pd?.isc ?? 12.26,
-                stringImp:   pd?.imp || 11.5,
-              };
-            })
-          );
-
-      const payload = {
-        projectId: searchParams.get('projectId') || '',
-        clientId: null,
-        // Project
-        projectName: config.projectName,
-        clientName: config.clientName,
-        address: config.address,
-        city: config.city,
-        state: config.state,
-        zip: '',
-        county: config.county,
-        // System
-        systemKw: parseFloat(totalKw),
-        panelCount: totalPanels,
-        panelModel: panelData?.model || 'Solar Panel',
-        panelWatts: panelData?.watts || 400,
-        panelWeightLbs: panelData?.weightLbs || 40,
-        panelLengthIn: panelData?.lengthIn || 65,
-        panelWidthIn: panelData?.widthIn || 39,
-        inverterType: firstInv?.type || 'string',
-        inverterModel: invData?.model || 'Inverter',
-        inverterManufacturer: invData?.manufacturer || '',
-        // v58.3: safe inverterCount for permit data
-        inverterCount: (() => {
-          const _inv0 = config.inverters[0];
-          if (_inv0?.type === 'micro') return 1;
-          if (sizingRecommendation?.inverterCount) return sizingRecommendation.inverterCount;
-          const _raw = config.inverters.length;
-          const _mods = totalPanels || 1;
-          const _physMax = _inv0?.type === 'optimizer'
-            ? Math.max(1, Math.ceil(_mods / 25))
-            : Math.max(1, Math.ceil(_mods / 8));
-          return _raw > _physMax ? 1 : _raw;
-        })(),
-        inverterKw: parseFloat(totalInverterKw),
-        inverterVacOut: invData?.acVoltage || 240,
-        inverterMaxDcV: invData?.maxDcVoltage || 600,
-        inverterMaxAcA: invData?.maxAcOutputA || (parseFloat(totalInverterKw) * 1000 / 240),
-        mountType: config.mountingId || 'Roof Mount',
-        roofType: config.roofType,
-        roofPitchDeg: config.roofPitch,
-        roofPitchRatio: `${Math.round(config.roofPitch * 12 / 90 * 12)}:12`,
-        rafterSize: config.rafterSize,
-        rafterSpacingIn: config.rafterSpacing,
-        rafterSpanFt: config.rafterSpan,
-        // ── Electrical ── Single Source of Truth: computedSystem (cs) ──────────
-        // cs = computedSystem from useMemo above — already called computeSystem()
-        // Use cs.runMap / cs.runs for wire gauges; cs.acOcpdAmps / cs.backfeedBreakerAmps for OCPDs.
-        strings: planStrings,
-        dcWireGauge:          (csRun('DC_STRING_RUN') as any)?.wireGauge
-                                ?? config.wireGauge
-                                ?? '#10 AWG',
-        dcConduitType:        (csRun('DC_STRING_RUN') as any)?.conduitSize
-                                ?? config.conduitType
-                                ?? '3/4" EMT',
-        acWireGauge:          (csRun('DISCO_TO_METER_RUN') as any)?.wireGauge
-                                ?? compliance.electrical?.acWireGauge
-                                ?? '#8 AWG',
-        acConduitType:        (csRun('DISCO_TO_METER_RUN') as any)?.conduitSize
-                                ?? config.conduitType
-                                ?? '1" EMT',
-        dcDisconnectAmps:     (csStrings[0] as any)?.ocpdAmps
-                                ?? compliance.stringConfig?.ocpdPerString
-                                ?? 15,
-        dcDisconnectVoltage:  (invData as any)?.maxDcVoltage || 600,
-        acDisconnectAmps:     cs.acOcpdAmps
-                                || compliance.electrical?.busbar?.backfeedBreakerAmps
-                                || Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5
-                                || 30,
-        acBreakerAmps:        cs.acOcpdAmps
-                                || compliance.electrical?.busbar?.backfeedBreakerAmps
-                                || Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5
-                                || 20,
-        backfeedBreakerAmps:  cs.backfeedBreakerAmps
-                                || compliance.electrical?.busbar?.backfeedBreakerAmps
-                                || 20,
-        mainPanelBusAmps:     config.panelBusRating || config.mainPanelAmps || 200,
-        mainPanelBreakerAmps: config.mainPanelAmps || 200,
-        interconnectionType:  config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'supply-side' : 'load-side',
-        interconnectionMethod: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'Supply-Side Tap' : 'Backfeed Breaker',
-        rapidShutdownRequired: config.rapidShutdown,
-        rapidShutdownDevice:  config.inverters[0]?.type === 'micro' ? 'Enphase IQ RSD (integrated)' : 'Tigo RSS / SolarEdge SafeDC',
-        groundWireGauge:      (csRun('DC_STRING_RUN') as any)?.egcGauge
-                                ?? (csRun('DISCO_TO_METER_RUN') as any)?.egcGauge
-                                ?? '#10 AWG',
-        // Battery
-        hasBattery: config.batteryCount > 0 && !!config.batteryId,
-        batteryModel: config.batteryModel || undefined,
-        batteryManufacturer: config.batteryBrand || undefined,
-        batteryCount: config.batteryCount || undefined,
-        batteryKwh: config.batteryKwh || undefined,
-        batteryBreakerAmps: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) || undefined,
-        // Module electrical specs (v44.0 — NEC 690.7 temp correction)
-        moduleVoc: panelData?.voc || undefined,
-        moduleIsc: panelData?.isc || undefined,
-        moduleVmp: panelData?.vmp || undefined,
-        moduleImp: panelData?.imp || undefined,
-        moduleTempCoeffVoc: panelData?.tempCoeffVoc || undefined,
-        panelsPerString: firstStr?.panelCount || undefined,
-        // Inverter MPPT / max DC (v44.0)
-        inverterMpptMin: invData?.mpptMin || undefined,
-        inverterMpptMax: invData?.mpptMax || undefined,
-        inverterMaxDcA: invData?.maxDcInputA || undefined,
-        // Temperature inputs (v44.0 — NEC 310.15 rooftop derating)
-        minAmbientTempC: compliance.electrical?.minAmbientTempC || -10,
-        maxRooftopTempC: compliance.electrical?.maxRooftopTempC || 60,
-        // Site geometry (v44.0 — for A-1 site layout)
-        roofWidthFt: config.roofWidth || 30,
-        roofLengthFt: config.roofLength || 20,
-        // Equipment locations (v44.0 — for A-1)
-        inverterLocation: config.inverterLocation || 'Garage wall — see site plan',
-        disconnectLocation: config.disconnectLocation || 'Adjacent to inverter',
-        meterLocation: config.meterLocation || 'Exterior wall — utility meter',
-        mainPanelLocation: config.mainPanelLocation || 'Main panel — see site plan',
-        // Mounting hardware (v44.0 — for M-1)
-        mountingSystem: config.mountingId || 'Roof Mount Racking',
-        railType: config.railType || 'IronRidge XR-100',
-        flashingType: config.flashingType || 'Flashed L-Foot',
-        lagBoltSize: config.lagBoltSize || '5/16" × 3"',
-        lagBoltSpacingFt: config.attachmentSpacing ? config.attachmentSpacing / 12 : 4,
-        panelThicknessIn: panelData?.thicknessIn || 1.5,
-        panelFrameHeight: panelData?.frameHeightMm || 35,
-        sheathingType: config.sheathingType || '7/16" OSB',
-        bondingHardware: 'WEEB Clips (UL 2703 Listed)',
-        // Contractor (v44.0)
-        contractorLicense: config.contractorLicense || undefined,
-        electricalLicense: config.electricalLicense || undefined,
-        ownerContact: config.ownerPhone || config.ownerEmail || undefined,
-        stringCount: planStrings.length,
-        // Pass pre-rendered SLD SVG so E-1 uses the same diagram already reviewed
-        // in Design Studio — avoids generating a different SLD from scratch.
-        // activeSldSvg is either the existing state value OR a freshly-fetched SVG
-        // (auto-fetched above if sldSvg was null when plan-set was triggered).
-        sldSvg: activeSldSvg || undefined,
-        // Structural
-        windSpeedMph: config.windSpeed || 90,
-        groundSnowPsf: config.groundSnowLoad || 0,
-        seismicCategory: compliance.structural?.seismicCategory || 'C',
-        // AHJ
-        ahj: compliance.jurisdiction?.ahjName || `${config.city}, ${config.state} Building Dept.`,
-        utilityName: compliance.jurisdiction?.utility || config.utilityId || 'Local Utility',
-        necVersion: compliance.jurisdiction?.necVersion || 'NEC 2020',
-        // Contractor
-        contractorName: config.projectName || 'SolarPro Contractor',
-        designerName: config.designer || 'SolarPro',
-        annualKwh: compliance.electrical?.annualKwh || undefined,
-      };
-
-      console.log('[PLANSET V43] Calling /api/engineering/plan-set', {
-        payloadKeys: Object.keys(payload),
-        systemKw: payload.systemKw,
-        panelCount: payload.panelCount,
-      });
-      const res = await fetch('/api/engineering/plan-set', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      console.log('[ENGINE EXECUTED]', { status: res.status, ok: res.ok });
-
-      // ── Binary response (no projectId) → trigger browser download ──
-      const contentType = res.headers.get('Content-Type') || '';
-      if (contentType.includes('application/pdf') || contentType.includes('text/html')) {
-        if (!res.ok) throw new Error('Plan set generation failed');
-        const blob = await res.blob();
-        const sheets    = parseInt(res.headers.get('X-Plan-Set-Sheets') || '5', 10);
-        const strStatus = res.headers.get('X-Structural-Status') || 'UNKNOWN';
-        const pdfMethod = res.headers.get('X-Pdf-Method') || 'pdf';
-        const ext       = contentType.includes('text/html') ? 'html' : 'pdf';
-        const fileName  = `SolarPro_PlanSet_${(config.address || 'Project').replace(/[^a-zA-Z0-9]/g, '_')}.${ext}`;
-        const url = URL.createObjectURL(blob);
-        const a   = document.createElement('a');
-        a.href     = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        setPlanSetResult({
-          fileName,
-          fileId: undefined,
-          sheets,
-          structuralStatus: strStatus,
-          message: pdfMethod === 'html'
-            ? `Downloaded as HTML (open in browser → Print → Save as PDF). ${sheets} sheets ready.`
-            : `Downloaded ${sheets}-sheet permit plan set PDF.`,
-        });
-        logDecision('Plan Set', `Downloaded ${sheets}-sheet plan set: ${fileName}`, 'auto');
-        return;
-      }
-
-      // ── JSON response (projectId present) → saved to project files ──
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Plan set generation failed');
-
-      setPlanSetResult({
-        fileName: data.fileName,
-        fileId: data.fileId,
-        sheets: data.sheets,
-        structuralStatus: data.structuralStatus,
-        message: data.message,
-      });
-
-      // ── Trigger browser download from the saved file ──
-      // The file was saved to project files (DB). Fetch it back and download.
-      if (data.fileId) {
-        try {
-          console.log('[handleGeneratePlanSet] Fetching saved file for download:', data.fileId);
-          const dlRes = await fetch(`/api/project-files/download?id=${data.fileId}`);
-          if (dlRes.ok) {
-            const dlBlob = await dlRes.blob();
-            const ext = (data.fileName || '').endsWith('.html') ? 'html' : 'pdf';
-            const dlUrl = URL.createObjectURL(dlBlob);
-            const dlA   = document.createElement('a');
-            dlA.href     = dlUrl;
-            dlA.download = data.fileName || `SolarPro_PlanSet.${ext}`;
-            document.body.appendChild(dlA);
-            dlA.click();
-            document.body.removeChild(dlA);
-            URL.revokeObjectURL(dlUrl);
-            console.log('[handleGeneratePlanSet] Download triggered for:', data.fileName);
-          } else {
-            console.warn('[handleGeneratePlanSet] Download fetch failed:', dlRes.status, '— file still saved in Files tab');
-          }
-        } catch (dlErr: unknown) {
-          console.warn('[handleGeneratePlanSet] Download error (non-fatal):', (dlErr as Error).message, '— file still saved in Files tab');
-        }
-      }
-
-      logDecision('Plan Set', `Generated ${data.sheets}-sheet plan set: ${data.fileName}`, 'auto');
-    } catch (e: unknown) {
-      setPlanSetError((e as Error).message);
-      logDecision('Plan Set', `Error: ${(e as Error).message}`, 'manual');
-    } finally {
-      setPlanSetLoading(false);
-    }
-  };
+  // ── Generate Permit-Grade Plan Set — RETIRED (W4 §6) ───────────────────────
+  // The legacy /api/engineering/plan-set generator was a second, snapshot-blind
+  // planset authority and has been deleted. This quick-action now delegates to
+  // the single canonical permit generator (handleGeneratePermitPackage →
+  // POST /api/engineering/permit → PermitDesignSnapshot).
+  const handleGeneratePlanSet = () => handleGeneratePermitPackage();
 
   const handleAiQuery = async () => {
     if (!aiQuery.trim()) return;
@@ -17193,14 +16876,14 @@ function EngineeringPageInner() {
                   {sldSvg && !sldLoading ? <span className="text-purple-600 text-xs">✓</span> : null}
                 </button>
 
-                {/* Row 7: Generate Plan Set (v43.1) */}
+                {/* Row 7: Generate Plan Set → canonical permit generator (W4 §6) */}
                 <button
                   onClick={handleGeneratePlanSet}
-                  disabled={planSetLoading || calculating || sldLoading || bomLoading}
+                  disabled={permitLoading || calculating || sldLoading || bomLoading}
                   className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-amber-500/15 to-orange-500/15 border border-amber-500/40 text-amber-300 hover:from-amber-500/25 hover:to-orange-500/25 rounded-lg text-xs font-bold transition-all disabled:opacity-40"
                 >
-                  <Stamp size={12} className={planSetLoading ? 'animate-spin' : ''} />
-                  <span className="flex-1 text-left">{planSetLoading ? 'Generating Plan Set…' : 'Generate Plan Set (v43.1)'}</span>
+                  <Stamp size={12} className={permitLoading ? 'animate-spin' : ''} />
+                  <span className="flex-1 text-left">{permitLoading ? 'Generating Plan Set…' : 'Generate Plan Set'}</span>
                 </button>
               </div>
 

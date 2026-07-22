@@ -56,7 +56,16 @@ import { inlineManufacturerAssets } from './utils/inlineManufacturerAssets';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
 
-export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): string {
+export function generatePermitHTML(
+  input: PermitInput,
+  storedSldSvg?: string,
+  // W4 §8/§9/§12 closer wiring — the async-resolved document + ledger authority
+  // (lib/permit/snapshot/authorityInputs.resolveSnapshotAuthorityInputs), passed
+  // by the async POST route. Omitted (harness/tests/self-heal) ⇒ the sync build
+  // uses the fail-soft defaults (no document; docs-archived unresolved), so the
+  // snapshot digest is unchanged. Never makes generation async.
+  snapshotAuthority?: import('./snapshot/authorityInputs').SnapshotAuthorityInputs | null,
+): string {
   const { project } = input;
 
   // ── PermitDesignSnapshot req. 6: capture RAW client-posted values before any
@@ -1032,6 +1041,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   {
     const snapshot = buildPermitDesignSnapshot(input, cad, {
       projectId: (input as { projectId?: string }).projectId ?? null,
+      // W4 §8/§9/§12 — thread the async-resolved document + ledger authority into
+      // the pure build (fail-soft null defaults when the route did not resolve it).
+      capacityDocument: snapshotAuthority?.capacityDocument ?? null,
+      projectJurisdiction: snapshotAuthority?.projectJurisdiction ?? null,
+      manufacturerDocumentsArchived: snapshotAuthority?.manufacturerDocumentsArchived ?? null,
+      digestInvalidatedByLedger: snapshotAuthority?.digestInvalidatedByLedger ?? false,
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);

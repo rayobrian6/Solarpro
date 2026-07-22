@@ -44,6 +44,7 @@ import {
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
 import { projectStructural } from '../../permit/snapshot/structuralProjection';
+import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 
 // ── ARRAY COLORS (one per array, wraps) ──────────────────────────────────────
@@ -137,6 +138,7 @@ export function drawGroundArray(
   circuit?: { strings: number; colors: string[] } | null,
 ): string {
   const { layout, engineering } = input;
+  const _cpGa = projectCodeAuthority(ctx?.snapshot);   // W4 §2 code editions
   // Even, larger-first split of N modules into k strings (row-major) — matches
   // the balancedBranchSizes the circuit legend/schedule use.
   const _balancedSizes = (n: number, k: number): number[] => {
@@ -769,8 +771,8 @@ export function drawGroundArray(
         ['Pile embedment', `5' min. — field-verify refusal`],
         ['Property setback', `${setbackFt}' min. from line`],
         ['Bonding', 'All metalwork to EGC — NEC 690.43'],
-        ['Structural loads', 'See PV-3 (ASCE 7-22 / IBC 2021)'],
-        ['Codes', 'NEC 690 · IBC 1809 · ASCE 7-22'],
+        ['Structural loads', `See PV-3 (${_cpGa.asceLabel} / ${_cpGa.ibcLabel})`],
+        ['Codes', `NEC 690 · IBC 1809 · ${_cpGa.asceLabel}`],
       ];
       crit.forEach(([k, v], i) => {
         const ry = cy + i * 13;
@@ -833,6 +835,7 @@ export function drawGroundStructural(
   ctx?: RenderContext | null,
 ): string {
   const { layout, engineering, project } = input;
+  const _cpGs = projectCodeAuthority(ctx?.snapshot);   // W4 §2 code editions
 
   // ── STEP 4: CAD is the ONLY source of truth ──
   const cadGround = cad?.ground;
@@ -1095,9 +1098,9 @@ export function drawGroundStructural(
     { n: 3, label: `STRONGBACK — TILTED, SINGLE-STRUT CANTILEVER` },
     { n: 4, label: `PX RAIL — CONTINUOUS E-W, MODULE CLAMPS` },
     { n: 5, label: `PV MODULE — ${panelLenIn}" × ${panelWidIn}" @ ${tiltDeg}° TILT` },
-    { n: 6, label: `WIND LOAD — ${windSpeedMph} MPH (ASCE 7-22)` },
+    { n: 6, label: `WIND LOAD — ${windSpeedMph} MPH (${_cpGs.asceLabel})` },
     { n: 7, label: groundSnowPsf > 0
-        ? `SNOW LOAD — ${groundSnowPsf} PSF (ASCE 7-22)`
+        ? `SNOW LOAD — ${groundSnowPsf} PSF (${_cpGs.asceLabel})`
         : 'SNOW LOAD — N/A (SEE CALCULATIONS)' },
     { n: 8, label: `GROUND CLEARANCE — ${gcInch.toFixed(0)}" MIN.` },
   ];
@@ -1126,7 +1129,7 @@ export function drawGroundStructural(
     { text: `ROW SPACING: ${ftToFtIn(rowSpacingFt)} (TYP.)`, bold: false },
     { text: `PYLON EMBED: ${ftToFtIn(pileDepthFt)} MIN.`, bold: false },
     { text: `GROUND CLEAR: ${gcInch.toFixed(0)}" MIN.`, bold: false },
-    { text: `REF: NEC 690 / IBC 1609 / ASCE 7-22`, bold: false },
+    { text: `REF: NEC 690 / IBC 1609 / ${_cpGs.asceLabel}`, bold: false },
     { text: 'VERIFY PYLON SIZE + EMBED WITH GEOTECH.', bold: true, red: true },
   ];
   notes.forEach((note, ni) => {

@@ -8,7 +8,7 @@ import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
 // Minimal valid snapshot for validator unit tests.
-function baseSnapshot(): PermitDesignSnapshot {
+export function baseSnapshot(): PermitDesignSnapshot {
   const mods = Array.from({ length: 31 }, (_, i) => ({
     moduleId: `m${i}`, planeKey: i < 19 ? 'P1' : 'P2', moduleRecordId: 'mod-1',
     lat: null, lng: null, row: 0, col: i, orientation: null,
@@ -17,7 +17,55 @@ function baseSnapshot(): PermitDesignSnapshot {
     deviceId: `mi-${m.moduleId}`, moduleId: m.moduleId, inverterRecordId: 'inv-1',
     branchId: i < 11 ? 'br-1' : i < 21 ? 'br-2' : 'br-3',
   }));
+  const _codeEd = (kind: 'nec'|'ibc'|'irc'|'ifc'|'asce', edition: string) =>
+    ({ kind, edition, standard: kind.toUpperCase(), source: 'ahj-record' as const,
+       provenance: { source: 'test' } });
   return {
+    // W4 §1 — a VERIFIED code-authority record (test-only) so V11 passes with no
+    // CODE-AUTHORITY-INCOMPLETE blocker required.
+    codeAuthority: {
+      schemaVersion: '1.0.0', ahjName: 'Test AHJ', jurisdictionType: 'county',
+      stateCode: 'IL', stateName: 'Illinois', county: 'Test', city: 'Test',
+      ahjRecordId: 'il-test', utility: { name: null, id: null },
+      editions: {
+        nec: _codeEd('nec', '2023'), ibc: _codeEd('ibc', '2021'), irc: _codeEd('irc', '2021'),
+        ifc: _codeEd('ifc', '2024'), asce: _codeEd('asce', '7-22'),
+      },
+      localAmendments: [], effectiveDate: null, expirationDate: null,
+      sourceDocument: 'Test adoption ordinance', officialSource: null, sourceRevision: null,
+      sourceDate: null, sourceHash: 'sha256:test', verificationStatus: 'verified',
+      verifiedBy: 'test-operator', verifiedAtIso: '2026-07-20', recordProvenance: 'curated',
+      applicabilityNotes: [], incompleteEditions: [], capturedAtIso: '2026-07-20',
+      provenance: { source: 'test' },
+    },
+    // W4 §3/§12 — minimal canonical project/cover authority (test fixture).
+    projectAuthority: {
+      schemaVersion: '1.0.0',
+      projectName: 'Test PV System', customer: 'Test Client',
+      installationAddress: '123 Test St', city: 'Test', stateCode: 'IL', zip: '60000',
+      parcelApn: 'APN-TEST', ahjName: 'Test AHJ', utilityName: 'Test Utility',
+      systemType: 'ROOF MOUNT',
+      capacities: { dcKw: 12.4, acKw: 10.82, moduleCount: 31 },
+      equipmentSummary: {
+        moduleManufacturer: 'Q CELLS', moduleModel: 'Q.PEAK DUO BLK ML-G10+ 400W', moduleWatts: 400,
+        inverterManufacturer: 'Enphase', inverterModel: 'IQ8A', inverterType: 'MICROINVERTER',
+        mountManufacturer: null, mountModel: null,
+        batteryBrand: null, batteryModel: null, batteryCount: null, combinerLabel: null,
+      },
+      designer: 'Test Designer', contractor: null, issueDate: '2026-07-20',
+      engineerReviewStatus: 'PENDING — no approved engineering-review record',
+      issueState: 'PENDING ELECTRICAL REVIEW',
+      issueStateBasis: {
+        authorityGapDomains: ['electrical'], reviewCoversCurrentDigest: false, reviewStale: false,
+        reviewedDigest: null, reason: 'only electrical authority gaps remain',
+      },
+      issuedForPermitGate: { pass: false, preconditions: [] },
+      revisionHistory: [{ rev: 'A', description: 'PENDING ELECTRICAL REVIEW', date: '2026-07-20', by: 'Test Designer' }],
+      sheetIndex: [{ id: 'PV-0', title: 'COVER SHEET' }, { id: 'PV-1', title: 'SITE & ROOF PLAN' }],
+      governingCodesRef: { source: 'snapshot.codeAuthority', schemaVersion: '1.0.0', verificationStatus: 'verified', ahjName: 'Test AHJ' },
+      generalNotes: [], fieldProvenance: {}, capturedAtIso: '2026-07-20',
+      provenance: { source: 'test' },
+    },
     meta: { snapshotId: '', digest: '', schemaVersion: '1.0.0', engineVersion: 'test',
             generatedAtIso: '2026-07-20', projectId: null, designVersionId: null },
     sourceInputs: { clientElectrical: null, clientBackfeedBreakerA: null, clientWireGauge: null,

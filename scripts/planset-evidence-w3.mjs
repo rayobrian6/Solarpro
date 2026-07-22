@@ -336,26 +336,57 @@ failureClasses.push({
 });
 const failureClassesAllCorrected = failureClasses.filter(f => f.mustCorrect).every(f => f.ok);
 
-// ── W3.1 §3 — PARALLEL-PATH CONTAINMENT status ───────────────────────────────
-const LEGACY_BANNER = 'LEGACY PATH — NOT FOR PERMIT / PENDING CANONICAL MIGRATION';
-const parallelPathContainment = {
-  guard: 'lib/plan-set/legacy-path-guard.ts (resolveLegacyPathStatus / isSnapshotPermitValid)',
+// ── §3 (W4 §6) — LEGACY plan-set path is now PERMANENTLY DELETED ──────────────
+// W3.1 shipped INTERIM containment (a fail-closed guard). W4 §6 replaced that
+// with permanent DELETION: the 9 lib/plan-set builders + the guard are removed,
+// the /api/engineering/plan-set route is a 410 tombstone, and zero importers
+// remain. This emission proves the permanent-deletion state from the filesystem
+// (the guard is gone, so nothing is replicated at runtime here).
+const LEGACY_BUILDER_FILES = [
+  'lib/plan-set/legacy-path-guard.ts', 'lib/plan-set/cover-sheet.ts',
+  'lib/plan-set/electrical-sheet.ts', 'lib/plan-set/structural-sheet.ts',
+  'lib/plan-set/equipment-schedule.ts', 'lib/plan-set/site-layout-sheet.ts',
+  'lib/plan-set/mounting-details-sheet.ts', 'lib/plan-set/compliance-sheet.ts',
+  'lib/plan-set/title-block.ts',
+];
+const legacyBuildersPresent = LEGACY_BUILDER_FILES.filter(f => fs.existsSync(f));
+let _routeSrc = ''; try { _routeSrc = fs.readFileSync('app/api/engineering/plan-set/route.ts', 'utf8'); } catch { /* absent = also deleted */ }
+const routeIsTombstone = /410/.test(_routeSrc) && /PLAN_SET_ROUTE_RETIRED/.test(_routeSrc);
+// A retired route must carry NO builder/compute/PDF/PASS tokens (it does no
+// work). Scan the COMMENT-STRIPPED source so the tombstone's explanatory header
+// (which describes what the deleted generator USED to emit) is not a false hit.
+const _routeCode = _routeSrc ? stripComments(_routeSrc) : '';
+const routeWorkTokens = ['buildCoverSheet', 'buildStructuralSheet', 'buildMountingDetailsSheet',
+  'computeSystem(', 'STRUCTURAL_PASS', 'permitReady', 'overallCompliance']
+  .filter(t => _routeCode.includes(t));
+const legacyPathResolution = {
+  resolution: 'DELETED',                 // W4 §6 outcome (was: CONTAINED in W3.1)
+  priorState: 'W3.1 interim containment (LEGACY PATH — NOT FOR PERMIT guard)',
   route: 'app/api/engineering/plan-set',
-  contained: true,
+  routeStatus: routeIsTombstone ? 410 : (_routeSrc ? 'PRESENT-BUT-NOT-TOMBSTONE' : 'ABSENT'),
+  routeCode: 'PLAN_SET_ROUTE_RETIRED',
   routeConsumesSnapshot: false,
-  structuralStatus: 'LEGACY_NOT_FOR_PERMIT',
+  routeEmitsArtifact: false,
+  routeWorkTokensFound: routeWorkTokens,       // MUST be empty
+  legacyBuilderFiles: LEGACY_BUILDER_FILES.length,
+  legacyBuildersPresent,                       // MUST be empty (all deleted)
+  legacyBuildersDeleted: legacyBuildersPresent.length === 0,
+  importersRemaining: 0,
+  structuralStatus: 'N/A — path deleted (no second structuralStatus authority exists)',
   permitReady: false,
-  overallCompliance: LEGACY_BANNER,
-  // Even THIS snapshot could not authorize a PASS on the legacy path: it is
-  // permit-valid only with a real id+digest AND zero blockers — Braidon carries
-  // honest blockers, so snapshotWouldAuthorizePass is false (fail closed proven).
-  snapshotWouldAuthorizePass: snapshotPermitValid,
-  legacyBannerString: LEGACY_BANNER,
-  proof: 'tests/planset/legacy-path-containment.test.ts',
-  note: 'The /api/engineering/plan-set route consumes NO PermitDesignSnapshot → resolveLegacyPathStatus(null) '
-    + '→ LEGACY_NOT_FOR_PERMIT (fail closed). A structural PASS / permit-ready artifact is structurally '
-    + 'impossible without a valid snapshot id + digest + completed validators (zero blockers).',
+  retainedNonAuthorityModule: 'lib/plan-set/permit-system-model.ts (pure ComputedSystem→view bridge; no PASS decision; external SLD-route consumer)',
+  proof: 'tests/planset/legacy-path-containment.test.ts (rewritten to a retirement/reachability proof) + docs/W4-PLANSET-PATH-RESOLUTION.md',
+  note: 'W4 §6 permanent DELETE (option B): the snapshot-blind second planset generator is gone. '
+    + 'The route is an HTTP 410 tombstone (code PLAN_SET_ROUTE_RETIRED) that emits no artifact and makes '
+    + 'no structuralStatus/overallCompliance/permit-ready decision; all 9 builders + the guard are deleted; '
+    + 'the single UI caller now drives the canonical /api/engineering/permit generator. There is exactly ONE '
+    + 'production planset authority (lib/permit/generatePermit.ts → PermitDesignSnapshot).',
 };
+// §3 assertion: the permanent deletion must actually hold (files gone + route is
+// a no-work 410 tombstone). A regression here fails the harness.
+const legacyPathResolutionFail = legacyBuildersPresent.length > 0
+  || routeWorkTokens.length > 0
+  || (_routeSrc !== '' && !routeIsTombstone);
 
 // ── W3.1 §4 — RACKING CAPACITY PROVENANCE + promoted blocking gaps ───────────
 const rap = st.rackingAssembly || {};
@@ -388,7 +419,7 @@ const modeAssertionFail = (MODE === 'original')
   && (!failureClassesAllCorrected || missingExpectedBlockers.length > 0 || fixtureIdentityConflictLeaked);
 
 const blockingFail = disagreements.filter(r => r.blocking).length > 0 || reconFailed || bannerHiddenViolation
-  || coordParityFail || rackingProvenanceFail || modeAssertionFail;
+  || coordParityFail || rackingProvenanceFail || modeAssertionFail || legacyPathResolutionFail;
 
 const report = {
   generatedAt: new Date().toISOString(),
@@ -406,8 +437,8 @@ const report = {
   failureClasses,
   failureClassesAllCorrected,
 
-  // W3.1 §3 — parallel plan-set path containment (fail closed)
-  parallelPathContainment,
+  // §3 (W4 §6) — legacy plan-set path PERMANENTLY DELETED (was W3.1 containment)
+  legacyPathResolution,
 
   // W3.1 §4 — racking capacity provenance (documentHash null + promoted gaps)
   rackingCapacityProvenance,
@@ -520,14 +551,14 @@ const report = {
     liveScan: grepProof,
   },
 
-  // 10 — parallel-path flag (superseded by parallelPathContainment above; W3.1 §3
-  // neutralized the bypass: the route now fails closed to LEGACY_NOT_FOR_PERMIT).
+  // 10 — parallel-path flag (RESOLVED in W4 §6 — see legacyPathResolution above;
+  // the bypass is permanently DELETED, not merely contained).
   parallelPathFlag: {
-    flagged: true,
+    flagged: false,
     surface: 'lib/plan-set/* (buildStructuralSheet, buildMountingDetailsSheet) via /api/engineering/plan-set',
-    status: 'CONTAINED in W3.1 §3 — see parallelPathContainment. The route consumes no snapshot so it fails '
-      + 'closed to LEGACY_NOT_FOR_PERMIT; a PASS/permit-ready artifact is impossible without a valid snapshot. '
-      + 'Permanent convert-or-delete remains W4. (buildPermitCoverSheet.ts already receives a snapshot; flagged for W4.)',
+    status: 'RESOLVED (W4 §6, DELETE) — see legacyPathResolution. The 9 builders + the guard are deleted, the '
+      + 'route is a 410 tombstone (PLAN_SET_ROUTE_RETIRED) with zero importers, and buildPermitCoverSheet.ts is '
+      + 'also deleted (W4 §4). Exactly one production planset authority remains (PermitDesignSnapshot).',
   },
 
   // 11 — carried-forward electrical blockers (all must remain visible)
@@ -564,7 +595,8 @@ console.log(`[w3.1-evidence:${MODE}] truth matrix: ${report.summary.agree} agree
 console.log(`[w3.1-evidence:${MODE}] failure-classes corrected: ${failureClassesAllCorrected ? 'ALL' : 'INCOMPLETE'} `
   + `(${failureClasses.filter(f => f.mustCorrect && f.ok).length}/${failureClasses.filter(f => f.mustCorrect).length})`);
 console.log(`[w3.1-evidence:${MODE}] coord parity: maxΔ ${coordinateAuthority.renderParity.maxDrawnVsTransformDeltaSheetUnits} sheet-units over ${coordinateAuthority.renderParity.structuralObjectsPlaced} placed objects (tol 0.5)`);
-console.log(`[w3.1-evidence:${MODE}] parallel path: contained=${parallelPathContainment.contained} status=${parallelPathContainment.structuralStatus} permitReady=${parallelPathContainment.permitReady}`);
+console.log(`[w3.1-evidence:${MODE}] legacy plan-set path: resolution=${legacyPathResolution.resolution} route=${legacyPathResolution.routeStatus} buildersDeleted=${legacyPathResolution.legacyBuildersDeleted} importers=${legacyPathResolution.importersRemaining}`);
+if (legacyPathResolutionFail) console.log(`[w3.1-evidence:${MODE}] FAIL: legacy plan-set path not fully deleted (builders present=[${legacyBuildersPresent.join(', ')}] routeWorkTokens=[${routeWorkTokens.join(', ')}])`);
 console.log(`[w3.1-evidence:${MODE}] racking provenance: documentHash=${rackingCapacityProvenance.documentHash} gaps→blockers=[${rackingCapacityProvenance.blockingGapsPromotedToBlockers.join(', ')}]`);
 console.log(`[w3.1-evidence:${MODE}] honest blockers: ${blockerCodes.join(', ') || 'none'}`);
 if (disagreements.length) console.log(`[w3.1-evidence:${MODE}] disagreements: ${disagreements.map(r => `${r.quantity}[${r.distinctPrinted}≠${r.authority}]`).join('; ')}`);

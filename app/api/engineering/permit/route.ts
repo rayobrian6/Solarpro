@@ -15,6 +15,7 @@ import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 
 // Permit engine imports (modularized)
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
+import { resolveSnapshotAuthorityInputs } from '@/lib/permit/snapshot/authorityInputs';
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
 import { applyAerialEdgeSnapRegistration } from '@/lib/permit/utils/aerialEdgeSnap';
@@ -1399,7 +1400,14 @@ export async function POST(req: NextRequest) {
 
     await applyAerialEdgeSnapRegistration(enrichedBody);
 
-    const html = generatePermitHTML(enrichedBody, storedSldSvg);
+    // W4 §8/§9/§12 — resolve the async document-registry + digest-invalidation
+    // authority (lib/documents + lib/reconciliation) BEFORE the sync render and
+    // thread it into the snapshot build. Fail-soft: never throws (a
+    // DB-unavailable read resolves to the not-satisfied default), so the RT-MINI
+    // blockers stay firing and ISSUED FOR PERMIT remains impossible until a
+    // verified document is archived (migrations 113/114 pending).
+    const snapshotAuthority = await resolveSnapshotAuthorityInputs(enrichedBody);
+    const html = generatePermitHTML(enrichedBody, storedSldSvg, snapshotAuthority);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });
 
     // ── Save permit HTML to project_files for permit-preview GET endpoint ──────

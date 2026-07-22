@@ -7,6 +7,8 @@ import type { PermitInput } from '../types';
 import { utilityDisplayName, resolveEquipment } from './helpers';
 import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
 
 
 // ─── Title Block (shared across all pages) ───────────────────────────────────
@@ -19,17 +21,20 @@ export function titleBlock(
   totalPages: number
 ): string {
   const { project, compliance, system } = input;
-  // Some AHJ records carry 'NEC 2023' rather than '2023' — strip the prefix so
-  // the code line never prints 'NEC NEC 2023' (critique/red-line item).
-  const necVer  = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
-  const ibcVer  = '2021';
-  const ircVer  = '2021';
-  const ifcVer  = necVer === '2023' ? '2024' : '2021';
+  // W4 §2: EVERY code edition on the title block projects from the ONE snapshot
+  // codeAuthority record — no sheet-local literal, no NEC→IFC inference. Unknown
+  // adoptions render PENDING. The editions are TAGGED (data-code-edition) so the
+  // evidence harness can prove cross-sheet identity + literal-freedom.
+  const cp = projectCodeAuthorityFromInput(input);
+  // W4 §3: AHJ / utility / APN / module / inverter / issue status project from the
+  // ONE snapshot projectAuthority record and are TAGGED (data-project-field) so
+  // the truth matrix can prove cross-sheet identity + single-sourcing on EVERY
+  // sheet's title block. (_snapshot propagates through subScopedInput's spread.)
+  const pa = projectProjectAuthorityFromInput(input);
   const state   = compliance.jurisdiction?.state || '—';
-  const ahj     = compliance.jurisdiction?.ahj   || project.ahj || '—';
-  // FIX v47.341: Convert utility slug to display name in title block
-  const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
-  const apn     = project.apn || '—';
+  const ahj     = pa.ahj ?? compliance.jurisdiction?.ahj ?? project.ahj ?? '—';
+  const utility = pa.utility ?? utilityDisplayName(project.utilityName || project.utilityMeter || '') ?? '—';
+  const apn     = pa.apn ?? project.apn ?? '—';
 
   // Resolve module and inverter models for title block.
   // HYBRID (Ray 2026-07-16): inverters[0] leaked whichever subsystem sorted
@@ -91,19 +96,20 @@ export function titleBlock(
       <div class="tbs-firm-sub">SOLAR PERMIT PLANSETS</div>
     </div>
     <div class="tbs-block">
-      <div class="tb-project">${escapeH(project.projectName || 'SOLAR PV SYSTEM')}</div>
-      <div class="tb-address">${escapeH(project.address || '—')}</div>
-      <div class="tb-client">CLIENT: ${escapeH(project.clientName || '—')}</div>
-      <div class="tb-meta">APN: ${apn}</div>
-      <div class="tb-meta">UTILITY: ${utility}</div>
-      <div class="tb-meta">AHJ: ${ahj} | ${state}</div>
+      <div class="tb-project">${pa.present ? pa.tag('project-name') : escapeH(project.projectName || 'SOLAR PV SYSTEM')}</div>
+      <div class="tb-address">${pa.present ? pa.tag('address') : escapeH(project.address || '—')}</div>
+      <div class="tb-client">CLIENT: ${pa.present ? pa.tag('customer') : escapeH(project.clientName || '—')}</div>
+      <div class="tb-meta">APN: ${pa.present ? pa.tag('apn') : escapeH(apn)}</div>
+      <div class="tb-meta">UTILITY: ${pa.present ? pa.tag('utility') : escapeH(utility)}</div>
+      <div class="tb-meta">AHJ: ${pa.present ? pa.tag('ahj') : escapeH(ahj)} | ${escapeH(state)}</div>
+      <div class="tb-meta">ISSUE: ${pa.present ? pa.tag('issue-status') : 'PENDING'}</div>
     </div>
     <table class="tb-table">
       <tr><td class="tbl">DESIGNER</td><td class="tbv">${escapeH(project.designer || '—')}</td></tr>
       <tr><td class="tbl">DATE</td><td class="tbv">${escapeH(String(project.date ?? ''))}</td></tr>
       <tr><td class="tbl">SYSTEM</td><td class="tbv">${systemSizeKw}${panelCount ? ' / ' + panelCount : ''}</td></tr>
-      <tr><td class="tbl">MODULE</td><td class="tbv">${moduleDisplay}</td></tr>
-      <tr><td class="tbl">INVERTER</td><td class="tbv">${inverterDisplay}</td></tr>
+      <tr><td class="tbl">MODULE</td><td class="tbv">${_distinctSubs.size > 1 ? moduleDisplay : (pa.moduleDisplay ? pa.tag('module-model') : moduleDisplay)}</td></tr>
+      <tr><td class="tbl">INVERTER</td><td class="tbv">${_distinctSubs.size > 1 ? inverterDisplay : (pa.inverterDisplay ? pa.tag('inverter-model') : inverterDisplay)}</td></tr>
       <tr><td class="tbl">SCALE</td><td class="tbv">${/^(PV-1|PV-1B|PV-3)$/.test(sheetId) ? 'AS NOTED' : 'NTS'}</td></tr>
     </table>
     <div class="tbs-rev-hdr">REVISIONS</div>
@@ -118,7 +124,7 @@ export function titleBlock(
     <div class="tbs-sheetname">
       <div class="tbs-sn-label">SHEET NAME</div>
       <div class="tb-sheet-title">${pageTitle}</div>
-      <div class="tb-codes">NEC ${necVer} &middot; IBC ${ibcVer} &middot; IRC ${ircVer} &middot; IFC ${ifcVer} &middot; ASCE 7-22</div>
+      <div class="tb-codes">${cp.tag('nec')} &middot; ${cp.tag('ibc')} &middot; ${cp.tag('irc')} &middot; ${cp.tag('ifc')} &middot; ${cp.tag('asce')}</div>
       <div class="tb-size">ANSI B &mdash; 11&Prime; &times; 17&Prime; &nbsp;|&nbsp; SHEET ${pageNum} OF ${totalPages}</div>
     </div>
     <div class="tbs-id">
@@ -138,22 +144,28 @@ function _snapshotStampHtml(input: PermitInput): string {
   if (!m?.snapshotId || !m?.digest) {
     return `<div class="tb-snapshot" style="font-size:5.5px;color:#a00;padding:1px 4px;border-top:1px solid #000;">SNAPSHOT: UNSTAMPED — NOT AN AUTHORITY-VERIFIED SHEET</div>`;
   }
+  // W4 §3: snapshot id + digest are TAGGED (data-project-field) so the truth
+  // matrix extracts the identical snapshot identity printed on every sheet.
   return `<div class="tb-snapshot" style="font-size:5.5px;color:#333;padding:1px 4px;border-top:1px solid #000;line-height:1.35;">`
-    + `SNAPSHOT ${escapeH(m.snapshotId)} &middot; SCHEMA ${escapeH(m.schemaVersion ?? '')}<br/>`
-    + `SHA-256 ${escapeH((m.digest ?? '').slice(0, 20))}&hellip;</div>`;
+    + `SNAPSHOT <span data-project-field="snapshot-id">${escapeH(m.snapshotId)}</span> &middot; SCHEMA ${escapeH(m.schemaVersion ?? '')}<br/>`
+    + `SHA-256 <span data-project-field="digest">${escapeH((m.digest ?? '').slice(0, 20))}</span>&hellip;</div>`;
 }
 
 // ─── Construction Notes (NEC-specific, system-config-aware) ──────────────────
 
 export function buildConstructionNotes(input: PermitInput): string[] {
   const { project, compliance } = input;
-  // Strip any 'NEC ' prefix so notes never read 'NEC NEC 2023' and the IFC
-  // cycle matches the title block / cover (all derive from the same version).
-  const necVer = (compliance.jurisdiction?.necVersion || '2023').replace(/^NEC\s+/i, '');
-  const ibcVer = '2021';
-  const ifcVer = necVer === '2023' ? '2024' : '2021';
+  // W4 §2: code editions in the general notes project from the ONE snapshot
+  // codeAuthority record (same source as the title block / cover). Unknown
+  // adoptions read PENDING — never a sheet-local literal or NEC→IFC inference.
+  const cp = projectCodeAuthorityFromInput(input);
+  const necVer = cp.nec ?? 'PENDING';
+  const ibcVer = cp.ibc ?? 'PENDING';
+  const ircVer = cp.irc ?? 'PENDING';
+  const ifcVer = cp.ifc ?? 'PENDING';
+  const asceVer = cp.asce ?? 'PENDING';
   const notes: string[] = [
-    `All work shall conform to NEC ${necVer}, ${ibcVer} IBC, ${ibcVer} IRC, ${ifcVer} IFC, ASCE 7-22, applicable state amendments, and AHJ requirements. All equipment shall be listed and labeled per NEC 110.3(B).`,
+    `All work shall conform to NEC ${necVer}, ${ibcVer} IBC, ${ircVer} IRC, ${ifcVer} IFC, ASCE ${asceVer}, applicable state amendments, and AHJ requirements. All equipment shall be listed and labeled per NEC 110.3(B).`,
     `Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).`,
     // Interconnection note follows the ACTUAL method — the load-side backfeed
     // boilerplate on a supply-side-tap job re-introduced the exact set-wide
@@ -185,7 +197,7 @@ export function buildConstructionNotes(input: PermitInput): string[] {
         ]
       : input.project?.systemType === 'ground' || input.project?.systemType === 'ground_mount'
       ? [
-          `Ground mount pile/pier foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Embedment depth per geotechnical requirements and ASCE 7-22.`,
+          `Ground mount pile/pier foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Embedment depth per geotechnical requirements and ASCE ${asceVer}.`,
           `All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: #10 AWG per NEC 690.45. Ground array grounding per NEC 690.47 and 250.166.`,
         ]
       : [

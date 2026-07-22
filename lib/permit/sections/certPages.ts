@@ -21,6 +21,8 @@ import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { BUILD_VERSION } from '@/lib/version';
 import { projectStructuralFromInput, fmt, fmtStr, findCheck } from '../snapshot/structuralProjection';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
 
 /** D-6 (Ray, binding 2026-07-20) / snapshot V13: certification language may
  *  activate ONLY when the snapshot carries an approved engineering-review
@@ -57,7 +59,11 @@ export function certificationGateBanner(input: PermitInput): string {
 
 export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, compliance } = input;
-  const necVer = compliance.jurisdiction?.necVersion || '2020';
+  const cp = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
+  const pa = projectProjectAuthorityFromInput(input); // W4 §3 project/cover authority
+  const asce = cp.asceLabel;
+  const necVer = cp.nec ?? 'PENDING';
+  const ifcVer = cp.ifc ?? 'PENDING';
   const state = compliance.jurisdiction?.state || 'â€”';
   const ahj = compliance.jurisdiction?.ahj || 'â€”';
   const system = input.system;
@@ -101,10 +107,10 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
           <li>National Electrical Code (NEC) ${necVer}, Article 690 â€” Solar Photovoltaic Systems</li>
           <li>National Electrical Code (NEC) ${necVer}, Article 705 â€” Interconnected Electric Power Production Sources</li>
           ${hasRealBattery(project) ? `<li>National Electrical Code (NEC) ${necVer}, Article 706 â€” Energy Storage Systems; NFPA 855</li>` : ''}
-          <li>ASCE 7-22 â€” Minimum Design Loads and Associated Criteria for Buildings and Other Structures</li>
+          <li>${asce} â€” Minimum Design Loads and Associated Criteria for Buildings and Other Structures</li>
           <li>International Building Code (IBC) / International Residential Code (IRC) â€” Structural requirements</li>
-          <li>International Fire Code (IFC) ${necVer === '2023' ? '2024' : '2021'} â€” Â§1204 Solar Photovoltaic Systems (rooftop access & pathways)</li>
-          <li>All applicable local amendments adopted by ${state} and the Authority Having Jurisdiction (${ahj})</li>
+          <li>International Fire Code (IFC) ${ifcVer} â€” Â§1204 Solar Photovoltaic Systems (rooftop access & pathways)</li>
+          <li>All applicable local amendments adopted by ${state} and the Authority Having Jurisdiction (${pa.present ? pa.tag('ahj') : escapeH(ahj)})</li>
         </ul>
       </div>
       <div class="cert-grid">
@@ -211,17 +217,18 @@ function _peSigBlock(): string {
   </div>`;
 }
 
-function _peFooter(): string {
+function _peFooter(asce: string): string {
   return `
   <div class="f-xs center mt-sm pt-xs" style="border-top:var(--border);">
     THIS LETTER IS PREPARED SPECIFICALLY FOR THE ABOVE-NAMED PROJECT AND INSTALLATION ADDRESS.
     IT IS NOT TRANSFERABLE TO OTHER PROJECTS OR LOCATIONS.
-    STRUCTURAL DATA DERIVED FROM ASCE 7-22 AUTOMATED ANALYSIS. FIELD VERIFICATION REQUIRED.
+    STRUCTURAL DATA DERIVED FROM ${asce} AUTOMATED ANALYSIS. FIELD VERIFICATION REQUIRED.
   </div>`;
 }
 
 function _peProjectInfo(input: PermitInput): string {
   const { project, compliance } = input;
+  const pa = projectProjectAuthorityFromInput(input); // W4 §3 — AHJ single-sourced
   const ahj   = compliance.jurisdiction?.ahj || 'â€”';
   const state  = compliance.jurisdiction?.state || 'â€”';
   return `
@@ -230,7 +237,7 @@ function _peProjectInfo(input: PermitInput): string {
     <tr><td class="il">Project Name</td><td class="iv" colspan="3">${escapeH(project.projectName || 'â€”')}</td></tr>
     <tr><td class="il">Client / Owner</td><td class="iv">${escapeH(project.clientName || 'â€”')}</td><td class="il">Date</td><td class="iv">${escapeH(String(project.date ?? ''))}</td></tr>
     <tr><td class="il">Installation Address</td><td class="iv" colspan="3">${escapeH(project.address || 'â€”')}</td></tr>
-    <tr><td class="il">AHJ</td><td class="iv">${ahj}</td><td class="il">State</td><td class="iv">${state}</td></tr>
+    <tr><td class="il">AHJ</td><td class="iv">${pa.present ? pa.tag('ahj') : ahj}</td><td class="il">State</td><td class="iv">${state}</td></tr>
     <tr><td class="il">Permit No.</td><td class="iv">___________________</td><td class="il">APN</td><td class="iv">${project.apn || '___________________'}</td></tr>
   </table>`;
 }
@@ -258,9 +265,10 @@ function _peSiteLoading(input: PermitInput): string {
 
 // â”€â”€â”€ FENCE PE LETTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: PELetterOpts): string {
+  const _cpF = projectCodeAuthorityFromInput(input); const asce = _cpF.asceLabel;   // W4 §2
   const { project, system, compliance } = input;
-  const necVer  = compliance.jurisdiction?.necVersion || '2023';
-  const ibcVer  = '2021';
+  const necVer  = _cpF.nec ?? 'PENDING';
+  const ibcVer  = _cpF.ibc ?? 'PENDING';
   const state   = compliance.jurisdiction?.state || 'â€”';
   const structural = compliance.structural;
   // W3 §7/§9 — env single-sourced from the snapshot; fence overturning SF from
@@ -294,7 +302,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
       <div class="bb-hvy pb-xs mb-sm">
         <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
         <div class="f-lg c555 mt-xs">Solar Photovoltaic System â€” Solar Fence Array</div>
-        <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
+        <div class="f-sm muted">Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
       </div>
 
       <div class="two-col-layout">
@@ -315,19 +323,19 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
             <tr><td class="il">Post Type</td><td class="iv">Galvanized Steel Pipe / HSS</td><td class="il">Post Spacing</td><td class="iv">${postSpacing} ft O.C.</td></tr>
             <tr><td class="il">Foundation Type</td><td class="iv">Concrete Footing (cast-in-place)</td><td class="il">Embedment Depth</td><td class="iv">${postEmbed} ft min.</td></tr>
             <tr><td class="il">Concrete Strength</td><td class="iv">3,000 psi min.</td><td class="il">Hardware</td><td class="iv">Galvanized / Stainless Steel</td></tr>
-            <tr><td class="il">Wind Code</td><td class="iv">ASCE 7-22 Â§29.4, Cf = 1.3</td><td class="il">Exposure</td><td class="iv">Category ${exposure}</td></tr>
+            <tr><td class="il">Wind Code</td><td class="iv">${asce} Â§29.4, Cf = 1.3</td><td class="il">Exposure</td><td class="iv">Category ${exposure}</td></tr>
           </table>
         </div>
 
         <div class="col-right">
-          <div class="section-title">Structural Analysis Results (ASCE 7-22)</div>
+          <div class="section-title">Structural Analysis Results (${asce})</div>
           <table class="info-table" class="mb-xs">
             ${_peSiteLoading(input)}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Post Foundation Capacity Analysis</td></tr>
-            <tr><td class="il">Net Lateral Wind Load / Post</td><td class="iv">${uplift} lbs</td><td class="il">Post Embedment Capacity</td><td class="iv">Per ASCE 7-22 Â§29.4</td></tr>
+            <tr><td class="il">Net Lateral Wind Load / Post</td><td class="iv">${uplift} lbs</td><td class="il">Post Embedment Capacity</td><td class="iv">Per ${asce} Â§29.4</td></tr>
             <tr><td class="il">Safety Factor (Overturning)</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= _fenceMinSf ? '#000' : '#cc0000'};">${safetyFact} (min. ${_fenceMinSf.toFixed(1)} req.)</td><td class="il">Post Embedment Depth</td><td class="iv">${postEmbed} ft min.</td></tr>
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 Â§2.4 â€” ASD)</td></tr>
-            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Overturning)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 Â§29.4</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} Â§2.4 â€” ASD)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Overturning)</td><td class="il">Code Reference</td><td class="iv">${asce} Â§29.4</td></tr>
           </table>
 
           <div class="sec" style="margin-bottom:var(--xs);">
@@ -338,13 +346,13 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
                 hereby certify that I have reviewed the structural design of the above-described solar photovoltaic
                 fence array installation and determined that the <strong>proposed solar fence post foundation system
                 is adequate to support the additional loads imposed by the proposed fence-mounted PV array</strong>,
-                based on the structural analysis performed in accordance with <strong>ASCE 7-22 Â§29.4</strong>,
+                based on the structural analysis performed in accordance with <strong>${asce} Â§29.4</strong>,
                 <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
               </div>
               <div class="f-sm mt-xs" style="line-height:1.6;">
                 Post embedment depth, concrete footing size, and post section are confirmed adequate to resist
                 wind overturning and lateral loads at the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
-                per ASCE 7-22 Â§29.4 (Cf = 1.3). Dead load and ground snow load per ASCE 7-22 Â§26 and Â§7 respectively.
+                per ${asce} Â§29.4 (Cf = 1.3). Dead load and ground snow load per ${asce} Â§26 and Â§7 respectively.
                 Field conditions shall be verified by the installing contractor.
                 Any deviations from the approved design shall be reported to the engineer of record prior to installation.
               </div>
@@ -355,16 +363,17 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
         </div>
       </div>
 
-      ${_peFooter()}
+      ${_peFooter(asce)}
     </div>
   </div>`;
 }
 
 // â”€â”€â”€ GROUND MOUNT PE LETTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: PELetterOpts): string {
+  const _cpG = projectCodeAuthorityFromInput(input); const asce = _cpG.asceLabel;   // W4 §2
   const { project, system, compliance } = input;
-  const necVer  = compliance.jurisdiction?.necVersion || '2023';
-  const ibcVer  = '2021';
+  const necVer  = _cpG.nec ?? 'PENDING';
+  const ibcVer  = _cpG.ibc ?? 'PENDING';
   const state   = compliance.jurisdiction?.state || 'â€”';
   const structural = compliance.structural;
   // W3 §7 — env single-sourced from the snapshot.
@@ -400,7 +409,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
       <div class="bb-hvy pb-xs mb-sm">
         <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
         <div class="f-lg c555 mt-xs">Solar Photovoltaic System â€” Ground Mount Array</div>
-        <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
+        <div class="f-sm muted">Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
       </div>
 
       <div class="two-col-layout">
@@ -420,19 +429,19 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
             <tr><td class="il">Foundation Type</td><td class="iv">${structType}</td><td class="il">Pylon Embed</td><td class="iv">${pileDepth} ft min.</td></tr>
             <tr><td class="il">Ground Clearance</td><td class="iv">${groundClr}" min.</td><td class="il">Tilt Angle</td><td class="iv">${tiltDeg}Â°</td></tr>
             <tr><td class="il">Pylon Spacing</td><td class="iv">${pileSpacing} ft O.C. (1/bay)</td><td class="il">Hardware</td><td class="iv">Galvanized / Stainless Steel</td></tr>
-            <tr><td class="il">Wind Code</td><td class="iv">ASCE 7-22 Â§27 + Â§29.4</td><td class="il">Exposure</td><td class="iv">Category ${exposure}</td></tr>
+            <tr><td class="il">Wind Code</td><td class="iv">${asce} Â§27 + Â§29.4</td><td class="il">Exposure</td><td class="iv">Category ${exposure}</td></tr>
           </table>
         </div>
 
         <div class="col-right">
-          <div class="section-title">Structural Analysis Results (ASCE 7-22)</div>
+          <div class="section-title">Structural Analysis Results (${asce})</div>
           <table class="info-table" class="mb-xs">
             ${_peSiteLoading(input)}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Pylon Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift / Pylon</td><td class="iv">${uplift} lbs</td><td class="il">Pylon Lateral Capacity</td><td class="iv">Per geotechnical report</td></tr>
             <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${Number(safetyFact) >= MIN_ATTACHMENT_SF ? '#000' : '#cc0000'};">${safetyFact} (ASD basis â€” min. ${MIN_ATTACHMENT_SF.toFixed(1)} req.)</td><td class="il">Pylon Embedment Depth</td><td class="iv">${pileDepth} ft min.</td></tr>
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 Â§2.4 â€” ASD)</td></tr>
-            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 Â§27</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} Â§2.4 â€” ASD)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} Â§27</td></tr>
           </table>
 
           <div class="sec" style="margin-bottom:var(--xs);">
@@ -444,12 +453,12 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
                 solar photovoltaic array installation and determined that the <strong>proposed driven-pylon
                 (Speck PLP POWER DRIVEâ„¢) foundation system is adequate to support the loads imposed by the
                 proposed ground-mounted PV array</strong>, based on the structural analysis performed in accordance
-                with <strong>ASCE 7-22 Â§27</strong>, <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
+                with <strong>${asce} Â§27</strong>, <strong>${ibcVer} IBC</strong>, and NEC ${necVer}.
               </div>
               <div class="f-sm mt-xs" style="line-height:1.6;">
                 Pylon embedment depth, pylon capacity, and foundation system design are confirmed adequate to resist
                 wind uplift and lateral loads at the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
-                per ASCE 7-22 Â§27. Ground snow load per ASCE 7-22 Â§7 (slope reduction factor per array tilt angle
+                per ${asce} Â§27. Ground snow load per ${asce} Â§7 (slope reduction factor per array tilt angle
                 of ${tiltDeg}Â°). Geotechnical conditions shall be confirmed by a licensed geotechnical engineer.
                 Field conditions shall be verified by the installing contractor.
                 Any deviations from the approved design shall be reported to the engineer of record prior to installation.
@@ -461,7 +470,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
         </div>
       </div>
 
-      ${_peFooter()}
+      ${_peFooter(asce)}
     </div>
   </div>`;
 }
@@ -470,8 +479,9 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
 export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: PELetterOpts): string {
   const { project, system, compliance } = input;
   const _eqRoof = opts?.subKey ? resolveEquipmentBySubSystem(input, opts.subKey, cad) : null;
-  const necVer  = compliance.jurisdiction?.necVersion || '2023';
-  const ibcVer  = '2021';
+  const _cpR = projectCodeAuthorityFromInput(input); const asce = _cpR.asceLabel;   // W4 §2
+  const necVer  = _cpR.nec ?? 'PENDING';
+  const ibcVer  = _cpR.ibc ?? 'PENDING';
   const state   = compliance.jurisdiction?.state || 'â€”';
   const structural = compliance.structural;
   // W3 §5/§7/§9 — env single-sourced; lag-bolt result from the snapshot
@@ -551,7 +561,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
         <div>
           <div class="f-3xl fw9" style="letter-spacing:1px;">LETTER OF STRUCTURAL COMPLIANCE</div>
           <div class="f-lg c555 mt-xs">Solar Photovoltaic System â€” Roof-Mounted Array</div>
-          <div class="f-sm muted">Prepared under ASCE 7-22 &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
+          <div class="f-sm muted">Prepared under ${asce} &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
         </div>
         <div class="f-sm" style="text-align:right;color:#555;line-height:1.6;">
           <div>RE: <strong style="color:#000;">${escapeH(project.address || 'â€”')}</strong></div>
@@ -582,7 +592,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
         </div>
 
         <div class="col-right">
-          <div class="section-title">Structural Analysis Results (ASCE 7-22)</div>
+          <div class="section-title">Structural Analysis Results (${asce})</div>
           <table class="info-table" class="mb-xs">
             ${_peSiteLoading(input)}
                                     <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Rafter Bending & Deflection Analysis</td></tr>
@@ -598,8 +608,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
             <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis â€” min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} â€” ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : 'â€”'}</td></tr>
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (ASCE 7-22 Â§2.4 â€” ASD)</td></tr>
-            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">ASCE 7-22 Â§26/27</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} Â§2.4 â€” ASD)</td></tr>
+            <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} Â§26/27</td></tr>
           </table>
 
           <div class="sec" style="margin-bottom:var(--xs);">
@@ -614,7 +624,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 PV array</strong>,`
                   : `<strong>the modeled framing does not satisfy all code checks â€” see below</strong>,`}
                 based on the structural analysis performed in accordance with
-                <strong>ASCE 7-22 Â§26/27</strong>, <strong>${ibcVer} IBC</strong>, <strong>${ibcVer} IRC</strong>,
+                <strong>${asce} Â§26/27</strong>, <strong>${ibcVer} IBC</strong>, <strong>${ibcVer} IRC</strong>,
                 and NEC ${necVer}.
               </div>
               ${_allPass ? `
@@ -623,8 +633,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                   ? `Lag bolt attachment capacity (safety factor ${safetyFact}) and the pre-engineered truss load capacity (governing utilization ${utilization}%; member deflection to be verified with the truss manufacturer for the added PV load) are confirmed adequate for`
                   : `Lag bolt attachment capacity (safety factor ${safetyFact}), rafter bending stress (Fâ€™b = ${fbPrime} psi, bending utilization ${bendUtil}%), and deflection (Î” = ${deflection} in vs Î”_allow = ${allowableDefl} in) are confirmed adequate for`}
                 the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
-                per ASCE 7-22 Â§26/27. Roof framing of ${rafterSize} @ ${rafterSpace}" O.C. (${_isTruss ? 'truss' : 'stick'} construction, span ${rafterSpanFt} ft) confirmed adequate for
-                the combined dead load (${totalLoadPsf} psf), wind, and snow loading per IBC Section 1607 and ASCE 7-22 Â§2.3.
+                per ${asce} Â§26/27. Roof framing of ${rafterSize} @ ${rafterSpace}" O.C. (${_isTruss ? 'truss' : 'stick'} construction, span ${rafterSpanFt} ft) confirmed adequate for
+                the combined dead load (${totalLoadPsf} psf), wind, and snow loading per IBC Section 1607 and ${asce} Â§2.3.
                 Field conditions shall be verified by the installing contractor.
                 Any deviations from the approved design shall be reported to the engineer of record prior to installation.
               </div>` : `
@@ -645,7 +655,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
         </div>
       </div>
 
-      ${_peFooter()}
+      ${_peFooter(asce)}
     </div>
   </div>`;
 }
