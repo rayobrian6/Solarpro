@@ -17,6 +17,8 @@ import { getInverterById, getMicroinverterById, SOLAR_PANELS } from '@/lib/equip
 import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
+import { peekSnapshot } from '../snapshot/read';
+import { projectCanonicalFeeder } from '../snapshot/electricalProjection';
 
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
@@ -59,6 +61,12 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const eq = getEquipmentContext(input, cad);
   const topology = topologyToLegacy(getInverterTopology(input, cad));
   const isMicro = topology === 'MICRO';
+
+  // §3 (07-22) — canonical feeder projection: E-1's conduit type/size, feeder
+  // voltage drop and run length come from the ONE feeder segment the snapshot
+  // carries (the SAME source PV-4A/PV-4B/SCHED read), so the SLD can never print
+  // '3/4" EMT' while the schedule prints '1-1/4" 3/4" EMT' at 1.11%-vs-0.37%.
+  const _snapFeed = projectCanonicalFeeder(peekSnapshot(input));
 
   // ── Mount type — drives the PV-array glyph/labels in the renderer ──
   // (cad.systemType is canonical, e.g. 'solar_fence'; project.systemType is the
@@ -182,7 +190,10 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     acOutputKw,
     acOutputAmps,
     acWireGauge,
-    acConduitType:           project.conduitType ?? 'EMT',
+    // §3 — canonical feeder raceway/size first (single source); project.conduitType
+    // is only the standalone-preview fallback (no snapshot).
+    acConduitType:           _snapFeed.raceway ?? project.conduitType ?? 'EMT',
+    acConduitSize:           _snapFeed.tradeSizeIn ?? project.conduitSize ?? undefined,
     acOCPD,
     mainPanelAmps:           mainAmps,
     // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot
@@ -207,11 +218,13 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     atsBrand:                project.atsBrand ?? undefined,
     atsAmpRating:            project.atsAmpRating ?? undefined,
     scale:                   'NOT TO SCALE',
-    acWireLength,
+    // §3 — feeder run length from the canonical segment (same value PV-4B prints).
+    acWireLength:            _snapFeed.oneWayFt ?? acWireLength,
     // Real engine results — without these the renderer's fallback schedule
-    // fabricated 32% fill / canned voltage drops.
-    acConduitFillPct:        compliance.electrical?.conduitFill?.fillPercent ?? undefined,
-    acVoltageDropPct:        compliance.electrical?.acVoltageDrop ?? undefined,
+    // fabricated 32% fill / canned voltage drops. §3: voltage drop is the
+    // canonical ROUTED value (0.37%), never the legacy flat-length 1.11%.
+    acConduitFillPct:        _snapFeed.fillPct ?? compliance.electrical?.conduitFill?.fillPercent ?? undefined,
+    acVoltageDropPct:        _snapFeed.voltageDropPct ?? compliance.electrical?.acVoltageDrop ?? undefined,
     // EGC from the shared authority — same value PV-4B prints (prefers the
     // engine groundingConductor, falls back to NEC 250.122 on the governing
     // OCPD). Never re-derive here.

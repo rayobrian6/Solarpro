@@ -16,6 +16,7 @@ import type {
   PermitDesignSnapshot, StructuralEnv, StructuralCheck, AttachmentObject,
   RailObject, ModuleInstance, RoofPlaneObject, RackingAssemblyRecord,
   StructuralEngineResult, StructuralBomRow, StructuralBomReconciliation,
+  StructuralReactionReconciliation,
 } from './types';
 import { peekSnapshot } from './read';
 
@@ -47,6 +48,11 @@ export interface StructuralProjection {
   // §10 structural BOM (object-derived rows + reconciliation)
   bom: StructuralBomRow[];
   bomReconciliation: StructuralBomReconciliation | null;
+  // §8 attachment-reaction reconciliation (object count / tributary / reactions)
+  reactionReconciliation: StructuralReactionReconciliation | null;
+  /** §9 — true when a blocking racking-capacity gap is active, so no sheet may
+   *  render a capacity PASS from the unverified allowable. */
+  capacityGated: boolean;
   // convenience scalars (single-sourced env)
   windSpeedMph: number | null;
   windSource: string | null;
@@ -85,10 +91,20 @@ const STRUCTURAL_BLOCKER_CODES = new Set([
   'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED',
   'WIND-SNOW-AUTHORITY-UNRESOLVED',
   'REACTIONS-UNTRACEABLE',
+  'STRUCTURAL-REACTION-RECONCILIATION-FAILED',
   'RAIL-QUANTITY-UNTRACEABLE',
   'STRUCTURAL-UTILIZATION-EXCEEDED',
   'SITE-GEOMETRY-MISSING',
   'MODULE-DIMENSIONS-UNVERIFIED',
+  'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+  'RACKING-CAPACITY-APPLICABILITY-GAP',
+]);
+
+/** §9 — racking-capacity gap codes that gate a capacity PASS off any sheet. */
+export const CAPACITY_GATE_BLOCKER_CODES = new Set([
+  'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+  'RACKING-CAPACITY-APPLICABILITY-GAP',
+  'ATTACHMENT-CAPACITY-SOURCE-MISSING',
 ]);
 
 export const BANNER_LINE_1 = 'PENDING STRUCTURAL ENGINEERING REVIEW';
@@ -116,6 +132,15 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
   const env = st?.env ?? null;
   const mi = geo?.moduleInstances ?? [];
   const mod0 = mi[0] ?? null;
+  // §9 — capacity is GATED whenever a blocking racking-capacity gap is active
+  // (RT-MINI unverified 600 lb source / applicability). Read both the readiness
+  // blockers and the racking-assembly structural-authority gaps (belt + braces).
+  const _blockerCodes = new Set((snap?.permitReadiness?.blockers ?? []).map(b => b.code));
+  const _rackGaps = ((st?.rackingAssembly as unknown as {
+    structuralAuthorityGaps?: { code: string; severity: string }[] } | null)?.structuralAuthorityGaps) ?? [];
+  const capacityGated =
+    [...CAPACITY_GATE_BLOCKER_CODES].some(c => _blockerCodes.has(c))
+    || _rackGaps.some(g => g.severity === 'blocking' && CAPACITY_GATE_BLOCKER_CODES.has(g.code));
   return {
     present: !!snap,
     env,
@@ -128,6 +153,8 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
     engine: st?.engine ?? null,
     bom: st?.bom ?? [],
     bomReconciliation: st?.bomReconciliation ?? null,
+    reactionReconciliation: st?.reactionReconciliation ?? null,
+    capacityGated,
     windSpeedMph: env?.ultimateWindSpeedMph ?? st?.loads.windSpeedMph ?? null,
     windSource: env?.windSpeedSource ?? null,
     exposure: env?.exposureCategory ?? st?.loads.exposure ?? null,

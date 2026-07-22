@@ -147,6 +147,33 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
     }
   }
 
+  // ── V10R (§8) — ATTACHMENT-REACTION RECONCILIATION, BLOCKING ──────────────
+  // The canonical attachment reactions must reconcile with the applied load:
+  // object count == the engine reaction-model mount count, Σ tributary ≈ the
+  // array footprint, and Σ uplift/snow/dead reactions ≈ applied pressure × area
+  // (per limit state, documented tolerance). A non-closure means the printed
+  // per-attachment reaction is not traceable to the object set — it must block
+  // rather than render as an authoritative pass (Braidon: 636.48 ft² × 55.95 psf
+  // ÷ 64 never equalled the printed 369 lb/attachment).
+  {
+    const rr = s.structural.reactionReconciliation;
+    if (rr && rr.present && !rr.ok) {
+      const failed = rr.checks.filter(c => !c.ok);
+      add('V10R', 'structural.reactionReconciliation', failed.map(c => c.name),
+        'W3 §8 attachment-reaction reconciliation', ['PV-4C', 'SCHED', 'PE-1'],
+        `attachment reactions do not reconcile with the applied load: `
+        + failed.map(c => `${c.name}(exp ${c.expected}≠act ${c.actual}, ×${c.ratio})`).join(', '));
+    }
+    // Honest surfacing: a failed reconciliation MUST also be a permit-readiness
+    // blocker (never silently permit-ready).
+    if (rr && rr.present && !rr.ok
+        && !s.permitReadiness.blockers.some(b => b.code === 'STRUCTURAL-REACTION-RECONCILIATION-FAILED')) {
+      add('V10R', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+        'W3 §8 attachment-reaction reconciliation', ['PV-4C'],
+        'reactions do not reconcile but no STRUCTURAL-REACTION-RECONCILIATION-FAILED blocker present — the gap must actively block permit-ready');
+    }
+  }
+
   // ── V11 (W4 §2) — CODE-AUTHORITY SINGLE SOURCE — ACTIVATED, BLOCKING ──────
   // Every displayed code edition must come from the ONE snapshot codeAuthority
   // record; the snapshot may not fabricate an edition the authority lacks; and
@@ -237,6 +264,91 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
     add('V18', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
       'snapshot builder', ['PV-0', 'VAL-1'],
       'estimate-grade route lengths present but not reflected as a permit-readiness blocker');
+  }
+
+  // ── §3 (07-22) ELECTRICAL VALUE INTEGRITY — no NaN/Infinity ever renders ─────
+  // V40 — a NaN/±Infinity in any displayed electrical number is a corrupt value
+  // that must NEVER reach a sheet (it printed 'undefined%' / 'NaN A' on Braidon).
+  // BLOCKING (hard) — distinct from an honest null (PENDING), which V41 governs.
+  {
+    const badNum = (x: unknown): boolean => typeof x === 'number' && !Number.isFinite(x);
+    const scan: { path: string; v: unknown }[] = [
+      { path: 'electrical.feeder.voltageDropPct', v: s.electrical.feeder.voltageDropPct },
+      { path: 'electrical.feeder.ocpdA', v: s.electrical.feeder.ocpdA },
+      { path: 'electrical.feeder.continuousA', v: s.electrical.feeder.continuousA },
+      { path: 'electrical.feeder.currentA', v: s.electrical.feeder.currentA },
+      { path: 'electrical.feeder.conduit.fillPct', v: s.electrical.feeder.conduit.fillPct },
+      ...s.electrical.branches.flatMap(b => [
+        { path: `electrical.branches[${b.label}].currentA`, v: b.currentA },
+        { path: `electrical.branches[${b.label}].continuousA`, v: b.continuousA },
+        { path: `electrical.branches[${b.label}].ocpdA`, v: b.ocpdA },
+      ]),
+      ...s.electrical.routeSegments.flatMap(r => [
+        { path: `electrical.routeSegments[${r.segmentId}].voltageDropPct`, v: r.voltageDropPct },
+        { path: `electrical.routeSegments[${r.segmentId}].oneWayFt`, v: r.oneWayFt },
+        { path: `electrical.routeSegments[${r.segmentId}].fillPct`, v: r.fillPct },
+        { path: `electrical.routeSegments[${r.segmentId}].ocpdA`, v: r.ocpdA },
+      ]),
+    ];
+    for (const { path, v } of scan) {
+      if (badNum(v)) {
+        add('V40', path, v, 'computeSystem / conductor authority', SHEETS_ELECTRICAL,
+          `electrical value is NaN/Infinity — a corrupt number may never render (fail closed, never PASS)`);
+        break;
+      }
+    }
+  }
+  // V41 — SEGMENT-PROJECTION CONSISTENCY: the feeder conduit raceway/size the
+  // sheets project (electrical.feeder.conduit) must MATCH the canonical feeder
+  // route segment's raceway/tradeSize. A divergence is the exact 3/4"-EMT-vs-
+  // 1-1/4"-PVC-vs-1"-EMT conflict this correction eliminates — every surface
+  // must project ONE raceway per segment.
+  {
+    const feederIds = new Set(['COMBINER_TO_DISCO_RUN', 'INV_TO_DISCO_RUN']);
+    const seg = s.electrical.routeSegments.find(r => feederIds.has(r.segmentId));
+    const fc = s.electrical.feeder.conduit;
+    if (seg && seg.raceway && fc.raceway && seg.raceway !== 'FREE_AIR'
+        && String(seg.raceway) !== String(fc.raceway)) {
+      add('V41', 'electrical.feeder.conduit.raceway', fc.raceway, 'snapshot builder',
+        ['E-1', 'PV-4B', 'SCHED', 'BOM'],
+        `feeder conduit raceway '${fc.raceway}' ≠ canonical segment '${seg.segmentId}' raceway '${seg.raceway}' — one raceway per segment (segment authority)`);
+    }
+    if (seg && seg.tradeSizeIn && fc.tradeSizeIn && String(seg.tradeSizeIn) !== String(fc.tradeSizeIn)) {
+      add('V41', 'electrical.feeder.conduit.tradeSizeIn', fc.tradeSizeIn, 'snapshot builder',
+        ['E-1', 'PV-4B', 'SCHED', 'BOM'],
+        `feeder conduit trade size '${fc.tradeSizeIn}' ≠ canonical segment '${seg.segmentId}' size '${seg.tradeSizeIn}' — one raceway size per segment`);
+    }
+  }
+  // ── §5 (07-22) V42 — SERVICE-TOPOLOGY OBJECT INTEGRITY ──────────────────────
+  // A supply-side (705.11) design MUST carry the full canonical service chain as
+  // separate objects, and NO object may render a compliant length-limit claim
+  // (e.g. the 10-ft tap rule) without a KNOWN length — an unmeasured tap run is
+  // PENDING, never a fabricated 'within 10 ft'.
+  {
+    const topo = s.electrical.serviceTopology ?? [];
+    const isSupply = s.project.interconnection.rule === '705.11'
+      || /SUPPLY|LINE/i.test(String(s.electrical.poi.method ?? ''));
+    if (isSupply) {
+      const required: import('./types').ServiceTopologyObject['type'][] =
+        ['tap-point', 'tap-conductors', 'fused-ocpd', 'utility-disconnect', 'meter', 'service-disconnect'];
+      const present = new Set(topo.map(o => o.type));
+      const missing = required.filter(t => !present.has(t));
+      if (missing.length) {
+        add('V42', 'electrical.serviceTopology', missing, 'snapshot builder',
+          ['E-1', 'PV-4B'],
+          `supply-side (705.11) design is missing canonical service-topology object(s): ${missing.join(', ')} — each of tap point, tap conductors, fused OCPD, utility disconnect, meter and service disconnect must be a separate object`);
+      }
+    }
+    // No object may claim a passing length-limit rule without a known length.
+    for (const o of topo) {
+      for (const c of o.constraints) {
+        if (c.limitFt != null && c.state === 'pass' && o.lengthFt == null) {
+          add('V42', `electrical.serviceTopology[${o.objectId}]`, { rule: c.code, length: o.lengthFt },
+            'snapshot builder', ['PV-4B', 'E-1'],
+            `object '${o.objectId}' claims constraint '${c.code}' PASSES but its length is unknown — a ≤${c.limitFt}-ft claim requires a known length (must be PENDING)`);
+        }
+      }
+    }
   }
 
   // ── W3 canonical STRUCTURAL invariants (snapshot-internal, blocking) ─────
@@ -564,6 +676,71 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
       if (s.codeAuthority && pa.ahjName !== s.codeAuthority.ahjName) {
         add('V35', 'projectAuthority.ahjName', pa.ahjName, 'buildProjectAuthority',
           COVER_SHEETS, `projectAuthority AHJ '${pa.ahjName}' ≠ codeAuthority AHJ '${s.codeAuthority.ahjName}' — AHJ must be single-sourced from the code authority`);
+      }
+
+      // ── V37 (§15d) — PRODUCTION IDENTITY GATE ────────────────────────────
+      // A project whose name still contains "TEST" or whose designer is blank
+      // may NEVER reach a production/issued state, and the ISSUED-FOR-PERMIT
+      // gate's project-identity precondition must reflect that.
+      const _nameHasTest = /\bTEST\b/i.test(String(pa.projectName ?? ''));
+      const _designerBlank = !pa.designer || !String(pa.designer).trim();
+      if (_nameHasTest || _designerBlank) {
+        const idPre = pa.issuedForPermitGate.preconditions.find(p => p.id === 'project-identity-valid');
+        if (idPre && idPre.satisfied) {
+          add('V37', 'projectAuthority.issuedForPermitGate[project-identity-valid]', true, 'evaluateIssuedForPermitGate',
+            COVER_SHEETS, `project name '${pa.projectName}' contains TEST or designer is blank, but the project-identity gate precondition is satisfied — a TEST/undesigned project must not pass the identity gate`);
+        }
+        if (pa.issueState === 'REVIEWED' || pa.issueState === 'PERMIT-READY' || pa.issueState === 'ISSUED FOR PERMIT') {
+          add('V37', 'projectAuthority.issueState', pa.issueState, 'buildProjectAuthority',
+            COVER_SHEETS, `issue state '${pa.issueState}' is a production/issued state but the project name contains TEST${_designerBlank ? ' and/or the designer is blank' : ''} — blocked (§15d)`);
+        }
+      }
+
+      // ── V38 (§14) — PROJECT-AUTHORITY VERIFICATION SURFACING ─────────────
+      // Any postally-inferred / unverified legal-authority field MUST surface a
+      // PROJECT-AUTHORITY-UNVERIFIED permit-readiness blocker (never silently
+      // treat a ZIP-inferred county/AHJ as verified).
+      if (pa.authorityAnyUnverified
+          && !s.permitReadiness.blockers.some(b => b.code === 'PROJECT-AUTHORITY-UNVERIFIED')) {
+        add('V38', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          '§14 project-authority verification', ['PV-0', 'CERT', 'VAL-1'],
+          'project legal authority has unverified-derived fields but no PROJECT-AUTHORITY-UNVERIFIED blocker present — postal inference must actively block permit-ready');
+      }
+
+      // ── V39 (§15b) — HUMAN UTILITY NAME, NEVER A SLUG ────────────────────
+      // projectAuthority.utilityName is the display name; a raw registry slug
+      // (lowercase, hyphenated, e.g. 'il-ameren-illinois') may never leak.
+      if (pa.utilityName && /^[a-z0-9]+(-[a-z0-9]+)+$/.test(String(pa.utilityName))) {
+        add('V39', 'projectAuthority.utilityName', pa.utilityName, 'buildProjectAuthority',
+          ['ALL SHEETS'], `utility name '${pa.utilityName}' is a raw registry slug — the human utility name must be single-sourced (utilityDisplayName)`);
+      }
+    }
+
+    // ── V44 (§15a) — MOJIBAKE / ENCODING INTEGRITY (BLOCKING) ──────────────
+    // No snapshot text field may carry a UTF-8 mojibake byte sequence or a
+    // Unicode replacement character — corrupt encoding must never reach a sheet.
+    // (The rendered-package scan is the render-level half; this owns the data.)
+    {
+      // Classic double-encoded markers + the replacement char. Kept narrow so a
+      // legitimate accented character is never falsely flagged.
+      const MOJIBAKE = /�|â€|Ã[ -¿]|Â[ -¿]/;
+      const texts: { path: string; v: unknown }[] = [
+        { path: 'projectAuthority.projectName', v: pa?.projectName },
+        { path: 'projectAuthority.customer', v: pa?.customer },
+        { path: 'projectAuthority.installationAddress', v: pa?.installationAddress },
+        { path: 'projectAuthority.utilityName', v: pa?.utilityName },
+        { path: 'projectAuthority.ahjName', v: pa?.ahjName },
+        { path: 'projectAuthority.equipmentSummary.moduleModel', v: pa?.equipmentSummary?.moduleModel },
+        { path: 'projectAuthority.equipmentSummary.inverterModel', v: pa?.equipmentSummary?.inverterModel },
+        { path: 'projectAuthority.equipmentSummary.combinerLabel', v: pa?.equipmentSummary?.combinerLabel },
+        ...(pa?.generalNotes ?? []).map((n, i) => ({ path: `projectAuthority.generalNotes[${i}]`, v: n })),
+      ];
+      for (const { path, v } of texts) {
+        if (typeof v === 'string' && MOJIBAKE.test(v)) {
+          add('V44', path, v, 'snapshot text authority', ['ALL SHEETS'],
+            `text field carries a mojibake / replacement-character sequence — corrupt encoding may never render (§15a)`);
+          break;
+        }
       }
     }
   }

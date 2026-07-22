@@ -1,0 +1,210 @@
+{
+  "generatedAt": "2026-07-22T22:23:21.831Z",
+  "artifact": "braidon-canonical-segment-report",
+  "section": "§3 segment authority / §5 service topology / §6 route provenance (correction 2026-07-22)",
+  "project": "BRAIDON (GreenLancer feedback-session planset)",
+  "snapshotId": "PDS-3280B0112DF5",
+  "digest": "3280b0112df5b93cd3de8041397a6a3b17a51db586b40e04f1748f719db48f6a",
+  "purpose": "The EXACT single set of canonical electrical objects every sheet (E-1/PV-4A/PV-4B/SCHED/BOM) projects. One raceway/size/VD/length per run — the displayed length equals the length used in the formula; the six-object service chain is modelled separately so the ≤10-ft tap rule is never conflated with a downstream feeder run.",
+  "routeProvenanceLabel": "CAD-DERIVED ESTIMATE — FIELD VERIFY",
+  "canonicalFeederProjection": {
+    "feederSegmentId": "COMBINER_TO_DISCO_RUN",
+    "raceway": "PVC Sch 80",
+    "tradeSizeIn": "1-1/4\"",
+    "conduitLabel": "PVC Sch 80 1-1/4\"",
+    "fillPct": null,
+    "voltageDropPct": 0.369361,
+    "oneWayFt": 20,
+    "gauge": "#6 AWG",
+    "egcGauge": "#10 AWG",
+    "ocpdA": 60,
+    "continuousA": 56.348958,
+    "currentA": 45.079167,
+    "conductorCallout": "3×#6 AWG THWN-2 + 1×#10 AWG EGC IN PVC Sch 80 1-1/4\"",
+    "lengthSource": "cad-derived-estimate",
+    "hasHole": false,
+    "holes": [],
+    "note": "This is the ONE feeder read every sheet projects (lib/permit/snapshot/electricalProjection). No sheet derives its own raceway/size/VD; the 3/4\"-vs-1\"-vs-1-1/4\" and 1.11%-vs-0.37% conflicts are gone."
+  },
+  "routeSegments": [
+    {
+      "segmentId": "ROOF_RUN",
+      "from": "PV ARRAY",
+      "to": "MICROINVERTERS",
+      "oneWayFt": 15,
+      "lengthSource": "cad-derived-estimate",
+      "raceway": "FREE_AIR",
+      "tradeSizeIn": "N/A",
+      "fillPct": null,
+      "conductorGauge": "#10 AWG",
+      "egcGauge": "#12 AWG",
+      "voltageDropPct": 0.08283,
+      "ocpdA": 20,
+      "tempDeratingFactor": 0.58,
+      "provenance": "computeSystem runs (deriveRunLengths cad estimate)"
+    },
+    {
+      "segmentId": "BRANCH_RUN",
+      "from": "MICROINVERTERS",
+      "to": "AC COMBINER",
+      "oneWayFt": 86,
+      "lengthSource": "cad-derived-estimate",
+      "raceway": "PVC Sch 80",
+      "tradeSizeIn": "1-1/4\"",
+      "fillPct": null,
+      "conductorGauge": "#10 AWG",
+      "egcGauge": "#12 AWG",
+      "voltageDropPct": 0.298188,
+      "ocpdA": 20,
+      "tempDeratingFactor": 0.96,
+      "provenance": "computeSystem runs (deriveRunLengths cad estimate)"
+    },
+    {
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "from": "AC COMBINER",
+      "to": "AC DISCONNECT",
+      "oneWayFt": 20,
+      "lengthSource": "cad-derived-estimate",
+      "raceway": "PVC Sch 80",
+      "tradeSizeIn": "1-1/4\"",
+      "fillPct": null,
+      "conductorGauge": "#6 AWG",
+      "egcGauge": "#10 AWG",
+      "voltageDropPct": 0.369361,
+      "ocpdA": 60,
+      "tempDeratingFactor": 0.96,
+      "provenance": "computeSystem runs (deriveRunLengths cad estimate)"
+    },
+    {
+      "segmentId": "DISCO_TO_METER_RUN",
+      "from": "AC DISCONNECT",
+      "to": "MAIN SERVICE PANEL",
+      "oneWayFt": 15,
+      "lengthSource": "cad-derived-estimate",
+      "raceway": "PVC Sch 80",
+      "tradeSizeIn": "1-1/4\"",
+      "fillPct": null,
+      "conductorGauge": "#6 AWG",
+      "egcGauge": "#10 AWG",
+      "voltageDropPct": 0.27702,
+      "ocpdA": 60,
+      "tempDeratingFactor": 0.96,
+      "provenance": "computeSystem runs (deriveRunLengths cad estimate)"
+    },
+    {
+      "segmentId": "MSP_TO_UTILITY_RUN",
+      "from": "MAIN SERVICE PANEL",
+      "to": "UTILITY METER",
+      "oneWayFt": 5,
+      "lengthSource": "cad-derived-estimate",
+      "raceway": "PVC Sch 80",
+      "tradeSizeIn": "2-1/2\"",
+      "fillPct": null,
+      "conductorGauge": "#2/0 AWG",
+      "egcGauge": "#6 AWG",
+      "voltageDropPct": 0.080766,
+      "ocpdA": 200,
+      "tempDeratingFactor": 0.96,
+      "provenance": "computeSystem runs (deriveRunLengths cad estimate)"
+    }
+  ],
+  "serviceTopology": [
+    {
+      "objectId": "svc-tap-point",
+      "type": "tap-point",
+      "label": "Supply-side tap point",
+      "description": "Line side of the service disconnecting means (NEC 705.11)",
+      "conductorSpec": null,
+      "ocpdRatingA": null,
+      "lengthFt": null,
+      "lengthSource": "not-applicable",
+      "constraints": [],
+      "provenance": "interconnection method (supply-side)"
+    },
+    {
+      "objectId": "svc-tap-conductors",
+      "type": "tap-conductors",
+      "label": "Tap conductors",
+      "description": "Tap point → fused AC disconnect; sized ≥ 125% of PV output current",
+      "conductorSpec": "#6 AWG THWN-2 (≥ 56.3A)",
+      "ocpdRatingA": null,
+      "lengthFt": null,
+      "lengthSource": "unknown",
+      "constraints": [
+        {
+          "code": "NEC-705.11(C)-TAP-10FT",
+          "description": "Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft",
+          "limitFt": 10,
+          "state": "pending"
+        }
+      ],
+      "provenance": "design rule (tap-conductor length not measured)"
+    },
+    {
+      "objectId": "svc-fused-ocpd",
+      "type": "fused-ocpd",
+      "label": "Fused AC disconnect (tap OCPD)",
+      "description": "NEC 705.11 supply-side overcurrent device",
+      "conductorSpec": null,
+      "ocpdRatingA": 60,
+      "lengthFt": null,
+      "lengthSource": "not-applicable",
+      "constraints": [],
+      "provenance": "computeSystem tap OCPD"
+    },
+    {
+      "objectId": "svc-utility-disconnect",
+      "type": "utility-disconnect",
+      "label": "Utility/AC disconnect",
+      "description": "Lockable AC disconnect ahead of the point of interconnection (per utility)",
+      "conductorSpec": null,
+      "ocpdRatingA": 60,
+      "lengthFt": null,
+      "lengthSource": "not-applicable",
+      "constraints": [],
+      "provenance": "interconnection requirements"
+    },
+    {
+      "objectId": "svc-meter",
+      "type": "meter",
+      "label": "Utility revenue meter",
+      "description": "Existing utility service meter",
+      "conductorSpec": null,
+      "ocpdRatingA": null,
+      "lengthFt": null,
+      "lengthSource": "not-applicable",
+      "constraints": [],
+      "provenance": "existing service"
+    },
+    {
+      "objectId": "svc-service-disconnect",
+      "type": "service-disconnect",
+      "label": "Main service disconnect",
+      "description": "Existing main service disconnecting means",
+      "conductorSpec": null,
+      "ocpdRatingA": 200,
+      "lengthFt": null,
+      "lengthSource": "not-applicable",
+      "constraints": [],
+      "provenance": "project service rating"
+    }
+  ],
+  "counts": {
+    "routeSegments": 5,
+    "serviceTopologyObjects": 6,
+    "serviceTopologyTypes": [
+      "tap-point",
+      "tap-conductors",
+      "fused-ocpd",
+      "utility-disconnect",
+      "meter",
+      "service-disconnect"
+    ],
+    "tapConductorRule": {
+      "code": "NEC-705.11(C)-TAP-10FT",
+      "limitFt": 10,
+      "state": "pending",
+      "lengthFt": null
+    }
+  }
+}

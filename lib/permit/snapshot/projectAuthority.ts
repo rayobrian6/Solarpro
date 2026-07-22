@@ -56,6 +56,7 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'RACEWAY-BONDING-AUTHORITY': 'electrical',
   'EQUIPMENT-IDENTITY-CONFLICT': 'equipment',
   'CODE-AUTHORITY-INCOMPLETE': 'code',
+  'PROJECT-AUTHORITY-UNVERIFIED': 'document',
   'ENGINEERING-REVIEW-PENDING': 'review',
   'STRUCTURAL-FRAMING-UNVERIFIED': 'structural',
   'STRUCTURAL-UTILIZATION-EXCEEDED': 'structural',
@@ -168,6 +169,10 @@ export interface GatePrecondition {
 }
 
 export interface IssuedForPermitGateInput {
+  /** §15(d) — project identity is production-valid: the project name does NOT
+   *  contain "TEST" and a designer/engineer-of-record is present. A TEST project
+   *  or a blank designer can never reach a production/issued state. */
+  projectIdentityValid: boolean;
   /** every blocking snapshot validator passes (no blocking violations). */
   blockingValidatorsPass: boolean;
   /** equipment identity reconciled (no EQUIPMENT-IDENTITY-CONFLICT blocker). */
@@ -202,6 +207,10 @@ export function evaluateIssuedForPermitGate(input: IssuedForPermitGateInput): Is
   const reviewCovers = input.engineerReviewCoversCurrentDigest && !input.digestInvalidatedByLedger;
   const docs = input.manufacturerDocumentsArchived;
   const preconditions: GatePrecondition[] = [
+    { id: 'project-identity-valid', label: 'Project identity is production-valid',
+      satisfied: input.projectIdentityValid,
+      detail: input.projectIdentityValid ? 'project name is not a TEST project and a designer is present'
+        : 'project name contains "TEST" or the designer/engineer-of-record is blank (§15d)' },
     { id: 'blocking-validators', label: 'All blocking validators pass',
       satisfied: input.blockingValidatorsPass,
       detail: input.blockingValidatorsPass ? 'no blocking snapshot violations' : 'blocking snapshot violation(s) present' },
@@ -245,6 +254,24 @@ export interface ProjectRevisionEntry {
   rev: string; description: string; date: string | null; by: string | null;
 }
 
+/** §14 — per-field legal-authority verification state.
+ *   • 'verified'          — confirmed from an official source / document registry
+ *                           (operator verification path). NOT fabricated here.
+ *   • 'unverified-derived'— present but POSTALLY INFERRED (county/city/AHJ/fire
+ *                           from ZIP) or operator-posted; NOT verification.
+ *   • 'unverified'        — present, operator-posted, awaiting verification.
+ *   • 'unknown'           — absent. */
+export type FieldVerificationState = 'verified' | 'unverified-derived' | 'unverified' | 'unknown';
+
+export interface ProjectAuthorityVerification {
+  address: FieldVerificationState;
+  apn: FieldVerificationState;
+  /** county / municipal boundary (the "Madison County / Granite City" inference). */
+  municipalBoundary: FieldVerificationState;
+  ahjName: FieldVerificationState;
+  fireAuthority: FieldVerificationState;
+}
+
 export interface ProjectAuthorityRecord {
   schemaVersion: string;
   // ── §3 identity ─────────────────────────────────────────────────────────
@@ -261,6 +288,11 @@ export interface ProjectAuthorityRecord {
   designer: string | null;
   contractor: string | null;
   issueDate: string | null;
+  // ── §14 legal-authority verification (address/APN/municipal/AHJ/fire) ─────
+  authorityVerification: ProjectAuthorityVerification;
+  /** true when ANY project-authority field is postally-inferred / unverified —
+   *  drives the PROJECT-AUTHORITY-UNVERIFIED permit-readiness blocker. */
+  authorityAnyUnverified: boolean;
   // ── §12 issue state + engineer review ───────────────────────────────────
   engineerReviewStatus: string;
   issueState: ProjectIssueState;
@@ -302,6 +334,13 @@ export interface ProjectAuthorityBuildArgs {
   designer: string | null;
   contractor: string | null;
   issueDate: string | null;
+  /** §14 — county / municipal boundary the address resolved to (postal-inferred
+   *  unless verified). Used only to detect the "assumed from ZIP" case. */
+  county?: string | null;
+  /** §14 — true ONLY when project legal authority was verified from an official
+   *  source / the document-registry operator path. Default (undefined/false) ⇒
+   *  every present field is 'unverified-derived'. Never fabricated true here. */
+  authorityVerified?: boolean;
   // sheet index (THE generated manifest) + governing-codes reference
   sheetIndex: { id: string; title: string }[];
   governingCodes: { schemaVersion: string; verificationStatus: string; ahjName: string | null };
@@ -343,6 +382,21 @@ export function buildProjectAuthority(args: ProjectAuthorityBuildArgs): ProjectA
 
   const prov = (source: string, note?: string): Provenance => ({ source: 'buildProjectAuthority', ref: source, note });
 
+  // §14 — per-field legal-authority verification. Verified state can ONLY come
+  // from the operator/document-registry path (args.authorityVerified); postal
+  // inference (county/city/AHJ/fire from ZIP) is NEVER verification.
+  const _verified = args.authorityVerified === true;
+  const _fieldState = (present: boolean): FieldVerificationState =>
+    !present ? 'unknown' : _verified ? 'verified' : 'unverified-derived';
+  const authorityVerification: ProjectAuthorityVerification = {
+    address: _fieldState(!!args.installationAddress),
+    apn: _fieldState(!!args.parcelApn),
+    municipalBoundary: _fieldState(!!(args.county || args.city || args.stateCode)),
+    ahjName: _fieldState(!!args.ahjName),
+    fireAuthority: _fieldState(!!args.ahjName),   // fire authority derives with the AHJ
+  };
+  const authorityAnyUnverified = Object.values(authorityVerification).some(st => st === 'unverified-derived');
+
   return {
     schemaVersion: PROJECT_AUTHORITY_SCHEMA_VERSION,
     projectName: args.projectName ?? null,
@@ -358,6 +412,8 @@ export function buildProjectAuthority(args: ProjectAuthorityBuildArgs): ProjectA
     designer: args.designer ?? null,
     contractor: args.contractor ?? null,
     issueDate: args.issueDate ?? null,
+    authorityVerification,
+    authorityAnyUnverified,
     engineerReviewStatus: reviewStatusLabel(args.review, issue.reviewCoversCurrentDigest, issue.reviewStale),
     issueState: issue.state,
     issueStateBasis: {

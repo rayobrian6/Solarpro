@@ -48,6 +48,10 @@ import {
 import { regularizeRoofPlanes, coTransformPanels } from '../regularizeRoof';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
+// §6 ROUTE PROVENANCE (07-22): the trench/conduit annotation must NOT claim
+// "ROUTE FIELD-VERIFIED" while run lengths are CAD-derived estimates — it prints
+// "CAD-DERIVED ESTIMATE — FIELD VERIFY", driven by the snapshot's lengthSource.
+import { routeProvenanceLabel } from '../../permit/snapshot/electricalProjection';
 import {
   computeFitWindow, drawSiteContextEls, type SiteContext,
   computePlanTiltDeg, choosePlanRotationDeg, rotateFakePt, rotateAzimuthDeg,
@@ -746,7 +750,7 @@ export function drawRoofPlan(
           const mx = (bestSeg[0] + bestSeg[2]) / 2, my = (bestSeg[1] + bestSeg[3]) / 2;
           let ang = Math.atan2(bestSeg[3] - bestSeg[1], bestSeg[2] - bestSeg[0]) * 180 / Math.PI;
           if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
-          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ROUTE FIELD-VERIFIED</text>`);
+          tEls.push(`<text x="${mx.toFixed(1)}" y="${(my - 3.5).toFixed(1)}" transform="rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})" text-anchor="middle" font-family="Arial,sans-serif" font-size="5.4" font-weight="bold" fill="#3a3f46" stroke="#fff" stroke-width="1.6" paint-order="stroke">(N) TRENCH — ${routeProvenanceLabel(ctx?.snapshot)}</text>`);
         }
       });
       if (tEls.length) {
@@ -1861,7 +1865,7 @@ export function drawRoofPlan(
     els.push(`<line x1="${(jbX - 3.5).toFixed(1)}" y1="${(jbY - 3.5).toFixed(1)}" x2="${(jbX + 3.5).toFixed(1)}" y2="${(jbY + 3.5).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
     const cEndX = roofMaxX - 8, cEndY = roofMaxY - 6;
     els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
-    const _jbLines = [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ROUTE FIELD-VERIFIED`];
+    const _jbLines = [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ${routeProvenanceLabel(ctx?.snapshot)}`];
     const _jbTextW = Math.max(..._jbLines.map(l => l.length)) * 3.5;
     const _rightGap = (W - zones.dims.right) - roofMaxX;
     if (_rightGap >= _jbTextW + 18) {
@@ -2026,8 +2030,11 @@ export function drawRoofStructural(
     v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
   const _lagDiaD  = _mSelD?.mount?.fastenerDiameterIn ?? 0.375;
   const _embedD   = _mSelD?.mount?.fastenerEmbedmentIn ?? 2.5;
-  const _lagLenD  = Math.ceil((_embedD + 1.5) * 2) / 2;
-  const lagLabelD = `${_fracD(_lagDiaD)}" DIA × ${_lagLenD}" SS LAG`;
+  // §10 — prefer the EXACT manufacturer product length + type so the PV-3 detail
+  // matches the notes / PE-1 / BOM (RT-MINI = 3.5" wood screw, never a 4" lag).
+  const _lagLenD  = _mSelD?.mount?.fastenerLengthIn ?? (Math.ceil((_embedD + 1.5) * 2) / 2);
+  const _lagTypeD = (_mSelD?.mount?.fastenerType ?? 'SS lag').toUpperCase();
+  const lagLabelD = `${_fracD(_lagDiaD)}" DIA × ${_lagLenD}" ${_lagTypeD}`;
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
   // W3 §2 — exact catalog module dims from the snapshot (no generic 66×40).
   const panelLenIn = _spD.moduleHeightIn ?? project.panelLengthIn ?? 0;

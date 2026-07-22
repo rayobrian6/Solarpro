@@ -743,7 +743,10 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
         <div style="border-top:3px solid #000;padding:5px 10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:7.5px;">
           <div><strong>INSTALLED BY:</strong> ${escapeH(project.designer || '____________________')}</div>
           <div><strong>EMERGENCY / MONITORING CONTACT:</strong> ____________________</div>
-          <div><strong>INSTALL DATE:</strong> ${escapeH(project.date || '______________')}</div>
+          <!-- §15(c): the install date must NOT be populated before installation.
+               The package/issue date (project.date) is NOT the install date —
+               leave it blank for field completion at install time. -->
+          <div><strong>INSTALL DATE:</strong> ______________ <span style="font-size:6px;color:#999;">(AT INSTALLATION)</span></div>
         </div>
       </div>
 
@@ -1021,7 +1024,18 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
           <table class="info-table">
             <tr><td class="il">System</td><td class="iv">${_sysName}</td></tr>
             <tr><td class="il">Material</td><td class="iv">${_mSel?.rail?.materialAlloy || 'Aluminum — per manufacturer listing'}</td></tr>
-            <tr><td class="il">Rail Profile</td><td class="iv">${_mSel?.rail ? `${_mSel.rail.model} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")` : (_mSel ? 'Rail-less / direct-attach' : 'Per manufacturer')}</td></tr>
+            <tr><td class="il">Rail Profile</td><td class="iv">${_mSel?.rail
+              ? `${_mSel.rail.model} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")`
+              // §10 — a rail-based / rail-paired mount with no own rail spec (e.g.
+              // RT-MINI) is NOT rail-less: its rail is a compatible SKU PENDING
+              // SELECTION. Only a genuinely rail-less product prints direct-attach.
+              : (_mSel
+                  ? (_mSel.systemType === 'rail_based' || _mSel.systemType === 'standing_seam' || _mSel.mountTopology === 'rail_paired'
+                      ? 'Compatible rail — PENDING SELECTION (SKU not specified)'
+                      : _mSel.systemType === 'rail_less'
+                        ? 'Rail-less / direct-attach'
+                        : 'PENDING — mounting topology unconfirmed')
+                  : 'Per manufacturer')}</td></tr>
             <tr><td class="il">Max Attach Spacing</td><td class="iv">${(() => {
               // Engineering-resolved spacing first (same chain as PV-3/PE-1) —
               // the racking's rated 48" printed here beside PV-3's resolved 24".

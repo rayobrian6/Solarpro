@@ -9,6 +9,29 @@ import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+
+/** §10 — the ONE verified fastener installation spec for the SELECTED mounting
+ *  system (single source = mounting-hardware-db hardware.lagBolt + embedment).
+ *  Replaces the hardcoded "3/8" lag" note so every sheet prints the same spec
+ *  the PV-3 detail, PE-1 and BOM print (RT-MINI: 2× 5/16" (8mm) wood screw,
+ *  ~3.5" (90mm), no pilot hole). Falls back to the listed installation
+ *  instructions when no mount is resolved — never a fabricated diameter. */
+function roofAttachmentNote(mountingSystemId: string | undefined): string {
+  const m = mountingSystemId ? getMountingSystemById(mountingSystemId) : undefined;
+  if (!m) {
+    return `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. `
+      + `Fasteners per the selected mounting system's listed installation instructions and PV-3 attachment detail; `
+      + `use corrosion-resistant hardware throughout.`;
+  }
+  const fracIn = (v: number | undefined) =>
+    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : (v != null ? `${v}` : '');
+  const spec = m.hardware.lagBolt
+    ?? `${fracIn(m.mount.fastenerDiameterIn)}" dia structural fastener`;
+  const embed = m.mount.fastenerEmbedmentIn ? `, minimum ${m.mount.fastenerEmbedmentIn}" embedment into rafter` : '';
+  return `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. `
+    + `Fastener: ${spec}${embed}. Use corrosion-resistant hardware per the manufacturer's listed installation instructions.`;
+}
 
 
 // ─── Title Block (shared across all pages) ───────────────────────────────────
@@ -114,8 +137,8 @@ export function titleBlock(
     </table>
     <div class="tbs-rev-hdr">REVISIONS</div>
     <table class="tb-table">
-      <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; ${escapeH(String(project.date ?? ''))}</td></tr>
-    </table>
+      <tr><td class="tbl">REV A</td><td class="tbv">${pa.present ? escapeH(pa.display('issue-status')) : 'PENDING'} &mdash; ${escapeH(String(pa.issueDate ?? project.date ?? ''))}</td></tr>
+    </table>${''/* W4 §1: REV A description = DERIVED issue state (projectAuthority) — never a hardcoded issued state while pending review. */}
     <div class="tbs-seal">
       <div class="tbs-seal-caption">PE SEAL</div>
       <div class="pe-seal-box">&nbsp;</div>
@@ -201,7 +224,7 @@ export function buildConstructionNotes(input: PermitInput): string[] {
           `All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: #10 AWG per NEC 690.45. Ground array grounding per NEC 690.47 and 250.166.`,
         ]
       : [
-          `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. Lag bolts minimum 3/8" diameter, minimum 2.5" embedment into rafter. Use stainless steel hardware throughout.`,
+          roofAttachmentNote((project as { mountingSystemId?: string }).mountingSystemId),
           `Flashing shall be installed under all roof penetrations and sealed with approved sealant per manufacturer instructions. Verify roof framing at each attachment point. No attachments to sheathing only.`,
         ]),
     `Module-to-rail torque shall be per rail manufacturer specification. Rail splices installed per manufacturer details. All exposed hardware shall be stainless steel or corrosion-resistant equivalent per NEC 110.3(B).`,

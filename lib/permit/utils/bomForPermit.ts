@@ -54,6 +54,8 @@ import { resolveArrayStructuralLayout } from './arrayLayout';
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { buildComputedRunsForPermit } from './computedRuns';
+import { peekSnapshot } from '../snapshot/read';
+import { projectCanonicalFeeder } from '../snapshot/electricalProjection';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -526,8 +528,14 @@ export function generateBOMForPermit(
     + (_rl.DISCO_TO_METER_RUN ?? 0) + (_rl.METER_TO_MSP_RUN ?? 0);
   const dcWireLength  = firstStr?.wireLength || (_dcPathFt > 0 ? _dcPathFt : 0) || project.wireLength || 50;
   const acWireLength  = (_acPathFt > 0 ? _acPathFt : 0) || project.wireLength || 60;
-  const conduitType   = (project.conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
-  const conduitSize   = project.conduitSize || '3/4';
+  // §3 (07-22) — conduit fittings must match the CANONICAL feeder segment raceway
+  // + size (EMT fittings for EMT, PVC for PVC, sized to the segment), not a stray
+  // project.conduitType. Single-source from the snapshot feeder segment; the
+  // project scalars are only the standalone fallback.
+  const _bomFeed = projectCanonicalFeeder(peekSnapshot(input));
+  const _rawConduitType = (_bomFeed.raceway ?? project.conduitType ?? 'EMT');
+  const conduitType   = _rawConduitType.toUpperCase().replace(/\s+SCH.*$/i, '').trim() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
+  const conduitSize   = (_bomFeed.tradeSizeIn ?? project.conduitSize ?? '3/4').replace(/"/g, '');
 
   // ── 3. Structural ─────────────────────────────────────────
   const bomSystemType = cadTypeToBOMType(cad.systemType);
@@ -616,6 +624,13 @@ export function generateBOMForPermit(
         batteryId:           project.batteryId,
         moduleCount:         totalPanels,
         deviceCount,
+        // §13 — canonical AC-branch count from the plane-aware branch plan the
+        // snapshot carries (electrical.branches), so micro terminator/cap qty
+        // tracks the REAL branch count (3 → 3), never the resolver's branches+1
+        // heuristic. Falls back to the shared conductor authority's branch plan.
+        branchCount:         isMicro
+          ? ((peekSnapshot(input)?.electrical.branches.length) || _auth.microBranches.length || undefined)
+          : undefined,
         stringCount,
         inverterCount,
         systemKw:            totalDcKw,

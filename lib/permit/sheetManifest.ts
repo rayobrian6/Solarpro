@@ -38,6 +38,17 @@ export interface SheetManifestOptions {
    *  sub-system count — never a single-type sheet claiming another sub's
    *  modules. */
   hybridSubs?: HybridManifestSub[];
+  /** §4 (07-22) — microinverter systems have AC BRANCH CIRCUITS, not DC strings.
+   *  PV-1B is titled "AC BRANCH CIRCUIT LAYOUT" for micro; string/optimizer keep
+   *  the "ARRAY GEOMETRY — STRING LAYOUT" title. Undefined ⇒ string (unchanged). */
+  isMicro?: boolean;
+}
+
+/** §4 — PV-1B title, topology-aware (the ONE source; sheet titleBlock mirrors). */
+export function pv1bTitle(isMicro: boolean | undefined, suffix = ''): string {
+  return isMicro
+    ? `AC BRANCH CIRCUIT LAYOUT${suffix}`
+    : `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION${suffix}`;
 }
 
 const HYBRID_SUFFIX: Record<HybridManifestSub, string> = { roof: 'R', ground: 'G', fence: 'F' };
@@ -79,8 +90,8 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     // Hybrid: one plan/elevation detail sheet PER additional sub-system
     // (real GPS geometry — never overlays only).
     ...extras.map(sub => ({ id: hybridSheetId('PV-1', sub), title: HYBRID_PLAN_TITLE[sub] })),
-    { id: 'PV-1B', title: `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION${primaryLabel}` },
-    ...extras.map(sub => ({ id: hybridSheetId('PV-1B', sub), title: `ARRAY GEOMETRY — STRING LAYOUT & CONFIGURATION — ${HYBRID_LABEL[sub]}` })),
+    { id: 'PV-1B', title: pv1bTitle(o.isMicro, primaryLabel) },
+    ...extras.map(sub => ({ id: hybridSheetId('PV-1B', sub), title: pv1bTitle(o.isMicro, ` — ${HYBRID_LABEL[sub]}`) })),
     // ── structural (how it's held up) ─────────────────────────────────────
     { id: 'PV-3',  title: o.pv3Title },
     ...extras.map(sub => ({ id: hybridSheetId('PV-3', sub), title: HYBRID_STRUCT_TITLE[sub] })),

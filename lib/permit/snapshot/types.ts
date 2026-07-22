@@ -14,6 +14,8 @@
 
 import type { StructuralBomRow, StructuralBomReconciliation } from './structuralBom';
 export type { StructuralBomRow, StructuralBomReconciliation } from './structuralBom';
+import type { StructuralReactionReconciliation } from './structuralEngine';
+export type { StructuralReactionReconciliation } from './structuralEngine';
 import type { CodeAuthorityRecord } from './codeAuthority';
 export type { CodeAuthorityRecord, CodeEdition, CodeEditionKind, CodeVerificationStatus } from './codeAuthority';
 import type { ProjectAuthorityRecord } from './projectAuthority';
@@ -130,6 +132,34 @@ export interface RouteSegmentRecord {
   voltageDropPct: number | null;
   ocpdA: number | null;
   tempDeratingFactor: number | null;
+  provenance: Provenance;
+}
+
+/** §5 (07-22) — a code constraint attached to a service-topology object. The
+ *  compliance `state` is HONESTLY derived from the object's own length state:
+ *  a ≤N-ft rule on an object with an unknown length is 'pending', never 'pass'. */
+export interface ServiceTopologyConstraint {
+  code: string;                      // e.g. 'NEC-705.11(C)-TAP-10FT'
+  description: string;
+  limitFt: number | null;           // the numeric limit (null = non-length rule)
+  state: 'pass' | 'fail' | 'pending';
+}
+
+/** §5 — one canonical object in the supply-/load-side service chain. The tap
+ *  point, tap conductors, fused OCPD, utility disconnect, meter and service
+ *  disconnect are SEPARATE objects, each with its own (honest) length + rules,
+ *  so a sheet can never conflate the ≤10-ft tap-conductor rule with the
+ *  downstream feeder run length. Digest-covered. */
+export interface ServiceTopologyObject {
+  objectId: string;
+  type: 'tap-point' | 'tap-conductors' | 'fused-ocpd' | 'utility-disconnect' | 'meter' | 'service-disconnect';
+  label: string;
+  description: string | null;
+  conductorSpec: string | null;      // where applicable (tap conductors / feeders)
+  ocpdRatingA: number | null;        // where applicable (fused OCPD / service disco)
+  lengthFt: number | null;           // per-object run length (null ⇒ PENDING)
+  lengthSource: 'known-design' | 'cad-derived-estimate' | 'field-measurement' | 'unknown' | 'not-applicable';
+  constraints: ServiceTopologyConstraint[];
   provenance: Provenance;
 }
 
@@ -375,7 +405,12 @@ export interface AttachmentObject {
   embedmentIn: number | null;
   tributaryAreaFt2: number | null;
   upliftReactionLbs: number | null;
-  downwardReactionLbs: number | null;
+  downwardReactionLbs: number | null;   // §8 gravity reaction = dead + snow at this attachment
+  /** §8 — separated gravity components for the attachment-ID reaction schedule.
+   *  deadReactionLbs = added dead-load psf × tributary; snowReactionLbs = roof
+   *  snow psf × tributary. downwardReactionLbs = deadReactionLbs + snowReactionLbs. */
+  deadReactionLbs: number | null;
+  snowReactionLbs: number | null;
   lateralReactionLbs: number | null;
   allowableCapacityLbs: number | null;
   adjustmentFactors: Record<string, number>;
@@ -548,6 +583,11 @@ export interface PermitDesignSnapshot {
     /** W2.1: canonical route-length + per-segment conductor authority
      *  (computeSystem runs — sheets/engines may not substitute lengths). */
     routeSegments: RouteSegmentRecord[];
+    /** §5 (07-22): canonical service-interconnection objects (tap point, tap
+     *  conductors, fused OCPD, utility disconnect, meter, service disconnect) —
+     *  each with its OWN honest length + attached code rules. Supply-side designs
+     *  MUST carry the full chain (V42). Sheets project these; they do not restate. */
+    serviceTopology: ServiceTopologyObject[];
     poi: { method: string; busbarA: number | null; mainBreakerA: number | null;
            backfeedA: number | null; rulePasses: boolean | null };
     parity: {                       // W2.1: canonical=computeSystem vs legacy shadow
@@ -583,6 +623,11 @@ export interface PermitDesignSnapshot {
     /** §10 reconciliation report (rails/mounts/splices/clamps/fasteners/bonding
      *  vs the objects and the V4 producer). `ok:false` ⇒ V10 blocking. */
     bomReconciliation: StructuralBomReconciliation;
+    /** §8 attachment-reaction reconciliation: object count vs the engine reaction
+     *  model, Σ tributary areas vs the canonical array footprint, and Σ uplift /
+     *  snow / dead reactions vs applied load × area (per limit state). `ok:false`
+     *  ⇒ a blocking permit-readiness gap (reactions not traceable to the load). */
+    reactionReconciliation: StructuralReactionReconciliation;
     provenance: Provenance;
     gaps: string[];                 // e.g. 'attachment coordinates not derived (W3)'
   };

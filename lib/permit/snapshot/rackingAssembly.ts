@@ -297,7 +297,12 @@ export function buildRackingAssembly(
   // A rail-based mount that carries NO own rail spec is paired with a COMPATIBLE
   // rail from a different manufacturer (documented in hw.railSplice).
   const mixedManufacturer = isRailBased && !rail;
+  // §10 — a rail-based mount with NO own rail spec has an UNPINNED rail SKU. The
+  // record must state PENDING SELECTION explicitly (never a generic "compatible /
+  // or equivalent" placeholder that reads as if a rail were specified).
+  const railUnpinned = isRailBased && !rail;
   const railBrand = rail ? system.manufacturer : null;
+  const RAIL_PENDING = 'PENDING SELECTION — compatible rail/splice SKU not specified';
   // Documented compatibility (hw.railSplice names the accepted rails) ⇒ supported.
   const assemblySupported = !mixedManufacturer
     || /compatible|xr100|xr1000|pegasus|unirac|sfm|equivalent/i.test(hw.railSplice ?? '');
@@ -318,9 +323,9 @@ export function buildRackingAssembly(
   }
   if (mixedManufacturer) {
     notes.push(
-      `Mixed-manufacturer assembly: ${mountBrand} ${mount.model} mount + compatible rail `
-      + `(${hw.railSplice}). The mount record carries no rail span-limit authority, so rail `
-      + `span / cantilever checks are UNVERIFIABLE until the rail SKU is pinned.`);
+      `Mixed-manufacturer assembly: ${mountBrand} ${mount.model} mount + compatible rail — `
+      + `rail/splice SKU is PENDING SELECTION (not yet specified). The mount record carries no rail `
+      + `span-limit authority, so rail span / cantilever checks are UNVERIFIABLE until the rail SKU is pinned.`);
   }
 
   const publishedAllowable = allowableUpliftLbs(mount.upliftCapacityLbs, mount.capacityBasis);
@@ -328,7 +333,13 @@ export function buildRackingAssembly(
 
   // ── W3.1 §4 — capacity provenance + structural-authority gaps ────────────────
   const asd = resolveAsdAllowableLbs(mount.upliftCapacityLbs, mount.capacityBasis);
-  const railModel = rail?.model ?? (isRailBased ? 'compatible-rail (SKU unpinned)' : null);
+  // SEMANTIC rail SKU for clearance / provenance matching: the exact rail model
+  // when pinned, else null (unpinned) — never a placeholder string, so a verified
+  // document's rail-assembly match is not defeated by a display placeholder.
+  const railModel = rail?.model ?? null;
+  // DISPLAY value on the record: exact SKU, or explicit PENDING SELECTION when a
+  // rail-based mount carries no own rail (never "compatible / or equivalent").
+  const railDisplay = rail?.model ?? (railUnpinned ? RAIL_PENDING : null);
   const installationCondition = system.compatibleRoofTypes.join(', ') || null;
   const fastenerPattern = mount.fastenersPerMount != null
     ? `${mount.fastenersPerMount}× ${hw.lagBolt ?? mount.attachmentMethod}`
@@ -523,13 +534,15 @@ export function buildRackingAssembly(
     mountModel: mount.model,
     mountSku: null,
     railManufacturer: railBrand,
-    railModel,
+    railModel: railDisplay,
     railSku: null,
     lFootOrAdapter: /l_foot/i.test(mount.attachmentMethod) ? `${mountBrand} L-Foot` : null,
     tBoltFastener: isRailBased ? 'Rail T-bolt / mount-to-rail bolt' : null,
     midClamp: hw.midClamp ?? null,
     endClamp: hw.endClamp ?? null,
-    splice: hw.railSplice ?? null,
+    // §10 — no "or equivalent"/"compatible" placeholder: pin the splice SKU or
+    // print PENDING SELECTION when the rail (and thus its splice) is unpinned.
+    splice: railUnpinned ? RAIL_PENDING : (hw.railSplice ?? null),
     groundingBonding: hw.bondingHardware ?? null,
     // Not carried in mounting-hardware-db — honest gap, not fabricated.
     compatibleModuleThicknessInRange: null,

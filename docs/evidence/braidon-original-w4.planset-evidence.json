@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-07-22T03:26:54.114Z",
+  "generatedAt": "2026-07-22T22:19:10.145Z",
   "wave": "W4",
   "mode": "original",
   "evidenceRole": "IMMUTABLE W4 acceptance evidence from the frozen braidon-original-audit-fixture — proves AHJ/code/project/document authority + cross-sheet agreement + zero authority bypass on the exact originally-audited design.",
   "supersedes": null,
-  "snapshotId": "PDS-D66B56B78C1E",
-  "digest": "d66b56b78c1ea2e7756db0927c177134611444696b29916900b40eca04c4ea1a",
+  "snapshotId": "PDS-19FB360A2BEB",
+  "digest": "19fb360a2beb4130d16cc73ee1a3957923278a3b147931efca779abc78c42cb6",
   "schemaVersion": "1.0.0",
   "project": "BRAIDON (GreenLancer feedback-session planset)",
   "sheetCount": 19,
@@ -162,16 +162,22 @@
       "authorityGapDomains": [
         "electrical",
         "structural",
-        "code"
+        "code",
+        "document"
       ],
       "reviewCoversCurrentDigest": false,
       "reviewStale": false,
       "reviewedDigest": null,
-      "reason": "authority gaps span [electrical, structural, code] — full engineering review required"
+      "reason": "authority gaps span [electrical, structural, code, document] — full engineering review required"
     },
     "issuedForPermitGate": {
       "pass": false,
       "preconditions": [
+        {
+          "id": "project-identity-valid",
+          "satisfied": true,
+          "detail": "project name is not a TEST project and a designer is present"
+        },
         {
           "id": "blocking-validators",
           "satisfied": false,
@@ -1086,7 +1092,19 @@
           "value": "RT-MINI"
         },
         {
+          "sheet": "PV-1B",
+          "value": "RT-MINI"
+        },
+        {
           "sheet": "PV-3",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "PV-4B",
           "value": "RT-MINI"
         },
         {
@@ -1099,6 +1117,10 @@
         },
         {
           "sheet": "DS-3",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "CERT",
           "value": "RT-MINI"
         },
         {
@@ -1206,91 +1228,91 @@
     },
     {
       "quantity": "authority.snapshot-id",
-      "authority": "PDS-D66B56B78C1E",
+      "authority": "PDS-19FB360A2BEB",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-1",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-1B",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-3",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-4C",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "E-1",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-4A",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-4B",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-5",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PV-6",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "SCHED",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "SCHED-2",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "APP-A",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "DS-1",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "DS-2",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "DS-3",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "DS-4",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "CERT",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "PE-1",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         },
         {
           "sheet": "E-1(SLD stamp)",
-          "value": "PDS-D66B56B78C1E"
+          "value": "PDS-19FB360A2BEB"
         }
       ],
       "distinctPrinted": [
-        "PDS-D66B56B78C1E"
+        "PDS-19FB360A2BEB"
       ],
       "agree": true,
       "blocking": true,
@@ -1298,91 +1320,91 @@
     },
     {
       "quantity": "authority.digest",
-      "authority": "d66b56b78c1ea2e7756d… (full d66b56b78c1e…)",
+      "authority": "19fb360a2beb4130d16c… (full 19fb360a2beb…)",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-1",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-1B",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-3",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-4C",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "E-1",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-4A",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-4B",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-5",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PV-6",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "SCHED",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "SCHED-2",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "APP-A",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "DS-1",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "DS-2",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "DS-3",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "DS-4",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "CERT",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "PE-1",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         },
         {
           "sheet": "E-1(SLD stamp)",
-          "value": "d66b56b78c1ea2e7756d"
+          "value": "19fb360a2beb4130d16c"
         }
       ],
       "distinctPrinted": [
-        "d66b56b78c1ea2e7756d"
+        "19fb360a2beb4130d16c"
       ],
       "agree": true,
       "blocking": true,
@@ -1641,11 +1663,116 @@
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
       "ENGINEERING-REVIEW-PENDING"
     ],
     "missing": []
   },
   "authorityBypasses": [],
+  "correctionPassGates": {
+    "canonicalFeeder": {
+      "raceway": "PVC Sch 80",
+      "tradeSizeIn": "1-1/4\"",
+      "conduitLabel": "PVC Sch 80 1-1/4\"",
+      "voltageDropPct": 0.36936055005081303,
+      "oneWayFt": 20,
+      "feederSegmentId": "COMBINER_TO_DISCO_RUN"
+    },
+    "reactionReconciliation": {
+      "present": true,
+      "ok": true,
+      "attachmentCount": 64,
+      "reactionModelCount": 64,
+      "tributarySumFt2": 756.288,
+      "arrayAreaFt2": 636.461
+    },
+    "capacityGate": {
+      "mount": "RT-MINI",
+      "capacityGated": true,
+      "rendersUnverified": true
+    },
+    "certApproved": false,
+    "newAuthorityBlockersPresent": true,
+    "gates": [
+      {
+        "id": "§1 no-issued-for-permit-while-pending",
+        "ok": true,
+        "detail": "issueState=PENDING ENGINEERING REVIEW"
+      },
+      {
+        "id": "§2 no-affirmative-cert-without-approval",
+        "ok": true,
+        "detail": "certApproved=false; leaked=none"
+      },
+      {
+        "id": "§3 electrical-canonical-feeder-single-source",
+        "ok": true,
+        "detail": "raceway=PVC Sch 80 size=1-1/4\" vd=0.36936055005081303 len=20"
+      },
+      {
+        "id": "§3 electrical-conduit-label-projected",
+        "ok": true,
+        "detail": "canonical conduit \"PVC Sch 80 1-1/4\"\" projected on the sheets"
+      },
+      {
+        "id": "§3 no-merged-raceway-token",
+        "ok": true,
+        "detail": "no `1-1/4\" 3/4\" EMT` style multi-size merge in any sheet"
+      },
+      {
+        "id": "§3 no-undefined-nan-value-render",
+        "ok": true,
+        "detail": "no undefined/NaN rendered as a %/A/V/ft/lbs value or table cell"
+      },
+      {
+        "id": "§8 reaction-reconciliation-present-ok",
+        "ok": true,
+        "detail": "attach=64 modelCount=64 tribΣ=756.288ft² area=636.461ft²"
+      },
+      {
+        "id": "§8 pv4c-reaction-schedule-rendered",
+        "ok": true,
+        "detail": "PV-4C carries the attachment-ID schedule + reconciliation footer"
+      },
+      {
+        "id": "§9 rtmini-capacity-unverified-no-pass",
+        "ok": true,
+        "detail": "mount=RT-MINI capacityGated=true"
+      },
+      {
+        "id": "§10 no-or-equivalent-or-railcompat",
+        "ok": true,
+        "detail": "no \"or equivalent\"/RAIL-COMPAT"
+      },
+      {
+        "id": "§10 no-rail-less-for-rail-paired-mount",
+        "ok": true,
+        "detail": "RT-MINI never described rail-less"
+      },
+      {
+        "id": "§11 no-pending-edition-literals",
+        "ok": true,
+        "detail": "none"
+      },
+      {
+        "id": "§14 new-authority-blockers-present",
+        "ok": true,
+        "detail": "missing=none"
+      },
+      {
+        "id": "§15 no-mojibake",
+        "ok": true,
+        "detail": "no U+FFFD / double-encoded UTF-8"
+      },
+      {
+        "id": "§15 human-utility-name-not-slug",
+        "ok": true,
+        "detail": "utility=Ameren Illinois"
+      }
+    ],
+    "failed": [],
+    "allPass": true
+  },
   "summary": {
     "truthRows": 15,
     "agree": 15,
@@ -1667,7 +1794,11 @@
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
       "ENGINEERING-REVIEW-PENDING"
-    ]
+    ],
+    "correctionGatesTotal": 15,
+    "correctionGatesFailed": [],
+    "correctionGatesAllPass": true
   }
 }

@@ -953,7 +953,7 @@ function calcRackingBOM(
       description: isRailBased
         ? `${system.manufacturer} ${system.rail?.model ?? 'Compatible Rail'} — ${railLengthFt.toFixed(1)} ft each`
         : 'N/A — Rail-less or ballasted system',
-      partNumber: system.rail?.model ?? 'RAIL-COMPAT',
+      partNumber: system.rail?.model ?? 'RAIL-PENDING-SELECTION',
     },
     railSplices: {
       qty: totalSplices,

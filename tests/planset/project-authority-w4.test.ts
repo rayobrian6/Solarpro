@@ -111,6 +111,7 @@ describe('W4 §12 — classifyBlockerDomain', () => {
 // ── §12 ISSUED-FOR-PERMIT gate ───────────────────────────────────────────────
 describe('W4 §12 — evaluateIssuedForPermitGate (each precondition)', () => {
   const allPass: IssuedForPermitGateInput = {
+    projectIdentityValid: true,   // §15(d)
     blockingValidatorsPass: true,
     noEquipmentIdentityConflict: true,
     codeAuthorityVerified: true,
@@ -124,11 +125,18 @@ describe('W4 §12 — evaluateIssuedForPermitGate (each precondition)', () => {
     const g = evaluateIssuedForPermitGate(allPass);
     expect(g.pass).toBe(true);
     expect(g.preconditions.every(p => p.satisfied)).toBe(true);
-    expect(g.preconditions).toHaveLength(7);
+    expect(g.preconditions).toHaveLength(8);
+  });
+
+  it('§15(d) — a TEST/undesigned project (projectIdentityValid=false) fails the gate', () => {
+    const g = evaluateIssuedForPermitGate({ ...allPass, projectIdentityValid: false });
+    expect(g.pass).toBe(false);
+    const idPre = g.preconditions.find(p => p.id === 'project-identity-valid')!;
+    expect(idPre.satisfied).toBe(false);
   });
 
   const flips: (keyof IssuedForPermitGateInput)[] = [
-    'blockingValidatorsPass', 'noEquipmentIdentityConflict', 'codeAuthorityVerified',
+    'projectIdentityValid', 'blockingValidatorsPass', 'noEquipmentIdentityConflict', 'codeAuthorityVerified',
     'structuralApplicabilityEstablished', 'engineerReviewCoversCurrentDigest', 'signatureSealSatisfied',
   ];
   for (const k of flips) {
@@ -177,6 +185,7 @@ describe('W4 §3 — buildProjectAuthority (no vendor/EOR defaults)', () => {
     blockers: [{ code: 'ROUTE-LENGTH-ESTIMATE' }, { code: 'ENGINEERING-REVIEW-PENDING' }],
     review: null, currentDigest: '',
     gateInput: {
+      projectIdentityValid: false,
       blockingValidatorsPass: false, noEquipmentIdentityConflict: true, codeAuthorityVerified: false,
       manufacturerDocumentsArchived: null, structuralApplicabilityEstablished: false,
       engineerReviewCoversCurrentDigest: false, signatureSealSatisfied: false,

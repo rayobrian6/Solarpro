@@ -233,8 +233,9 @@ describe('(d) legacy single-system BOMs (no subSystemCounts) are byte-identical'
       'mid_clamp|IronRidge|UFO Mid Clamp|UFO-MID-01|36|ea',
       'end_clamp|IronRidge|UFO End Clamp|UFO-END-01|8|ea',
       'splice|IronRidge|XR100 Splice|XR-100-SPLICE|4|ea',
-      'grounding|Erico/Harger|5/8" × 8 ft Copper-Clad Ground Rod|GR-5/8-8|1|ea',
-      'grounding|Erico/Harger|5/8" Ground Rod Acorn Clamp|GRC-5/8|1|ea',
+      // §7 (07-22): the auto ground rod + acorn clamp are REMOVED — a grid-tied
+      // interconnection bonds to the existing GES (NEC 250.64 / 690.47), it does
+      // not add a new electrode unless input.requiresGroundingElectrode is set.
     ]);
   });
 
@@ -248,8 +249,9 @@ describe('(d) legacy single-system BOMs (no subSystemCounts) are byte-identical'
       'mid_clamp|IronRidge|UFO Mid Clamp|UFO-MID-01|36|ea',
       'end_clamp|IronRidge|UFO End Clamp|UFO-END-01|8|ea',
       'grounding|Wiley Electronics|WEEB Lug 6.7|WEEB-LUG-6.7|20|ea',
-      'grounding|Erico/Harger|5/8" × 8 ft Copper-Clad Ground Rod|GR-5/8-8|1|ea',
-      'grounding|Erico/Harger|5/8" Ground Rod Acorn Clamp|GRC-5/8|1|ea',
+      // §7 (07-22): auto ground rod + acorn clamp REMOVED (bonds to existing GES;
+      // no new electrode unless requiresGroundingElectrode). Module bonding
+      // (WEEB Lug) stays — it is frame-to-rail bonding, not an electrode.
     ]);
   });
 });

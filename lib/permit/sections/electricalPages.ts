@@ -11,6 +11,10 @@ import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, to
 import { generateLiveSLD } from '../utils/sldAdapter';
 import { microBranchCount, planMicroBranches } from '../utils/branching';
 import { getSnapshot } from '../snapshot/read';
+// §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
+// size, voltage drop, run length + conductor callout PROJECTS from the ONE
+// canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
+import { projectCanonicalFeeder } from '../snapshot/electricalProjection';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { SUB_LABEL } from './subSystemSheets';
@@ -120,6 +124,23 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   const { compliance, rulesResult, overrides, system } = input;
   const _auth = buildConductorAuthority(input, cad);
   const _ic = resolveInterconnection(input, cad);
+  // §3 — the rules engine (legacy) reports voltage drop on a FLAT project-level
+  // length (the 1.11% number). W2.1 classified the canonical basis as the routed
+  // feeder segment (0.37%). Any VD row printed here MUST project the canonical
+  // value so PV-4A never contradicts E-1/PV-4B on the same feeder.
+  const _feedA = projectCanonicalFeeder(getSnapshot(input));
+  const _remapVdRule = <T extends { title?: string; message?: string; value?: unknown; ruleId?: string; necReference?: string }>(rule: T): T => {
+    const hay = `${rule.ruleId ?? ''} ${rule.title ?? ''} ${rule.message ?? ''}`.toLowerCase();
+    const isVd = /voltage\s*drop|v-?drop/.test(hay);
+    if (!isVd || _feedA.voltageDropPct == null) return rule;
+    const canon = _feedA.voltageDropPct;
+    return {
+      ...rule,
+      value: Number(canon.toFixed(2)),
+      // rewrite any embedded legacy percentage in the message with the canonical one
+      message: (rule.message ?? '').replace(/\d+(?:\.\d+)?\s*%/, `${canon.toFixed(2)}%`),
+    };
+  };
   // W4 §2/§11 (V11): the NEC edition comes from the ONE snapshot codeAuthority
   // record — never a sheet-local '2020'/'2023' literal (this was one half of the
   // 2023-vs-2020 disagreement). Unknown adoption renders PENDING, never a guess.
@@ -174,7 +195,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
             // contradicted PV-4C's numbers on the same package.
             _isRoof ? rule.category !== 'structural'
                     : (rule.category !== 'structural' || !String(rule.ruleId || '').includes('rafter'))
-          ).map(rule => `
+          ).map(_remapVdRule).map(rule => `
           <tr style="background:${statusBg(rule.severity)}">
             <td class="mono f-lg">${rule.necReference || rule.asceReference || rule.ruleId}</td>
             <td>${rule.title}${rule.autoFixed ? ' <span style="background:#f5f5f5;color:#000;padding:1px 5px;;font-size:8px;font-weight:700">Auto-Fixed</span>' : ''}</td>
@@ -353,6 +374,19 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
   const elec = compliance.electrical;
   const _auth = buildConductorAuthority(input, cad);
   const _ic = resolveInterconnection(input, cad);
+  // §3 — canonical feeder: raceway/size/VD/length/callout all single-sourced
+  // from the ONE feeder segment. Replaces project.conduitType, project.wireLength,
+  // elec.acVoltageDrop and elec.conduitFill (each of which was an independent,
+  // divergent source: the "1-1/4\" 3/4\" EMT" callout + 1.11%-vs-0.37% conflict).
+  const _snap = getSnapshot(input);
+  const _feed = projectCanonicalFeeder(_snap);
+  // §5 — canonical service-interconnection objects the supply-side text projects.
+  const _svcTopo = _snap.electrical.serviceTopology ?? [];
+  const _svc = (t: string) => _svcTopo.find(o => o.type === t) ?? null;
+  const _feedLenTxt = _feed.oneWayFt != null ? `${_feed.oneWayFt} ft` : 'PENDING';
+  const _feedVdTxt = _feed.voltageDropPct != null ? `${_feed.voltageDropPct.toFixed(2)}%` : 'PENDING';
+  const _feedCallout = _feed.conductorCallout ?? 'PENDING — feeder conductor authority incomplete';
+  const _feedConduit = _feed.conduitLabel ?? 'PENDING';
   // W4 §2/§11 (V11): NEC/ASCE editions on this sheet project from the ONE
   // snapshot codeAuthority record — no sheet-local 'ASCE 7-22' literal.
   const _cpCS = projectCodeAuthorityFromInput(input);
@@ -466,29 +500,29 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           <tr style="background:#f5f5f5">
             <td class="fw7">AC Output</td>
             <td>Inverter(s)</td><td>${_ic.isSupplySide ? 'Supply-Side Tap @ Service' : 'Main Panel'}</td>
-            <td>${_ic.feederPhaseCallout}</td>
+            <td>${_feedCallout}</td>
             <td>${_ic.feederAmpacityA != null ? _ic.feederAmpacityA.toFixed(1) : '—'}A</td>
             <td>${_ic.feederOcpd || '—'}A</td>
-            <td style="color:${(elec.acVoltageDrop || 0) > 3 ? '#cc0000' : '#000'}">${elec.acVoltageDrop?.toFixed(2) || '—'}%</td>
-            <td>${project.conduitType}</td>
-            <td>${project.wireLength} ft</td>
+            <td style="color:${(_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000'}">${_feedVdTxt}</td>
+            <td>${_feedConduit}</td>
+            <td>${_feedLenTxt}</td>
           </tr>
           <tr style="background:#fff">
             <td class="fw7">EGC</td>
             <td>Array</td><td>${_ic.isSupplySide ? 'AC Disconnect (ground bus)' : 'Main Panel'}</td>
             <td>${_ic.feederEgcGauge} bare Cu</td>
             <td>—</td><td>—</td><td>—</td>
-            <td>${project.conduitType}</td>
-            <td>${project.wireLength} ft</td>
+            <td>${_feedConduit}</td>
+            <td>${_feedLenTxt}</td>
           </tr>` : ''}
         </tbody>
       </table>
-      ${elec?.conduitFill ? `
+      ${(_feed.raceway || _feed.tradeSizeIn) ? `
       <div class="section-title">Conduit Fill Analysis — NEC Chapter 9</div>
       <table class="info-table">
-        <tr><td class="il">Conduit Type</td><td class="iv">${elec.conduitFill.conduitType}</td><td class="il">Conduit Size</td><td class="iv">${elec.conduitFill.conduitSize}</td></tr>
-        <tr><td class="il">Fill Percentage</td><td class="iv" style="color:${elec.conduitFill.fillPercent > 40 ? '#cc0000' : '#000'};font-weight:bold">${elec.conduitFill.fillPercent?.toFixed(1)}% (Max: 40%)</td>
-        <td class="il">Status</td><td class="iv" style="color:${elec.conduitFill.passes ? '#000' : '#cc0000'};font-weight:bold">${elec.conduitFill.passes ? '✓ PASS' : '✗ FAIL'}</td></tr>
+        <tr><td class="il">Conduit Type</td><td class="iv">${_feed.raceway ?? 'PENDING'}</td><td class="il">Conduit Size</td><td class="iv">${_feed.tradeSizeIn ?? 'PENDING'}</td></tr>
+        <tr><td class="il">Fill Percentage</td><td class="iv" style="color:${(_feed.fillPct ?? 0) > 40 ? '#cc0000' : '#000'};font-weight:bold">${_feed.fillPct != null ? `${_feed.fillPct.toFixed(1)}% (Max: 40%)` : 'PENDING (Max: 40%)'}</td>
+        <td class="il">Status</td><td class="iv" style="color:${_feed.fillPct == null ? '#cc6600' : (_feed.fillPct <= 40 ? '#000' : '#cc0000')};font-weight:bold">${_feed.fillPct == null ? 'PENDING' : (_feed.fillPct <= 40 ? '✓ PASS' : '✗ FAIL')}</td></tr>
       </table>` : ''}
       ${elec ? `
       <div class="section-title">Voltage Drop Calculation — NEC 210.19(A) Informational Note</div>
@@ -497,22 +531,22 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         <tbody>
           <tr>
             <td class="fw7">AC Output</td>
-            <td class="tr">${project.wireLength} ft</td>
-            <td>${_ic.feederPhaseCallout} Cu</td>
+            <td class="tr">${_feedLenTxt}</td>
+            <td>${_feedCallout} Cu</td>
             <td class="tr">${_ic.feederOcpd || '—'}A</td>
             <td class="tr">240V</td>
-            <td class="tr mono">${elec.acVoltageDrop ? (elec.acVoltageDrop * 240 / 100).toFixed(2) : '—'}V</td>
-            <td class="tr mono fw7" style="color:${(elec.acVoltageDrop || 0) > 3 ? '#cc0000' : '#000'}">${elec.acVoltageDrop?.toFixed(2) || '—'}%</td>
+            <td class="tr mono">${_feed.voltageDropPct != null ? (_feed.voltageDropPct * 240 / 100).toFixed(2) + 'V' : 'PENDING'}</td>
+            <td class="tr mono fw7" style="color:${(_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000'}">${_feedVdTxt}</td>
             <td class="tr">≤ 3.0%</td>
-            <td class="center fw7" style="color:${(elec.acVoltageDrop || 0) > 3 ? '#cc0000' : '#000'}">${(elec.acVoltageDrop || 0) <= 3 ? '✓ PASS' : '✗ REVIEW'}</td>
+            <td class="center fw7" style="color:${_feed.voltageDropPct == null ? '#cc6600' : ((_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000')}">${_feed.voltageDropPct == null ? 'PENDING' : ((_feed.voltageDropPct || 0) <= 3 ? '✓ PASS' : '✗ REVIEW')}</td>
           </tr>
         </tbody>
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>VOLTAGE DROP INTERPRETATION:</strong>
-        Calculated AC feeder voltage drop is ${elec.acVoltageDrop?.toFixed(2) || '—'}% over a ${project.wireLength} ft conductor run using ${_ic.feederPhaseCallout} copper.
+        Calculated AC feeder voltage drop is ${_feedVdTxt} over a ${_feedLenTxt} conductor run using ${_feedCallout} copper.
         NEC 210.19(A) Informational Note recommends ≤ 3% for feeders and ≤ 5% total (branch + feeder combined).
-        ${(elec.acVoltageDrop || 0) <= 3 ? 'The calculated drop is within recommended limits. No conductor upsizing is required.' : 'The calculated drop exceeds 3%. Consider upsizing conductors or reducing run length.'}
+        ${_feed.voltageDropPct == null ? 'Feeder voltage drop is pending conductor authority — resolve before submission.' : ((_feed.voltageDropPct || 0) <= 3 ? 'The calculated drop is within recommended limits. No conductor upsizing is required.' : 'The calculated drop exceeds 3%. Consider upsizing conductors or reducing run length.')}
       </div>
       ${''/* Formula-tutorial box removed — code-book pedagogy that displaced
            project content on the fixed sheet; the calc row + interpretation
@@ -603,13 +637,50 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           </tbody>
         </table>
         ${_lcSupply ? `
+        ${(() => {
+          // §5 — project the canonical service-topology objects. The 10-ft rule
+          // is the tap-CONDUCTOR object's own constraint; its state is honest
+          // (PENDING while the tap-conductor length is unknown — never a compliant
+          // 10-ft claim on an unmeasured run). The 60-ft feeder run is a separate
+          // object (the route segment), so the two can't be conflated.
+          const _tap = _svc('tap-conductors');
+          const _fused = _svc('fused-ocpd');
+          const _svcDisco = _svc('service-disconnect');
+          const _tapRule = _tap?.constraints.find(c => c.code === 'NEC-705.11(C)-TAP-10FT');
+          const _tapLenTxt = _tap?.lengthFt != null
+            ? `${_tap.lengthFt} ft` : 'PENDING — tap-conductor length not measured (FIELD-VERIFY ≤10 ft)';
+          const _ruleStateTxt = _tapRule
+            ? (_tapRule.state === 'pass' ? '✓ within 10 ft'
+               : _tapRule.state === 'fail' ? '✗ EXCEEDS 10 ft'
+               : 'PENDING — length unknown')
+            : 'PENDING';
+          const _fusedA = _fused?.ocpdRatingA ?? bfAmps;
+          const _svcA = _svcDisco?.ocpdRatingA ?? mainA;
+          return `
+        <table class="equip-table" style="margin-bottom:var(--xs);">
+          <thead><tr><th style="width:22%">Service Object</th><th style="width:30%">Description</th><th style="width:16%">Rating / Conductor</th><th style="width:16%">Length</th><th>10-ft Tap Rule (705.11(C))</th></tr></thead>
+          <tbody>
+            ${_svcTopo.map(o => {
+              const _r = o.constraints.find(c => c.code === 'NEC-705.11(C)-TAP-10FT');
+              const _rTxt = _r ? (_r.state === 'pass' ? '✓ ≤10 ft' : _r.state === 'fail' ? '✗ >10 ft' : 'PENDING (length unknown)') : '—';
+              const _lenTxt = o.lengthSource === 'not-applicable' ? '—'
+                : o.lengthFt != null ? `${o.lengthFt} ft` : 'PENDING';
+              const _spec = o.conductorSpec ?? (o.ocpdRatingA != null ? `${o.ocpdRatingA}A` : '—');
+              return `<tr><td class="fw7">${o.label}</td><td style="font-size:8px">${o.description ?? '—'}</td><td class="tr mono">${_spec}</td><td class="tr">${_lenTxt}</td><td class="center fw7" style="color:${_r?.state === 'pending' ? '#cc6600' : _r?.state === 'fail' ? '#cc0000' : '#000'}">${_rTxt}</td></tr>`;
+            }).join('')}
+          </tbody>
+        </table>
         <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
           <strong>SUPPLY-SIDE INTERCONNECTION — NEC 705.11:</strong>
-          The PV system output connection is made to the supply (line) side of the service disconnecting means.
-          Tap conductors are sized ≥ 125% of PV output current (${acAmps.toFixed(1)}A × 1.25 = ${continuousA.toFixed(1)}A) and terminate in a ${bfAmps}A fused AC disconnect located within 10 ft of the tap per NEC 705.11(C).
-          The 120% busbar limitation of NEC 705.12(B) applies only to load-side connections and does not govern this design.
-          Service conductor and metering equipment adequacy to be field-verified with the serving utility.
-        </div>
+          The PV output connects to the supply (line) side of the ${_svcA}A service disconnecting means. The topology above is a chain
+          of distinct objects, each with its OWN length: the <em>tap conductors</em> (tap point → ${_fusedA}A fused AC disconnect,
+          sized ≥ 125% of PV output current = ${continuousA.toFixed(1)}A) carry the NEC 705.11(C)/240.21(B) ≤10-ft rule
+          (currently <strong>${_ruleStateTxt}</strong>; tap-conductor run = ${_tapLenTxt}). This is a SEPARATE segment from the
+          <em>PV AC feeder</em> (array combiner → disconnect, ${_feedLenTxt}${_feed.lengthSource === 'cad-derived-estimate' ? ' CAD-derived estimate' : ''}, ${_feedVdTxt} drop shown above) —
+          the 10-ft rule does not govern the feeder run. The 120% busbar limitation of NEC 705.12(B) applies only to load-side
+          connections. Service conductor and metering adequacy to be field-verified with the serving utility.
+        </div>`;
+        })()}
         ${''/* formula-tutorial box removed — displaced project content */}` : `
         <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
           <strong>120% RULE INTERPRETATION:</strong>
@@ -680,10 +751,28 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         </div>
         <div style="font-size:var(--f-sm);line-height:1.6;">
           <div style="font-weight:900;font-size:9px;margin-bottom:4px;letter-spacing:0.5px;">GROUNDING & BONDING REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. All module frames bonded to mounting rail via listed bonding hardware (WEEB, lay-in lug, or equivalent) per UL 2703.</div>
+          <div style="margin-bottom:3px;">1. All module frames bonded to mounting rail via ${(() => {
+            // §10/§7 (07-22): pin the ACTUAL bonding hardware the canonical racking
+            // assembly specifies — never "or equivalent". Unpinned ⇒ explicit
+            // PENDING SELECTION (the structural agent's convention), never a guess.
+            const _bond = _snap.structural.rackingAssembly?.groundingBonding;
+            return _bond
+              ? `${_bond} (listed to UL 2703)`
+              : 'the racking manufacturer’s listed UL 2703 bonding hardware — <strong>PENDING SELECTION</strong>';
+          })()}.</div>
           <div style="margin-bottom:3px;">2. Equipment grounding conductor (EGC): ${_ic.feederEgcGauge} bare Cu min. per NEC 250.122 and 690.45.</div>
           <div style="margin-bottom:3px;">3. EGC routed with circuit conductors in same raceway per NEC 690.43(A).</div>
-          <div style="margin-bottom:3px;">4. Grounding electrode conductor (GEC) connected to existing building grounding electrode system per NEC 250.166.</div>
+          <div style="margin-bottom:3px;">4. ${(() => {
+            // §7 — project the canonical GEC grounding object. For a grid-tied
+            // interconnected PV system the equipment grounding path bonds to the
+            // EXISTING service grounding electrode system; a separate GEC + new
+            // electrode is added ONLY when an authoritative design input requires
+            // one (none here). Never auto-invent a ground rod / #6 GEC.
+            const _gec = getSnapshot(input).electrical.groundingObjects.find(g => g.purpose === 'gec');
+            return _gec && !_gec.required
+              ? 'Equipment grounding bonds to the EXISTING service grounding electrode system per NEC 250.64 / 690.47 — no separate grounding electrode conductor or new electrode is added by this PV interconnection.'
+              : 'Grounding electrode conductor (GEC) connected to the building grounding electrode system per NEC 250.166.';
+          })()}</div>
           <div style="margin-bottom:3px;">5. All connections made with listed connectors rated for the conductor material and environment.</div>
           <div style="margin-bottom:3px;">6. Bonding jumpers installed at all mechanical joints in the racking system per NEC 250.96.</div>
           <div style="color:#555;font-size:7px;margin-top:4px;font-style:italic;">Detail is typical — verify with racking manufacturer bonding requirements.</div>
@@ -694,7 +783,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         <strong>PAGE CONCLUSION — CONDUCTOR & CONDUIT SCHEDULE:</strong>
         All conductors have been sized per NEC 690.8 with continuous duty factor applied (Isc × 1.25).
         Overcurrent protection devices are rated per NEC 690.9. Temperature correction and conduit fill derating have been evaluated per NEC 310.15.
-        ${elec?.acVoltageDrop && elec.acVoltageDrop <= 3 ? 'AC feeder voltage drop is within NEC recommended limits.' : 'Voltage drop requires review.'}
+        ${_feed.voltageDropPct != null && _feed.voltageDropPct <= 3 ? 'AC feeder voltage drop is within NEC recommended limits.' : 'Voltage drop requires review.'}
         All conductors are sized appropriately for the calculated load conditions of this ${system.totalDcKw?.toFixed(2) || '—'} kW DC system.
       </div>
     </div>

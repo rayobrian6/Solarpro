@@ -434,7 +434,11 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
   const _lagDiaIn  = _mountSel?.mount?.fastenerDiameterIn ?? 0.375;
   const _embedIn   = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
-  const _lagLenIn  = Math.ceil((_embedIn + 1.5) * 2) / 2;
+  // §10 — prefer the EXACT manufacturer product length; only estimate (embed +
+  // ~1.5" stack-up) when the mount record does not pin a length. Keeps PV-3 in
+  // agreement with the notes / PE-1 / BOM (RT-MINI = 3.5" screw, never a 4" lag).
+  const _lagLenIn  = _mountSel?.mount?.fastenerLengthIn ?? (Math.ceil((_embedIn + 1.5) * 2) / 2);
+  const _lagType   = (_mountSel?.mount?.fastenerType ?? 'SS lag').toUpperCase();
   const _ca = ((c?.structural ?? {}) as Record<string, any>)?.attachment;
   const _mountName = ((input?.project as any)?._canonical?.mountSystem as string)
     || (p?.mountingSystem as string)
@@ -477,7 +481,7 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
       || (p?.attachmentSpacing as number)
       || _mountSel?.mount?.maxSpacingIn
       || 48,
-    lagSpec:       `${_fracIn(_lagDiaIn)}" DIA × ${_lagLenIn}" MIN SS`,
+    lagSpec:       `${_fracIn(_lagDiaIn)}" DIA × ${_lagLenIn}" ${_lagType}`,
     embedSpec:     `${_embedIn}" MIN THREAD EMBEDMENT`,
     conduitType:   ((p?.conduitType as string) || 'EMT').toUpperCase(),
     // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).

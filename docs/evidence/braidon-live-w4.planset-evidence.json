@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-07-22T03:27:48.113Z",
+  "generatedAt": "2026-07-22T22:19:11.363Z",
   "wave": "W4",
   "mode": "live",
   "evidenceRole": "CURRENT live database design — W4 authority + cross-sheet agreement + bypass scan on the live Braidon project.",
   "supersedes": null,
-  "snapshotId": "PDS-78865C4C4C5F",
-  "digest": "78865c4c4c5f523298d5c6d6d69b7477889c7c3c4375dfd234658b2f385ff871",
+  "snapshotId": "PDS-3280B0112DF5",
+  "digest": "3280b0112df5b93cd3de8041397a6a3b17a51db586b40e04f1748f719db48f6a",
   "schemaVersion": "1.0.0",
   "project": "BRAIDON (GreenLancer feedback-session planset)",
   "sheetCount": 19,
@@ -134,7 +134,7 @@
     "schemaVersion": "1.0.0",
     "systemType": "ROOF MOUNT",
     "ahjName": "Madison County Building & Zoning",
-    "utilityName": "il-ameren-illinois",
+    "utilityName": "Ameren Illinois",
     "capacities": {
       "dcKw": 12.4,
       "acKw": 10.818999999999999,
@@ -163,16 +163,22 @@
         "electrical",
         "equipment",
         "structural",
-        "code"
+        "code",
+        "document"
       ],
       "reviewCoversCurrentDigest": false,
       "reviewStale": false,
       "reviewedDigest": null,
-      "reason": "authority gaps span [electrical, equipment, structural, code] — full engineering review required"
+      "reason": "authority gaps span [electrical, equipment, structural, code, document] — full engineering review required"
     },
     "issuedForPermitGate": {
       "pass": false,
       "preconditions": [
+        {
+          "id": "project-identity-valid",
+          "satisfied": false,
+          "detail": "project name contains \"TEST\" or the designer/engineer-of-record is blank (§15d)"
+        },
         {
           "id": "blocking-validators",
           "satisfied": false,
@@ -324,91 +330,91 @@
     },
     {
       "quantity": "authority.utility",
-      "authority": "il-ameren-illinois",
+      "authority": "Ameren Illinois",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-0",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-1",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-1B",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-3",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-4C",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "E-1",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-4A",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-4B",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-5",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PV-6",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "SCHED",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "SCHED-2",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "APP-A",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "DS-1",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "DS-2",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "DS-3",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "DS-4",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "CERT",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         },
         {
           "sheet": "PE-1",
-          "value": "il-ameren-illinois"
+          "value": "Ameren Illinois"
         }
       ],
       "distinctPrinted": [
-        "il-ameren-illinois"
+        "Ameren Illinois"
       ],
       "agree": true,
       "blocking": true
@@ -1087,7 +1093,19 @@
           "value": "RT-MINI"
         },
         {
+          "sheet": "PV-1B",
+          "value": "RT-MINI"
+        },
+        {
           "sheet": "PV-3",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "PV-4C",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "PV-4B",
           "value": "RT-MINI"
         },
         {
@@ -1100,6 +1118,10 @@
         },
         {
           "sheet": "DS-3",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "CERT",
           "value": "RT-MINI"
         },
         {
@@ -1207,91 +1229,91 @@
     },
     {
       "quantity": "authority.snapshot-id",
-      "authority": "PDS-78865C4C4C5F",
+      "authority": "PDS-3280B0112DF5",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-1",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-1B",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-3",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-4C",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "E-1",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-4A",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-4B",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-5",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PV-6",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "SCHED",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "SCHED-2",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "APP-A",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "DS-1",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "DS-2",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "DS-3",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "DS-4",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "CERT",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "PE-1",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         },
         {
           "sheet": "E-1(SLD stamp)",
-          "value": "PDS-78865C4C4C5F"
+          "value": "PDS-3280B0112DF5"
         }
       ],
       "distinctPrinted": [
-        "PDS-78865C4C4C5F"
+        "PDS-3280B0112DF5"
       ],
       "agree": true,
       "blocking": true,
@@ -1299,91 +1321,91 @@
     },
     {
       "quantity": "authority.digest",
-      "authority": "78865c4c4c5f523298d5… (full 78865c4c4c5f…)",
+      "authority": "3280b0112df5b93cd3de… (full 3280b0112df5…)",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-1",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-1B",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-3",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-4C",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "E-1",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-4A",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-4B",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-5",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PV-6",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "SCHED",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "SCHED-2",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "APP-A",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "DS-1",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "DS-2",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "DS-3",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "DS-4",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "CERT",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "PE-1",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         },
         {
           "sheet": "E-1(SLD stamp)",
-          "value": "78865c4c4c5f523298d5"
+          "value": "3280b0112df5b93cd3de"
         }
       ],
       "distinctPrinted": [
-        "78865c4c4c5f523298d5"
+        "3280b0112df5b93cd3de"
       ],
       "agree": true,
       "blocking": true,
@@ -1637,11 +1659,116 @@
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
       "ENGINEERING-REVIEW-PENDING"
     ],
     "missing": []
   },
   "authorityBypasses": [],
+  "correctionPassGates": {
+    "canonicalFeeder": {
+      "raceway": "PVC Sch 80",
+      "tradeSizeIn": "1-1/4\"",
+      "conduitLabel": "PVC Sch 80 1-1/4\"",
+      "voltageDropPct": 0.36936055005081303,
+      "oneWayFt": 20,
+      "feederSegmentId": "COMBINER_TO_DISCO_RUN"
+    },
+    "reactionReconciliation": {
+      "present": true,
+      "ok": true,
+      "attachmentCount": 64,
+      "reactionModelCount": 64,
+      "tributarySumFt2": 704,
+      "arrayAreaFt2": 636.461
+    },
+    "capacityGate": {
+      "mount": "RT-MINI",
+      "capacityGated": true,
+      "rendersUnverified": true
+    },
+    "certApproved": false,
+    "newAuthorityBlockersPresent": true,
+    "gates": [
+      {
+        "id": "§1 no-issued-for-permit-while-pending",
+        "ok": true,
+        "detail": "issueState=PENDING ENGINEERING REVIEW"
+      },
+      {
+        "id": "§2 no-affirmative-cert-without-approval",
+        "ok": true,
+        "detail": "certApproved=false; leaked=none"
+      },
+      {
+        "id": "§3 electrical-canonical-feeder-single-source",
+        "ok": true,
+        "detail": "raceway=PVC Sch 80 size=1-1/4\" vd=0.36936055005081303 len=20"
+      },
+      {
+        "id": "§3 electrical-conduit-label-projected",
+        "ok": true,
+        "detail": "canonical conduit \"PVC Sch 80 1-1/4\"\" projected on the sheets"
+      },
+      {
+        "id": "§3 no-merged-raceway-token",
+        "ok": true,
+        "detail": "no `1-1/4\" 3/4\" EMT` style multi-size merge in any sheet"
+      },
+      {
+        "id": "§3 no-undefined-nan-value-render",
+        "ok": true,
+        "detail": "no undefined/NaN rendered as a %/A/V/ft/lbs value or table cell"
+      },
+      {
+        "id": "§8 reaction-reconciliation-present-ok",
+        "ok": true,
+        "detail": "attach=64 modelCount=64 tribΣ=704ft² area=636.461ft²"
+      },
+      {
+        "id": "§8 pv4c-reaction-schedule-rendered",
+        "ok": true,
+        "detail": "PV-4C carries the attachment-ID schedule + reconciliation footer"
+      },
+      {
+        "id": "§9 rtmini-capacity-unverified-no-pass",
+        "ok": true,
+        "detail": "mount=RT-MINI capacityGated=true"
+      },
+      {
+        "id": "§10 no-or-equivalent-or-railcompat",
+        "ok": true,
+        "detail": "no \"or equivalent\"/RAIL-COMPAT"
+      },
+      {
+        "id": "§10 no-rail-less-for-rail-paired-mount",
+        "ok": true,
+        "detail": "RT-MINI never described rail-less"
+      },
+      {
+        "id": "§11 no-pending-edition-literals",
+        "ok": true,
+        "detail": "none"
+      },
+      {
+        "id": "§14 new-authority-blockers-present",
+        "ok": true,
+        "detail": "missing=none"
+      },
+      {
+        "id": "§15 no-mojibake",
+        "ok": true,
+        "detail": "no U+FFFD / double-encoded UTF-8"
+      },
+      {
+        "id": "§15 human-utility-name-not-slug",
+        "ok": true,
+        "detail": "utility=Ameren Illinois"
+      }
+    ],
+    "failed": [],
+    "allPass": true
+  },
   "summary": {
     "truthRows": 15,
     "agree": 15,
@@ -1663,7 +1790,11 @@
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
       "ENGINEERING-REVIEW-PENDING"
-    ]
+    ],
+    "correctionGatesTotal": 15,
+    "correctionGatesFailed": [],
+    "correctionGatesAllPass": true
   }
 }

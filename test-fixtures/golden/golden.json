@@ -125,6 +125,7 @@
   "sld-input-roof": {
     "topLevelKeys": [
       "acConduitFillPct",
+      "acConduitSize",
       "acConduitType",
       "acOCPD",
       "acOutputAmps",

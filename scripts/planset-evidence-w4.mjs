@@ -252,6 +252,97 @@ const EXPECTED = MODE === 'original'
   : ['CODE-AUTHORITY-INCOMPLETE', 'ENGINEERING-REVIEW-PENDING'];
 const missingExpected = EXPECTED.filter(c => !blockerCodes.includes(c));
 
+// ═══════════════════════════════════════════════════════════════════════════
+// POST-CAMPAIGN CORRECTION-PASS GATES (2026-07-22) — the 15-section correction.
+// Folded into the evidence harness so a single invocation, in BOTH modes,
+// re-proves every corrected truth-authority regression on the freshly rendered
+// package + snapshot. Each gate is package-level (scans the whole rendered HTML
+// across all sheets) or snapshot-authority-level. ANY failed gate exits non-zero.
+// ═══════════════════════════════════════════════════════════════════════════
+const el = snap.electrical || {};
+const segs2 = el.routeSegments || [];
+// canonical feeder resolution (mirrors lib/permit/snapshot/electricalProjection
+// projectCanonicalFeeder — ONE raceway/size/VD/length source, no per-sheet drift)
+const FEEDER_IDS = ['COMBINER_TO_DISCO_RUN', 'INV_TO_DISCO_RUN'];
+const feederSeg = segs2.find(r => FEEDER_IDS.includes(r.segmentId))
+  ?? segs2.find(r => r.egcGauge && r.voltageDropPct != null && r.raceway && r.raceway !== 'FREE_AIR') ?? null;
+const F = el.feeder || {};
+const canRaceway = F?.conduit?.raceway ?? feederSeg?.raceway ?? null;
+const canSize = F?.conduit?.tradeSizeIn ?? feederSeg?.tradeSizeIn ?? null;
+const canVd = typeof F?.voltageDropPct === 'number' ? F.voltageDropPct : (feederSeg?.voltageDropPct ?? null);
+const canLen = feederSeg?.oneWayFt ?? null;
+const conduitLabel2 = (canRaceway && canSize) ? `${canRaceway} ${canSize}` : (canRaceway ?? null);
+const conduitLabelEnc = conduitLabel2 ? conduitLabel2.replace(/"/g, '&quot;') : null;
+
+const AFFIRMATIVE_CERT = ['I hereby certify', 'prepared under my direct supervision',
+  'prepared under my supervision', 'confirmed adequate', 'is adequate to support', 'are adequate to support'];
+const certApproved = !!(snap?.certification?.engineeringReviewApproved?.reviewedDigest);
+const MOJIBAKE = /�|â€|Ã[-¿]|Â[¡-¿]/;
+// undefined/NaN only in a RENDERED VALUE context (never inside base64 asset blobs)
+const badValueRe = /(?:NaN|undefined)\s*(?:%|A\b|V\b|ft\b|W\b|lbs\b|in\.|Ω)|>\s*(?:NaN|undefined)\s*<|:\s+(?:NaN|undefined)\b/;
+// a merged multi-size raceway token, e.g. `1-1/4&quot; 3/4&quot;` — the §3 defect
+const mergedRacewayRe = /\d(?:-\d\/\d)?&quot;\s*\d\/\d&quot;\s*(?:EMT|PVC|RMC|IMC|FMC)/;
+const st2 = st || {};
+const rr2 = st2.reactionReconciliation || {};
+const rackMountModel = st2.rackingAssembly?.mountModel || '';
+const capacityGated = /RT-?MINI/i.test(rackMountModel)
+  || blockerCodes.includes('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED');
+const NEW_BLOCKERS = ['PROJECT-AUTHORITY-UNVERIFIED'];
+const missingNewBlockers = NEW_BLOCKERS.filter(c => !blockerCodes.includes(c));
+const affLeak = certApproved ? [] : AFFIRMATIVE_CERT.filter(p => html.includes(p));
+const edLit = ['IFC 2021', 'IBC 2021'].filter(l => html.includes(l));
+
+const gate = (id, ok, detail) => ({ id, ok, detail });
+const correctionGates = [
+  // §1 issue-state authority — no ISSUED FOR PERMIT / Initial Issue for Permit while pending
+  gate('§1 no-issued-for-permit-while-pending',
+    !html.includes('ISSUED FOR PERMIT') && !html.includes('Initial Issue for Permit'),
+    `issueState=${issueAuthority}`),
+  // §2 certification gate — no affirmative cert phrase without an approved digest-bound review
+  gate('§2 no-affirmative-cert-without-approval', affLeak.length === 0,
+    `certApproved=${certApproved}; leaked=${affLeak.join(' | ') || 'none'}`),
+  // §3 electrical segment authority — ONE canonical feeder raceway/size/VD single-sourced
+  gate('§3 electrical-canonical-feeder-single-source',
+    !!canRaceway && !!canSize && canVd != null,
+    `raceway=${canRaceway} size=${canSize} vd=${canVd} len=${canLen}`),
+  gate('§3 electrical-conduit-label-projected',
+    !conduitLabelEnc || html.includes(conduitLabelEnc),
+    `canonical conduit "${conduitLabel2}" projected on the sheets`),
+  gate('§3 no-merged-raceway-token', !mergedRacewayRe.test(html),
+    'no `1-1/4" 3/4" EMT` style multi-size merge in any sheet'),
+  gate('§3 no-undefined-nan-value-render', !badValueRe.test(html),
+    'no undefined/NaN rendered as a %/A/V/ft/lbs value or table cell'),
+  // §8 structural reaction reconciliation present + reconciled + schedule rendered
+  gate('§8 reaction-reconciliation-present-ok', rr2.present === true && rr2.ok === true,
+    `attach=${rr2.attachmentCount} modelCount=${rr2.reactionModelCount} tribΣ=${rr2.tributarySumFt2}ft² area=${rr2.arrayAreaFt2}ft²`),
+  gate('§8 pv4c-reaction-schedule-rendered',
+    html.includes('Attachment Reaction Schedule') && html.includes('Reaction Reconciliation'),
+    'PV-4C carries the attachment-ID schedule + reconciliation footer'),
+  // §9 capacity gate — RT-MINI UNVERIFIED, never a capacity PASS
+  gate('§9 rtmini-capacity-unverified-no-pass',
+    !capacityGated
+    || (html.includes('UNVERIFIED / PENDING STRUCTURAL SOURCE')
+        && blockerCodes.includes('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED')
+        && !/safety factor of [\d.]+ meets the required minimum/i.test(html)),
+    `mount=${rackMountModel} capacityGated=${capacityGated}`),
+  // §10 exact racking assembly — no "or equivalent", no RAIL-COMPAT, no rail-less for a rail-paired mount
+  gate('§10 no-or-equivalent-or-railcompat',
+    !/or equivalent/i.test(html) && !html.includes('RAIL-COMPAT'), 'no "or equivalent"/RAIL-COMPAT'),
+  gate('§10 no-rail-less-for-rail-paired-mount',
+    !capacityGated || !/rail-?less/i.test(html), 'RT-MINI never described rail-less'),
+  // §11 code authority — no pending-edition literal in body/BOM/labels/notes
+  gate('§11 no-pending-edition-literals', edLit.length === 0, edLit.join(', ') || 'none'),
+  // §14 project authority — the postal-inference blocker is PRESENT (never cleared)
+  gate('§14 new-authority-blockers-present', missingNewBlockers.length === 0,
+    `missing=${missingNewBlockers.join(', ') || 'none'}`),
+  // §15 quality gates — no mojibake, human utility name (never the registry slug)
+  gate('§15 no-mojibake', !MOJIBAKE.test(html), 'no U+FFFD / double-encoded UTF-8'),
+  gate('§15 human-utility-name-not-slug',
+    !/\bil-[a-z]+-[a-z]+\b/.test(html) && !html.includes('il-ameren-illinois'),
+    `utility=${pa?.utilityName ?? '—'}`),
+];
+const correctionFail = correctionGates.filter(g => !g.ok);
+
 // ── carry-forward from the W3 evidence (failure classes + coord parity + disclaimer) ──
 const w3Path = `docs/evidence/braidon-${MODE}-w3.planset-evidence.json`;
 let w3 = null; try { w3 = JSON.parse(fs.readFileSync(path.resolve(repoRoot, w3Path), 'utf8')); } catch { /* optional */ }
@@ -279,7 +370,8 @@ const blockingFail = blockingDisagree.length > 0
   || issueStateForbidden || !issueStateOk
   || missingExpected.length > 0
   || singleSourceFail
-  || !renderedEqualsManifest;
+  || !renderedEqualsManifest
+  || correctionFail.length > 0;
 
 const report = {
   generatedAt: new Date().toISOString(),
@@ -443,6 +535,23 @@ const report = {
   expectedBlockers: { mode: MODE, expected: EXPECTED, present: blockerCodes, missing: missingExpected },
   authorityBypasses: bypasses,
 
+  // POST-CAMPAIGN CORRECTION-PASS GATES (2026-07-22) — the 15-section correction,
+  // re-proven on the freshly rendered package. Every gate must be ok in both modes.
+  correctionPassGates: {
+    canonicalFeeder: { raceway: canRaceway, tradeSizeIn: canSize, conduitLabel: conduitLabel2,
+      voltageDropPct: canVd, oneWayFt: canLen, feederSegmentId: feederSeg?.segmentId ?? null },
+    reactionReconciliation: { present: rr2.present ?? false, ok: rr2.ok ?? false,
+      attachmentCount: rr2.attachmentCount ?? null, reactionModelCount: rr2.reactionModelCount ?? null,
+      tributarySumFt2: rr2.tributarySumFt2 ?? null, arrayAreaFt2: rr2.arrayAreaFt2 ?? null },
+    capacityGate: { mount: rackMountModel || null, capacityGated,
+      rendersUnverified: html.includes('UNVERIFIED / PENDING STRUCTURAL SOURCE') },
+    certApproved,
+    newAuthorityBlockersPresent: missingNewBlockers.length === 0,
+    gates: correctionGates,
+    failed: correctionFail.map(g => g.id),
+    allPass: correctionFail.length === 0,
+  },
+
   summary: {
     truthRows: truth.length,
     agree: truth.filter(r => r.agree === true).length,
@@ -456,6 +565,9 @@ const report = {
     renderedEqualsManifest,
     missingExpectedBlockers: missingExpected,
     honestBlockers: blockerCodes,
+    correctionGatesTotal: correctionGates.length,
+    correctionGatesFailed: correctionFail.map(g => g.id),
+    correctionGatesAllPass: correctionFail.length === 0,
   },
 };
 
@@ -466,6 +578,9 @@ console.log(`[w4-evidence:${MODE}] truth matrix: ${report.summary.agree} agree /
 console.log(`[w4-evidence:${MODE}] issue state: ${issueAuthority} (pending-ok=${issueStateOk}, forbidden=${issueStateForbidden}) | sheet-index rendered==manifest: ${renderedEqualsManifest}`);
 console.log(`[w4-evidence:${MODE}] deletions: coverFileGone=${!coverFilePresent} buildSLDGone=${!buildSldImplPresent && !buildSldCallPresent} planSet410=${planSetRouteTombstone} planSetReachable=${planSetReachability.length}`);
 console.log(`[w4-evidence:${MODE}] honest blockers: ${blockerCodes.join(', ') || 'none'}`);
+console.log(`[w4-evidence:${MODE}] correction-pass gates: ${correctionGates.length - correctionFail.length}/${correctionGates.length} pass`
+  + ` | feeder ${conduitLabel2 ?? '—'} @ ${canVd ?? '—'}% | reaction-recon present=${rr2.present ?? false} ok=${rr2.ok ?? false} | capacityGated=${capacityGated}`);
+if (correctionFail.length) correctionFail.forEach(g => console.log(`[w4-evidence:${MODE}] FAIL(correction): ${g.id} — ${g.detail}`));
 if (missingExpected.length) console.log(`[w4-evidence:${MODE}] FAIL: expected honest blocker(s) missing: ${missingExpected.join(', ')}`);
 if (bypasses.length) bypasses.forEach(b => console.log(`[w4-evidence:${MODE}] FAIL(bypass): ${b}`));
 if (blockingDisagree.length) console.log(`[w4-evidence:${MODE}] FAIL: cross-sheet disagreement: ${blockingDisagree.map(r => `${r.quantity}[${r.distinctPrinted}≠${r.authority}]`).join('; ')}`);

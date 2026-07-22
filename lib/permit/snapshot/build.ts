@@ -30,6 +30,7 @@ import { buildStructuralAuthority, type StructuralRunsBundle } from './structura
 import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+import { utilityDisplayName } from '../utils/helpers';   // §15(b) — human utility name, never a slug
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA, type BranchPlanPanel } from '../utils/branching';
 import { getDesignTemps } from '../utils/designTemps';
@@ -314,6 +315,75 @@ export function buildPermitDesignSnapshot(
     provenance: { source: 'computeSystem runs (deriveRunLengths cad estimate)' },
   }));
 
+  // ═══ §5 (07-22) CANONICAL SERVICE-INTERCONNECTION TOPOLOGY ═════════════════
+  // The tap point, tap conductors, fused OCPD, utility disconnect, meter and
+  // service disconnect are SEPARATE objects with their OWN honest length. The
+  // ≤10-ft 705.11(C) rule attaches to the TAP-CONDUCTOR object only, and its
+  // compliance state derives from that object's length state — an unknown
+  // tap-conductor length is PENDING (never a fabricated compliant 10-ft claim),
+  // and is reflected in ROUTE-LENGTH-ESTIMATE. The 60-ft PV feeder run lives on
+  // the feeder route segment, NOT on any tap object (the conflation the audit hit).
+  const serviceTopology: import('./types').ServiceTopologyObject[] = (() => {
+    const method = String(proj.interconnectionMethod ?? 'LOAD_SIDE');
+    const isSupply = /SUPPLY|LINE/i.test(method);
+    const feederOcpd = cs?.backfeedBreakerAmps ?? cs?.acOcpdAmps ?? feederRun?.ocpdAmps ?? null;
+    const feederGauge = feederRun?.wireGauge ?? auth.acFeeder.wireGauge ?? null;
+    const pvOutA = cs?.acOutputCurrentA ?? null;
+    const pvContA = cs?.acContinuousCurrentA ?? (pvOutA != null ? pvOutA * 1.25 : null);
+    const mainA = proj.mainPanelAmps ?? proj.mainBreakerA ?? null;
+    const objs: import('./types').ServiceTopologyObject[] = [];
+    if (isSupply) {
+      objs.push({
+        objectId: 'svc-tap-point', type: 'tap-point',
+        label: 'Supply-side tap point', description: 'Line side of the service disconnecting means (NEC 705.11)',
+        conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
+        constraints: [], provenance: { source: 'interconnection method (supply-side)' },
+      });
+      objs.push({
+        objectId: 'svc-tap-conductors', type: 'tap-conductors',
+        label: 'Tap conductors', description: 'Tap point → fused AC disconnect; sized ≥ 125% of PV output current',
+        conductorSpec: feederGauge ? `${feederGauge} THWN-2${pvContA != null ? ` (≥ ${pvContA.toFixed(1)}A)` : ''}` : null,
+        ocpdRatingA: null,
+        // No CAD datum for the short tap run → honest PENDING (participates in
+        // ROUTE-LENGTH-ESTIMATE via the length-source below).
+        lengthFt: null, lengthSource: 'unknown',
+        constraints: [{
+          code: 'NEC-705.11(C)-TAP-10FT',
+          description: 'Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft',
+          limitFt: 10,
+          state: 'pending',   // unknown length ⇒ never a compliant 10-ft claim
+        }],
+        provenance: { source: 'design rule (tap-conductor length not measured)', note: 'FIELD-VERIFY ≤10ft' },
+      });
+      objs.push({
+        objectId: 'svc-fused-ocpd', type: 'fused-ocpd',
+        label: 'Fused AC disconnect (tap OCPD)', description: 'NEC 705.11 supply-side overcurrent device',
+        conductorSpec: null, ocpdRatingA: feederOcpd, lengthFt: null, lengthSource: 'not-applicable',
+        constraints: [], provenance: { source: 'computeSystem tap OCPD' },
+      });
+      objs.push({
+        objectId: 'svc-utility-disconnect', type: 'utility-disconnect',
+        label: 'Utility/AC disconnect', description: 'Lockable AC disconnect ahead of the point of interconnection (per utility)',
+        conductorSpec: null, ocpdRatingA: feederOcpd, lengthFt: null, lengthSource: 'not-applicable',
+        constraints: [], provenance: { source: 'interconnection requirements' },
+      });
+    }
+    // meter + service disconnect exist on every design (supply- and load-side).
+    objs.push({
+      objectId: 'svc-meter', type: 'meter',
+      label: 'Utility revenue meter', description: 'Existing utility service meter',
+      conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
+      constraints: [], provenance: { source: 'existing service' },
+    });
+    objs.push({
+      objectId: 'svc-service-disconnect', type: 'service-disconnect',
+      label: 'Main service disconnect', description: 'Existing main service disconnecting means',
+      conductorSpec: null, ocpdRatingA: mainA, lengthFt: null, lengthSource: 'not-applicable',
+      constraints: [], provenance: { source: 'project service rating' },
+    });
+    return objs;
+  })();
+
   // ═══ W2.1 CLASSIFIED PARITY — canonical (computeSystem) vs legacy shadow ═
   const parityChecks: import('./types').ParityCheck[] = [];
   const _par = (name: string, segmentId: string | null, canonical: unknown, legacy: unknown,
@@ -489,6 +559,12 @@ export function buildPermitDesignSnapshot(
     ifc: _ce.ifc.edition ?? '—', asce: _ce.asce.edition ?? '—',
   };
 
+  // §14 — project legal authority is NEVER verified from an official source here
+  // (no document-registry / operator verification path is wired into this pure
+  // build). Postal inference is not verification, so this stays false and the
+  // per-field states resolve to 'unverified-derived'. Never fabricate true.
+  const _projectAuthorityVerified = false;
+
   // ═══ W4 §12 PERMIT-READINESS (extracted so the project/issue-state authority
   // can derive the issue state from these blockers by domain) ════════════════
   const _permitReadiness: { ready: boolean; blockers: { code: string; message: string }[] } = (() => {
@@ -541,6 +617,18 @@ export function buildPermitDesignSnapshot(
           + `${codeAuthority.ahjName ?? 'the project jurisdiction'} — ${_detail}. `
           + `Archive + verify the adoption document (W4-D) before permit-ready.` });
     }
+    // §14 — PROJECT LEGAL AUTHORITY VERIFICATION. Address / APN / municipal
+    // boundary / AHJ / fire authority are operator-posted or POSTALLY INFERRED
+    // (county/city/AHJ from ZIP — the "Madison County / Granite City assumed
+    // from 62040" case). Postal inference is NOT verification. Verified state can
+    // only come from the document-registry / operator verification path (not
+    // wired here — never fabricated). Any unverified-derived field blocks
+    // permit-ready.
+    if (!_projectAuthorityVerified && (proj.address || proj.city || proj.county || codeAuthority.ahjName)) {
+      blockers.push({ code: 'PROJECT-AUTHORITY-UNVERIFIED',
+        message: 'Project legal authority (address, APN, municipal boundary, AHJ and fire authority) is operator-posted / postally inferred and not verified from an official source — '
+          + 'county/city/AHJ must not be assumed from postal code alone. Verify via the document registry before permit-ready.' });
+    }
     blockers.push({ code: 'ENGINEERING-REVIEW-PENDING',
       message: 'No approved engineering-review record covering this snapshot digest (D-6)' });
     return { ready: blockers.length === 0, blockers };
@@ -569,7 +657,14 @@ export function buildPermitDesignSnapshot(
   // tested across all 8 states + the digest-invalidation case independently.
   const _paReview: IssueStateReview | null = null;
   const _paAuthGapBlockers = _permitReadiness.blockers.filter(b => classifyBlockerDomain(b.code) !== 'review');
+  // §15(d) — production identity: the project name must NOT contain "TEST" and a
+  // designer/engineer-of-record must be present, or the ISSUED-FOR-PERMIT gate
+  // fails (Braidon's name is "...Solar TEST" ⇒ this precondition is false).
+  const _projectIdentityValid = !!(proj.projectName
+    && !/\bTEST\b/i.test(String(proj.projectName))
+    && proj.designer && String(proj.designer).trim());
   const _paGateInput: IssuedForPermitGateInput = {
+    projectIdentityValid: _projectIdentityValid,
     // Real enforcement is generatePermit's throw on blocking validators; at build
     // we proxy "no known authority gaps" as the blocking-validator signal.
     blockingValidatorsPass: _paAuthGapBlockers.length === 0,
@@ -600,7 +695,10 @@ export function buildPermitDesignSnapshot(
     zip: proj.zip ?? null,
     parcelApn: proj.apn ?? null,
     ahjName: codeAuthority.ahjName,          // single-sourced from code authority
-    utilityName: proj.utilityName ?? null,
+    // §15(b) — the human utility name ("Ameren Illinois"), never the registry
+    // slug ("il-ameren-illinois"). Humanized at the single source so every sheet
+    // that projects projectAuthority.utility gets the display name.
+    utilityName: utilityDisplayName(proj.utilityName ?? '') || null,
     systemType: _paSystemType,
     dcKw: system?.totalDcKw ?? (dcWattsStc > 0 ? dcWattsStc / 1000 : null),
     acKw: system?.totalAcKw ?? (acWattsContinuous > 0 ? acWattsContinuous / 1000 : null),
@@ -622,6 +720,8 @@ export function buildPermitDesignSnapshot(
     designer: proj.designer ?? null,          // NO default engineer name
     contractor: proj.contractor ?? proj.installerName ?? proj.installer ?? null,
     issueDate: proj.date ?? null,
+    county: proj.county ?? null,                        // §14 municipal-boundary provenance
+    authorityVerified: _projectAuthorityVerified,       // §14 — false (no official-source path)
     sheetIndex: computePlansetManifest(input, cad),
     governingCodes: {
       schemaVersion: codeAuthority.schemaVersion,
@@ -746,6 +846,7 @@ export function buildPermitDesignSnapshot(
       microInverterUnits: microUnits, branches, conductors,
       groundingObjects,
       routeSegments,
+      serviceTopology,
       feeder: {
         conductorId: feederConductorId,
         ocpdA: cs?.backfeedBreakerAmps ?? cs?.acOcpdAmps ?? null,
@@ -800,6 +901,7 @@ export function buildPermitDesignSnapshot(
       // §10 — structural BOM rows + reconciliation, derived from the objects.
       bom: structAuth.bom,
       bomReconciliation: structAuth.bomReconciliation,
+      reactionReconciliation: structAuth.reactionReconciliation,
       provenance: { source: 'W3 structural authority (structural-engine-v4 objects + mounting-hardware-db + fire-setback engine)' },
       gaps: [
         // W4 closer: rails OR direct-mount attachments count as canonical

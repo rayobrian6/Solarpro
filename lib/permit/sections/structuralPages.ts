@@ -694,6 +694,16 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // demand = ASD uplift, SF = capacity/demand). No `(safetyFactor||2)` derive.
   const lagCap      = _attChk?.capacity != null ? _attChk.capacity.toFixed(0) : (structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—');
   const safetyFact  = _attChk?.safetyFactor != null ? _attChk.safetyFactor.toFixed(2) : (structural?.attachment?.safetyFactor?.toFixed(2) || '—');
+  // §9 — the mount ALLOWABLE (RT-MINI 600 lb) is UNVERIFIED while a blocking
+  // racking-capacity gap is active. No sheet may render a capacity PASS from it:
+  // gate the capacity value, the safety factor and the verdict to PENDING. The
+  // DEMAND numbers (uplift/snow per attachment) stay printed — they are canonical.
+  const _capGated   = _proj.capacityGated === true;
+  const lagCapDisp  = _capGated ? 'UNVERIFIED / PENDING STRUCTURAL SOURCE' : `${lagCap} lbs`;
+  const sfCellHtml  = _capGated
+    ? `<span style="font-weight:bold;color:#b45309;">PENDING — CAPACITY SOURCE UNVERIFIED</span>`
+    : `<span style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < _attThreshold ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${_attThreshold.toFixed(1)})` : ''}</span>`;
+  const _attVerdict = _capGated ? 'PENDING — CAPACITY SOURCE UNVERIFIED' : (_attChk ? checkResultLabel(_attChk) : '—');
   const maxSpacing  = _proj.attachmentSpacingIn ?? structural?.attachment?.maxAllowedSpacing ?? '—';
   const _utilRatio = structural?.rafter?.utilizationRatio; // GOVERNING ratio (max of bending/deflection)
   const utilization = _utilRatio != null ? (_utilRatio * 100).toFixed(0) : '—';
@@ -799,11 +809,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <div class="struct-card">
           <div class="sct">Lag Bolt Attachment Analysis</div>
           <table class="calc-table">
-            <tr><td>Lag Bolt Capacity</td><td class="cv">${lagCap} lbs</td></tr>
+            <tr><td>Attachment Capacity (allowable)</td><td class="cv"${_capGated ? ' style="color:#b45309;font-weight:bold;"' : ''}>${lagCapDisp}</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < _attThreshold ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ` (ASD — min. ${_attThreshold.toFixed(1)})` : ''}</td></tr>
+            <tr><td>Capacity Check (SF)</td><td class="cv">${sfCellHtml}</td></tr>
             <tr><td>Max Allowed Spacing</td><td class="cv">${maxSpacing}"</td></tr>
           </table>
+          ${_capGated ? `<div style="font-size:6.5px;line-height:1.3;color:#b45309;padding:2px 3px;">CAPACITY GATE (§9): the published allowable is UNVERIFIED (RT-MINI structural source not archived / applicability unconfirmed). Demand is canonical; the capacity comparison is INDETERMINATE pending a verified structural source — no PASS is asserted.</div>` : ''}
         </div>
       </div>
 
@@ -828,6 +839,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         ${_utilRatio != null && _utilRatio <= 1.0 ? 'confirms the existing framing has adequate capacity' : 'indicates the modeled framing requires field verification of actual framing type/span or reinforcement'}
         for the additional PV loading${_utilRatio != null && _utilRatio > 1.0 ? ' (bending utilization ' + bendUtil + '%; deflection ' + rafterDefl + '" vs ' + rafterAD + '" allowable)' : ''}.
       </div>
+
+      <!-- §8 Attachment-ID Reaction Schedule + reconciliation (canonical objects) -->
+      ${renderReactionSchedule(_proj)}
 
       <!-- Standard Detail: Roof Attachment -->
       <div class="section-title">Standard Detail — Roof Attachment (Lag Bolt w/ Flashing, Typical)</div>
@@ -911,8 +925,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           withdrawal capacity, and <strong>D + S</strong> for gravity/snow loading on existing framing.
           All lag bolt attachments shall develop the required withdrawal capacity with a minimum safety factor of
           ${_attThreshold.toFixed(1)} (${_attChk ? _attChk.limitState : 'attachment-uplift'} — demand and allowable both ASD,
-          Ω-normalized capacity; ${asce} §2.4). ${_attChk ? `As analyzed: demand ${fmt(_attChk.demand)} lbs, allowable
-          ${fmt(_attChk.capacity)} lbs, SF ${fmt(_attChk.safetyFactor, 2)} — ${checkResultLabel(_attChk)}.` : ''}
+          Ω-normalized capacity; ${asce} §2.4). ${_attChk ? (_capGated
+            ? `As analyzed: demand ${fmt(_attChk.demand)} lbs (canonical); allowable capacity is UNVERIFIED / PENDING STRUCTURAL SOURCE (§9) — the safety-factor check is INDETERMINATE, no PASS asserted.`
+            : `As analyzed: demand ${fmt(_attChk.demand)} lbs, allowable ${fmt(_attChk.capacity)} lbs, SF ${fmt(_attChk.safetyFactor, 2)} — ${_attVerdict}.`) : ''}
         </div>
       </div>
       ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
@@ -923,7 +938,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         ${_reviewRequired
           ? `<strong style="color:#b91c1c;">ROOF FRAMING UNVERIFIED — the rafter/truss capacity is computed from code defaults and is NOT engineering authority. A licensed structural review of the existing framing is required before permit submission; no framing pass is certified on this sheet.</strong>`
           : (_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.')}
-        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= _attThreshold ? 'meets' : 'DOES NOT MEET'} the required minimum of ${_attThreshold.toFixed(1)} (ASD demand vs allowable capacity per ${asce} §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
+        ${_capGated
+          ? `<strong style="color:#b45309;">ATTACHMENT CAPACITY UNVERIFIED (§9) — the published allowable capacity source is not archived / its applicability to the selected assembly is unconfirmed. The demand is canonical, but the safety-factor comparison is INDETERMINATE and no attachment PASS is asserted on this sheet until a verified structural source is supplied.</strong>`
+          : (Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= _attThreshold ? 'meets' : 'DOES NOT MEET'} the required minimum of ${_attThreshold.toFixed(1)} (ASD demand vs allowable capacity per ${asce} §2.4).` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.')}
       </div>` : ''}
       <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
@@ -931,7 +948,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ${asce} §26/27 and ${ibcVer} IBC/IRC.
         ${_reviewRequired
           ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted). The lag-bolt attachment and rail checks pass on the analyzed inputs, but a licensed structural review of the existing framing is required before this set is submitted for permit — see the review notice above.'
-          : (_attChk?.passes === true && _framingChk?.passes === true
+          : (_capGated
+            ? 'Attachment capacity is UNVERIFIED (§9 — structural source not archived / applicability unconfirmed). The demand analysis is complete, but a verified attachment-capacity source is required before this set is submitted for permit; no attachment PASS is asserted.'
+            : _attChk?.passes === true && _framingChk?.passes === true
             ? `All structural parameters are within acceptable limits. The existing roof structure and lag bolt attachment
                system are adequate to support the proposed PV array without modification.`
             : (_attChk == null && _framingChk == null
@@ -971,6 +990,106 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
 }
 
 
+
+// ── §8 ATTACHMENT-ID REACTION SCHEDULE ────────────────────────────────────────
+// Dense CAD table sourced from the CANONICAL attachment objects (id, roof zone,
+// tributary area, dead / snow / down / uplift reactions, capacity + SF), plus a
+// reconciliation footer that sums tributary areas and reactions back to the
+// applied load × array footprint (per limit state). Capacity/SF are gated to
+// PENDING when the §9 capacity gate is active. Uniform reactions are collapsed
+// beyond a row cap with an explicit "+K identical" note (never silently clipped).
+const REACTION_ROW_CAP = 40;
+function renderReactionSchedule(proj: StructuralProjection): string {
+  const atts = proj.attachments ?? [];
+  const rr = proj.reactionReconciliation;
+  if (atts.length === 0) {
+    return `
+      <div class="section-title">Attachment Reaction Schedule — Per-Attachment Reactions (${'ASCE 7'} §2.4)</div>
+      <div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);border-top:none;background:#fafafa;color:#b45309;">
+        No canonical attachment objects were derived for this system — per-attachment reactions are not traceable.
+        A structural review must establish the attachment layout and reactions before permit submission.
+      </div>`;
+  }
+  const gated = proj.capacityGated === true;
+  const n2 = (v: number | null | undefined) => v == null || !isFinite(v) ? '—' : v.toFixed(0);
+  const n1 = (v: number | null | undefined) => v == null || !isFinite(v) ? '—' : v.toFixed(1);
+  const capCell = gated ? 'PENDING' : '';
+  const rows = atts.slice(0, REACTION_ROW_CAP);
+  const extra = atts.length - rows.length;
+
+  const bodyRows = rows.map((a, i) => {
+    const sf = gated ? 'PEND.' : (a.safetyFactor != null ? a.safetyFactor.toFixed(2) : '—');
+    const cap = gated ? capCell : n2(a.allowableCapacityLbs);
+    return `<tr${i % 2 ? ' class="bg-lt"' : ''}>
+      <td class="mono">${escapeH(a.attachmentId)}</td>
+      <td>${escapeH(a.roofZone ?? '—')}</td>
+      <td class="tr">${n1(a.tributaryAreaFt2)}</td>
+      <td class="tr">${n2(a.deadReactionLbs)}</td>
+      <td class="tr">${n2(a.snowReactionLbs)}</td>
+      <td class="tr">${n2(a.downwardReactionLbs)}</td>
+      <td class="tr fw7">${n2(a.upliftReactionLbs)}</td>
+      <td class="tr"${gated ? ' style="color:#b45309;"' : ''}>${cap}</td>
+      <td class="tr"${gated ? ' style="color:#b45309;"' : ''}>${sf}</td>
+    </tr>`;
+  }).join('');
+
+  const extraNote = extra > 0
+    ? `<tr><td colspan="9" style="font-size:6.5px;color:#555;font-style:italic;padding:2px 3px;">+ ${extra} additional attachment${extra === 1 ? '' : 's'} with identical uniform tributary / reaction values (full set carried in the canonical structural object model; abbreviated here for legibility).</td></tr>`
+    : '';
+
+  // ── Reconciliation footer ──
+  const reconRows: string[] = [];
+  let footer = '';
+  if (rr && rr.present) {
+    const verdict = rr.ok ? 'RECONCILED' : 'DOES NOT RECONCILE';
+    const vColor = rr.ok ? '#006600' : '#cc0000';
+    const chk = (name: string) => rr.checks.find(c => c.name === name);
+    const cCount = chk('attachment-count-vs-reaction-model');
+    const cTrib = chk('tributary-sum-vs-array-area');
+    const cUp = chk('uplift-reactions-vs-applied');
+    const cSnow = chk('snow-reactions-vs-applied');
+    const cDead = chk('dead-reactions-vs-applied');
+    const line = (label: string, c: ReturnType<typeof chk>) => c
+      ? `<tr><td>${label}</td><td class="tr">${c.expected ?? '—'}</td><td class="tr">${c.actual ?? '—'}</td><td class="tr">${c.ratio ?? '—'}</td><td style="text-align:center;font-weight:bold;color:${c.ok ? '#006600' : '#cc0000'};">${c.ok ? 'OK' : 'FAIL'}</td></tr>`
+      : '';
+    reconRows.push(
+      `<tr style="font-weight:bold;"><td>Object count vs reaction model</td><td class="tr">${cCount?.expected ?? '—'}</td><td class="tr">${cCount?.actual ?? '—'}</td><td class="tr">${cCount?.ratio ?? '—'}</td><td style="text-align:center;color:${cCount?.ok ? '#006600' : '#cc0000'};">${cCount?.ok ? 'OK' : 'FAIL'}</td></tr>`,
+      line('Σ tributary vs array area (ft²)', cTrib),
+      line('Σ uplift vs 0.6·W × area (lb)', cUp),
+      line('Σ snow vs snow psf × area (lb)', cSnow),
+      line('Σ dead vs dead psf × area (lb)', cDead),
+    );
+    footer = `
+      <div class="section-title">Reaction Reconciliation — Σ Reactions vs Applied Load × Array Area (§8)</div>
+      <table class="calc-table" style="width:100%;">
+        <thead><tr><th style="text-align:left;">Closure Check</th><th style="text-align:right;">Expected</th><th style="text-align:right;">Σ Objects</th><th style="text-align:right;">Ratio</th><th style="text-align:center;">Status</th></tr></thead>
+        <tbody>${reconRows.join('')}</tbody>
+      </table>
+      <div style="padding:3px 6px;font-size:6.8px;line-height:1.35;border:var(--border);border-top:none;background:${rr.ok ? '#f6faf6' : '#fdf3f3'};">
+        <strong style="color:${vColor};">${verdict}.</strong>
+        ${escapeH(rr.note)} Tolerance band on closure ratios: [${rr.tolerance.lower}, ${rr.tolerance.upper}].
+        Array footprint = Σ canonical module areas = ${rr.arrayAreaFt2 ?? '—'} ft²; Σ per-mount tributary = ${rr.tributarySumFt2 ?? '—'} ft²
+        over ${rr.attachmentCount} attachments.
+        ${!rr.ok ? '<strong style="color:#cc0000;"> Reactions do not reconcile with the applied load — see the permit-readiness blocker; the per-attachment reaction is not authoritative.</strong>' : ''}
+      </div>`;
+  }
+
+  return `
+      <div class="section-title">Attachment Reaction Schedule — Per-Attachment Reactions (${'ASCE 7'} §2.4 ASD)</div>
+      <table class="equip-table" style="width:100%;">
+        <thead><tr>
+          <th>Attach ID</th><th>Zone</th><th style="text-align:right;">Trib (ft²)</th>
+          <th style="text-align:right;">Dead (lb)</th><th style="text-align:right;">Snow (lb)</th>
+          <th style="text-align:right;">Down D+S (lb)</th><th style="text-align:right;">Uplift 0.6W (lb)</th>
+          <th style="text-align:right;">Cap (lb)</th><th style="text-align:right;">SF</th>
+        </tr></thead>
+        <tbody>${bodyRows}${extraNote}</tbody>
+      </table>
+      <div style="padding:2px 6px;font-size:6.5px;color:#555;line-height:1.3;border:var(--border);border-top:none;">
+        Reactions sourced from the canonical attachment objects (structural-engine-v4 mount layout). Uplift = ASD 0.6·W net C&amp;C over the per-mount tributary; Down = Dead + Snow over the same tributary.
+        ${gated ? 'Capacity + SF are gated to PENDING (§9 — allowable source unverified).' : ''}
+      </div>${footer}`;
+}
 
 // ─── DISPATCHER ───────────────────────────────────────────────────────────────
 export function pageStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {

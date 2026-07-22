@@ -258,6 +258,10 @@ export interface SLDProfessionalInput {
   hasEnphaseIQSC3?:        boolean;
   scale:                   string;
   acWireLength:            number;
+  /** §3 — canonical AC feeder conduit trade size (e.g. '1"'), single-sourced
+   *  from the snapshot feeder segment so E-1 never invents a '3/4"' fallback that
+   *  disagrees with PV-4B. */
+  acConduitSize?:          string;
   /** Real engine-computed AC feeder conduit fill % (NEC Ch.9 Tbl.1). */
   acConduitFillPct?:       number;
   /** Real engine-computed AC feeder voltage drop %. */
@@ -1696,7 +1700,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const acFeederRun         = isMicro ? combDiscoRun : invDiscoRun;
   const resolvedAcWire      = acFeederRun?.wireGauge   ?? input.acWireGauge   ?? '#6 AWG';
   const resolvedAcOCPD      = acFeederRun?.ocpdAmps    ?? input.acOCPD        ?? 30;
-  const resolvedAcConduit   = acFeederRun?.conduitSize ?? '3/4"';
+  // §3 — canonical feeder conduit size/type: engine run first, then the snapshot-
+  // sourced feeder trade size/raceway the adapter passes, then a last-resort default.
+  const resolvedAcConduit   = acFeederRun?.conduitSize ?? input.acConduitSize ?? '3/4"';
   const resolvedAcCondType  = acFeederRun?.conduitType ?? input.acConduitType ?? 'EMT';
   // Phase 6: AC conductor count — US residential 120/240V split-phase.
   // Standard string/hybrid inverters output L1+L2+N (3 current-carrying + EGC = 4 total).
@@ -2798,10 +2804,32 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _fVd   = input.acVoltageDropPct ?? 0;
     const _fLen  = input.acWireLength ?? 0;
     const _fPass = _fFill <= 40 && _fVd <= 3;
+    const _feederConduit = `${resolvedAcCondType} ${resolvedAcConduit}`;
+    // §4 (07-22): a microinverter system has N parallel AC BRANCH CIRCUITS (each
+    // ≤20A OCPD, its own conductor), NOT one collapsed BR-1 carrying the feeder's
+    // #6/45A/60A. Render every real branch from the canonical branch plan
+    // (input.microBranches). Their AC output is on the open-air Q-Cable trunk;
+    // the shared feeder (combiner→disco→MSP) carries the aggregated current.
+    const _branchRows: SR[] = (input.microBranches && input.microBranches.length > 0)
+      ? input.microBranches.map(b => ({
+          id: `BR-${b.branchIndex}`,
+          from: `${b.deviceCount}× MICRO`, to: 'AC COMBINER',
+          conductors: b.conductorCallout ?? `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${egcNum} GRN`,
+          conduit: 'OPEN AIR',
+          fill: 0,
+          amp: Math.round((b.branchCurrentA * 1.25) * 10) / 10,
+          ocpd: b.ocpdAmps,
+          vdrop: 0, len: 0, pass: true,
+        }))
+      : [{ id: 'BR-1', from: 'AC BRANCHES', to: 'AC COMBINER',
+          conductors: `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${egcNum} GRN`,
+          conduit: 'OPEN AIR', fill: 0,
+          amp: input.branchOcpdAmps ? Math.round(input.branchOcpdAmps * 0.8 * 10) / 10 : 0,
+          ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true }];
     sRows = isMicro ? [
-      {id:'BR-1',from:'ROOF J-BOX',to:'AC COMBINER',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
-      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
-      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
+      ..._branchRows,
+      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
+      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ] : [
       {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
       {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},

@@ -107,6 +107,13 @@ export interface MountSpec {
   fastenersPerMount: number;       // lag bolts / screws per mount
   fastenerDiameterIn: number;      // inches
   fastenerEmbedmentIn: number;     // minimum embedment depth (inches)
+  /** §10 — exact fastener PRODUCT length (inches), when the manufacturer specifies
+   *  a specific screw/lag length. When present, sheets print THIS length instead of
+   *  a derived (embedment + stack-up) estimate — so PV-3 / notes / BOM never contradict
+   *  the product spec (RT-MINI: 3.5" / 90mm wood screw, NOT a derived 4" lag). */
+  fastenerLengthIn?: number;
+  /** §10 — the exact fastener TYPE wording ('structural wood screw', 'SS lag'…). */
+  fastenerType?: string;
   fastenerPulloutLbs: number;      // lbs per fastener (NDS withdrawal)
   maxSpacingIn: number;            // max mount spacing (inches)
   minRafterDepthIn: number;        // minimum rafter depth for fastener
@@ -601,6 +608,8 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       fastenersPerMount: 2,
       fastenerDiameterIn: 0.3125,   // 5/16" (8mm/M8) structural wood screw — was wrongly 0.5" (1/2"); registry-v4 agrees on 5/16"
       fastenerEmbedmentIn: 2.5,
+      fastenerLengthIn: 3.5,        // §10 — exact product length: ~3.5" (90mm) RT-MINI screw (NOT a derived 4" lag)
+      fastenerType: 'structural wood screw',  // §10 — RT-MINI uses wood screws, not SS lags
       fastenerPulloutLbs: 450,      // ultimate per screw → ~300 allowable via SF ≈ ESR 306/screw
       maxSpacingIn: 48,
       minRafterDepthIn: 3.5,
@@ -612,7 +621,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     hardware: {
       midClamp: 'RT-MINI Mid Clamp',
       endClamp: 'RT-MINI End Clamp',
-      railSplice: 'Compatible with IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent rail',
+      railSplice: 'Compatible rail — PENDING SELECTION (specify a listed compatible rail/splice SKU: IronRidge XR100/XR1000, UniRac SFM, or Pegasus)',
       groundLug: 'RT-MINI Ground Lug',
       lagBolt: '5/16" (8mm/M8) structural wood screw, ~3.5" (90mm) — 2 per pad, no pilot hole',
       // No flashingKit — RT-MINI is self-flashing (integrated AlphaSeal/RT Butyl).

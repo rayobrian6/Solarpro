@@ -52,6 +52,10 @@ export interface BOMGenerationInputV4 {
   // System sizing
   moduleCount: number;
   deviceCount?: number;       // micro: ceil(panelCount / modulesPerDevice); if omitted falls back to moduleCount
+  /** §13 — canonical AC-branch count from the plane-aware branch plan
+   *  (snapshot.electrical.branches.length). Governs micro terminator/cap qty so
+   *  3 branches never materialize 4 terminators. Undefined ⇒ resolver heuristic. */
+  branchCount?: number;
   stringCount: number;
   inverterCount: number;
   systemKw: number;
@@ -166,6 +170,14 @@ export interface BOMGenerationInputV4 {
   requiresACDisconnect?: boolean;
   requiresDCDisconnect?: boolean;
   requiresRapidShutdown?: boolean;
+  /** §7 GROUNDING AUTHORITY (post-campaign correction 07-22): a grid-tied PV
+   *  interconnection bonds to the EXISTING service grounding electrode system
+   *  (NEC 250.64 / 690.47) — it does NOT add a new electrode. A ground rod +
+   *  acorn clamp + #6 GEC are materialized ONLY when an authoritative design
+   *  input requires a NEW electrode (e.g. a detached structure / no existing
+   *  GES). Undefined/false ⇒ no auto electrode hardware (the canonical
+   *  groundingObjects record GEC as none-required). */
+  requiresGroundingElectrode?: boolean;
 
   // Labels (NEC 690.31, 690.54, 690.56)
   requiresWarningLabels?: boolean;
@@ -341,14 +353,14 @@ function emitRackingBOMInto(
       quantity: Math.ceil(r.qty), derivedFrom: 'structuralEngine.rackingBOM',
       formula: 'calcRackingBOM', necReference: nec });
   };
-  emitRB('rail', rb.rails, 'IBC 2021');
-  emitRB('splice', rb.railSplices, 'IBC 2021');
+  emitRB('rail', rb.rails, 'UL 2703');
+  emitRB('splice', rb.railSplices, 'UL 2703');
   emitRB('l_foot', rb.lFeet, 'ASCE 7-22');
   emitRB('lag_bolt', rb.lagBolts, 'ASCE 7-22');
-  emitRB('mount_hardware', rb.mountingBolts, 'IBC 2021');
-  emitRB('mid_clamp', rb.midClamps, 'IBC 2021');
-  emitRB('end_clamp', rb.endClamps, 'IBC 2021');
-  emitRB('flashing', rb.flashingKits, 'IBC 2021');
+  emitRB('mount_hardware', rb.mountingBolts, 'UL 2703');
+  emitRB('mid_clamp', rb.midClamps, 'UL 2703');
+  emitRB('end_clamp', rb.endClamps, 'UL 2703');
+  emitRB('flashing', rb.flashingKits, 'UL 2703');
   emitRB('grounding', rb.bondingClips, 'UL 2703');
 }
 
@@ -536,6 +548,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const trunkDeviceCount = input.deviceCount ?? input.moduleCount;
     const microBrand = inverterEntry?.manufacturer ?? microDb?.manufacturer ?? 'Enphase';
     const microModel = inverterEntry?.model ?? microDb?.model;
+    // §13 — the AC-branch COUNT that governs terminator/cap quantities is the
+    // ACTUAL branch-cable topology (the plane-aware planMicroBranches result the
+    // snapshot carries as electrical.branches), NOT the resolver's flat
+    // ceil(devices / perModelMax) heuristic which yielded branches+1 on Braidon
+    // (3 real branches → 4 terminators). Absent ⇒ resolver heuristic (unchanged).
+    const branchCountOverride = (typeof input.branchCount === 'number' && input.branchCount > 0)
+      ? input.branchCount : undefined;
     const plan = resolveTrunkCablePlan({
       brand: microBrand,
       model: microModel,
@@ -546,48 +565,54 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       subArrayCount: input.subArrayCount,
       // Installer preference: cut at rows instead of service-looping.
       spliceAtRows: input.spliceAtRows,
+      // Canonical AC-branch count (terminators/caps derive from THIS).
+      branchCountOverride,
     });
 
     if (plan) {
       const { system, cable } = plan;
       const orientLabel = cable.orientation === 'fixed' ? '' : ` (${cable.orientation})`;
-      items.push(addItem('dc', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
+      // §13 — Enphase Q-Cable / AC trunk is AC BRANCH-CIRCUIT equipment (240 V AC
+      // output of each microinverter), NOT DC. It files under Stage 4 — AC. The
+      // terminator/sealing-cap COUNT derives from the ACTUAL AC-branch topology
+      // (branchCount below), never a branches+1 heuristic.
+      items.push(addItem('ac', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
         cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft), continuous per branch × ${plan.branchCount}`,
         plan.dropCount, 'ea', 'NEC 690.31', 'one connector-drop per device', `${trunkDeviceCount} drops`, true));
-      log.push({ stageId: 'dc', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
+      log.push({ stageId: 'ac', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
         quantity: plan.dropCount, derivedFrom: 'trunkCable resolver (drops)', formula: `${trunkDeviceCount} drops ≈ ${plan.approxFeet} ft`, necReference: 'NEC 690.31' });
 
       if (plan.splicePairs > 0) {
-        items.push(addItem('dc', 'connector', system.brand, system.connectors.male.description,
+        items.push(addItem('ac', 'connector', system.brand, system.connectors.male.description,
           system.connectors.male.sku, `${system.connectors.male.description} — trunk jump (${plan.spliceBasis})`,
           plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-        items.push(addItem('dc', 'connector', system.brand, system.connectors.female.description,
+        items.push(addItem('ac', 'connector', system.brand, system.connectors.female.description,
           system.connectors.female.sku, `${system.connectors.female.description} — trunk jump (${plan.spliceBasis})`,
           plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-        log.push({ stageId: 'dc', category: 'connector', item: 'Field-wireable splice (M/F pair)',
+        log.push({ stageId: 'ac', category: 'connector', item: 'Field-wireable splice (M/F pair)',
           quantity: plan.splicePairs, derivedFrom: plan.spliceBasis, formula: `${plan.splicePairs}`, necReference: 'NEC 690.31' });
       }
 
-      items.push(addItem('dc', 'terminator', system.brand, system.connectors.terminator.description,
-        system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per branch end`,
-        plan.terminators, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount} branches`, true));
-      log.push({ stageId: 'dc', category: 'terminator', item: system.connectors.terminator.description,
-        quantity: plan.terminators, derivedFrom: '1 per branch', formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
+      items.push(addItem('ac', 'terminator', system.brand, system.connectors.terminator.description,
+        system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per AC branch end`,
+        plan.terminators, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount} branches`, true));
+      log.push({ stageId: 'ac', category: 'terminator', item: system.connectors.terminator.description,
+        quantity: plan.terminators, derivedFrom: '1 per AC branch', formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
 
       if (system.connectors.sealingCap) {
-        items.push(addItem('dc', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
-          system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per branch)`,
-          plan.sealingCaps, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount}`, false));
+        items.push(addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
+          system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per AC branch)`,
+          plan.sealingCaps, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount}`, false));
       }
     } else {
-      // Unknown micro brand — generic trunk line so the wire never silently vanishes.
-      const genericSections = Math.ceil(trunkDeviceCount / 13);
-      items.push(addItem('dc', 'trunk_cable', microBrand, 'AC Trunk Cable (brand TBD)',
+      // Unknown micro brand — generic AC trunk line so the wire never silently vanishes.
+      const genericSections = branchCountOverride ?? Math.ceil(trunkDeviceCount / 13);
+      items.push(addItem('ac', 'trunk_cable', microBrand, 'AC Trunk Cable (brand TBD)',
         'TRUNK-TBD', `AC trunk cable — 1 drop per micro (${trunkDeviceCount} devices, brand not in trunk catalog)`,
         trunkDeviceCount, 'ea', 'NEC 690.31', 'one drop per device', `${trunkDeviceCount}`, true));
-      items.push(addItem('dc', 'terminator', microBrand, 'Trunk Terminator (brand TBD)',
-        'TERM-TBD', 'Trunk terminator — 1 per branch end', genericSections, 'ea', 'NEC 690.31', '1 per branch', `${genericSections}`, true));
-      log.push({ stageId: 'dc', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
+      items.push(addItem('ac', 'terminator', microBrand, 'Trunk Terminator (brand TBD)',
+        'TERM-TBD', 'Trunk terminator — 1 per AC branch end', genericSections, 'ea', 'NEC 690.31', '1 per AC branch', `${genericSections}`, true));
+      log.push({ stageId: 'ac', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
         quantity: trunkDeviceCount, derivedFrom: 'generic fallback (brand not in trunkCable catalog)', formula: `${trunkDeviceCount}`, necReference: 'NEC 690.31' });
     }
 
@@ -1311,12 +1336,12 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     items.push(addItem('structural', 'racking', _roofRB.manufacturer, _roofRB.systemModel,
       _roofRB.mounts.partNumber ?? _roofRB.systemModel,
       `${_roofRB.manufacturer} ${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`,
-      1, 'lot', 'IBC 2021', 'perSystem', '1', true));
+      1, 'lot', 'UL 2703', 'perSystem', '1', true));
     items.push(addItem('structural', 'attachment', _roofRB.manufacturer,
       _roofRB.mounts.description, _roofRB.mounts.partNumber ?? 'TBD', _roofRB.mounts.description,
       Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
     log.push({ stageId: 'structural', category: 'racking', item: _roofRB.systemModel,
-      quantity: 1, derivedFrom: 'structuralEngine.rackingBOM (no registry entry)', formula: '1', necReference: 'IBC 2021' });
+      quantity: 1, derivedFrom: 'structuralEngine.rackingBOM (no registry entry)', formula: '1', necReference: 'UL 2703' });
     emitRackingBOM(_roofRB, _roofRB.manufacturer);
   }
 
@@ -1366,7 +1391,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     items.push(addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
       rackingEntry.partNumber ?? rackingEntry.id,
       `${rackingEntry.manufacturer} ${rackingEntry.model} — ${_suppressRailFormulas ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`,
-      1, 'lot', rackingEntry.iccEsReport ?? 'IBC 2021', 'perSystem', '1', true));
+      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem', '1', true));
     log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
       quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: rackingEntry.iccEsReport });
 
@@ -1432,7 +1457,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
             acc.defaultModel ?? acc.description,
             acc.defaultPartNumber ?? 'TBD',
             acc.description,
-            qty, 'ea', acc.necReference ?? 'IBC 2021',
+            qty, 'ea', acc.necReference ?? 'UL 2703',
             acc.quantityFormula ?? acc.quantityRule,
             acc.quantityFormula ?? acc.quantityRule,
             acc.required));
@@ -1465,8 +1490,12 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   }
 
   // Ground Rod & GEC — NEC 250.52(A)(5) / 250.66
-  // Required for grounding electrode system unless existing ground rod on site
-  {
+  // §7 (07-22): a grid-tied PV interconnection bonds to the EXISTING service
+  // grounding electrode system (NEC 250.64 / 690.47) — NO new electrode. Only
+  // materialize a ground rod + acorn clamp + GEC when an authoritative design
+  // input requires a NEW electrode. Previously this ran unconditionally and put
+  // a phantom 5/8"×8ft rod + acorn + #6 GEC on every microinverter package.
+  if (input.requiresGroundingElectrode === true) {
     // Ground rod: 8-ft copper-clad per NEC 250.52(A)(5)
     items.push(addItem('structural', 'grounding', 'Erico/Harger', '5/8" × 8 ft Copper-Clad Ground Rod',
       'GR-5/8-8',
@@ -1541,10 +1570,15 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   // ── STAGE 7: LABELS ──────────────────────────────────────────────────────────
 
   if (input.requiresWarningLabels !== false) {
-    // NEC 690.31 — DC conductor labels
-    items.push(addItem('labels', 'label', 'HellermannTyton', 'DC Conductor Label Set',
-      'LABEL-DC-SET', 'DC conductor warning labels per NEC 690.31',
-      input.stringCount * 2, 'ea', 'NEC 690.31', 'stringCount × 2', 'strings * 2', true));
+    // NEC 690.31 — DC conductor labels. §13: a microinverter design has NO DC
+    // source/output circuits (each module is paired 1:1 with a micro; the only
+    // DC is the factory MC4 module lead). A "DC Conductor Label Set" sized on a
+    // phantom stringCount is a string-system artifact — omit it for micro.
+    if (!isMicro) {
+      items.push(addItem('labels', 'label', 'HellermannTyton', 'DC Conductor Label Set',
+        'LABEL-DC-SET', 'DC conductor warning labels per NEC 690.31',
+        input.stringCount * 2, 'ea', 'NEC 690.31', 'stringCount × 2', 'strings * 2', true));
+    }
 
     // NEC 690.54 — Equipment labels
     items.push(addItem('labels', 'label', 'HellermannTyton', 'PV System Warning Label',
@@ -1929,49 +1963,52 @@ function generateBOMV4PerSubSystem(
       }
     }
 
-    // ── Stage 2 — DC / trunk (this sub's own brand rules) ──
+    // ── Stage 4 — AC trunk / Q-Cable (this sub's own brand rules) ──
+    // §13 (07-22): a micro sub's Q-Cable / AC trunk + terminators + sealing caps
+    // are AC BRANCH-CIRCUIT equipment (Stage 4 — AC), consistent with the
+    // single-system path — never filed under DC.
     if (s.isMicro) {
       const plan = s.trunkPlan;
       if (plan) {
         const { system, cable } = plan;
         const orientLabel = cable.orientation === 'fixed' ? '' : ` (${cable.orientation})`;
-        push(key, addItem('dc', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
+        push(key, addItem('ac', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
           cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft), continuous per branch × ${plan.branchCount} — ${key} sub-system`,
           plan.dropCount, 'ea', 'NEC 690.31', `${key} sub-system: one connector-drop per device`, `${s.deviceCount} drops`, true));
-        log.push({ stageId: 'dc', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
+        log.push({ stageId: 'ac', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
           quantity: plan.dropCount, derivedFrom: `trunkCable resolver (${key} sub-system drops)`, formula: `${s.deviceCount} drops ≈ ${plan.approxFeet} ft`, necReference: 'NEC 690.31' });
 
         if (plan.splicePairs > 0) {
-          push(key, addItem('dc', 'connector', system.brand, system.connectors.male.description,
+          push(key, addItem('ac', 'connector', system.brand, system.connectors.male.description,
             system.connectors.male.sku, `${system.connectors.male.description} — trunk jump (${plan.spliceBasis})`,
             plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-          push(key, addItem('dc', 'connector', system.brand, system.connectors.female.description,
+          push(key, addItem('ac', 'connector', system.brand, system.connectors.female.description,
             system.connectors.female.sku, `${system.connectors.female.description} — trunk jump (${plan.spliceBasis})`,
             plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
-          log.push({ stageId: 'dc', category: 'connector', item: 'Field-wireable splice (M/F pair)',
+          log.push({ stageId: 'ac', category: 'connector', item: 'Field-wireable splice (M/F pair)',
             quantity: plan.splicePairs, derivedFrom: plan.spliceBasis, formula: `${plan.splicePairs}`, necReference: 'NEC 690.31' });
         }
 
-        push(key, addItem('dc', 'terminator', system.brand, system.connectors.terminator.description,
-          system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per branch end — ${key} sub-system`,
-          plan.terminators, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount} branches`, true));
-        log.push({ stageId: 'dc', category: 'terminator', item: system.connectors.terminator.description,
-          quantity: plan.terminators, derivedFrom: `1 per branch (${key})`, formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
+        push(key, addItem('ac', 'terminator', system.brand, system.connectors.terminator.description,
+          system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per AC branch end — ${key} sub-system`,
+          plan.terminators, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount} branches`, true));
+        log.push({ stageId: 'ac', category: 'terminator', item: system.connectors.terminator.description,
+          quantity: plan.terminators, derivedFrom: `1 per AC branch (${key})`, formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
 
         if (system.connectors.sealingCap) {
-          push(key, addItem('dc', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
-            system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per branch) — ${key} sub-system`,
-            plan.sealingCaps, 'ea', 'NEC 690.31', '1 per branch', `${plan.branchCount}`, false));
+          push(key, addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
+            system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per AC branch) — ${key} sub-system`,
+            plan.sealingCaps, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount}`, false));
         }
       } else {
-        // Unknown micro brand — generic trunk so the wire never silently vanishes.
+        // Unknown micro brand — generic AC trunk so the wire never silently vanishes.
         const genericSections = Math.ceil(s.deviceCount / 13);
-        push(key, addItem('dc', 'trunk_cable', s.brand, 'AC Trunk Cable (brand TBD)',
+        push(key, addItem('ac', 'trunk_cable', s.brand, 'AC Trunk Cable (brand TBD)',
           'TRUNK-TBD', `AC trunk cable — 1 drop per micro (${s.deviceCount} devices, ${key} sub-system, brand not in trunk catalog)`,
           s.deviceCount, 'ea', 'NEC 690.31', 'one drop per device', `${s.deviceCount}`, true));
-        push(key, addItem('dc', 'terminator', s.brand, 'Trunk Terminator (brand TBD)',
-          'TERM-TBD', 'Trunk terminator — 1 per branch end', genericSections, 'ea', 'NEC 690.31', '1 per branch', `${genericSections}`, true));
-        log.push({ stageId: 'dc', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
+        push(key, addItem('ac', 'terminator', s.brand, 'Trunk Terminator (brand TBD)',
+          'TERM-TBD', 'Trunk terminator — 1 per AC branch end', genericSections, 'ea', 'NEC 690.31', '1 per AC branch', `${genericSections}`, true));
+        log.push({ stageId: 'ac', category: 'trunk_cable', item: 'AC Trunk (brand TBD)',
           quantity: s.deviceCount, derivedFrom: `generic fallback (${s.brand} not in trunkCable catalog)`, formula: `${s.deviceCount}`, necReference: 'NEC 690.31' });
       }
     } else if (!subsWithDcRuns.has(key)) {
@@ -2526,7 +2563,7 @@ function generateBOMV4PerSubSystem(
     push('roof', addItem('structural', 'racking', _roofRB.manufacturer, _roofRB.systemModel,
       _roofRB.mounts.partNumber ?? _roofRB.systemModel,
       `${_roofRB.manufacturer} ${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`,
-      1, 'lot', 'IBC 2021', 'perSystem', '1', true));
+      1, 'lot', 'UL 2703', 'perSystem', '1', true));
     push('roof', addItem('structural', 'attachment', _roofRB.manufacturer,
       _roofRB.mounts.description, _roofRB.mounts.partNumber ?? 'TBD', _roofRB.mounts.description,
       Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
@@ -2540,7 +2577,7 @@ function generateBOMV4PerSubSystem(
     push('roof', addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
       rackingEntry.partNumber ?? rackingEntry.id,
       `${rackingEntry.manufacturer} ${rackingEntry.model} — ${suppressRail ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`,
-      1, 'lot', rackingEntry.iccEsReport ?? 'IBC 2021', 'perSystem (roof sub-system)', '1', true));
+      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem (roof sub-system)', '1', true));
     if (_roofRB) {
       emitRackingBOMInto(items, log, _roofRB, rackingEntry.manufacturer, 'roof');
     } else {
@@ -2583,7 +2620,7 @@ function generateBOMV4PerSubSystem(
             acc.defaultManufacturer ?? rackingEntry.manufacturer,
             acc.defaultModel ?? acc.description,
             acc.defaultPartNumber ?? 'TBD', acc.description,
-            qty, 'ea', acc.necReference ?? 'IBC 2021',
+            qty, 'ea', acc.necReference ?? 'UL 2703',
             acc.quantityFormula ?? acc.quantityRule,
             acc.quantityFormula ?? acc.quantityRule, acc.required));
           log.push({ stageId: 'structural', category: acc.category,

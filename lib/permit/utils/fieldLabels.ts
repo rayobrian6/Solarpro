@@ -18,6 +18,7 @@ import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/li
 import { buildConductorAuthority } from './conductorAuthority';
 import { getDesignTemps } from './designTemps';
 import { SOLAR_PANELS } from '@/lib/equipment-db';
+import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';   // §11 — editions single-sourced
 
 interface RawLabel {
   id: string;
@@ -77,15 +78,23 @@ const REQUIRED_WHEN: Record<string, (c: Ctx) => boolean> = {
   'inverter-listing-label': () => true,
 };
 
-/** Resolve the code reference for the job's NEC edition (+ any IFC ref). */
-function resolveRef(codeRefs: RawLabel['codeRefs'], year: string): string {
+/** §11 — resolve the label's code SECTION references. NEC follows the AHJ's
+ *  adopted cycle (`necYear`, the jurisdiction's NEC — the same source
+ *  codeAuthority derives NEC from, and what the placard cycle is selected by).
+ *  The IFC edition is SINGLE-SOURCED from snapshot.codeAuthority (`ifcEd`): the
+ *  placard JSON's baked-in "IFC 2021" literal may NEVER leak, because the IFC
+ *  authority is unverified/pending on most jobs — an "IFC 2021" claim was a
+ *  FALSE edition. A missing IFC edition prints PENDING (section still cited). */
+function resolveRef(codeRefs: RawLabel['codeRefs'], necYear: string, ifcEd: string | null): string {
   const nec = codeRefs.filter(c => /NEC/i.test(c.code));
   const ifc = codeRefs.filter(c => /IFC/i.test(c.code));
-  const necPick = nec.find(c => c.code.includes(year)) ?? nec[nec.length - 1];
-  const ifcPick = ifc.find(c => c.code.includes(year)) ?? ifc[ifc.length - 1];
+  const necPick = nec.find(c => c.code.includes(necYear)) ?? nec[nec.length - 1];
+  // Never pick by the placard's own edition literal; use the authority edition
+  // (or the latest listed section when pending — the section, not its edition).
+  const ifcPick = (ifcEd ? ifc.find(c => c.code.includes(ifcEd)) : undefined) ?? ifc[ifc.length - 1];
   const parts: string[] = [];
-  if (necPick) parts.push(`NEC ${year} ${necPick.section}`);
-  if (ifcPick) parts.push(`${ifcPick.code} ${ifcPick.section}`);
+  if (necPick) parts.push(`NEC ${necYear} ${necPick.section}`);
+  if (ifcPick) parts.push(`IFC ${ifcEd ?? 'PENDING'} ${ifcPick.section}`);
   return parts.join('  ·  ') || (codeRefs[0] ? `${codeRefs[0].code} ${codeRefs[0].section}` : '');
 }
 
@@ -102,7 +111,11 @@ function fillBlanks(text: string, values: Array<string | number>): string {
  */
 export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel[] {
   const { project, system, compliance } = input;
+  // NEC label cycle follows the AHJ's adopted NEC (jurisdiction). §11 — the IFC
+  // edition is single-sourced from the snapshot codeAuthority projection so the
+  // placard's baked-in "IFC 2021" literal can never leak (null ⇒ PENDING).
   const year = String(compliance.jurisdiction?.necVersion || '2020').match(/20\d\d/)?.[0] || '2020';
+  const _cp = projectCodeAuthorityFromInput(input);
   const isMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
   const isSupply = isSupplySideInterconnection(input);
   const ctx: Ctx = {
@@ -168,7 +181,7 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
     return {
       id: `L-${n}`,
       refId: l.id,
-      necRef: resolveRef(l.codeRefs, year),
+      necRef: resolveRef(l.codeRefs, year, _cp.ifc),
       placement: l.location,
       lines,
       bg: l.colors.background || '#ffffff',

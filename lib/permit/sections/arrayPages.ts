@@ -557,7 +557,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
   return `
   <div class="page">
-    ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `ARRAY GEOMETRY & STRING LAYOUT${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `${_isMicro ? 'AC BRANCH CIRCUIT LAYOUT' : 'ARRAY GEOMETRY & STRING LAYOUT'}${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
     ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
     <!-- PIPELINE v47.343: PV-2B now uses draw-zone/data-zone layout -->
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">

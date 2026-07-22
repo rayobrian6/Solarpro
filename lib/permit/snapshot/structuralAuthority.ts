@@ -17,7 +17,10 @@ import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
 import { buildRackingAssembly, type RackingCapacityDocumentEvidence } from './rackingAssembly';
-import { runSnapshotStructuralEngine, type FramingInputs } from './structuralEngine';
+import {
+  runSnapshotStructuralEngine, reconcileReactions, type FramingInputs,
+  type StructuralReactionReconciliation,
+} from './structuralEngine';
 import {
   deriveStructuralBom, reconcileStructuralBom,
   type StructuralBomRow, type StructuralBomReconciliation,
@@ -73,6 +76,7 @@ export interface StructuralAuthorityBundle {
   engine: StructuralEngineResult;
   bom: StructuralBomRow[];
   bomReconciliation: StructuralBomReconciliation;
+  reactionReconciliation: StructuralReactionReconciliation;   // §8 attachment-reaction closure
   drawingTransforms: DrawingTransform[];   // §2 canonical→sheet transform authority
   blockers: { code: string; message: string }[];
 }
@@ -156,13 +160,38 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
   const scopeMatchesV4 = v4PanelScope != null && v4PanelScope === moduleInstances.length;
   const bomReconciliation = reconcileStructuralBom(bom, bomObjects, v4RackingBom as any, { scopeMatchesV4 });
 
+  // §8 — reconcile the canonical attachment reactions back to the applied load.
+  // The reaction-model count is the engine's calcMountLayout mountCount (what the
+  // per-attachment reaction was computed against); addedDeadLoadPsf is the engine
+  // gravity basis. Only meaningful on a roof system with attachment objects.
+  const engineMountCount = (roofRun as unknown as { mountLayout?: { mountCount?: number } })?.mountLayout?.mountCount ?? null;
+  const addedDeadPsf = engine.addedDeadLoadPsf
+    ?? ((roofRun as unknown as { addedDeadLoadPsf?: number })?.addedDeadLoadPsf ?? null);
+  // §8 — array area SCOPED to the modules the attachments actually support (union
+  // of rail supportedModuleIds + direct-mount supportedModuleId), so a hybrid
+  // roof run (roof-scoped attachments) reconciles against the roof modules, not
+  // the whole multi-sub-array footprint. Falls back to all instances when no
+  // supported-module relation is carried (single-system).
+  const areaByRawId = new Map<string, number>();
+  for (const mi of moduleInstances) areaByRawId.set(mi.instanceId.replace(/^mi-/, ''), mi.areaFt2 ?? 0);
+  const supportedRaw = new Set<string>();
+  for (const r of rails) for (const id of r.supportedModuleIds) supportedRaw.add(id);
+  for (const at of attachments) if (at.supportedModuleId) supportedRaw.add(at.supportedModuleId.replace(/^mi-/, ''));
+  const scopedArea = supportedRaw.size
+    ? [...supportedRaw].reduce((s, id) => s + (areaByRawId.get(id) ?? 0), 0)
+    : moduleInstances.reduce((s, m) => s + (m.areaFt2 ?? 0), 0);
+  const reactionReconciliation = ctx.isRoofSystem
+    ? reconcileReactions(attachments, scopedArea, env, engineMountCount, addedDeadPsf, scopeMatchesV4)
+    : reconcileReactions([], 0, env, engineMountCount, addedDeadPsf, scopeMatchesV4);
+
   const blockers = collectBlockers(ctx, {
     moduleInstances, roofPlaneObjects, rackingAssembly, rails, attachments, engine, checks, bomReconciliation,
+    reactionReconciliation,
   });
 
   return {
     moduleInstances, roofPlaneObjects, rackingAssembly, rails, attachments, env, checks, engine,
-    bom, bomReconciliation, drawingTransforms, blockers,
+    bom, bomReconciliation, reactionReconciliation, drawingTransforms, blockers,
   };
 }
 
@@ -408,6 +437,14 @@ function buildRailsAndAttachments(
     ? `${input?.framingType === 'truss' ? 'truss' : 'rafter'} ${input?.rafterSize ?? ''}`.trim()
     : 'unverified-framing';
 
+  // §8 — gravity reactions per mount = applied gravity psf × the SAME per-mount
+  // tributary the engine used for uplift, so all reaction rows share one basis
+  // and sum back to applied load × array area. Uniform across mounts.
+  const tribPerMount = ml.tributaryAreaPerMountFt2;
+  const snowPerMount = run.snow?.roofSnowLoadPsf != null ? run.snow.roofSnowLoadPsf * tribPerMount : null;
+  const deadPerMount = run.addedDeadLoadPsf != null ? run.addedDeadLoadPsf * tribPerMount : null;
+  const downPerMount = (snowPerMount ?? 0) + (deadPerMount ?? 0);
+
   for (let i = 0; i < railCount; i++) {
     const row = Math.floor(i / railsPerRow);
     const idxInRow = i % railsPerRow;
@@ -452,7 +489,9 @@ function buildRailsAndAttachments(
         embedmentIn: sys?.mount.fastenerEmbedmentIn ?? null,
         tributaryAreaFt2: r3(ml.tributaryAreaPerMountFt2),
         upliftReactionLbs: r3(ml.upliftPerMountLbs),
-        downwardReactionLbs: r3(ml.downwardPerMountLbs),
+        downwardReactionLbs: r3(downPerMount),
+        deadReactionLbs: r3n(deadPerMount),
+        snowReactionLbs: r3n(snowPerMount),
         lateralReactionLbs: null,
         allowableCapacityLbs: r3(ml.mountCapacityLbs),
         adjustmentFactors: { omegaUltimateToAllowable: sys?.mount.capacityBasis === 'allowable' ? 1 : 3.0 },
@@ -522,6 +561,10 @@ function buildDirectMountAttachments(
   // (count-independent). Absent an engine layout, reactions are honestly null.
   const pUplift = ml && ml.tributaryAreaPerMountFt2 > 0 ? ml.upliftPerMountLbs / ml.tributaryAreaPerMountFt2 : null;
   const pDown = ml && ml.tributaryAreaPerMountFt2 > 0 ? ml.downwardPerMountLbs / ml.tributaryAreaPerMountFt2 : null;
+  // §8 gravity pressures (roof snow + added dead) applied to the geometry-honest
+  // per-attachment tributary so reaction sums close on the array footprint.
+  const snowPsf = run.snow?.roofSnowLoadPsf ?? null;
+  const deadPsf = run.addedDeadLoadPsf ?? null;
   const capacity = ml && ml.mountCapacityLbs > 0
     ? ml.mountCapacityLbs
     : (sys.mount.upliftCapacityLbs && sys.mount.upliftCapacityLbs > 0 ? sys.mount.upliftCapacityLbs : null);
@@ -539,7 +582,9 @@ function buildDirectMountAttachments(
     const perModule = perEdge * 2;                                       // two frame edges
     const tributaryFt2 = perModule > 0 ? mi.areaFt2 / perModule : null;
     const upliftLbs = pUplift != null && tributaryFt2 != null ? r3(pUplift * tributaryFt2) : null;
-    const downwardLbs = pDown != null && tributaryFt2 != null ? r3(pDown * tributaryFt2) : null;
+    const snowLbs = snowPsf != null && tributaryFt2 != null ? r3(snowPsf * tributaryFt2) : null;
+    const deadLbs = deadPsf != null && tributaryFt2 != null ? r3(deadPsf * tributaryFt2) : null;
+    const downwardLbs = ((snowLbs ?? 0) + (deadLbs ?? 0)) || (pDown != null && tributaryFt2 != null ? r3(pDown * tributaryFt2) : null);
     const sf = upliftLbs != null && upliftLbs > 0 && capacity != null ? r3(capacity / upliftLbs) : null;
     const rawModuleId = mi.instanceId.replace(/^mi-/, '');
     let n = 0;
@@ -564,6 +609,8 @@ function buildDirectMountAttachments(
           tributaryAreaFt2: tributaryFt2 != null ? r3(tributaryFt2) : null,
           upliftReactionLbs: upliftLbs,
           downwardReactionLbs: downwardLbs,
+          deadReactionLbs: deadLbs,
+          snowReactionLbs: snowLbs,
           lateralReactionLbs: null,
           allowableCapacityLbs: capacity != null ? r3(capacity) : null,
           adjustmentFactors: { omegaUltimateToAllowable: capBasis === 'allowable' ? 1 : 3.0 },
@@ -620,7 +667,7 @@ function buildEnv(ctx: StructuralAuthorityCtx, run: StructuralResultV4 | null): 
 // ── §12 blockers ─────────────────────────────────────────────────────────────
 function collectBlockers(
   ctx: StructuralAuthorityCtx,
-  a: Pick<StructuralAuthorityBundle, 'moduleInstances' | 'roofPlaneObjects' | 'rackingAssembly' | 'rails' | 'attachments' | 'engine' | 'checks' | 'bomReconciliation'>,
+  a: Pick<StructuralAuthorityBundle, 'moduleInstances' | 'roofPlaneObjects' | 'rackingAssembly' | 'rails' | 'attachments' | 'engine' | 'checks' | 'bomReconciliation' | 'reactionReconciliation'>,
 ): { code: string; message: string }[] {
   const b: { code: string; message: string }[] = [];
   // §10 — a BOM that does not reconcile with the structural objects is a
@@ -629,6 +676,16 @@ function collectBlockers(
     b.push({ code: 'STRUCTURAL-BOM-RECONCILIATION-FAILED',
       message: `Structural BOM quantities do not reconcile with the canonical objects: `
         + a.bomReconciliation.checks.filter(c => !c.ok).map(c => c.name).join(', ') });
+  }
+  // §8 — attachment reactions that do not reconcile with the applied load
+  // (object count ≠ reaction model, Σ tributary ≉ array area, or Σ reactions ≉
+  // applied × area) are not traceable — the per-attachment reaction cannot be
+  // presented as authoritative. Blocks permit-ready.
+  if (a.reactionReconciliation.present && !a.reactionReconciliation.ok) {
+    b.push({ code: 'STRUCTURAL-REACTION-RECONCILIATION-FAILED',
+      message: 'Attachment reactions do not reconcile with the applied load: '
+        + a.reactionReconciliation.checks.filter(c => !c.ok).map(c => c.name).join(', ')
+        + ' — per-attachment reaction not traceable to the array footprint / object set.' });
   }
   if (!ctx.isRoofSystem) return b;
   // W4.1 §1 — an UNKNOWN mounting topology (neither verified rail-paired nor

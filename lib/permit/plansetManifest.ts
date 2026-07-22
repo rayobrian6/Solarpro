@@ -16,6 +16,7 @@ import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPag
 import { equipmentDatasheetIndexRows } from './sections/datasheetAppendix';
 import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE } from './sections/subSystemSheets';
 import { pv2Title, pv3Title, type SysType } from './utils/helpers';
+import { getInverterTopology, topologyToLegacy } from '@/lib/system';
 
 export function computePlansetManifest(input: PermitInput, cad: CADModel): SheetRef[] {
   // APP-CAD is opt-in (Ray, 2026-07-09) — match generatePermit's internal flag.
@@ -32,6 +33,10 @@ export function computePlansetManifest(input: PermitInput, cad: CADModel): Sheet
     ? SUB_KEY_TO_CAD_TYPE[_tocSubs[0]]
     : (cad.systemType as SysType);
 
+  // §4 — PV-1B title is topology-aware (AC branches vs DC strings). Resolve the
+  // primary system's topology through the SAME accessor the sheets use.
+  const _isMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
+
   return buildSheetManifest({
     pv1Title: pv2Title(_tocPrimaryType as SysType),
     pv3Title: pv3Title(_tocPrimaryType as SysType),
@@ -39,6 +44,7 @@ export function computePlansetManifest(input: PermitInput, cad: CADModel): Sheet
     includeSchedCont,
     includeValidation: includeInternalValidation,
     includeCadAppendix: includeCADAppendixPreview,
+    isMicro: _isMicro,
     ...(_tocSubs.length > 1 ? { hybridSubs: _tocSubs } : {}),
   });
 }

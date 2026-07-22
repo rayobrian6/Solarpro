@@ -171,6 +171,10 @@ export interface TrunkPlanInput {
    */
   spliceAtRows?: boolean;
   rowCount?: number;                   // used only when spliceAtRows
+  /** §13 — canonical AC-branch count (plane-aware planMicroBranches). When set,
+   *  branchCount (and therefore terminators/sealingCaps) uses THIS instead of the
+   *  flat ceil(deviceCount / perModelMax) heuristic. */
+  branchCountOverride?: number;
 }
 
 export interface TrunkPlan {
@@ -203,7 +207,11 @@ export function resolveTrunkCablePlan(input: TrunkPlanInput): TrunkPlan | null {
   const modelKey = Object.keys(system.deviceBranchLimits ?? {})
     .find(k => (input.model ?? '').toUpperCase().includes(k.toUpperCase()));
   const perBranch = modelKey ? system.deviceBranchLimits![modelKey] : system.maxDevicesPerBranch;
-  const branchCount = Math.max(1, Math.ceil(input.deviceCount / perBranch));
+  // §13 — the canonical plane-aware branch count wins when supplied; the flat
+  // ceil(devices / perModelMax) heuristic is only the standalone fallback.
+  const heuristicBranchCount = Math.max(1, Math.ceil(input.deviceCount / perBranch));
+  const branchCount = (typeof input.branchCountOverride === 'number' && input.branchCountOverride > 0)
+    ? input.branchCountOverride : heuristicBranchCount;
 
   const dropCount = input.deviceCount;
   const approxFeet = Math.ceil(dropCount * cable.connectorSpacingFt * 1.15);
