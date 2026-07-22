@@ -12,6 +12,8 @@ import { buildComputeSystemShadow } from './utils/computedRuns';
 import { mapComputedSystemToCompliance } from './snapshot/computeSystemProjection';
 import { validatePermitDesignSnapshot, blockingViolations, SnapshotValidationError } from './snapshot/validate';
 import { deepFreeze } from './snapshot/digest';
+import { scanRenderedObjectIds, checkRenderedIdCoverage, parsePlacementManifests, checkRenderParity } from './snapshot/coordinateAuthority';
+import type { PermitDesignSnapshot } from './snapshot/types';
 import { escapeH } from './utils/drawing';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
@@ -1216,6 +1218,52 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         sourceRecord: 'certPages', affectedProjections: [`page ${pn}`],
         message: `certification sheet ${pn} lacks the PENDING ENGINEERING REVIEW gate`, enforcement: 'blocking' as const,
       })));
+    }
+    // ═══ V29 — RENDER-PARITY (W3.1 §2 (d)): no rendered physical object without
+    // a canonical object ID. Every data-object-id drawn on a sheet MUST resolve
+    // to a snapshot physical object (module/rail/attachment). Renderers may not
+    // invent object identity. (Sub-inch DRAWN-coordinate parity is enforced via
+    // the placement-manifest checker in the evidence harness; the renderer's
+    // regularization/plan-rotation warp is a recorded geometry.gaps item, so
+    // the live blocking check here is ID coverage.)
+    const snapFull = (input as unknown as { _snapshot?: PermitDesignSnapshot })._snapshot;
+    if (snapFull?.meta?.snapshotId) {
+      const joined = pages.join('\n');
+      // V29 (d) — every rendered data-object-id resolves to a canonical object.
+      const renderedIds = scanRenderedObjectIds(joined);
+      if (renderedIds.length) {
+        const { orphanRenderedIds, ok } = checkRenderedIdCoverage(snapFull, renderedIds);
+        if (!ok) {
+          throw new SnapshotValidationError([{
+            invariant: 'V29', authorityPath: 'geometry.moduleInstances', offendingValue: orphanRenderedIds.slice(0, 8),
+            sourceRecord: 'drafting/templates/roof.ts (data-object-id)', affectedProjections: ['PV-1', 'PV-1B', 'PV-2'],
+            message: `${orphanRenderedIds.length} rendered physical object(s) carry a data-object-id with no canonical snapshot object: ${orphanRenderedIds.slice(0, 8).join(', ')}`,
+            enforcement: 'blocking' as const,
+          }]);
+        }
+      }
+      // V30/V31 (a/b/c/e) — RENDER-PARITY: structural objects (rails, attachment
+      // feet, splices) drawn as PURE PROJECTIONS of the canonical coordinates.
+      // For every emitted placement manifest, checkRenderParity asserts
+      // sheetXY == viewport∘DT-SITE(canonical) within 0.5 sheet units (V31),
+      // that the renderer consumed the snapshot coordinate (no re-derivation),
+      // and that no canonical structural object is omitted (V30, requireCoverage).
+      const manifests = parsePlacementManifests(joined);
+      const parityViol = manifests.flatMap(m => [
+        // structural objects: parity + no-omission (every canonical object drawn)
+        ...checkRenderParity(snapFull, m, { kinds: ['rail', 'attachment', 'splice'], requireCoverage: true, tolSheet: 0.5 }),
+        // modules: drawn == transform(canonical drawnPolygon) parity (coverage is
+        // the geo-valid drawn subset — annotated "N of M shown", not blocking here)
+        ...checkRenderParity(snapFull, m, { kinds: ['module'], requireCoverage: false, tolSheet: 0.5 }),
+      ].map(v => ({ sheet: m.sheetId, v })));
+      if (parityViol.length) {
+        throw new SnapshotValidationError(parityViol.slice(0, 12).map(({ sheet, v }) => ({
+          invariant: v.code === 'CANONICAL-OBJECT-OMITTED' ? 'V30' : 'V31',
+          authorityPath: `placementManifest[${sheet}].${v.objectId ?? '?'}`, offendingValue: v.delta ?? v.detail,
+          sourceRecord: 'drafting/templates/roof.ts (placement manifest)', affectedProjections: [sheet],
+          message: `${v.code}: ${v.detail}`, enforcement: 'blocking' as const,
+        })));
+      }
     }
   }
 

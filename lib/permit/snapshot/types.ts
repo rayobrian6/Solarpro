@@ -162,6 +162,81 @@ export interface Polygon2D {
   frame: 'slope-plane-ft' | 'plan-ft' | 'schematic-ft';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// W3.1 §2 — CANONICAL COORDINATE AUTHORITY
+// Every physical object (module footprint, rail, splice, attachment, roof-plane
+// polygon, setback/pathway polygon) is expressed in ONE canonical coordinate
+// system and carries the transform that maps it into sheet space. There is no
+// second frame: the pre-W3.1 split (module polygons in plan-ft while rails /
+// attachments lived in an abstract V4 grid) is eliminated — all objects share
+// CANONICAL_COORDINATE_SYSTEM_ID. Renderers PLACE objects by applying the
+// snapshot-carried transform; they may compute viewport scaling/paper layout
+// but may NOT independently geo-register or re-derive positions.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The ONE canonical coordinate system. Site-plan feet: equirectangular local
+ *  feet, origin = array centroid, +x = east, +y = north; plan-projected, NOT
+ *  plan-rotated and NOT display-regularized. Modules, rails, attachments,
+ *  plane polygons and setbacks all live here. */
+export const CANONICAL_COORDINATE_SYSTEM_ID = 'CS-SITE-PLAN-FT';
+
+/** §2 — coordinate provenance stamped on every physical object. */
+export interface CoordinateMeta {
+  coordinateSystemId: string;       // === CANONICAL_COORDINATE_SYSTEM_ID
+  units: 'ft';
+  /** how THIS object's coordinate was derived into the canonical frame */
+  sourceFrame: 'plan-ft' | 'schematic-ft' | 'slope-plane-ft';
+  /** resolves into geometry.drawingTransforms[] (the sheet-registration map) */
+  transformId: string;
+  transformRevision: string;        // === the referenced transform's revision
+  transformProvenance: Provenance;
+}
+
+/** §2 — snapshot-carried transform mapping the canonical coordinate system →
+ *  the sheet REGISTRATION frame (feet, pre-viewport). The renderer applies this
+ *  affine, then its own viewport scale/paper offset; it never geo-registers.
+ *  matrix is 2×3: x' = a·x + c·y + e ; y' = b·x + d·y + f. */
+export interface DrawingTransform {
+  transformId: string;
+  revision: string;                 // contentRevision of {matrix, params}
+  scope: string;                    // 'site' or a specific planeId
+  fromCoordinateSystemId: string;   // === CANONICAL_COORDINATE_SYSTEM_ID
+  toFrame: 'registration-ft';
+  units: 'ft';
+  matrix: { a: number; b: number; c: number; d: number; e: number; f: number };
+  params: {
+    kind: 'identity' | 'plan-rotation';
+    rotationDeg: number;
+    pivot: { x: number; y: number };
+  };
+  /** stable hash of {matrix, params} — the evidence-exposed transform digest;
+   *  any parameter change flips this (and, via the snapshot, the design digest). */
+  transformDigest: string;
+  provenance: Provenance;
+}
+
+/** §2 render-parity — a renderer's placement record for ONE physical object.
+ *  Produced at RENDER time (not stored on the immutable snapshot); consumed by
+ *  the render-parity checker (checkRenderParity) and the evidence harness. */
+export interface PlacementEntry {
+  objectId: string;
+  kind: 'module' | 'rail' | 'attachment' | 'plane' | 'setback' | 'splice';
+  /** the canonical coordinate the renderer CONSUMED from the snapshot */
+  canonicalXY: { x: number; y: number };
+  /** the final sheet-space coordinate the renderer DREW */
+  sheetXY: { x: number; y: number };
+}
+
+/** §2 — a sheet's full placement manifest (objectId → sheet coords), plus the
+ *  viewport affine the renderer applied after the snapshot transform. */
+export interface PlacementManifest {
+  sheetId: string;
+  transformId: string;              // the DrawingTransform the renderer consumed
+  /** registration-ft → sheet-px affine (viewport scale/paper); renderer-owned */
+  viewport: { a: number; b: number; c: number; d: number; e: number; f: number };
+  entries: PlacementEntry[];
+}
+
 /** §2 — one canonical module footprint, dims taken EXACTLY from the selected
  *  versioned equipment record (never a generic 66×40). */
 export interface ModuleInstance {
@@ -172,13 +247,23 @@ export interface ModuleInstance {
   widthIn: number; heightIn: number; thicknessIn: number | null;
   orientation: 'portrait' | 'landscape' | null;
   roofPlaneId: string;
+  /** RAW canonical footprint (axis-aligned rectangle at the raw placed centroid).
+   *  PHYSICAL TRUTH — feeds the area invariant (V21) and Σ-area. */
   polygon: Polygon2D;
-  areaFt2: number;                  // exact catalog footprint (w×h/144)
+  /** §2 — the DISPLAY-straightened drawn footprint: the same raw centroid, but
+   *  the rectangle ORIENTED to the plane azimuth and FORESHORTENED up-slope by
+   *  cos(pitch) — i.e. the linework the renderer draws. Trace-regularization
+   *  lives HERE (in the snapshot build), not in the renderer; the renderer draws
+   *  module outlines as viewport∘DT(drawnPolygon). Position/count/adjacency are
+   *  unchanged (raw placement) — no panel is moved, dropped or re-placed. */
+  drawnPolygon: Polygon2D;
+  areaFt2: number;                  // exact catalog footprint (w×h/144) — from `polygon`
   row: number | null; col: number | null;
   clampZones: ('mid' | 'end')[];    // clamp zones on this module's mounting edges
   mountingEdgeOrientation: 'along-rail' | 'across-slope' | null;
   electricalDeviceId: string | null;
   branchId: string | null;
+  coord: CoordinateMeta;            // §2 canonical coordinate authority
   provenance: Provenance;
 }
 
@@ -201,6 +286,7 @@ export interface RoofPlaneObject {
   obstructionPolygons: Polygon2D[];
   usableAreaPolygons: Polygon2D[];
   confidence: 'high' | 'medium' | 'low' | 'none';
+  coord: CoordinateMeta;            // §2 canonical coordinate authority
   provenance: Provenance;
 }
 
@@ -242,6 +328,9 @@ export interface RailObject {
   railId: string;
   roofPlaneId: string;
   startXY: { x: number; y: number }; endXY: { x: number; y: number };
+  /** §2 — canonical splice-marker coordinates along the rail (in the canonical
+   *  frame), one per splice at each stock-section boundary. Drawn from these. */
+  splicePointsXY: { x: number; y: number }[];
   physicalLengthIn: number;
   stockLengthIn: number | null;
   spanConfigIn: number | null;
@@ -252,6 +341,7 @@ export interface RailObject {
   manufacturerSpanLimitIn: number | null;
   governingWindSnowZone: string | null;
   utilization: number | null;
+  coord: CoordinateMeta;            // §2 canonical coordinate authority (startXY/endXY frame)
   provenance: Provenance;
 }
 
@@ -274,6 +364,7 @@ export interface AttachmentObject {
   adjustmentFactors: Record<string, number>;
   utilization: number | null;
   safetyFactor: number | null;
+  coord: CoordinateMeta;            // §2 canonical coordinate authority (xy frame)
   provenance: Provenance;
 }
 
@@ -397,6 +488,13 @@ export interface PermitDesignSnapshot {
     moduleInstances: ModuleInstance[];
     /** W3 §3 — canonical roof planes with setback/pathway polygons. */
     roofPlaneObjects: RoofPlaneObject[];
+    /** W3.1 §2 — the ONE canonical coordinate system every physical object is
+     *  expressed in. */
+    coordinateSystem: { id: string; units: 'ft'; description: string };
+    /** W3.1 §2 — snapshot-carried transforms mapping the canonical frame → sheet
+     *  registration space (matrix + params + transformDigest). Renderers apply
+     *  these; they never geo-register independently. */
+    drawingTransforms: DrawingTransform[];
     provenance: Provenance;
     gaps: string[];                 // e.g. 'setback polygons not snapshot-owned until W3'
   };

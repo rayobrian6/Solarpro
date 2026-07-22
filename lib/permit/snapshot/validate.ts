@@ -12,7 +12,8 @@
 //     silently assumed. V12/V13 are render-level and enforced by a post-render
 //     assertion in generatePermit.
 // ═══════════════════════════════════════════════════════════════════════════
-import type { PermitDesignSnapshot, SnapshotViolation } from './types';
+import { CANONICAL_COORDINATE_SYSTEM_ID, type PermitDesignSnapshot, type SnapshotViolation, type CoordinateMeta } from './types';
+import { transformDigestOf } from './coordinateAuthority';
 
 const SHEETS_ELECTRICAL = ['E-1', 'PV-4A', 'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'BOM'];
 
@@ -311,6 +312,81 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
         add('V25', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code), 'W3 structural authority',
           ['PV-0', 'VAL-1'],
           `attachment reaction exceeds allowable capacity (${over.attachmentId}) but no STRUCTURAL-UTILIZATION-EXCEEDED blocker present`);
+      }
+    }
+  }
+
+  // V32 (W3.1 §4) — RACKING-CAPACITY PROVENANCE COVERAGE: every BLOCKING
+  // racking-capacity structural-authority gap on the assembly record must be
+  // surfaced as a permit-readiness blocker (RT-MINI source-not-archived +
+  // applicability). A blocking gap hidden from the blockers list is forbidden —
+  // the capacity gap must ACTIVELY block permit-ready, never apply generically.
+  {
+    const gaps = ((st.rackingAssembly as unknown as {
+      structuralAuthorityGaps?: { code: string; severity: string; message: string }[];
+    } | null)?.structuralAuthorityGaps) ?? [];
+    for (const g of gaps) {
+      if (g.severity === 'blocking' && !s.permitReadiness.blockers.some(b => b.code === g.code)) {
+        add('V32', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          'W3.1 §4 racking capacity provenance', ['PV-3', 'PV-4C', 'PV-0', 'VAL-1'],
+          `blocking racking-capacity gap '${g.code}' not surfaced as a permit-readiness blocker`);
+      }
+    }
+  }
+
+  // ── W3.1 §2 canonical COORDINATE-AUTHORITY invariants (blocking) ─────────
+  {
+    const transforms = s.geometry.drawingTransforms ?? [];
+    const byId = new Map(transforms.map(t => [t.transformId, t]));
+    // Every physical object that carries a coordinate + the transform it names.
+    type Phys = { path: string; coord: CoordinateMeta | undefined };
+    const physicals: Phys[] = [
+      ...(s.geometry.moduleInstances ?? []).map(m => ({ path: `geometry.moduleInstances[${m.instanceId}]`, coord: (m as { coord?: CoordinateMeta }).coord })),
+      ...(s.geometry.roofPlaneObjects ?? []).map(p => ({ path: `geometry.roofPlaneObjects[${p.planeId}]`, coord: (p as { coord?: CoordinateMeta }).coord })),
+      ...(st.rails ?? []).map(r => ({ path: `structural.rails[${r.railId}]`, coord: (r as { coord?: CoordinateMeta }).coord })),
+      ...(st.attachments ?? []).map(a => ({ path: `structural.attachments[${a.attachmentId}]`, coord: (a as { coord?: CoordinateMeta }).coord })),
+    ];
+    // V26 — UNIFIED FRAME: every physical object shares the ONE canonical
+    // coordinate system (the pre-W3.1 module-vs-rail/attachment split is gone).
+    for (const p of physicals) {
+      if (p.coord && p.coord.coordinateSystemId !== CANONICAL_COORDINATE_SYSTEM_ID) {
+        add('V26', `${p.path}.coord.coordinateSystemId`, p.coord.coordinateSystemId, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3', 'PV-4C'], `physical object in '${p.coord.coordinateSystemId}' ≠ canonical '${CANONICAL_COORDINATE_SYSTEM_ID}' — coordinate frame split forbidden`);
+        break;
+      }
+    }
+    // V27 — COMPLETE COORDINATE METADATA + resolvable transform reference.
+    for (const p of physicals) {
+      const c = p.coord;
+      if (!c || !c.coordinateSystemId || !c.units || !c.sourceFrame || !c.transformId || !c.transformRevision || !c.transformProvenance) {
+        add('V27', `${p.path}.coord`, c ?? null, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3', 'BOM'], `physical object missing complete coordinate metadata (coordinateSystemId/units/sourceFrame/transformId/transformRevision/transformProvenance)`);
+        break;
+      }
+      const t = byId.get(c.transformId);
+      if (!t) {
+        add('V27', `${p.path}.coord.transformId`, c.transformId, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3'], `coordinate transformId '${c.transformId}' does not resolve in geometry.drawingTransforms`);
+        break;
+      }
+      if (t.revision !== c.transformRevision) {
+        add('V27', `${p.path}.coord.transformRevision`, c.transformRevision, 'W3.1 coordinate authority',
+          ['PV-1', 'PV-3'], `object transformRevision '${c.transformRevision}' ≠ referenced transform revision '${t.revision}'`);
+        break;
+      }
+    }
+    // V28 — TRANSFORM DIGEST INTEGRITY: the stored digest must equal a
+    // recomputation of the matrix/params (change ⇒ new digest), and the revision
+    // is bound to the digest (approval-invalidation basis).
+    for (const t of transforms) {
+      const recomputed = transformDigestOf(t.matrix, t.params);
+      if (t.transformDigest !== recomputed) {
+        add('V28', `geometry.drawingTransforms[${t.transformId}].transformDigest`, t.transformDigest, 'W3.1 coordinate authority',
+          ['EVIDENCE', 'PV-3'], `transformDigest '${t.transformDigest}' ≠ recomputed '${recomputed}' — transform parameters were mutated without redigest`);
+      }
+      if (t.fromCoordinateSystemId !== CANONICAL_COORDINATE_SYSTEM_ID) {
+        add('V28', `geometry.drawingTransforms[${t.transformId}].fromCoordinateSystemId`, t.fromCoordinateSystemId, 'W3.1 coordinate authority',
+          ['EVIDENCE'], `transform maps from '${t.fromCoordinateSystemId}' ≠ canonical '${CANONICAL_COORDINATE_SYSTEM_ID}'`);
       }
     }
   }

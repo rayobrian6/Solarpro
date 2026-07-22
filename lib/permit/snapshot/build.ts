@@ -13,7 +13,8 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import {
-  SNAPSHOT_SCHEMA_VERSION, type PermitDesignSnapshot, type EquipmentRecord,
+  SNAPSHOT_SCHEMA_VERSION, CANONICAL_COORDINATE_SYSTEM_ID,
+  type PermitDesignSnapshot, type EquipmentRecord,
   type ModuleSpec, type MicroInverterSpec, type StringInverterSpec, type MountSpec,
   type RailSpec, type ConductorRecord, type BranchRecord,
 } from './types';
@@ -486,11 +487,28 @@ export function buildPermitDesignSnapshot(
       roofPlanes, modules: geoModules,
       moduleInstances: structAuth.moduleInstances,
       roofPlaneObjects: structAuth.roofPlaneObjects,
+      coordinateSystem: {
+        id: CANONICAL_COORDINATE_SYSTEM_ID, units: 'ft',
+        description: 'site-plan feet — equirectangular local ft, origin = array centroid, +x east / +y north, plan-projected (not plan-rotated, not display-regularized). Every physical object shares this frame.',
+      },
+      drawingTransforms: structAuth.drawingTransforms,
       provenance: { source: 'project.panelPositions + cad.roof.planes + W3 structural authority' },
       gaps: [
         ...(structAuth.moduleInstances.length ? [] : ['module footprints unavailable — exact record dims missing (W3 blocker)']),
         ...(structAuth.roofPlaneObjects.some(p => p.pathwayPolygons.length) ? []
             : ['access-pathway polygons pending true routed roof geometry (width authority carried on plane object)']),
+        // §2: module outlines, rails, attachment feet + splice markers are ALL
+        // drawn as PURE PROJECTIONS of the canonical coordinates
+        // (viewport∘DT-SITE) with BLOCKING drawn==transform(canonical) parity
+        // (V30/V31). Module display-straightening (azimuth orientation + cos-pitch
+        // foreshorten) lives in `moduleInstances[].drawnPolygon` (snapshot build),
+        // NOT the renderer; positions stay raw canonical (no panel moved). The RAW
+        // `polygon` remains the area/physical-truth basis (V21). Remaining honest
+        // gap: RAIL-LESS direct-mount products (RT-APEX / E-Mount AIR / S-5 /
+        // EcoFasten) have no canonical attachment objects yet, so their mounts are
+        // drawn on the legacy path and are NOT projected from canonical — recorded
+        // here + in structural.gaps ('no canonical rail objects … rail-less').
+        ...(structAuth.rails.length ? [] : ['rail-less direct-mount placement not yet canonical (mount coordinates un-derived) — mounts drawn on legacy path, not projected from canonical (recorded gap)']),
         ...equipmentIdentityConflicts.map(c => `EQUIPMENT IDENTITY CONFLICT: ${c}`),
       ],
     },
@@ -592,6 +610,19 @@ export function buildPermitDesignSnapshot(
       // authority, untraceable reactions/rails, utilization failures, missing
       // site geometry). Honest blockers are the correct Braidon outcome.
       for (const sb of structAuth.blockers) blockers.push(sb);
+      // §4 (W3.1): promote BLOCKING racking-capacity structural-authority gaps
+      // (RT-MINI capacity provenance: RACKING-CAPACITY-SOURCE-NOT-ARCHIVED +
+      // RACKING-CAPACITY-APPLICABILITY-GAP) into the permit-readiness blockers
+      // so the racking capacity gap ACTIVELY blocks permit-ready rather than
+      // being applied generically. Warning-severity gaps stay on the record
+      // (structural.rackingAssembly.capacityProvenance / structuralAuthorityGaps)
+      // but do not block. Enforced by V32.
+      const _rackGaps = ((structAuth.rackingAssembly as unknown as {
+        structuralAuthorityGaps?: { code: string; severity: 'blocking' | 'warning'; message: string }[];
+      } | null)?.structuralAuthorityGaps) ?? [];
+      for (const g of _rackGaps) {
+        if (g.severity === 'blocking') blockers.push({ code: g.code, message: g.message });
+      }
       blockers.push({ code: 'ENGINEERING-REVIEW-PENDING',
         message: 'No approved engineering-review record covering this snapshot digest (D-6)' });
       return { ready: blockers.length === 0, blockers };

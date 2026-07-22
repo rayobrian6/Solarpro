@@ -10,10 +10,11 @@
 import type {
   ModuleInstance, RoofPlaneObject, RailObject, AttachmentObject, StructuralEnv,
   StructuralCheck, StructuralEngineResult, RackingAssemblyRecord, Polygon2D,
-  RoofEdgeClass, EquipmentRecord, ModuleSpec, Provenance,
+  RoofEdgeClass, EquipmentRecord, ModuleSpec, Provenance, DrawingTransform, CoordinateMeta,
 } from './types';
 import type { StructuralResultV4, StructuralInputV4 } from '@/lib/structural-engine-v4';
 import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
+import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
 import { buildRackingAssembly } from './rackingAssembly';
 import { runSnapshotStructuralEngine, type FramingInputs } from './structuralEngine';
 import {
@@ -66,6 +67,7 @@ export interface StructuralAuthorityBundle {
   engine: StructuralEngineResult;
   bom: StructuralBomRow[];
   bomReconciliation: StructuralBomReconciliation;
+  drawingTransforms: DrawingTransform[];   // §2 canonical→sheet transform authority
   blockers: { code: string; message: string }[];
 }
 
@@ -82,9 +84,34 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
   const framingVerified = !!(ctx.framing.framingType && ctx.framing.rafterSize
     && ctx.framing.rafterSpacing && ctx.framing.rafterSpecies && ctx.framing.rafterSpan);
 
-  const moduleInstances = buildModuleInstances(ctx, framingVerified);
-  const roofPlaneObjects = buildRoofPlaneObjects(ctx, framingVerified);
-  const { rails, attachments } = buildRailsAndAttachments(ctx, roofRun, roofInput, framingVerified);
+  // §2 — the canonical→sheet transform AUTHORITY. The snapshot OWNS the plan
+  // rotation (the "squaring" geo-registration): DT-SITE is a plan-rotation whose
+  // angle is the array's principal axis (PCA of the canonical module centroids)
+  // and whose pivot is the array centroid — computed at BUILD time, with a
+  // content digest. The renderer applies DT-SITE, then only a viewport
+  // (scale/paper/flip); it does NOT compute rotation itself. Rails, attachments,
+  // splices and module footprints are drawn as viewport∘DT-SITE(canonical).
+  const planPts = modulePlanCentroids(ctx);
+  const rotDeg = planPts.length >= 2 ? r6(-dominantAxisDeg(planPts)) : 0;
+  const pivot = planPts.length
+    ? { x: r6(avg(planPts.map(p => p.x))), y: r6(avg(planPts.map(p => p.y))) }
+    : { x: 0, y: 0 };
+  const siteTransform = buildDrawingTransform({
+    transformId: 'DT-SITE', scope: 'site',
+    kind: rotDeg !== 0 ? 'plan-rotation' : 'identity', rotationDeg: rotDeg, pivot,
+    provenanceNote: rotDeg !== 0
+      ? 'plan-rotation squares the array to the sheet (PCA of canonical module centroids about the array centroid) — snapshot-owned geo-registration'
+      : 'no plan rotation resolvable from module geometry (identity)',
+  });
+  const planeTransforms = new Map<string, DrawingTransform>();
+  for (const p of ctx.roofPlanes) {
+    planeTransforms.set(p.planeId, siteTransform);  // planes register with the site transform
+  }
+  const drawingTransforms = [siteTransform];
+
+  const moduleInstances = buildModuleInstances(ctx, framingVerified, siteTransform);
+  const roofPlaneObjects = buildRoofPlaneObjects(ctx, framingVerified, planeTransforms, siteTransform);
+  const { rails, attachments } = buildRailsAndAttachments(ctx, roofRun, roofInput, framingVerified, moduleInstances, siteTransform);
   const env = buildEnv(ctx, roofRun);
   // The roof rafter/truss structural engine is roof-scoped (W3). Ground/fence
   // structural remains an ESTIMATE on its own path — do NOT run the roof framing
@@ -126,12 +153,12 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
 
   return {
     moduleInstances, roofPlaneObjects, rackingAssembly, rails, attachments, env, checks, engine,
-    bom, bomReconciliation, blockers,
+    bom, bomReconciliation, drawingTransforms, blockers,
   };
 }
 
 // ── §2 module instances ────────────────────────────────────────────────────
-function buildModuleInstances(ctx: StructuralAuthorityCtx, framingVerified: boolean): ModuleInstance[] {
+function buildModuleInstances(ctx: StructuralAuthorityCtx, framingVerified: boolean, transform: DrawingTransform): ModuleInstance[] {
   const rec = ctx.moduleRecord;
   const widthIn = rec?.spec.widthIn ?? null;
   const heightIn = rec?.spec.lengthIn ?? null;   // catalog LONG dim = module height
@@ -151,6 +178,7 @@ function buildModuleInstances(ctx: StructuralAuthorityCtx, framingVerified: bool
   const ftPerDegLng = FT_PER_DEG_LAT * Math.cos((clat * Math.PI) / 180);
 
   const deviceByModule = new Map(ctx.microUnits.map(u => [u.moduleId, u]));
+  const planeMap = new Map(ctx.roofPlanes.map(p => [p.planeId, p]));
 
   return geo.map((g, i) => {
     const orientation = normOrient(g.orientation);
@@ -167,11 +195,32 @@ function buildModuleInstances(ctx: StructuralAuthorityCtx, framingVerified: bool
       frame = 'schematic-ft';
     }
     const hw = alongEaveFt / 2, hh = upSlopeFt / 2;
+    // RAW footprint: axis-aligned rectangle at the raw centroid (PHYSICAL truth → V21/area).
     const polygon: Polygon2D = {
       frame,
       points: [
         { x: r3(cx - hw), y: r3(cy - hh) }, { x: r3(cx + hw), y: r3(cy - hh) },
         { x: r3(cx + hw), y: r3(cy + hh) }, { x: r3(cx - hw), y: r3(cy + hh) },
+      ],
+    };
+    // §2 DRAWN footprint (display linework straightening, moved OUT of the
+    // renderer): SAME raw centroid, but the rectangle oriented to the plane
+    // azimuth and foreshortened up-slope by cos(pitch). NO position change.
+    const plane = planeMap.get(g.planeKey);
+    const azDeg = plane?.azimuthDeg ?? 180;
+    const pitchDeg = plane?.pitchDeg ?? null;
+    const cosP = (pitchDeg != null && pitchDeg > 0 && pitchDeg < 89) ? Math.cos((pitchDeg * Math.PI) / 180) : 1;
+    const th = (azDeg * Math.PI) / 180;
+    const uHalf = (upSlopeFt * cosP) / 2;                                   // foreshortened up-slope
+    const u = { x: Math.sin(th) * uHalf, y: Math.cos(th) * uHalf };         // fall-line axis
+    const v = { x: Math.cos(th) * (alongEaveFt / 2), y: -Math.sin(th) * (alongEaveFt / 2) }; // along-eave axis
+    const drawnPolygon: Polygon2D = {
+      frame,
+      points: [
+        { x: r3(cx - u.x - v.x), y: r3(cy - u.y - v.y) },
+        { x: r3(cx + u.x - v.x), y: r3(cy + u.y - v.y) },
+        { x: r3(cx + u.x + v.x), y: r3(cy + u.y + v.y) },
+        { x: r3(cx - u.x + v.x), y: r3(cy - u.y + v.y) },
       ],
     };
     const dev = deviceByModule.get(g.moduleId) ?? null;
@@ -180,20 +229,24 @@ function buildModuleInstances(ctx: StructuralAuthorityCtx, framingVerified: bool
       moduleRecordId: rec.recordId, equipmentCatalogId: rec.catalogId, equipmentRevision: revision,
       widthIn, heightIn, thicknessIn: rec.spec.thicknessIn,
       orientation, roofPlaneId: g.planeKey,
-      polygon, areaFt2: r3(areaFt2),
+      polygon, drawnPolygon, areaFt2: r3(areaFt2),
       row: g.row, col: g.col,
       clampZones: (g.col === 0 ? ['end', 'mid'] : ['mid']) as ('mid' | 'end')[],
       mountingEdgeOrientation: 'along-rail',
       electricalDeviceId: dev?.deviceId ?? null, branchId: dev?.branchId ?? null,
+      coord: coordMetaFor(transform, frame, useLL ? 'footprint centroid in canonical site-plan-ft' : 'footprint centroid in schematic-ft'),
       provenance: PROV(useLL
-        ? 'footprint = equipment-db exact dims × placed lat/lng (equirectangular local ft)'
+        ? 'footprint = equipment-db exact dims × placed lat/lng (equirectangular local ft); drawnPolygon = azimuth-oriented + cos(pitch) foreshortened (display linework)'
         : 'footprint = equipment-db exact dims × row/col placement grid (schematic ft)'),
     };
   });
 }
 
 // ── §3 roof plane objects (with canonical fire-setback polygons) ────────────
-function buildRoofPlaneObjects(ctx: StructuralAuthorityCtx, framingVerified: boolean): RoofPlaneObject[] {
+function buildRoofPlaneObjects(
+  ctx: StructuralAuthorityCtx, framingVerified: boolean,
+  planeTransforms: Map<string, DrawingTransform>, siteTransform: DrawingTransform,
+): RoofPlaneObject[] {
   const rec = ctx.moduleRecord;
   const panelLenIn = rec?.spec.lengthIn ?? null;
   const panelWidIn = rec?.spec.widthIn ?? null;
@@ -214,6 +267,7 @@ function buildRoofPlaneObjects(ctx: StructuralAuthorityCtx, framingVerified: boo
     const edgeClasses = classifyEdges(cad);
     const fireSetbackPolygons = (proj && fireSetbackIn != null)
       ? setbackBands(proj.pointsFt, edgeClasses, fireSetbackIn / 12) : [];
+    const planeTransform = planeTransforms.get(plane.planeId) ?? siteTransform;
     return {
       planeId: plane.planeId,
       polygon: proj ? { frame: proj.frame, points: proj.pointsFt } : null,
@@ -228,6 +282,7 @@ function buildRoofPlaneObjects(ctx: StructuralAuthorityCtx, framingVerified: boo
       obstructionPolygons: [],
       usableAreaPolygons: [],
       confidence: proj ? (framingVerified ? 'high' : 'medium') : 'low',
+      coord: coordMetaFor(planeTransform, proj?.frame ?? 'plan-ft', 'plane + setback polygons in canonical site-plan-ft'),
       provenance: PROV(proj
         ? 'plane polygon from cad.roof.planes; fire setback width from fireSetback engine (slope-space)'
         : 'plane geometry not available on cad.roof.planes — setback width only'),
@@ -236,9 +291,14 @@ function buildRoofPlaneObjects(ctx: StructuralAuthorityCtx, framingVerified: boo
 }
 
 // ── §5/§6 rails + attachments (from the V4 engine-of-record result) ─────────
+// §2 (W3.1): rails + attachments are placed in the SAME canonical site-plan-ft
+// frame as the module footprints (co-located from the module centroids), NOT an
+// abstract V4 grid — the pre-W3.1 frame split is eliminated. Rail LENGTHS /
+// COUNTS / SPLICES stay engine-of-record (V4); only the coordinate FRAME is
+// unified so every physical object shares one coordinate system.
 function buildRailsAndAttachments(
   ctx: StructuralAuthorityCtx, run: StructuralResultV4 | null, input: StructuralInputV4 | null,
-  framingVerified: boolean,
+  framingVerified: boolean, moduleInstances: ModuleInstance[], transform: DrawingTransform,
 ): { rails: RailObject[]; attachments: AttachmentObject[] } {
   const sys = ctx.mountSystem;
   const railBased = !!sys && (sys.systemType === 'rail_based' || sys.systemType === 'standing_seam');
@@ -258,34 +318,89 @@ function buildRailsAndAttachments(
   const spanLimitIn = sys?.rail?.maxSpanIn ?? null;
   const zone = `wind ${round0(ctx.windSpeedMph)}mph / exp ${ctx.exposure ?? '?'} / snow ${round0(ctx.snowPsf)}psf`;
 
-  // module → row buckets (global order chunked by colCount)
+  // module → row buckets (global order chunked by colCount).
+  // Explicit design-tool row indices are honored ONLY when they exactly cover the
+  // engine's rail-grid rows (0..rowCount-1). On a MULTI-PLANE array (front/back
+  // gable: two planes at opposing azimuths) the explicit rows collapse to 0..1
+  // while V4's single-array grid has more rows — honoring them left the upper
+  // engine rows empty, producing phantom rails with zero supported modules (V22).
+  // When the explicit rows don't fill the grid, fall back to positional bucketing
+  // (global order ÷ colCount), which populates every engine row so no rail is
+  // module-less. Rectangular single-plane arrays (rows cover the grid) are
+  // unchanged.
   const sorted = [...ctx.geoModules];
   const rowModules: string[][] = Array.from({ length: rowCount }, () => []);
+  const explicitRows = sorted.length > 0 && sorted.every(g => g.row != null);
+  const distinctRows = new Set(sorted.map(g => g.row));
+  const rowsCoverGrid = explicitRows && distinctRows.size === rowCount
+    && Math.max(...[...distinctRows].map(Number)) === rowCount - 1;
   sorted.forEach((g, i) => {
-    const r = g.row != null ? Math.min(rowCount - 1, g.row) : Math.min(rowCount - 1, Math.floor(i / Math.max(1, colCount)));
+    const r = rowsCoverGrid
+      ? Math.min(rowCount - 1, g.row as number)
+      : Math.min(rowCount - 1, Math.floor(i / Math.max(1, colCount)));
     rowModules[r].push(g.moduleId);
   });
+
+  // §2 — module centroids in the CANONICAL frame (unified coordinate source).
+  const centroidByModule = new Map<string, { x: number; y: number }>();
+  let anyLL = false;
+  for (const mi of moduleInstances) {
+    const pts = mi.polygon.points;
+    if (!pts.length) continue;
+    centroidByModule.set(mi.instanceId.replace(/^mi-/, ''), {
+      x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
+      y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
+    });
+    if (mi.polygon.frame === 'plan-ft') anyLL = true;
+  }
+  const coordFrame: CoordinateMeta['sourceFrame'] = anyLL ? 'plan-ft' : 'schematic-ft';
 
   const rails: RailObject[] = [];
   const attachments: AttachmentObject[] = [];
   const mountsPerRail = ml.mountsPerRail;
   const spacingFt = ml.mountSpacingIn / 12;
+  const railSpacingFt = ag.railSpacingIn / 12;
+  const halfLenFt = railLenIn / 24;
   const substrate = framingVerified
     ? `${input?.framingType === 'truss' ? 'truss' : 'rafter'} ${input?.rafterSize ?? ''}`.trim()
     : 'unverified-framing';
 
   for (let i = 0; i < railCount; i++) {
     const row = Math.floor(i / railsPerRow);
+    const idxInRow = i % railsPerRow;
     const railId = `rail-${i + 1}`;
-    const yBase = row * ((ag.railSpacingIn / 12) + 0.5) + (i % railsPerRow) * (ag.railSpacingIn / 24);
+    // Row geometry in the canonical frame from the supported modules' centroids.
+    const rowCentroids = (rowModules[row] ?? []).map(id => centroidByModule.get(id)).filter(Boolean) as { x: number; y: number }[];
+    // along-axis (u) = direction of greatest spread of the row; n = perpendicular.
+    let u = { x: 1, y: 0 }, center = { x: 0, y: 0 };
+    if (rowCentroids.length) {
+      center = { x: avg(rowCentroids.map(p => p.x)), y: avg(rowCentroids.map(p => p.y)) };
+      const spanX = Math.max(...rowCentroids.map(p => p.x)) - Math.min(...rowCentroids.map(p => p.x));
+      const spanY = Math.max(...rowCentroids.map(p => p.y)) - Math.min(...rowCentroids.map(p => p.y));
+      u = spanY > spanX ? { x: 0, y: 1 } : { x: 1, y: 0 };
+    } else {
+      // schematic fallback keeps the SAME frame (no separate grid space)
+      center = { x: halfLenFt, y: row * (railSpacingFt + 0.5) };
+    }
+    const n = { x: -u.y, y: u.x };
+    const nOff = (idxInRow - (railsPerRow - 1) / 2) * railSpacingFt;
+    const cx = center.x + n.x * nOff, cy = center.y + n.y * nOff;
+    const startXY = { x: r3(cx - u.x * halfLenFt), y: r3(cy - u.y * halfLenFt) };
+    const endXY   = { x: r3(cx + u.x * halfLenFt), y: r3(cy + u.y * halfLenFt) };
+
     const attIds: string[] = [];
     for (let k = 0; k < mountsPerRail; k++) {
       const attId = `att-${railId}-${k + 1}`;
       attIds.push(attId);
       const sf = ml.safetyFactor;
+      // attachment along the rail at the engine-resolved O.C. spacing, centered.
+      const offAlong = mountsPerRail > 1
+        ? (k - (mountsPerRail - 1) / 2) * spacingFt
+        : 0;
+      const ax = cx + u.x * offAlong, ay = cy + u.y * offAlong;
       attachments.push({
         attachmentId: attId, railId, roofPlaneId: ctx.roofPlanes[Math.min(row, ctx.roofPlanes.length - 1)]?.planeId ?? 'plane-1',
-        xy: { x: r3(k * spacingFt), y: r3(yBase) },
+        xy: { x: r3(ax), y: r3(ay) },
         roofZone: run.wind.roofZone ?? null,
         substrateMember: substrate,
         attachmentMethod: sys?.mount.attachmentMethod ?? null,
@@ -299,12 +414,19 @@ function buildRailsAndAttachments(
         allowableCapacityLbs: r3(ml.mountCapacityLbs),
         adjustmentFactors: { omegaUltimateToAllowable: sys?.mount.capacityBasis === 'allowable' ? 1 : 3.0 },
         utilization: sf > 0 ? r3(1 / sf) : null, safetyFactor: r3(sf),
-        provenance: PROV('reaction/capacity from structural-engine-v4 calcMountLayout; coordinate from array-geometry grid'),
+        coord: coordMetaFor(transform, coordFrame, 'attachment coordinate in canonical site-plan-ft (co-located from module centroids)'),
+        provenance: PROV('reaction/capacity from structural-engine-v4 calcMountLayout; coordinate co-located in canonical site-plan-ft'),
       });
+    }
+    // §2 — canonical splice-marker coordinates at each stock-section boundary.
+    const splicePointsXY: { x: number; y: number }[] = [];
+    for (let sIdx = 1; sIdx <= spliceCount; sIdx++) {
+      const t = (sIdx * stockIn) / railLenIn;   // fraction along start→end
+      splicePointsXY.push({ x: r3(startXY.x + (endXY.x - startXY.x) * t), y: r3(startXY.y + (endXY.y - startXY.y) * t) });
     }
     rails.push({
       railId, roofPlaneId: ctx.roofPlanes[Math.min(row, ctx.roofPlanes.length - 1)]?.planeId ?? 'plane-1',
-      startXY: { x: 0, y: r3(yBase) }, endXY: { x: r3(railLenIn / 12), y: r3(yBase) },
+      startXY, endXY, splicePointsXY,
       physicalLengthIn: r3(railLenIn), stockLengthIn: stockIn, spanConfigIn: ml.mountSpacingIn,
       cantileverIn: r3n(ra?.cantileverIn ?? null), spliceCount,
       supportedModuleIds: rowModules[row] ?? [],
@@ -312,6 +434,7 @@ function buildRailsAndAttachments(
       manufacturerSpanLimitIn: spanLimitIn,
       governingWindSnowZone: zone,
       utilization: r3n(ra?.utilizationRatio ?? null),
+      coord: coordMetaFor(transform, coordFrame, 'rail start/end in canonical site-plan-ft (co-located from module centroids)'),
       provenance: PROV(sys?.rail
         ? 'rail geometry from array-geometry engine; span limit from mounting-hardware-db rail spec'
         : 'rail geometry from array-geometry engine; COMPATIBLE rail (no span-limit authority on mount record)'),
@@ -502,6 +625,22 @@ function normOrient(o: string | null): 'portrait' | 'landscape' | null {
 const isFin = (n: unknown): n is number => typeof n === 'number' && isFinite(n);
 const avg = (a: number[]): number => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
+const r6 = (n: number): number => Math.round(n * 1e6) / 1e6;
+
+/** §2 — module centroids in the canonical plan-ft frame (SAME projection as
+ *  buildModuleInstances), used to derive the DT-SITE plan-rotation authority. */
+function modulePlanCentroids(ctx: StructuralAuthorityCtx): { x: number; y: number }[] {
+  const geo = ctx.geoModules;
+  const withLL = geo.filter(g => isFin(g.lat) && isFin(g.lng));
+  if (withLL.length !== geo.length || geo.length === 0) return [];
+  const clat = avg(withLL.map(g => g.lat as number));
+  const clng = avg(withLL.map(g => g.lng as number));
+  const ftPerDegLng = FT_PER_DEG_LAT * Math.cos((clat * Math.PI) / 180);
+  return geo.map(g => ({
+    x: ((g.lng as number) - clng) * ftPerDegLng,
+    y: ((g.lat as number) - clat) * FT_PER_DEG_LAT,
+  }));
+}
 const r3n = (n: number | null | undefined): number | null =>
   (n == null || !isFinite(n)) ? null : Math.round(n * 1000) / 1000;
 const round0 = (n: number | null | undefined): string => n == null ? '?' : String(Math.round(n));

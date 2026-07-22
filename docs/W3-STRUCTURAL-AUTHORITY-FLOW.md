@@ -588,3 +588,97 @@ exits non-zero on any disagreement or reconciliation failure (§13).
 `npx tsc --noEmit` clean · `npx vitest run tests/planset` = 46 files / 307 tests green (adds §10/§11
 BOM + reconciliation + validator tests) · `node scripts/planset-evidence-w3.mjs` exits **0** with the
 truth matrix (0 disagree) and honest blockers recorded.
+
+---
+
+## AFTER (W3.1 §2 — CANONICAL COORDINATE AUTHORITY, landed 2026-07-21, dev, uncommitted)
+
+W3.1 §2 unifies structural and drawing coordinates. **The pre-W3.1 frame split is
+eliminated**: rails/attachments no longer live in an abstract V4 array-geometry grid while
+module footprints live in plan-ft — every physical object (module footprints, rail
+start/end, attachment points, roof-plane + setback polygons) is now expressed in ONE
+canonical coordinate system, `CANONICAL_COORDINATE_SYSTEM_ID = 'CS-SITE-PLAN-FT'`
+(equirectangular local feet, origin = array centroid, +x east / +y north, plan-projected,
+NOT plan-rotated, NOT display-regularized).
+
+### What landed
+- **Canonical frame + per-object coordinate metadata.** Every `ModuleInstance`, `RailObject`,
+  `AttachmentObject`, `RoofPlaneObject` carries `coord: CoordinateMeta`
+  (`coordinateSystemId / units / sourceFrame / transformId / transformRevision /
+  transformProvenance`). Rails + attachments are **co-located from the module centroids** in
+  the same plan-ft frame (`structuralAuthority.buildRailsAndAttachments`) — lengths / counts /
+  splices stay engine-of-record (V4); only the coordinate FRAME is unified.
+- **Snapshot-carried transform authority.** `geometry.drawingTransforms[]` (a `DT-SITE`
+  transform + per-plane `DT-<planeId>`), each with a 2×3 affine `matrix`, `params`
+  (kind/rotationDeg/pivot), and a `transformDigest` (stable hash of matrix+params, exposed in
+  evidence). `geometry.coordinateSystem` declares the canonical frame. Math lives in
+  `lib/permit/snapshot/coordinateAuthority.ts` (applyAffine/composeAffine/planRotationAffine/
+  transformDigestOf/buildDrawingTransform + the `checkRenderParity` render-parity checker).
+- **Blocking invariants (validate.ts).** **V26** unified frame (all physical objects on the ONE
+  canonical CS — split forbidden); **V27** complete coordinate metadata + resolvable transform
+  reference + matching revision; **V28** transformDigest integrity (recompute == stored;
+  `fromCoordinateSystemId` == canonical). **V29** (post-render, generatePermit) — no rendered
+  physical object without a canonical object ID: every `data-object-id` drawn on a sheet must
+  resolve to a snapshot object.
+- **Rendered-object tagging.** `roof.ts` tags each drawn module `<rect>` with
+  `data-object-id="mi-<panelId>"` (matches `moduleInstances[].instanceId`); the harness /
+  V29 scan verify coverage. **Tolerance:** render-parity sheet tolerance = 0.5 sheet unit
+  (renderers round coords to 0.1 px; the manifest stores 0.01-ft canonical values → sub-0.5
+  is rounding noise), canonical-consumption tolerance = 0.01 ft.
+- **Evidence.** `planset-evidence-w3.mjs` emits a `coordinateAuthority` block (canonical CS,
+  the transforms w/ matrix + digest, and the live `data-object-id` render-parity coverage) +
+  V26–V29 statuses.
+
+### Corrective pass — full resolution of the §2 render seam (2026-07-21)
+
+The identity-transform / procedural-rafter-grid interim was corrected per Ray's ruling
+(count/spacing/ID parity is insufficient):
+
+- **Geo-registration moved into the snapshot transform.** `DT-SITE` is now a real
+  **plan-rotation** transform whose angle is the array's principal axis (PCA of the canonical
+  module centroids about the array centroid), built at snapshot time with a content digest
+  (`structuralAuthority.modulePlanCentroids` + `dominantAxisDeg`). (Axis-aligned arrays yield
+  0° = identity, which is correct; rotated arrays like Braidon carry the real angle.)
+- **Procedural rafter-grid placement DELETED.** `roof.ts` no longer generates feet from the
+  rafter grid. Rail lines, attachment feet and splice markers are drawn as
+  **`viewport ∘ DT-SITE(canonical)`** — the renderer fits its viewport (registration-ft →
+  sheet-px, scale/paper/flip ONLY) by least squares from the drawn module anchors
+  (`fitAffine`) and projects each canonical rail/attachment/splice coordinate through it. The
+  canonical attachment coordinates + rail splice points are derived once, at build time, in
+  `structuralAuthority.ts` (`RailObject.splicePointsXY`).
+- **Live BLOCKING parity.** Each roof sheet emits a `<!--PLACEMENT-MANIFEST:…-->`; after
+  render `generatePermit` runs `checkRenderParity` as a fail-closed invariant:
+  **V31** drawn == `viewport∘DT-SITE(canonical)` within **0.5 sheet units** (+ renderer
+  consumed the snapshot coordinate, no re-derivation), **V30** no canonical structural object
+  omitted, **V29** no rendered object without a canonical ID. Verified live: 6 rails + 6
+  splices + 30 feet placed, **max Δ = 0**. Wired into `planset-evidence-w3.mjs`
+  (`coordinateAuthority.renderParity`, validators V29/V30/V31; harness fails closed on parity).
+
+### Module polygons closed too (regularization moved into the snapshot build)
+Module OUTLINES are now pure projections as well. The display trace-straightening
+(azimuth orientation + cos-pitch foreshorten) is computed at **snapshot build time** and stored
+as `ModuleInstance.drawnPolygon` (alongside the RAW `polygon`), with provenance. `roof.ts`
+draws module outlines as **`viewport∘DT-SITE(drawnPolygon)`** (a `<polygon data-object-id="mi-…">`)
+and deletes the in-renderer module regularization — **positions stay RAW canonical (no panel is
+moved, dropped or re-placed;** Ray's standing rule). **V31 now covers modules**; module manifest
+entries are enforced live (real render: 12 module polygons + 6 rails + 6 splices + 30 feet,
+**max Δ = 0**). **V21 basis note:** the area invariant (V21) and Σ-area keep using the RAW
+`polygon` (physical truth); `drawnPolygon` is display-only and is foreshortened, so it is NEVER
+the area basis.
+
+### ONE honest residual (recorded in `geometry.gaps` + `structural.gaps`, not faked green)
+**Rail-less direct-mount products** (RT-APEX / E-Mount AIR / S-5 / EcoFasten) have **no canonical
+attachment objects yet** (`buildRailsAndAttachments` derives rails/attachments only for
+`rail_based`/`standing_seam`). Their per-module direct mounts are therefore drawn on the **legacy
+path**, not projected from canonical, and this is recorded as a blocking gap (rail-less modules
+still get V29 ID-coverage but not V31 coordinate parity). Deriving canonical rail-less mount
+coordinates is the only remaining §2 follow-on.
+
+### Verification (W3.1 §2)
+`npx tsc --noEmit` clean · `npx vitest run tests/planset` = 49 files / 356 tests green (adds
+`tests/planset/coordinate-authority.test.ts` — transform math incl. invert/fit, digest change,
+`checkRenderParity` passing + violation classes + tolerance, unified-frame on the real
+snapshot, V26/V28 tamper detection, **V21 basis (raw vs drawn polygon)**, and **LIVE
+placement-manifest parity: real render pass + deliberately-perturbed V31 module/foot + V30
+omission fail cases**) · `planset-evidence-w3.mjs` exposes the coordinate authority + transforms
+(matrix/digest) + live render-parity (modules + rails + feet + splices, max Δ 0), V26–V31 PASS.

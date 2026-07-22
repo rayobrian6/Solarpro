@@ -1,4 +1,6 @@
 {
+  "supersededBy": "docs/evidence/braidon-live-w3.planset-evidence.json",
+  "supersededNote": "W3.1 §1/§5: this W3 live-design evidence is SUPERSEDED by braidon-live-w3 (regenerated at W3.1 HEAD with §4 racking-capacity blockers + V32). The immutable acceptance evidence is docs/evidence/braidon-original-w3.planset-evidence.json (frozen fixture). Kept for history.",
   "generatedAt": "2026-07-21T17:31:42.378Z",
   "wave": "W3",
   "snapshotId": "PDS-86ADCDA93474",

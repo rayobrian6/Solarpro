@@ -251,8 +251,33 @@ export function reconcileStructuralBom(
     push('rails-vs-v4-calcRackingBOM', v4.rails?.qty ?? null, qty('rails'), 'V4 calcRackingBOM.rails');
     push('mounts-vs-v4-calcRackingBOM', v4.mounts?.qty ?? null, qty('mounts'), 'V4 calcRackingBOM.mounts');
     push('splices-vs-v4-calcRackingBOM', v4.railSplices?.qty ?? null, qty('railSplices'), 'V4 calcRackingBOM.railSplices');
-    push('midclamps-vs-v4-calcRackingBOM', v4.midClamps?.qty ?? null, qty('midClamps'), 'V4 calcRackingBOM.midClamps');
-    push('endclamps-vs-v4-calcRackingBOM', v4.endClamps?.qty ?? null, qty('endClamps'), 'V4 calcRackingBOM.endClamps');
+    // Mid/end clamps: V4 calcRackingBOM uses a UNIFORM idealized grid
+    // ((colCount−1) × railCount) which only equals true module adjacency for a
+    // PERFECT RECTANGLE. A real ragged array (prime panel count, partial last
+    // row, or multi-plane) has rails supporting unequal module counts, so the
+    // object adjacency count (§10: the AUTHORITY for clamps) legitimately
+    // differs from the V4 approximation. Asserting strict equality there would
+    // REJECT the more-accurate object count, so the V4 clamp cross-check is
+    // informational (ok) on a ragged array while the object-internal adjacency
+    // check above remains the blocking authority. Rectangular arrays still
+    // strict-match (roofProject 12 = 2×6 unchanged).
+    const railsWithMods = o.rails.filter(r => r.supportedModuleIds.length > 0);
+    const railModuleCounts = new Set(railsWithMods.map(r => r.supportedModuleIds.length));
+    const raggedArray = railModuleCounts.size > 1;
+    const clampBasisNote = raggedArray
+      ? 'V4 uniform-grid clamp count is a rectangular approximation; ragged real array → object adjacency (§10) is authority'
+      : 'V4 calcRackingBOM';
+    if (raggedArray) {
+      checks.push({ name: 'midclamps-vs-v4-calcRackingBOM', expected: v4.midClamps?.qty ?? null,
+        actual: qty('midClamps'), ok: true, basis: clampBasisNote + '.midClamps' });
+      checks.push({ name: 'endclamps-vs-v4-calcRackingBOM', expected: v4.endClamps?.qty ?? null,
+        actual: qty('endClamps'), ok: true, basis: clampBasisNote + '.endClamps' });
+      note = 'Mid/end-clamp V4 cross-check informational: real array is ragged (rails support unequal '
+        + 'module counts), so object module-adjacency (§10 authority) governs, not the V4 uniform-grid figure.';
+    } else {
+      push('midclamps-vs-v4-calcRackingBOM', v4.midClamps?.qty ?? null, qty('midClamps'), 'V4 calcRackingBOM.midClamps');
+      push('endclamps-vs-v4-calcRackingBOM', v4.endClamps?.qty ?? null, qty('endClamps'), 'V4 calcRackingBOM.endClamps');
+    }
     push('lagbolts-vs-v4-calcRackingBOM', v4.lagBolts?.qty ?? null, qty('lagBolts'), 'V4 calcRackingBOM.lagBolts');
     push('bonding-vs-v4-calcRackingBOM', v4.bondingClips?.qty ?? null, qty('bondingClips'), 'V4 calcRackingBOM.bondingClips');
     if (v4.mountingBolts?.qty != null)

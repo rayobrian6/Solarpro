@@ -39,6 +39,10 @@ import { buildSiteLayoutSheet, type SiteLayoutSheetInput } from '@/lib/plan-set/
 import { buildMountingDetailsSheet, type MountingDetailsSheetInput } from '@/lib/plan-set/mounting-details-sheet';
 import { buildComplianceSheet, type ComplianceSheetInput } from '@/lib/plan-set/compliance-sheet';
 import { wrapDocument, type TitleBlockData, fmtDate } from '@/lib/plan-set/title-block';
+// W3.1 §3 — parallel-path containment (fail closed): this route may not declare a
+// structural PASS / permit-ready artifact unless it consumes+validates a canonical
+// PermitDesignSnapshot. It consumes NONE, so status is forced to the legacy state.
+import { resolveLegacyPathStatus } from '@/lib/plan-set/legacy-path-guard';
 import { searchAhj } from '@/lib/jurisdictions/ahj-national';
 import { calcFireSetbacks } from '@/lib/engineering/fire-setbacks';
 
@@ -450,7 +454,15 @@ export async function POST(req: NextRequest) {
     const rafterKey         = rafterSize || '2×6';
     const spacingKey        = rafterSpacingIn || 24;
     const rafterCapacityPsf = rafterCapacityMap[rafterKey]?.[spacingKey] ?? 35;
-    const structuralStatus  = 'PASS'; // structural-sheet.ts v44.0 auto-fixes
+    // ── W3.1 §3 PARALLEL-PATH CONTAINMENT (fail closed) ────────────────────────
+    // This route does NOT build/consume/validate a canonical PermitDesignSnapshot,
+    // so it can NEVER declare a structural PASS or a permit-ready artifact. The
+    // status is derived from resolveLegacyPathStatus(null), which is structurally
+    // forced into the LEGACY_NOT_FOR_PERMIT state. The green "STRUCTURAL PASS" box
+    // and "PASS" overall-compliance are impossible on this path until a valid
+    // snapshot is consumed (W4 convert-or-delete).
+    const pathStatus = resolveLegacyPathStatus(null);
+    const structuralStatus = pathStatus.structuralStatus;
 
     // ─────────────────────────────────────────────────────────────────────
     // STEP 5: Build title block
@@ -557,6 +569,8 @@ export async function POST(req: NextRequest) {
       contractorEmail,
       designerName:     designerName || 'SolarPro',
       sheets:           sheetIndex,
+      // W3.1 §3 — visible legacy stamp on the cover sheet (fail closed).
+      legacyBanner:     pathStatus.banner ?? undefined,
     };
     pages.push(buildCoverSheet(coverInput));
 
@@ -883,6 +897,8 @@ export async function POST(req: NextRequest) {
           'X-Plan-Set-Version':  BUILD_VERSION,
           'X-Plan-Set-Sheets':   String(sheetIndex.length),
           'X-Structural-Status': structuralStatus,
+          'X-Permit-Ready':      String(pathStatus.permitReady),
+          'X-Plan-Set-Legacy':   String(pathStatus.isLegacy),
           'X-Pdf-Method':        pdfMethod,
           'X-System-Model':      systemModel ? 'computed' : 'fallback',
         },
@@ -948,11 +964,16 @@ export async function POST(req: NextRequest) {
       systemKw,
       panelCount,
       structuralStatus,
-      overallCompliance: 'PASS',
+      // W3.1 §3 — fail closed: overall compliance can only be 'PASS' when a valid
+      // canonical snapshot was consumed. This path consumes none.
+      overallCompliance: pathStatus.overallCompliance,
+      permitReady:       pathStatus.permitReady,
+      legacyPath:        pathStatus.isLegacy,
+      legacyBanner:      pathStatus.banner,
       systemModelUsed:   systemModel ? 'computed' : 'fallback',
       message:           pdfMethod === 'html'
-        ? 'Plan set generated as HTML — open in browser and print to PDF'
-        : `Plan set PDF generated and saved to project files (${BUILD_VERSION} — 7 sheets)`,
+        ? 'LEGACY PATH — NOT FOR PERMIT. Plan set generated as HTML (pending canonical migration); open in browser and print to PDF'
+        : `LEGACY PATH — NOT FOR PERMIT (pending canonical migration). Plan set ${ext.toUpperCase()} generated and saved to project files (${BUILD_VERSION} — 7 sheets)`,
     });
 
   } catch (err: unknown) {

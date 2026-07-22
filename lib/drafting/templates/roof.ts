@@ -28,6 +28,8 @@ import type { DesignIntent } from '../designIntent';
 import type { CADModel } from '../../cad/types';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
 import { projectStructural } from '../../permit/snapshot/structuralProjection';
+import { applyAffine, fitAffine, emitPlacementManifestComment } from '../../permit/snapshot/coordinateAuthority';
+import type { PlacementEntry } from '../../permit/snapshot/types';
 import { getLayoutForSystem } from '../layoutEngine';
 import {
   drawSVGOpen, drawSVGClose, drawBackground, drawTitleBar,
@@ -135,6 +137,17 @@ function planViewAreaFt2(ring: Array<{ lat: number; lng: number }>): number {
 // STEP 2: Roof top-down plan is the primary view.
 // STEP 4: All geometry from CADModel (via fake-degree encoding).
 // ─────────────────────────────────────────────────────────────────────────────
+
+// W3.1 §2 — tag a drawn module with its CANONICAL object id so the render-parity
+// harness can verify (d) no rendered physical object without a canonical ID and
+// (e) coverage. The id matches snapshot.geometry.moduleInstances[].instanceId
+// (`mi-<panelId>`). Only emitted for safe-charactered ids (never fabricated).
+function canonicalObjIdAttr(p: { id?: unknown } | null | undefined): string {
+  const raw = p?.id;
+  if (raw == null) return '';
+  const s = String(raw);
+  return /^[\w.:-]+$/.test(s) ? ` data-object-id="mi-${s}"` : '';
+}
 
 export function drawRoofPlan(
   input: DraftingInput,
@@ -940,6 +953,45 @@ export function drawRoofPlan(
   const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
   const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
+  // W3.1 §2 — CANONICAL PROJECTION CONTEXT. When a validated snapshot is present,
+  // module outlines, rails, attachment feet and splice markers are drawn as PURE
+  // PROJECTIONS of their canonical coordinates: viewport ∘ DT-SITE(canonical),
+  // where the viewport (registration-ft → sheet-px, scale/paper/flip ONLY) is fit
+  // by least squares from DT-SITE(drawnPolygon centroid) → toX/toY(raw lng/lat).
+  // The renderer no longer regularizes/geo-registers modules — the display
+  // straightening lives in the snapshot's drawnPolygon; positions stay RAW
+  // canonical (no panel moved). A single placement manifest is emitted for the
+  // post-render checkRenderParity (V30/V31, blocking).
+  const _placementEntries: PlacementEntry[] = [];
+  let _projVp: { a: number; b: number; c: number; d: number; e: number; f: number } | null = null;
+  let _projDTM: { a: number; b: number; c: number; d: number; e: number; f: number } | null = null;
+  const _miByRawId = new Map<string, any>();
+  if (ctx?.snapshot) {
+    const _snap = ctx.snapshot;
+    const _dt = (_snap.geometry.drawingTransforms ?? []).find((t: any) => t.transformId === 'DT-SITE') ?? null;
+    if (_dt) {
+      const _rawById = new Map(validPanels.map((p: any) => [String(p.id), p]));
+      const _src: Array<{ x: number; y: number }> = [], _dst: Array<{ x: number; y: number }> = [];
+      for (const mi of _snap.geometry.moduleInstances) {
+        const rawId = String(mi.instanceId).replace(/^mi-/, '');
+        _miByRawId.set(rawId, mi);
+        const rp: any = _rawById.get(rawId);
+        const poly = (mi.drawnPolygon ?? mi.polygon)?.points ?? [];
+        if (!rp || !poly.length) continue;
+        const cen = { x: poly.reduce((s: number, q: any) => s + q.x, 0) / poly.length, y: poly.reduce((s: number, q: any) => s + q.y, 0) / poly.length };
+        _src.push(applyAffine(_dt.matrix, cen));
+        _dst.push({ x: toX(rp.lng), y: toY(rp.lat) });
+      }
+      const vp = fitAffine(_src, _dst);
+      if (vp) { _projVp = vp; _projDTM = _dt.matrix; }
+    }
+  }
+  const _projectCanon = (xy: { x: number; y: number }) => applyAffine(_projVp!, applyAffine(_projDTM!, xy));
+  const _canonCentroid = (poly: { points: Array<{ x: number; y: number }> }) => ({
+    x: poly.points.reduce((s, q) => s + q.x, 0) / poly.points.length,
+    y: poly.points.reduce((s, q) => s + q.y, 0) / poly.points.length,
+  });
+
   // PV-1B circuit sheet: map each branch color → its circuit number (1-based), in
   // the order arrayPages assigned them (first appearance = B1..Bn = legend order).
   const branchIndexByColor = new Map<string, number>();
@@ -988,7 +1040,7 @@ export function drawRoofPlan(
       // top edge, upright, clear of the center wire line.
       const numFs = Math.max(Math.min(Math.min(pw, ph) * 0.22, 9), 4.2);
       const tagY = py - ph * 0.5 + numFs + 1.5;
-      els.push(`${gOpen}<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/></g>`);
+      els.push(`${gOpen}<rect${canonicalObjIdAttr(p)} x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/></g>`);
       els.push(`<text x="${px.toFixed(1)}" y="${tagY.toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}" opacity="0.9">${cNum}</text>`);
       // IQ8 microinverter mounted UNDER the module (Enphase micro system) — a small
       // dark device box in the module's lower area, outlined in its branch color.
@@ -1024,97 +1076,71 @@ export function drawRoofPlan(
       } else {
         // Railed: continuous rails + rafter feet drawn in the per-plane pass below.
       }
-      els.push(
-        `${gOpen}` +
-        `<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
-        hardware +
-        `</g>`);
+      // §2 — RAILED modules with a snapshot: draw the outline as a PURE PROJECTION
+      // of the canonical drawnPolygon (viewport∘DT-SITE) + record the manifest
+      // entry. Rail-less keeps its legacy rect (its direct mounts are not yet
+      // canonical — recorded gap). No snapshot ⇒ legacy rect (preview/tests).
+      const _mi = (!isRailless && !isBranchColorMode && _projVp && _projDTM) ? _miByRawId.get(String(p.id)) : null;
+      if (_mi && (_mi.drawnPolygon?.points?.length)) {
+        const proj = _mi.drawnPolygon.points.map((c: any) => _projectCanon(c));
+        const ptsStr = proj.map((c: any) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+        els.push(`<polygon data-object-id="${_mi.instanceId}" points="${ptsStr}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>`);
+        _placementEntries.push({
+          objectId: _mi.instanceId, kind: 'module',
+          canonicalXY: _canonCentroid(_mi.drawnPolygon),
+          sheetXY: { x: proj.reduce((s: number, c: any) => s + c.x, 0) / proj.length, y: proj.reduce((s: number, c: any) => s + c.y, 0) / proj.length },
+        });
+      } else {
+        els.push(
+          `${gOpen}` +
+          `<rect${canonicalObjIdAttr(p)} x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
+          hardware +
+          `</g>`);
+      }
     }
   });
 
-  // ── RT-Mini foot + rail attachment — cantilever logic (Ray 2026-07-08) ──────
-  // Two rail lines per panel row at the 25% / 75% points of the module (25% down
-  // from the top, 25% up from the bottom): equal cantilevers top & bottom, the
-  // 50% span between carries the load efficiently. Feet land ON rafters at 48"
-  // O.C., STAGGERED (both rails start on the same rafter; the top rail then jumps
-  // 24" and runs 48" O.C., the bottom rail runs straight 48" O.C. — not a foot
-  // per module). END CANTILEVER: the overhang from the outermost foot to the end
-  // of the end panel must be ≤ 18" or that panel droops; if no rafter falls within
-  // 18" of the edge, a DECK-MOUNTED foot (open ◻ marker) is added there instead.
-  let _deckMountUsed = false;
-  if (!isRailless && !isBranchColorMode) {
-    const FT = scale;                       // 1 ft in px (1 fake-degree unit = 1 ft)
-    const quarterUp = panLenPx * 0.25;      // rail at 25% down from top / up from bottom
-    const cantMaxPx = 1.5 * FT;             // 18" max overhang from outer foot to panel end
-    const halfPanU = panWidPx / 2;          // panel half-width across the eave (portrait)
-    const endInsetPx = Math.min(cantMaxPx * 0.6, 0.5 * FT);   // deck foot ~6" from the edge
-    regPlanes.forEach((rp: any, ri: number) => {
-      const pp = regPanels.filter((p: any) => ptInLatLngRing(p.lat, p.lng, rp.vertices ?? []));
-      if (!pp.length) return;
-      // plane fall-line basis in screen space: v = eave→ridge, u = along the eave
-      const az = (typeof rp.azimuth === 'number' && isFinite(rp.azimuth)) ? rp.azimuth : 180;
-      const c0lng = rp.vertices.reduce((s: number, v: any) => s + v.lng, 0) / rp.vertices.length;
-      const c0lat = rp.vertices.reduce((s: number, v: any) => s + v.lat, 0) / rp.vertices.length;
-      let vdx = toX(c0lng + Math.sin(az * Math.PI / 180)) - toX(c0lng);
-      let vdy = toY(c0lat + Math.cos(az * Math.PI / 180)) - toY(c0lat);
-      const vl = Math.hypot(vdx, vdy) || 1; vdx /= vl; vdy /= vl;
-      const udx = -vdy, udy = vdx;
-      const uOf = (x: number, y: number) => x * udx + y * udy;
-      const vOf = (x: number, y: number) => x * vdx + y * vdy;
-      const grid = framingGrids[ri];
-      // rails sit at 25/75% of the module's PLAN (foreshortened) height so
-      // they stay inside the drawn rects on pitched planes
-      const quarterUpP = quarterUp * planeCosP[ri];
-      const rafStep = grid ? grid.spacingPx : 2 * FT;        // rafter spacing (24" default)
-      const uPhase = grid ? uOf(grid.bcx, grid.bcy) : 0;     // rafter phase (feet land ON rafters)
-      const stride = Math.max(2, Math.round((railFootOcIn / 12 * FT) / rafStep)); // rafters between feet (48"/24"=2)
-      const stagStride = Math.max(1, Math.floor(stride / 2));                       // 24" stagger = 1 rafter
-      const rowsMap = new Map<number, any[]>();
-      pp.forEach((p: any) => { const r = p.row ?? 0; if (!rowsMap.has(r)) rowsMap.set(r, []); rowsMap.get(r)!.push(p); });
-      const rails: string[] = [], rFeet: string[] = [], dFeet: string[] = [];
-      const P = (u: number, v: number) => ({ x: u * udx + v * vdx, y: u * udy + v * vdy });
-      const rafterFoot = (u: number, v: number) => { const q = P(u, v); rFeet.push(`<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="1.15" fill="#2a5db0"/>`); };
-      const deckFoot = (u: number, v: number) => { const q = P(u, v); dFeet.push(`<rect x="${(q.x - 1.5).toFixed(1)}" y="${(q.y - 1.5).toFixed(1)}" width="3" height="3" fill="#fff" stroke="#b45309" stroke-width="0.9"/>`); _deckMountUsed = true; };
-      rowsMap.forEach((rowPanels) => {
-        const us = rowPanels.map((p: any) => uOf(toX(p.lng), toY(p.lat)));
-        const vs = rowPanels.map((p: any) => vOf(toX(p.lng), toY(p.lat)));
-        const vMid = vs.reduce((a: number, b: number) => a + b, 0) / vs.length;
-        const uEdgeL = Math.min(...us) - halfPanU, uEdgeR = Math.max(...us) + halfPanU;   // panel-row extent
-        const vBot = vMid - quarterUpP, vTop = vMid + quarterUpP;                          // 25% / 75% rails
-        // rail lines span the panels (they cantilever past the end feet)
-        for (const vLine of [vBot, vTop]) {
-          const a = P(uEdgeL, vLine), b = P(uEdgeR, vLine);
-          rails.push(`<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#5a6478" stroke-width="0.8"/>`);
-        }
-        // rafter feet at 48" O.C. — both rails start on the first rafter inside the row
-        const uStart = uPhase + Math.ceil((uEdgeL - uPhase) / rafStep) * rafStep;
-        const botUs: number[] = [], topUs: number[] = [];
-        for (let u = uStart; u <= uEdgeR + 0.5; u += stride * rafStep) if (u >= uEdgeL - 0.5) botUs.push(u);
-        if (uStart >= uEdgeL - 0.5 && uStart <= uEdgeR + 0.5) topUs.push(uStart);
-        for (let u = uStart + stagStride * rafStep; u <= uEdgeR + 0.5; u += stride * rafStep) if (u >= uEdgeL - 0.5) topUs.push(u);
-        for (const u of botUs) rafterFoot(u, vBot);
-        for (const u of topUs) rafterFoot(u, vTop);
-        // END CANTILEVER guard per rail: overhang to the panel edge ≤ 18", else a
-        // rafter within 18" if one exists, else a deck-mounted foot at the edge.
-        for (const [lineUs, vLine] of [[botUs, vBot], [topUs, vTop]] as Array<[number[], number]>) {
-          const s = [...lineUs].sort((a, b) => a - b);
-          // LEFT end
-          if (!s.length || s[0] - uEdgeL > cantMaxPx) {
-            const r = uPhase + Math.ceil((uEdgeL - uPhase) / rafStep) * rafStep;
-            if (r - uEdgeL <= cantMaxPx && (!s.length || r < s[0] - 0.5)) rafterFoot(r, vLine);
-            else deckFoot(uEdgeL + endInsetPx, vLine);
-          }
-          // RIGHT end
-          if (!s.length || uEdgeR - s[s.length - 1] > cantMaxPx) {
-            const r = uPhase + Math.floor((uEdgeR - uPhase) / rafStep) * rafStep;
-            if (uEdgeR - r <= cantMaxPx && (!s.length || r > s[s.length - 1] + 0.5)) rafterFoot(r, vLine);
-            else deckFoot(uEdgeR - endInsetPx, vLine);
-          }
-        }
+  // ── W3.1 §2 — RAILS · ATTACHMENTS · SPLICES as PURE PROJECTIONS of the
+  // canonical snapshot coordinates. The former procedural rafter-grid foot
+  // generation is DELETED: rail lines, attachment feet and splice markers are
+  // now placed by applying the snapshot-carried DrawingTransform (DT-SITE) then a
+  // viewport affine fit ONLY from the drawn module anchors (scale/paper/flip) —
+  // the renderer no longer geo-registers or re-derives structural positions.
+  // Every drawn object is tagged with its canonical data-object-id and emitted in
+  // a placement manifest; generatePermit's post-render checkRenderParity enforces
+  // drawn == transform(canonical) (+ no-omission) as a BLOCKING invariant.
+  const _deckMountUsed = false;   // deck-foot heuristic retired with procedural placement
+  if (!isRailless && !isBranchColorMode && _projVp && _projDTM && ctx?.snapshot) {
+    const snap = ctx.snapshot;
+    const cAtts = snap.structural.attachments ?? [];
+    const cRails = snap.structural.rails ?? [];
+    const project = _projectCanon;   // viewport∘DT-SITE, fit up-front from module anchors
+    const railEls: string[] = [], feetEls: string[] = [], spliceEls: string[] = [];
+    for (const r of cRails) {
+      const a = project(r.startXY), b = project(r.endXY);
+      railEls.push(`<line data-object-id="${r.railId}" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#5a6478" stroke-width="0.8"/>`);
+      _placementEntries.push({ objectId: r.railId, kind: 'rail',
+        canonicalXY: { x: (r.startXY.x + r.endXY.x) / 2, y: (r.startXY.y + r.endXY.y) / 2 },
+        sheetXY: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } });
+      (r.splicePointsXY ?? []).forEach((sp: { x: number; y: number }, k: number) => {
+        const s = project(sp); const sid = `splice-${r.railId}-${k + 1}`;
+        spliceEls.push(`<rect data-object-id="${sid}" x="${(s.x - 1.4).toFixed(1)}" y="${(s.y - 1.4).toFixed(1)}" width="2.8" height="2.8" fill="none" stroke="#b45309" stroke-width="0.8"/>`);
+        _placementEntries.push({ objectId: sid, kind: 'splice', canonicalXY: sp, sheetXY: s });
       });
-      if (rails.length || rFeet.length || dFeet.length)
-        els.push(`<g clip-path="url(#sb${_svgNs}c${ri})">${rails.join('')}${rFeet.join('')}${dFeet.join('')}</g>`);
-    });
+    }
+    for (const at of cAtts) {
+      const q = project(at.xy);
+      feetEls.push(`<circle data-object-id="${at.attachmentId}" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="1.15" fill="#2a5db0"/>`);
+      _placementEntries.push({ objectId: at.attachmentId, kind: 'attachment', canonicalXY: at.xy, sheetXY: q });
+    }
+    els.push(`<g class="pv1-structural">${railEls.join('')}${feetEls.join('')}${spliceEls.join('')}</g>`);
+  }
+  // §2 — emit ONE placement manifest for this sheet (modules + rails + feet +
+  // splices) for the post-render checkRenderParity (V30/V31, blocking).
+  if (_projVp && _placementEntries.length) {
+    els.push(emitPlacementManifestComment({
+      sheetId: isBranchColorMode ? 'PV-1B' : 'PV-1', transformId: 'DT-SITE', viewport: _projVp, entries: _placementEntries,
+    }));
   }
 
   // ── Setback hatch OVER the modules + encroachment accounting ──

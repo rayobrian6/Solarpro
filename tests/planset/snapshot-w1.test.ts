@@ -51,6 +51,8 @@ function baseSnapshot(): PermitDesignSnapshot {
       roofPlanes: [{ planeId: 'P1', pitchDeg: 17, azimuthDeg: 180, moduleCount: 19 },
                    { planeId: 'P2', pitchDeg: 17, azimuthDeg: 90, moduleCount: 12 }],
       modules: mods, moduleInstances: [], roofPlaneObjects: [],
+      coordinateSystem: { id: 'CS-SITE-PLAN-FT', units: 'ft', description: 'test' },
+      drawingTransforms: [],
       provenance: { source: 'test' }, gaps: [],
     },
     electrical: {

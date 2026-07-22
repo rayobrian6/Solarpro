@@ -69,6 +69,10 @@ export interface CoverSheetInput {
 
   // Satellite/aerial image (optional) — rendered in right column below scope of work
   satelliteImageBase64?: string;  // data:image/jpeg;base64,... from Google Maps Static API
+
+  // W3.1 §3 — when the plan set is produced by the legacy path (no canonical
+  // PermitDesignSnapshot), this carries the visible NOT-FOR-PERMIT banner text.
+  legacyBanner?: string;
 }
 
 export function buildCoverSheet(inp: CoverSheetInput): string {
@@ -81,6 +85,11 @@ export function buildCoverSheet(inp: CoverSheetInput): string {
       </div>
       <div class="sh-badge">G-1 COVER SHEET</div>
     </div>
+    ${inp.legacyBanner ? `
+    <div style="margin-top:6px; padding:7px 12px; border:2px solid #b00020; border-radius:4px; background:#fff0f0; text-align:center;">
+      <div style="font-size:10pt; font-weight:bold; color:#b00020; letter-spacing:0.4px;">${escHtml(inp.legacyBanner)}</div>
+      <div style="font-size:6pt; color:#7a1020; margin-top:2px;">This plan set was produced by the legacy generator, which does not consume the canonical PermitDesignSnapshot. It is NOT permit-ready and is pending canonical migration.</div>
+    </div>` : ''}
 
     <div class="two-col" style="gap:12px; margin-top:6px;">
 
