@@ -135,7 +135,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 // uses via getPrimaryView(roof_plan), so PV-1 and PV-1B came out as literal
 // duplicates. Removed: PV-1B now renders its own schematicGridSvg below.
 
-export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, opts?: { sheetId?: string; titleSuffix?: string }): string {
+export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null, opts?: { sheetId?: string; titleSuffix?: string }): string {
   const { project, system } = input;
   const _cpArr = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
   // CAD-sourced: use cad.totalPanels as authoritative count
@@ -445,7 +445,12 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     // the GROUND top-view colors modules by string (PV-1BG was a clone of PV-1G's
     // physical layout). Only string systems get a string map; micro = AC branches.
     const _groundCircuit = !_isMicro ? { strings: totalStrings, colors: stringColors } : null;
-    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById, _groundCircuit);
+    // Pass the RenderContext (carries the PermitDesignSnapshot) so the circuit
+    // sheet draws modules as PURE PROJECTIONS of the canonical drawnPolygon
+    // (viewport∘DT-SITE) — the SAME 31 polygons/ids PV-1 draws — instead of the
+    // legacy locally-recreated rects. Without the snapshot the renderer falls
+    // back to the legacy rect (standalone preview only).
+    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, ctx ?? null, panelColorById, _groundCircuit);
     if (roofSvg && roofSvg.length > 500) {
       agDrawSvg = roofSvg;
     } else {

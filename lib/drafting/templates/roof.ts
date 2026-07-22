@@ -1029,54 +1029,62 @@ export function drawRoofPlan(
       ? `<g transform="rotate(${rot.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">` : '<g>';
 
     const branchColor = panelColorById?.get(p.id);
-    if (branchColor) {
-      // PV-1B circuit sheet (Cannon-style): a CLEAN uniform module outline — the
-      // thin colored CIRCUIT wires (drawn below) carry branch identity, not a
-      // garish solid fill. A small circuit number in the branch color ties each
-      // module to its circuit. Drawn UPRIGHT (outside the rotate group) so the
-      // number stays readable on E/W (rotated) planes.
-      const cNum = (branchIndexByColor.get(branchColor) ?? 0) + 1;
-      // Small circuit tag, capped so it never dominates the module (a big number
-      // read as a module label, not a circuit id). Sits just below the module's
-      // top edge, upright, clear of the center wire line.
-      const numFs = Math.max(Math.min(Math.min(pw, ph) * 0.22, 9), 4.2);
-      const tagY = py - ph * 0.5 + numFs + 1.5;
-      els.push(`${gOpen}<rect${canonicalObjIdAttr(p)} x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/></g>`);
-      els.push(`<text x="${px.toFixed(1)}" y="${tagY.toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}" opacity="0.9">${cNum}</text>`);
-      // IQ8 microinverter mounted UNDER the module (Enphase micro system) — a small
-      // dark device box in the module's lower area, outlined in its branch color.
-      // The AC branch wire daisy-chains these micros in series to the JB, so the
-      // sheet shows the module-level electronics + the string attached to each.
-      const micW = Math.max(Math.min(pw, ph) * 0.44, 4);
-      const micH = Math.max(Math.min(pw, ph) * 0.16, 1.8);
-      const micCy = py + ph * 0.20;
-      els.push(`<rect x="${(px - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
+    // ── Module outline (system-agnostic) ──
+    // W3.1/W4 §2 — the module outline is a PURE PROJECTION of the canonical
+    // drawnPolygon (viewport∘DT-SITE) on EVERY sheet: PV-1 (structural) AND the
+    // PV-1B circuit sheet draw the SAME 31 canonical polygons with the SAME ids,
+    // so the two sheets never disagree on where a module is. The renderer never
+    // recreates a rectangle from generic dims when the snapshot is present.
+    // Only the STYLING differs: PV-1B strokes each module in its BRANCH color
+    // with a light branch-colored fill (borders stay crisp on the white roof),
+    // while the thin circuit wires + micro symbols (below) overlay — never
+    // replace — the module layer. No snapshot (standalone preview / unit tests)
+    // ⇒ legacy rect fallback, for both modes.
+    const _mi = (_projVp && _projDTM) ? _miByRawId.get(String(p.id)) : null;
+    const _canonPoly: Array<{ x: number; y: number }> | null =
+      _mi && _mi.drawnPolygon?.points?.length ? _mi.drawnPolygon.points.map((c: any) => _projectCanon(c)) : null;
+    const cNum = branchColor ? (branchIndexByColor.get(branchColor) ?? 0) + 1 : 0;
+    if (_canonPoly && _mi) {
+      const ptsStr = _canonPoly.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+      const stroke = branchColor ?? '#2c4a75';
+      // branch-colored LIGHT fill on the circuit sheet; opaque near-white on the
+      // structural sheet (that sheet's fill carries no circuit meaning).
+      const fillAttr = branchColor
+        ? `fill="${branchColor}" fill-opacity="0.14"`
+        : `fill="#fdfdfd"`;
+      els.push(`<polygon data-object-id="${_mi.instanceId}" points="${ptsStr}" ${fillAttr} stroke="${stroke}" stroke-width="${branchColor ? '1.1' : '0.8'}"/>`);
+      _placementEntries.push({
+        objectId: _mi.instanceId, kind: 'module',
+        canonicalXY: _canonCentroid(_mi.drawnPolygon),
+        sheetXY: { x: _canonPoly.reduce((s, c) => s + c.x, 0) / _canonPoly.length, y: _canonPoly.reduce((s, c) => s + c.y, 0) / _canonPoly.length },
+      });
+      if (branchColor) {
+        // circuit tag + IQ8 micro symbol OVERLAY the branch-colored module,
+        // placed from the PROJECTED polygon bbox so they track the canonical
+        // geometry (upright) on every plane, incl. rotated E/W faces.
+        const xs = _canonPoly.map(c => c.x), ys = _canonPoly.map(c => c.y);
+        const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
+        const bw = bx1 - bx0, bh = by1 - by0, bcx = (bx0 + bx1) / 2;
+        const numFs = Math.max(Math.min(Math.min(bw, bh) * 0.30, 9), 4.2);
+        els.push(`<text x="${bcx.toFixed(1)}" y="${(by0 + numFs + 1.5).toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}">${cNum}</text>`);
+        const micW = Math.max(Math.min(bw, bh) * 0.50, 4);
+        const micH = Math.max(Math.min(bw, bh) * 0.18, 1.8);
+        const micCy = by0 + bh * 0.62;
+        els.push(`<rect x="${(bcx - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
+      }
     } else {
-      // ── Module outline (system-agnostic) ──
-      // W4 §10: the procedural per-module DIRECT-MOUNT placement (the old
-      // rail-less 4-dot generator) is DELETED. Mounts — RAILED and RAIL-LESS
-      // alike — are now drawn ONLY as pure projections of the canonical snapshot
-      // attachment objects (viewport∘DT-SITE) in the structural pass below, with
-      // data-object-id tags + placement-manifest entries (V29/V30/V31). The
-      // renderer never invents mount coordinates for any system type.
-      // §2 — draw the outline as a PURE PROJECTION of the canonical drawnPolygon
-      // (viewport∘DT-SITE) + record the manifest entry, for both railed and
-      // rail-less products. No snapshot ⇒ legacy rect (preview/tests only).
-      const _mi = (!isBranchColorMode && _projVp && _projDTM) ? _miByRawId.get(String(p.id)) : null;
-      if (_mi && (_mi.drawnPolygon?.points?.length)) {
-        const proj = _mi.drawnPolygon.points.map((c: any) => _projectCanon(c));
-        const ptsStr = proj.map((c: any) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-        els.push(`<polygon data-object-id="${_mi.instanceId}" points="${ptsStr}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>`);
-        _placementEntries.push({
-          objectId: _mi.instanceId, kind: 'module',
-          canonicalXY: _canonCentroid(_mi.drawnPolygon),
-          sheetXY: { x: proj.reduce((s: number, c: any) => s + c.x, 0) / proj.length, y: proj.reduce((s: number, c: any) => s + c.y, 0) / proj.length },
-        });
-      } else {
-        els.push(
-          `${gOpen}` +
-          `<rect${canonicalObjIdAttr(p)} x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.8"/>` +
-          `</g>`);
+      // No snapshot geometry (standalone preview / unit tests): legacy local
+      // rect, same styling split as the projected path above.
+      const stroke = branchColor ?? '#2c4a75';
+      const fillAttr = branchColor ? `fill="${branchColor}" fill-opacity="0.14"` : `fill="#fdfdfd"`;
+      els.push(`${gOpen}<rect${canonicalObjIdAttr(p)} x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" ${fillAttr} stroke="${stroke}" stroke-width="${branchColor ? '1.1' : '0.8'}"/></g>`);
+      if (branchColor) {
+        const numFs = Math.max(Math.min(Math.min(pw, ph) * 0.22, 9), 4.2);
+        els.push(`<text x="${px.toFixed(1)}" y="${(py - ph * 0.5 + numFs + 1.5).toFixed(1)}" text-anchor="middle" font-size="${numFs.toFixed(1)}" font-weight="700" fill="${branchColor}">${cNum}</text>`);
+        const micW = Math.max(Math.min(pw, ph) * 0.44, 4);
+        const micH = Math.max(Math.min(pw, ph) * 0.16, 1.8);
+        const micCy = py + ph * 0.20;
+        els.push(`<rect x="${(px - micW / 2).toFixed(1)}" y="${(micCy - micH / 2).toFixed(1)}" width="${micW.toFixed(1)}" height="${micH.toFixed(1)}" fill="#2b2f36" stroke="${branchColor}" stroke-width="0.6" rx="0.6"/>`);
       }
     }
   });

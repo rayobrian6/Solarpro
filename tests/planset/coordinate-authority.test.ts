@@ -259,9 +259,11 @@ describe('W3.1 §2 — LIVE placement-manifest parity on the rendered planset', 
   const { snap, html } = realSnapshot();
   const manifests = parsePlacementManifests(html);
 
-  it('the rendered planset emits a manifest covering modules + rails + feet + splices', () => {
+  it('the rendered planset emits a STRUCTURAL manifest covering modules + rails + feet + splices', () => {
     expect(manifests.length).toBeGreaterThan(0);
-    const m = manifests[0];
+    // the structural plan sheet (PV-1) draws modules AND rails/feet; the PV-1B
+    // circuit sheet also emits a manifest, but of MODULES only (see below).
+    const m = manifests.find(x => x.entries.some(e => e.kind === 'rail')) ?? manifests[0];
     expect(m.transformId).toBe('DT-SITE');
     const kinds = new Set(m.entries.map(e => e.kind));
     expect(kinds.has('module')).toBe(true);       // module outlines are projected too
@@ -272,10 +274,33 @@ describe('W3.1 §2 — LIVE placement-manifest parity on the rendered planset', 
   });
 
   it('every drawn structural object == transform(canonical) within tolerance (V31) + no omission (V30)', () => {
+    // Structural COVERAGE (V30 no-omission) is required only on manifests that
+    // render structural objects — the PV-1B circuit sheet legitimately draws no
+    // rails/feet, so demanding coverage there would false-fire. Parity (V31)
+    // still applies to whatever structural objects each manifest DOES draw. This
+    // mirrors the production post-render enforcement in generatePermit.ts.
     for (const m of manifests) {
-      const v = checkRenderParity(snap, m, { kinds: ['rail', 'attachment', 'splice'], requireCoverage: true, tolSheet: 0.5 });
+      const hasStructural = m.entries.some(e => e.kind === 'rail' || e.kind === 'attachment' || e.kind === 'splice');
+      const v = checkRenderParity(snap, m, { kinds: ['rail', 'attachment', 'splice'], requireCoverage: hasStructural, tolSheet: 0.5 });
       expect(v, JSON.stringify(v.slice(0, 3))).toEqual([]);
     }
+    // exactly one manifest carries the structural objects (the structural plan)
+    expect(manifests.filter(m => m.entries.some(e => e.kind === 'rail')).length).toBe(1);
+  });
+
+  it('the PV-1B circuit manifest carries the SAME canonical modules but NO rails/feet (circuit sheet)', () => {
+    const pv1b = manifests.find(m => m.sheetId === 'PV-1B');
+    expect(pv1b, 'PV-1B manifest present').toBeTruthy();
+    const kinds = new Set(pv1b!.entries.map(e => e.kind));
+    expect(kinds.has('module')).toBe(true);
+    expect(kinds.has('rail')).toBe(false);
+    expect(kinds.has('attachment')).toBe(false);
+    // PV-1B modules == transform(canonical) under its OWN viewport (per-sheet parity)
+    expect(checkRenderParity(snap, pv1b!, { kinds: ['module'], tolSheet: 0.5 })).toEqual([]);
+    // and the PV-1B module-id set equals the structural sheet's module-id set
+    const structural = manifests.find(m => m.entries.some(e => e.kind === 'rail'))!;
+    const idsOf = (m: typeof pv1b) => new Set(m!.entries.filter(e => e.kind === 'module').map(e => e.objectId));
+    expect([...idsOf(pv1b)].sort()).toEqual([...idsOf(structural)].sort());
   });
 
   it('every drawn MODULE polygon == transform(canonical drawnPolygon) within tolerance (V31)', () => {

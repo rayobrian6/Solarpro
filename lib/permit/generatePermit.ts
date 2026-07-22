@@ -1162,11 +1162,11 @@ export function generatePermitHTML(
     (n, t) => pageArrayPrimary(input, cad, n, t, renderCtx),           // PV-1: Site & Roof / Ground / Fence (cad.systemType; hybrid = roof-scoped w/ overlays)
     ...(_w5Extras.map(_w5PlanPage)),                                   // PV-1G / PV-1F: per-sub plan/elevation (hybrid only)
     (n, t) => _w5Hybrid
-      ? pageArrayGeometry(subScopedInput(input, cad, _w5Primary), subScopedView(cad, _w5Primary), n, t,
+      ? pageArrayGeometry(subScopedInput(input, cad, _w5Primary), subScopedView(cad, _w5Primary), n, t, renderCtx,
           { titleSuffix: ` — ${SUB_LABEL[_w5Primary]}` })
-      : pageArrayGeometry(input, cad, n, t),                           // PV-1B: Array geometry (hybrid = primary sub scoped)
+      : pageArrayGeometry(input, cad, n, t, renderCtx),               // PV-1B: Array geometry (hybrid = primary sub scoped)
     ..._w5Extras.map(sec => (n: number, t: number) =>
-      pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t,
+      pageArrayGeometry(subScopedInput(input, cad, sec.key), subScopedView(cad, sec.key), n, t, renderCtx,
         { sheetId: hybridSheetId('PV-1B', sec.key), titleSuffix: ` — ${SUB_LABEL[sec.key]}` })), // PV-1BG / PV-1BF
     // ── Reading order (Ray 2026-07-20, mirrors buildSheetManifest): plans →
     // STRUCTURAL → ELECTRICAL (E-1 leads) → labels — one discipline at a time,
@@ -1264,13 +1264,22 @@ export function generatePermitHTML(
       // that the renderer consumed the snapshot coordinate (no re-derivation),
       // and that no canonical structural object is omitted (V30, requireCoverage).
       const manifests = parsePlacementManifests(joined);
-      const parityViol = manifests.flatMap(m => [
-        // structural objects: parity + no-omission (every canonical object drawn)
-        ...checkRenderParity(snapFull, m, { kinds: ['rail', 'attachment', 'splice'], requireCoverage: true, tolSheet: 0.5 }),
-        // modules: drawn == transform(canonical drawnPolygon) parity (coverage is
-        // the geo-valid drawn subset — annotated "N of M shown", not blocking here)
-        ...checkRenderParity(snapFull, m, { kinds: ['module'], requireCoverage: false, tolSheet: 0.5 }),
-      ].map(v => ({ sheet: m.sheetId, v })));
+      const parityViol = manifests.flatMap(m => {
+        // Structural coverage (V30 no-omission) is required only on sheets that
+        // actually RENDER structural objects (PV-1, the structural plan). The
+        // PV-1B circuit sheet legitimately draws NO rails/feet — it is a branch
+        // map — so demanding structural coverage there would false-fire; parity
+        // (V31) still applies to whatever structural objects a manifest DOES draw.
+        const hasStructural = m.entries.some(e => e.kind === 'rail' || e.kind === 'attachment' || e.kind === 'splice');
+        return [
+          // structural objects: parity always; no-omission only where drawn
+          ...checkRenderParity(snapFull, m, { kinds: ['rail', 'attachment', 'splice'], requireCoverage: hasStructural, tolSheet: 0.5 }),
+          // modules: drawn == transform(canonical drawnPolygon) parity, enforced on
+          // EVERY manifest that carries modules (PV-1 AND the PV-1B circuit sheet).
+          // Coverage is the geo-valid drawn subset — annotated "N of M shown".
+          ...checkRenderParity(snapFull, m, { kinds: ['module'], requireCoverage: false, tolSheet: 0.5 }),
+        ].map(v => ({ sheet: m.sheetId, v }));
+      });
       if (parityViol.length) {
         throw new SnapshotValidationError(parityViol.slice(0, 12).map(({ sheet, v }) => ({
           invariant: v.code === 'CANONICAL-OBJECT-OMITTED' ? 'V30' : 'V31',
