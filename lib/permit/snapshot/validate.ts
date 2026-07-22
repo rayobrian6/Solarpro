@@ -15,6 +15,7 @@
 import { CANONICAL_COORDINATE_SYSTEM_ID, type PermitDesignSnapshot, type SnapshotViolation, type CoordinateMeta } from './types';
 import { transformDigestOf } from './coordinateAuthority';
 import { deriveIssueState } from './projectAuthority';
+import { getMountingSystemById, classifyMountTopology } from '@/lib/mounting-hardware-db';
 
 const SHEETS_ELECTRICAL = ['E-1', 'PV-4A', 'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'BOM'];
 
@@ -378,6 +379,31 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
         add('V32', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
           'W3.1 §4 racking capacity provenance', ['PV-3', 'PV-4C', 'PV-0', 'VAL-1'],
           `blocking racking-capacity gap '${g.code}' not surfaced as a permit-readiness blocker`);
+      }
+    }
+  }
+
+  // ── V36 (W4.1 §1) — MOUNTING-TOPOLOGY RESOLUTION ─────────────────────────
+  // A roof mount whose corrected topology is 'unknown' (neither verified rail-
+  // paired nor verified rail-less — e.g. an unconfirmed RT-MINI alias) must
+  // ACTIVELY block permit-ready: the MOUNT-TOPOLOGY-UNKNOWN blocker MUST be
+  // present. Topology is re-derived independently here from the equipment
+  // authority (classifyMountTopology) — the structural path is guarded on the
+  // topology VALUE, never the product name, so a mislabeled 'rail_less'
+  // systemType cannot silently reach the direct-mount engine.
+  {
+    const mountCatalogId = (s.equipment.mount as { catalogId?: string | null } | null)?.catalogId ?? null;
+    const mountSys = mountCatalogId ? getMountingSystemById(mountCatalogId) : undefined;
+    if (mountSys) {
+      const { topology } = classifyMountTopology(mountSys);
+      const isRoofMount = mountSys.category === 'roof_residential' || mountSys.category === 'roof_commercial';
+      const looksRoof = s.geometry.roofPlanes.length > 0 || st.rails.length > 0 || st.attachments.length > 0;
+      if (topology === 'unknown' && isRoofMount && looksRoof
+          && !s.permitReadiness.blockers.some(b => b.code === 'MOUNT-TOPOLOGY-UNKNOWN')) {
+        add('V36', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code),
+          'W4.1 mounting-topology authority', ['PV-0', 'PV-3', 'PV-4C', 'VAL-1'],
+          `mount '${mountSys.manufacturer} ${mountSys.model}' has an UNKNOWN mounting topology but no `
+          + `MOUNT-TOPOLOGY-UNKNOWN blocker is present — an unresolved mounting topology must actively block permit-ready`);
       }
     }
   }

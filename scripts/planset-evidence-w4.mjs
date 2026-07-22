@@ -407,16 +407,36 @@ const report = {
   failureClasses: w3?.failureClasses ?? null,
   failureClassesAllCorrected: w3?.failureClassesAllCorrected ?? null,
 
-  // Item-4 FLAG (Ray decision — recorded, NOT changed)
+  // Item-4 RESOLUTION (W4.1 — Ray corrective directive docs/W4.1-DIRECTIVE.md §1).
+  // The open flag is CLOSED: a corrected mounting-TOPOLOGY authority
+  // (classifyMountTopology, mounting-hardware-db) now decides the rail-paired vs
+  // rail-less structural path by VALUE (never the product name), and unknown
+  // topology BLOCKS permit-ready (MOUNT-TOPOLOGY-UNKNOWN blocker + V36 validator).
   mountingHardwareDbFlag: {
-    issue: 'mounting-hardware-db labels rooftech-mini-s / rooftech-mini-t / rooftech-mini-m (RT-MINI-M Metal) as systemType "rail_less", contradicting the RT-MINI = rail-paired ruling.',
-    entries: [
-      { id: 'rooftech-mini', model: 'RT-MINI', systemType: 'rail_based', ruling: 'correct' },
-      { id: 'rooftech-mini-s', model: 'RT-MINI-S', systemType: 'rail_less', ruling: 'CONTRADICTS rail-paired ruling' },
-      { id: 'rooftech-mini-t', model: 'RT-MINI-T', systemType: 'rail_less', ruling: 'CONTRADICTS rail-paired ruling' },
-      { id: 'rooftech-mini-m', model: 'RT-MINI-M (Metal)', systemType: 'rail_less', ruling: 'CONTRADICTS rail-paired ruling' },
+    status: 'RESOLVED — W4.1 mounting-topology correction',
+    correction: 'Introduced MountTopology { rail_paired | rail_less | unknown } in the equipment authority. '
+      + 'The structural engine guards the rail-paired vs rail-less direct-mount path on the topology VALUE '
+      + '(classifyMountTopology), not the systemType/product name — a mislabeled "rail_less" systemType can no '
+      + 'longer drive the direct-mount engine. rail_less is now reserved for VERIFIED rail-less products.',
+    classification: [
+      { id: 'rooftech-mini', model: 'RT-MINI', systemType: 'rail_based', mountTopology: 'rail_paired',
+        basis: 'RT-MINI / RT-MINI II rail-paired self-flashing standoff base (pad + conventional rail); routes the railed path.' },
+      { id: 'rooftech-hook', model: 'RT-HOOK', systemType: 'standing_seam', mountTopology: 'rail_paired',
+        basis: 'Standing-seam clamp carrying a conventional rail; railed structural path.' },
+      { id: 'rooftech-mini-s', model: 'RT-MINI-S', systemType: 'rail_less', mountTopology: 'unknown',
+        basis: 'AMBIGUOUS ALIAS — no in-repo evidence (research/PE/datasheet/SKU) confirms it maps to a genuine Roof Tech rail-less RT-MINI product; tile_hook attachment differs from the RT-MINI pad standoff. Classified unknown ⇒ BLOCKS.' },
+      { id: 'rooftech-mini-t', model: 'RT-MINI-T', systemType: 'rail_less', mountTopology: 'unknown',
+        basis: 'AMBIGUOUS ALIAS — no in-repo evidence it is a genuine rail-less RT-MINI product; tile_replacement attachment differs from the RT-MINI pad standoff. Classified unknown ⇒ BLOCKS.' },
+      { id: 'rooftech-mini-m', model: 'RT-MINI-M (Metal)', systemType: 'rail_less', mountTopology: 'unknown',
+        basis: 'AMBIGUOUS — recorded as a corrugated_clamp, which does NOT map to "RT-MINI with metal flashing"; confirmation to rail_paired NOT met. Classified unknown ⇒ BLOCKS.' },
     ],
-    disposition: 'RAY DECISION — production data NOT changed by the closer (boundary: no production equipment alterations). Flagged for Ray to confirm whether these RT-MINI variants are truly rail-less or should be rail_based.',
+    unknownBlocksRule: 'A roof mount classified "unknown" emits the MOUNT-TOPOLOGY-UNKNOWN permit-readiness blocker '
+      + '(structuralAuthority.collectBlockers → permitReadiness) and is cross-checked by the V36 snapshot validator; '
+      + 'permit-ready is unreachable until the topology is confirmed. No RT-APEX / E Mount AIR record was fabricated — '
+      + 'the rail-less path is exercised by the existing verified rail-less records (Tesla / EcoFasten).',
+    braidonImpact: 'Braidon rides rooftech-mini (rail_paired) — its structural path stays railed and its snapshot '
+      + 'digest is UNCHANGED (the new mountTopology field lives in the equipment authority only; it is not serialized '
+      + 'into the snapshot, and rooftech-mini\'s classification did not change).',
   },
 
   // expected honest blockers + summary

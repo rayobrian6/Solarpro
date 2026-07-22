@@ -14,6 +14,7 @@ import type {
 } from './types';
 import type { StructuralResultV4, StructuralInputV4 } from '@/lib/structural-engine-v4';
 import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
+import { classifyMountTopology } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
 import { buildRackingAssembly, type RackingCapacityDocumentEvidence } from './rackingAssembly';
 import { runSnapshotStructuralEngine, type FramingInputs } from './structuralEngine';
@@ -309,16 +310,22 @@ function buildRailsAndAttachments(
   framingVerified: boolean, moduleInstances: ModuleInstance[], transform: DrawingTransform,
 ): { rails: RailObject[]; attachments: AttachmentObject[] } {
   const sys = ctx.mountSystem;
-  const railBased = !!sys && (sys.systemType === 'rail_based' || sys.systemType === 'standing_seam');
-  // §10 — genuine RAIL-LESS / DIRECT-MOUNT roof products (per mounting-hardware-db
-  // systemType, the single source): each module is fastened DIRECTLY to the roof
-  // at per-module mount points (the module frame is the load path — there is NO
-  // rail). We derive canonical attachment objects + CS-SITE-PLAN-FT coordinates
-  // from the module footprints × the product's attachment pattern. railObjects
-  // stay EMPTY (no phantom rails); the module→attachment relation is carried on
-  // each attachment (`supportedModuleId`). RT-MINI-class rail-PAIRED mounts
-  // (systemType 'rail_based') do NOT come here (Ray ruling) — they are railed.
-  const directMount = !!sys && sys.systemType === 'rail_less' && ctx.isRoofSystem;
+  // W4.1 §1/§2 — the rail-paired vs rail-less decision is GUARDED ON THE MOUNTING
+  // TOPOLOGY VALUE (classifyMountTopology), never on the systemType/product name.
+  const topology = sys ? classifyMountTopology(sys).topology : null;
+  const railBased = !!sys && (sys.systemType === 'rail_based' || sys.systemType === 'standing_seam'
+    || sys.mountTopology === 'rail_paired');
+  // §10 — genuine RAIL-LESS / DIRECT-MOUNT roof products (topology === 'rail_less',
+  // the corrected authority): each module is fastened DIRECTLY to the roof at per-
+  // module mount points (the module frame is the load path — there is NO rail). We
+  // derive canonical attachment objects + CS-SITE-PLAN-FT coordinates from the
+  // module footprints × the product's attachment pattern. railObjects stay EMPTY
+  // (no phantom rails); the module→attachment relation is carried on each
+  // attachment (`supportedModuleId`). RT-MINI-class rail-PAIRED mounts and
+  // topology-'unknown' mounts NEVER come here — the guard is the topology VALUE,
+  // so a mislabeled 'rail_less' systemType (unverified RT-MINI alias → 'unknown')
+  // cannot enter this path (W4.1 §2, Ray directive).
+  const directMount = !!sys && topology === 'rail_less' && ctx.isRoofSystem;
   if (run && directMount) {
     const dmAttachments = buildDirectMountAttachments(ctx, run, input, framingVerified, moduleInstances, transform);
     // W4 closer — back-fill the module→attachment relation onto each supported
@@ -624,9 +631,22 @@ function collectBlockers(
         + a.bomReconciliation.checks.filter(c => !c.ok).map(c => c.name).join(', ') });
   }
   if (!ctx.isRoofSystem) return b;
+  // W4.1 §1 — an UNKNOWN mounting topology (neither verified rail-paired nor
+  // verified rail-less — e.g. an unconfirmed RT-MINI alias) must ACTIVELY BLOCK
+  // permit-ready generation. Guarded on the topology VALUE (classifyMountTopology),
+  // never the product name. This flows into permitReadiness.blockers (build.ts)
+  // and is cross-checked by the V36 validator.
+  const mountTopo = ctx.mountSystem ? classifyMountTopology(ctx.mountSystem) : null;
+  if (ctx.mountSystem && mountTopo?.topology === 'unknown') {
+    b.push({ code: 'MOUNT-TOPOLOGY-UNKNOWN',
+      message: `Mounting product ${ctx.mountSystem.manufacturer} ${ctx.mountSystem.model} has an UNRESOLVED `
+        + `mounting topology (neither verified rail-paired nor verified rail-less) — ${mountTopo.basis} `
+        + `Permit-ready generation is blocked until the product's mounting topology is confirmed.` });
+  }
   const railBased = !!ctx.mountSystem
-    && (ctx.mountSystem.systemType === 'rail_based' || ctx.mountSystem.systemType === 'standing_seam');
-  const directMount = !!ctx.mountSystem && ctx.mountSystem.systemType === 'rail_less';
+    && (ctx.mountSystem.systemType === 'rail_based' || ctx.mountSystem.systemType === 'standing_seam'
+      || ctx.mountSystem.mountTopology === 'rail_paired');
+  const directMount = !!ctx.mountSystem && mountTopo?.topology === 'rail_less';
 
   if (a.engine.engineeringReviewRequired) {
     b.push({ code: 'STRUCTURAL-FRAMING-UNVERIFIED',

@@ -56,6 +56,24 @@ export type SystemType =
   | 'standing_seam'
   | 'solar_fence';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// W4.1 — MOUNTING TOPOLOGY (Ray corrective directive, docs/W4.1-DIRECTIVE.md §1)
+//
+// The STRUCTURAL LOAD-PATH classification — distinct from `systemType` — that
+// decides whether a roof mount routes through the RAIL-PAIRED (railed) assembly
+// path or the RAIL-LESS direct-mount path. This is the directive's own term and
+// the AUTHORITY the structural engine guards on (by VALUE, never by matching the
+// product name). It corrects the RT-MINI family being wrongly labeled rail-less:
+//   • rail_paired — RT-MINI / RT-MINI II family + every conventional railed mount
+//     (module → rail → L-foot/clamp → roof). Routes the railed structural path.
+//   • rail_less   — VERIFIED rail-less direct-mount products only (module frame
+//     is the load path; no rail). Routes buildDirectMountAttachments.
+//   • unknown     — the product's topology is NOT confirmed as either. This is an
+//     honest gap and MUST BLOCK permit-ready generation (MOUNT-TOPOLOGY-UNKNOWN)
+//     — never guessed from the word "mini" or a fabricated "rail-less" label.
+export type MountTopology = 'rail_paired' | 'rail_less' | 'unknown';
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface RailSpec {
   model: string;
   materialAlloy: string;           // e.g. '6005-T5 aluminum'
@@ -161,6 +179,15 @@ export interface MountingSystemSpec {
   model: string;
   category: SystemCategory;
   systemType: SystemType;
+  // W4.1 §1 — corrected mounting TOPOLOGY (directive term). When set it is the
+  // AUTHORITY for the rail-paired vs rail-less structural-path decision (the
+  // structural engine guards on this VALUE, not the product name). When absent,
+  // classifyMountTopology() derives it from systemType. 'unknown' BLOCKS
+  // permit-ready generation (MOUNT-TOPOLOGY-UNKNOWN) — never a guess.
+  mountTopology?: MountTopology;
+  // Provenance/basis for the topology classification — especially the alias
+  // confirmation for an RT-MINI variant, or the reason a record is 'unknown'.
+  mountTopologyBasis?: string;
   compatibleRoofTypes: RoofType[];
   description: string;
 
@@ -546,6 +573,12 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     model: 'RT-MINI',
     category: 'roof_residential',
     systemType: 'rail_based',
+    // W4.1 §1 — RT-MINI / RT-MINI II are RAIL-PAIRED standoff bases (module → rail
+    // → RT-MINI pad → roof), NOT rail-less module mounts. Routes the railed path.
+    mountTopology: 'rail_paired',
+    mountTopologyBasis: 'RT-MINI / RT-MINI II are rail-paired self-flashing standoff bases: the pad '
+      + 'attaches a CONVENTIONAL rail (IronRidge XR100/XR1000, UniRac SFM, Pegasus or equivalent — see '
+      + 'hardware.railSplice), and modules clamp to that rail. systemType rail_based; Ray directive §1.',
     compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
     description: 'Roof Tech RT-MINI — SELF-FLASHING pad standoff (AlphaSeal / RT Butyl seals the screw penetration; no separate flashing kit). Fastened with 2 structural wood screws into the rafter (no pilot hole). L-foot + conventional rail are separate add-ons. ICC-ES ESR-3575.',
     mount: {
@@ -607,8 +640,20 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     model: 'RT-MINI-S',
     category: 'roof_residential',
     systemType: 'rail_less',
+    // W4.1 §1 — TOPOLOGY UNKNOWN (blocks). This record's systemType 'rail_less' and
+    // "rail-less" description are UNVERIFIED: no in-repo evidence (research artifact,
+    // PE letter, datasheet, or SKU) confirms 'RT-MINI-S' is a genuine Roof Tech
+    // rail-less product mapping to the RT-MINI family — its tile_hook attachment
+    // differs from the RT-MINI pad standoff, and attachment-capacity-basis-research
+    // .json documents only RT-MINI / RT-MINI II. Per the directive ("do not guess
+    // from 'mini'"), an ambiguous alias is 'unknown' and BLOCKS permit-ready.
+    mountTopology: 'unknown',
+    mountTopologyBasis: 'AMBIGUOUS ALIAS — no in-repo evidence confirms RT-MINI-S maps to a genuine Roof '
+      + 'Tech rail-less product; the tile_hook attachment differs from the RT-MINI rail-paired pad standoff '
+      + 'and no research/PE/datasheet/SKU corroborates it. Classified unknown (blocks) per Ray directive §1.',
     compatibleRoofTypes: ['tile_concrete', 'tile_clay', 'slate'],
-    description: 'Roof Tech RT-MINI-S — extended standoff rail-less mount for tile and slate roofs. ICC-ES ESR-3575',
+    description: 'Roof Tech RT-MINI-S — UNVERIFIED tile/slate variant; mounting topology UNKNOWN (no in-repo '
+      + 'evidence it is a genuine rail-less RT-MINI product) — blocks permit-ready until confirmed. ICC-ES ESR-3575',
     mount: {
       model: 'RT-MINI-S',
       attachmentMethod: 'tile_hook',
@@ -651,8 +696,17 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     model: 'RT-MINI-T',
     category: 'roof_residential',
     systemType: 'rail_less',
+    // W4.1 §1 — TOPOLOGY UNKNOWN (blocks). Same as RT-MINI-S: an unverified
+    // "rail-less" tile-replacement variant with no in-repo evidence it is a
+    // genuine Roof Tech product mapping to the RT-MINI family; its
+    // tile_replacement attachment differs from the RT-MINI pad standoff.
+    mountTopology: 'unknown',
+    mountTopologyBasis: 'AMBIGUOUS ALIAS — no in-repo evidence confirms RT-MINI-T maps to a genuine Roof '
+      + 'Tech rail-less product; the tile_replacement attachment differs from the RT-MINI rail-paired pad '
+      + 'standoff and no research/PE/datasheet/SKU corroborates it. Classified unknown (blocks) per directive §1.',
     compatibleRoofTypes: ['tile_concrete', 'tile_clay'],
-    description: 'Roof Tech RT-MINI-T — tile replacement rail-less mount for concrete and clay tile. ICC-ES ESR-3575',
+    description: 'Roof Tech RT-MINI-T — UNVERIFIED tile-replacement variant; mounting topology UNKNOWN (no in-repo '
+      + 'evidence it is a genuine rail-less RT-MINI product) — blocks permit-ready until confirmed. ICC-ES ESR-3575',
     mount: {
       model: 'RT-MINI-T',
       attachmentMethod: 'tile_replacement',
@@ -695,6 +749,11 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     model: 'RT-HOOK',
     category: 'roof_residential',
     systemType: 'standing_seam',
+    // W4.1 §1 — RT-HOOK is a standing-seam CLAMP paired with a conventional rail
+    // (module → rail → clamp → seam). Rail-paired structural path.
+    mountTopology: 'rail_paired',
+    mountTopologyBasis: 'RT-HOOK is a no-penetration standing-seam clamp that carries a conventional rail; '
+      + 'modules clamp to that rail (systemType standing_seam) — railed structural path. Ray directive §1.',
     compatibleRoofTypes: ['metal_standing_seam'],
     description: 'Roof Tech RT-HOOK — standing seam clamp mount, no roof penetrations. ICC-ES ESR-3575',
     mount: {
@@ -739,8 +798,19 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     model: 'RT-MINI-M (Metal)',
     category: 'roof_residential',
     systemType: 'rail_less',
+    // W4.1 §1 — TOPOLOGY UNKNOWN (blocks). The directive lists "RT-MINI metal-
+    // flashing variants = rail_paired ONLY after confirming it maps to RT-MINI
+    // with metal flashing." This record is a CORRUGATED-METAL CLAMP
+    // (attachmentMethod 'corrugated_clamp'), which does NOT map to an RT-MINI
+    // pad standoff with metal flashing — it is a different, unverified product.
+    // Ambiguous ⇒ unknown (blocks), never guessed to rail_paired.
+    mountTopology: 'unknown',
+    mountTopologyBasis: 'AMBIGUOUS — recorded as a corrugated_clamp product, which does NOT map to '
+      + '"RT-MINI with metal flashing" (a penetrating pad standoff); no in-repo evidence confirms it is a '
+      + 'genuine Roof Tech product. Confirmation to rail_paired was NOT met ⇒ classified unknown (blocks) per directive §1.',
     compatibleRoofTypes: ['metal_corrugated'],
-    description: 'Roof Tech RT-MINI-M — corrugated metal roof rail-less mount with integrated sealing. ICC-ES ESR-3575',
+    description: 'Roof Tech RT-MINI-M — UNVERIFIED corrugated-metal variant; mounting topology UNKNOWN (recorded as a '
+      + 'corrugated clamp, not a confirmed RT-MINI metal-flashing standoff) — blocks permit-ready until confirmed. ICC-ES ESR-3575',
     mount: {
       model: 'RT-MINI-M',
       attachmentMethod: 'corrugated_clamp',
@@ -2682,6 +2752,42 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
 
 export function getMountingSystemById(id: string): MountingSystemSpec | undefined {
   return MOUNTING_SYSTEMS.find(s => s.id === id);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// W4.1 §1 — MOUNTING-TOPOLOGY CLASSIFIER (the single authority for the rail-
+// paired vs rail-less structural-path decision). Precedence:
+//   1. An EXPLICIT `mountTopology` on the record wins (incl. 'unknown').
+//   2. Otherwise DERIVE from systemType: railed systemTypes (rail_based /
+//      standing_seam) ⇒ rail_paired; 'rail_less' ⇒ rail_less; any other
+//      systemType is a ballast/ground/tracker/fence path where the roof rail-
+//      topology decision does not apply — reported rail_paired so it never
+//      falsely enters the rail-less direct-mount path or the unknown blocker
+//      (those paths are additionally gated on `isRoofSystem` upstream).
+// The structural engine MUST guard on the returned VALUE, never on the product
+// name — so a mislabeled 'rail_less' systemType (e.g. an unverified RT-MINI
+// alias) cannot drive the direct-mount path once classified 'unknown'.
+export function classifyMountTopology(
+  system: Pick<MountingSystemSpec, 'systemType' | 'mountTopology' | 'mountTopologyBasis'>,
+): { topology: MountTopology; basis: string } {
+  if (system.mountTopology) {
+    return {
+      topology: system.mountTopology,
+      basis: system.mountTopologyBasis ?? `explicit record classification '${system.mountTopology}'`,
+    };
+  }
+  switch (system.systemType) {
+    case 'rail_based':
+    case 'standing_seam':
+      return { topology: 'rail_paired', basis: `derived from systemType '${system.systemType}' (railed structural path)` };
+    case 'rail_less':
+      return { topology: 'rail_less', basis: `derived from systemType 'rail_less' (verified rail-less direct-mount)` };
+    default:
+      return {
+        topology: 'rail_paired',
+        basis: `systemType '${system.systemType}' is not a roof rail-topology (ballast/ground/tracker/fence) — routed on its own path`,
+      };
+  }
 }
 
 export function getMountingSystemsByCategory(category: SystemCategory): MountingSystemSpec[] {
