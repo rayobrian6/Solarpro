@@ -1,0 +1,138 @@
+{
+  "generatedAt": "2026-07-23T03:33:59.882Z",
+  "snapshotId": "PDS-7793029705B6",
+  "digest": "7793029705b6f7b4cf00ef6b11aa750ef7938172b7ca622cce6f15ff3ce4a5ef",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-7793029705B6 (digest 7793029705b6f7b4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W5 — APP-A projects ONLY from versioned verified equipment/document records; each displayed value carries equipment record ID + exact SKU + document record ID + verification state.",
+  "appAFieldCount": 14,
+  "everyFieldProvenanceComplete": true,
+  "appAFieldToDocumentMap": [
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.acOutputVaPeak",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.acOutputW",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.acOutputCurrentMax",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.dcInputWMax",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.mpptVoltageMin",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.maxInputCurrent",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.cec_efficiency",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.connectorType",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.rapidShutdownCompliant",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.weight",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "equipment-db#enphase-iq8a.warranty",
+      "renderedValue": "",
+      "verify": "verified-document",
+      "equipmentRecordId": "enphase-iq8a",
+      "sku": "IQ8A-72-2-US",
+      "documentRecordId": "microinverter_spec:enphase-iq8a"
+    },
+    {
+      "fieldPath": "mountTopology",
+      "renderedValue": "rail_paired",
+      "verify": null,
+      "equipmentRecordId": null,
+      "sku": null,
+      "documentRecordId": null
+    },
+    {
+      "fieldPath": "railModel",
+      "renderedValue": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION",
+      "verify": null,
+      "equipmentRecordId": null,
+      "sku": null,
+      "documentRecordId": null
+    },
+    {
+      "fieldPath": "fastener",
+      "renderedValue": "5/16&quot; (8mm/M8) structural wood screw, ~3.5&quot; (90mm) — 2 per pad, no pilot hole — 2/mount",
+      "verify": null,
+      "equipmentRecordId": null,
+      "sku": null,
+      "documentRecordId": null
+    }
+  ],
+  "equipmentSummary": {
+    "moduleManufacturer": "Q CELLS",
+    "moduleModel": "Q.PEAK DUO BLK ML-G10+ 400W",
+    "moduleWatts": 400,
+    "inverterManufacturer": "Enphase",
+    "inverterModel": "IQ8A",
+    "inverterType": "MICROINVERTER",
+    "mountManufacturer": "Roof Tech",
+    "mountModel": "RT-MINI",
+    "batteryBrand": null,
+    "batteryModel": null,
+    "batteryCount": null,
+    "combinerLabel": "Enphase IQ Combiner 6C"
+  }
+}

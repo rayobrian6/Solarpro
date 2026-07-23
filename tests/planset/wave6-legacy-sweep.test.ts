@@ -49,7 +49,9 @@ function roofStringProject(): any {
 // leads) → labels → schedules/datasheets → certs. DS series: equipment pages
 // + RACKING MOUNT (the manufacturer page PV-3 formerly reprinted inline —
 // PV-3 is a DRAWING sheet again) + RACKING RAIL (rail_spec product sheet).
-const LEGACY_SEQ = ['PV-0', 'PV-1', 'PV-1B', 'PV-3', 'PV-4C', 'E-1', 'PV-4A',
+// RS-1 (REVIEW STATUS) follows the cover — W10 (RP-D) dedicated active-blocker
+// registry sheet, always present, referenced from the cover SHEET INDEX.
+const LEGACY_SEQ = ['PV-0', 'RS-1', 'PV-1', 'PV-1B', 'PV-3', 'PV-4C', 'E-1', 'PV-4A',
   'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'DS-2', 'DS-3',
   'CERT', 'PE-1'];
 // Fence: no racking-mount image asset (SolFence has no public doc) and no

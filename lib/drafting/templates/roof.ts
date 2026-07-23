@@ -51,7 +51,7 @@ import { resolveFireSetbackIn } from '../../permit/utils/fireSetback';
 // §6 ROUTE PROVENANCE (07-22): the trench/conduit annotation must NOT claim
 // "ROUTE FIELD-VERIFIED" while run lengths are CAD-derived estimates — it prints
 // "CAD-DERIVED ESTIMATE — FIELD VERIFY", driven by the snapshot's lengthSource.
-import { routeProvenanceLabel } from '../../permit/snapshot/electricalProjection';
+import { routeProvenanceLabel, branchLayoutCaption, projectCanonicalBranch } from '../../permit/snapshot/electricalProjection';
 import {
   computeFitWindow, drawSiteContextEls, type SiteContext,
   computePlanTiltDeg, choosePlanRotationDeg, rotateFakePt, rotateAzimuthDeg,
@@ -1865,7 +1865,14 @@ export function drawRoofPlan(
     els.push(`<line x1="${(jbX - 3.5).toFixed(1)}" y1="${(jbY - 3.5).toFixed(1)}" x2="${(jbX + 3.5).toFixed(1)}" y2="${(jbY + 3.5).toFixed(1)}" stroke="#000" stroke-width="0.6"/>`);
     const cEndX = roofMaxX - 8, cEndY = roofMaxY - 6;
     els.push(`<polyline points="${jbX.toFixed(1)},${jbY.toFixed(1)} ${cEndX.toFixed(1)},${cEndY.toFixed(1)}" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="5 3"/>`);
-    const _jbLines = [`(N) JUNCTION BOX + 3/4" ${condType}`, `CONDUIT — ${routeProvenanceLabel(ctx?.snapshot)}`];
+    // W1b — the JB conduit stub PROJECTS the canonical branch run raceway/size
+    // (the branch home-run from the JB), never a hardcoded 3/4" + project conduit
+    // type, so PV-1 agrees with E-1 / PV-4B on the branch conduit (gate 3).
+    const _jbBranch = projectCanonicalBranch(ctx?.snapshot);
+    const _jbConduit = _jbBranch.raceway === 'FREE_AIR'
+      ? 'FREE AIR (Q-CABLE)'
+      : (_jbBranch.raceway && _jbBranch.tradeSizeIn ? `${_jbBranch.tradeSizeIn} ${_jbBranch.raceway}` : `3/4" ${condType}`);
+    const _jbLines = [`(N) JUNCTION BOX + ${_jbConduit}`, `CONDUIT — ${routeProvenanceLabel(ctx?.snapshot)}`];
     const _jbTextW = Math.max(..._jbLines.map(l => l.length)) * 3.5;
     const _rightGap = (W - zones.dims.right) - roofMaxX;
     if (_rightGap >= _jbTextW + 18) {
@@ -1914,10 +1921,14 @@ export function drawRoofPlan(
   // explains the module shading (useful) rather than repeating the sheet title. ──
   if (isBranchColorMode) {
     els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
-      // Wording note: the planset-structural golden guards against any on-map
-      // legend overlay by asserting the literal "BRANCH LEGEND" never appears
-      // in this SVG — reference the rail table without tripping it.
-      'IQ8 MICROINVERTER (▪) UNDER EACH MODULE · WIRED IN SERIES PER AC BRANCH (COLORED) · DASHED = HOMERUN TO JB · SEE LEGEND IN DATA RAIL', {
+      // W3 §topology-description — the caption PROJECTS the ONE canonical
+      // topology accessor (branchLayoutCaption). Micros are CONNECTED IN
+      // PARALLEL on the AC branch / Q-Cable — never the old "WIRED IN SERIES"
+      // literal (gate 1: series language is prohibited on a micro AC-branch
+      // sheet). Brand-aware (Enphase ⇒ Q Cable). The planset-structural golden
+      // still guards against the on-map "BRANCH LEGEND" literal — this keys the
+      // device symbol + dashing and references the rail table only.
+      branchLayoutCaption(ctx?.snapshot), {
         anchor: 'start', fontSize: 6.5, fill: '#555', italic: true,
       }));
   }

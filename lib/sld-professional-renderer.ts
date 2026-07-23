@@ -291,6 +291,8 @@ export interface SLDProfessionalInput {
   microBranches?:          MicroBranch[];
   branchWireGauge?:        string;
   branchConduitSize?:      string;
+  branchConduitType?:      string;   // W1b — canonical BRANCH_RUN raceway (single source; no '3/4" EMT' literal)
+  branchIsOpenAir?:        boolean;  // W1b — branch home-run in raceway (false) vs open-air Q-Cable (true)
   branchOcpdAmps?:         number;
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
   runs?:                   RunSegment[];
@@ -1951,7 +1953,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const _brWireTxt = _brGauges.length
         ? `${_brGauges.join('/')} AWG THWN-2`
         : `${input.branchWireGauge??'#10 AWG'} THWN-2`;
-      const fb = [_brWireTxt, `1×#${egcNum} GRN EGC`, `IN ${input.branchConduitSize??'3/4"'} EMT`];
+      // W1b — the branch home-run conduit label PROJECTS the canonical BRANCH_RUN
+      // raceway (branchConduitType/Size from the snapshot), never a hardcoded
+      // '3/4" EMT'. Open-air Q-Cable branches print the 690.31(C) free-air label;
+      // in-raceway home runs print the real raceway type + size (matching PV-4B).
+      const _brCondLine = input.branchIsOpenAir
+        ? 'OPEN AIR — NEC 690.31(C)'
+        : `IN ${input.branchConduitSize ?? '3/4"'} ${input.branchConduitType ?? 'EMT'}`;
+      const fb = [_brWireTxt, `1×#${egcNum} GRN EGC`, _brCondLine];
       const {lines, cnt} = runLines(run, fb);
       const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
       console.log('[WIRE RUN CREATED] SEGMENT_2A_JBOX_TO_COMBINER: AC branch');

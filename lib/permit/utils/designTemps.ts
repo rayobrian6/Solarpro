@@ -76,3 +76,74 @@ export function getDesignTemps(
     source: `ASHRAE 2021 climatic design data — ${key} state envelope (conservative)`,
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THERMAL DESIGN BASIS — the ONE canonical min/max design-temperature object
+// (W5 §4, repair pass 2026-07-22). Every V/I/T calculation on the permit set
+// (NEC 690.7 cold-Voc, 310.15 ampacity derating) consumes THIS basis. No
+// renderer may hardcode a local temperature (the APP-A -10 °C split is killed
+// by routing APP-A through getThermalDesignBasis). One basis per package.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ThermalDesignBasis {
+  /** minimum design temperature, °C (NEC 690.7(A) cold-Voc basis). */
+  minDesignTempC: number;
+  /** maximum / 2% cooling design temperature, °C (NEC 310.15 derating basis). */
+  maxDesignTempC: number;
+  /** human-readable provenance of the temperature values. */
+  source: string;
+  /** station / location the values represent (state envelope or AHJ override). */
+  stationOrLocation: string;
+  /** climatic-data revision, e.g. 'ASHRAE 2021'. */
+  revision: string;
+  /** where the module temperature coefficients come from. */
+  coefficientSource: string;
+  /** the calculation the min temp feeds. */
+  method: string;
+  /** true when an explicit AHJ/project override replaced the ASHRAE envelope. */
+  overrideApplied: boolean;
+  provenance: { source: string };
+}
+
+/** Extract a 2-letter USPS state from an explicit field or a "…, IL 62040" address tail. */
+function resolveStateAbbr(state?: string | null, address?: string | null): string | undefined {
+  if (state && /^[A-Za-z]{2}$/.test(state.trim())) return state.trim().toUpperCase();
+  const m = (address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/);
+  return m ? m[1].toUpperCase() : undefined;
+}
+
+/**
+ * Resolve the singular ThermalDesignBasis for a site. An explicit
+ * `designTempMinOverrideC` (the project's AHJ design-low field) always wins
+ * over the ASHRAE state envelope; otherwise the ASHRAE 2021 state-envelope
+ * extreme-low is used. This is the ONLY sanctioned source of design temperatures
+ * for the equipment/compliance sheets.
+ */
+export function getThermalDesignBasis(opts: {
+  lat?: number | null;
+  lng?: number | null;
+  state?: string | null;
+  address?: string | null;
+  designTempMinOverrideC?: number | null;
+}): ThermalDesignBasis {
+  const stateAbbr = resolveStateAbbr(opts.state, opts.address);
+  const temps = getDesignTemps(opts.lat, opts.lng, stateAbbr);
+  const hasOverride = typeof opts.designTempMinOverrideC === 'number'
+    && Number.isFinite(opts.designTempMinOverrideC);
+  const minC = hasOverride ? (opts.designTempMinOverrideC as number) : temps.ashraeExtremeLowC;
+  return {
+    minDesignTempC: minC,
+    maxDesignTempC: temps.ashrae2pctHighC,
+    source: hasOverride
+      ? `AHJ / project design-low override (${minC} °C); ASHRAE max ${temps.ashrae2pctHighC} °C`
+      : temps.source,
+    stationOrLocation: hasOverride
+      ? 'AHJ / project override'
+      : (stateAbbr ? `${stateAbbr} state envelope` : 'national default'),
+    revision: 'ASHRAE 2021',
+    coefficientSource: 'module manufacturer datasheet (temperature coefficient of Voc)',
+    method: 'NEC 690.7(A) cold-temperature Voc correction / NEC 310.15 ampacity derating',
+    overrideApplied: hasOverride,
+    provenance: { source: hasOverride ? 'project.designTempMin' : 'designTemps.getDesignTemps' },
+  };
+}

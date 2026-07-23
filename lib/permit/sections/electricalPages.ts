@@ -14,7 +14,7 @@ import { getSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
-import { projectCanonicalFeeder } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch } from '../snapshot/electricalProjection';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { SUB_LABEL } from './subSystemSheets';
@@ -166,26 +166,69 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   // suppressed until the per-sub pairing check lands (Wave 6).
   const _pairWarn = !_auth.isHybrid && _pairRatio > 1.55;
   const _extraWarn = _pairWarn ? 1 : 0;
+
+  // ══ W1a §compliance-summary — PV-4A's verdict DERIVES from the canonical
+  // snapshot (permit-readiness blockers + canonical feeder holes + service-
+  // topology PENDINGs + unresolved parity), NEVER the legacy rules-engine
+  // counter that read `input.rulesResult`. That counter tallied only legacy
+  // rules rows, so it printed "0 errors / 0 warnings / complies" while the
+  // canonical feeder fill was PENDING and the supply-side tap length was
+  // unmeasured. FAIL CLOSED (gate 4): any pending electrical authority forbids
+  // a global PASS / zero-warning claim — the sheet prints PENDING honestly.
+  const _snapA = getSnapshot(input);
+  const _ELEC_BLOCKER_CODES = new Set([
+    'ROUTE-LENGTH-ESTIMATE', 'FEEDER-RACEWAY-AUTHORITY', 'CONDUIT-FILL-PENDING',
+    'TAP-LENGTH-PENDING', 'CONDUCTOR-AUTHORITY-INCOMPLETE', 'EQUIPMENT-IDENTITY-CONFLICT',
+  ]);
+  const _elecBlockers = (_snapA.permitReadiness?.blockers ?? []).filter(b => _ELEC_BLOCKER_CODES.has(b.code));
+  const _elecPending: string[] = [];
+  if (_feedA.hasHole) _elecPending.push(..._feedA.holes.map(h => `${h} unresolved`));
+  if (_feedA.fillPct == null) _elecPending.push('feeder conduit fill pending');
+  const _tapPending = (_snapA.electrical.serviceTopology ?? []).some(o =>
+    o.constraints.some(c => c.state === 'pending'));
+  if (_tapPending) _elecPending.push('supply-side tap-conductor length pending (≤10 ft — field verify)');
+  const _parityUnresolved = _snapA.electrical.parity?.unresolved ?? [];
+  const _elecErrorCount = _elecBlockers.length + _parityUnresolved.length;
+  const _elecWarnCount = _elecPending.length + _extraWarn;
+  // COMPLIES only when nothing is blocking AND nothing is pending (gate 4).
+  const _elecComplies = _elecErrorCount === 0 && _elecWarnCount === 0;
+  const _elecStatusLabel = _elecErrorCount > 0 ? 'BLOCKED — REVIEW REQUIRED'
+    : _elecWarnCount > 0 ? 'PENDING — ITEMS OUTSTANDING' : 'COMPLIES';
+  const _elecStatusColor = _elecErrorCount > 0 ? '#cc0000' : _elecWarnCount > 0 ? '#cc6600' : '#127a3e';
+  const _elecSummaryCard = `
+      <div class="rules-summary">
+        <div class="rs" style="color:${_elecErrorCount > 0 ? '#cc0000' : '#000'}">
+          <div class="rs-val">${_elecErrorCount}</div><div class="rs-lbl">Blocking</div>
+        </div>
+        <div class="rs" style="color:${_elecWarnCount > 0 ? '#cc6600' : '#000'}">
+          <div class="rs-val">${_elecWarnCount}</div><div class="rs-lbl">Pending</div>
+        </div>
+        <div class="rs" style="color:${_elecStatusColor};grid-column:span 2">
+          <div class="rs-val" style="font-size:13px">${_elecStatusLabel}</div><div class="rs-lbl">Electrical Compliance Status (snapshot ${_snapA.meta.snapshotId})</div>
+        </div>
+      </div>
+      ${(_elecBlockers.length || _elecPending.length) ? `
+      <table class="equip-table">
+        <thead><tr><th style="width:22%">Type</th><th style="width:26%">Code</th><th>Outstanding Authority / Condition</th></tr></thead>
+        <tbody>
+          ${_elecBlockers.map(b => `<tr style="background:${statusBg('error')}"><td style="color:#cc0000;font-weight:bold">BLOCKING</td><td class="mono f-lg">${b.code}</td><td style="font-size:9px">${b.message}</td></tr>`).join('')}
+          ${_parityUnresolved.map(p => `<tr style="background:${statusBg('error')}"><td style="color:#cc0000;font-weight:bold">BLOCKING</td><td class="mono f-lg">PARITY-UNRESOLVED</td><td style="font-size:9px">${p}</td></tr>`).join('')}
+          ${_elecPending.map(p => `<tr style="background:${statusBg('warning')}"><td style="color:#cc6600;font-weight:bold">PENDING</td><td class="mono f-lg">—</td><td style="font-size:9px">${p}</td></tr>`).join('')}
+        </tbody>
+      </table>` : `<div style="padding:var(--xs);font-size:var(--f-md);border:var(--border);border-top:none;background:#f0f7f0;color:#127a3e;font-weight:700">No blocking or pending electrical authority items on the canonical snapshot.</div>`}`;
   return `
   <div class="page">
     ${titleBlock(input, 'PV-4A', 'NEC COMPLIANCE SHEET', pageNum, totalPages)}
     <div class="page-content">
       <div class="section-title">Electrical Compliance — ${_cp.tag('nec')}</div>
+      <!-- W1a: AUTHORITATIVE electrical compliance status — snapshot-derived
+           (blockers + canonical feeder + service topology + parity). The legacy
+           rules-engine 4-counter card (errorCount/warningCount from
+           input.rulesResult) is RETIRED: it under-counted (missed the PENDING
+           feeder fill + tap length) and produced the false "0 errors / complies". -->
+      ${_elecSummaryCard}
       ${rulesResult ? `
-      <div class="rules-summary">
-        <div class="rs" style="color:${rulesResult.errorCount > 0 ? '#cc0000' : '#000'}">
-          <div class="rs-val">${rulesResult.errorCount}</div><div class="rs-lbl">Errors</div>
-        </div>
-        <div class="rs" style="color:${rulesResult.warningCount + _extraWarn > 0 ? '#cc6600' : '#000'}">
-          <div class="rs-val">${rulesResult.warningCount + _extraWarn}</div><div class="rs-lbl">Warnings</div>
-        </div>
-        <div class="rs" style="color:#000">
-          <div class="rs-val">${rulesResult.autoFixCount}</div><div class="rs-lbl">Auto-Fixed</div>
-        </div>
-        <div class="rs" style="color:#000">
-          <div class="rs-val">${rulesResult.overrideCount}</div><div class="rs-lbl">Overrides</div>
-        </div>
-      </div>
+      <div class="section-title" style="margin-top:var(--sm)">NEC Rule Detail (advisory — authoritative status above)</div>
       <table class="equip-table">
         <thead><tr><th style="width:18%">Code Reference</th><th style="width:25%">Description</th><th style="width:30%">Result</th><th style="width:15%">Value / Limit</th><th style="width:12%">Status</th></tr></thead>
         <tbody>
@@ -339,15 +382,15 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         <strong>ENGINEERING INTERPRETATION:</strong> The above methodology is applied to all DC and AC circuits in this system.
         Each conductor, overcurrent device, and disconnect has been sized using the calculation chain shown.
         Temperature correction factors per NEC 310.15(B)(1) are applied. ${_auth.isHybrid ? 'Rooftop temperature adders per NEC 310.15(B)(3)(c) apply to ROOF sub-system circuits only \u2014 ground and fence sub-system circuits use standard ambient (no rooftop adder).' : _isRoof ? 'Rooftop temperature adders per NEC 310.15(B)(3)(c) are applied where conduit is routed on or above the roof surface.' : _isFence ? 'No rooftop temperature adder applies \u2014 fence-mounted system (NEC 310.15(B)(3)(c) N/A).' : 'No rooftop temperature adder applies \u2014 ground-mounted system (NEC 310.15(B)(3)(c) N/A).'}
-        ${rulesResult && rulesResult.errorCount === 0 ? 'All calculations produce compliant results with no errors identified.' : 'Review flagged items above before submission.'}
+        ${_elecComplies ? 'All calculations produce compliant results with no blocking or pending electrical authority items on the canonical snapshot.' : 'Blocking or pending electrical authority items remain — resolve the items listed in the compliance status above before submission.'}
       </div>
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — NEC COMPLIANCE:</strong>
         This ${cadTotalDcKw.toFixed(2)} kW DC / ${cadTotalPanels} module ${_auth.isHybrid ? `HYBRID photovoltaic system (${_auth.subSystems.map(s => `${SUB_LABEL[s.key]}: ${s.panelCount}`).join(' · ')})` : 'photovoltaic system'} has been evaluated against NEC ${necVer} Articles 690, 705, 250, and 310.
         ${_auth.isHybrid ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) applies to the ROOF sub-system only.' : _isRoof ? '' : _isFence ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a fence-mounted system.' : 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a ground-mounted system.'}
-        ${rulesResult ? `The rules engine identified ${rulesResult.errorCount} error(s), ${rulesResult.warningCount + _extraWarn} warning(s), and ${rulesResult.autoFixCount} auto-correction(s).` : ''}
+        The canonical snapshot reports ${_elecErrorCount} blocking and ${_elecWarnCount} pending electrical authority item(s)${rulesResult ? ` (advisory rules-engine detail: ${rulesResult.errorCount} error(s), ${rulesResult.warningCount + _extraWarn} warning(s), ${rulesResult.autoFixCount} auto-correction(s))` : ''}.
         Interconnection is resolved to a ${_ic.isSupplySide ? `SUPPLY-SIDE (line-side) tap per NEC 705.11 (${_ic.feederOcpd} A fused AC disconnect ahead of the ${_ic.mainA} A service disconnect) — the 120% busbar rule of NEC 705.12(B) does not apply` : `LOAD-SIDE connection per NEC 705.12(B) (${_ic.feederOcpd} A backfeed breaker; ${_ic.mainA} A main + ${_ic.feederOcpd} A ≤ ${_ic.busLimit.toFixed(0)} A busbar limit)`}.
-        System configuration ${(!rulesResult || rulesResult.errorCount === 0) ? 'complies with' : 'requires review per'} NEC ${necVer} and applicable local amendments.
+        System configuration ${_elecComplies ? 'complies with' : 'requires review per'} NEC ${necVer} and applicable local amendments.
       </div>
 
       ${overrides && overrides.length > 0 ? `
@@ -466,6 +509,13 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               // rows sourced from the shared conductor authority (same branch
               // OCPD/gauge as PV-4A + E-1). The old code hardcoded '#10 AWG' and
               // re-derived the OCPD locally.
+              // W1c: conduit + length come from the CANONICAL branch run segment,
+              // NOT project.conduitType / project.wireLength. Micro AC branch
+              // conductors on the Q-Cable trunk are FREE-AIR (NEC 690.31(C)); the
+              // old code stamped the feeder's flat 60 ft "EMT" onto every branch.
+              const _branch = projectCanonicalBranch(_snap);
+              const _brConduit = _branch.conduitLabel ?? 'FREE AIR (Q-CABLE / TC-ER)';
+              const _brLenTxt = _branch.oneWayFt != null ? `${_branch.oneWayFt} ft` : '—';
               return _auth.microBranches.map((b) => `
               <tr>
                 <td class="fw7">AC Branch ${b.index}</td>
@@ -475,8 +525,8 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 <td>${b.branchCurrentA.toFixed(1)}A</td>
                 <td>${b.ocpdAmps}A</td>
                 <td>—</td>
-                <td>${project.conduitType || 'EMT'}</td>
-                <td>${project.wireLength || '—'} ft</td>
+                <td>${_brConduit}</td>
+                <td>${_brLenTxt}</td>
               </tr>`).join('');
             } else {
               // String / Optimizer: Show traditional DC string rows
@@ -533,7 +583,11 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <td class="fw7">AC Output</td>
             <td class="tr">${_feedLenTxt}</td>
             <td>${_feedCallout} Cu</td>
-            <td class="tr">${_ic.feederOcpd || '—'}A</td>
+            <!-- W1d: the Amps column states the OPERATING current the voltage-drop
+                 formula actually used (Vd = 2·L·I·R/1000, I = PV operating current),
+                 NOT the feeder OCPD rating. Printing the 60 A OCPD here made the VD
+                 look computed at 60 A while the engine derived it at ~45 A. -->
+            <td class="tr">${_feed.currentA != null ? _feed.currentA.toFixed(1) : (_ic.feederOutputA ? _ic.feederOutputA.toFixed(1) : '—')}A<span style="color:#777;font-size:7px"> (op)</span></td>
             <td class="tr">240V</td>
             <td class="tr mono">${_feed.voltageDropPct != null ? (_feed.voltageDropPct * 240 / 100).toFixed(2) + 'V' : 'PENDING'}</td>
             <td class="tr mono fw7" style="color:${(_feed.voltageDropPct || 0) > 3 ? '#cc0000' : '#000'}">${_feedVdTxt}</td>
@@ -544,7 +598,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>VOLTAGE DROP INTERPRETATION:</strong>
-        Calculated AC feeder voltage drop is ${_feedVdTxt} over a ${_feedLenTxt} conductor run using ${_feedCallout} copper.
+        Calculated AC feeder voltage drop is ${_feedVdTxt} over a ${_feedLenTxt} conductor run using ${_feedCallout} copper${_feed.currentA != null ? `, at the PV operating current of ${_feed.currentA.toFixed(1)} A (the feeder OCPD is ${_ic.feederOcpd || '—'} A — the OCPD rating is not the load current used in the Vd formula)` : ''}.
         NEC 210.19(A) Informational Note recommends ≤ 3% for feeders and ≤ 5% total (branch + feeder combined).
         ${_feed.voltageDropPct == null ? 'Feeder voltage drop is pending conductor authority — resolve before submission.' : ((_feed.voltageDropPct || 0) <= 3 ? 'The calculated drop is within recommended limits. No conductor upsizing is required.' : 'The calculated drop exceeds 3%. Consider upsizing conductors or reducing run length.')}
       </div>

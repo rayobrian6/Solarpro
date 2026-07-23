@@ -633,6 +633,11 @@ export function generateBOMForPermit(
           : undefined,
         stringCount,
         inverterCount,
+        // W4a — the DESIGN topology is authority. Passing it prevents the V4
+        // resolver from silently falling to STRING_INVERTER on an inverter-id
+        // round-trip miss and emitting phantom USE-2 DC roof-wiring rows on a
+        // pure-micro job (no DC string segment physically exists).
+        topologyType:        isMicro ? 'MICROINVERTER' : undefined,
         systemKw:            totalDcKw,
         acOutputKw:          totalAcKw > 0 ? totalAcKw : undefined,
         dcWireGauge,

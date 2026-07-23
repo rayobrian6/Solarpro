@@ -1,0 +1,97 @@
+{
+  "generatedAt": "2026-07-23T03:33:59.882Z",
+  "snapshotId": "PDS-7793029705B6",
+  "digest": "7793029705b6f7b4cf00ef6b11aa750ef7938172b7ca622cce6f15ff3ce4a5ef",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-7793029705B6 (digest 7793029705b6f7b4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W2 — canonical grounding/bonding objects (EGC + equipment bonding), each referencing its segment + code/listing basis.",
+  "count": 5,
+  "groundingObjects": [
+    {
+      "groundingId": "gnd-br-1",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B1",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-br-2",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B2",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-br-3",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B3",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-feeder",
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "purpose": "feeder-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#10 AWG",
+      "sizingBasis": "NEC 250.122 @ 60A feeder OCPD",
+      "associatedOcpdA": 60,
+      "associatedEquipment": "AC feeder (combiner → disconnect → POI)",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem feeder segment"
+      }
+    },
+    {
+      "groundingId": "gnd-gec",
+      "segmentId": "SERVICE",
+      "purpose": "gec",
+      "required": false,
+      "method": "none-required",
+      "conductorMaterial": null,
+      "conductorSize": null,
+      "sizingBasis": null,
+      "associatedOcpdA": null,
+      "associatedEquipment": "Existing service grounding electrode system",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.64 / 690.47 — interconnected system bonds to the existing GES; no separate GEC added",
+      "provenance": {
+        "source": "design rule",
+        "note": "explicit not-required record — never an invented conductor"
+      }
+    }
+  ]
+}

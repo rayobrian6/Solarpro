@@ -230,6 +230,20 @@ export function evaluateRackingCapacityClearance(
 export interface RackingAssemblyRecordExt extends RackingAssemblyRecord {
   capacityProvenance: RackingCapacityProvenance;
   structuralAuthorityGaps: StructuralAuthorityGap[];
+  // ── W6 — assembly completeness toward Ray's full field list (honest nulls) ──
+  /** Rail stock (splice-interval) length, or null when the rail SKU is unpinned. */
+  railStockLengthIn: number | null;
+  /** Where span / cantilever authority comes from, or null when unresolved. */
+  spanCantileverSource: string | null;
+  /** Per-element verification state so no renderer treats a PENDING assembly as
+   *  permit-ready. `overall` is 'verified' only when EVERY element is verified. */
+  assemblyVerification: {
+    railSku: 'verified' | 'pending' | 'unverified';
+    capacitySource: 'verified' | 'pending' | 'unverified';
+    spanSource: 'verified' | 'pending' | 'unverified';
+    fastener: 'verified' | 'pending' | 'unverified';
+    overall: 'verified' | 'pending';
+  };
 }
 
 // ── W3.1 §4 — ASD allowable resolver (refuses 'ultimate' basis) ────────────────
@@ -302,7 +316,10 @@ export function buildRackingAssembly(
   // or equivalent" placeholder that reads as if a rail were specified).
   const railUnpinned = isRailBased && !rail;
   const railBrand = rail ? system.manufacturer : null;
-  const RAIL_PENDING = 'PENDING SELECTION — compatible rail/splice SKU not specified';
+  // W6 — the explicit pending-banner language for an unpinned rail/splice SKU.
+  // NO "compatible rail" / "or equivalent" / RAIL-PENDING-SELECTION raw tokens on
+  // any renderer: an unpinned assembly reads as the blocked state it is.
+  const RAIL_PENDING = 'PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION';
   // Documented compatibility (hw.railSplice names the accepted rails) ⇒ supported.
   const assemblySupported = !mixedManufacturer
     || /compatible|xr100|xr1000|pegasus|unirac|sfm|equivalent/i.test(hw.railSplice ?? '');
@@ -323,9 +340,9 @@ export function buildRackingAssembly(
   }
   if (mixedManufacturer) {
     notes.push(
-      `Mixed-manufacturer assembly: ${mountBrand} ${mount.model} mount + compatible rail — `
-      + `rail/splice SKU is PENDING SELECTION (not yet specified). The mount record carries no rail `
-      + `span-limit authority, so rail span / cantilever checks are UNVERIFIABLE until the rail SKU is pinned.`);
+      `Mixed-manufacturer assembly: ${mountBrand} ${mount.model} mount + rail from a different manufacturer — `
+      + `rail/splice SKU is PENDING SELECTION (not yet specified; NOT FOR PERMIT SUBMISSION). The mount record carries `
+      + `no rail span-limit authority, so rail span / cantilever checks are UNVERIFIABLE until the exact rail SKU is pinned.`);
   }
 
   const publishedAllowable = allowableUpliftLbs(mount.upliftCapacityLbs, mount.capacityBasis);
@@ -416,7 +433,7 @@ export function buildRackingAssembly(
         sourceCoversSubstrate: null,  // weakest wood assembly only; other substrates uncertain
         assessment: 'The 600 lb ASD allowable covers the RT-MINI pad-to-rafter attachment for the '
           + 'weakest standard wood assembly ONLY. It does NOT establish rail span/cantilever capacity '
-          + 'for the mixed-manufacturer compatible rail (SKU unpinned), and the source jurisdiction '
+          + 'for the mixed-manufacturer paired rail (SKU unpinned), and the source jurisdiction '
           + '(ASCE 7-10, KY) is not confirmed for the project AHJ. Do NOT apply generically.',
       },
       provenance: {
@@ -441,7 +458,7 @@ export function buildRackingAssembly(
         code: 'RACKING-CAPACITY-APPLICABILITY-GAP',
         severity: 'blocking',
         message: 'The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer '
-          + 'compatible rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction '
+          + 'paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction '
           + '(ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically.',
       });
     } else {
@@ -508,7 +525,7 @@ export function buildRackingAssembly(
         sourceCoversRail: rail ? true : (mixedManufacturer ? false : null),
         sourceCoversSubstrate: null,
         assessment: mixedManufacturer
-          ? 'Mixed-manufacturer assembly — mount source does not cover the compatible rail span/cantilever.'
+          ? 'Mixed-manufacturer assembly — mount source does not cover the paired rail span/cantilever.'
           : 'Same-manufacturer assembly per the cited engineering source.',
       },
       provenance: {
@@ -527,6 +544,20 @@ export function buildRackingAssembly(
       });
     }
   }
+
+  // ── W6 — per-element verification states (honest; no fabrication) ──
+  const _vRailSku: 'verified' | 'pending' | 'unverified' =
+    rail?.model ? 'verified' : (railUnpinned ? 'pending' : 'unverified');
+  const _vCapacity: 'verified' | 'pending' | 'unverified' =
+    isRtMini ? (rtCleared ? 'verified' : 'pending')
+      : (publishedAllowable != null && !asd.refused ? 'verified' : 'pending');
+  const _vSpan: 'verified' | 'pending' | 'unverified' =
+    rail?.maxSpanIn != null ? 'verified' : 'pending';
+  const _vFastener: 'verified' | 'pending' | 'unverified' =
+    (hw.lagBolt && mount.fastenersPerMount != null && mount.fastenerEmbedmentIn != null) ? 'verified' : 'pending';
+  const _vOverall: 'verified' | 'pending' =
+    (_vRailSku === 'verified' && _vCapacity === 'verified' && _vSpan === 'verified' && _vFastener === 'verified')
+      ? 'verified' : 'pending';
 
   const base: Omit<RackingAssemblyRecordExt, 'recordRevision'> = {
     assemblyId: `assembly-${system.id}`,
@@ -571,6 +602,15 @@ export function buildRackingAssembly(
     // ── W3.1 §4 ──
     capacityProvenance,
     structuralAuthorityGaps,
+    // ── W6 completeness ──
+    railStockLengthIn: rail?.spliceIntervalIn ?? null,
+    spanCantileverSource: rail?.maxSpanIn != null
+      ? 'mounting-hardware-db rail spec (manufacturer max span)'
+      : (railUnpinned ? null : (system.iccEsReport ?? null)),
+    assemblyVerification: {
+      railSku: _vRailSku, capacitySource: _vCapacity, spanSource: _vSpan,
+      fastener: _vFastener, overall: _vOverall,
+    },
   };
   return { ...base, recordRevision: contentRevision(base) };
 }

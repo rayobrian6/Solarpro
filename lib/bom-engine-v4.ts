@@ -410,7 +410,24 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   };
   const topoResult = resolveTopology(topoCtx);
   const topology = topoResult.topology;
-  const norm = normalizeTopologyV4(topology);
+  let norm = normalizeTopologyV4(topology);
+  // ── W4a — the caller's DESIGN topologyType is AUTHORITY over the id-round-trip
+  // resolver. resolveTopology() falls to STRING_INVERTER whenever
+  // getRegistryEntryV4(inverterId) misses (topology-manager.ts:426-427); on a
+  // PURE-MICRO design that silently flipped `isMicro` false and emitted phantom
+  // "#10/#12 AWG USE-2 — DC roof wiring" rows + a DC disconnect for a DC string
+  // circuit that PHYSICALLY DOES NOT EXIST (gate 6). When the design declares a
+  // micro topology but the resolver returned a DC/string topology, honor the
+  // design and record the resolver miss (never silent). ──
+  if (input.topologyType) {
+    const _declared = normalizeTopologyV4(input.topologyType);
+    const _declaredMicro = _declared === 'MICROINVERTER' || _declared === 'AC_MODULE';
+    const _resolvedMicro = norm === 'MICROINVERTER' || norm === 'AC_MODULE' || norm === 'AC_COUPLED_BATTERY';
+    if (_declaredMicro && !_resolvedMicro) {
+      warnings.push(`[V4 topology] resolver returned ${norm} but the design declares ${_declared}; honoring the design topology — NO DC string wiring/conduit/disconnect emitted (pure micro AC branch). Verify inverter registry id "${input.inverterId}".`);
+      norm = _declared;
+    }
+  }
 
   // FIX v57.2: For microinverter topology, stringCount=0 (no DC strings).
   // Structural rail/clamp formulas use 'strings' as a proxy for "rows of modules".
@@ -886,7 +903,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       junctionBoxQty = Math.ceil((input.deviceCount ?? input.moduleCount) / 16);
     }
     if (junctionBoxQty > 0) {
-      items.push(addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box (or approved equal)',
+      items.push(addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box',
         '0786-41', 'Roof-flashed PV junction box — transitions open-air PV wire to conduit',
         junctionBoxQty, 'ea', 'NEC 690.31', 'runSegments.to=JUNCTION BOX', 'ceil(deviceCount/16)', true));
       log.push({ stageId: 'ac', category: 'junction_box', item: 'PV Junction Box',
@@ -913,13 +930,26 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const dcRunIds = new Set(['ROOF_RUN', 'DC_STRING_RUN', 'DC_DISCO_TO_INV_RUN']);
     const dcBomRuns = allBomRuns.filter(r => dcRunIds.has(r.id));
     const acBomRuns = allBomRuns.filter(r => !dcRunIds.has(r.id));
+    // ── W4a — on a PURE micro the module→micro DC connection (ROOF_RUN) is the
+    // module's FACTORY leads / MC4 connectors, NOT installer-run USE-2 DC roof
+    // wiring. Emitting ROOF_RUN as bulk "#10/#12 USE-2 — DC roof wiring" invented
+    // a field-run DC home run for a circuit that ships integral to the module
+    // (gate 6: no DC string materials in pure micro topology without a real DC
+    // string segment). Exclude ROOF_RUN from the micro DC-wire rows; a genuine DC
+    // string segment (DC_STRING_RUN / DC_DISCO_TO_INV_RUN — string/optimizer only)
+    // is unaffected. ──
+    const MICRO_FACTORY_LEAD_IDS = new Set(['ROOF_RUN']);
+    const dcFieldRuns = isMicro ? dcBomRuns.filter(r => !MICRO_FACTORY_LEAD_IDS.has(r.id)) : dcBomRuns;
+    if (isMicro && dcBomRuns.length > 0 && dcFieldRuns.length === 0) {
+      complianceNotes.push('Module-to-microinverter DC connection uses the module’s factory-integrated leads/MC4 connectors (NEC 690.31) — no separately-run DC roof conductor; the field wiring is the AC branch (Q-Cable trunk).');
+    }
 
     // ── Group DC runs by wire gauge → one line item per gauge (micro only, matches calcBOMFromSegments) ──
     // Key insight: EGC can be a DIFFERENT gauge than DC conductors
-    if (isMicro && dcBomRuns.length > 0) {
+    if (isMicro && dcFieldRuns.length > 0) {
       const dcGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
-      
-      for (const r of dcBomRuns) {
+
+      for (const r of dcFieldRuns) {
         const gauge: string = r.wireGauge ?? '#10 AWG';
         const egcGauge: string = r.egcGauge ?? '#10 AWG';
         const conductors: number = r.conductorCount ?? 2;
@@ -1074,53 +1104,75 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   // Auto-derived from total conduit length across all runs.
   // Rule of thumb: 1 connector + 1 coupling per 10 ft of conduit.
   {
-    const totalConduitFt = (() => {
-      if (input.runs && input.runs.length > 0) {
-        return input.runs
-          // Utility-owned and open-air (no-conduit) runs carry no raceway —
-          // they must not inflate connector/coupling/bushing/strap counts.
-          .filter(r => !r.isUtilityOwned && !runHasNoConduit(r))
-          .reduce((sum: number, r) =>
-            sum + Math.ceil((r.onewayLengthFt ?? 30) * 1.15), 0);
+    // ── W4b — fittings are generated PER RACEWAY, matching each segment's actual
+    // conduit type + trade size (gate 7). The old block emitted one '3/4" EMT'
+    // fitting set (from input.conduitType/conduitSizeInch defaults) while the
+    // real runs were, e.g., '1-1/4" PVC Sch 80' — a fitting set that physically
+    // does not fit the installed raceway. Group the in-conduit AC/DC runs by
+    // (trade size, raceway type) and emit matching connectors / couplings /
+    // bushings / straps for each. ──
+    const _fitGroups = new Map<string, { size: string; type: string; ft: number }>();
+    if (input.runs && input.runs.length > 0) {
+      for (const r of input.runs) {
+        // Utility-owned and open-air (Q-Cable / free-air) runs carry no raceway —
+        // they must not inflate connector/coupling/bushing/strap counts.
+        if (r.isUtilityOwned || runHasNoConduit(r)) continue;
+        // Normalize the trade size: run.conduitSize carries the inch mark ('1"'),
+        // input.conduitSizeInch does not ('3/4') — strip a trailing " so the
+        // label appends exactly one (no '1""').
+        const size = (r.conduitSize ?? input.conduitSizeInch ?? '3/4').trim().replace(/"$/, '');
+        const type = (r.conduitType ?? input.conduitType ?? 'EMT').trim();
+        const key = `${size}|${type}`;
+        const ft = Math.ceil((r.onewayLengthFt ?? 30) * 1.15);
+        const ex = _fitGroups.get(key);
+        if (ex) ex.ft += ft; else _fitGroups.set(key, { size, type, ft });
       }
-      return conduitLength(input.acWireLength);
-    })();
+    }
+    if (_fitGroups.size === 0) {
+      const size = input.conduitSizeInch ?? '3/4';
+      const type = input.conduitType ?? 'EMT';
+      _fitGroups.set(`${size}|${type}`, { size, type, ft: conduitLength(input.acWireLength) });
+    }
 
-    const conduitType = input.conduitType ?? 'EMT';
-    const conduitSize = input.conduitSizeInch ?? '3/4';
+    let _fitTotal = 0;
+    for (const { size: conduitSize, type: conduitType, ft: totalConduitFt } of _fitGroups.values()) {
+      const _typeTag = conduitType.replace(/\s+/g, '-');
+      const _sizeTag = conduitSize.replace('/', '-').replace(/"/g, '');
+      // Connectors — 1 per 10 ft (termination at each end + mid-run joins)
+      const connQty = Math.max(2, Math.ceil(totalConduitFt / 10));
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Connector`,
+        `${_typeTag}-CONN-${_sizeTag}`,
+        `${conduitSize}" ${conduitType} set-screw connector — NEC 300.15`,
+        connQty, 'ea', 'NEC 300.15 / 358.30', 'ceil(runConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
 
-    // Connectors — 1 per 10 ft (termination at each end + mid-run joins)
-    const connQty = Math.max(2, Math.ceil(totalConduitFt / 10));
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Connector`,
-      `${conduitType}-CONN-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" ${conduitType} set-screw connector — NEC 300.15`,
-      connQty, 'ea', 'NEC 300.15 / 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+      // Couplings — 1 per 10 ft (joins 10-ft sticks)
+      const couplingQty = Math.max(1, Math.ceil(totalConduitFt / 10));
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Coupling`,
+        `${_typeTag}-COUP-${_sizeTag}`,
+        `${conduitSize}" ${conduitType} coupling — joins conduit sticks`,
+        couplingQty, 'ea', 'NEC 358.30', 'ceil(runConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
 
-    // Couplings — 1 per 10 ft (joins 10-ft sticks)
-    const couplingQty = Math.max(1, Math.ceil(totalConduitFt / 10));
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Coupling`,
-      `${conduitType}-COUP-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" ${conduitType} coupling — joins conduit sticks`,
-      couplingQty, 'ea', 'NEC 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+      // Insulated bushings — 1 per conduit termination end (min 2 per run segment)
+      const bushingQty = Math.max(2, Math.ceil(totalConduitFt / 50) * 2);
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" Insulated Bushing`,
+        `BUSH-INS-${_sizeTag}`,
+        `${conduitSize}" insulated throat bushing — protects conductors at conduit end per NEC 300.15`,
+        bushingQty, 'ea', 'NEC 300.15', 'ceil(runConduitFt/50)*2', `ceil(${totalConduitFt}/50)*2`, true));
 
-    // Insulated bushings — 1 per conduit termination end (min 2 per run segment)
-    const bushingQty = Math.max(2, Math.ceil(totalConduitFt / 50) * 2);
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" Insulated Bushing`,
-      `BUSH-INS-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" insulated throat bushing — protects conductors at conduit end per NEC 300.15`,
-      bushingQty, 'ea', 'NEC 300.15', 'ceil(totalConduitFt/50)*2', `ceil(${totalConduitFt}/50)*2`, true));
+      // One-hole straps — 1 per 10 ft (NEC 358.30 support every 10 ft)
+      const strapQty = Math.max(2, Math.ceil(totalConduitFt / 10));
+      items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} One-Hole Strap`,
+        `${_typeTag}-STRAP-${_sizeTag}`,
+        `${conduitSize}" ${conduitType} one-hole strap — NEC 358.30 support every 10 ft`,
+        strapQty, 'ea', 'NEC 358.30', 'ceil(runConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
 
-    // One-hole straps — 1 per 10 ft (NEC 358.30 support every 10 ft)
-    const strapQty = Math.max(2, Math.ceil(totalConduitFt / 10));
-    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} One-Hole Strap`,
-      `${conduitType}-STRAP-${conduitSize.replace('/', '-')}`,
-      `${conduitSize}" ${conduitType} one-hole strap — NEC 358.30 support every 10 ft`,
-      strapQty, 'ea', 'NEC 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+      _fitTotal += connQty + couplingQty + bushingQty + strapQty;
+    }
 
     log.push({ stageId: 'ac', category: 'conduit_fitting', item: 'Conduit Fittings Set',
-      quantity: connQty + couplingQty + bushingQty + strapQty,
-      derivedFrom: 'totalConduitFt',
-      formula: 'connectors + couplings + bushings + straps derived from total conduit footage',
+      quantity: _fitTotal,
+      derivedFrom: 'per-raceway run conduit footage',
+      formula: 'connectors + couplings + bushings + straps derived per raceway (matching each segment)',
       necReference: 'NEC 300.15 / 358.30' });
   }
 
@@ -2141,7 +2193,7 @@ function generateBOMV4PerSubSystem(
       }
       if (jbQty === 0) jbQty = Math.ceil(s.deviceCount / 16);
       if (jbQty > 0) {
-        push(key, addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box (or approved equal)',
+        push(key, addItem('ac', 'junction_box', 'Soladeck', 'PV Junction Box',
           '0786-41', `Flashed PV junction box — transitions open-air PV wire to conduit (${key} sub-system)`,
           jbQty, 'ea', 'NEC 690.31', `${key} runSegments / ceil(deviceCount/16)`, 'ceil(deviceCount/16)', true));
         complianceNotes.push(`NEC 690.31: ${jbQty} junction box(es) — ${key} sub-system open-air PV wire to conduit`);
@@ -2291,7 +2343,11 @@ function generateBOMV4PerSubSystem(
 
   if (input.runs && input.runs.length > 0) {
     const allBomRuns = input.runs.filter(r => !r.isUtilityOwned);
-    const dcBomRuns = allBomRuns.filter(r => DC_RUN_IDS.has(baseRunId(r)));
+    // W4a — ROOF_RUN is the micro module→microinverter connection = the module's
+    // FACTORY leads/MC4 connectors (string roofs use DC_STRING_RUN), never a
+    // field-run DC conductor. Exclude it from bulk DC-wire emission (gate 6);
+    // real DC string segments (DC_STRING_RUN / DC_DISCO_TO_INV_RUN) still emit.
+    const dcBomRuns = allBomRuns.filter(r => DC_RUN_IDS.has(baseRunId(r)) && baseRunId(r) !== 'ROOF_RUN');
     const acBomRuns = allBomRuns.filter(r => !DC_RUN_IDS.has(baseRunId(r)));
 
     // DC runs — grouped per (owning sub, gauge); stamped when the sub is known.

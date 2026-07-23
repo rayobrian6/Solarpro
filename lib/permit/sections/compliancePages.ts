@@ -10,7 +10,8 @@ import { escapeH } from '../utils/drawing';
 import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { selectFieldLabels, type FieldLabel } from '../utils/fieldLabels';
-import { getDesignTemps } from '../utils/designTemps';
+import { getThermalDesignBasis } from '../utils/designTemps';
+import { projectMicroinverterDatasheet, type ProjectedValue } from '../snapshot/equipmentProjection';
 import { isSubSystemKey, type SubSystemKey } from '../utils/subSystems';
 import { resolvePanelSpecs, coldVocFactor, type ResolvedPanelSpecs } from '../utils/panelSpecs';
 import { hybridSheetSections } from './subSystemSheets';
@@ -50,14 +51,12 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   const { project, system } = input;
   const auth = buildConductorAuthority(input, cad);
   const _projX = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
-  const _stateAbbr = (() => {
-    if (_projX.state && /^[A-Za-z]{2}$/.test(_projX.state.trim())) return _projX.state.trim().toUpperCase();
-    const m = (_projX.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/);
-    return m ? m[1].toUpperCase() : undefined;
-  })();
-  const _temps = getDesignTemps(_projX.lat, _projX.lng, _stateAbbr);
-  // Explicit AHJ design-temp override wins over the ASHRAE state envelope.
-  const tMinC = project.designTempMin ?? _temps.ashraeExtremeLowC;
+  // W5 §4 — ONE thermal basis (singular; shared with APP-A + disconnect directory).
+  const _temps = getThermalDesignBasis({
+    lat: _projX.lat, lng: _projX.lng, state: _projX.state, address: _projX.address,
+    designTempMinOverrideC: project.designTempMin ?? null,
+  });
+  const tMinC = _temps.minDesignTempC;
 
   const _panelDb = (model?: string) => {
     const m = (model || '').toLowerCase().trim();
@@ -556,10 +555,11 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   // Design-low temp for the ONE cold-Voc law (shared by the hybrid branch AND
   // the single-system fallback below — register P1-4).
   const _projT = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
-  const _st = (_projT.state && /^[A-Za-z]{2}$/.test(_projT.state.trim()))
-    ? _projT.state.trim().toUpperCase()
-    : ((_projT.address ?? '').match(/,\s*([A-Za-z]{2})[\s,]+\d{5}(?:-\d{4})?\b/)?.[1]?.toUpperCase());
-  const _tMin = project.designTempMin ?? getDesignTemps(_projT.lat, _projT.lng, _st).ashraeExtremeLowC;
+  // W5 §4 — ONE thermal basis (singular; shared with APP-A + warning labels).
+  const _tMin = getThermalDesignBasis({
+    lat: _projT.lat, lng: _projT.lng, state: _projT.state, address: _projT.address,
+    designTempMinOverrideC: project.designTempMin ?? null,
+  }).minDesignTempC;
   // SYSTEMIC ROOT #1: on a hybrid the whole system is NOT microinverter — the
   // string/optimizer subs carry real series DC. "MAX DC SYSTEM VOLTAGE" is the
   // largest cold-corrected string Voc across those subs, never "N/A" (which
@@ -613,8 +613,29 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   // combiner + gateway + AC disconnect in one box). Single-sourced.
   const bos = buildIntegratedEquipment(input, cad);
   const discos: Disco[] = [];
-  discos.push({ name: 'MAIN SERVICE DISCONNECT', rating: `${mainA} A${project.mainPanelBrand ? ` · ${project.mainPanelBrand}` : ''}`, loc: 'Exterior — at utility meter / service entrance' });
-  if (project.acDisconnect !== false) discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A${isSupply ? ' fused' : ''}` : 'PER PLAN', loc: bos.providesAcDisconnect ? 'Integral to the combiner (load-break) — exterior AC disconnect only if required by AHJ/utility' : 'Exterior, lockable — adjacent to utility meter' });
+  // ── W2a §service-topology — the disconnect roles PROJECT the canonical
+  // snapshot.serviceTopology objects (svc-service-disconnect, svc-fused-ocpd,
+  // svc-utility-disconnect, …). Each canonical device is ONE row with ONE role:
+  // the combiner's integral load-break (NEC 690.13, listed under the BOS device
+  // below) is NOT the same object as the supply-side FUSED tap OCPD (NEC 705.11)
+  // or the utility-accessible lockable disconnect. The old code merged the fused
+  // tap disconnect + the combiner load-break into a single "PV AC DISCONNECT"
+  // row — that conflation is the defect this replaces. ──
+  const _svcTopo = getSnapshot(input).electrical.serviceTopology ?? [];
+  const _svcObj = (t: string) => _svcTopo.find(o => o.type === t) ?? null;
+  const _svcDisco = _svcObj('service-disconnect');
+  discos.push({ name: 'MAIN SERVICE DISCONNECT', rating: `${_svcDisco?.ocpdRatingA ?? mainA} A${project.mainPanelBrand ? ` · ${project.mainPanelBrand}` : ''}`, loc: 'Exterior — at utility meter / service entrance' });
+  if (isSupply) {
+    // Supply-side (NEC 705.11): the fused tap OCPD and the utility-accessible
+    // lockable disconnect are DISTINCT canonical objects — one row each.
+    const _fused = _svcObj('fused-ocpd');
+    const _util = _svcObj('utility-disconnect');
+    discos.push({ name: 'FUSED AC DISCONNECT — SUPPLY-SIDE TAP OCPD', rating: `${_fused?.ocpdRatingA ?? acOcpd ?? '—'} A fused · NEC 705.11`, loc: 'At the supply-side tap — line side of the service disconnecting means' });
+    if (_util) discos.push({ name: 'UTILITY-ACCESSIBLE AC DISCONNECT (LOCKABLE)', rating: `${_util.ocpdRatingA ?? acOcpd ?? '—'} A · lockable`, loc: 'Ahead of the point of interconnection — per serving-utility requirement' });
+    if (bos.providesAcDisconnect) discos.push({ name: 'PV SYSTEM AC DISCONNECT (COMBINER LOAD-BREAK)', rating: `${acOcpd ? `${acOcpd} A · ` : ''}NEC 690.13`, loc: 'Integral load-break in the AC combiner — the PV-system disconnecting means' });
+  } else if (project.acDisconnect !== false) {
+    discos.push({ name: 'PV AC DISCONNECT', rating: acOcpd ? `${acOcpd} A` : 'PER PLAN', loc: bos.providesAcDisconnect ? 'Integral to the combiner (load-break) — exterior AC disconnect only if required by AHJ/utility' : 'Exterior, lockable — adjacent to utility meter' });
+  }
   if (!isMicro && project.dcDisconnect !== false) discos.push({ name: 'PV DC / SYSTEM DISCONNECT', rating: `${maxDcV}`, loc: 'At the inverter' });
   // Integrated combiner / gateway — the AC aggregation + monitoring device.
   for (const d of bos.devices) {
@@ -795,6 +816,21 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const _dbPanel = _dbFind(SOLAR_PANELS, panels?.panelModel);
   const _dbMicro = system.inverters?.[0]?.type === 'micro'
     ? _dbFind(MICROINVERTERS, system.inverters?.[0]?.model) : undefined;
+  // W5 §1 — APP-A microinverter datasheet table projects ONLY from the verified
+  // equipment/document record chain (equipment-db + manufacturer-assets-db),
+  // with per-value provenance. No hand-entered parallel spec values.
+  const _microProj = _dbMicro
+    ? projectMicroinverterDatasheet(system.inverters?.[0]?.model) : null;
+  // Render one provenance-stamped datasheet row. PENDING when the value is
+  // absent from the verified record (never a fabricated default).
+  const _mvRow = (label: string, pv: ProjectedValue<number | string | boolean | null>, fmt: (v: number | string | boolean) => string): string => {
+    const p = pv.provenance;
+    const disp = pv.value === null ? '<span style="color:#b00">PENDING</span>' : escapeH(fmt(pv.value));
+    return `<tr data-app-a-field="${escapeH(p.extractedFieldPath)}" data-verify="${p.verification}"`
+      + ` data-eq-id="${escapeH(p.equipmentRecordId ?? '')}" data-sku="${escapeH(p.sku ?? '')}"`
+      + ` data-doc-id="${escapeH(p.documentRecordId ?? '')}">`
+      + `<td class="il">${label}</td><td class="iv">${disp}</td></tr>`;
+  };
 
   // Get specs from the spec sheet DB
   const voc = panels?.panelVoc || project.panelVoc || _dbPanel?.voc || 41.6;
@@ -829,7 +865,14 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   // use), matching the compatibility gate. The old blanket ×1.25 printed a
   // 62.3 V "max" beside a 60 V inverter DC limit on the same sheet.
   const VOC_TEMP_COEFF = _dbPanel?.tempCoeffVoc ?? -0.27;  // %/°C — manufacturer value when resolved; matches the printed spec row
-  const designTempMinC = project.designTempMin ?? -10;
+  // W5 §4 — ONE thermal basis (kills the APP-A −10 °C split vs ASHRAE −23 °C).
+  // Same singular basis the other compliance sheets consume; no renderer-local temp.
+  const _projA = project as unknown as { state?: string; address?: string; lat?: number; lng?: number };
+  const _thermA = getThermalDesignBasis({
+    lat: _projA.lat, lng: _projA.lng, state: _projA.state, address: _projA.address,
+    designTempMinOverrideC: project.designTempMin ?? null,
+  });
+  const designTempMinC = _thermA.minDesignTempC;
   const vocColdFactor = 1 + (VOC_TEMP_COEFF / 100) * (designTempMinC - 25);
   const NEC_SAFETY = 1.25;
   const vocMax = parseFloat((voc * vocColdFactor).toFixed(1));
@@ -990,20 +1033,23 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
           </div>
           `).join('') || '<p style="font-size:9px;color:#999">No inverter data</p>'}
 
-          ${_dbMicro ? `
-          <div class="section-title">Microinverter — Datasheet Reference</div>
-          <table class="info-table" style="margin-bottom:6px;">
-            <tr><td class="il">Peak AC Output</td><td class="iv">${_dbMicro.acOutputW} VA</td></tr>
-            <tr><td class="il">Max Continuous Output Current</td><td class="iv">${_dbMicro.acOutputCurrentMax} A @ ${_dbMicro.acOutputVoltage} V</td></tr>
-            <tr><td class="il">DC Input Power (Module STC Max)</td><td class="iv">${_dbMicro.dcInputWMax} W</td></tr>
-            <tr><td class="il">MPPT Voltage Range</td><td class="iv">${_dbMicro.mpptVoltageMin}–${_dbMicro.mpptVoltageMax} V</td></tr>
-            <tr><td class="il">Max DC Input Current</td><td class="iv">${_dbMicro.maxInputCurrent} A</td></tr>
-            ${_dbMicro.maxPerBranch20A ? `<tr><td class="il">Max Units / 20A Branch</td><td class="iv">${_dbMicro.maxPerBranch20A}</td></tr>` : ''}
-            <tr><td class="il">CEC Weighted Efficiency</td><td class="iv">${_dbMicro.cec_efficiency}%</td></tr>
-            <tr><td class="il">Rapid Shutdown</td><td class="iv">${_dbMicro.rapidShutdownCompliant ? 'Integrated — NEC 690.12 MLRS' : 'External MLRS required'}</td></tr>
-            <tr><td class="il">Unit Weight</td><td class="iv">${_dbMicro.weight} lbs</td></tr>
-            <tr><td class="il">Product Warranty</td><td class="iv">${_dbMicro.warranty}</td></tr>
-          </table>` : ''}
+          ${_microProj ? `
+          <div class="section-title">Microinverter — Datasheet Reference${_microProj.sku ? ` (${escapeH(_microProj.sku)})` : ''}</div>
+          <table class="info-table" style="margin-bottom:2px;" data-app-a-source="micro-datasheet" data-doc-verified="${_microProj.documentVerified}">
+            ${_mvRow('Peak AC Output', _microProj.fields.peakVa, v => `${v} VA`)}
+            ${_mvRow('Continuous AC Output', _microProj.fields.continuousVa, v => `${v} VA`)}
+            ${_mvRow('Max Continuous Output Current', _microProj.fields.maxContinuousCurrentA, v => `${v} A${_microProj!.fields.acVoltage.value !== null ? ` @ ${_microProj!.fields.acVoltage.value} V` : ''}`)}
+            ${_mvRow('DC Input Power (Module STC Max)', _microProj.fields.dcInputWMax, v => `${v} W`)}
+            ${_mvRow('MPPT Voltage Range', _microProj.fields.mpptMinV, v => `${v}–${_microProj!.fields.mpptMaxV.value ?? '—'} V`)}
+            ${_mvRow('Max DC Input Current', _microProj.fields.maxDcInputCurrentA, v => `${v} A`)}
+            ${_microProj.fields.maxUnitsPerBranch20A.value !== null ? _mvRow('Max Units / 20A Branch', _microProj.fields.maxUnitsPerBranch20A, v => `${v}`) : ''}
+            ${_mvRow('CEC Weighted Efficiency', _microProj.fields.cecEfficiency, v => `${v}%`)}
+            ${_mvRow('DC Connector', _microProj.fields.connector, v => `${v}`)}
+            ${_mvRow('Rapid Shutdown', _microProj.fields.rapidShutdown, v => v ? 'Integrated — NEC 690.12 MLRS' : 'External MLRS required')}
+            ${_mvRow('Unit Weight', _microProj.fields.weightLb, v => `${v} lbs`)}
+            ${_mvRow('Product Warranty', _microProj.fields.warranty, v => `${v}`)}
+          </table>
+          <div style="font-size:6.5px;color:#555;margin:0 0 6px 0;line-height:1.35;">${escapeH(_microProj.sourceLine)}</div>` : ''}
 
           <!-- Racking System Summary — from the SELECTED mounting system.
                The old static table printed IronRidge FlashFoot2 / 5/16" lag
@@ -1014,28 +1060,42 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             const _sysName = project._canonical?.mountSystem || project.mountingSystem
               || (_mSel ? `${_mSel.manufacturer} ${_mSel.model}` : '')
               || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100';
-            const _fr = (v: number) =>
-              v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-            const _lagDia = _mSel?.mount?.fastenerDiameterIn ?? 0.375;
-            const _embed  = _mSel?.mount?.fastenerEmbedmentIn ?? 2.5;
-            const _lagLen = Math.ceil((_embed + 1.5) * 2) / 2;
+            // W6 — the rail + fastener are PROJECTED from the ONE canonical racking
+            // assembly record (structuralProjection), never a local string or a
+            // fabricated length formula. The record already carries the blocked-state
+            // language ("PENDING RACKING ASSEMBLY SELECTION …") when the rail SKU is
+            // unpinned, so APP-A stays in lockstep with the structural sheets.
+            const _ra = _spSpec.rackingAssembly;
+            const _railPinned = !!(_ra && _ra.railSku);
+            const _railState = _ra
+              ? (_railPinned ? 'verified' : 'pending')
+              : 'no-record';
+            // Rail profile: pinned rail with own dims → dims; otherwise the canonical
+            // record railModel (= PENDING RACKING ASSEMBLY SELECTION when unpinned).
+            const _railProfile = (_mSel?.rail && _railPinned)
+              ? `${escapeH(_mSel.rail.model)} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")`
+              : (_ra?.railModel
+                  ? escapeH(_ra.railModel)
+                  : (_mSel?.systemType === 'rail_less' && _mSel?.mountTopology !== 'rail_paired'
+                      ? 'Rail-less / direct-attach'
+                      : 'PENDING RACKING ASSEMBLY SELECTION'));
+            // Mount topology (W6.4) — RT-MINI is rail_paired, never rail-less/direct.
+            const _mountTopo = _mSel?.mountTopology ?? _mSel?.systemType ?? '—';
+            // Fastener: the ONE verified record fastener (screwLagModel + qty +
+            // embedment). No fabricated "×4\" SS lag" length formula. PENDING when absent.
+            const _fastenerDisp = _ra?.screwLagModel
+              ? `${escapeH(_ra.screwLagModel)}${_ra.screwLagQtyPerMount ? ` — ${_ra.screwLagQtyPerMount}/mount` : ''}`
+              : 'PENDING RACKING ASSEMBLY SELECTION';
+            const _embedDisp = _ra?.embedmentRequirementIn != null
+              ? `Min. ${_ra.embedmentRequirementIn}" thread embedment into rafter`
+              : 'Per verified racking assembly';
             return `
           <div class="section-title">Racking System</div>
-          <table class="info-table">
+          <table class="info-table" data-app-a-source="racking-assembly" data-rail-state="${_railState}">
             <tr><td class="il">System</td><td class="iv">${_sysName}</td></tr>
+            <tr><td class="il">Mount Topology</td><td class="iv" data-app-a-field="mountTopology">${escapeH(String(_mountTopo))}</td></tr>
             <tr><td class="il">Material</td><td class="iv">${_mSel?.rail?.materialAlloy || 'Aluminum — per manufacturer listing'}</td></tr>
-            <tr><td class="il">Rail Profile</td><td class="iv">${_mSel?.rail
-              ? `${_mSel.rail.model} (${_mSel.rail.heightIn}" × ${_mSel.rail.widthIn}")`
-              // §10 — a rail-based / rail-paired mount with no own rail spec (e.g.
-              // RT-MINI) is NOT rail-less: its rail is a compatible SKU PENDING
-              // SELECTION. Only a genuinely rail-less product prints direct-attach.
-              : (_mSel
-                  ? (_mSel.systemType === 'rail_based' || _mSel.systemType === 'standing_seam' || _mSel.mountTopology === 'rail_paired'
-                      ? 'Compatible rail — PENDING SELECTION (SKU not specified)'
-                      : _mSel.systemType === 'rail_less'
-                        ? 'Rail-less / direct-attach'
-                        : 'PENDING — mounting topology unconfirmed')
-                  : 'Per manufacturer')}</td></tr>
+            <tr><td class="il">Rail Profile</td><td class="iv" data-app-a-field="railModel">${_railProfile}</td></tr>
             <tr><td class="il">Max Attach Spacing</td><td class="iv">${(() => {
               // Engineering-resolved spacing first (same chain as PV-3/PE-1) —
               // the racking's rated 48" printed here beside PV-3's resolved 24".
@@ -1045,8 +1105,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               return _spc ? `${_spc}" O.C.` : 'Per PV-3 / structural calc';
             })()}</td></tr>
             ${_isRoof ? `<tr><td class="il">Attachment</td><td class="iv">${_mSel?.mount?.model || 'Per PV-3 attachment detail'}</td></tr>` : ''}
-            ${_isRoof ? `<tr><td class="il">Lag Bolt</td><td class="iv">${_fr(_lagDia)}" DIA × ${_lagLen}" Min. Stainless Steel</td></tr>` : ''}
-            ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">Min. ${_embed}" thread embedment into rafter</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
+            ${_isRoof ? `<tr><td class="il">Fastener</td><td class="iv" data-app-a-field="fastener">${_fastenerDisp}</td></tr>` : ''}
+            ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">${escapeH(_embedDisp)}</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
             <tr><td class="il">UL Listing</td><td class="iv">${_mSel?.mount?.ul2703Listed === false ? 'See manufacturer listing' : 'UL 2703'}${_mSel?.mount?.iccEsReport ? ` / ${_mSel.mount.iccEsReport}` : ''}</td></tr>
             <tr><td class="il">Wind Rating</td><td class="iv">Per ${cp.asceLabel} (see PV-4C)</td></tr>
           </table>`;

@@ -1,0 +1,368 @@
+{
+  "generatedAt": "2026-07-23T03:30:17.709Z",
+  "harness": "planset-evidence-rp (repair-pass rendered-truth, 20 permanent gates)",
+  "mode": "original",
+  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/PermitPackage-BRAIDON-original.html",
+  "snapshotId": "PDS-FC73E0615EB1",
+  "digest": "fc73e0615eb199d80fd0d6ffb7f38d77d875dc67dc26caf9c9f48c0906f1a89b",
+  "schemaVersion": "1.0.0",
+  "engineVersion": "47420",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "sheetCount": 20,
+  "sheetIds": [
+    "PV-0",
+    "RS-1",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "DS-4",
+    "CERT",
+    "PE-1"
+  ],
+  "topology": "MICRO",
+  "feeder": {
+    "conduitLabel": "PVC Sch 80 1-1/4\"",
+    "voltageDropPct": 0.36936055005081303,
+    "fillPct": null
+  },
+  "reactionReconciliation": {
+    "present": true,
+    "ok": true,
+    "attachmentCount": 64,
+    "tributarySumFt2": 756.288,
+    "arrayAreaFt2": 636.461
+  },
+  "activeBlockers": [
+    "ROUTE-LENGTH-ESTIMATE",
+    "CONDUIT-FILL-PENDING",
+    "TAP-CONDUCTOR-LENGTH-PENDING",
+    "STRUCTURAL-FRAMING-UNVERIFIED",
+    "PENDING-RACKING-ASSEMBLY-SELECTION",
+    "WIND-SNOW-AUTHORITY-UNRESOLVED",
+    "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+    "RACKING-CAPACITY-APPLICABILITY-GAP",
+    "CODE-AUTHORITY-INCOMPLETE",
+    "PROJECT-AUTHORITY-UNVERIFIED",
+    "MODULE-EXACT-DATASHEET-PENDING",
+    "ENGINEERING-REVIEW-PENDING"
+  ],
+  "reportEqualsRendered": {
+    "reconciled": [
+      {
+        "name": "snapshotId",
+        "reportVal": "PDS-FC73E0615EB1",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "PDS-FC73E0615EB1"
+        ],
+        "sldStamp": "PDS-FC73E0615EB1"
+      },
+      {
+        "name": "digestPrefix",
+        "reportVal": "fc73e0615eb1",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "fc73e0615eb199d80fd0"
+        ],
+        "sldStamp": "fc73e0615eb199d80fd0"
+      },
+      {
+        "name": "feederConduit",
+        "reportVal": "PVC Sch 80 1-1/4\"",
+        "matchedInRendered": true
+      },
+      {
+        "name": "feederVoltageDropPct",
+        "reportVal": "0.37",
+        "matchedInRendered": true
+      },
+      {
+        "name": "inverterSku",
+        "reportVal": "IQ8A-72-2-US",
+        "matchedInRendered": true,
+        "skuTagsFound": [
+          "IQ8A-72-2-US"
+        ]
+      },
+      {
+        "name": "moduleModel",
+        "reportVal": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        ]
+      },
+      {
+        "name": "attachmentCount",
+        "reportVal": "64",
+        "matchedInRendered": true
+      },
+      {
+        "name": "issueState",
+        "reportVal": "PENDING ENGINEERING REVIEW",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "PENDING ENGINEERING REVIEW"
+        ]
+      },
+      {
+        "name": "blockingBlockerCount",
+        "reportVal": "9",
+        "matchedInRendered": true,
+        "rs1RenderedBlocking": 9
+      }
+    ],
+    "mismatches": []
+  },
+  "gates": [
+    {
+      "gate": 1,
+      "id": "no-wired-in-series-on-micro-branch",
+      "ok": true,
+      "detail": "topology=MICRO · \"wired in series\" occurrences=0",
+      "evidence": []
+    },
+    {
+      "gate": 2,
+      "id": "no-field-verified-without-record",
+      "ok": true,
+      "detail": "affirmative \"route … field-verified\" occurrences=0",
+      "evidence": []
+    },
+    {
+      "gate": 3,
+      "id": "per-segment-cross-sheet-equality",
+      "ok": true,
+      "detail": "feeder=PVC Sch 80 1-1/4\" @ VD 0.36936055005081303% fill=PENDING · projected=true merged=false fillHonest=true",
+      "evidence": {
+        "canRaceway": "PVC Sch 80",
+        "canSize": "1-1/4\"",
+        "canVd": 0.36936055005081303,
+        "canFill": null,
+        "segments": [
+          "ROOF_RUN",
+          "BRANCH_RUN",
+          "COMBINER_TO_DISCO_RUN",
+          "DISCO_TO_METER_RUN",
+          "MSP_TO_UTILITY_RUN"
+        ]
+      }
+    },
+    {
+      "gate": 4,
+      "id": "no-zero-error-claim-with-active-blockers",
+      "ok": true,
+      "detail": "activeElectricalBlockers=3 · zeroErrorClaims=0",
+      "evidence": {
+        "activeElectrical": [
+          "ROUTE-LENGTH-ESTIMATE",
+          "CONDUIT-FILL-PENDING",
+          "TAP-CONDUCTOR-LENGTH-PENDING"
+        ],
+        "zeroErrorClaim": []
+      }
+    },
+    {
+      "gate": 5,
+      "id": "no-undefined-nan-null-nonfinite-value",
+      "ok": true,
+      "detail": "bad value renders=0",
+      "evidence": []
+    },
+    {
+      "gate": 6,
+      "id": "no-dc-materials-in-micro-topology",
+      "ok": true,
+      "detail": "micro=true dcStringSegment=false dcMaterialRows=0",
+      "evidence": []
+    },
+    {
+      "gate": 7,
+      "id": "fittings-match-segment",
+      "ok": true,
+      "detail": "stray 3/4\" EMT DC fittings=0 (feeder is PVC Sch 80 1-1/4\")",
+      "evidence": []
+    },
+    {
+      "gate": 8,
+      "id": "no-substitute-equipment-language",
+      "ok": true,
+      "detail": "substitute phrases found=0",
+      "evidence": []
+    },
+    {
+      "gate": 9,
+      "id": "appA-equals-verified-document",
+      "ok": true,
+      "detail": "appAFields=14 provenanceGaps=0 w5aDefectLeaks=0",
+      "evidence": {
+        "appAProvenanceGaps": [],
+        "w5aLeaks": []
+      }
+    },
+    {
+      "gate": 10,
+      "id": "single-thermal-design-basis",
+      "ok": true,
+      "detail": "negative design temps rendered=-23°C (split −10/−23 present=false)",
+      "evidence": [
+        "-23°C"
+      ]
+    },
+    {
+      "gate": 11,
+      "id": "no-unverified-capacity-as-pass",
+      "ok": true,
+      "detail": "capacityGated=true passLeaks=0 unverifiedShown=true",
+      "evidence": []
+    },
+    {
+      "gate": 12,
+      "id": "no-affirmative-on-pending-pe-cert",
+      "ok": true,
+      "detail": "certApproved=false affirmativeLeaks=0",
+      "evidence": []
+    },
+    {
+      "gate": 13,
+      "id": "no-unnumbered-overflow-pages",
+      "ok": true,
+      "detail": "rendered=20 manifest=20 equal=true everySheetTitled=true",
+      "evidence": {
+        "renderedIds": [
+          "PV-0",
+          "RS-1",
+          "PV-1",
+          "PV-1B",
+          "PV-3",
+          "PV-4C",
+          "E-1",
+          "PV-4A",
+          "PV-4B",
+          "PV-5",
+          "PV-6",
+          "SCHED",
+          "SCHED-2",
+          "APP-A",
+          "DS-1",
+          "DS-2",
+          "DS-3",
+          "DS-4",
+          "CERT",
+          "PE-1"
+        ],
+        "manifestIds": [
+          "PV-0",
+          "RS-1",
+          "PV-1",
+          "PV-1B",
+          "PV-3",
+          "PV-4C",
+          "E-1",
+          "PV-4A",
+          "PV-4B",
+          "PV-5",
+          "PV-6",
+          "SCHED",
+          "SCHED-2",
+          "APP-A",
+          "DS-1",
+          "DS-2",
+          "DS-3",
+          "DS-4",
+          "CERT",
+          "PE-1"
+        ]
+      }
+    },
+    {
+      "gate": 14,
+      "id": "every-active-blocker-on-RS-1",
+      "ok": true,
+      "detail": "RS-1 present=true activeBlockers=12 missingOnRS-1=0",
+      "evidence": {
+        "missingOnRs1": [],
+        "activeBlockers": [
+          "ROUTE-LENGTH-ESTIMATE",
+          "CONDUIT-FILL-PENDING",
+          "TAP-CONDUCTOR-LENGTH-PENDING",
+          "STRUCTURAL-FRAMING-UNVERIFIED",
+          "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "WIND-SNOW-AUTHORITY-UNRESOLVED",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+          "RACKING-CAPACITY-APPLICABILITY-GAP",
+          "CODE-AUTHORITY-INCOMPLETE",
+          "PROJECT-AUTHORITY-UNVERIFIED",
+          "MODULE-EXACT-DATASHEET-PENDING",
+          "ENGINEERING-REVIEW-PENDING"
+        ]
+      }
+    },
+    {
+      "gate": 15,
+      "id": "no-hidden-equipment-conflict",
+      "ok": true,
+      "detail": "conflictActive=false renderedOnRS-1=true",
+      "evidence": null
+    },
+    {
+      "gate": 16,
+      "id": "report-equals-rendered",
+      "ok": true,
+      "detail": "reconciled=9 mismatches=0",
+      "evidence": []
+    },
+    {
+      "gate": 17,
+      "id": "no-renderer-local-engineering-calc",
+      "ok": true,
+      "detail": "fabricated-4in-lag renders=0 · APP-A length-formula source hits=0",
+      "evidence": {
+        "fabricatedLag": [],
+        "apAFormula": []
+      }
+    },
+    {
+      "gate": 18,
+      "id": "no-renderer-local-product-selection",
+      "ok": true,
+      "detail": "micro APP-A projection present=true · _dbMicro scalar prints into verified surface=0",
+      "evidence": []
+    },
+    {
+      "gate": 19,
+      "id": "no-renderer-local-issue-or-cert-decision",
+      "ok": true,
+      "detail": "renderer-local issue/cert decisions=0",
+      "evidence": []
+    },
+    {
+      "gate": 20,
+      "id": "no-code-project-authority-bypass",
+      "ok": true,
+      "detail": "rendered edition contradictions=0 · projection-renderer literals=0",
+      "evidence": {
+        "renderedContradictions": [],
+        "codeLiteralHits": []
+      }
+    }
+  ],
+  "summary": {
+    "total": 20,
+    "passed": 20,
+    "failed": [],
+    "allPass": true
+  }
+}

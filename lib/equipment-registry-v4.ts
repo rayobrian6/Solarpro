@@ -2623,12 +2623,12 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
       },
       {
         category: 'rail',
-        description: 'Rail — 2 rails per module row (IronRidge XR100/XR1000, Pegasus, or compatible)',
+        description: 'Rail — 2 rails per module row (IronRidge XR100/XR1000, Pegasus)',
         required: true, quantityRule: 'formula',
         quantityFormula: 'strings * 2',
         defaultManufacturer: 'IronRidge', defaultModel: 'XR100 Rail 168"',
         defaultPartNumber: 'XR-100-168B', necReference: 'UL 2703',
-        notes: '2 rails per string row (portrait). Compatible: IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent aluminum extruded rail.',
+        notes: '2 rails per string row (portrait). IronRidge XR100/XR1000 aluminum extruded rail; alternates Pegasus, UniRac SFM.',
       },
       {
         category: 'mid_clamp',
@@ -2658,7 +2658,7 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     notesTemplates: [
       'Roof Tech RT-MINI — flashed pad standoff system, rail-based attachment',
       'Assembly: RT-MINI pad (2 lag bolts into rafter) → L-foot → standard rail → mid/end clamps',
-      'Compatible rails: IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent',
+      'Rails: IronRidge XR100/XR1000, Pegasus, UniRac SFM',
       'ICC-ES ESR-3575 / UL 2703, ASCE 7-22 compliant, 150 mph wind, 45 psf snow',
       'Max 48" pad spacing, max 72" rail span (L-foot to L-foot)',
     ],

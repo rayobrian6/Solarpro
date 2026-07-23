@@ -20,8 +20,16 @@ export function structuralBannerHtml(
 ): string {
   const b: StructuralBanner = isBanner(src) ? src : structuralBanner(src ?? null);
   if (!b.show) return '';
-  const reasons = (b.structuralBlockers.length ? b.structuralBlockers : b.blockers)
-    .slice(0, 6).map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('');
+  // W10 (RP-D): render the UNION of every active blocker (b.blockers already IS
+  // the union from the registry) — NEVER the structural-else-everything ternary
+  // that hid the equipment-identity / code / tap / fill / identity blockers.
+  // Cap the compact banner and point at RS-1 for the full registry.
+  const _all = b.blockers;
+  const _cap = 8;
+  const _shown = _all.slice(0, _cap);
+  const _more = _all.length - _shown.length;
+  const reasons = _shown.map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('')
+    + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more active release blocker${_more === 1 ? '' : 's'} — see sheet RS-1 (REVIEW STATUS)</li>` : '');
   const pad = opts?.compact ? '4px 8px' : '8px 12px';
   return `
   <div class="struct-review-banner" style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid #b91c1c;background:#fef2f2;padding:${pad};page-break-inside:avoid;">

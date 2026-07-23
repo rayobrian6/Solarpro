@@ -13,8 +13,10 @@ import { escapeH } from '../utils/drawing';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, BATTERIES } from '@/lib/equipment-db';
 import { getManufacturerAsset, getManufacturerAssetsByCategory, type ManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getRegistryEntryV4 } from '@/lib/equipment-registry-v4';
+import { resolveModuleDatasheetExactness, type ModuleDatasheetExactness } from '../snapshot/equipmentProjection';
+import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 
-interface DatasheetEntry { label: string; asset: ManufacturerAsset; }
+interface DatasheetEntry { label: string; asset: ManufacturerAsset; moduleExactness?: ModuleDatasheetExactness; railPending?: boolean; }
 
 function fuzz<T extends { model: string; id: string }>(list: T[], model?: string): T | undefined {
   const m = (model || '').toLowerCase().trim();
@@ -28,9 +30,13 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
   const { project, system } = input;
   const out: DatasheetEntry[] = [];
   const seen = new Set<string>();
-  const push = (label: string, a: ManufacturerAsset | null) => {
-    if (a && a.imageUrl && !seen.has(a.id)) { seen.add(a.id); out.push({ label, asset: a }); }
+  const push = (label: string, a: ManufacturerAsset | null, extra?: { moduleExactness?: ModuleDatasheetExactness; railPending?: boolean }) => {
+    if (a && a.imageUrl && !seen.has(a.id)) { seen.add(a.id); out.push({ label, asset: a, moduleExactness: extra?.moduleExactness, railPending: extra?.railPending }); }
   };
+  // W6 — canonical racking-assembly rail SKU pinned-state (structuralProjection).
+  // The RACKING RAIL datasheet page must NOT imply a rail is specified while the
+  // assembly's rail SKU is unpinned (RT-MINI: railSku=null → pending).
+  const _railPending = !projectStructuralFromInput(input).rackingAssembly?.railSku;
 
   // PV module(s) — one datasheet per DISTINCT panel model across ALL
   // inverters' strings (Wave 5B: a hybrid's roof/ground/fence subs each carry
@@ -47,7 +53,10 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
   if (panelModels.length === 0) panelModels.push(system.inverters?.[0]?.strings?.[0]?.panelModel ?? '');
   for (const m of panelModels) {
     const dbPanel = fuzz(SOLAR_PANELS, m);
-    push('PV MODULE', getManufacturerAsset(dbPanel?.id, 'module_spec'));
+    // W5 §3 — flag whether the on-file document is the EXACT selected-wattage
+    // module sheet or only a family/range page (rendered as PENDING, not exact).
+    const exact = resolveModuleDatasheetExactness(m, (dbPanel as { watts?: number } | undefined)?.watts ?? null);
+    push('PV MODULE', getManufacturerAsset(dbPanel?.id, 'module_spec'), { moduleExactness: exact });
   }
 
   // Inverter(s) / microinverter(s) — one datasheet per distinct model
@@ -92,7 +101,7 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
       .filter(a => norm(a.brand) === accBrand
         && accModel.includes(norm(a.model).replace(/rail$/, '')))
       .sort((a, b) => b.model.length - a.model.length)[0] ?? null;
-    push('RACKING RAIL', railAsset);
+    push('RACKING RAIL', railAsset, { railPending: _railPending });
   }
 
   return out;
@@ -105,10 +114,29 @@ function datasheetPage(input: PermitInput, sheetId: string, entry: DatasheetEntr
     : '';
   const cite = [a.docTitle, a.pageRef, host].filter(Boolean).join(' · ');
   const title = escapeH(`MANUFACTURER DATASHEET — ${entry.label} · ${a.brand} ${a.model}`.toUpperCase());
+  // W5 §3 — a module document that is only a family/range sheet must be labelled
+  // PENDING (never presented as the exact selected-wattage datasheet).
+  const _ex = entry.moduleExactness;
+  const _familyPending = !!_ex && _ex.stateLabel === 'FAMILY-DATASHEET-PENDING';
+  // W6 — the rail datasheet is shown for reference while the rail SKU is unpinned;
+  // it must NOT imply the shown rail is the specified rail.
+  const _railPending = entry.label === 'RACKING RAIL' && !!entry.railPending;
+  const _pendingBanner = _familyPending ? `
+      <div data-ds-state="family-datasheet-pending" style="border:2px solid #b00;background:#fff5f5;color:#b00;font-weight:700;font-size:8.5px;padding:5px 8px;margin-bottom:6px;line-height:1.4;">
+        EXACT MODULE DOCUMENT PENDING — family datasheet shown for reference.
+        On file: ${escapeH(String(_ex!.familyRange?.[0]))}–${escapeH(String(_ex!.familyRange?.[1]))} W family sheet; selected module is ${escapeH(String(_ex!.selectedWatts ?? '?'))} W.
+        Attach the exact ${escapeH(String(_ex!.selectedWatts ?? ''))} W datasheet before permit submission.
+      </div>`
+    : _railPending ? `
+      <div data-ds-state="rail-not-selected" style="border:2px solid #b00;background:#fff5f5;color:#b00;font-weight:700;font-size:8.5px;padding:5px 8px;margin-bottom:6px;line-height:1.4;">
+        RAIL NOT YET SELECTED — datasheet shown for reference only, not a specification.
+        No rail SKU is pinned to this racking assembly (PENDING RACKING ASSEMBLY SELECTION); ${escapeH(a.brand + ' ' + a.model)} is NOT the specified rail. Confirm and pin the rail before permit submission.
+      </div>` : '';
   return `
-  <div class="page" data-sheet-id="${sheetId}">
+  <div class="page" data-sheet-id="${sheetId}"${_familyPending ? ' data-ds-exact="pending"' : ''}${_railPending ? ' data-ds-rail="pending"' : ''}>
     ${titleBlock(input, sheetId, title, n, t)}
     <div style="height:calc(100% - 150px);padding:10px 14px;display:flex;flex-direction:column;">
+      ${_pendingBanner}
       <div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;border:var(--border);background:#fff;overflow:hidden;padding:8px;">
         <img src="${a.imageUrl}" alt="${escapeH(a.brand + ' ' + a.model + ' datasheet')}" style="max-width:100%;max-height:100%;object-fit:contain;display:block;" />
       </div>

@@ -61,6 +61,7 @@ export function runSnapshotStructuralEngine(
   const ml = result.mountLayout;
   const ra = result.railAnalysis;
   const raf = result.rafterAnalysis;
+  const wind = result.wind;
   const checks: StructuralCheck[] = [];
 
   // ── §9 attachment uplift (ASD; verified regardless of framing) ──────────
@@ -74,6 +75,19 @@ export function runSnapshotStructuralEngine(
     requiredThreshold: MIN_ATTACHMENT_SF, thresholdKind: 'min-safety-factor',
     passes: attSf >= MIN_ATTACHMENT_SF,
     governingSource: 'structural-engine-v4 calcMountLayout + attachmentCapacity (ASD, Ω-normalized allowable)',
+    // W7 — one stated load basis; demand and allowable are BOTH ASD (never an
+    // ASD-reaction-vs-strength-pressure comparison).
+    loadBasis: {
+      designMethod: 'ASD',
+      windPressureBasis: `ASCE 7-22 §26/29 C&C, GOVERNING corner (Zone 3) applied uniformly — conservative screening envelope; net uplift ${round(wind?.netUpliftPressurePsf)} psf`,
+      loadCombination: '0.6D + 0.6W (uplift)',
+      zonePressurePsf: round(wind?.netUpliftPressurePsf),
+      tributaryAreaFt2: round(ml.tributaryAreaPerMountFt2),
+      reactionLbs: round(ml.upliftPerMountLbs),
+      capacityBasis: 'ASD allowable (Ω-normalized; ultimate refused per attachmentCapacity)',
+      adjustments: `0.6 ASD wind factor on demand; per-mount tributary ${round(ml.tributaryAreaPerMountFt2)} ft²`,
+      tributaryModel: 'uniform CONSERVATIVE SCREENING ENVELOPE — full interior tributary charged at every mount (end mounts included)',
+    },
     provenance: prov,
   });
 
@@ -210,14 +224,33 @@ function round(n: number | null | undefined): number | null {
 // blocks on a genuine non-closure (lost load, gross error, or count mismatch).
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Documented closure band (§8). LOWER is the coverage floor — Σ must not fall
- *  below the array footprint / applied load (that would be lost load / under-
- *  design). UPPER is a gross-error ceiling — the conservative uniform-tributary
- *  envelope legitimately exceeds the array area (full tributary on the end
- *  mounts), so only an implausible overcount (≈ doubled/duplicated objects)
- *  fails. A ratio in between is a documented conservative envelope, not a defect.*/
+// W7 — the flat 3.0 "reconciliation band" is replaced by SEPARATE, principled
+// validations (no single loose ceiling that would pass 2–3× object duplication):
+//
+//   • LOST-LOAD FLOOR (REACTION_CLOSURE_LOWER) — Σ tributary / Σ reactions must
+//     COVER the array footprint / applied load. Below this ⇒ load lost ⇒
+//     under-design. Hard floor.
+//   • DUPLICATE-AREA GUARD (ENVELOPE_MAX_RATIO) — the CONSERVATIVE SCREENING
+//     ENVELOPE charges every mount (end mounts included) a FULL interior
+//     tributary. The theoretical maximum of that model is the all-end-mount
+//     degenerate case: each mount charged a full tributary where it physically
+//     carries half ⇒ ratio → 2.0. A ratio ABOVE 2× therefore cannot come from
+//     the envelope's end-mount overcount — it signals duplicated / doubled
+//     objects (a real object-model error). Small epsilon so the degenerate
+//     one-span rail is not false-flagged.
+//   • COUNT AGREEMENT — canonical attachment objects === engine reaction-model
+//     mount count (hard for rail-based; informational for geometry-derived
+//     direct-mount).
+//   • EXACT-CLOSURE tolerance would apply only to a TRUE per-position geometric
+//     model; this package uses the labeled screening envelope, so the envelope
+//     bounds above govern (documented, intentional Σ ≥ area overage).
 export const REACTION_CLOSURE_LOWER = 0.98;
-export const REACTION_CLOSURE_UPPER = 3.0;
+/** Duplicate/doubled-object ceiling (see above). 2.0 = the all-end-mount
+ *  degenerate limit of the uniform full-interior-tributary screening envelope. */
+export const ENVELOPE_MAX_RATIO = 2.05;
+/** @deprecated retained for the schedule footer's displayed band; equals the
+ *  duplicate-area guard. The former flat 3.0 gross-error ceiling is removed. */
+export const REACTION_CLOSURE_UPPER = ENVELOPE_MAX_RATIO;
 
 export interface ReactionReconCheck {
   name: string;
@@ -296,11 +329,14 @@ export function reconcileReactions(
   const appliedDead = addedDeadLoadPsf ?? null;
 
   const checks: ReactionReconCheck[] = [];
-  // Area/reaction closure is a hard check only when the reaction model and the
-  // array-area scope match; otherwise it is informational (documented caveat).
-  const band = (ratio: number | null): boolean =>
-    !scopeMatched
-    || (ratio != null && isFinite(ratio) && ratio >= tol.lower && ratio <= tol.upper);
+  // W7 — SEPARATE validations, not one flat band. Area/reaction closure is a hard
+  // check only when the reaction model and the array-area scope match; otherwise
+  // it is informational (documented hybrid caveat).
+  const floorOk = (ratio: number | null): boolean =>
+    !scopeMatched || (ratio != null && isFinite(ratio) && ratio >= tol.lower);
+  const ceilOk = (ratio: number | null): boolean =>
+    !scopeMatched || (ratio != null && isFinite(ratio) && ratio <= ENVELOPE_MAX_RATIO);
+  const envelopeOk = (ratio: number | null): boolean => floorOk(ratio) && ceilOk(ratio);
 
   // (1) object count vs the engine reaction-model mount count. HARD for a
   // rail-based array (attachments === engine calcMountLayout mountCount). For a
@@ -319,46 +355,56 @@ export function reconcileReactions(
       : 'canonical attachment objects === engine calcMountLayout mountCount (per-attachment reaction basis)',
   });
 
-  // (2) Σ tributary ≈ array footprint.
+  // (2a) LOST-LOAD FLOOR — Σ tributary must COVER the array footprint (Σ ≥ area).
   const tribRatio = arrayAreaFt2 > 0 ? tributarySum / arrayAreaFt2 : null;
   checks.push({
-    name: 'tributary-sum-vs-array-area', limitState: 'geometry',
+    name: 'tributary-lost-load-floor', limitState: 'geometry',
     expected: rr3(arrayAreaFt2), actual: rr3(tributarySum), ratio: rr3(tribRatio),
-    ok: band(tribRatio),
-    basis: 'Σ attachment.tributaryAreaFt2 vs Σ module footprint (conservative uniform-tributary envelope ≥ area)',
+    ok: floorOk(tribRatio),
+    basis: 'lost-load prevention: Σ attachment.tributaryAreaFt2 must COVER the module footprint (Σ ≥ array area). '
+      + 'The uniform CONSERVATIVE SCREENING ENVELOPE charges a full interior tributary at every mount, so Σ ≥ area is intentional.',
+  });
+  // (2b) DUPLICATE-AREA GUARD — Σ tributary must not exceed the envelope's
+  // all-end-mount theoretical limit (≈2× area); above ⇒ doubled/duplicated objects.
+  checks.push({
+    name: 'tributary-duplicate-area-guard', limitState: 'geometry',
+    expected: rr3(arrayAreaFt2 * ENVELOPE_MAX_RATIO), actual: rr3(tributarySum), ratio: rr3(tribRatio),
+    ok: ceilOk(tribRatio),
+    basis: `duplicate-area prevention: Σ tributary ≤ ${ENVELOPE_MAX_RATIO}× array area. The screening envelope's `
+      + 'end-mount overcount tops out at the all-end-mount 2× degenerate; a ratio above that signals duplicated attachment objects, not conservatism.',
   });
 
-  // (3) Σ uplift reaction ≈ 0.6·W × array area (ASD).
+  // (3) Σ uplift reaction envelopes 0.6·W × array area (ASD demand basis).
   const expUplift = appliedUpliftAsd != null ? appliedUpliftAsd * arrayAreaFt2 : null;
   const upRatio = expUplift && expUplift > 0 ? upliftSum / expUplift : null;
   checks.push({
     name: 'uplift-reactions-vs-applied', limitState: 'attachment-uplift',
     expected: rr3(expUplift), actual: rr3(upliftSum), ratio: rr3(upRatio),
-    ok: appliedUpliftAsd == null ? true : band(upRatio),
-    basis: 'Σ upliftReactionLbs vs 0.6·(net C&C uplift psf) × array area',
+    ok: appliedUpliftAsd == null ? true : envelopeOk(upRatio),
+    basis: 'Σ upliftReactionLbs envelopes 0.6·(net C&C uplift psf) × array area (screening envelope: ≥ applied, ≤ 2×)',
   });
 
-  // (4) Σ snow reaction ≈ roof snow psf × array area.
+  // (4) Σ snow reaction envelopes roof snow psf × array area.
   const expSnow = appliedSnow != null ? appliedSnow * arrayAreaFt2 : null;
   const snowRatio = expSnow && expSnow > 0 ? snowSum / expSnow : null;
   if (appliedSnow != null && appliedSnow > 0) {
     checks.push({
       name: 'snow-reactions-vs-applied', limitState: 'snow',
       expected: rr3(expSnow), actual: rr3(snowSum), ratio: rr3(snowRatio),
-      ok: band(snowRatio),
-      basis: 'Σ snowReactionLbs vs roof snow psf × array area',
+      ok: envelopeOk(snowRatio),
+      basis: 'Σ snowReactionLbs envelopes roof snow psf × array area (screening envelope: ≥ applied, ≤ 2×)',
     });
   }
 
-  // (5) Σ dead reaction ≈ added dead psf × array area.
+  // (5) Σ dead reaction envelopes added dead psf × array area.
   const expDead = appliedDead != null ? appliedDead * arrayAreaFt2 : null;
   const deadRatio = expDead && expDead > 0 ? deadSum / expDead : null;
   if (appliedDead != null && appliedDead > 0) {
     checks.push({
       name: 'dead-reactions-vs-applied', limitState: 'dead',
       expected: rr3(expDead), actual: rr3(deadSum), ratio: rr3(deadRatio),
-      ok: band(deadRatio),
-      basis: 'Σ deadReactionLbs vs added dead-load psf × array area',
+      ok: envelopeOk(deadRatio),
+      basis: 'Σ deadReactionLbs envelopes added dead-load psf × array area (screening envelope: ≥ applied, ≤ 2×)',
     });
   }
 
@@ -374,10 +420,12 @@ export function reconcileReactions(
     upliftReactionSumLbs: rr3(upliftSum), snowReactionSumLbs: rr3(snowSum), deadReactionSumLbs: rr3(deadSum),
     tolerance: tol, checks,
     note: ok
-      ? `Reactions reconcile (conservative envelope): ${attachments.length} attachments, Σ design tributary `
-        + `${rr3(tributarySum)} ft² covers array footprint ${rr3(arrayAreaFt2)} ft² (×${rr3(tribRatio)}). Every mount `
-        + `is charged a full interior tributary (end mounts too), so Σ ≥ area is expected; Σ reactions envelope `
-        + `applied load × area per limit state. Coverage band [${tol.lower}, ${tol.upper}].${scopeNote}`
+      ? `Reactions reconcile under the CONSERVATIVE SCREENING ENVELOPE: ${attachments.length} attachments, Σ design `
+        + `tributary ${rr3(tributarySum)} ft² covers the array footprint ${rr3(arrayAreaFt2)} ft² (×${rr3(tribRatio)}). `
+        + `This is NOT an exact geometric closure: every mount — end mounts included — is charged a FULL interior `
+        + `tributary, so Σ ≥ area is intentional and documented. Validated by separate checks (lost-load floor Σ ≥ area; `
+        + `duplicate-area guard Σ ≤ ${ENVELOPE_MAX_RATIO}× area; per-limit-state reaction envelope; object-count agreement) `
+        + `— not a single loose band.${scopeNote}`
       : `Reactions DO NOT reconcile with the applied load — ${checks.filter(c => !c.ok).map(c => c.name).join(', ')}. `
         + `The per-attachment reaction is not traceable to the canonical object set / array footprint `
         + `(load lost below the footprint, a gross object-model overcount, or an object-count mismatch).`,

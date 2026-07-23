@@ -116,21 +116,64 @@ export interface GroundingRecord {
   provenance: Provenance;
 }
 
-/** W2.1 — canonical route-length authority: every electrical run is a
- *  segment with ONE authoritative length and a recorded source. */
+/** W1 §route-verification — the five allowed states for a run's length/route
+ *  evidence. An estimate can NEVER be presented as field-verified (gate 2). */
+export type RouteVerificationState =
+  | 'unverified-estimate'
+  | 'cad-derived-estimate'
+  | 'field-measured'
+  | 'field-verified'
+  | 'as-built-verified';
+
+/** W2.1 / W1 — canonical route-length + per-segment electrical authority: every
+ *  physically distinct electrical section is a segment with ONE authoritative
+ *  length, its OWN currents (operating / continuous / calculated SEPARATED from
+ *  the OCPD rating), temperature basis, derating, installation method and
+ *  verification status. Every sheet PROJECTS these fields; no sheet re-derives
+ *  conductor/conduit/length/fill/VD/current for a given segmentId. Fields added
+ *  in the 07-22 repair pass are optional so existing serialization/digest is
+ *  unchanged until the build populates them. */
 export interface RouteSegmentRecord {
   segmentId: string;                 // engine RunSegment id (e.g. 'COMBINER_TO_DISCO_RUN')
   from: string; to: string;
+  /** what this physical section carries — e.g. 'micro AC branch (Q-Cable trunk)',
+   *  'branch home-run', 'roof junction box', 'combiner feeder',
+   *  'combiner→disconnect', 'disconnect→tap', 'tap conductors',
+   *  'service connection'. */
+  electricalFunction?: string | null;
   oneWayFt: number | null;
   lengthSource: 'cad-route' | 'cad-derived-estimate' | 'field-measurement' | 'operator-entry' | 'unknown';
+  /** W1 — the ONE verification state derived from lengthSource + blockers. Route
+   *  notes/callouts project THIS (never a renderer "field-verified" literal). */
+  verificationStatus?: RouteVerificationState;
   raceway: string | null;            // 'EMT' | 'PVC' | 'FREE_AIR' …
   tradeSizeIn: string | null;
   fillPct: number | null;
+  /** W1 — installation method (e.g. 'in-conduit', 'free-air (690.31(C))',
+   *  'direct-burial', 'cable-tray'). Distinct from the raceway TYPE. */
+  installationMethod?: string | null;
   conductorGauge: string | null;
+  conductorCount?: number | null;    // current-carrying conductors in this run
+  conductorMaterial?: 'Cu' | 'Al' | null;
+  insulation?: string | null;        // 'THWN-2' | 'USE-2' | 'PV Wire' | 'TC-ER' …
+  neutralPresent?: boolean | null;   // W1 — neutral status (grid-tied AC feeder)
   conductorCallout: string | null;
   egcGauge: string | null;           // the EGC carried IN this segment, if any
+  /** W1 — how EGC/bonding is provided ('conductor' | 'raceway' | 'integrated-listed'). */
+  bondingMethod?: 'conductor' | 'raceway' | 'integrated-listed' | 'none-required' | null;
+  // ── W1 — currents SEPARATED (operating vs continuous vs OCPD rating). PV-4B's
+  //    "60 A next to a VD computed at ~45 A" was the OCPD printed where the
+  //    operating current belonged; these three fields keep them distinct. ──
+  operatingCurrentA?: number | null;   // the load current the VD formula uses
+  continuousCurrentA?: number | null;  // operating × 1.25 (NEC 690.8(A))
+  calculatedCurrentA?: number | null;  // engine sizing current (post-derate)
   voltageDropPct: number | null;
-  ocpdA: number | null;
+  /** which current the voltage-drop formula consumed (states the basis). */
+  voltageDropCurrentBasis?: 'operating' | 'continuous' | 'calculated' | null;
+  ocpdA: number | null;                // OCPD/breaker RATING — NOT a load current
+  /** W1 — temperature basis for ampacity derate (ambient + rooftop adder). */
+  ambientTempC?: number | null;
+  rooftopAdderC?: number | null;
   tempDeratingFactor: number | null;
   provenance: Provenance;
 }
@@ -416,6 +459,16 @@ export interface AttachmentObject {
   adjustmentFactors: Record<string, number>;
   utilization: number | null;
   safetyFactor: number | null;
+  /** W7 — net C&C zone pressure (psf) applied to this attachment's tributary
+   *  (the reaction basis). Optional; honest null when no engine pressure. */
+  zonePressurePsf?: number | null;
+  /** W7 — the design method the reaction/capacity are stated in. Both demand and
+   *  allowable are ASD here, so no ASD-vs-strength comparison is ever presented. */
+  loadBasis?: 'ASD' | 'LRFD' | null;
+  /** W7 — the zone/tributary model label. The uniform corner-zone / full-interior
+   *  tributary is a CONSERVATIVE SCREENING ENVELOPE, not an exact per-position
+   *  classification — labeled so no reader treats it as the real distribution. */
+  zoneModel?: string | null;
   coord: CoordinateMeta;            // §2 canonical coordinate authority (xy frame)
   provenance: Provenance;
 }
@@ -458,6 +511,20 @@ export interface StructuralCheck {
   thresholdKind: 'max-dc-ratio' | 'min-safety-factor';
   passes: boolean | null;             // null ⇒ not verifiable (e.g. framing unverified)
   governingSource: string;
+  /** W7 — the explicit load basis this check states, so no reader ever compares
+   *  an ASD reaction to a strength pressure. Optional; populated by the snapshot
+   *  structural engine. Every field is honest-null when not computable. */
+  loadBasis?: {
+    designMethod: 'ASD' | 'LRFD';
+    windPressureBasis: string | null;   // e.g. 'ASCE 7 §26/29 C&C, governing corner zone (screening envelope)'
+    loadCombination: string | null;     // e.g. '0.6D + 0.6W (uplift)'
+    zonePressurePsf: number | null;     // net C&C zone pressure applied
+    tributaryAreaFt2: number | null;    // tributary the reaction was computed over
+    reactionLbs: number | null;         // the demand reaction at this basis
+    capacityBasis: string | null;       // e.g. 'ASD allowable (Ω-normalized)' | 'manufacturer max span'
+    adjustments: string | null;         // e.g. 'Ω=3.0 ultimate→allowable' | 'n/a (published allowable)'
+    tributaryModel: string | null;      // e.g. 'uniform conservative screening envelope (full interior tributary at all mounts)'
+  };
   provenance: Provenance;
 }
 
@@ -650,11 +717,53 @@ export interface PermitDesignSnapshot {
   /** W2.1 req. 3/7: unresolved authority gaps BLOCK permit-ready status —
    *  never silently degraded. (Distinct from validation violations: these are
    *  known-missing authorities, e.g. no true routed geometry, unreconciled
-   *  stored equipment identity.) */
+   *  stored equipment identity.)
+   *
+   *  W10 (RP-D): `registry` is the CANONICAL structured record of every active
+   *  release blocker (blocking + advisory). `blockers` is the back-compat
+   *  code/string list — SINGLE-SOURCED from the registry's BLOCKING entries so
+   *  the many existing code-string consumers (issue-state derivation, gates,
+   *  banners) keep working byte-identically while renderers surface the full
+   *  registry (RS-1 review-status sheet + the union banners). */
   permitReadiness: {
     ready: boolean;
     blockers: { code: string; message: string }[];
+    registry: PermitReadinessBlocker[];
   };
+}
+
+/** W10 (RP-D) — a canonical, structured permit-readiness blocker. Every release
+ *  blocker (electrical, structural, code, project/document, equipment-identity,
+ *  equipment/document, electrical-PENDING, project-identity) is emitted as one
+ *  of these into `permitReadiness.registry`, so the rendered package can surface
+ *  ALL of them (never the structural-else-everything ternary that hid the
+ *  REC-405-vs-Qcells-400 conflict + the code/tap/fill/identity blockers). */
+export interface PermitReadinessBlocker {
+  /** stable machine code, e.g. 'EQUIPMENT-IDENTITY-CONFLICT'. */
+  code: string;
+  /** blocking = prevents permit-ready / issue; warning = advisory (surfaced, not gating). */
+  severity: 'blocking' | 'warning';
+  /** authority domain (electrical/structural/code/equipment/document/review/other). */
+  domain: string;
+  /** the authority record / path whose gap this represents. */
+  authorityPath: string;
+  /** sheets whose rendered content is affected / must show the PENDING state. */
+  affectedSheets: string[];
+  /** human-readable explanation (also used as the back-compat `message`). */
+  explanation: string;
+  /** the concrete action that resolves the blocker. */
+  resolutionAction: string;
+  /** where the blocker was detected. */
+  provenance: { source: string; ref: string | null };
+  /** snapshot generation time (meta.generatedAtIso) — NOT Date.now (pure/digest-safe). */
+  createdAtIso: string;
+  /** engine version that emitted it (meta.engineVersion). */
+  createdVersion: string;
+  /** always false at build (no in-pipeline reconciliation path); an operator
+   *  workflow / migration flips it with a resolutionAuditRef. */
+  resolved: boolean;
+  /** audit reference for the resolution (null until resolved). */
+  resolutionAuditRef: string | null;
 }
 
 export interface SnapshotViolation {

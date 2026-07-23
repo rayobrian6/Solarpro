@@ -496,6 +496,10 @@ function buildRailsAndAttachments(
         allowableCapacityLbs: r3(ml.mountCapacityLbs),
         adjustmentFactors: { omegaUltimateToAllowable: sys?.mount.capacityBasis === 'allowable' ? 1 : 3.0 },
         utilization: sf > 0 ? r3(1 / sf) : null, safetyFactor: r3(sf),
+        // W7 artifact — zone pressure basis + design method + honest model label.
+        zonePressurePsf: r3n(run.wind.netUpliftPressurePsf ?? null),
+        loadBasis: 'ASD',
+        zoneModel: 'CONSERVATIVE SCREENING ENVELOPE — governing corner (Zone 3) C&C pressure + full interior tributary applied uniformly (not an exact per-position classification)',
         coord: coordMetaFor(transform, coordFrame, 'attachment coordinate in canonical site-plan-ft (co-located from module centroids)'),
         provenance: PROV('reaction/capacity from structural-engine-v4 calcMountLayout; coordinate co-located in canonical site-plan-ft'),
       });
@@ -519,7 +523,7 @@ function buildRailsAndAttachments(
       coord: coordMetaFor(transform, coordFrame, 'rail start/end in canonical site-plan-ft (co-located from module centroids)'),
       provenance: PROV(sys?.rail
         ? 'rail geometry from array-geometry engine; span limit from mounting-hardware-db rail spec'
-        : 'rail geometry from array-geometry engine; COMPATIBLE rail (no span-limit authority on mount record)'),
+        : 'rail geometry from array-geometry engine; rail SKU PENDING SELECTION — no span-limit authority on the mount record (NOT FOR PERMIT SUBMISSION)'),
     });
   }
   return { rails, attachments };
@@ -615,6 +619,10 @@ function buildDirectMountAttachments(
           allowableCapacityLbs: capacity != null ? r3(capacity) : null,
           adjustmentFactors: { omegaUltimateToAllowable: capBasis === 'allowable' ? 1 : 3.0 },
           utilization: sf != null && sf > 0 ? r3(1 / sf) : null, safetyFactor: sf,
+          // W7 artifact — zone pressure basis + design method + honest model label.
+          zonePressurePsf: r3n(run.wind.netUpliftPressurePsf ?? null),
+          loadBasis: 'ASD',
+          zoneModel: 'CONSERVATIVE SCREENING ENVELOPE — governing corner (Zone 3) C&C pressure + geometry-honest per-attachment tributary (design pressure re-applied from the engine of record)',
           coord: coordMetaFor(transform, coordFrame, 'direct-mount attachment coordinate in canonical site-plan-ft (per-module mount point from module footprint × product pattern)'),
           provenance: PROV(`direct-mount attachment: coordinate from module footprint × mounting-hardware-db pattern (${sys.id}: ${sys.mount.attachmentMethod}, maxSpacing ${maxSpacingIn}", ${fastenerCount ?? '?'} fastener/mount, ${perEdge}/edge); reaction = engine-of-record design pressure × geometry tributary; capacity = mount-record allowable`),
         });
@@ -722,6 +730,28 @@ function collectBlockers(
   if (a.rackingAssembly?.mixedManufacturer && !a.rackingAssembly.assemblySupported) {
     b.push({ code: 'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED',
       message: `Mixed-manufacturer racking assembly without documented compatibility/capacity authority: ${a.rackingAssembly.mountModel}` });
+  }
+  // W6 — NO verified EXACT rail assembly. When the rail SKU is unpinned (rail-based
+  // mount carrying no own rail spec), OR the assembly's per-element verification is
+  // not fully cleared (capacity source unarchived / span source unresolved), the
+  // racking assembly is NOT permit-ready: emit the explicit PENDING blocker so the
+  // banner prints "PENDING RACKING ASSEMBLY SELECTION / NOT FOR PERMIT SUBMISSION"
+  // and structural PASS is prevented. Guarded on the record's honest verification
+  // states — never fabricated.
+  const _rk = a.rackingAssembly as unknown as {
+    assemblyVerification?: { railSku?: string; overall?: string };
+    railSku?: string | null; railModel?: string | null;
+  } | null;
+  const _railUnpinned = !!a.rackingAssembly?.mixedManufacturer
+    && (a.rackingAssembly?.railSku == null)
+    && (a.rackingAssembly?.railModel == null || /PENDING/i.test(a.rackingAssembly.railModel));
+  const _assemblyPending = _rk?.assemblyVerification?.overall === 'pending';
+  if (a.rackingAssembly && (_railUnpinned || _assemblyPending)) {
+    b.push({ code: 'PENDING-RACKING-ASSEMBLY-SELECTION',
+      message: 'No verified exact racking assembly — '
+        + (_railUnpinned ? 'rail/splice SKU is unpinned (PENDING SELECTION); ' : '')
+        + 'PENDING RACKING ASSEMBLY SELECTION, NOT FOR PERMIT SUBMISSION. Pin the exact rail/splice SKU, '
+        + 'archive the capacity/compatibility authority, and resolve span/cantilever source before permit-ready.' });
   }
   if (!ctx.windAuthoritative || !ctx.snowAuthoritative) {
     b.push({ code: 'WIND-SNOW-AUTHORITY-UNRESOLVED',

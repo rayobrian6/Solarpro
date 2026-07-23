@@ -1,0 +1,110 @@
+{
+  "generatedAt": "2026-07-23T03:33:59.882Z",
+  "snapshotId": "PDS-7793029705B6",
+  "digest": "7793029705b6f7b4cf00ef6b11aa750ef7938172b7ca622cce6f15ff3ce4a5ef",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-7793029705B6 (digest 7793029705b6f7b4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W6 — the exact selected RackingAssembly. RT-MINI mount is rail_paired; rail SKU / span-cantilever authority and capacity document are PENDING — reported honestly, no fabrication.",
+  "assemblyId": "assembly-rooftech-mini",
+  "mount": {
+    "manufacturer": "Roof Tech",
+    "model": "RT-MINI",
+    "sku": null
+  },
+  "rail": {
+    "manufacturer": null,
+    "model": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION",
+    "sku": null,
+    "stockLengthIn": null,
+    "spanCantileverSource": null
+  },
+  "fastener": {
+    "model": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+    "qtyPerMount": 2,
+    "embedmentIn": 2.5,
+    "pilotHole": false
+  },
+  "capacity": {
+    "publishedAllowableLbs": 600,
+    "basis": "allowable",
+    "source": "Roof Tech RT-MINI ICC-ES ESR-3575 Rev 2023",
+    "datasheetRevision": "2023-01",
+    "ul2703": "ICC-ES ESR-3575",
+    "iccEs": "ICC-ES ESR-3575"
+  },
+  "mixedManufacturer": true,
+  "assemblySupported": true,
+  "assemblyVerification": {
+    "railSku": "pending",
+    "capacitySource": "pending",
+    "spanSource": "pending",
+    "fastener": "verified",
+    "overall": "pending"
+  },
+  "structuralAuthorityGaps": [
+    {
+      "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "severity": "blocking",
+      "message": "The RT-MINI 600 lb ASD allowable cites a Roof Tech PE structural letter that is NOT archived in-repo (documentHash null). ESR-3575 is a flashing report that excludes structural capacity. The value cannot be verified against a source of record. Supplied document did NOT clear it — missing/unmatched: document."
+    },
+    {
+      "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "severity": "blocking",
+      "message": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically."
+    }
+  ],
+  "capacityProvenance": {
+    "mountModel": "RT-MINI",
+    "publishedValueLbs": 600,
+    "capacityBasis": "allowable",
+    "asdAllowableLbs": 600,
+    "ultimateBasisRefusedForAsd": false,
+    "sourceDocument": {
+      "identity": "Roof Tech RT-MINI II PE-stamped structural letter — \"RT-MINI II ASCE 7-10 (KY)\". ICC-ES ESR-3575 is a FLASHING / water-resistance report only and Sec. 5.2 explicitly EXCLUDES structural capacity — it is NOT the capacity source.",
+      "revisionOrDate": "2023-01 · basis ASCE 7-10",
+      "issuingEntity": "Roof Tech (registered design professional; specific PE name / license / seal not captured in-repo)",
+      "documentHash": null,
+      "archivedInRepo": false,
+      "hashNote": "source-document-not-archived — the RT-MINI II PE structural letter is referenced by URL/label only; no PDF/datasheet file exists in this repository (searched docs/, public/, assets, _tesla_docs). sha256 cannot be computed and the 600 lb value cannot be verified against an archived source in-repo. Cross-referenced by lib/data/structural/attachment-capacity-basis-research.json, which flags it PROVISIONAL.",
+      "url": "design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_10/"
+    },
+    "jurisdictionApplicabilityBoundary": "Source basis = ASCE 7-10, Kentucky. The project AHJ / adopted ASCE edition is NOT confirmed against this source in-repo — applicability to the project jurisdiction is UNESTABLISHED.",
+    "fastenerPattern": "2× 5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) into the rafter, no pilot hole",
+    "substrateInstallationCondition": "Weakest standard assembly governing the 613.2 lb allowable: 15/32\" sheathing, 2×4 DF-L #2, 2 screws. Compatible roof types: asphalt_shingle, wood_shake. Self-flashing (integrated AlphaSeal/RT Butyl).",
+    "adjustmentFactors": {
+      "assumedSpeciesSpecificGravityG": 0.5,
+      "embedmentIn": 2.5,
+      "safetyFactorAppliedBySource": "yes (value stated as ASD allowable)",
+      "impliedUltimateToAllowableRatio": 1.5,
+      "impliedRatioStatus": "UNVERIFIED — inconsistent with the 3.0 documented for lag-withdrawal (ICC-ES AC428 §3.2.5 / IronRidge FF2 certification); flagged for field verification"
+    },
+    "excludedUltimateRecords": [
+      {
+        "value": 900,
+        "basis": "ultimate",
+        "source": "equipment-db / equipment-registry-v4 (2×450 lb) and ICC-ES ESR-3575 (flashing report)",
+        "reason": "ESR-3575 Sec. 5.2 excludes structural capacity; the 900 lb \"ultimate\" is not a structural authority and is REFUSED as an ASD allowable-capacity value (resolveAsdAllowableLbs)."
+      }
+    ],
+    "assemblyApplicability": {
+      "selectedMountModel": "RT-MINI",
+      "selectedRail": null,
+      "selectedSubstrate": "asphalt_shingle, wood_shake",
+      "sourceCoversMount": true,
+      "sourceCoversRail": false,
+      "sourceCoversSubstrate": null,
+      "assessment": "The 600 lb ASD allowable covers the RT-MINI pad-to-rafter attachment for the weakest standard wood assembly ONLY. It does NOT establish rail span/cantilever capacity for the mixed-manufacturer paired rail (SKU unpinned), and the source jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do NOT apply generically."
+    },
+    "provenance": {
+      "source": "rackingAssembly.buildRackingAssembly",
+      "ref": "rooftech-mini",
+      "note": "W3.1 §4 RT-MINI capacity provenance — records only in-repo-verifiable evidence; the PE source document is not archived, hence documentHash null + blocking gaps."
+    }
+  },
+  "pendingStateHonest": false,
+  "notes": [
+    "CAPACITY AUTHORITY = 600 lb ASD ALLOWABLE (Roof Tech RT-MINI II PE letter, 613.2 lb weakest standard assembly, conservative round-down). The 900 lb \"ultimate\" (2×450) entries in equipment-db / equipment-registry-v4 are NOT structural authority (ESR-3575 is a flashing / water-resistance report and carries no structural value).",
+    "W3.1 §4 — the cited PE structural letter is NOT archived in this repository (documentHash: null, source-document-not-archived); the 600 lb value is field-referenced and PROVISIONAL. Applicability to the selected mixed assembly / project jurisdiction is UNVERIFIED — see capacityProvenance and the RACKING-CAPACITY-* structural-authority gaps.",
+    "Mixed-manufacturer assembly: Roof Tech RT-MINI mount + rail from a different manufacturer — rail/splice SKU is PENDING SELECTION (not yet specified; NOT FOR PERMIT SUBMISSION). The mount record carries no rail span-limit authority, so rail span / cantilever checks are UNVERIFIABLE until the exact rail SKU is pinned."
+  ]
+}

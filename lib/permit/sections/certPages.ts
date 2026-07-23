@@ -64,9 +64,15 @@ export function certificationGateBanner(input: PermitInput): string {
   // missing, ...) rather than a generic pending line. One gate, wired to the
   // snapshot.
   const _sp = projectStructuralFromInput(input);
-  const _reasons = (_sp.banner.structuralBlockers.length ? _sp.banner.structuralBlockers : _sp.banner.blockers)
-    .slice(0, 6)
-    .map(b => `<li style="margin:0 0 1px 0;">${String(b.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('');
+  // W10 (RP-D): enumerate the UNION of every active blocker (banner.blockers is
+  // the registry union) — not the structural-else-everything ternary that hid
+  // the equipment-identity / code / tap / fill / project-identity blockers.
+  const _allReasons = _sp.banner.blockers;
+  const _shownReasons = _allReasons.slice(0, 8);
+  const _moreReasons = _allReasons.length - _shownReasons.length;
+  const _reasons = _shownReasons
+    .map(b => `<li style="margin:0 0 1px 0;">${String(b.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')
+    + (_moreReasons > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_moreReasons} more — see sheet RS-1 (REVIEW STATUS)</li>` : '');
   const _hasStructural = _sp.banner.structuralBlockers.length > 0;
   return `
   <div style="border:3px solid #b00000;background:#fff2f2;margin:10px 14px 6px;padding:8px 12px;text-align:center;">
@@ -559,6 +565,15 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   // attachment-uplift CHECK (capacity/demand/SF), not a `(safetyFactor||2)` derive.
   const _sp = projectStructuralFromInput(input);
   const _attChk = findCheck(_sp, 'attachment-uplift');
+  // W8 — PE-1 projects the SAME gated state as PV-4C. While the RT-MINI capacity
+  // source is unverified (capacityGated) no allowable / SF / PASS may render; while
+  // framing authority is unverified (engineeringReviewRequired) the framing check
+  // renders INDETERMINATE (no utilization %, no PASS). PE-1 reads the honest
+  // snapshot framing check (passes:null) rather than the legacy compliance.structural
+  // .rafter.* numbers that were computed off the fabricated 45-psf / 12-ft defaults.
+  const _capGated       = _sp.capacityGated === true;
+  const _framingChk     = findCheck(_sp, 'framing-capacity');
+  const _reviewRequired = _sp.engine?.engineeringReviewRequired ?? (_framingChk?.passes == null);
   const windSpeed   = _sp.present ? fmt(_sp.windSpeedMph) : (structural?.wind?.windSpeed || '—');
   const uplift      = _attChk?.demand != null ? _attChk.demand.toFixed(0) : (structural?.wind?.upliftPerAttachment?.toFixed(0) || '—');
   const lagCap      = _attChk?.capacity != null ? _attChk.capacity.toFixed(0) : (structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—');
@@ -666,8 +681,11 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <div class="section-title">Structural Analysis Results (${asce})</div>
           <table class="info-table mb-xs">
             ${_peSiteLoading(input)}
-                                    <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Rafter Bending &amp; Deflection Analysis</td></tr>
-            ${_isTruss ? `
+                                    <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">${_isTruss ? 'Roof Framing (Truss) Analysis' : 'Rafter Bending &amp; Deflection Analysis'}</td></tr>
+            ${_reviewRequired ? `
+            <tr><td class="il">Framing Authority</td><td class="iv" style="font-weight:bold;color:#b91c1c;">UNVERIFIED</td><td class="il">Framing</td><td class="iv">${_isTruss ? 'Pre-Engineered Truss' : `Stick (${framingType})`}</td></tr>
+            <tr><td class="il">Capacity Basis</td><td class="iv" colspan="3">Code default (${_isTruss ? 'BCSI generic table' : 'NDS generic'}) &mdash; NOT project engineering authority. Member size / spacing / species / clear span are not verified against a truss drawing, mfr data or engineer calc.</td></tr>
+            <tr><td class="il">Result</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO FRAMING PASS/FAIL CONCLUSION ISSUED (no utilization asserted)</td></tr>` : _isTruss ? `
             <tr><td class="il">Analysis Basis</td><td class="iv">BCSI capacity table</td><td class="il">Framing</td><td class="iv">Pre-Engineered Truss</td></tr>
             <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Truss Span</td><td class="iv">${rafterSpanFt} ft${!project.rafterSpan ? ' (PER ROOF GEOMETRY &mdash; FIELD VERIFY)' : ''}</td></tr>
             <tr><td class="il">Truss Capacity</td><td class="iv">${allowableBM} psf</td><td class="il">Load Utilization</td><td class="iv" style="font-weight:bold;color:${(structural?.rafter?.utilizationRatio ?? 0) <= 1.0 ? '#000' : '#cc0000'};">${utilization}%</td></tr>
@@ -676,9 +694,12 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Rafter Span</td><td class="iv">${rafterSpanFt} ft${!project.rafterSpan ? ' (ASSUMED &mdash; FIELD VERIFY)' : ''}</td></tr>
             <tr><td class="il">Line Load</td><td class="iv">${lineLoad} lb/ft</td><td class="il">Bending Moment</td><td class="iv">${bendingMoment} / ${allowableBM} lb-ft</td></tr>
             <tr><td class="il">Bending Utilization</td><td class="iv" style="font-weight:bold;color:${_bendPass ? '#000' : '#cc0000'};">${bendUtil}%</td><td class="il">Deflection</td><td class="iv" style="color:${_deflPass ? '#000' : '#cc0000'};">${deflection} in (&Delta;_allow = ${allowableDefl} in &mdash; ${deflUtil}%)</td></tr>`}
-            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment Capacity Analysis</td></tr>
+            <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Lag Bolt Attachment ${_capGated ? '&mdash; Capacity Source Pending' : 'Capacity Analysis'}</td></tr>
+            ${_capGated ? `
+            <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs (ASD 0.6W, canonical)</td><td class="il">Published Allowable</td><td class="iv" style="font-weight:bold;color:#b45309;">CAPACITY SOURCE UNVERIFIED</td></tr>
+            <tr><td class="il">Capacity Comparison</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO PASS/FAIL CONCLUSION ISSUED (RT-MINI structural capacity source not archived / applicability to the selected assembly unconfirmed &mdash; &sect;9)</td></tr>` : `
             <tr><td class="il">Net Uplift per Attachment</td><td class="iv">${uplift} lbs</td><td class="il">Lag Bolt Capacity</td><td class="iv">${lagCap} lbs</td></tr>
-            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} &mdash; ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : '—'}</td></tr>
+            <tr><td class="il">Safety Factor</td><td class="iv" style="font-weight:bold;color:${_lagPass ? '#000' : '#cc0000'};">${safetyFact} (ASD basis &mdash; min. ${_attThreshold.toFixed(1)} req.)</td><td class="il">Governing Check</td><td class="iv" style="font-weight:bold;color:${_allPass ? '#000' : '#cc0000'};">${_utilRatioPresent ? `${_governs} &mdash; ${utilization}% ${_allPass ? '(PASS)' : '(EXCEEDS LIMIT)'}` : '—'}</td></tr>`}
             <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Governing Load Combination (${asce} &sect;2.4 &mdash; ASD)</td></tr>
             <tr><td class="il">Governing Combo</td><td class="iv">0.6D + 0.6W (Uplift)</td><td class="il">Code Reference</td><td class="iv">${asce} &sect;26/27</td></tr>
           </table>

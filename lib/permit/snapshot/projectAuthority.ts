@@ -63,6 +63,16 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED': 'structural',
   'RACKING-CAPACITY-APPLICABILITY-GAP': 'structural',
   'DIRECT-MOUNT-GEOMETRY-MISSING': 'structural',
+  // W10 (RP-D) — codes that do not lead with a domain prefix, mapped explicitly
+  // so the review-status registry groups them correctly (never a generic 'other'
+  // for a known-domain gap) and the empty-sheets default is avoided.
+  'PENDING-RACKING-ASSEMBLY-SELECTION': 'structural',
+  'CONDUIT-FILL-PENDING': 'electrical',
+  'TAP-CONDUCTOR-LENGTH-PENDING': 'electrical',
+  'PROJECT-NAME-NONPRODUCTION': 'document',
+  'DESIGNER-OF-RECORD-MISSING': 'document',
+  'MODULE-EXACT-DATASHEET-PENDING': 'document',
+  'EQUIPMENT-DOCUMENT-UNVERIFIED': 'document',
 };
 
 /** Classify one blocker code into its authority domain (pure). */

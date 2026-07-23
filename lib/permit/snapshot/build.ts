@@ -17,6 +17,7 @@ import {
   type PermitDesignSnapshot, type EquipmentRecord,
   type ModuleSpec, type MicroInverterSpec, type StringInverterSpec, type MountSpec,
   type RailSpec, type ConductorRecord, type BranchRecord,
+  type PermitReadinessBlocker,
 } from './types';
 import { computeSnapshotDigest, snapshotIdFromDigest, deepFreeze } from './digest';
 import { buildCodeAuthority, resolveAhjRecord } from './codeAuthority';
@@ -38,6 +39,7 @@ import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, getPanelById } from '@/
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
+import { collectEquipmentDocumentBlockers } from './equipmentProjection';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 
 const fuzz = <T extends { model: string }>(list: T[], model?: string | null): T | undefined => {
@@ -97,7 +99,10 @@ export function buildPermitDesignSnapshot(
     const asset = db ? getManufacturerAsset(db.id, 'module_spec') : null;
     return {
       recordId: `mod-${i + 1}`, catalogId: db?.id ?? null,
-      manufacturer: db?.manufacturer ?? '', model: db?.model ?? m, sku: db?.sku ?? null,
+      // W5 (RP-C): the exact SKU lives on `partNumber` (equipment-db canonical
+      // field); the legacy `sku` read was always undefined, so the snapshot
+      // equipment record dropped IQ8A-72-2-US / the module part number.
+      manufacturer: db?.manufacturer ?? '', model: db?.model ?? m, sku: db?.partNumber ?? db?.sku ?? null,
       datasheet: { revision: asset?.docTitle ?? null, sourceUrl: asset?.sourceUrl ?? db?.datasheetUrl ?? null,
                    capturedAtIso: null, assetId: asset?.id ?? null },
       verified: !!asset?.verified,
@@ -128,7 +133,10 @@ export function buildPermitDesignSnapshot(
     const asset = db ? (getManufacturerAsset(db.id, 'microinverter_spec') ?? getManufacturerAsset(db.id, 'inverter_spec')) : null;
     const base = {
       recordId: `inv-${i + 1}`, catalogId: db?.id ?? null,
-      manufacturer: db?.manufacturer ?? '', model: db?.model ?? m, sku: db?.sku ?? null,
+      // W5 (RP-C): the exact SKU lives on `partNumber` (equipment-db canonical
+      // field); the legacy `sku` read was always undefined, so the snapshot
+      // equipment record dropped IQ8A-72-2-US / the module part number.
+      manufacturer: db?.manufacturer ?? '', model: db?.model ?? m, sku: db?.partNumber ?? db?.sku ?? null,
       datasheet: { revision: asset?.docTitle ?? null, sourceUrl: asset?.sourceUrl ?? db?.datasheetUrl ?? null,
                    capturedAtIso: null, assetId: asset?.id ?? null },
       verified: !!asset?.verified,
@@ -299,21 +307,61 @@ export function buildPermitDesignSnapshot(
   // ═══ W2.1 CANONICAL ROUTE-LENGTH AUTHORITY ═════════════════════════════
   // deriveRunLengths(cad) is a DOCUMENTED CAD-DERIVED ESTIMATE, not routed
   // geometry — recorded as such, and it BLOCKS permit-ready status below.
-  const routeSegments: import('./types').RouteSegmentRecord[] = ((cs?.runs ?? []) as any[]).map((r: any) => ({
-    segmentId: String(r.id), from: String(r.fromLabel ?? r.from ?? ''), to: String(r.toLabel ?? r.to ?? ''),
-    oneWayFt: isFinite(r.onewayLengthFt) ? r.onewayLengthFt : null,
-    lengthSource: 'cad-derived-estimate',
-    raceway: r.isOpenAir ? 'FREE_AIR' : (r.conduitType ?? null),
-    tradeSizeIn: r.conduitSize ?? null,
-    fillPct: isFinite(r.conduitFillPercent) ? r.conduitFillPercent : null,
-    conductorGauge: r.wireGauge ?? null,
-    conductorCallout: r.conductorCallout ?? null,
-    egcGauge: r.egcGauge ?? null,
-    voltageDropPct: isFinite(r.voltageDropPct) ? r.voltageDropPct : null,
-    ocpdA: isFinite(r.ocpdAmps) ? r.ocpdAmps : null,
-    tempDeratingFactor: isFinite(r.tempDeratingFactor) ? r.tempDeratingFactor : null,
-    provenance: { source: 'computeSystem runs (deriveRunLengths cad estimate)' },
-  }));
+  // W1 — describe each physical section's electrical function from its run id so
+  // the schema self-documents (Q-Cable trunk / branch home-run / roof JB /
+  // combiner feeder / combiner→disco / disco→tap / tap conductors / service).
+  const _elecFunction = (id: string, isOpenAir: boolean): string => {
+    const s = id.toUpperCase();
+    if (/BRANCH/.test(s)) return isOpenAir ? 'micro AC branch (Q-Cable trunk, open air)' : 'branch home-run raceway';
+    if (/JBOX|J_BOX|JB/.test(s)) return 'roof junction box';
+    if (/PV_TO/.test(s)) return isOpenAir ? 'array wiring (open air, 690.31(C))' : 'array wiring in raceway';
+    if (/COMBINER_TO_DISCO|INV_TO_DISCO/.test(s)) return 'combiner/inverter feeder → disconnect';
+    if (/DISCO_TO_(MSP|TAP|POI)/.test(s)) return 'disconnect → point of interconnection / tap';
+    if (/TAP/.test(s)) return 'tap conductors';
+    if (/SERVICE|MSP/.test(s)) return 'service equipment connection';
+    return 'electrical run';
+  };
+  const routeSegments: import('./types').RouteSegmentRecord[] = ((cs?.runs ?? []) as any[]).map((r: any) => {
+    const _isOpenAir = !!r.isOpenAir;
+    const _opA = isFinite(r.operatingCurrentA) ? r.operatingCurrentA
+      : (isFinite(r.currentA) ? r.currentA : null);
+    const _contA = isFinite(r.continuousCurrentA) ? r.continuousCurrentA
+      : (_opA != null ? Math.round(_opA * 1.25 * 100) / 100 : null);
+    return {
+      segmentId: String(r.id), from: String(r.fromLabel ?? r.from ?? ''), to: String(r.toLabel ?? r.to ?? ''),
+      electricalFunction: _elecFunction(String(r.id), _isOpenAir),
+      oneWayFt: isFinite(r.onewayLengthFt) ? r.onewayLengthFt : null,
+      lengthSource: 'cad-derived-estimate',
+      // W1 — CAD-derived length ⇒ cad-derived-estimate verification state (never
+      // field-verified without a recorded measurement). Mirrors the canonical
+      // RouteVerificationStatus accessor's mapping.
+      verificationStatus: 'cad-derived-estimate',
+      raceway: _isOpenAir ? 'FREE_AIR' : (r.conduitType ?? null),
+      tradeSizeIn: r.conduitSize ?? null,
+      fillPct: isFinite(r.conduitFillPercent) ? r.conduitFillPercent : null,
+      installationMethod: _isOpenAir ? 'free-air (NEC 690.31(C))' : (r.conduitType ? 'in-conduit' : null),
+      conductorGauge: r.wireGauge ?? null,
+      conductorCount: isFinite(r.conductorCount) ? r.conductorCount : null,
+      conductorMaterial: 'Cu',
+      insulation: r.insulation ?? (_isOpenAir && isMicro ? 'TC-ER' : (r.isDc ? 'USE-2' : 'THWN-2')),
+      neutralPresent: typeof r.neutralPresent === 'boolean' ? r.neutralPresent : null,
+      conductorCallout: r.conductorCallout ?? null,
+      egcGauge: r.egcGauge ?? null,
+      bondingMethod: r.egcGauge ? 'conductor' : (String(r.conduitType ?? '').toUpperCase().includes('EMT') ? 'raceway' : null),
+      operatingCurrentA: _opA,
+      continuousCurrentA: _contA,
+      calculatedCurrentA: isFinite(r.effectiveCurrentA) ? r.effectiveCurrentA : _contA,
+      voltageDropPct: isFinite(r.voltageDropPct) ? r.voltageDropPct : null,
+      // The VD formula uses the OPERATING current (Vd = 2·L·I·R/1000); recorded
+      // so a sheet can never present the OCPD rating as the VD current.
+      voltageDropCurrentBasis: 'operating',
+      ocpdA: isFinite(r.ocpdAmps) ? r.ocpdAmps : null,
+      ambientTempC: isFinite(r.ambientTempC) ? r.ambientTempC : null,
+      rooftopAdderC: isFinite(r.rooftopAdderC) ? r.rooftopAdderC : null,
+      tempDeratingFactor: isFinite(r.tempDeratingFactor) ? r.tempDeratingFactor : null,
+      provenance: { source: 'computeSystem runs (deriveRunLengths cad estimate)' },
+    };
+  });
 
   // ═══ §5 (07-22) CANONICAL SERVICE-INTERCONNECTION TOPOLOGY ═════════════════
   // The tap point, tap conductors, fused OCPD, utility disconnect, meter and
@@ -565,73 +613,157 @@ export function buildPermitDesignSnapshot(
   // per-field states resolve to 'unverified-derived'. Never fabricate true.
   const _projectAuthorityVerified = false;
 
-  // ═══ W4 §12 PERMIT-READINESS (extracted so the project/issue-state authority
-  // can derive the issue state from these blockers by domain) ════════════════
-  const _permitReadiness: { ready: boolean; blockers: { code: string; message: string }[] } = (() => {
-    const blockers: { code: string; message: string }[] = [];
+  // ═══ W4 §12 / W10 (RP-D) PERMIT-READINESS REGISTRY ═════════════════════════
+  // ONE canonical, structured registry of EVERY active release blocker
+  // (blocking + advisory), from which the back-compat code/message list is
+  // single-sourced (BLOCKING entries only, preserving the issue-state / gate
+  // semantics). The renderer surfaces the FULL registry (RS-1 review-status
+  // sheet + union banners) so nothing is hidden by the old structural-else
+  // ternary. createdAtIso/createdVersion use the snapshot generation
+  // meta (NOT Date.now) so pure/digest paths stay deterministic.
+  const _permitReadiness: {
+    ready: boolean;
+    blockers: { code: string; message: string }[];
+    registry: PermitReadinessBlocker[];
+  } = (() => {
+    const registry: PermitReadinessBlocker[] = [];
+    // Static authority metadata per code (severity / where it lives / which
+    // sheets must show it / how to resolve it). Dynamic codes (structural /
+    // racking / equipment-document) fall back to sensible defaults.
+    const META: Record<string, { severity: 'blocking' | 'warning'; authorityPath: string; sheets: string[]; resolution: string }> = {
+      'ROUTE-LENGTH-ESTIMATE': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].lengthSource', sheets: ['PV-1', 'PV-4B', 'E-1', 'SCHED'], resolution: 'Provide CAD-routed geometry or field-measured run lengths (no estimate as authority).' },
+      'EQUIPMENT-IDENTITY-CONFLICT': { severity: 'blocking', authorityPath: 'project.subSystems[*].panelId vs equipment.modules[0]', sheets: ['SCHED', 'APP-A', 'DS-1'], resolution: 'Operator must reconcile the stored panelId with the fleet module (migration 110) — never auto-resolved.' },
+      'FEEDER-RACEWAY-AUTHORITY': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit', sheets: ['PV-4B', 'E-1', 'SCHED'], resolution: 'Resolve the feeder raceway/conduit type + bonding authority on the canonical feeder segment.' },
+      'CONDUIT-FILL-PENDING': { severity: 'warning', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
+      'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'warning', authorityPath: 'electrical.serviceTopology[svc-tap-conductors].constraints', sheets: ['PV-4B', 'PV-6', 'E-1'], resolution: 'Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).' },
+      'CODE-AUTHORITY-INCOMPLETE': { severity: 'blocking', authorityPath: 'codeAuthority.editions', sheets: ['PV-0', 'CERT', 'PE-1'], resolution: 'Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.' },
+      'PROJECT-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'projectAuthority', sheets: ['PV-0', 'CERT'], resolution: 'Verify address / APN / municipal boundary / AHJ / fire authority via the document registry (no postal inference).' },
+      'PROJECT-NAME-NONPRODUCTION': { severity: 'blocking', authorityPath: 'project.projectName', sheets: ['PV-0'], resolution: 'Replace the non-production ("TEST") project name with the real project identity before issue.' },
+      'DESIGNER-OF-RECORD-MISSING': { severity: 'blocking', authorityPath: 'project.designer', sheets: ['PV-0', 'CERT'], resolution: 'Assign the designer / engineer-of-record before issue.' },
+      'ENGINEERING-REVIEW-PENDING': { severity: 'blocking', authorityPath: 'certification.engineeringReviewApproved', sheets: ['CERT', 'PE-1'], resolution: 'Obtain an approved engineering-review record covering the current snapshot digest (D-6).' },
+    };
+    const STRUCT_DEFAULT = { authorityPath: 'structural (structural-engine-v4 objects)', sheets: ['PV-4C', 'PV-3', 'PE-1', 'CERT'], resolution: 'Establish the verified structural authority (capacity / framing / fastener / assembly) before a structural PASS.' };
+    const push = (code: string, explanation: string, over?: Partial<PermitReadinessBlocker>): void => {
+      const m = META[code];
+      const domain = classifyBlockerDomain(code);
+      const isStruct = domain === 'structural';
+      registry.push({
+        code,
+        severity: over?.severity ?? m?.severity ?? 'blocking',
+        domain,
+        authorityPath: over?.authorityPath ?? m?.authorityPath ?? (isStruct ? STRUCT_DEFAULT.authorityPath : `snapshot (${domain})`),
+        affectedSheets: over?.affectedSheets ?? m?.sheets ?? (isStruct ? STRUCT_DEFAULT.sheets : []),
+        explanation,
+        resolutionAction: over?.resolutionAction ?? m?.resolution ?? (isStruct ? STRUCT_DEFAULT.resolution : 'Resolve the missing authority before permit-ready.'),
+        provenance: over?.provenance ?? { source: 'snapshot build (permitReadiness)', ref: null },
+        createdAtIso: _capturedIso,
+        createdVersion: String(PLANSET_ENGINE_VERSION),
+        resolved: false,
+        resolutionAuditRef: null,
+      });
+    };
+
     // Req. 3: no authoritative routed geometry exists — segment lengths are
     // CAD-derived ESTIMATES. Identified, never silently used as authority-grade.
     if (routeSegments.some(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement')) {
-      blockers.push({ code: 'ROUTE-LENGTH-ESTIMATE',
-        message: 'Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status' });
+      push('ROUTE-LENGTH-ESTIMATE',
+        'Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status');
     }
     // Req. 7: stored equipment-identity conflict (e.g. Braidon subSystems
     // panelId vs fleet model) BLOCKS permit-ready until operator reconciliation.
-    for (const c of equipmentIdentityConflicts) blockers.push({ code: 'EQUIPMENT-IDENTITY-CONFLICT', message: c });
+    // W10b: this conflict was NEVER reconciled — it must stay VISIBLE (first-class
+    // registry entry), never hidden by a renderer ternary.
+    for (const c of equipmentIdentityConflicts) push('EQUIPMENT-IDENTITY-CONFLICT', c);
     // §14 carry-forward: missing feeder raceway/conduit type authority stays
     // visible and blocking (never weakened by W3).
     if (cs && !(feederRun?.conduitType)) {
-      blockers.push({ code: 'FEEDER-RACEWAY-AUTHORITY',
-        message: 'Feeder raceway/conduit type not resolved on the canonical feeder segment — raceway + bonding authority required' });
+      push('FEEDER-RACEWAY-AUTHORITY',
+        'Feeder raceway/conduit type not resolved on the canonical feeder segment — raceway + bonding authority required');
+    }
+    // W10a: conduit fill PENDING was only ever a schedule-cell literal (counted as
+    // "0 errors" on PV-4A). Emit it as an ADVISORY blocker so it is enumerated.
+    if (cs && ((elec?.conduitFill as any)?.fillPercent == null)) {
+      push('CONDUIT-FILL-PENDING',
+        'Feeder conduit fill is PENDING (not computed) — it must never be presented as a passing zero-error result on PV-4A/PV-4B');
+    }
+    // W10a: tap-conductor length is PENDING (no CAD/field datum) — the ≤10-ft
+    // NEC 705.11(C) rule cannot be evaluated. Surface it as an advisory blocker
+    // rather than only a service-topology PENDING cell.
+    if (serviceTopology.some(o => o.type === 'tap-conductors'
+      && (o.constraints ?? []).some(k => k.state === 'pending'))) {
+      push('TAP-CONDUCTOR-LENGTH-PENDING',
+        'Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)');
     }
     // §12: W3 canonical structural blockers (framing unverified, missing
     // capacity/fastener source, unsupported mixed assembly, wind/snow
     // authority, untraceable reactions/rails, utilization failures, missing
-    // site geometry). Honest blockers are the correct Braidon outcome.
-    for (const sb of structAuth.blockers) blockers.push(sb);
+    // site geometry, PENDING-RACKING-ASSEMBLY-SELECTION). Honest blockers are
+    // the correct Braidon outcome.
+    for (const sb of structAuth.blockers) push(sb.code, sb.message, { provenance: { source: 'structuralAuthority', ref: null } });
     // §4 (W3.1): promote BLOCKING racking-capacity structural-authority gaps
     // (RT-MINI capacity provenance: RACKING-CAPACITY-SOURCE-NOT-ARCHIVED +
-    // RACKING-CAPACITY-APPLICABILITY-GAP) into the permit-readiness blockers
-    // so the racking capacity gap ACTIVELY blocks permit-ready rather than
-    // being applied generically. Warning-severity gaps stay on the record
-    // (structural.rackingAssembly.capacityProvenance / structuralAuthorityGaps)
-    // but do not block. Enforced by V32.
+    // RACKING-CAPACITY-APPLICABILITY-GAP) into the readiness registry. Enforced by V32.
     const _rackGaps = ((structAuth.rackingAssembly as unknown as {
       structuralAuthorityGaps?: { code: string; severity: 'blocking' | 'warning'; message: string }[];
     } | null)?.structuralAuthorityGaps) ?? [];
     for (const g of _rackGaps) {
-      if (g.severity === 'blocking') blockers.push({ code: g.code, message: g.message });
+      if (g.severity === 'blocking') push(g.code, g.message, { provenance: { source: 'rackingAssembly.structuralAuthorityGaps', ref: null } });
     }
     // W4 §1/§2: code authority must be VERIFIED and CURRENT for the project
-    // jurisdiction. An unverified or edition-incomplete record blocks
-    // permit-ready (the planset still renders for review). Missing editions
-    // are named so the operator knows exactly what adoption authority is
-    // still required — never silently defaulted.
+    // jurisdiction. An unverified or edition-incomplete record blocks permit-ready.
     if (codeAuthority.verificationStatus !== 'verified') {
       const _missing = codeAuthority.incompleteEditions.map(k => k.toUpperCase());
       const _detail = _missing.length
         ? `unknown adopted edition for ${_missing.join(', ')} (printed PENDING — no inference)`
         : `code authority unverified (no archived adoption document)`;
-      blockers.push({ code: 'CODE-AUTHORITY-INCOMPLETE',
-        message: `Code authority is ${codeAuthority.verificationStatus} for `
+      push('CODE-AUTHORITY-INCOMPLETE',
+        `Code authority is ${codeAuthority.verificationStatus} for `
           + `${codeAuthority.ahjName ?? 'the project jurisdiction'} — ${_detail}. `
-          + `Archive + verify the adoption document (W4-D) before permit-ready.` });
+          + `Archive + verify the adoption document (W4-D) before permit-ready.`);
     }
-    // §14 — PROJECT LEGAL AUTHORITY VERIFICATION. Address / APN / municipal
-    // boundary / AHJ / fire authority are operator-posted or POSTALLY INFERRED
-    // (county/city/AHJ from ZIP — the "Madison County / Granite City assumed
-    // from 62040" case). Postal inference is NOT verification. Verified state can
-    // only come from the document-registry / operator verification path (not
-    // wired here — never fabricated). Any unverified-derived field blocks
-    // permit-ready.
+    // §14 — PROJECT LEGAL AUTHORITY VERIFICATION (postal inference is NOT
+    // verification). Any unverified-derived field blocks permit-ready.
     if (!_projectAuthorityVerified && (proj.address || proj.city || proj.county || codeAuthority.ahjName)) {
-      blockers.push({ code: 'PROJECT-AUTHORITY-UNVERIFIED',
-        message: 'Project legal authority (address, APN, municipal boundary, AHJ and fire authority) is operator-posted / postally inferred and not verified from an official source — '
-          + 'county/city/AHJ must not be assumed from postal code alone. Verify via the document registry before permit-ready.' });
+      push('PROJECT-AUTHORITY-UNVERIFIED',
+        'Project legal authority (address, APN, municipal boundary, AHJ and fire authority) is operator-posted / postally inferred and not verified from an official source — '
+          + 'county/city/AHJ must not be assumed from postal code alone. Verify via the document registry before permit-ready.');
     }
-    blockers.push({ code: 'ENGINEERING-REVIEW-PENDING',
-      message: 'No approved engineering-review record covering this snapshot digest (D-6)' });
-    return { ready: blockers.length === 0, blockers };
+    // §15(d) — production IDENTITY blockers. Previously these only gated the
+    // ISSUED-FOR-PERMIT step silently (_projectIdentityValid); now they are
+    // first-class registry entries so the reviewer sees WHY the set is not
+    // production-ready (Braidon's "…Solar TEST" name + blank designer).
+    if (proj.projectName && /\bTEST\b/i.test(String(proj.projectName))) {
+      push('PROJECT-NAME-NONPRODUCTION',
+        `Project name "${String(proj.projectName)}" contains "TEST" — a non-production identity can never reach an ISSUED/production state`);
+    }
+    if (!(proj.designer && String(proj.designer).trim())) {
+      push('DESIGNER-OF-RECORD-MISSING',
+        'No designer / engineer-of-record is assigned — required before a production/issued set');
+    }
+    // W5 (RP-C): equipment / document readiness (advisory) — a micro with no
+    // verified datasheet, or a family/range module page instead of the exact
+    // wattage. Structured records carry their own authority path + resolution.
+    for (const e of collectEquipmentDocumentBlockers(input)) {
+      push(e.code, e.explanation, {
+        severity: e.severity,
+        authorityPath: e.authorityPath,
+        affectedSheets: e.affectedSheets,
+        resolutionAction: e.resolutionAction,
+        provenance: { source: e.provenance.source, ref: e.provenance.equipmentRecordId ?? e.provenance.documentRecordId ?? null },
+      });
+    }
+    // D-6: engineering review is ALWAYS pending at build (no approved record).
+    push('ENGINEERING-REVIEW-PENDING',
+      'No approved engineering-review record covering this snapshot digest (D-6)');
+
+    // Back-compat: the code/message list is the BLOCKING subset, single-sourced
+    // from the registry — the issue-state derivation, gates, and prior consumers
+    // see EXACTLY the blocking authority gaps they always did (advisory warnings
+    // are surfaced by the renderer but never gate readiness).
+    const blockers = registry
+      .filter(r => r.severity === 'blocking' && !r.resolved)
+      .map(r => ({ code: r.code, message: r.explanation }));
+    return { ready: blockers.length === 0, blockers, registry };
   })();
 
   // ═══ W4 §3/§12 CANONICAL PROJECT + COVER AUTHORITY ═════════════════════════

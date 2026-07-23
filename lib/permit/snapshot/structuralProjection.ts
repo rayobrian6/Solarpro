@@ -98,6 +98,7 @@ const STRUCTURAL_BLOCKER_CODES = new Set([
   'MODULE-DIMENSIONS-UNVERIFIED',
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
   'RACKING-CAPACITY-APPLICABILITY-GAP',
+  'PENDING-RACKING-ASSEMBLY-SELECTION',
 ]);
 
 /** §9 — racking-capacity gap codes that gate a capacity PASS off any sheet. */
@@ -111,9 +112,20 @@ export const BANNER_LINE_1 = 'PENDING STRUCTURAL ENGINEERING REVIEW';
 export const BANNER_LINE_2 = 'NOT FOR PERMIT SUBMISSION';
 
 /** Compute the §12 banner state from a snapshot's permit readiness. The banner
- *  shows whenever readiness is false OR any structural blocker is present. */
+ *  shows whenever readiness is false OR any structural blocker is present.
+ *
+ *  W10 (RP-D): `blockers` is the UNION of every ACTIVE release blocker (blocking
+ *  + advisory) drawn from the canonical registry — so banner surfaces that were
+ *  wrongly showing ONLY structural blockers (structuralBlockers-else-blockers
+ *  ternary) now enumerate electrical / code / equipment-identity / document /
+ *  project-identity blockers too. `structuralBlockers` remains the structural
+ *  subset for the banner's show-gate. Falls back to the back-compat blocker list
+ *  when a snapshot predates the registry. */
 export function structuralBanner(snap: PermitDesignSnapshot | null | undefined): StructuralBanner {
-  const blockers = snap?.permitReadiness?.blockers ?? [];
+  const registry = snap?.permitReadiness?.registry;
+  const blockers = (registry && registry.length)
+    ? registry.filter(r => !r.resolved).map(r => ({ code: r.code, message: r.explanation }))
+    : (snap?.permitReadiness?.blockers ?? []);
   const structuralBlockers = blockers.filter(b => STRUCTURAL_BLOCKER_CODES.has(b.code));
   const notReady = snap ? snap.permitReadiness.ready === false : false;
   return {

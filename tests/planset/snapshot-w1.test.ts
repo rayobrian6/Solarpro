@@ -199,7 +199,7 @@ export function baseSnapshot(): PermitDesignSnapshot {
     permitReadiness: { ready: false, blockers: [
       { code: 'ROUTE-LENGTH-ESTIMATE', message: 'cad-derived estimates' },
       { code: 'ENGINEERING-REVIEW-PENDING', message: 'no review record' },
-    ] },
+    ], registry: [] },
   };
 }
 

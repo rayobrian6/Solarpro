@@ -443,7 +443,21 @@ function analyzeRafter(
   // ── TRUSS: BCSI capacity table ──────────────────────────────────────────
   if (framingType === 'truss') {
     const spanKey = String(Math.round(rafterSpanFt / 4) * 4);
-    const trussCapacity = TRUSS_CAPACITY_PSF[spanKey] ?? 45;
+    // W8 — no fabricated 45-psf magic default. When the span is outside the BCSI
+    // screening table, clamp to the NEAREST tabulated span bound and flag the
+    // value as a GENERIC screening default (NOT project engineering authority).
+    // The snapshot framing check renders this indeterminate until the framing is
+    // verified, so it is never certified as a pass regardless.
+    const _tabled = TRUSS_CAPACITY_PSF[spanKey];
+    const _spanKeys = Object.keys(TRUSS_CAPACITY_PSF).map(Number).sort((a, b) => a - b);
+    const _nearest = _spanKeys.reduce((best, k) =>
+      Math.abs(k - rafterSpanFt) < Math.abs(best - rafterSpanFt) ? k : best, _spanKeys[0]);
+    const trussCapacity = _tabled ?? TRUSS_CAPACITY_PSF[String(_nearest)];
+    if (_tabled == null) {
+      notes.push(`Span ${rafterSpanFt} ft is outside the BCSI screening table (${_spanKeys[0]}-${_spanKeys[_spanKeys.length - 1]} ft) — `
+        + `capacity clamped to the nearest tabulated span (${_nearest} ft = ${trussCapacity} psf) as a GENERIC screening default, `
+        + `NOT project engineering authority. Verify against the truss manufacturer design.`);
+    }
     const totalLoad = roofDeadLoad + pvDeadLoadPsf + snowLoadPsf;
     const utilization = totalLoad / trussCapacity;
 
@@ -950,10 +964,15 @@ function calcRackingBOM(
       qty: railQty,
       lengthFt: railLengthFt,
       unit: 'ea',
+      // W6 — no raw 'Compatible Rail' / 'RAIL-PENDING-SELECTION' tokens: an
+      // unpinned rail reads as the explicit pending state; partNumber is an
+      // honest null (no SKU), not a placeholder token.
       description: isRailBased
-        ? `${system.manufacturer} ${system.rail?.model ?? 'Compatible Rail'} — ${railLengthFt.toFixed(1)} ft each`
+        ? (system.rail?.model
+            ? `${system.manufacturer} ${system.rail.model} — ${railLengthFt.toFixed(1)} ft each`
+            : 'RAIL / SPLICE SKU PENDING RACKING ASSEMBLY SELECTION — NOT FOR PERMIT SUBMISSION')
         : 'N/A — Rail-less or ballasted system',
-      partNumber: system.rail?.model ?? 'RAIL-PENDING-SELECTION',
+      partNumber: system.rail?.model ?? null,
     },
     railSplices: {
       qty: totalSplices,

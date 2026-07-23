@@ -18,7 +18,7 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
 import { peekSnapshot } from '../snapshot/read';
-import { projectCanonicalFeeder } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch } from '../snapshot/electricalProjection';
 
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
@@ -67,6 +67,10 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // carries (the SAME source PV-4A/PV-4B/SCHED read), so the SLD can never print
   // '3/4" EMT' while the schedule prints '1-1/4" 3/4" EMT' at 1.11%-vs-0.37%.
   const _snapFeed = projectCanonicalFeeder(peekSnapshot(input));
+  // W1b — the micro AC branch home-run raceway PROJECTS the canonical BRANCH_RUN
+  // segment so E-1 stops printing the '3/4" EMT' literal while PV-4B / SCHED /
+  // BOM project the real branch conduit (one segment authority, gate 3).
+  const _snapBranch = projectCanonicalBranch(peekSnapshot(input));
 
   // ── Mount type — drives the PV-array glyph/labels in the renderer ──
   // (cad.systemType is canonical, e.g. 'solar_fence'; project.systemType is the
@@ -194,6 +198,10 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // is only the standalone-preview fallback (no snapshot).
     acConduitType:           _snapFeed.raceway ?? project.conduitType ?? 'EMT',
     acConduitSize:           _snapFeed.tradeSizeIn ?? project.conduitSize ?? undefined,
+    // W1b — canonical branch home-run raceway (single source for E-1's SEGMENT_2A).
+    branchConduitType:       _snapBranch.raceway ?? undefined,
+    branchConduitSize:       _snapBranch.tradeSizeIn ?? undefined,
+    branchIsOpenAir:         _snapBranch.raceway === 'FREE_AIR',
     acOCPD,
     mainPanelAmps:           mainAmps,
     // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot

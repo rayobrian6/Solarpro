@@ -584,7 +584,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     // → RT-MINI pad → roof), NOT rail-less module mounts. Routes the railed path.
     mountTopology: 'rail_paired',
     mountTopologyBasis: 'RT-MINI / RT-MINI II are rail-paired self-flashing standoff bases: the pad '
-      + 'attaches a CONVENTIONAL rail (IronRidge XR100/XR1000, UniRac SFM, Pegasus or equivalent — see '
+      + 'attaches a listed rail (IronRidge XR100/XR1000, UniRac SFM, or Pegasus — SKU PENDING SELECTION; see '
       + 'hardware.railSplice), and modules clamp to that rail. systemType rail_based; Ray directive §1.',
     compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
     description: 'Roof Tech RT-MINI — SELF-FLASHING pad standoff (AlphaSeal / RT Butyl seals the screw penetration; no separate flashing kit). Fastened with 2 structural wood screws into the rafter (no pilot hole). L-foot + conventional rail are separate add-ons. ICC-ES ESR-3575.',
@@ -621,7 +621,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     hardware: {
       midClamp: 'RT-MINI Mid Clamp',
       endClamp: 'RT-MINI End Clamp',
-      railSplice: 'Compatible rail — PENDING SELECTION (specify a listed compatible rail/splice SKU: IronRidge XR100/XR1000, UniRac SFM, or Pegasus)',
+      railSplice: 'Rail/splice SKU PENDING RACKING ASSEMBLY SELECTION — paired rail system; specify a listed rail/splice SKU (IronRidge XR100/XR1000, UniRac SFM, or Pegasus)',
       groundLug: 'RT-MINI Ground Lug',
       lagBolt: '5/16" (8mm/M8) structural wood screw, ~3.5" (90mm) — 2 per pad, no pilot hole',
       // No flashingKit — RT-MINI is self-flashing (integrated AlphaSeal/RT Butyl).

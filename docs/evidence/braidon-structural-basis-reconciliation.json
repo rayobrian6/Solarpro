@@ -1,0 +1,159 @@
+{
+  "generatedAt": "2026-07-23T03:33:59.882Z",
+  "snapshotId": "PDS-7793029705B6",
+  "digest": "7793029705b6f7b4cf00ef6b11aa750ef7938172b7ca622cce6f15ff3ce4a5ef",
+  "engineVersion": "47420",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-7793029705B6 (digest 7793029705b6f7b4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "role": "W7/W8 — one canonical load basis per check (ASD/LRFD, wind pressure basis, load combination, zone pressure, adjustments); the 3.0× band is retired for separate closure/envelope/lost-load/duplicate-area/count checks.",
+  "loads": {
+    "windSpeedMph": 115,
+    "exposure": "C",
+    "snowPsf": 0,
+    "source": "structural-engine-v4"
+  },
+  "governing": {
+    "utilization": 0.673,
+    "safetyFactor": 1.4865981027434467,
+    "passes": true
+  },
+  "env": {
+    "ultimateWindSpeedMph": 115,
+    "windSpeedSource": "code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority",
+    "exposureCategory": "C",
+    "riskCategory": null,
+    "groundSnowPsf": 0,
+    "roofSnowPsf": 0,
+    "buildingHeightFt": 15,
+    "componentCladdingZones": [
+      "corner"
+    ],
+    "upliftPressurePsf": 61.152,
+    "downforcePressurePsf": 61.152,
+    "codeAuthority": {
+      "asceEdition": "ASCE 7-22",
+      "source": "pending-w4-ahj-authority"
+    },
+    "provenance": {
+      "source": "W3 structural authority",
+      "note": "wind/snow/exposure from canonical site → structural-engine-v4; ASCE edition via code-authority interface (AHJ population = W4)"
+    }
+  },
+  "reactionReconciliation": {
+    "ok": true,
+    "present": true,
+    "attachmentCount": 64,
+    "reactionModelCount": 64,
+    "arrayAreaFt2": 636.461,
+    "tributarySumFt2": 704,
+    "appliedUpliftPsfAsd": 36.691,
+    "appliedSnowPsf": 0,
+    "appliedDeadPsf": 2.642,
+    "upliftReactionSumLbs": 25830.784,
+    "snowReactionSumLbs": 0,
+    "deadReactionSumLbs": 1860.224,
+    "tolerance": {
+      "lower": 0.98,
+      "upper": 2.05
+    },
+    "checks": [
+      {
+        "name": "attachment-count-vs-reaction-model",
+        "limitState": "count",
+        "expected": 64,
+        "actual": 64,
+        "ratio": 1,
+        "ok": true,
+        "basis": "canonical attachment objects === engine calcMountLayout mountCount (per-attachment reaction basis)"
+      },
+      {
+        "name": "tributary-lost-load-floor",
+        "limitState": "geometry",
+        "expected": 636.461,
+        "actual": 704,
+        "ratio": 1.106,
+        "ok": true,
+        "basis": "lost-load prevention: Σ attachment.tributaryAreaFt2 must COVER the module footprint (Σ ≥ array area). The uniform CONSERVATIVE SCREENING ENVELOPE charges a full interior tributary at every mount, so Σ ≥ area is intentional."
+      },
+      {
+        "name": "tributary-duplicate-area-guard",
+        "limitState": "geometry",
+        "expected": 1304.745,
+        "actual": 704,
+        "ratio": 1.106,
+        "ok": true,
+        "basis": "duplicate-area prevention: Σ tributary ≤ 2.05× array area. The screening envelope's end-mount overcount tops out at the all-end-mount 2× degenerate; a ratio above that signals duplicated attachment objects, not conservatism."
+      },
+      {
+        "name": "uplift-reactions-vs-applied",
+        "limitState": "attachment-uplift",
+        "expected": 23352.518,
+        "actual": 25830.784,
+        "ratio": 1.106,
+        "ok": true,
+        "basis": "Σ upliftReactionLbs envelopes 0.6·(net C&C uplift psf) × array area (screening envelope: ≥ applied, ≤ 2×)"
+      },
+      {
+        "name": "dead-reactions-vs-applied",
+        "limitState": "dead",
+        "expected": 1681.53,
+        "actual": 1860.224,
+        "ratio": 1.106,
+        "ok": true,
+        "basis": "Σ deadReactionLbs envelopes added dead-load psf × array area (screening envelope: ≥ applied, ≤ 2×)"
+      }
+    ],
+    "note": "Reactions reconcile under the CONSERVATIVE SCREENING ENVELOPE: 64 attachments, Σ design tributary 704 ft² covers the array footprint 636.461 ft² (×1.106). This is NOT an exact geometric closure: every mount — end mounts included — is charged a FULL interior tributary, so Σ ≥ area is intentional and documented. Validated by separate checks (lost-load floor Σ ≥ area; duplicate-area guard Σ ≤ 2.05× area; per-limit-state reaction envelope; object-count agreement) — not a single loose band."
+  },
+  "reconciliationChecks": [
+    {
+      "name": "attachment-count-vs-reaction-model",
+      "limitState": "count",
+      "expected": 64,
+      "actual": 64,
+      "ratio": 1,
+      "ok": true,
+      "basis": "canonical attachment objects === engine calcMountLayout mountCount (per-attachment reaction basis)"
+    },
+    {
+      "name": "tributary-lost-load-floor",
+      "limitState": "geometry",
+      "expected": 636.461,
+      "actual": 704,
+      "ratio": 1.106,
+      "ok": true,
+      "basis": "lost-load prevention: Σ attachment.tributaryAreaFt2 must COVER the module footprint (Σ ≥ array area). The uniform CONSERVATIVE SCREENING ENVELOPE charges a full interior tributary at every mount, so Σ ≥ area is intentional."
+    },
+    {
+      "name": "tributary-duplicate-area-guard",
+      "limitState": "geometry",
+      "expected": 1304.745,
+      "actual": 704,
+      "ratio": 1.106,
+      "ok": true,
+      "basis": "duplicate-area prevention: Σ tributary ≤ 2.05× array area. The screening envelope's end-mount overcount tops out at the all-end-mount 2× degenerate; a ratio above that signals duplicated attachment objects, not conservatism."
+    },
+    {
+      "name": "uplift-reactions-vs-applied",
+      "limitState": "attachment-uplift",
+      "expected": 23352.518,
+      "actual": 25830.784,
+      "ratio": 1.106,
+      "ok": true,
+      "basis": "Σ upliftReactionLbs envelopes 0.6·(net C&C uplift psf) × array area (screening envelope: ≥ applied, ≤ 2×)"
+    },
+    {
+      "name": "dead-reactions-vs-applied",
+      "limitState": "dead",
+      "expected": 1681.53,
+      "actual": 1860.224,
+      "ratio": 1.106,
+      "ok": true,
+      "basis": "Σ deadReactionLbs envelopes added dead-load psf × array area (screening envelope: ≥ applied, ≤ 2×)"
+    }
+  ],
+  "tolerance": {
+    "lower": 0.98,
+    "upper": 2.05
+  },
+  "note": "Reactions reconcile under the CONSERVATIVE SCREENING ENVELOPE: 64 attachments, Σ design tributary 704 ft² covers the array footprint 636.461 ft² (×1.106). This is NOT an exact geometric closure: every mount — end mounts included — is charged a FULL interior tributary, so Σ ≥ area is intentional and documented. Validated by separate checks (lost-load floor Σ ≥ area; duplicate-area guard Σ ≤ 2.05× area; per-limit-state reaction envelope; object-count agreement) — not a single loose band."
+}

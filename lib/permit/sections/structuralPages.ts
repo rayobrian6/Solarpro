@@ -946,8 +946,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ${asce} §26/27 and ${ibcVer} IBC/IRC.
-        ${_reviewRequired
-          ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted). The lag-bolt attachment and rail checks pass on the analyzed inputs, but a licensed structural review of the existing framing is required before this set is submitted for permit — see the review notice above.'
+        ${_reviewRequired && _capGated
+          ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted) AND the attachment-capacity source is UNVERIFIED (§9 — structural source not archived / applicability unconfirmed). Demand analysis is complete, but NO framing pass and NO attachment pass are asserted; a licensed structural review of the existing framing and a verified attachment-capacity source are both required before this set is submitted for permit.'
+          : _reviewRequired
+          ? 'Roof framing authority is UNVERIFIED (member size / spacing / species / span defaulted). The rail checks pass on the analyzed inputs, but a licensed structural review of the existing framing is required before this set is submitted for permit — see the review notice above.'
           : (_capGated
             ? 'Attachment capacity is UNVERIFIED (§9 — structural source not archived / applicability unconfirmed). The demand analysis is complete, but a verified attachment-capacity source is required before this set is submitted for permit; no attachment PASS is asserted.'
             : _attChk?.passes === true && _framingChk?.passes === true
@@ -998,7 +1000,6 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
 // applied load × array footprint (per limit state). Capacity/SF are gated to
 // PENDING when the §9 capacity gate is active. Uniform reactions are collapsed
 // beyond a row cap with an explicit "+K identical" note (never silently clipped).
-const REACTION_ROW_CAP = 40;
 function renderReactionSchedule(proj: StructuralProjection): string {
   const atts = proj.attachments ?? [];
   const rr = proj.reactionReconciliation;
@@ -1014,14 +1015,43 @@ function renderReactionSchedule(proj: StructuralProjection): string {
   const n2 = (v: number | null | undefined) => v == null || !isFinite(v) ? '—' : v.toFixed(0);
   const n1 = (v: number | null | undefined) => v == null || !isFinite(v) ? '—' : v.toFixed(1);
   const capCell = gated ? 'PENDING' : '';
-  const rows = atts.slice(0, REACTION_ROW_CAP);
-  const extra = atts.length - rows.length;
 
-  const bodyRows = rows.map((a, i) => {
+  // ── W9 (RP-D) PAGE-FIT: GROUP-BY-LOAD-CASE compact schedule ────────────────
+  // The former 40-row per-attachment table overflowed PV-4C onto an unnumbered
+  // second physical page. Because this is a CONSERVATIVE SCREENING ENVELOPE
+  // (governing corner zone + full interior tributary applied to EVERY mount),
+  // the per-attachment reactions are identical — 1 row group covers all 64. The
+  // schedule now collapses attachments with an identical rendered signature into
+  // ONE row (ID range + count); the FULL per-attachment set stays in the
+  // machine-readable canonical object model (proj.attachments). If a future
+  // per-position zone/tributary model lands, distinct positions render as
+  // distinct groups automatically.
+  interface Grp { key: string; ids: string[]; a: (typeof atts)[number]; }
+  const groups: Grp[] = [];
+  const gIndex = new Map<string, Grp>();
+  for (const a of atts) {
+    const sfKey = gated ? 'PEND.' : (a.safetyFactor != null ? a.safetyFactor.toFixed(2) : '—');
+    const capKey = gated ? 'PENDING' : n2(a.allowableCapacityLbs);
+    const key = [a.roofZone ?? '—', n1(a.tributaryAreaFt2), n2(a.deadReactionLbs), n2(a.snowReactionLbs),
+      n2(a.downwardReactionLbs), n2(a.upliftReactionLbs), capKey, sfKey].join('|');
+    let g = gIndex.get(key);
+    if (!g) { g = { key, ids: [], a }; gIndex.set(key, g); groups.push(g); }
+    g.ids.push(a.attachmentId);
+  }
+  const GROUP_CAP = 24;
+  const shownGroups = groups.slice(0, GROUP_CAP);
+  const hiddenGroups = groups.length - shownGroups.length;
+  const idRange = (ids: string[]): string => ids.length === 1
+    ? escapeH(ids[0])
+    : `${escapeH(ids[0])} &ndash; ${escapeH(ids[ids.length - 1])}`;
+
+  const bodyRows = shownGroups.map((g, i) => {
+    const a = g.a;
     const sf = gated ? 'PEND.' : (a.safetyFactor != null ? a.safetyFactor.toFixed(2) : '—');
     const cap = gated ? capCell : n2(a.allowableCapacityLbs);
     return `<tr${i % 2 ? ' class="bg-lt"' : ''}>
-      <td class="mono">${escapeH(a.attachmentId)}</td>
+      <td class="mono">${idRange(g.ids)}</td>
+      <td class="tr fw7">${g.ids.length}</td>
       <td>${escapeH(a.roofZone ?? '—')}</td>
       <td class="tr">${n1(a.tributaryAreaFt2)}</td>
       <td class="tr">${n2(a.deadReactionLbs)}</td>
@@ -1033,19 +1063,20 @@ function renderReactionSchedule(proj: StructuralProjection): string {
     </tr>`;
   }).join('');
 
-  const extraNote = extra > 0
-    ? `<tr><td colspan="9" style="font-size:6.5px;color:#555;font-style:italic;padding:2px 3px;">+ ${extra} additional attachment${extra === 1 ? '' : 's'} with identical uniform tributary / reaction values (full set carried in the canonical structural object model; abbreviated here for legibility).</td></tr>`
+  const extraNote = hiddenGroups > 0
+    ? `<tr><td colspan="10" style="font-size:6.5px;color:#555;font-style:italic;padding:2px 3px;">+ ${hiddenGroups} additional distinct load-case group${hiddenGroups === 1 ? '' : 's'} (full per-attachment set carried in the canonical structural object model; abbreviated here for page fit).</td></tr>`
     : '';
 
   // ── Reconciliation footer ──
   const reconRows: string[] = [];
   let footer = '';
   if (rr && rr.present) {
-    const verdict = rr.ok ? 'RECONCILED' : 'DOES NOT RECONCILE';
+    const verdict = rr.ok ? 'RECONCILED (CONSERVATIVE SCREENING ENVELOPE)' : 'DOES NOT RECONCILE';
     const vColor = rr.ok ? '#006600' : '#cc0000';
     const chk = (name: string) => rr.checks.find(c => c.name === name);
     const cCount = chk('attachment-count-vs-reaction-model');
-    const cTrib = chk('tributary-sum-vs-array-area');
+    const cFloor = chk('tributary-lost-load-floor');
+    const cDup = chk('tributary-duplicate-area-guard');
     const cUp = chk('uplift-reactions-vs-applied');
     const cSnow = chk('snow-reactions-vs-applied');
     const cDead = chk('dead-reactions-vs-applied');
@@ -1054,10 +1085,11 @@ function renderReactionSchedule(proj: StructuralProjection): string {
       : '';
     reconRows.push(
       `<tr style="font-weight:bold;"><td>Object count vs reaction model</td><td class="tr">${cCount?.expected ?? '—'}</td><td class="tr">${cCount?.actual ?? '—'}</td><td class="tr">${cCount?.ratio ?? '—'}</td><td style="text-align:center;color:${cCount?.ok ? '#006600' : '#cc0000'};">${cCount?.ok ? 'OK' : 'FAIL'}</td></tr>`,
-      line('Σ tributary vs array area (ft²)', cTrib),
-      line('Σ uplift vs 0.6·W × area (lb)', cUp),
-      line('Σ snow vs snow psf × area (lb)', cSnow),
-      line('Σ dead vs dead psf × area (lb)', cDead),
+      line('Σ tributary &ge; array area — lost-load floor (ft²)', cFloor),
+      line('Σ tributary &le; 2&times; area — duplicate-area guard (ft²)', cDup),
+      line('Σ uplift envelopes 0.6·W × area (lb)', cUp),
+      line('Σ snow envelopes snow psf × area (lb)', cSnow),
+      line('Σ dead envelopes dead psf × area (lb)', cDead),
     );
     footer = `
       <div class="section-title">Reaction Reconciliation — Σ Reactions vs Applied Load × Array Area (§8)</div>
@@ -1075,10 +1107,10 @@ function renderReactionSchedule(proj: StructuralProjection): string {
   }
 
   return `
-      <div class="section-title">Attachment Reaction Schedule — Per-Attachment Reactions (${'ASCE 7'} §2.4 ASD)</div>
+      <div class="section-title">Attachment Reaction Schedule — Grouped by Load Case (${'ASCE 7'} §2.4 ASD) — ${atts.length} attachment${atts.length === 1 ? '' : 's'}, ${groups.length} distinct group${groups.length === 1 ? '' : 's'}</div>
       <table class="equip-table" style="width:100%;">
         <thead><tr>
-          <th>Attach ID</th><th>Zone</th><th style="text-align:right;">Trib (ft²)</th>
+          <th>Attach IDs</th><th style="text-align:right;">Qty</th><th>Zone</th><th style="text-align:right;">Trib (ft²)</th>
           <th style="text-align:right;">Dead (lb)</th><th style="text-align:right;">Snow (lb)</th>
           <th style="text-align:right;">Down D+S (lb)</th><th style="text-align:right;">Uplift 0.6W (lb)</th>
           <th style="text-align:right;">Cap (lb)</th><th style="text-align:right;">SF</th>
@@ -1087,6 +1119,7 @@ function renderReactionSchedule(proj: StructuralProjection): string {
       </table>
       <div style="padding:2px 6px;font-size:6.5px;color:#555;line-height:1.3;border:var(--border);border-top:none;">
         Reactions sourced from the canonical attachment objects (structural-engine-v4 mount layout). Uplift = ASD 0.6·W net C&amp;C over the per-mount tributary; Down = Dead + Snow over the same tributary.
+        <strong>CONSERVATIVE SCREENING ENVELOPE:</strong> the &ldquo;Zone&rdquo; column prints the GOVERNING corner (ASCE 7 Zone 3) C&amp;C pressure applied UNIFORMLY to every attachment, and each mount is charged a FULL interior tributary (end mounts included). This is an intentionally conservative screening basis, not an exact per-position zone/tributary distribution &mdash; a design that passes here passes at every position.
         ${gated ? 'Capacity + SF are gated to PENDING (§9 — allowable source unverified).' : ''}
       </div>${footer}`;
 }

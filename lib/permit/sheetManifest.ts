@@ -86,6 +86,10 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
   const primaryLabel = isHybrid ? ` — ${HYBRID_LABEL[(o.hybridSubs ?? ['roof'])[0]]}` : '';
   return [
     { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
+    // W10 (RP-D): the dedicated review-status registry sheet — every active
+    // release blocker, referenced from the cover SHEET INDEX. Always present so
+    // the manifest and page assembly stay byte-for-byte in sync (V12/V35).
+    { id: 'RS-1',  title: 'REVIEW STATUS — ACTIVE RELEASE BLOCKERS & RECONCILIATION' },
     { id: 'PV-1',  title: o.pv1Title },
     // Hybrid: one plan/elevation detail sheet PER additional sub-system
     // (real GPS geometry — never overlays only).

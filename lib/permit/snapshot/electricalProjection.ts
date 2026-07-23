@@ -107,13 +107,165 @@ export function projectCanonicalFeeder(snap: PermitDesignSnapshot | null | undef
   };
 }
 
-/** §6 ROUTE PROVENANCE — the annotation every route/trench label must print
- *  while any electrical run length is a CAD-derived estimate (not routed CAD
- *  geometry / field measurement). Drives PV-1's trench text off the real state. */
-export function routeProvenanceLabel(snap: PermitDesignSnapshot | null | undefined): string {
+// ═══════════════════════════════════════════════════════════════════════════
+// W3 §route-verification — the ONE RouteVerificationStatus authority. Every
+// route note / conduit callout / trench label across the package projects THIS
+// (no renderer literal). An estimated route can NEVER print "field-verified":
+// that string is reachable only when the snapshot carries a recorded field
+// measurement (lengthSource==='field-measurement') or an as-built record. The
+// five allowed values are Ray's binding list; the accessor computes the WEAKEST
+// (least-verified) status across all electrical run segments, because a route
+// callout describes the whole run — one unverified segment governs the label.
+// ═══════════════════════════════════════════════════════════════════════════
+export type RouteVerificationStatus =
+  | 'unverified-estimate'      // no segment authority / unknown length source
+  | 'cad-derived-estimate'     // deriveRunLengths / CAD geometry, not field-checked
+  | 'field-measured'           // a tech measured the run in the field
+  | 'field-verified'           // measured AND verified against the installed route
+  | 'as-built-verified';       // as-built record closes the loop
+
+const ROUTE_STATUS_LABEL: Record<RouteVerificationStatus, string> = {
+  'unverified-estimate': 'UNVERIFIED ESTIMATE — FIELD VERIFY',
+  'cad-derived-estimate': 'CAD-DERIVED ESTIMATE — FIELD VERIFY',
+  'field-measured': 'FIELD-MEASURED',
+  'field-verified': 'FIELD-VERIFIED',
+  'as-built-verified': 'AS-BUILT VERIFIED',
+};
+
+/** Order weakest→strongest so we can pick the governing (weakest) status. */
+const ROUTE_STATUS_RANK: RouteVerificationStatus[] = [
+  'unverified-estimate', 'cad-derived-estimate', 'field-measured', 'field-verified', 'as-built-verified',
+];
+
+/** Map a RouteSegmentRecord.lengthSource → a verification status. Conservative:
+ *  operator-entry and cad-route are estimate-grade until field measurement is
+ *  recorded (nothing short of a field measurement may claim "verified"). */
+function statusForLengthSource(src: RouteSegmentRecord['lengthSource']): RouteVerificationStatus {
+  switch (src) {
+    case 'field-measurement': return 'field-measured';
+    case 'cad-route':
+    case 'cad-derived-estimate':
+    case 'operator-entry': return 'cad-derived-estimate';
+    case 'unknown':
+    default: return 'unverified-estimate';
+  }
+}
+
+/** W3 — THE canonical route verification status for the package. Weakest wins. */
+export function routeVerificationStatus(snap: PermitDesignSnapshot | null | undefined): RouteVerificationStatus {
   const segs = snap?.electrical?.routeSegments ?? [];
-  const estimate = segs.some(r => r.lengthSource === 'cad-derived-estimate' || r.lengthSource === 'unknown')
-    || (snap?.permitReadiness?.blockers ?? []).some(b => b.code === 'ROUTE-LENGTH-ESTIMATE')
-    || segs.length === 0;   // no segment authority ⇒ estimate, never "verified"
-  return estimate ? 'CAD-DERIVED ESTIMATE — FIELD VERIFY' : 'ROUTE FIELD-VERIFIED';
+  if (segs.length === 0) return 'unverified-estimate';
+  // An active ROUTE-LENGTH-ESTIMATE blocker forces at most cad-derived-estimate
+  // (can never resolve to field-verified while the blocker is live).
+  const routeBlocked = (snap?.permitReadiness?.blockers ?? []).some(b => b.code === 'ROUTE-LENGTH-ESTIMATE');
+  let governing: RouteVerificationStatus = 'as-built-verified';
+  for (const s of segs) {
+    // Prefer the segment's own recorded verification state (W1 build populates
+    // it); fall back to deriving from lengthSource for older/partial snapshots.
+    const st = (s.verificationStatus as RouteVerificationStatus | undefined)
+      ?? statusForLengthSource(s.lengthSource);
+    if (ROUTE_STATUS_RANK.indexOf(st) < ROUTE_STATUS_RANK.indexOf(governing)) governing = st;
+  }
+  if (routeBlocked && ROUTE_STATUS_RANK.indexOf(governing) > ROUTE_STATUS_RANK.indexOf('cad-derived-estimate')) {
+    governing = 'cad-derived-estimate';
+  }
+  return governing;
+}
+
+export function routeVerificationLabel(status: RouteVerificationStatus): string {
+  return ROUTE_STATUS_LABEL[status];
+}
+
+/** §6 ROUTE PROVENANCE — the two-state annotation every route/trench/conduit
+ *  label prints. Projects the ONE RouteVerificationStatus authority collapsed to
+ *  estimate-vs-verified: an ESTIMATE (unverified / CAD-derived) never prints
+ *  "field-verified" (gate 2); only a recorded field measurement / verification /
+ *  as-built promotes to "ROUTE FIELD-VERIFIED". Granular 5-state consumers use
+ *  routeVerificationLabel(routeVerificationStatus(snap)) directly. */
+export function routeProvenanceLabel(snap: PermitDesignSnapshot | null | undefined): string {
+  const st = routeVerificationStatus(snap);
+  const verified = st === 'field-measured' || st === 'field-verified' || st === 'as-built-verified';
+  return verified ? 'ROUTE FIELD-VERIFIED' : 'CAD-DERIVED ESTIMATE — FIELD VERIFY';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W1c §branch-authority — THE canonical projection of the micro AC BRANCH run
+// (the Q-Cable trunk + branch home-run). Both PV-4B and E-1 read THIS so they
+// can never disagree ("OPEN AIR" on E-1 vs "60 ft EMT" on PV-4B). Micro AC
+// branch conductors on the manufacturer trunk cable are FREE-AIR rated
+// (NEC 690.31(C) — Q Cable is TC-ER, permitted in free air under the modules);
+// the branch length comes from the canonical BRANCH_RUN segment, NEVER from the
+// project-level feeder wireLength (the "60 ft on every circuit" bug).
+// ═══════════════════════════════════════════════════════════════════════════
+const BRANCH_SEGMENT_IDS = ['BRANCH_RUN'];
+
+export interface CanonicalBranchProjection {
+  segment: RouteSegmentRecord | null;
+  raceway: string | null;
+  tradeSizeIn: string | null;
+  /** display: 'FREE AIR (Q-CABLE / TC-ER)' or 'EMT 3/4"'. */
+  conduitLabel: string | null;
+  oneWayFt: number | null;
+  gauge: string | null;
+  egcGauge: string | null;
+  voltageDropPct: number | null;
+  lengthSource: RouteSegmentRecord['lengthSource'] | null;
+  isOpenAir: boolean;
+}
+
+export function projectCanonicalBranch(snap: PermitDesignSnapshot | null | undefined): CanonicalBranchProjection {
+  const segs = snap?.electrical?.routeSegments ?? [];
+  const segment =
+    segs.find(r => BRANCH_SEGMENT_IDS.includes(r.segmentId))
+    ?? segs.find(r => /branch/i.test(r.segmentId) || /branch/i.test(r.from) || /branch/i.test(r.to))
+    ?? null;
+  const raceway = segment?.raceway ?? null;
+  const isOpenAir = raceway === 'FREE_AIR' || snap?.electrical?.topology === 'MICRO';
+  const conduitLabel = raceway === 'FREE_AIR'
+    ? 'FREE AIR (Q-CABLE / TC-ER)'
+    : (raceway && segment?.tradeSizeIn ? `${raceway} ${segment.tradeSizeIn}` : (raceway ?? (isOpenAir ? 'FREE AIR (Q-CABLE / TC-ER)' : null)));
+  return {
+    segment,
+    raceway,
+    tradeSizeIn: segment?.tradeSizeIn ?? null,
+    conduitLabel,
+    oneWayFt: num(segment?.oneWayFt),
+    gauge: segment?.conductorGauge ?? null,
+    egcGauge: segment?.egcGauge ?? null,
+    voltageDropPct: num(segment?.voltageDropPct),
+    lengthSource: segment?.lengthSource ?? null,
+    isOpenAir,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// W3 §topology-description — the ONE canonical electrical-topology sentence for
+// array/branch drawing captions (PV-1B) and any sheet that describes how the
+// modules connect. Micro designs are PARALLELED on an AC branch circuit — never
+// "wired in series" (gate 1). Brand-aware: Enphase micros ride an Enphase Q
+// Cable AC trunk. No renderer may hardcode the connection topology string.
+// ═══════════════════════════════════════════════════════════════════════════
+export function topologyDescription(snap: PermitDesignSnapshot | null | undefined): string {
+  const topo = snap?.electrical?.topology ?? null;
+  const micro = snap?.equipment?.microInverters?.[0];
+  const mfr = (micro?.manufacturer ?? '').trim();
+  const isEnphase = /enphase/i.test(mfr);
+  if (topo === 'MICRO') {
+    const trunk = isEnphase ? 'ENPHASE Q CABLE AC BRANCH CIRCUIT'
+      : (mfr ? `${mfr.toUpperCase()} AC BRANCH CIRCUIT` : 'AC BRANCH CIRCUIT');
+    return `MICROINVERTERS CONNECTED IN PARALLEL ON ${trunk}`;
+  }
+  if (topo === 'OPTIMIZER') return 'DC POWER OPTIMIZERS ON A SERIES STRING TO A CENTRAL INVERTER';
+  if (topo === 'STRING') return 'MODULES WIRED IN SERIES STRINGS TO A CENTRAL STRING INVERTER';
+  if (topo === 'HYBRID') return 'HYBRID — SEE PER-SUBSYSTEM TOPOLOGY ON THE ELECTRICAL SHEETS';
+  return 'SEE ELECTRICAL SHEETS FOR CIRCUIT TOPOLOGY';
+}
+
+/** Short caption form for PV-1B's module-shading key (no sheet-local literal). */
+export function branchLayoutCaption(snap: PermitDesignSnapshot | null | undefined): string {
+  const micro = snap?.equipment?.microInverters?.[0];
+  const isEnphase = /enphase/i.test((micro?.manufacturer ?? '').trim());
+  const dev = isEnphase ? 'IQ MICROINVERTER' : 'MICROINVERTER';
+  const trunk = isEnphase ? 'ENPHASE Q CABLE AC BRANCH (COLORED)' : 'AC BRANCH CIRCUIT (COLORED)';
+  return `${dev} (▪) UNDER EACH MODULE · CONNECTED IN PARALLEL ON ${trunk} · DASHED = HOMERUN TO JB · SEE LEGEND IN DATA RAIL`;
 }

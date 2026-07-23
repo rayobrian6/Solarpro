@@ -21,6 +21,11 @@ import type { CADModel } from '../cad/types';
 import { getMountingSystemById } from '../mounting-hardware-db';
 import { getRackingById } from '../equipment-db';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../permit/utils/fireSetback';
+// W3 §route-verification — the CONDUIT RUN callout projects the ONE canonical
+// route provenance authority (never a hardcoded "route field-verified" literal;
+// gate 2: no "field-verified" without a recorded field measurement).
+import { routeProvenanceLabel } from '../permit/snapshot/electricalProjection';
+import type { PermitDesignSnapshot } from '../permit/snapshot/types';
 
 export type SysType = 'roof' | 'ground_mount' | 'solar_fence';
 export type ViewType = 'plan' | 'structural';
@@ -730,7 +735,7 @@ function roofComposition(
         { n: 1, label: 'PV MODULE ARRAY', sub: `${d.totalPanels} mod @ ${d.dcKw} kW DC` },
         { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
-        { n: 4, label: 'CONDUIT RUN', sub: `route field-verified — ${d.conduitType}` },
+        { n: 4, label: 'CONDUIT RUN', sub: `${routeProvenanceLabel((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null)} — ${d.conduitType}` },
         // 'truss'.toLowerCase()+'s' printed "trusss" on PV-1 — pluralize properly.
         { n: 5, label: 'ATTACHMENT ZONE', sub: `${_attachInto} into ${_frameLabel === 'TRUSS' ? 'trusses' : 'rafters'}` },
       ]
