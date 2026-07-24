@@ -161,6 +161,18 @@ export interface RouteSegmentRecord {
   egcGauge: string | null;           // the EGC carried IN this segment, if any
   /** W1 — how EGC/bonding is provided ('conductor' | 'raceway' | 'integrated-listed'). */
   bondingMethod?: 'conductor' | 'raceway' | 'integrated-listed' | 'none-required' | null;
+  // ── §3/§4 (closeout 2026-07-23) PHYSICAL RACEWAY AUTHORITY (per segment) ──
+  /** the shared physical raceway this in-conduit segment rides (null ⇒ open-air).
+   *  Two segments with the SAME id share ONE conduit (bundled fill). */
+  physicalRacewayId?: string | null;
+  /** # circuits sharing this segment's raceway (1 dedicated; N shared home-run). */
+  sharedCircuitCount?: number | null;
+  /** smallest legal trade size at ≤40% fill (documents any discretionary upsize). */
+  minimumCodeRacewaySize?: string | null;
+  /** NEC article for the raceway TYPE — the ONLY code-citation source (§7). */
+  racewayNecArticle?: string | null;
+  /** documented rationale when selected raceway size exceeds the minimum. */
+  upsizingReason?: string | null;
   // ── W1 — currents SEPARATED (operating vs continuous vs OCPD rating). PV-4B's
   //    "60 A next to a VD computed at ~45 A" was the OCPD printed where the
   //    operating current belonged; these three fields keep them distinct. ──
@@ -175,6 +187,30 @@ export interface RouteSegmentRecord {
   ambientTempC?: number | null;
   rooftopAdderC?: number | null;
   tempDeratingFactor: number | null;
+  provenance: Provenance;
+}
+
+/** §3/§4/§6 (closeout 2026-07-23) — one PHYSICAL raceway as a first-class
+ *  snapshot record. The shared branch home-run appears ONCE with
+ *  sharedCircuitCount>1 (all branches bundled). PV-4A/PV-4B fill reads THIS; the
+ *  BOM §6/§7 pass iterates these (per-raceway material + the raceway's OWN NEC
+ *  article — never a project-level 'all runs' roll-up or a hardcoded '358'). */
+export interface PhysicalRacewayRecord {
+  physicalRacewayId: string;
+  racewayType: string;               // 'PVC Sch 80' | 'EMT' | …
+  necArticle: string;                // '352' | '358' | … (raceway-type authority)
+  supportArticle: string;            // '352.30' | '358.30' | …
+  sharedCircuitCount: number;
+  conductorCount: number;
+  currentCarryingCount: number;
+  conductorAreaIn2: number | null;
+  minimumCodeRacewaySize: string | null;
+  calculatedFillRacewaySize: string | null;
+  selectedRacewaySize: string | null;
+  fillPct: number | null;
+  upsizingReason: string | null;
+  deratingBasis: string | null;
+  supportCondition: string | null;
   provenance: Provenance;
 }
 
@@ -195,7 +231,8 @@ export interface ServiceTopologyConstraint {
  *  downstream feeder run length. Digest-covered. */
 export interface ServiceTopologyObject {
   objectId: string;
-  type: 'tap-point' | 'tap-conductors' | 'fused-ocpd' | 'utility-disconnect' | 'meter' | 'service-disconnect';
+  type: 'combiner' | 'combiner-load-break' | 'rsd-initiator' | 'tap-point' | 'tap-conductors'
+      | 'fused-ocpd' | 'utility-disconnect' | 'meter' | 'service-disconnect';
   label: string;
   description: string | null;
   conductorSpec: string | null;      // where applicable (tap conductors / feeders)
@@ -203,6 +240,25 @@ export interface ServiceTopologyObject {
   lengthFt: number | null;           // per-object run length (null ⇒ PENDING)
   lengthSource: 'known-design' | 'cad-derived-estimate' | 'field-measurement' | 'unknown' | 'not-applicable';
   constraints: ServiceTopologyConstraint[];
+  // ── §9 (closeout 2026-07-23) PHYSICAL-ORDER GRAPH + DEVICE-ROLE AUTHORITY ──
+  /** upstream (PV-source-side) neighbor objectId — proves physical order. */
+  upstreamObjectId?: string | null;
+  /** downstream (grid-side) neighbor objectId. */
+  downstreamObjectId?: string | null;
+  /** exact mfr/model when a physical device is selected (else null = PENDING). */
+  deviceModel?: string | null;
+  /** electrical role in the PV interconnection (e.g. 'overcurrent-protection'). */
+  electricalRole?: string | null;
+  /** utility role when applicable (e.g. 'utility-accessible-disconnect'). */
+  utilityRole?: string | null;
+  fusedState?: 'fused' | 'non-fused' | 'not-applicable' | null;
+  lockable?: boolean | null;
+  rsdRole?: 'initiator' | 'none' | null;
+  /** §9 — when TRUE this single LISTED device serves MULTIPLE roles (e.g. the
+   *  fused AC disconnect IS the utility-accessible lockable means); the roles it
+   *  covers are listed in dualPurposeRoles. Prevents a phantom duplicate device. */
+  dualPurposeListing?: boolean | null;
+  dualPurposeRoles?: string[] | null;
   provenance: Provenance;
 }
 
@@ -650,6 +706,10 @@ export interface PermitDesignSnapshot {
     /** W2.1: canonical route-length + per-segment conductor authority
      *  (computeSystem runs — sheets/engines may not substitute lengths). */
     routeSegments: RouteSegmentRecord[];
+    /** §3/§4/§6 (closeout 07-23): every PHYSICAL raceway as a first-class object.
+     *  The shared branch home-run appears ONCE (sharedCircuitCount>1). Optional
+     *  so pre-closeout snapshots/digests are unchanged until the build populates. */
+    physicalRaceways?: PhysicalRacewayRecord[];
     /** §5 (07-22): canonical service-interconnection objects (tap point, tap
      *  conductors, fused OCPD, utility disconnect, meter, service disconnect) —
      *  each with its OWN honest length + attached code rules. Supply-side designs
@@ -743,6 +803,11 @@ export interface PermitReadinessBlocker {
   code: string;
   /** blocking = prevents permit-ready / issue; warning = advisory (surfaced, not gating). */
   severity: 'blocking' | 'warning';
+  /** §17 severity policy — the written justification REQUIRED for any ADVISORY
+   *  classification (why the missing fact cannot affect safety, code compliance,
+   *  procurement, engineering approval, or permit acceptance). Empty string for
+   *  BLOCKING entries. Rendered on RS-1. Single-sourced from severityPolicy.ts. */
+  justification: string;
   /** authority domain (electrical/structural/code/equipment/document/review/other). */
   domain: string;
   /** the authority record / path whose gap this represents. */

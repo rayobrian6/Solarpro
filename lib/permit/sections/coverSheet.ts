@@ -41,6 +41,10 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // project from the ONE snapshot projectAuthority record (no vendor default, no
   // stale equipment, no default engineer name, no independent sheet index).
   const pa = projectProjectAuthorityFromInput(input);
+  // §16 — permit-issue language is gated on the DERIVED authority issue state.
+  // Only a true ISSUED-FOR-PERMIT state prints "Issued for permit review"; every
+  // pending/draft/revised state prints the honest DESIGN-REVIEW disposition.
+  const _permitIssued = pa.issueStatus === 'ISSUED FOR PERMIT';
   const necVer  = cp.nec ?? 'PENDING';
   const ibcVer  = cp.ibc ?? 'PENDING';
   const ircVer  = cp.irc ?? 'PENDING';
@@ -101,7 +105,6 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // breaker, and never a red FAIL/QA flag on an issued set.
   const _ic = _icTop;
   const isSupplySide = _ic.isSupplySide;
-  const interconn = _ic.methodLabel;
 
   // ── Battery ───────────────────────────────────────────────────────────────
   const hasBattery    = hasRealBattery(project);
@@ -118,7 +121,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     // prints, and the address caption is normal document flow below the image
     // so it can never silently fail to render.
     vicinityMapHtml = `
-        <div class=\"aerial-wrap\" style=\"position:relative;flex:1 1 auto;min-height:160px;overflow:hidden;\">
+        <div class=\"aerial-wrap\" style=\"position:relative;flex:1 1 auto;min-height:116px;overflow:hidden;\">
         <img src="${aerial.imageBase64}" style="position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center;" alt="Vicinity Map"/>
           <div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-58%);text-align:center;\">
           <svg viewBox="0 0 36 46" width="26" height="34" style="display:block;margin:0 auto;">
@@ -419,9 +422,11 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const sysInfoRows = [
     // W4 §3: system type + issue status project from projectAuthority, tagged for
     // the truth matrix (data-project-field="system-type" / "issue-status").
+    // §15 page-fit: the DC/AC size + mounting + interconnection rows are dropped
+    // from this section — each is already printed on the cover (headline, scope
+    // note 5, engineering summary) — so the SYSTEM INFORMATION block carries the
+    // tagged identity rows only and the vicinity map / address fits the page.
     rawInfoRow('SYSTEM TYPE',  pa.tag('system-type'), pa.systemType),
-    infoRow('DC SYSTEM SIZE',  dcKw  !== null ? `${dcKw.toFixed(2)} kW DC`  : ''),
-    infoRow('AC SYSTEM SIZE',  acKw  !== null ? `${acKw.toFixed(2)} kW AC`  : ''),
     // Hybrid: no single project-wide module/inverter/mount row — each sub has
     // its own equipment (SYSTEM SUMMARY carries the per-sub lines). Single-system
     // module/inverter identity is TAGGED from the authority (no stale equipment).
@@ -431,8 +436,6 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     _coverHybrid
       ? infoRow('INVERTER', `${_coverSubRows.length} SUB-SYSTEM FLEETS (SEE SUMMARY)`)
       : rawInfoRow('INVERTER', `${pa.tag('inverter-model')} — ${escapeH(topologyLabel)}`, pa.inverterDisplay),
-    infoRow('MOUNTING',        _coverHybrid ? `HYBRID — ${_coverSubRows.map(r => r.label).join(' + ')}` : mountLabel),
-    infoRow('INTERCONNECTION', interconn),
     // §12 — the derived project issue status prints here (tagged) and drives the
     // REVISIONS description below; never a hardcoded "ISSUED FOR PERMIT".
     rawInfoRow('ISSUE STATUS', pa.tag('issue-status'), pa.issueStatus),
@@ -452,7 +455,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
   return `
-  <div class="page">
+  <div class="page cover-compact">
 
     ${titleBlock(input, 'PV-0', 'COVER SHEET', pageNum, totalPages)}
 
@@ -587,13 +590,20 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
         </div>
 
         <!-- ENGINEERING SUMMARY (condensed — the long paragraph pushed the
-             sheet index and construction notes off the fixed page) -->
+             sheet index and construction notes off the fixed page).
+             §16: the issue disposition is DERIVED from the project-authority
+             issue state (pa.issueStatus) — never a hard-coded "Issued for permit
+             review". While the set is pending review it prints the honest
+             DESIGN-REVIEW disposition; only an ISSUED-FOR-PERMIT / PERMIT-READY
+             authority state prints permit-issue language. -->
         <div class="sec" style="margin-bottom:var(--xs);">
           <div class="sec-hdr">ENGINEERING SUMMARY</div>
           <div class="sec-body" style="font-size:var(--f-md);line-height:1.45;padding:var(--xs);">
             ${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}, designed per
             NEC ${necVer}, ASCE ${asceVer}, IBC ${ibcVer}, and applicable local amendments.
-            Issued for permit review — requires PE review and wet stamp before AHJ submission.
+            ${_permitIssued
+              ? 'Issued for permit review — requires PE review and wet stamp before AHJ submission.'
+              : `DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION (${escapeH(pa.issueStatus ?? 'DESIGN DRAFT')}); requires PE review and wet stamp before AHJ submission.`}
           </div>
         </div>
       <div class="sec">
@@ -693,8 +703,6 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
                 <td class="iv">${pa.issueDate || ''}</td>
               </tr>
               <tr><td colspan="3" class="iv">&nbsp;</td></tr>
-              <tr><td colspan="3" class="iv">&nbsp;</td></tr>
-              <tr><td colspan="3" class="iv">&nbsp;</td></tr>
             </table>
           </div>
         </div>
@@ -703,7 +711,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
         <div class="sec">
           <div class="sec-hdr">ENGINEER OF RECORD</div>
           <div class="sec-body">
-          <div class=\"stamp-box\" style=\"min-height:88px;\">
+          <div class=\"stamp-box\" style=\"min-height:58px;\">
               <span class="f-xs c555 fw7" style="line-height:1.8;">
                 AFFIX PE STAMP HERE<br/>LICENSE NO. ____________<br/>STATE: ____________
               </span>

@@ -26,7 +26,14 @@ export interface SheetManifestOptions {
   pv3Title: string;
   /** DS-n equipment datasheet pages already resolved (module/inverter/battery) */
   datasheets?: SheetRef[];
-  includeSchedCont?: boolean;     // long BOM → SCHED-2
+  includeSchedCont?: boolean;     // long BOM → SCHED-2 (legacy single-sheet flag)
+  /** W9/§15 — number of SCHED continuation sheets (SCHED-2, SCHED-3, …) a long
+   *  BOM paginates onto. Overrides includeSchedCont when > 0. */
+  schedContCount?: number;
+  /** W9/§15 page-fit — roof structural calcs spill onto the formal continuation
+   *  sheet PV-4C.1 (attachment detail + governing load combination + page
+   *  conclusion). Roof, single-system only; the page assembly gates identically. */
+  includePv4cCont?: boolean;
   includeValidation?: boolean;    // VAL-1 internal QA (off in AHJ deliverable)
   includeCadAppendix?: boolean;   // APP-CAD non-authoritative preview
   /** Wave 5B — hybrid (multi-sub-system) planset. Present sub keys in fixed
@@ -74,6 +81,15 @@ export function hybridSheetId(base: string, sub: HybridManifestSub): string {
   return `${base}${HYBRID_SUFFIX[sub]}`;
 }
 
+/** Ordered SCHED continuation sheet ids for the given options (SCHED-2,
+ *  SCHED-3, …). schedContCount is authoritative; includeSchedCont ⇒ one sheet. */
+function schedContIds(o: SheetManifestOptions): string[] {
+  const n = o.schedContCount != null && o.schedContCount > 0
+    ? o.schedContCount
+    : (o.includeSchedCont ? 1 : 0);
+  return Array.from({ length: n }, (_, i) => (i === 0 ? 'SCHED-2' : `SCHED-${i + 2}`));
+}
+
 /**
  * The canonical ordered list of sheets for a permit package. Deterministic and
  * pure — safe to call on both the server (generator, cover index) and the
@@ -100,6 +116,8 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     { id: 'PV-3',  title: o.pv3Title },
     ...extras.map(sub => ({ id: hybridSheetId('PV-3', sub), title: HYBRID_STRUCT_TITLE[sub] })),
     { id: 'PV-4C', title: 'STRUCTURAL CALCULATIONS — ASCE 7-22 ANALYSIS' },
+    // W9/§15: formal continuation of the roof structural calc sheet.
+    ...(o.includePv4cCont ? [{ id: 'PV-4C.1', title: 'STRUCTURAL CALCULATIONS (CONTINUED) — DETAIL · LOAD COMBINATION · CONCLUSION' }] : []),
     // ── electrical (how it's wired — the single-line leads, calcs support) ─
     { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
     { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
@@ -109,7 +127,10 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     { id: 'PV-6',  title: 'DISCONNECT DIRECTORY & EMERGENCY PLACARD — NEC 705.10 / 690.56(B)' },
     // ── schedules · specs · datasheets ────────────────────────────────────
     { id: 'SCHED', title: 'EQUIPMENT SCHEDULE — MODULES, INVERTERS & BOM' },
-    ...(o.includeSchedCont ? [{ id: 'SCHED-2', title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' }] : []),
+    // W9/§15: N continuation sheets (SCHED-2 … SCHED-(N+1)) for long BOMs; each
+    // capped so no continuation page clips. schedContCount is authoritative;
+    // includeSchedCount is the legacy single-sheet fallback.
+    ...schedContIds(o).map(id => ({ id, title: 'EQUIPMENT SCHEDULE — BILL OF MATERIALS (CONTINUED)' })),
     { id: 'APP-A', title: 'SPECIFICATION REFERENCE — EQUIPMENT DATA SHEETS' },
     ...ds,
     // ── certifications ────────────────────────────────────────────────────

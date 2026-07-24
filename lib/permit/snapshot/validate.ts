@@ -329,14 +329,46 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
     const isSupply = s.project.interconnection.rule === '705.11'
       || /SUPPLY|LINE/i.test(String(s.electrical.poi.method ?? ''));
     if (isSupply) {
+      // §9 (closeout 2026-07-23): the utility-accessible disconnect may be a
+      // SEPARATE physical device OR the SAME listed fused AC disconnect serving a
+      // DUAL role (the residential norm). When the fused OCPD carries a
+      // dualPurposeListing covering the utility-accessible role, a standalone
+      // utility-disconnect object is CORRECTLY absent (modeling it would be a
+      // phantom duplicate device — gate 9). Otherwise it must be a separate object.
+      const _dualUtility = topo.some(o =>
+        o.type === 'fused-ocpd' && o.dualPurposeListing === true
+        && (o.utilityRole != null || (o.dualPurposeRoles ?? []).some(r => /utility/i.test(r))));
       const required: import('./types').ServiceTopologyObject['type'][] =
-        ['tap-point', 'tap-conductors', 'fused-ocpd', 'utility-disconnect', 'meter', 'service-disconnect'];
+        _dualUtility
+          ? ['tap-point', 'tap-conductors', 'fused-ocpd', 'meter', 'service-disconnect']
+          : ['tap-point', 'tap-conductors', 'fused-ocpd', 'utility-disconnect', 'meter', 'service-disconnect'];
       const present = new Set(topo.map(o => o.type));
       const missing = required.filter(t => !present.has(t));
       if (missing.length) {
         add('V42', 'electrical.serviceTopology', missing, 'snapshot builder',
           ['E-1', 'PV-4B'],
-          `supply-side (705.11) design is missing canonical service-topology object(s): ${missing.join(', ')} — each of tap point, tap conductors, fused OCPD, utility disconnect, meter and service disconnect must be a separate object`);
+          `supply-side (705.11) design is missing canonical service-topology object(s): ${missing.join(', ')} — each of tap point, tap conductors, fused OCPD, ${_dualUtility ? 'utility-accessible disconnect (dual-role on the fused OCPD)' : 'utility disconnect'}, meter and service disconnect must be represented`);
+      }
+      // §9 gate 9 — device-role graph must have no CONFLATION or DUPLICATE physical
+      // devices: a dual-purpose fused OCPD and a SEPARATE utility-disconnect object
+      // cannot both exist (that IS the phantom duplicate the audit flagged).
+      if (_dualUtility && present.has('utility-disconnect')) {
+        add('V43', 'electrical.serviceTopology', ['fused-ocpd(dual)', 'utility-disconnect'],
+          'snapshot builder', ['PV-6', 'E-1'],
+          'device-role conflation: the fused AC disconnect is modeled as a dual-purpose utility-accessible device AND a separate utility-disconnect object exists — one physical device may not appear twice (§9 gate 9)');
+      }
+      // §9 gate 9 — no two objects may share the SAME (type, ocpdRating) identity
+      // (a duplicated physical device). tap-point/meter carry no rating → skip.
+      const _byIdentity = new Map<string, number>();
+      for (const o of topo) {
+        if (o.ocpdRatingA == null) continue;
+        const k = `${o.type}|${o.ocpdRatingA}`;
+        _byIdentity.set(k, (_byIdentity.get(k) ?? 0) + 1);
+      }
+      for (const [k, n] of _byIdentity) {
+        if (n > 1) add('V43', 'electrical.serviceTopology', { identity: k, count: n },
+          'snapshot builder', ['PV-6'],
+          `duplicate physical device: ${n} service-topology objects share identity ${k} (§9 gate 9 — a single listed device must appear once)`);
       }
     }
     // No object may claim a passing length-limit rule without a known length.

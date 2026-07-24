@@ -238,15 +238,17 @@ describe('W6 — APP-A racking section projects the canonical assembly, no banne
   });
 });
 
-describe('W6 — RACKING RAIL DS page gated on a pinned rail SKU', () => {
+describe('§10 (Gate 10) — RACKING RAIL DS page OMITTED while the rail SKU is unpinned', () => {
   const html = generatePermitHTML(braidonLikeInput());
 
-  it('renders the RAIL NOT YET SELECTED reference-only banner while the rail is unpinned', () => {
-    // the DS page renders (label present) …
-    expect(html).toContain('RACKING RAIL');
-    // … but with the explicit not-a-specification banner, not implying XR100 is specified
-    expect(html).toMatch(/data-ds-state="rail-not-selected"/);
-    expect(html).toContain('RAIL NOT YET SELECTED');
-    expect(html).toMatch(/is NOT the specified rail/i);
+  it('does NOT render the unselected rail datasheet as an authoritative appendix page', () => {
+    // Ray's preference (§10): OMIT the page entirely while the rail is pending.
+    // An unselected datasheet must never render — no page, no banner, no rail image.
+    // A datasheet appears as an authoritative appendix ONLY when its document
+    // record is selected (railSku pinned) by the snapshot.
+    expect(html).not.toContain('RACKING RAIL');
+    expect(html).not.toMatch(/data-ds-rail="pending"/);
+    expect(html).not.toMatch(/data-ds-state="rail-not-selected"/);
+    expect(html).not.toMatch(/RAIL NOT YET SELECTED/);
   });
 });

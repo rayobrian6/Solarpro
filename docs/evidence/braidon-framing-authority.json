@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-07-24T00:11:38.791Z",
+  "artifact": "braidon-framing-authority",
+  "section": "§13 existing-framing capacity authority",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-00E105F58C2C",
+  "digest": "00e105f58c2ca87a1d9ec09e4e8e12d58be0579972fa7aaab9cc0ccdfaa28eee",
+  "purpose": "The existing roof framing capacity is NOT certified from generic BCSI/NDS defaults. The engine may quantify ADDED PV dead load, but a framing PASS/utilization/\"adequate\" verdict requires archived project structural authority. When unverified the sheet prints EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED and the STRUCTURAL-FRAMING-UNVERIFIED blocker fires.",
+  "engineeringReviewRequired": false,
+  "reviewReasons": [],
+  "addedDeadLoadPsf": 2.642,
+  "distributedRoofLoadPsf": 17.642,
+  "governing": {
+    "utilization": 0.673,
+    "safetyFactor": 1.4865981027434467,
+    "passes": true
+  },
+  "observedFramingKeptSeparateFromVerifiedCapacity": true,
+  "evidenceThatWouldClear": "Archived truss drawing / member layout / species-grade / plates / bearing / clear span / design loads / deflection limits / manufacturer BCSI approval, or a licensed engineer calculation bound to the project.",
+  "note": "Operator supplied complete framing dimensions (type/size/spacing/species/span); per the established structural contract the modeled capacity renders. Archived-document authority remains the stronger future gate."
+}

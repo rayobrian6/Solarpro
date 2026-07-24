@@ -14,7 +14,7 @@ import { getSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
-import { projectCanonicalFeeder, projectCanonicalBranch } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor } from '../snapshot/electricalProjection';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { SUB_LABEL } from './subSystemSheets';
@@ -55,6 +55,11 @@ export interface InterconnectionResolution {
   busLimit: number;
   maxBackfeedA: number;
   passes120: boolean;
+  /** §1 (closeout 2026-07-23) — the CANONICAL tri-state 120% verdict. null ⇒
+   *  the snapshot carries no busbar evaluation → the sheet renders PENDING (never
+   *  a synthesized PASS). passes120 stays `rulePasses === true` for existing
+   *  boolean consumers. On a supply-side tap the busbar rule is N/A (not shown). */
+  rulePasses: boolean | null;
 }
 
 export function resolveInterconnection(input: PermitInput, cad?: CADModel | null): InterconnectionResolution {
@@ -72,7 +77,11 @@ export function resolveInterconnection(input: PermitInput, cad?: CADModel | null
   const feederContinuousA = snap.electrical.feeder.continuousA ?? feederOutputA * 1.25;
   const busLimit = busA * 1.2;
   const maxBackfeedA = busLimit - mainA;
-  const passes120 = snap.electrical.poi.rulePasses ?? (feederOcpd > 0 ? feederOcpd <= maxBackfeedA : true);
+  // §1: NO local recompute. The busbar verdict is the canonical snapshot value —
+  // null stays null (PENDING). The old `?? (feederOcpd <= maxBackfeedA)` fallback
+  // synthesized a PASS on a hole (the 27.5%-PASS class); dropped (gate 2/gate 4).
+  const rulePasses = snap.electrical.poi.rulePasses ?? null;
+  const passes120 = rulePasses === true;
   const isSupplySide = snap.project.interconnection.rule === '705.11';
   const feederConductorCallout = auth.acFeeder.conductorCallout || `${auth.acFeeder.wireGauge} THWN-2`;
   const feederPhaseCallout = feederConductorCallout.replace(/\s*\+\s*\d*\s*#[\d/]+\s*AWG\s*GND/ig, '');
@@ -101,6 +110,7 @@ export function resolveInterconnection(input: PermitInput, cad?: CADModel | null
     busLimit,
     maxBackfeedA,
     passes120,
+    rulePasses,
   };
 }
 
@@ -187,9 +197,13 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   const _tapPending = (_snapA.electrical.serviceTopology ?? []).some(o =>
     o.constraints.some(c => c.state === 'pending'));
   if (_tapPending) _elecPending.push('supply-side tap-conductor length pending (≤10 ft — field verify)');
+  // §1: with the legacy rules-engine advisory table retired, the module/micro
+  // power-pairing warning surfaces here in the CANONICAL pending list (never a
+  // separate legacy-counter row).
+  if (_pairWarn) _elecPending.push(`module/micro power pairing ${_pairRatio.toFixed(2)} exceeds mfr range 1.55 — expect output clipping (${Math.round(_pairModW)}W on ${Math.round(_pairAcW)}W-AC)`);
   const _parityUnresolved = _snapA.electrical.parity?.unresolved ?? [];
   const _elecErrorCount = _elecBlockers.length + _parityUnresolved.length;
-  const _elecWarnCount = _elecPending.length + _extraWarn;
+  const _elecWarnCount = _elecPending.length;
   // COMPLIES only when nothing is blocking AND nothing is pending (gate 4).
   const _elecComplies = _elecErrorCount === 0 && _elecWarnCount === 0;
   const _elecStatusLabel = _elecErrorCount > 0 ? 'BLOCKED — REVIEW REQUIRED'
@@ -227,41 +241,21 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
            input.rulesResult) is RETIRED: it under-counted (missed the PENDING
            feeder fill + tap length) and produced the false "0 errors / complies". -->
       ${_elecSummaryCard}
-      ${rulesResult ? `
-      <div class="section-title" style="margin-top:var(--sm)">NEC Rule Detail (advisory — authoritative status above)</div>
-      <table class="equip-table">
-        <thead><tr><th style="width:18%">Code Reference</th><th style="width:25%">Description</th><th style="width:30%">Result</th><th style="width:15%">Value / Limit</th><th style="width:12%">Status</th></tr></thead>
-        <tbody>
-          ${(rulesResult.rules || []).filter(rule =>
-            // PV-4A is the NEC sheet — structural results live on PV-4C
-            // (engine V4, single source). Rules-engine structural rows here
-            // contradicted PV-4C's numbers on the same package.
-            _isRoof ? rule.category !== 'structural'
-                    : (rule.category !== 'structural' || !String(rule.ruleId || '').includes('rafter'))
-          ).map(_remapVdRule).map(rule => `
-          <tr style="background:${statusBg(rule.severity)}">
-            <td class="mono f-lg">${rule.necReference || rule.asceReference || rule.ruleId}</td>
-            <td>${rule.title}${rule.autoFixed ? ' <span style="background:#f5f5f5;color:#000;padding:1px 5px;;font-size:8px;font-weight:700">Auto-Fixed</span>' : ''}</td>
-            <td style="font-size:9px;color:#333">${rule.message}</td>
-            <td style="font-family:monospace;font-size:9px;text-align:right">${rule.value !== undefined ? `${rule.value}${rule.limit !== undefined ? ` / ${rule.limit}` : ''}` : '—'}</td>
-            <td style="text-align:center;font-weight:bold;color:${statusColor(rule.severity)}">${statusLabel(rule.severity)}</td>
-          </tr>`).join('')}
-          ${_pairWarn ? `
-          <tr style="background:${statusBg('warning')}">
-            <td class="mono f-lg">Mfr pairing guide</td>
-            <td>Module / Microinverter Power Pairing</td>
-            <td style="font-size:9px;color:#333">${Math.round(_pairModW)}W module on a ${Math.round(_pairAcW)}W-AC microinverter — per-module DC/AC ${_pairRatio.toFixed(2)} exceeds the manufacturer pairing range; expect sustained output clipping</td>
-            <td style="font-family:monospace;font-size:9px;text-align:right">${_pairRatio.toFixed(2)} / 1.55</td>
-            <td style="text-align:center;font-weight:bold;color:${statusColor('warning')}">${statusLabel('warning')}</td>
-          </tr>` : ''}
-        </tbody>
-      </table>` : `
+      ${/* §1 (closeout 2026-07-23): the legacy rules-engine advisory DETAIL table
+           (input.rulesResult.rules) is RETIRED. It printed stale NEC rows sourced
+           from a second engine (the 27.5% busbar-fill PASS class + duplicated
+           705.12 literals) beside the canonical card. PV-4A now projects ONLY the
+           canonical snapshot: the compliance card above enumerates every blocking/
+           pending item (the pairing warning included). The info-table below shows
+           the DERIVED DC/AC/grounding/interconnection facts — no local rule/counter/
+           verdict, and the busbar cell is TRI-STATE (N/A on a supply-side tap,
+           PENDING when the canonical snapshot carries no verdict, never a
+           synthesized PASS). */''}
       ${compliance.electrical ? `
       <table class="info-table">
         <tr><td class="il">DC Size</td><td class="iv">${compliance.electrical.summary?.totalDcKw?.toFixed(2)} kW</td><td class="il">AC Capacity</td><td class="iv">${compliance.electrical.summary?.totalAcKw?.toFixed(2)} kW</td></tr>
-        <tr><td class="il">Grounding Conductor</td><td class="iv">${_ic.feederEgcGauge}</td><td class="il">Interconnection</td><td class="iv" style="color:#000">${_ic.isSupplySide ? 'SUPPLY-SIDE TAP — 120% N/A (705.11)' : (_ic.passes120 ? '✓ 120% RULE PASS' : '✗ FAIL')}</td></tr>
+        <tr><td class="il">Grounding Conductor</td><td class="iv">${_ic.feederEgcGauge}</td><td class="il">Interconnection</td><td class="iv" style="color:#000">${_ic.isSupplySide ? 'SUPPLY-SIDE TAP — 120% N/A (705.11)' : (_ic.rulePasses == null ? 'PENDING — busbar evaluation not on canonical snapshot' : (_ic.rulePasses ? '✓ 120% RULE PASS' : '✗ FAIL'))}</td></tr>
       </table>` : '<p style="color:#555;font-style:italic;padding:5px;text-align:center;font-size:8.5px">Run compliance check to populate this section.</p>'}
-      `}
       <!-- Calculation Methodology -->
       <div class="section-title">Calculation Methodology — NEC ${necVer} Article 690</div>
       <table class="equip-table">
@@ -388,7 +382,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         <strong>PAGE CONCLUSION — NEC COMPLIANCE:</strong>
         This ${cadTotalDcKw.toFixed(2)} kW DC / ${cadTotalPanels} module ${_auth.isHybrid ? `HYBRID photovoltaic system (${_auth.subSystems.map(s => `${SUB_LABEL[s.key]}: ${s.panelCount}`).join(' · ')})` : 'photovoltaic system'} has been evaluated against NEC ${necVer} Articles 690, 705, 250, and 310.
         ${_auth.isHybrid ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) applies to the ROOF sub-system only.' : _isRoof ? '' : _isFence ? 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a fence-mounted system.' : 'Note: Rooftop temperature adder (NEC 310.15(B)(3)(c)) does NOT apply — this is a ground-mounted system.'}
-        The canonical snapshot reports ${_elecErrorCount} blocking and ${_elecWarnCount} pending electrical authority item(s)${rulesResult ? ` (advisory rules-engine detail: ${rulesResult.errorCount} error(s), ${rulesResult.warningCount + _extraWarn} warning(s), ${rulesResult.autoFixCount} auto-correction(s))` : ''}.
+        The canonical snapshot reports ${_elecErrorCount} blocking and ${_elecWarnCount} pending electrical authority item(s).${'' /* §1 (closeout 2026-07-23): the legacy rules-engine counter parenthetical is RETIRED — PV-4A reports ONLY canonical snapshot counts, no second-engine tally. */}
         Interconnection is resolved to a ${_ic.isSupplySide ? `SUPPLY-SIDE (line-side) tap per NEC 705.11 (${_ic.feederOcpd} A fused AC disconnect ahead of the ${_ic.mainA} A service disconnect) — the 120% busbar rule of NEC 705.12(B) does not apply` : `LOAD-SIDE connection per NEC 705.12(B) (${_ic.feederOcpd} A backfeed breaker; ${_ic.mainA} A main + ${_ic.feederOcpd} A ≤ ${_ic.busLimit.toFixed(0)} A busbar limit)`}.
         System configuration ${_elecComplies ? 'complies with' : 'requires review per'} NEC ${necVer} and applicable local amendments.
       </div>
@@ -428,6 +422,14 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
   const _svc = (t: string) => _svcTopo.find(o => o.type === t) ?? null;
   const _feedLenTxt = _feed.oneWayFt != null ? `${_feed.oneWayFt} ft` : 'PENDING';
   const _feedVdTxt = _feed.voltageDropPct != null ? `${_feed.voltageDropPct.toFixed(2)}%` : 'PENDING';
+  // §2 (closeout 2026-07-23): per-sub/string conduit cells DERIVE from the
+  // canonical raceway descriptor (the ONE route-description accessor) — never
+  // `project.conduitType || 'EMT'` (the fabricated EMT beside a PVC run). Absent
+  // raceway authority prints an honest PENDING, never a default.
+  const _rwDesc = projectRacewayDescriptor(_snap);
+  const _condCell = _rwDesc.present
+    ? (_rwDesc.entries[0].tradeSizeIn ? `${_rwDesc.entries[0].racewayType} ${_rwDesc.entries[0].tradeSizeIn}` : _rwDesc.entries[0].racewayType)
+    : (project.conduitType ? project.conduitType : 'PENDING');
   const _feedCallout = _feed.conductorCallout ?? 'PENDING — feeder conductor authority incomplete';
   const _feedConduit = _feed.conduitLabel ?? 'PENDING';
   // W4 §2/§11 (V11): NEC/ASCE editions on this sheet project from the ONE
@@ -469,7 +471,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 <td>${b.branchCurrentA.toFixed(1)}A</td>
                 <td>${b.ocpdAmps}A</td>
                 <td>—</td>
-                <td>${project.conduitType || 'EMT'}</td>
+                <td>${_condCell}</td>
                 <td>—</td>
               </tr>`).join('');
                 }
@@ -482,7 +484,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 <td>${s.ampacityA != null ? s.ampacityA.toFixed(2) + 'A' : '—'}</td>
                 <td>${s.ocpdAmps != null ? s.ocpdAmps + 'A' : '—'}</td>
                 <td>${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>
-                <td>${project.conduitType || 'EMT'}</td>
+                <td>${_condCell}</td>
                 <td>${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>
               </tr>`).join('');
               }).join('');
@@ -497,7 +499,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 <td>${sub.acSubFeeder.currentA.toFixed(1)}A</td>
                 <td>${sub.acSubFeeder.ocpdAmps != null ? sub.acSubFeeder.ocpdAmps + 'A' : '—'}</td>
                 <td>—</td>
-                <td>${project.conduitType || 'EMT'}</td>
+                <td>${_condCell}</td>
                 <td>—</td>
               </tr>`).join('');
               return sections + feeders;
@@ -516,18 +518,35 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               const _branch = projectCanonicalBranch(_snap);
               const _brConduit = _branch.conduitLabel ?? 'FREE AIR (Q-CABLE / TC-ER)';
               const _brLenTxt = _branch.oneWayFt != null ? `${_branch.oneWayFt} ft` : '—';
+              // §3/§4 — the shared jbox→combiner home-run raceway as its OWN row.
+              // The branch CONDUCTORS are open-air Q-Cable (rows above); the shared
+              // conduit carries all branches bundled. Never one merged whole-branch
+              // "95 ft #12 in 1-1/4\" PVC" string spanning two wiring methods.
+              const _hr = projectSharedBranchRaceway(_snap);
+              const _hrRow = _hr.present ? `
+              <tr style="background:#eef4fa">
+                <td class="fw7">Branch Home-Run</td>
+                <td>Roof J-Box (${_hr.sharedCircuitCount ?? '—'} branches)</td>
+                <td>AC Combiner</td>
+                <td>${_hr.currentCarryingCount ?? '—'}×${_branch.gauge ?? '#10 AWG'} THWN-2 (shared)</td>
+                <td>—</td>
+                <td>—</td>
+                <td>${_hr.fillPct != null ? _hr.fillPct.toFixed(1) + '%' : '—'}</td>
+                <td>${_hr.conduitLabel ?? (_hr.racewayType ?? 'PENDING')}</td>
+                <td>${_hr.oneWayFt != null ? _hr.oneWayFt + ' ft' : '—'}</td>
+              </tr>` : '';
               return _auth.microBranches.map((b) => `
               <tr>
                 <td class="fw7">AC Branch ${b.index}</td>
                 <td>${b.deviceCount} × Microinverter</td>
-                <td>AC Combiner / Panel</td>
+                <td>Roof J-Box (open air)</td>
                 <td>${b.wireGauge} THWN-2</td>
                 <td>${b.branchCurrentA.toFixed(1)}A</td>
                 <td>${b.ocpdAmps}A</td>
                 <td>—</td>
                 <td>${_brConduit}</td>
                 <td>${_brLenTxt}</td>
-              </tr>`).join('');
+              </tr>`).join('') + _hrRow;
             } else {
               // String / Optimizer: Show traditional DC string rows
               return (system.inverters?.flatMap((inv, invIdx) =>
@@ -540,7 +559,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                   <td>${str.isc ? (Math.ceil(str.isc * 1.25 * 100) / 100).toFixed(2) + 'A' : (str.ampacity ? str.ampacity + 'A' : '—')}</td>
                   <td>${str.isc ? necNextStandardOcpd(str.isc * 1.56) + 'A' : (str.ocpd ? str.ocpd + 'A' : '—')}</td>
                   <td>${str.voltageDrop != null ? str.voltageDrop.toFixed(2) + '%' : '—'}</td>
-                  <td>${project.conduitType}</td>
+                  <td>${_condCell}</td>
                   <td>${str.wireLength} ft</td>
                 </tr>`) || []
               ) || []).join('');
@@ -660,6 +679,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const busLimit = _ic.busLimit;
         const maxBfAllowed = _ic.maxBackfeedA;
         const passes120 = _ic.passes120;
+        const _rulePasses = _ic.rulePasses;   // §1 tri-state (null ⇒ PENDING)
         const _lcSupply = _ic.isSupplySide;
         // D-4 (Ray, binding 2026-07-20): the former NEC 220.82 dwelling-load
         // table FABRICATED its inputs (square footage assumed from service
@@ -686,7 +706,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:900;">Supply-Side Connection — NEC 705.11</td><td>Tap made LINE side of the ${mainA}A service disconnect; 120% busbar rule (NEC 705.12(B)) not applicable</td><td style="font-weight:900;text-align:right;font-size:11px;">COMPLIES</td></tr>
             ` : `
             <tr class="bg-lt"><td class="fw9 mono">4</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A breaker required</td></tr>
-            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${passes120 ? 'PASS' : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQUIRED'}</td></tr>
+            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${_rulePasses == null ? 'PENDING — NO CANONICAL BUSBAR VERDICT' : (_rulePasses ? 'PASS' : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQUIRED')}</td></tr>
             `}
           </tbody>
         </table>
@@ -740,16 +760,16 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           <strong>120% RULE INTERPRETATION:</strong>
           The PV system requires a ${bfAmps}A backfeed breaker installed at the load end of the existing ${busA}A busbar.
           Per NEC 705.12(B)(2)(3), the sum of the main breaker (${mainA}A) and the PV backfeed breaker (${bfAmps}A) = ${mainA + bfAmps}A,
-          which ${passes120 ? 'does not exceed' : 'exceeds'} the 120% limit of ${busLimit.toFixed(0)}A.
-          ${passes120 ? 'No panel upgrade is required.' : 'A supply-side connection per NEC 705.11 or a panel upgrade is required.'}
+          which ${_rulePasses == null ? 'has NOT been evaluated on the canonical snapshot for' : (_rulePasses ? 'does not exceed' : 'exceeds')} the 120% limit of ${busLimit.toFixed(0)}A.
+          ${_rulePasses == null ? 'The 120% busbar evaluation is PENDING — resolve before submission.' : (_rulePasses ? 'No panel upgrade is required.' : 'A supply-side connection per NEC 705.11 or a panel upgrade is required.')}
         </div>
         ${''/* formula-tutorial box removed — displaced project content */}`}`;
       })()}
       <!-- Grounding & Bonding Standard Detail -->
       <div class="section-title">Grounding & Bonding Detail — NEC 690.43, 250.166</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:2px;align-items:center;">
         <div style="text-align:center;">
-          <svg viewBox="0 0 300 198" width="238" height="157" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
+          <svg viewBox="0 0 300 198" width="128" height="84" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
             <!-- PV module frames (aluminum, white with inner frame line) -->
             <g stroke="#1a2230" stroke-width="1.1" fill="#ffffff">
               <rect x="22" y="14" width="66" height="34" rx="1"/>
@@ -803,9 +823,9 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <text x="232" y="189" font-size="5.6" fill="#0f5c30" text-anchor="end">ELECTRODE · 250.166</text>
           </svg>
         </div>
-        <div style="font-size:var(--f-sm);line-height:1.6;">
-          <div style="font-weight:900;font-size:9px;margin-bottom:4px;letter-spacing:0.5px;">GROUNDING & BONDING REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. All module frames bonded to mounting rail via ${(() => {
+        <div style="font-size:var(--f-sm);line-height:1.2;">
+          <div style="font-weight:900;font-size:9px;margin-bottom:2px;letter-spacing:0.5px;">GROUNDING & BONDING REQUIREMENTS</div>
+          <div style="margin-bottom:1px;">1. All module frames bonded to mounting rail via ${(() => {
             // §10/§7 (07-22): pin the ACTUAL bonding hardware the canonical racking
             // assembly specifies — never "or equivalent". Unpinned ⇒ explicit
             // PENDING SELECTION (the structural agent's convention), never a guess.
@@ -814,9 +834,9 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               ? `${_bond} (listed to UL 2703)`
               : 'the racking manufacturer’s listed UL 2703 bonding hardware — <strong>PENDING SELECTION</strong>';
           })()}.</div>
-          <div style="margin-bottom:3px;">2. Equipment grounding conductor (EGC): ${_ic.feederEgcGauge} bare Cu min. per NEC 250.122 and 690.45.</div>
-          <div style="margin-bottom:3px;">3. EGC routed with circuit conductors in same raceway per NEC 690.43(A).</div>
-          <div style="margin-bottom:3px;">4. ${(() => {
+          <div style="margin-bottom:1px;">2. Equipment grounding conductor (EGC): ${_ic.feederEgcGauge} bare Cu min. per NEC 250.122 and 690.45.</div>
+          <div style="margin-bottom:1px;">3. EGC routed with circuit conductors in same raceway per NEC 690.43(A).</div>
+          <div style="margin-bottom:1px;">4. ${(() => {
             // §7 — project the canonical GEC grounding object. For a grid-tied
             // interconnected PV system the equipment grounding path bonds to the
             // EXISTING service grounding electrode system; a separate GEC + new
@@ -827,16 +847,15 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               ? 'Equipment grounding bonds to the EXISTING service grounding electrode system per NEC 250.64 / 690.47 — no separate grounding electrode conductor or new electrode is added by this PV interconnection.'
               : 'Grounding electrode conductor (GEC) connected to the building grounding electrode system per NEC 250.166.';
           })()}</div>
-          <div style="margin-bottom:3px;">5. All connections made with listed connectors rated for the conductor material and environment.</div>
-          <div style="margin-bottom:3px;">6. Bonding jumpers installed at all mechanical joints in the racking system per NEC 250.96.</div>
-          <div style="color:#555;font-size:7px;margin-top:4px;font-style:italic;">Detail is typical — verify with racking manufacturer bonding requirements.</div>
+          <div style="margin-bottom:1px;">5. All connections made with listed connectors rated for the conductor material and environment.</div>
+          <div style="margin-bottom:1px;">6. Bonding jumpers installed at all mechanical joints in the racking system per NEC 250.96.</div>
+          <div style="color:#555;font-size:7px;margin-top:3px;font-style:italic;">Detail is typical — verify with racking manufacturer bonding requirements.</div>
         </div>
       </div>
 
-      <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
+      <div style="padding:3px 6px;margin-top:var(--xs);font-size:var(--f-sm);line-height:1.4;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — CONDUCTOR & CONDUIT SCHEDULE:</strong>
-        All conductors have been sized per NEC 690.8 with continuous duty factor applied (Isc × 1.25).
-        Overcurrent protection devices are rated per NEC 690.9. Temperature correction and conduit fill derating have been evaluated per NEC 310.15.
+        Conductors sized per NEC 690.8 (Isc × 1.25), OCPD per NEC 690.9, temperature/fill derating per NEC 310.15.
         ${_feed.voltageDropPct != null && _feed.voltageDropPct <= 3 ? 'AC feeder voltage drop is within NEC recommended limits.' : 'Voltage drop requires review.'}
         All conductors are sized appropriately for the calculated load conditions of this ${system.totalDcKw?.toFixed(2) || '—'} kW DC system.
       </div>

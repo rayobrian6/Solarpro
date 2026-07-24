@@ -26,7 +26,7 @@ import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
 import { getPanelById, getMicroinverterById, getInverterById } from './equipment-db';
 
-import type { RunSegment } from './computed-system';
+import { racewayNecArticle, type RunSegment } from './computed-system';
 import type { RackingBOM } from './structural-engine-v4';
 import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 // MASTER TASK: deriveStructuralBOM removed from V4 — now called in API route merge layer
@@ -247,6 +247,14 @@ export interface BOMGenerationResultV4 {
   derivationLog: BOMDerivationEntry[];
   warnings: string[];
   complianceNotes: string[];
+  /** §5 closeout — machine-readable branch/feeder conductor reconciliation
+   *  (per-segment conductor-by-conductor calc + per-gauge aggregation proof).
+   *  Present only on the object-derived (runs-fed) path; the closer packages it
+   *  as the B1/B2/B3 evidence artifact. */
+  branchWireReconciliation?: BranchWireReconciliation;
+  /** §6 closeout — the physical raceways the conduit BOM iterated (each row is
+   *  labeled with its physicalRacewayId; no project-level "all runs" roll-up). */
+  physicalRaceways?: DerivedRaceway[];
 }
 
 export interface BOMStageResult {
@@ -293,6 +301,219 @@ function runHasNoConduit(r: RunSegment): boolean {
   const t = String(r.conduitType ?? '').trim().toUpperCase();
   return t === 'NONE' || t === 'N/A' || t === 'NA'
     || t === 'FREE AIR' || t === 'FREE_AIR' || t === 'OPEN AIR' || t === 'OPEN_AIR';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §5/§6/§7 CLOSEOUT (2026-07-23) — object-derived branch/raceway BOM
+// The BOM no longer prices AC conductors from one flat `acWireLength` scalar nor
+// rolls every conduit into one "— all runs" line. It iterates the canonical
+// PHYSICAL RACEWAYS (CO-A: ComputedSystem.physicalRaceways / RunSegment
+// .physicalRacewayId) and derives per-segment conductor footage with the
+// shared-circuit-count semantics. Every emitted row carries its source segment
+// IDs / physicalRacewayId, and every code citation comes from the raceway TYPE
+// authority (racewayNecArticle) — never a hardcoded 'NEC 358'.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _WASTE = 1.15; // fitting/termination waste allowance (matches legacy)
+
+/** One physical raceway derived from the run graph (the shared branch home-run
+ *  appears ONCE with sharedCircuitCount>1 — its conduit is counted a single
+ *  time even though it carries N branch circuits). */
+interface DerivedRaceway {
+  physicalRacewayId: string;
+  racewayType: string;        // 'PVC Sch 80' | 'EMT' | …
+  sizeIn: string;             // trade size, no inch mark ('1-1/4')
+  necArticle: string;         // '352' | '358' | … (from raceway type)
+  supportArticle: string;     // '352.30' | '358.30' | …
+  sharedCircuitCount: number;
+  lengthFt: number;           // Σ member run one-way lengths × waste (whole ft)
+  segmentIds: string[];
+}
+
+/** Group in-conduit runs into their physical raceways. Open-air (Q-Cable /
+ *  free-air) and utility-owned runs carry NO raceway and are skipped. Uses the
+ *  run's attached PhysicalRaceway authority object where present (the declaring
+ *  home-run carrier), else synthesizes the article from the raceway TYPE — the
+ *  SAME single source computeSystem uses (racewayNecArticle). */
+function derivePhysicalRacewaysFromRuns(runs: RunSegment[]): DerivedRaceway[] {
+  const byId = new Map<string, DerivedRaceway>();
+  const order: string[] = [];
+  for (const r of runs) {
+    if (r.isUtilityOwned || runHasNoConduit(r)) continue;
+    const rid = r.physicalRacewayId ?? `RW-${r.id}`;
+    const type = String(r.physicalRaceway?.racewayType ?? r.conduitType ?? 'EMT').trim();
+    const art = r.physicalRaceway
+      ? { article: r.physicalRaceway.necArticle, supportArticle: r.physicalRaceway.supportArticle }
+      : racewayNecArticle(type);
+    const size = String(r.physicalRaceway?.selectedRacewaySize ?? r.conduitSize ?? '3/4')
+      .trim().replace(/"$/, '');
+    const shared = r.physicalRaceway?.sharedCircuitCount ?? r.sharedCircuitCount ?? 1;
+    const lenFt = Math.ceil((r.onewayLengthFt ?? 30) * _WASTE);
+    const ex = byId.get(rid);
+    if (ex) {
+      ex.lengthFt += lenFt;
+      if (!ex.segmentIds.includes(String(r.id))) ex.segmentIds.push(String(r.id));
+      ex.sharedCircuitCount = Math.max(ex.sharedCircuitCount, shared);
+    } else {
+      byId.set(rid, {
+        physicalRacewayId: rid, racewayType: type, sizeIn: size,
+        necArticle: art.article, supportArticle: art.supportArticle,
+        sharedCircuitCount: shared, lengthFt: lenFt, segmentIds: [String(r.id)],
+      });
+      order.push(rid);
+    }
+  }
+  return order.map(id => byId.get(id)!);
+}
+
+/** §6/§7 — emit one physical raceway's conduit material + its matching fittings
+ *  (couplings, connectors, straps/supports, bushings, bends, PVC expansion where
+ *  applicable). Every row is labeled with the physicalRacewayId + source
+ *  segments, and cites the raceway's OWN NEC article (never a template '358'). */
+function emitRacewayConduitBom(rw: DerivedRaceway): BOMLineItemV4[] {
+  const out: BOMLineItemV4[] = [];
+  const { sizeIn: size, racewayType: type, lengthFt: ft } = rw;
+  const typeTag = type.replace(/\s+/g, '-');
+  const sizeTag = size.replace(/\//g, '-').replace(/"/g, '');
+  const idTag = rw.physicalRacewayId.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const src = rw.segmentIds.join(', ');
+  const necConduit = `NEC ${rw.necArticle}`;
+  const necSupport = `NEC ${rw.supportArticle}`;
+  const sharedNote = rw.sharedCircuitCount > 1
+    ? ` — shared home-run (${rw.sharedCircuitCount} branch circuits, conduit counted once)`
+    : '';
+
+  // Conduit material — per raceway (kills the project-level "all runs" roll-up)
+  out.push(addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
+    `${typeTag}-${sizeTag}-${idTag}`,
+    `${size}" ${type} conduit — ${rw.physicalRacewayId} [${src}]${sharedNote}`,
+    ft, 'ft', necConduit, `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, `[${src}] × ${_WASTE}`, true));
+
+  // Couplings — join 10-ft sticks
+  const coupQty = Math.max(1, Math.ceil(ft / 10) - 1);
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} Coupling`,
+    `${typeTag}-COUP-${sizeTag}-${idTag}`,
+    `${size}" ${type} coupling — ${rw.physicalRacewayId} (joins conduit sticks)`,
+    coupQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)-1`, `ceil(${ft}/10)-1`, true));
+
+  // Terminal connectors — both raceway ends
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} Connector`,
+    `${typeTag}-CONN-${sizeTag}-${idTag}`,
+    `${size}" ${type} terminal connector — ${rw.physicalRacewayId} (both raceway ends per NEC 300.15)`,
+    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true));
+
+  // Straps / supports — ≤10 ft + within 3 ft of each box (raceway-type support rule)
+  const strapQty = Math.max(2, Math.ceil(ft / 10) + 1);
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} One-Hole Strap`,
+    `${typeTag}-STRAP-${sizeTag}-${idTag}`,
+    `${size}" ${type} one-hole strap — ${rw.physicalRacewayId} support per ${necSupport} (≤10 ft + within 3 ft of boxes)`,
+    strapQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)+1`, `ceil(${ft}/10)+1`, true));
+
+  // Insulated throat bushings — both ends
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" Insulated Bushing`,
+    `BUSH-INS-${sizeTag}-${idTag}`,
+    `${size}" insulated throat bushing — ${rw.physicalRacewayId} (protects conductors at each raceway end per NEC 300.15)`,
+    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true));
+
+  // Bends / sweeps — rough-in allowance (exact count pending field routing)
+  out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} 90° Sweep`,
+    `${typeTag}-ELL-${sizeTag}-${idTag}`,
+    `${size}" ${type} 90° sweep/elbow — ${rw.physicalRacewayId} (rough-in allowance; exact bend count pending field routing)`,
+    2, 'ea', necSupport, `${rw.physicalRacewayId}: rough-in allowance`, '2', true));
+
+  // PVC expansion fitting — NEC 352.44 thermal, applicable on longer exposed PVC runs
+  if (/PVC/i.test(type) && ft >= 25) {
+    out.push(addItem('ac', 'conduit_fitting', 'Carlon', `${size}" PVC Expansion Fitting`,
+      `PVC-EXP-${sizeTag}-${idTag}`,
+      `${size}" PVC expansion coupling — ${rw.physicalRacewayId} (NEC 352.44 thermal expansion, exposed run ≥ 25 ft)`,
+      1, 'ea', 'NEC 352.44', `${rw.physicalRacewayId}: PVC exposed run ≥ 25 ft`, '1', true));
+  }
+  return out;
+}
+
+/** §5 — per-conductor calc row for the machine-readable reconciliation evidence. */
+interface BranchWireCalcRow {
+  segmentId: string;
+  physicalRacewayId: string | null;
+  gauge: string;
+  egcGauge: string;
+  conductorsPerCircuit: number;
+  sharedCircuitCount: number;
+  oneWayFt: number;
+  hotConductors: number;   // conductorsPerCircuit × sharedCircuitCount
+  hotFt: number;           // ceil(oneWayFt × hotConductors × waste)
+  egcFt: number;           // ceil(oneWayFt × 1 × waste) — one shared EGC per raceway
+}
+
+interface BranchWireReconciliation {
+  waste: number;
+  segments: BranchWireCalcRow[];
+  hotByGauge: { gauge: string; ft: number; segmentIds: string[] }[];
+  egcByGauge: { gauge: string; ft: number; segmentIds: string[] }[];
+  openAirTrunkSegments: string[]; // billed as trunk cable, NOT THWN
+}
+
+/** §5 — derive AC field-conductor quantities from the actual in-conduit route
+ *  segments. Open-air Q-Cable trunk sections are EXCLUDED (billed as trunk
+ *  cable). Hots = conductorsPerCircuit × sharedCircuitCount × length; the EGC is
+ *  one shared conductor per raceway (NEC 250.122(C)). Hots and EGCs are kept as
+ *  SEPARATE rows (green EGC ≠ black hot) so a #10 branch hot is never merged
+ *  with a #10 feeder EGC into one undifferentiated "AC wiring" line. */
+function emitAcConductorBom(runs: RunSegment[]): { items: BOMLineItemV4[]; evidence: BranchWireReconciliation } {
+  const hotMap = new Map<string, { ft: number; segs: string[] }>();
+  const egcMap = new Map<string, { ft: number; segs: string[] }>();
+  const calc: BranchWireCalcRow[] = [];
+  const openAir: string[] = [];
+
+  for (const r of runs) {
+    if (r.isUtilityOwned) continue;
+    // Open-air AC sections (the Q-Cable trunk) are billed as trunk cable, never
+    // THWN field conductor — record them so the reconciliation is auditable.
+    if (runHasNoConduit(r)) { openAir.push(String(r.id)); continue; }
+    const gauge = r.wireGauge ?? '#10 AWG';
+    const egcGauge = r.egcGauge ?? '#10 AWG';
+    const perCircuit = r.conductorCount ?? 2;
+    const shared = r.sharedCircuitCount ?? r.physicalRaceway?.sharedCircuitCount ?? 1;
+    const lenOneWay = r.onewayLengthFt ?? 30;
+    const hotConductors = perCircuit * shared;
+    const hotFt = Math.ceil(lenOneWay * hotConductors * _WASTE);
+    const egcFt = Math.ceil(lenOneWay * 1 * _WASTE);
+    const h = hotMap.get(gauge);
+    if (h) { h.ft += hotFt; if (!h.segs.includes(String(r.id))) h.segs.push(String(r.id)); }
+    else hotMap.set(gauge, { ft: hotFt, segs: [String(r.id)] });
+    const e = egcMap.get(egcGauge);
+    if (e) { e.ft += egcFt; if (!e.segs.includes(String(r.id))) e.segs.push(String(r.id)); }
+    else egcMap.set(egcGauge, { ft: egcFt, segs: [String(r.id)] });
+    calc.push({
+      segmentId: String(r.id), physicalRacewayId: r.physicalRacewayId ?? null,
+      gauge, egcGauge, conductorsPerCircuit: perCircuit, sharedCircuitCount: shared,
+      oneWayFt: lenOneWay, hotConductors, hotFt, egcFt,
+    });
+  }
+
+  const gaugeNum = (g: string) => parseInt(g.replace('#', '').replace(' AWG', '')) || 99;
+  const items: BOMLineItemV4[] = [];
+  for (const [gauge, { ft, segs }] of [...hotMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
+    const gn = gauge.replace('#', '').replace(' AWG', '');
+    items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`, `THWN2-${gn}`,
+      `${gauge} THWN-2 — AC circuit conductors (${segs.join(', ')})`,
+      ft, 'ft', 'NEC 310.15', `Σ length × conductorsPerCircuit × sharedCircuitCount × ${_WASTE}`, `[${segs.join(', ')}]`, true));
+  }
+  for (const [gauge, { ft, segs }] of [...egcMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
+    const gn = gauge.replace('#', '').replace(' AWG', '');
+    items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2 Green EGC`, `THWN2-GRN-${gn}`,
+      `${gauge} green THWN-2 equipment grounding conductor — one per raceway, NEC 250.122(C) (${segs.join(', ')})`,
+      ft, 'ft', 'NEC 250.122', `Σ length × 1 × ${_WASTE} (one shared EGC per raceway)`, `[${segs.join(', ')}]`, true));
+  }
+
+  const evidence: BranchWireReconciliation = {
+    waste: _WASTE,
+    segments: calc,
+    hotByGauge: [...hotMap.entries()].map(([gauge, v]) => ({ gauge, ft: v.ft, segmentIds: v.segs })),
+    egcByGauge: [...egcMap.entries()].map(([gauge, v]) => ({ gauge, ft: v.ft, segmentIds: v.segs })),
+    openAirTrunkSegments: openAir,
+  };
+  return { items, evidence };
 }
 
 // ─── ID Generator ─────────────────────────────────────────────────────────────
@@ -396,6 +617,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   const log: BOMDerivationEntry[] = [];
   const warnings: string[] = [];
   const complianceNotes: string[] = [];
+  // §5/§6 closeout — machine-readable evidence (attached to the result below).
+  let _branchWireReconciliation: BranchWireReconciliation | undefined;
+  let _physicalRaceways: DerivedRaceway[] | undefined;
 
   // Resolve topology
   const topoCtx: TopologyManagerContext = {
@@ -992,88 +1216,34 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       }
     }
 
-    // ── Group AC runs by wire gauge → one line item per gauge (matches calcBOMFromSegments) ──
-    // Produces separate line items for #10, #8, #6, #4 AWG matching summary cards
-    // Key insight: EGC can be a DIFFERENT gauge than hot conductors
-    // - Hot/neutral: length × conductorCount × 1.15 of wireGauge
-    // - EGC: length × 1 × 1.15 of egcGauge (may differ from wireGauge)
-    const wireGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
-    
-    for (const r of acBomRuns) {
-      const gauge: string = r.wireGauge ?? input.acWireGauge ?? '#8 AWG';
-      const egcGauge: string = r.egcGauge ?? '#10 AWG';
-      const conductors: number = r.conductorCount ?? 3;
-      const length: number = r.onewayLengthFt ?? 50;
-      
-      // Add hot/neutral conductor quantity (gauge = wireGauge)
-      const hotQty = Math.ceil(length * conductors * 1.15);
-      const hotExisting = wireGaugeMap.get(gauge);
-      if (hotExisting) {
-        hotExisting.qty += hotQty;
-        hotExisting.runIds.push(r.id);
-      } else {
-        wireGaugeMap.set(gauge, { qty: hotQty, runIds: [r.id] });
-      }
-      
-      // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
-      // EGC is always 1 conductor per run
-      const egcQty = Math.ceil(length * 1 * 1.15);
-      const egcExisting = wireGaugeMap.get(egcGauge);
-      if (egcExisting) {
-        egcExisting.qty += egcQty;
-        if (!egcExisting.runIds.includes(r.id)) {
-          egcExisting.runIds.push(r.id);
-        }
-      } else {
-        wireGaugeMap.set(egcGauge, { qty: egcQty, runIds: [r.id] });
+    // ── §5 — AC circuit conductors from the ACTUAL route segments ────────────
+    // Open-air Q-Cable trunk sections are excluded (billed as trunk cable); hots
+    // scale by conductorsPerCircuit × sharedCircuitCount (the shared home-run
+    // carries N branches in ONE raceway); the shared EGC is one per raceway.
+    // Hots and EGCs stay SEPARATE rows — no undifferentiated "AC wiring" merge.
+    {
+      const _ac = emitAcConductorBom(acBomRuns);
+      _branchWireReconciliation = _ac.evidence;
+      for (const it of _ac.items) {
+        items.push(it);
+        log.push({ stageId: 'ac', category: 'wire', item: it.model,
+          quantity: it.quantity, derivedFrom: it.formula,
+          formula: it.derivedFrom, necReference: it.necReference });
       }
     }
 
-    // Emit one wire line item per gauge (sorted: smaller AWG number = larger wire = first)
-    const sortedGauges = [...wireGaugeMap.entries()].sort((a, b) => {
-      const numA = parseInt(a[0].replace('#', '').replace(' AWG', '')) || 99;
-      const numB = parseInt(b[0].replace('#', '').replace(' AWG', '')) || 99;
-      return numA - numB;
-    });
-
-    for (const [gauge, { qty, runIds }] of sortedGauges) {
-      const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
-      const runLabel = runIds.join(', ');
-      items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`,
-        `THWN2-${gaugeNum}`,
-        `${gauge} THWN-2 — AC wiring (${runLabel})`,
-        qty, 'ft', 'NEC 310.15 / 250.122',
-        `Sum(length x conductors x 1.15)`,
-        `${gauge} wire runs x 1.15`, true));
-      log.push({ stageId: 'ac', category: 'wire', item: `${gauge} THWN-2`,
-        quantity: qty, derivedFrom: runLabel,
-        formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 310.15 / 250.122' });
-    }
-
-    // ── Group ALL runs by conduit type+size → one conduit line item per type/size ──
-    // Open-air runs (conduitType 'NONE' / isOpenAir) carry no raceway — skip them.
-    const conduitMap = new Map<string, { qty: number; type: string; size: string }>();
-    for (const r of allBomRuns) {
-      if (runHasNoConduit(r)) continue;
-      const cType: string = r.conduitType ?? input.conduitType ?? 'EMT';
-      const cSize: string = (r.conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
-      const key = `${cType}-${cSize}`;
-      const qty = Math.ceil((r.onewayLengthFt ?? 30) * 1.15);
-      const existing = conduitMap.get(key);
-      if (existing) {
-        existing.qty += qty;
-      } else {
-        conduitMap.set(key, { qty, type: cType, size: cSize });
+    // ── §6/§7 — conduit + fittings PER PHYSICAL RACEWAY (no "— all runs" roll-up;
+    // the shared branch home-run is counted ONCE; each raceway cites its OWN NEC
+    // article from the raceway type — never a template 'NEC 358'). ────────────
+    {
+      const _raceways = derivePhysicalRacewaysFromRuns(allBomRuns);
+      _physicalRaceways = _raceways;
+      for (const rw of _raceways) {
+        for (const it of emitRacewayConduitBom(rw)) items.push(it);
+        log.push({ stageId: 'ac', category: 'conduit', item: `${rw.sizeIn}" ${rw.racewayType} (${rw.physicalRacewayId})`,
+          quantity: rw.lengthFt, derivedFrom: rw.segmentIds.join(', '),
+          formula: `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, necReference: `NEC ${rw.necArticle}` });
       }
-    }
-
-    for (const [, { qty, type, size }] of conduitMap.entries()) {
-      items.push(addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
-        `${type}-${size.replace('/', '-')}`,
-        `${size}" ${type} conduit — all runs`,
-        qty, 'ft', 'NEC 358',
-        'Sum(allRuns.length x 1.15)',
-        `${size}" ${type} x 1.15`, true));
     }
 
   } else {
@@ -1100,34 +1270,14 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       'acWireLength x 1.15', `${input.acWireLength} x 1.15`, true));
   }
 
-  // ── Conduit Fittings (NEC 300.15 / 358.30) ─────────────────────────────────
-  // Auto-derived from total conduit length across all runs.
-  // Rule of thumb: 1 connector + 1 coupling per 10 ft of conduit.
-  {
-    // ── W4b — fittings are generated PER RACEWAY, matching each segment's actual
-    // conduit type + trade size (gate 7). The old block emitted one '3/4" EMT'
-    // fitting set (from input.conduitType/conduitSizeInch defaults) while the
-    // real runs were, e.g., '1-1/4" PVC Sch 80' — a fitting set that physically
-    // does not fit the installed raceway. Group the in-conduit AC/DC runs by
-    // (trade size, raceway type) and emit matching connectors / couplings /
-    // bushings / straps for each. ──
+  // ── Conduit Fittings — FLAT FALLBACK ONLY (no runs) ─────────────────────────
+  // When runs ARE present the §6 per-physical-raceway pass above already emitted
+  // each raceway's own conduit + fittings (couplings/connectors/straps/bushings/
+  // bends), labeled with its physicalRacewayId and citing its raceway-type NEC
+  // article. This flat block only covers the design-studio fallback path where
+  // no sized runs exist (env-based single AC home run).
+  if (!(input.runs && input.runs.length > 0)) {
     const _fitGroups = new Map<string, { size: string; type: string; ft: number }>();
-    if (input.runs && input.runs.length > 0) {
-      for (const r of input.runs) {
-        // Utility-owned and open-air (Q-Cable / free-air) runs carry no raceway —
-        // they must not inflate connector/coupling/bushing/strap counts.
-        if (r.isUtilityOwned || runHasNoConduit(r)) continue;
-        // Normalize the trade size: run.conduitSize carries the inch mark ('1"'),
-        // input.conduitSizeInch does not ('3/4') — strip a trailing " so the
-        // label appends exactly one (no '1""').
-        const size = (r.conduitSize ?? input.conduitSizeInch ?? '3/4').trim().replace(/"$/, '');
-        const type = (r.conduitType ?? input.conduitType ?? 'EMT').trim();
-        const key = `${size}|${type}`;
-        const ft = Math.ceil((r.onewayLengthFt ?? 30) * 1.15);
-        const ex = _fitGroups.get(key);
-        if (ex) ex.ft += ft; else _fitGroups.set(key, { size, type, ft });
-      }
-    }
     if (_fitGroups.size === 0) {
       const size = input.conduitSizeInch ?? '3/4';
       const type = input.conduitType ?? 'EMT';
@@ -1523,9 +1673,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     }
   }
 
-  // ── Grounding Electrode System (NEC 250.52 / 690.43 / 250.66) ───────────────
-  // EGC: Equipment Grounding Conductor — runs inside conduit alongside AC conductors
-  {
+  // ── Equipment Grounding Conductor — FLAT FALLBACK ONLY (no runs) ────────────
+  // §5 closeout: when sized runs are present, the per-segment EGC is emitted ONCE
+  // per raceway by emitAcConductorBom (one shared green EGC per raceway,
+  // NEC 250.122(C)) — this flat `acWireLength × 1.15` row was the SECOND,
+  // independent EGC emitter that double-billed grounding on two bases. It now
+  // only covers the design-studio fallback path (no per-segment conductors).
+  if (!(input.runs && input.runs.length > 0)) {
     const egcLength = conduitLength(input.acWireLength);
     // EGC gauge: NEC 250.122 — based on OCPD size
     const ocpdForEgc = input.acOCPD > 0 ? input.acOCPD : nextStandardBreaker(
@@ -1796,6 +1950,8 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     derivationLog: log,
     warnings,
     complianceNotes,
+    ...(_branchWireReconciliation ? { branchWireReconciliation: _branchWireReconciliation } : {}),
+    ...(_physicalRaceways ? { physicalRaceways: _physicalRaceways } : {}),
   };
 }
 
@@ -1843,6 +1999,9 @@ function generateBOMV4PerSubSystem(
   const log: BOMDerivationEntry[] = [];
   const warnings: string[] = [];
   const complianceNotes: string[] = [];
+  // §5/§6 closeout — machine-readable evidence (attached to the result below).
+  let _branchWireReconciliation: BranchWireReconciliation | undefined;
+  let _physicalRaceways: DerivedRaceway[] | undefined;
   const counts = input.subSystemCounts!;
 
   /** Push a line, stamping the owning sub-system when the context is sub-scoped. */
@@ -2383,55 +2542,31 @@ function generateBOMV4PerSubSystem(
       }
     }
 
-    // AC runs — ONE line per gauge across the whole system (single POI set).
-    const wireGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
-    for (const r of acBomRuns) {
-      const gauge: string = r.wireGauge ?? input.acWireGauge ?? '#8 AWG';
-      const egcGauge: string = r.egcGauge ?? '#10 AWG';
-      const conductors: number = r.conductorCount ?? 3;
-      const length: number = r.onewayLengthFt ?? 50;
-      const hotQty = Math.ceil(length * conductors * 1.15);
-      const hotExisting = wireGaugeMap.get(gauge);
-      if (hotExisting) { hotExisting.qty += hotQty; hotExisting.runIds.push(String(r.id)); }
-      else wireGaugeMap.set(gauge, { qty: hotQty, runIds: [String(r.id)] });
-      const egcQty = Math.ceil(length * 1 * 1.15);
-      const egcExisting = wireGaugeMap.get(egcGauge);
-      if (egcExisting) {
-        egcExisting.qty += egcQty;
-        if (!egcExisting.runIds.includes(String(r.id))) egcExisting.runIds.push(String(r.id));
-      } else wireGaugeMap.set(egcGauge, { qty: egcQty, runIds: [String(r.id)] });
-    }
-    const sortedGauges = [...wireGaugeMap.entries()].sort((a, b) => {
-      const numA = parseInt(a[0].replace('#', '').replace(' AWG', '')) || 99;
-      const numB = parseInt(b[0].replace('#', '').replace(' AWG', '')) || 99;
-      return numA - numB;
-    });
-    for (const [gauge, { qty, runIds }] of sortedGauges) {
-      const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
-      const runLabel = runIds.join(', ');
-      push(undefined, addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`,
-        `THWN2-${gaugeNum}`, `${gauge} THWN-2 — AC wiring (${runLabel})`,
-        qty, 'ft', 'NEC 310.15 / 250.122', 'Sum(length x conductors x 1.15)', `${gauge} wire runs x 1.15`, true));
-      log.push({ stageId: 'ac', category: 'wire', item: `${gauge} THWN-2`,
-        quantity: qty, derivedFrom: runLabel, formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 310.15 / 250.122' });
+    // §5 — AC circuit conductors from the ACTUAL route segments (open-air Q-Cable
+    // excluded / billed as trunk cable; hots scale by conductorsPerCircuit ×
+    // sharedCircuitCount; the shared EGC is one per raceway; hots and EGCs are
+    // SEPARATE rows — no undifferentiated "AC wiring" merge).
+    {
+      const _ac = emitAcConductorBom(acBomRuns);
+      _branchWireReconciliation = _ac.evidence;
+      for (const it of _ac.items) {
+        push(undefined, it);
+        log.push({ stageId: 'ac', category: 'wire', item: it.model,
+          quantity: it.quantity, derivedFrom: it.formula, formula: it.derivedFrom, necReference: it.necReference });
+      }
     }
 
-    // Conduit — ONE line per type+size across all runs (open-air runs skipped).
-    const conduitMap = new Map<string, { qty: number; type: string; size: string }>();
-    for (const r of allBomRuns) {
-      if (runHasNoConduit(r)) continue;
-      const cType: string = r.conduitType ?? input.conduitType ?? 'EMT';
-      const cSize: string = (r.conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
-      const k = `${cType}-${cSize}`;
-      const qty = Math.ceil((r.onewayLengthFt ?? 30) * 1.15);
-      const existing = conduitMap.get(k);
-      if (existing) existing.qty += qty;
-      else conduitMap.set(k, { qty, type: cType, size: cSize });
-    }
-    for (const { qty, type, size } of conduitMap.values()) {
-      push(undefined, addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
-        `${type}-${size.replace('/', '-')}`, `${size}" ${type} conduit — all runs`,
-        qty, 'ft', 'NEC 358', 'Sum(allRuns.length x 1.15)', `${size}" ${type} x 1.15`, true));
+    // §6/§7 — conduit + fittings PER PHYSICAL RACEWAY (no "— all runs"; the shared
+    // branch home-run counted ONCE; each raceway cites its OWN NEC article).
+    {
+      const _raceways = derivePhysicalRacewaysFromRuns(allBomRuns);
+      _physicalRaceways = _raceways;
+      for (const rw of _raceways) {
+        for (const it of emitRacewayConduitBom(rw)) push(undefined, it);
+        log.push({ stageId: 'ac', category: 'conduit', item: `${rw.sizeIn}" ${rw.racewayType} (${rw.physicalRacewayId})`,
+          quantity: rw.lengthFt, derivedFrom: rw.segmentIds.join(', '),
+          formula: `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, necReference: `NEC ${rw.necArticle}` });
+      }
     }
   } else {
     // No runs provided — flat aggregate AC home run (legacy fallback shape).
@@ -2449,14 +2584,12 @@ function generateBOMV4PerSubSystem(
       acConduitQty, 'ft', 'NEC 358', 'acWireLength x 1.15', `${input.acWireLength} x 1.15`, true));
   }
 
-  // Conduit fittings — derived once from total raceway footage (all subs).
-  {
+  // Conduit fittings — FLAT FALLBACK ONLY (no runs). When runs are present the
+  // §6 per-physical-raceway pass already emitted each raceway's own conduit +
+  // fittings (labeled with its physicalRacewayId, citing its raceway-type NEC
+  // article) — running this project-level roll-up too would double-bill fittings.
+  if (!(input.runs && input.runs.length > 0)) {
     const totalConduitFt = (() => {
-      if (input.runs && input.runs.length > 0) {
-        return input.runs
-          .filter(r => !r.isUtilityOwned && !runHasNoConduit(r))
-          .reduce((sum: number, r) => sum + Math.ceil((r.onewayLengthFt ?? 30) * 1.15), 0);
-      }
       // env-based: AC home run + each string sub's DC raceway footage.
       return conduitLength(input.acWireLength)
         + subs.filter(s => !s.isMicro && s.modules > 0 && !subsWithDcRuns.has(s.key))
@@ -2695,10 +2828,15 @@ function generateBOMV4PerSubSystem(
       ((input.acOutputKw ?? input.systemKw) * 1000) / (input.acVoltage ?? 240) * 1.25
     );
     const egcGauge = ocpdForEgc <= 60 ? '#10 AWG' : ocpdForEgc <= 100 ? '#8 AWG' : '#6 AWG';
-    push(undefined, addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
-      `THWN2-GRN-${egcGauge.replace('#', '').replace(' AWG', '')}`,
-      `${egcGauge} green THWN-2 equipment grounding conductor — NEC 250.122`,
-      egcLength, 'ft', 'NEC 690.43 / 250.122', 'acWireLength × 1.15', `${input.acWireLength} × 1.15`, true));
+    // §5 closeout — the flat acWireLength×1.15 EGC row is the design-studio
+    // fallback only. When sized runs exist, emitAcConductorBom already emits the
+    // per-raceway shared green EGC (NEC 250.122(C)); this line would double-bill.
+    if (!(input.runs && input.runs.length > 0)) {
+      push(undefined, addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
+        `THWN2-GRN-${egcGauge.replace('#', '').replace(' AWG', '')}`,
+        `${egcGauge} green THWN-2 equipment grounding conductor — NEC 250.122`,
+        egcLength, 'ft', 'NEC 690.43 / 250.122', 'acWireLength × 1.15', `${input.acWireLength} × 1.15`, true));
+    }
     push(undefined, addItem('structural', 'grounding', 'Erico/Harger', '5/8" × 8 ft Copper-Clad Ground Rod',
       'GR-5/8-8', '5/8" × 8 ft copper-clad steel ground rod — NEC 250.52(A)(5)',
       1, 'ea', 'NEC 250.52(A)(5)', 'perSystem', '1', true));
@@ -2860,6 +2998,8 @@ function generateBOMV4PerSubSystem(
     derivationLog: log,
     warnings,
     complianceNotes,
+    ...(_branchWireReconciliation ? { branchWireReconciliation: _branchWireReconciliation } : {}),
+    ...(_physicalRaceways ? { physicalRaceways: _physicalRaceways } : {}),
   };
 }
 

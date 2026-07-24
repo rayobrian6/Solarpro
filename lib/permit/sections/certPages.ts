@@ -26,7 +26,7 @@ import type { SubSystemKey } from '../utils/subSystems';
 export interface PELetterOpts { sheetId?: string; subKey?: SubSystemKey; }
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { projectStructuralFromInput, fmt, fmtStr, findCheck } from '../snapshot/structuralProjection';
+import { projectStructuralFromInput, fmt, fmtStr, findCheck, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
 
@@ -114,7 +114,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
   const _structFlag = _u != null && _u > 1.0;
 
   return `
-  <div class="page">
+  <div class="page cert-compact">
     ${titleBlock(input, 'CERT', 'ENGINEER CERTIFICATION', pageNum, totalPages)}
     ${certificationGateBanner(input)}
     <div class="page-content">
@@ -178,17 +178,16 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
                issue date read as the expiration value of the field above. -->
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Date of Certification</div></div>
           <div class="cert-field"><div class="cf-val">________________________________</div><div class="cf-lbl">Phone / Email</div></div>
-          <div class="cert-field" style="margin-top:var(--sm)"><div class="cf-val" style="border-bottom:var(--border-hvy);padding-bottom:18px;">________________________________</div><div class="cf-lbl">Signature</div></div>
+          <div class="cert-field" style="margin-top:var(--xs)"><div class="cf-val" style="border-bottom:var(--border-hvy);padding-bottom:10px;">________________________________</div><div class="cf-lbl">Signature</div></div>
         </div>
         <div>
           <div class="cert-block-title">WET STAMP AREA</div>
-          <div class="stamp-box" style="min-height:130px;border:3px solid #000;position:relative;">
+          <div class="stamp-box" style="min-height:92px;border:3px solid #000;position:relative;">
             <div class="center">
-              <div style="font-size:28px;opacity:0.2">&#x2B21;</div>
-              <div style="font-size:12px;color:#666;margin-top:6px;font-weight:700;letter-spacing:0.5px;">AFFIX SEAL HERE</div>
-              <div style="font-size:9px;color:#999;margin-top:4px">Professional Engineer Wet Stamp</div>
-              <div style="font-size:8px;color:#aaa;margin-top:2px">Required for AHJ Submission</div>
-              <div style="font-size:8px;color:#bbb;margin-top:6px;font-style:italic;">Stamp must be raised or embossed seal</div>
+              <div style="font-size:22px;opacity:0.2">&#x2B21;</div>
+              <div style="font-size:11px;color:#666;margin-top:3px;font-weight:700;letter-spacing:0.5px;">AFFIX SEAL HERE</div>
+              <div style="font-size:8.5px;color:#999;margin-top:2px">Professional Engineer Wet Stamp — required for AHJ submission</div>
+              <div style="font-size:8px;color:#bbb;margin-top:3px;font-style:italic;">Stamp must be raised or embossed seal</div>
             </div>
           </div>
           <div class="cert-block-title mt-sm">REVISION HISTORY</div>
@@ -197,7 +196,6 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
             <tbody>
               <tr><td class="fw7">A</td><td>${escapeH(String(pa.issueDate ?? project.date ?? ''))}</td><td>${revDesc}</td><td>${escapeH(project.designer || '—')}</td></tr>
               <tr><td class="c999">B</td><td class="c999">&mdash;</td><td class="c999">&mdash;</td><td class="c999">&mdash;</td></tr>
-              <tr><td class="c999">C</td><td class="c999">&mdash;</td><td class="c999">&mdash;</td><td class="c999">&mdash;</td></tr>
             </tbody>
           </table>
           <div class="section-title">SLD Reference</div>
@@ -217,10 +215,12 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
         </table>
       </div>
 
-      <!-- Liability Limitation -->
-      <div style="margin-top:var(--xs);padding:var(--xs);font-size:7.5px;line-height:1.5;color:#666;border:var(--border);background:#fafafa;">
+      <!-- Liability Limitation — §15 page-fit: condensed to a single dense
+           paragraph so the full legal text prints within the page (never clipped
+           by overflow:hidden). No clause is dropped, only tightened. -->
+      <div style="margin-top:var(--xs);padding:4px 6px;font-size:7.3px;line-height:1.4;color:#666;border:var(--border);background:#fafafa;">
         <strong>LIMITATION OF LIABILITY:</strong>
-        This engineering document is prepared for the specific project and installation address identified herein. It is not transferable to other projects or locations.
+        This engineering document is prepared for the specific project and installation address identified herein; it is not transferable to other projects or locations.
         The engineer of record's liability is limited to the engineering design as documented. The installing contractor is responsible for field verification of all conditions,
         adherence to manufacturer installation requirements, and compliance with all applicable building codes. Any deviation from the approved design must be reported to the
         engineer of record prior to installation. This document expires 180 days from the date of certification unless extended in writing by the engineer of record.
@@ -624,8 +624,12 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
     || 48;
   const _fracIn = (v: number) =>
     v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-  const lagDia    = _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
-  const lagEmbed  = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
+  // §12 — the ONE canonical fastener assembly (identical to PV-3 / APP-A / SCHED).
+  // The PE letter no longer asserts a generic "5/16 minimum stainless lag"; while
+  // the assembly is unverified it prints PENDING VERIFIED FASTENER ASSEMBLY.
+  const _fa       = projectFastenerAssembly(input);
+  const lagDia    = _fa.diameterLabel ?? _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
+  const lagEmbed  = _fa.embedmentIn ?? _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
   // 1-decimal ratio so the printed pair is self-consistent -- Math.round gave
   // "4/12 (20.0 deg)" where 4:12 is actually 18.4 deg (a checkable contradiction).
   // Pitch = what the structural engine analyzed (CAD plane[0] -> project) --
@@ -664,15 +668,16 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             <tr><td class="il">Total Modules</td><td class="iv">${system.totalPanels || '—'}</td><td class="il">System Size</td><td class="iv">${system.totalDcKw?.toFixed(2) || '—'} kW DC</td></tr>
             <tr><td class="il">Module Model</td><td class="iv" colspan="3">${(() => { const _eq = _eqRoof ?? getEquipmentContext(input, cad); return [_eq.panelManufacturer, _eq.panelModel].filter(s => s && s !== '—' && s !== '&mdash;').join(' ') || '—'; })()}</td></tr>
             <tr><td class="il">Mounting System</td><td class="iv" colspan="3">${escapeH(mountSys)}</td></tr>
-            <tr><td class="il">Rail Orientation</td><td class="iv">Perpendicular to rafters</td><td class="il">Attachment</td><td class="iv">Lag bolt w/ flashing</td></tr>
+            <tr><td class="il">Rail Orientation</td><td class="iv">Perpendicular to rafters</td><td class="il">Attachment</td><td class="iv">${escapeH(_fa.present ? (_fa.fastenerType ?? 'Structural fastener') : 'Per fastener assembly')} w/ flashing</td></tr>
           </table>
 
           <div class="section-title">Existing Roof Construction</div>
           <table class="info-table mb-xs">
             <tr><td class="il">Roof Type</td><td class="iv">${roofType}</td><td class="il">Roof Pitch</td><td class="iv">${roofPitch}</td></tr>
             <tr><td class="il">Rafter / Framing</td><td class="iv">${_isTruss ? `Pre-Engineered Truss (${rafterSize} chords)` : `${rafterSize} Lumber`}</td><td class="il">Spacing</td><td class="iv">${rafterSpace}" O.C.</td></tr>
-            <tr><td class="il">Attachment Spacing</td><td class="iv">${attachSpace}" max O.C.</td><td class="il">Lag Diameter</td><td class="iv">${lagDia}" min.</td></tr>
-            <tr><td class="il">Min. Embedment</td><td class="iv">${lagEmbed}" into rafter</td><td class="il">Hardware</td><td class="iv">Stainless Steel</td></tr>
+            <tr><td class="il">Attachment Spacing</td><td class="iv">${attachSpace}" max O.C.</td><td class="il">Fastener Dia.</td><td class="iv">${lagDia}"</td></tr>
+            <tr><td class="il">Min. Embedment</td><td class="iv">${lagEmbed}" into ${escapeH(_fa.substrate ?? 'rafter')}</td><td class="il">Fastener Status</td><td class="iv" style="font-weight:bold;color:${_fa.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_fa.certLabel)}</td></tr>
+            <tr><td class="il">Fastener Assembly</td><td class="iv" colspan="3" data-pe-field="fastener">${escapeH(_fa.line)}</td></tr>
             <tr><td class="il">Roof Sheathing</td><td class="iv">No attachment to sheathing only</td><td class="il">Underlayment</td><td class="iv">Maintained per mfr. req.</td></tr>
           </table>
         </div>

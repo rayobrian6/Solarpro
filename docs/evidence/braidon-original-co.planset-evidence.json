@@ -1,0 +1,400 @@
+{
+  "generatedAt": "2026-07-24T00:12:32.720Z",
+  "harness": "planset-evidence-co (final closeout rendered-truth, 20 permanent gates)",
+  "mode": "original",
+  "htmlPath": "_tmp_braidon_original.html",
+  "snapshotId": "PDS-B7FBCEEDBD28",
+  "digest": "b7fbceedbd28c213ade871affbdb3fae690759e7a2db66c048f04d35d2bb8b20",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "sheetCount": 21,
+  "sheetIds": [
+    "PV-0",
+    "RS-1",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "manifestIds": [
+    "PV-0",
+    "RS-1",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "topology": "MICRO",
+  "supplySide": true,
+  "framingUnverified": true,
+  "feeder": {
+    "conduitLabel": "PVC Sch 80 1-1/4\"",
+    "voltageDropPct": 0.36936055005081303
+  },
+  "physicalRaceways": [
+    {
+      "id": "RW-BRANCH-HOMERUN",
+      "type": "PVC Sch 80",
+      "size": "1-1/4\"",
+      "scc": 3,
+      "nec": "352",
+      "fillPct": 23.4
+    },
+    {
+      "id": "RW-COMBINER_TO_DISCO_RUN",
+      "type": "PVC Sch 80",
+      "size": "1-1/4\"",
+      "scc": 1,
+      "nec": "352",
+      "fillPct": 29
+    },
+    {
+      "id": "RW-DISCO_TO_METER_RUN",
+      "type": "PVC Sch 80",
+      "size": "1-1/4\"",
+      "scc": 1,
+      "nec": "352",
+      "fillPct": 29
+    }
+  ],
+  "serviceTopology": [
+    "combiner",
+    "combiner-load-break",
+    "rsd-initiator",
+    "tap-conductors",
+    "fused-ocpd(DUAL)",
+    "tap-point",
+    "meter",
+    "service-disconnect"
+  ],
+  "branchConductorDerived": [
+    {
+      "segmentId": "BRANCH_HOMERUN_RUN",
+      "gauge": "#10 AWG",
+      "egcGauge": "#12 AWG",
+      "hotFt": 125,
+      "egcFt": 21
+    },
+    {
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "gauge": "#6 AWG",
+      "egcGauge": "#10 AWG",
+      "hotFt": 69,
+      "egcFt": 23
+    },
+    {
+      "segmentId": "DISCO_TO_METER_RUN",
+      "gauge": "#6 AWG",
+      "egcGauge": "#10 AWG",
+      "hotFt": 52,
+      "egcFt": 18
+    }
+  ],
+  "activeBlockers": [
+    "ROUTE-LENGTH-ESTIMATE",
+    "CONDUIT-FILL-PENDING",
+    "TAP-CONDUCTOR-LENGTH-PENDING",
+    "STRUCTURAL-FRAMING-UNVERIFIED",
+    "PENDING-RACKING-ASSEMBLY-SELECTION",
+    "WIND-SNOW-AUTHORITY-UNRESOLVED",
+    "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+    "RACKING-CAPACITY-APPLICABILITY-GAP",
+    "CODE-AUTHORITY-INCOMPLETE",
+    "PROJECT-AUTHORITY-UNVERIFIED",
+    "MODULE-EXACT-DATASHEET-PENDING",
+    "ENGINEERING-REVIEW-PENDING"
+  ],
+  "reportEqualsRendered": {
+    "reconciled": [
+      {
+        "name": "snapshotId",
+        "reportVal": "PDS-B7FBCEEDBD28",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "PDS-B7FBCEEDBD28"
+        ],
+        "sld": "PDS-B7FBCEEDBD28"
+      },
+      {
+        "name": "digestPrefix",
+        "reportVal": "b7fbceedbd28",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "b7fbceedbd28c213ade8"
+        ]
+      },
+      {
+        "name": "feederConduit",
+        "reportVal": "PVC Sch 80 1-1/4\"",
+        "matchedInRendered": true
+      },
+      {
+        "name": "feederVoltageDropPct",
+        "reportVal": "0.37",
+        "matchedInRendered": true
+      },
+      {
+        "name": "inverterSku",
+        "reportVal": "IQ8A-72-2-US",
+        "matchedInRendered": true,
+        "skuTags": [
+          "IQ8A-72-2-US"
+        ]
+      },
+      {
+        "name": "moduleModel",
+        "reportVal": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W",
+        "matchedInRendered": true
+      },
+      {
+        "name": "issueState",
+        "reportVal": "PENDING ENGINEERING REVIEW",
+        "matchedInRendered": true
+      },
+      {
+        "name": "blockingBlockerCount",
+        "reportVal": "12",
+        "matchedInRendered": true,
+        "rs1Rendered": null
+      }
+    ],
+    "mismatches": []
+  },
+  "gates": [
+    {
+      "gate": 1,
+      "id": "no-stale-pv4a-rule-calc",
+      "ok": true,
+      "detail": "27.5%-busbar-PASS=false legacy-rules-table=false",
+      "evidence": null
+    },
+    {
+      "gate": 2,
+      "id": "no-supply-side-705.12-pass",
+      "ok": true,
+      "detail": "supplySide=true busbarPASS=false naShown=true",
+      "evidence": null
+    },
+    {
+      "gate": 3,
+      "id": "one-raceway-per-segment-id",
+      "ok": true,
+      "detail": "segments-with->1-raceway=0 mixedDualCitation=false emtVsPvcNote=false",
+      "evidence": {
+        "multiRacewaySegs": []
+      }
+    },
+    {
+      "gate": 4,
+      "id": "every-branch-section-has-segment-id",
+      "ok": true,
+      "detail": "openAir=true homerun=true homerunRwId=RW-BRANCH-HOMERUN allSegs=true allRws=true nRaceways=3",
+      "evidence": {
+        "segments": [
+          "ROOF_RUN",
+          "BRANCH_RUN",
+          "BRANCH_HOMERUN_RUN",
+          "COMBINER_TO_DISCO_RUN",
+          "DISCO_TO_METER_RUN",
+          "MSP_TO_UTILITY_RUN"
+        ],
+        "raceways": [
+          "RW-BRANCH-HOMERUN",
+          "RW-COMBINER_TO_DISCO_RUN",
+          "RW-DISCO_TO_METER_RUN"
+        ]
+      }
+    },
+    {
+      "gate": 5,
+      "id": "branch-conductors-object-derived",
+      "ok": true,
+      "detail": "derivedSegs=3 hotByGauge={\"#10 AWG\":125,\"#6 AWG\":121} allRuns=false mergedBranch=false segTagged=true artifact==object-derived",
+      "evidence": {
+        "derived": [
+          {
+            "segmentId": "BRANCH_HOMERUN_RUN",
+            "gauge": "#10 AWG",
+            "egcGauge": "#12 AWG",
+            "hotFt": 125,
+            "egcFt": 21
+          },
+          {
+            "segmentId": "COMBINER_TO_DISCO_RUN",
+            "gauge": "#6 AWG",
+            "egcGauge": "#10 AWG",
+            "hotFt": 69,
+            "egcFt": 23
+          },
+          {
+            "segmentId": "DISCO_TO_METER_RUN",
+            "gauge": "#6 AWG",
+            "egcGauge": "#10 AWG",
+            "hotFt": 52,
+            "egcFt": 18
+          }
+        ]
+      }
+    },
+    {
+      "gate": 6,
+      "id": "no-all-runs-conduit-row",
+      "ok": true,
+      "detail": "\"all runs\" occurrences=0",
+      "evidence": null
+    },
+    {
+      "gate": 7,
+      "id": "raceway-article-matches-type",
+      "ok": true,
+      "detail": "snapshotArticleMismatch=0 renderedPvcCites358=false",
+      "evidence": []
+    },
+    {
+      "gate": 8,
+      "id": "no-unbacked-dc-rows",
+      "ok": true,
+      "detail": "micro=true dcSegment=false dcRows=0",
+      "evidence": []
+    },
+    {
+      "gate": 9,
+      "id": "device-role-graph-coherent",
+      "ok": true,
+      "detail": "objects=8 dupIds=0 utilityDisco=0 chainOk=true dualDoc=true fusedDual=true",
+      "evidence": {
+        "types": [
+          "combiner",
+          "combiner-load-break",
+          "rsd-initiator",
+          "tap-conductors",
+          "fused-ocpd(DUAL)",
+          "tap-point",
+          "meter",
+          "service-disconnect"
+        ]
+      }
+    },
+    {
+      "gate": 10,
+      "id": "unselected-datasheet-absent",
+      "ok": true,
+      "detail": "railPending=true DS-4-page=false authoritativeXR100=false",
+      "evidence": null
+    },
+    {
+      "gate": 11,
+      "id": "rt-mini-rail-paired",
+      "ok": true,
+      "detail": "direct-attach=false rail-paired=true",
+      "evidence": null
+    },
+    {
+      "gate": 12,
+      "id": "fastener-identical-across-sheets",
+      "ok": true,
+      "detail": "cells=3 distinctValues=1 genericLeak=false pendingGate=true",
+      "evidence": {
+        "sheets": [
+          "sched",
+          "app-a",
+          "pe"
+        ]
+      }
+    },
+    {
+      "gate": 13,
+      "id": "no-unverified-framing-capacity",
+      "ok": true,
+      "detail": "framingUnverified=true adequateVerdict=false capacityRow=false notVerifiedShown=true",
+      "evidence": null
+    },
+    {
+      "gate": 14,
+      "id": "screening-envelope-labeled",
+      "ok": true,
+      "detail": "conservativeEnvelope=true corner=true asd=true ratio=true noExactClaim=true",
+      "evidence": "1.188×"
+    },
+    {
+      "gate": 15,
+      "id": "geometry-page-fit",
+      "ok": true,
+      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 missing-title-block=0",
+      "evidence": null
+    },
+    {
+      "gate": 16,
+      "id": "page-count-equals-manifest",
+      "ok": true,
+      "detail": "rendered=21 manifest=21 equal=true",
+      "evidence": null
+    },
+    {
+      "gate": 17,
+      "id": "continuations-have-title-block-and-manifest",
+      "ok": true,
+      "detail": "continuations=PV-4C.1,SCHED-2,SCHED-3 issues=0",
+      "evidence": []
+    },
+    {
+      "gate": 18,
+      "id": "issue-wording-agrees",
+      "ok": true,
+      "detail": "staleIssuedForReview=false pendingShown=true issueFields=[\"PENDING ENGINEERING REVIEW\"]",
+      "evidence": null
+    },
+    {
+      "gate": 19,
+      "id": "severity-policy-compliant",
+      "ok": true,
+      "detail": "promotedNotBlocking=0 activeWarnings=0 blockingCount=12",
+      "evidence": {
+        "notBlocking": [],
+        "anyWarning": []
+      }
+    },
+    {
+      "gate": 20,
+      "id": "report-equals-rendered",
+      "ok": true,
+      "detail": "reconciled=8 mismatches=0",
+      "evidence": []
+    }
+  ],
+  "summary": {
+    "total": 20,
+    "passed": 20,
+    "failed": [],
+    "allPass": true
+  }
+}

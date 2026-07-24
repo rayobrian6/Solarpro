@@ -23,7 +23,7 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getSnapshot } from '../snapshot/read';
-import { projectStructuralFromInput } from '../snapshot/structuralProjection';
+import { projectStructuralFromInput, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
@@ -626,11 +626,23 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
   const _svcDisco = _svcObj('service-disconnect');
   discos.push({ name: 'MAIN SERVICE DISCONNECT', rating: `${_svcDisco?.ocpdRatingA ?? mainA} A${project.mainPanelBrand ? ` · ${project.mainPanelBrand}` : ''}`, loc: 'Exterior — at utility meter / service entrance' });
   if (isSupply) {
-    // Supply-side (NEC 705.11): the fused tap OCPD and the utility-accessible
-    // lockable disconnect are DISTINCT canonical objects — one row each.
+    // Supply-side (NEC 705.11). §9 (closeout 2026-07-23): the fused tap OCPD is,
+    // by determination from the design data, the SAME LISTED lockable device that
+    // serves as the utility-accessible disconnecting means — ONE row with a DUAL
+    // role (no phantom duplicate). A separate row prints ONLY when the project
+    // specifies a distinct utility-disconnect device (svc-utility-disconnect).
     const _fused = _svcObj('fused-ocpd');
     const _util = _svcObj('utility-disconnect');
-    discos.push({ name: 'FUSED AC DISCONNECT — SUPPLY-SIDE TAP OCPD', rating: `${_fused?.ocpdRatingA ?? acOcpd ?? '—'} A fused · NEC 705.11`, loc: 'At the supply-side tap — line side of the service disconnecting means' });
+    const _fusedDual = _fused?.dualPurposeListing === true && _util == null;
+    discos.push({
+      name: _fusedDual
+        ? 'FUSED AC DISCONNECT — SUPPLY-SIDE TAP OCPD + UTILITY-ACCESSIBLE (LOCKABLE)'
+        : 'FUSED AC DISCONNECT — SUPPLY-SIDE TAP OCPD',
+      rating: `${_fused?.ocpdRatingA ?? acOcpd ?? '—'} A fused${_fusedDual ? ' · lockable' : ''} · NEC 705.11`,
+      loc: _fusedDual
+        ? 'At the supply-side tap (line side of the service disconnect) — single listed device serving both the 705.11 tap OCPD and the utility-accessible disconnecting means'
+        : 'At the supply-side tap — line side of the service disconnecting means',
+    });
     if (_util) discos.push({ name: 'UTILITY-ACCESSIBLE AC DISCONNECT (LOCKABLE)', rating: `${_util.ocpdRatingA ?? acOcpd ?? '—'} A · lockable`, loc: 'Ahead of the point of interconnection — per serving-utility requirement' });
     if (bos.providesAcDisconnect) discos.push({ name: 'PV SYSTEM AC DISCONNECT (COMBINER LOAD-BREAK)', rating: `${acOcpd ? `${acOcpd} A · ` : ''}NEC 690.13`, loc: 'Integral load-break in the AC combiner — the PV-system disconnecting means' });
   } else if (project.acDisconnect !== false) {
@@ -1081,13 +1093,13 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
                       : 'PENDING RACKING ASSEMBLY SELECTION'));
             // Mount topology (W6.4) — RT-MINI is rail_paired, never rail-less/direct.
             const _mountTopo = _mSel?.mountTopology ?? _mSel?.systemType ?? '—';
-            // Fastener: the ONE verified record fastener (screwLagModel + qty +
-            // embedment). No fabricated "×4\" SS lag" length formula. PENDING when absent.
-            const _fastenerDisp = _ra?.screwLagModel
-              ? `${escapeH(_ra.screwLagModel)}${_ra.screwLagQtyPerMount ? ` — ${_ra.screwLagQtyPerMount}/mount` : ''}`
-              : 'PENDING RACKING ASSEMBLY SELECTION';
-            const _embedDisp = _ra?.embedmentRequirementIn != null
-              ? `Min. ${_ra.embedmentRequirementIn}" thread embedment into rafter`
+            // Fastener: the ONE canonical fastener assembly (§12) — projected
+            // identically onto PV-3 / PE-1 / SCHED. No fabricated "×4\" SS lag"
+            // length formula. PENDING VERIFIED FASTENER ASSEMBLY when unresolved.
+            const _fa = projectFastenerAssembly(input);
+            const _fastenerDisp = _fa.present ? escapeH(_fa.line) : 'PENDING VERIFIED FASTENER ASSEMBLY';
+            const _embedDisp = _fa.embedmentIn != null
+              ? `Min. ${_fa.embedmentIn}" thread embedment into ${escapeH(_fa.substrate ?? 'rafter')}`
               : 'Per verified racking assembly';
             return `
           <div class="section-title">Racking System</div>

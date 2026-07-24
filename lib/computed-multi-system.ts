@@ -466,6 +466,14 @@ export function computeMultiSystem(
       ...sharedServiceSegRows,
     ],
     conduitSchedule: buildConduitSchedule(runs),
+    // §3/§4 — per-sub physical raceways, namespaced so a roof-branch home-run and
+    // a ground-branch home-run stay distinct objects (I-1: identical to the base
+    // list at N=1 since namespacedRunId is a no-op for a single sub).
+    physicalRaceways: subList.flatMap(x =>
+      x.cs.physicalRaceways.map(rw => ({
+        ...rw,
+        physicalRacewayId: `${x.key}:${rw.physicalRacewayId}`,
+      }))),
     equipmentSchedule,
     bomQuantities,
     issues,

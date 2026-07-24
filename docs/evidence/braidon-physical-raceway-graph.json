@@ -1,0 +1,115 @@
+{
+  "generatedAt": "2026-07-24T00:11:38.791Z",
+  "artifact": "braidon-physical-raceway-graph",
+  "section": "§6 physical raceway objects (no \"all runs\" roll-up)",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-00E105F58C2C",
+  "digest": "00e105f58c2ca87a1d9ec09e4e8e12d58be0579972fa7aaab9cc0ccdfaa28eee",
+  "purpose": "Each physical raceway independently generates its material, size, length, couplings, straps and fittings — labelled to its raceway id. The §7 NEC article is carried by the raceway type (PVC→352), never a hardcoded 358.",
+  "raceways": [
+    {
+      "physicalRacewayId": "RW-BRANCH-HOMERUN",
+      "sourceSegmentId": "BRANCH_HOMERUN_RUN",
+      "racewayType": "PVC Sch 80",
+      "necArticle": "352",
+      "supportArticle": "352.30",
+      "tradeSize": "1-1/4\"",
+      "sharedCircuitCount": 3,
+      "conductorCount": 7,
+      "currentCarryingCount": 6,
+      "conductorAreaIn2": 0.1399,
+      "fillPct": 23.4,
+      "minimumCodeRacewaySize": "1-1/4\"",
+      "calculatedFillRacewaySize": "1-1/4\"",
+      "selectedRacewaySize": "1-1/4\"",
+      "upsizingReason": null,
+      "deratingBasis": "6 current-carrying conductors → 0.80 adjustment (NEC 310.15(C)(1))",
+      "supportCondition": "PVC Sch 80 secured per NEC 352.30; roof junction box → AC combiner",
+      "provenance": "computeSystem JBOX_TO_COMBINER (3 branch circuits bundled — shared fill)",
+      "material": {
+        "conduitFt": 21,
+        "couplings": 2,
+        "straps": 7,
+        "terminationConnectors": 2,
+        "bushings": 2,
+        "note": "per-raceway material derived from the PVC Sch 80 object (NEC 352.30 support) — labelled to raceway RW-BRANCH-HOMERUN, never a project-level \"all runs\" roll-up"
+      }
+    },
+    {
+      "physicalRacewayId": "RW-COMBINER_TO_DISCO_RUN",
+      "sourceSegmentId": "COMBINER_TO_DISCO_RUN",
+      "racewayType": "PVC Sch 80",
+      "necArticle": "352",
+      "supportArticle": "352.30",
+      "tradeSize": "1-1/4\"",
+      "sharedCircuitCount": 1,
+      "conductorCount": 5,
+      "currentCarryingCount": 4,
+      "conductorAreaIn2": null,
+      "fillPct": 29,
+      "minimumCodeRacewaySize": "1-1/4\"",
+      "calculatedFillRacewaySize": "1-1/4\"",
+      "selectedRacewaySize": "1-1/4\"",
+      "upsizingReason": null,
+      "deratingBasis": "4 current-carrying conductors (NEC 310.15(C)(1))",
+      "supportCondition": "PVC Sch 80 secured per NEC 352.30",
+      "provenance": "computeSystem COMBINER_TO_DISCO_RUN (dedicated raceway)",
+      "material": {
+        "conduitFt": 23,
+        "couplings": 2,
+        "straps": 8,
+        "terminationConnectors": 2,
+        "bushings": 2,
+        "note": "per-raceway material derived from the PVC Sch 80 object (NEC 352.30 support) — labelled to raceway RW-COMBINER_TO_DISCO_RUN, never a project-level \"all runs\" roll-up"
+      }
+    },
+    {
+      "physicalRacewayId": "RW-DISCO_TO_METER_RUN",
+      "sourceSegmentId": "DISCO_TO_METER_RUN",
+      "racewayType": "PVC Sch 80",
+      "necArticle": "352",
+      "supportArticle": "352.30",
+      "tradeSize": "1-1/4\"",
+      "sharedCircuitCount": 1,
+      "conductorCount": 5,
+      "currentCarryingCount": 4,
+      "conductorAreaIn2": null,
+      "fillPct": 29,
+      "minimumCodeRacewaySize": "1-1/4\"",
+      "calculatedFillRacewaySize": "1-1/4\"",
+      "selectedRacewaySize": "1-1/4\"",
+      "upsizingReason": null,
+      "deratingBasis": "4 current-carrying conductors (NEC 310.15(C)(1))",
+      "supportCondition": "PVC Sch 80 secured per NEC 352.30",
+      "provenance": "computeSystem DISCO_TO_METER_RUN (dedicated raceway)",
+      "material": {
+        "conduitFt": 18,
+        "couplings": 1,
+        "straps": 6,
+        "terminationConnectors": 2,
+        "bushings": 2,
+        "note": "per-raceway material derived from the PVC Sch 80 object (NEC 352.30 support) — labelled to raceway RW-DISCO_TO_METER_RUN, never a project-level \"all runs\" roll-up"
+      }
+    }
+  ],
+  "articleCheck": [
+    {
+      "id": "RW-BRANCH-HOMERUN",
+      "type": "PVC Sch 80",
+      "necArticle": "352",
+      "correctForType": true
+    },
+    {
+      "id": "RW-COMBINER_TO_DISCO_RUN",
+      "type": "PVC Sch 80",
+      "necArticle": "352",
+      "correctForType": true
+    },
+    {
+      "id": "RW-DISCO_TO_METER_RUN",
+      "type": "PVC Sch 80",
+      "necArticle": "352",
+      "correctForType": true
+    }
+  ]
+}

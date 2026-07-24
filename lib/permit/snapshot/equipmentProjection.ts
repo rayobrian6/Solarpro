@@ -263,7 +263,11 @@ export function collectEquipmentDocumentBlockers(input: PermitInput): EquipmentD
       if (ex.stateLabel === 'FAMILY-DATASHEET-PENDING') {
         out.push({
           code: 'MODULE-EXACT-DATASHEET-PENDING',
-          severity: 'warning',
+          // §17 — BLOCKING: the exact selected-module electrical/mechanical source is
+          // permit-critical (drives conductor sizing / structural inputs / AHJ
+          // acceptance). Authoritative severity is set by severityPolicy.ts; this
+          // field is documentary intent and kept in sync.
+          severity: 'blocking',
           authorityPath: `equipment-db(module) → manufacturer-assets-db#${ex.asset?.id ?? 'none'}`,
           affectedSheets: ['DS-1'],
           explanation: `Module ${model} (${ex.selectedWatts ?? '?'} W): the on-file document is the ${ex.familyRange?.[0]}–${ex.familyRange?.[1]} W family datasheet, not the exact ${ex.selectedWatts ?? ''} W sheet.`,

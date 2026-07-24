@@ -9,6 +9,8 @@ import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import { projectRacewayDescriptor } from '../snapshot/electricalProjection';
+import type { PermitDesignSnapshot } from '../snapshot/types';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
 /** §10 — the ONE verified fastener installation spec for the SELECTED mounting
@@ -200,7 +202,14 @@ export function buildConstructionNotes(input: PermitInput): string[] {
       ? `Rapid shutdown system required per NEC 690.12. Module-level rapid shutdown (MLRS) shall reduce array conductors to \u2264 30V within 30 seconds. Initiator shall be located at utility meter per NEC 690.56(B).`
       : `Rapid shutdown initiator shall be installed per NEC 690.12. Array boundary conductors shall be de-energized to \u2264 30V within 30 seconds of initiation.`,
     `All conductors shall be sized per NEC 310.15. Temperature correction (NEC 310.15(B)(1)) and conduit fill derating (NEC 310.15(C)(1)) shall be applied. PV conductor ampacity minimum 125% of maximum circuit current per NEC 690.8(B).`,
-    `Conduit type: ${project.conduitType || 'EMT'}. All conduit supports per NEC 358.30 (EMT) or NEC 352.30 (PVC). Conduit fill shall not exceed 40% per NEC Chapter 9, Table 1.`,
+    // §2/§7 (closeout 2026-07-23): the conduit note DERIVES from the actual
+    // physical raceway objects via the ONE canonical route-description accessor —
+    // never `project.conduitType || 'EMT'` (which printed EMT beside a PVC run)
+    // and never the mixed "358.30 (EMT) or 352.30 (PVC)" citation. A PVC run cites
+    // the PVC article (352), an EMT run cites 358; absent raceways print PENDING.
+    projectRacewayDescriptor(
+      (input as unknown as { _snapshot?: PermitDesignSnapshot })._snapshot ?? null
+    ).noteText,
     `Equipment grounding conductor (EGC) shall be sized per NEC 250.122. All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: ${project.wireGauge || '#10 AWG'} per NEC 690.45.`,
     `${project.acDisconnect ? 'AC disconnect switch required and shown on SLD' : 'AC disconnect — see SLD for requirements'}. Disconnect shall be within sight of inverter, accessible, and rated for available fault current per NEC 690.15.`,
     `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC 705.12 and manufacturer requirements.`,

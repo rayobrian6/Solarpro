@@ -40,6 +40,7 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { collectEquipmentDocumentBlockers } from './equipmentProjection';
+import { classifyBlockerSeverity } from './severityPolicy';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 
 const fuzz = <T extends { model: string }>(list: T[], model?: string | null): T | undefined => {
@@ -327,9 +328,24 @@ export function buildPermitDesignSnapshot(
       : (isFinite(r.currentA) ? r.currentA : null);
     const _contA = isFinite(r.continuousCurrentA) ? r.continuousCurrentA
       : (_opA != null ? Math.round(_opA * 1.25 * 100) / 100 : null);
+    // §7 — the NEC article comes from the raceway TYPE authority (never a
+    // hardcoded literal). Open-air carries no raceway article.
+    const _rwArticle = _isOpenAir ? null
+      : (r.physicalRaceway?.necArticle
+         ?? (String(r.conduitType ?? '').toUpperCase().includes('PVC') ? '352'
+             : String(r.conduitType ?? '').toUpperCase().includes('EMT') ? '358'
+             : String(r.conduitType ?? '').toUpperCase().includes('RMC') ? '344'
+             : null));
     return {
       segmentId: String(r.id), from: String(r.fromLabel ?? r.from ?? ''), to: String(r.toLabel ?? r.to ?? ''),
-      electricalFunction: _elecFunction(String(r.id), _isOpenAir),
+      // §3 — prefer the engine's explicit electrical function (the sectioned
+      // branch model tags open-air Q-Cable vs shared home-run raceway).
+      electricalFunction: r.electricalFunction ?? _elecFunction(String(r.id), _isOpenAir),
+      physicalRacewayId: r.physicalRacewayId ?? null,
+      sharedCircuitCount: isFinite(r.sharedCircuitCount) ? r.sharedCircuitCount : null,
+      minimumCodeRacewaySize: r.minimumCodeRacewaySize ?? null,
+      racewayNecArticle: _rwArticle,
+      upsizingReason: r.upsizingReason ?? null,
       oneWayFt: isFinite(r.onewayLengthFt) ? r.onewayLengthFt : null,
       lengthSource: 'cad-derived-estimate',
       // W1 — CAD-derived length ⇒ cad-derived-estimate verification state (never
@@ -363,6 +379,30 @@ export function buildPermitDesignSnapshot(
     };
   });
 
+  // ═══ §3/§4/§6 CANONICAL PHYSICAL-RACEWAY AUTHORITY (closeout 07-23) ════════
+  // Project the engine's per-raceway objects verbatim. The shared branch home-run
+  // appears ONCE with sharedCircuitCount>1; PV-4A/PV-4B fill + the BOM §6 pass
+  // read THESE (single source), never a project-level 'all runs' roll-up.
+  const physicalRaceways: import('./types').PhysicalRacewayRecord[] =
+    ((cs?.physicalRaceways ?? []) as any[]).map((rw: any) => ({
+      physicalRacewayId: String(rw.physicalRacewayId),
+      racewayType: String(rw.racewayType ?? ''),
+      necArticle: String(rw.necArticle ?? ''),
+      supportArticle: String(rw.supportArticle ?? ''),
+      sharedCircuitCount: isFinite(rw.sharedCircuitCount) ? rw.sharedCircuitCount : 1,
+      conductorCount: isFinite(rw.conductorCount) ? rw.conductorCount : 0,
+      currentCarryingCount: isFinite(rw.currentCarryingCount) ? rw.currentCarryingCount : 0,
+      conductorAreaIn2: isFinite(rw.conductorAreaIn2) ? rw.conductorAreaIn2 : null,
+      minimumCodeRacewaySize: rw.minimumCodeRacewaySize ?? null,
+      calculatedFillRacewaySize: rw.calculatedFillRacewaySize ?? null,
+      selectedRacewaySize: rw.selectedRacewaySize ?? null,
+      fillPct: isFinite(rw.fillPct) ? rw.fillPct : null,
+      upsizingReason: rw.upsizingReason ?? null,
+      deratingBasis: rw.deratingBasis ?? null,
+      supportCondition: rw.supportCondition ?? null,
+      provenance: { source: String(rw.provenance ?? 'computeSystem physicalRaceways') },
+    }));
+
   // ═══ §5 (07-22) CANONICAL SERVICE-INTERCONNECTION TOPOLOGY ═════════════════
   // The tap point, tap conductors, fused OCPD, utility disconnect, meter and
   // service disconnect are SEPARATE objects with their OWN honest length. The
@@ -379,55 +419,145 @@ export function buildPermitDesignSnapshot(
     const pvOutA = cs?.acOutputCurrentA ?? null;
     const pvContA = cs?.acContinuousCurrentA ?? (pvOutA != null ? pvOutA * 1.25 : null);
     const mainA = proj.mainPanelAmps ?? proj.mainBreakerA ?? null;
+    const isMicroTopo = !!cs?.isMicro;
+    const rsd = proj.rapidShutdown === true || proj.rapidShutdownIntegrated === true;
+    // §9 ONE-vs-TWO device DETERMINATION. Nothing in the design asserts a SECOND
+    // physical lockable disconnect distinct from the fused AC disconnect: no
+    // project field specifies a separate utility-disconnect device/model, and a
+    // residential 705.11 tap uses a single listed fused AC disconnect that IS the
+    // utility-accessible lockable means. So we model ONE dual-purpose LISTED
+    // device (tap OCPD + utility-accessible lockable disconnect) — never two — and
+    // only split when the project explicitly specifies a distinct device.
+    const _separateUtilityDisconnect =
+      proj.separateUtilityDisconnect === true ||
+      proj.utilityLockableDisconnect === true ||
+      (typeof proj.utilityDisconnectModel === 'string' && proj.utilityDisconnectModel.trim().length > 0);
+    const _fusedModel = (typeof proj.acDisconnectModel === 'string' && proj.acDisconnectModel.trim())
+      ? proj.acDisconnectModel.trim()
+      : (typeof proj.fusedDisconnectModel === 'string' && proj.fusedDisconnectModel.trim())
+        ? proj.fusedDisconnectModel.trim() : null;
     const objs: import('./types').ServiceTopologyObject[] = [];
-    if (isSupply) {
+    // Combiner (PV source side) — micro AC combiner / string DC combiner.
+    objs.push({
+      objectId: 'svc-combiner', type: 'combiner',
+      label: isMicroTopo ? 'AC combiner (branch aggregation)' : 'Combiner / inverter output',
+      description: isMicroTopo ? 'Micro AC branch circuits terminate here; integral load-break where listed' : 'Inverter AC output aggregation',
+      conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
+      constraints: [], upstreamObjectId: null, downstreamObjectId: 'svc-combiner-loadbreak',
+      deviceModel: null, electricalRole: 'pv-output-aggregation', utilityRole: null,
+      fusedState: 'not-applicable', lockable: null, rsdRole: 'none',
+      provenance: { source: 'computeSystem topology (combiner)' },
+    });
+    objs.push({
+      objectId: 'svc-combiner-loadbreak', type: 'combiner-load-break',
+      label: 'Combiner load-break', description: 'Integral load-break disconnecting means at the combiner (NEC 690.13) where listed',
+      conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
+      constraints: [], upstreamObjectId: 'svc-combiner',
+      downstreamObjectId: rsd ? 'svc-rsd-initiator' : (isSupply ? 'svc-tap-conductors' : 'svc-fused-ocpd'),
+      deviceModel: null, electricalRole: 'pv-system-disconnect', utilityRole: null,
+      fusedState: 'non-fused', lockable: true, rsdRole: 'none',
+      provenance: { source: 'design (combiner integral load-break)' },
+    });
+    if (rsd) {
       objs.push({
-        objectId: 'svc-tap-point', type: 'tap-point',
-        label: 'Supply-side tap point', description: 'Line side of the service disconnecting means (NEC 705.11)',
+        objectId: 'svc-rsd-initiator', type: 'rsd-initiator',
+        label: 'Rapid-shutdown initiator', description: 'PV rapid-shutdown initiation device (NEC 690.12) at the service location',
         conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
-        constraints: [], provenance: { source: 'interconnection method (supply-side)' },
+        constraints: [], upstreamObjectId: 'svc-combiner-loadbreak',
+        downstreamObjectId: isSupply ? 'svc-tap-conductors' : 'svc-fused-ocpd',
+        deviceModel: null, electricalRole: 'rapid-shutdown', utilityRole: 'emergency-shutdown',
+        fusedState: 'not-applicable', lockable: null, rsdRole: 'initiator',
+        provenance: { source: 'design (NEC 690.12 rapid shutdown)' },
       });
+    }
+    const _afterRsd = rsd ? 'svc-rsd-initiator' : 'svc-combiner-loadbreak';
+    if (isSupply) {
       objs.push({
         objectId: 'svc-tap-conductors', type: 'tap-conductors',
         label: 'Tap conductors', description: 'Tap point → fused AC disconnect; sized ≥ 125% of PV output current',
         conductorSpec: feederGauge ? `${feederGauge} THWN-2${pvContA != null ? ` (≥ ${pvContA.toFixed(1)}A)` : ''}` : null,
         ocpdRatingA: null,
-        // No CAD datum for the short tap run → honest PENDING (participates in
-        // ROUTE-LENGTH-ESTIMATE via the length-source below).
         lengthFt: null, lengthSource: 'unknown',
         constraints: [{
           code: 'NEC-705.11(C)-TAP-10FT',
           description: 'Fused disconnect within 10 ft of the tap; tap-conductor length ≤ 10 ft',
           limitFt: 10,
-          state: 'pending',   // unknown length ⇒ never a compliant 10-ft claim
+          state: 'pending',
         }],
+        upstreamObjectId: _afterRsd, downstreamObjectId: 'svc-fused-ocpd',
+        deviceModel: null, electricalRole: 'tap-conductors', utilityRole: null,
+        fusedState: 'not-applicable', lockable: null, rsdRole: 'none',
         provenance: { source: 'design rule (tap-conductor length not measured)', note: 'FIELD-VERIFY ≤10ft' },
       });
-      objs.push({
-        objectId: 'svc-fused-ocpd', type: 'fused-ocpd',
-        label: 'Fused AC disconnect (tap OCPD)', description: 'NEC 705.11 supply-side overcurrent device',
-        conductorSpec: null, ocpdRatingA: feederOcpd, lengthFt: null, lengthSource: 'not-applicable',
-        constraints: [], provenance: { source: 'computeSystem tap OCPD' },
-      });
+    }
+    // §9 — the SINGLE listed fused AC disconnect. When no separate utility
+    // disconnect is specified (the residential norm), it is DUAL-PURPOSE: the
+    // 705.11 tap OCPD AND the utility-accessible lockable disconnect. No phantom
+    // second device is emitted.
+    objs.push({
+      objectId: 'svc-fused-ocpd', type: 'fused-ocpd',
+      label: isSupply ? 'Fused AC disconnect (tap OCPD + utility-accessible)' : 'AC disconnect',
+      description: isSupply
+        ? (_separateUtilityDisconnect
+            ? 'NEC 705.11 supply-side overcurrent device (a separate utility disconnect is specified)'
+            : 'Single listed lockable fused AC disconnect — serves BOTH the NEC 705.11 tap OCPD and the utility-accessible disconnecting means (no separate device)')
+        : 'PV-system AC disconnecting means (NEC 690.13)',
+      conductorSpec: null, ocpdRatingA: feederOcpd, lengthFt: null, lengthSource: 'not-applicable',
+      constraints: [],
+      upstreamObjectId: isSupply ? 'svc-tap-conductors' : _afterRsd,
+      downstreamObjectId: isSupply ? 'svc-tap-point' : 'svc-meter',
+      deviceModel: _fusedModel, electricalRole: 'overcurrent-protection',
+      utilityRole: (isSupply && !_separateUtilityDisconnect) ? 'utility-accessible-disconnect' : null,
+      fusedState: 'fused', lockable: true, rsdRole: 'none',
+      dualPurposeListing: isSupply && !_separateUtilityDisconnect ? true : null,
+      dualPurposeRoles: isSupply && !_separateUtilityDisconnect
+        ? ['705.11-tap-ocpd', 'utility-accessible-lockable-disconnect'] : null,
+      provenance: { source: 'computeSystem tap OCPD', note: (isSupply && !_separateUtilityDisconnect) ? 'ONE listed device, dual role (no duplicate utility disconnect)' : undefined },
+    });
+    // Optional SEPARATE utility disconnect — ONLY when the project specifies it.
+    if (isSupply && _separateUtilityDisconnect) {
       objs.push({
         objectId: 'svc-utility-disconnect', type: 'utility-disconnect',
-        label: 'Utility/AC disconnect', description: 'Lockable AC disconnect ahead of the point of interconnection (per utility)',
+        label: 'Utility-accessible AC disconnect (separate)', description: 'Distinct lockable AC disconnect ahead of the point of interconnection (specified by the project/utility)',
         conductorSpec: null, ocpdRatingA: feederOcpd, lengthFt: null, lengthSource: 'not-applicable',
-        constraints: [], provenance: { source: 'interconnection requirements' },
+        constraints: [], upstreamObjectId: 'svc-fused-ocpd', downstreamObjectId: 'svc-tap-point',
+        deviceModel: (typeof proj.utilityDisconnectModel === 'string' ? proj.utilityDisconnectModel : null),
+        electricalRole: 'disconnecting-means', utilityRole: 'utility-accessible-disconnect',
+        fusedState: 'non-fused', lockable: true, rsdRole: 'none',
+        provenance: { source: 'project (separate utility disconnect specified)' },
       });
     }
-    // meter + service disconnect exist on every design (supply- and load-side).
+    if (isSupply) {
+      objs.push({
+        objectId: 'svc-tap-point', type: 'tap-point',
+        label: 'Supply-side tap point', description: 'Line side of the service disconnecting means (NEC 705.11)',
+        conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
+        constraints: [],
+        upstreamObjectId: _separateUtilityDisconnect ? 'svc-utility-disconnect' : 'svc-fused-ocpd',
+        downstreamObjectId: 'svc-meter',
+        deviceModel: null, electricalRole: 'interconnection-point', utilityRole: 'supply-side-tap',
+        fusedState: 'not-applicable', lockable: null, rsdRole: 'none',
+        provenance: { source: 'interconnection method (supply-side)' },
+      });
+    }
     objs.push({
       objectId: 'svc-meter', type: 'meter',
       label: 'Utility revenue meter', description: 'Existing utility service meter',
       conductorSpec: null, ocpdRatingA: null, lengthFt: null, lengthSource: 'not-applicable',
-      constraints: [], provenance: { source: 'existing service' },
+      constraints: [], upstreamObjectId: isSupply ? 'svc-tap-point' : 'svc-fused-ocpd',
+      downstreamObjectId: 'svc-service-disconnect',
+      deviceModel: null, electricalRole: 'metering', utilityRole: 'revenue-metering',
+      fusedState: 'not-applicable', lockable: null, rsdRole: 'none',
+      provenance: { source: 'existing service' },
     });
     objs.push({
       objectId: 'svc-service-disconnect', type: 'service-disconnect',
       label: 'Main service disconnect', description: 'Existing main service disconnecting means',
       conductorSpec: null, ocpdRatingA: mainA, lengthFt: null, lengthSource: 'not-applicable',
-      constraints: [], provenance: { source: 'project service rating' },
+      constraints: [], upstreamObjectId: 'svc-meter', downstreamObjectId: null,
+      deviceModel: null, electricalRole: 'service-disconnect', utilityRole: 'service-equipment',
+      fusedState: 'not-applicable', lockable: true, rsdRole: 'none',
+      provenance: { source: 'project service rating' },
     });
     return objs;
   })();
@@ -634,8 +764,12 @@ export function buildPermitDesignSnapshot(
       'ROUTE-LENGTH-ESTIMATE': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].lengthSource', sheets: ['PV-1', 'PV-4B', 'E-1', 'SCHED'], resolution: 'Provide CAD-routed geometry or field-measured run lengths (no estimate as authority).' },
       'EQUIPMENT-IDENTITY-CONFLICT': { severity: 'blocking', authorityPath: 'project.subSystems[*].panelId vs equipment.modules[0]', sheets: ['SCHED', 'APP-A', 'DS-1'], resolution: 'Operator must reconcile the stored panelId with the fleet module (migration 110) — never auto-resolved.' },
       'FEEDER-RACEWAY-AUTHORITY': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit', sheets: ['PV-4B', 'E-1', 'SCHED'], resolution: 'Resolve the feeder raceway/conduit type + bonding authority on the canonical feeder segment.' },
-      'CONDUIT-FILL-PENDING': { severity: 'warning', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
-      'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'warning', authorityPath: 'electrical.serviceTopology[svc-tap-conductors].constraints', sheets: ['PV-4B', 'PV-6', 'E-1'], resolution: 'Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).' },
+      'BRANCH-RACEWAY-AUTHORITY': { severity: 'blocking', authorityPath: 'electrical.physicalRaceways[branch home-run]', sheets: ['PV-4A', 'PV-4B', 'E-1', 'SCHED'], resolution: 'Model the branch route as explicit sections (open-air Q-Cable + shared home-run raceway); the shared jbox→combiner raceway must carry documented shared-circuit count + fill (NEC Ch.9, Table 1).' },
+      'RACEWAY-SEGMENT-CONFLICT': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].raceway', sheets: ['PV-1', 'PV-4B', 'E-1', 'SCHED'], resolution: 'A single physical segment id resolves to more than one raceway type/size — reconcile to ONE raceway per physical run (gate 3).' },
+      // §17 — PROMOTED to BLOCKING (permit-critical). The authoritative severity is
+      // set by severityPolicy.ts; these META fields are documentary and kept in sync.
+      'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
+      'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.serviceTopology[svc-tap-conductors].constraints', sheets: ['PV-4B', 'PV-6', 'E-1'], resolution: 'Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).' },
       'CODE-AUTHORITY-INCOMPLETE': { severity: 'blocking', authorityPath: 'codeAuthority.editions', sheets: ['PV-0', 'CERT', 'PE-1'], resolution: 'Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.' },
       'PROJECT-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'projectAuthority', sheets: ['PV-0', 'CERT'], resolution: 'Verify address / APN / municipal boundary / AHJ / fire authority via the document registry (no postal inference).' },
       'PROJECT-NAME-NONPRODUCTION': { severity: 'blocking', authorityPath: 'project.projectName', sheets: ['PV-0'], resolution: 'Replace the non-production ("TEST") project name with the real project identity before issue.' },
@@ -647,9 +781,16 @@ export function buildPermitDesignSnapshot(
       const m = META[code];
       const domain = classifyBlockerDomain(code);
       const isStruct = domain === 'structural';
+      // §17 — severity + advisory justification come from the CANONICAL severity
+      // policy (single source). A blocker is advisory ONLY with an explicit,
+      // justified policy entry; every unmapped code fails closed to BLOCKING. The
+      // emitter's requested severity (over/META) is advisory INTENT only and can
+      // never downgrade a code the policy classifies blocking.
+      const _sev = classifyBlockerSeverity(code);
       registry.push({
         code,
-        severity: over?.severity ?? m?.severity ?? 'blocking',
+        severity: _sev.severity,
+        justification: _sev.justification,
         domain,
         authorityPath: over?.authorityPath ?? m?.authorityPath ?? (isStruct ? STRUCT_DEFAULT.authorityPath : `snapshot (${domain})`),
         affectedSheets: over?.affectedSheets ?? m?.sheets ?? (isStruct ? STRUCT_DEFAULT.sheets : []),
@@ -681,14 +822,55 @@ export function buildPermitDesignSnapshot(
         'Feeder raceway/conduit type not resolved on the canonical feeder segment — raceway + bonding authority required');
     }
     // W10a: conduit fill PENDING was only ever a schedule-cell literal (counted as
-    // "0 errors" on PV-4A). Emit it as an ADVISORY blocker so it is enumerated.
+    // "0 errors" on PV-4A). §17 — emit it as a BLOCKING blocker (unresolved required
+    // conduit fill can hide a thermal-derating/ampacity violation; never a pass).
     if (cs && ((elec?.conduitFill as any)?.fillPercent == null)) {
       push('CONDUIT-FILL-PENDING',
         'Feeder conduit fill is PENDING (not computed) — it must never be presented as a passing zero-error result on PV-4A/PV-4B');
     }
+    // §4 BRANCH-RACEWAY coverage gate. A micro design's AC branch route is TWO
+    // physical sections: the open-air Q-Cable trunk (no raceway) and the shared
+    // jbox→combiner home-run raceway that carries ALL branches bundled. If the
+    // canonical model does not carry that shared raceway (with a documented
+    // shared-circuit count + fill), the branch grouping is AMBIGUOUS — block
+    // (never let a sheet describe a multi-method branch with one merged string).
+    if (cs?.isMicro) {
+      const _branchOpenAir = routeSegments.find(r => r.segmentId === 'BRANCH_RUN');
+      const _homerun = physicalRaceways.find(rw => /BRANCH-HOMERUN/.test(rw.physicalRacewayId));
+      const _homerunSeg = routeSegments.find(r => r.segmentId === 'BRANCH_HOMERUN_RUN');
+      const _ambiguous =
+        !_homerun ||
+        !(_homerun.sharedCircuitCount >= 1) ||
+        _homerun.fillPct == null ||
+        // the open-air Q-Cable trunk must NOT be stamped in-conduit (the merge bug)
+        (_branchOpenAir != null && _branchOpenAir.raceway != null && _branchOpenAir.raceway !== 'FREE_AIR') ||
+        // the home-run section must be in-conduit (not free-air)
+        (_homerunSeg != null && (_homerunSeg.raceway == null || _homerunSeg.raceway === 'FREE_AIR'));
+      if (_ambiguous) {
+        push('BRANCH-RACEWAY-AUTHORITY',
+          'Micro AC branch raceway model is incomplete/ambiguous — the shared jbox→combiner home-run raceway (with documented shared-circuit count + fill) and the open-air Q-Cable trunk must be modeled as distinct physical sections');
+      }
+    }
+    // §2/gate 3 — a single physical segment id must resolve to exactly ONE raceway
+    // type + size. Defends against a merged segment re-introducing two wiring
+    // methods (the PVC-vs-EMT / open-air-vs-conduit contradiction) at the source.
+    {
+      const _bySeg = new Map<string, Set<string>>();
+      for (const r of routeSegments) {
+        const key = `${r.raceway ?? '—'}|${r.tradeSizeIn ?? '—'}`;
+        const s = _bySeg.get(r.segmentId) ?? new Set<string>();
+        s.add(key); _bySeg.set(r.segmentId, s);
+      }
+      const _conflicts = [..._bySeg.entries()].filter(([, s]) => s.size > 1).map(([id]) => id);
+      if (_conflicts.length > 0) {
+        push('RACEWAY-SEGMENT-CONFLICT',
+          `Segment id(s) ${_conflicts.join(', ')} resolve to more than one raceway type/size — one physical run must carry ONE raceway`);
+      }
+    }
     // W10a: tap-conductor length is PENDING (no CAD/field datum) — the ≤10-ft
-    // NEC 705.11(C) rule cannot be evaluated. Surface it as an advisory blocker
-    // rather than only a service-topology PENDING cell.
+    // NEC 705.11(C) rule cannot be evaluated. §17 — surface it as a BLOCKING
+    // blocker (no compliant claim without a length) rather than only a
+    // service-topology PENDING cell.
     if (serviceTopology.some(o => o.type === 'tap-conductors'
       && (o.constraints ?? []).some(k => k.state === 'pending'))) {
       push('TAP-CONDUCTOR-LENGTH-PENDING',
@@ -978,6 +1160,7 @@ export function buildPermitDesignSnapshot(
       microInverterUnits: microUnits, branches, conductors,
       groundingObjects,
       routeSegments,
+      physicalRaceways,
       serviceTopology,
       feeder: {
         conductorId: feederConductorId,

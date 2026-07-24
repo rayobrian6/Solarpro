@@ -40,7 +40,7 @@ import type { ElectricalCompliance } from './types';
 import { pageCoverSheet } from './sections/coverSheet';
 import { pageReviewStatus } from './sections/reviewStatus';
 import { pageArrayPrimary, pageArrayGeometry, pageGroundArrayPlan, pageFencePlan } from './sections/arrayPages';
-import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule, pageEquipmentScheduleCont, schedBomRowCount, SCHED_BOM_ROWS_FIRST, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
+import { pageStructuralPrimary, pageStructural, pageStructuralRoofContinuation, roofStructuralHasContinuation, pageEquipmentSchedule, pageEquipmentScheduleCont, schedContPageCount, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
 import { pageWarningLabels, pageDisconnectDirectory, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter, pagePELetterRoof, pagePELetterGround, pagePELetterFence } from './sections/certPages';
@@ -1105,8 +1105,10 @@ export function generatePermitHTML(
   // NOT part of the AHJ deliverable. Opt back in for internal review runs.
   const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
     || input.planSetOptions?.includeInternalValidation === true;
-  // Long BOMs paginate onto SCHED-2 instead of clipping at the page edge.
-  const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
+  // Long BOMs paginate onto SCHED-2 … SCHED-(N+1) instead of clipping at the
+  // page edge. schedContPageCount MUST mirror computePlansetManifest so page
+  // count == sheet index. (W9/§15 multi-page BOM continuation.)
+  const _schedContCount = schedContPageCount(input.bom);
 
   // ── Wave 5B: hybrid per-sub sheet loop ────────────────────────────────
   // A hybrid design gets ONE detail set PER sub-system alongside the primary
@@ -1119,6 +1121,9 @@ export function generatePermitHTML(
   const _w5Sections = hybridSheetSections(cad);
   const _w5Hybrid = isHybridPlanset(cad);
   const _w5Primary = primarySubKey(cad);
+  // W9/§15 — PV-4C.1 roof-structural continuation (single-system roof only).
+  // MUST mirror computePlansetManifest's includePv4cCont so page count == index.
+  const _pv4cCont = !_w5Hybrid && roofStructuralHasContinuation(cad.systemType);
   const _w5Extras: HybridSectionRef[] = _w5Hybrid ? _w5Sections.slice(1) : [];
   /** Scoped input whose compliance.structural is the SUB's own V4 run —
    *  kills the "94 modules on the fence PE letter" class of lie. */
@@ -1182,13 +1187,18 @@ export function generatePermitHTML(
     (n, t) => _w5Hybrid
       ? pageStructural(_w5StructuralInput(_w5Primary), subScopedView(cad, _w5Primary), n, t)
       : pageStructural(input, cad, n, t),                              // PV-4C: Structural calcs (hybrid = primary sub scoped)
+    // W9/§15: PV-4C.1 — formal continuation of the roof structural calc sheet
+    // (single-system roof only; manifest gates it identically via
+    // roofStructuralHasContinuation so page count == sheet index).
+    ...(_pv4cCont ? [(n: number, t: number) => pageStructuralRoofContinuation(input, cad, n, t)] : []),
     (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD — the electrical section's key sheet, first
     (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
     (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
     (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
     (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
-    ...(includeSchedCont ? [(n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t)] : []),  // SCHED-2: BOM continuation
+    ...Array.from({ length: _schedContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci)),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
     (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
     // DS-n: full-page REAL manufacturer datasheets (module/inverter/battery),
     // one per selected-equipment id that has an image on file (manufacturer_assets).
@@ -1425,6 +1435,23 @@ export function generatePermitHTML(
 
   /* Column stack: vertical flex with canonical gap */
   .col-stack       { display: flex; flex-direction: column; gap: var(--gap-section); }
+
+  /* ── PV-0 cover-scoped vertical compaction (W9/§15 page-fit) ──────────────
+     The cover carries ~15 information sections across two columns; at the
+     default section gap + body padding both columns overran the fixed 11in
+     page and overflow:hidden silently clipped the vicinity map / project-info
+     tail. This scope tightens ONLY the cover's vertical rhythm (gaps, section
+     padding, table cell padding) so every section — map + address included —
+     fits within the printable box. No other sheet is affected. */
+  .cover-compact .col-stack { gap: 3px; }
+  .cover-compact .page-body { margin-top: 5px; }
+  .cover-compact .sec-body { padding: 3px; }
+  .cover-compact .sec-hdr { padding: 2px var(--xs); }
+  .cover-compact .info-table { font-size: 7.2px; }
+  .cover-compact .info-table .il,
+  .cover-compact .info-table .iv { padding-top: 1px; padding-bottom: 1px; font-size: 7px; }
+  .cover-compact .note-row { margin-bottom: 1px; }
+  .cover-compact .note-txt { line-height: 1.3; }
 
   /* ── Page footer ────────────────────────────────────────────────────────── */
   .page-footer {
@@ -2053,14 +2080,27 @@ export function generatePermitHTML(
   .cert-field { margin-bottom: var(--xs); }
   .cf-val { font-size: var(--f-xl); font-weight: 600; color: #000; border-bottom: var(--border-hvy); padding-bottom: 3px; min-height: 22px; }
   .cf-lbl { font-size: var(--f-sm); color: #555; margin-top: 2px; text-transform: uppercase; }
+
+  /* ── CERT-scoped vertical compaction (W9/§15 page-fit) ──────────────────────
+     The signature-field column (8 PREPARED-BY blanks) governed the cert-grid
+     height and, with the pending-review gate banner, pushed the LIMITATION /
+     footer legal text past the fixed page (clipped under overflow:hidden). This
+     scope tightens ONLY the CERT sheet's blank-field rhythm + placeholder
+     spacing so the full legal footer prints. No other sheet is affected; no
+     certification content is removed. */
+  .cert-compact .cert-field { margin-bottom: 3px; }
+  .cert-compact .cf-val { min-height: 15px; padding-bottom: 2px; }
+  .cert-compact .cf-lbl { margin-top: 1px; }
+  .cert-compact .cert-statement { padding: var(--xs); }
+  .cert-compact .cert-header { margin-bottom: 3px; }
   .stamp-box { border: var(--border-hvy); min-height: 96px; display: flex; align-items: center; justify-content: center; width: 100%; text-align: center; }
   .cert-footer {
     font-size: var(--f-sm);
     color: #555;
     text-align: center;
     border-top: var(--border);
-    padding-top: var(--xs);
-    margin-top: var(--md);
+    padding-top: 3px;
+    margin-top: var(--xs);
   }
   .notes-box { background: #fff; border: var(--border); padding: var(--xs); font-size: var(--f-lg); color: #000; }
 

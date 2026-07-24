@@ -47,12 +47,16 @@ function roofStringProject(): any {
 // The pinned legacy sheet sequences (post-campaign N=1 = pre-campaign set).
 // Discipline flow (Ray 2026-07-20): plans → structural → electrical (E-1
 // leads) → labels → schedules/datasheets → certs. DS series: equipment pages
-// + RACKING MOUNT (the manufacturer page PV-3 formerly reprinted inline —
-// PV-3 is a DRAWING sheet again) + RACKING RAIL (rail_spec product sheet).
+// (module DS-1, inverter DS-2) + RACKING MOUNT (the manufacturer page PV-3
+// formerly reprinted inline — PV-3 is a DRAWING sheet again).
+// §10 (closeout): the RACKING RAIL (rail_spec product) page is OMITTED while the
+// rail SKU is unpinned — an unselected datasheet must not appear authoritative,
+// so the former DS-3 rail page is gone from these micro/string fixtures (their
+// rail is pending). It returns only once a rail SKU is pinned+verified.
 // RS-1 (REVIEW STATUS) follows the cover — W10 (RP-D) dedicated active-blocker
 // registry sheet, always present, referenced from the cover SHEET INDEX.
 const LEGACY_SEQ = ['PV-0', 'RS-1', 'PV-1', 'PV-1B', 'PV-3', 'PV-4C', 'E-1', 'PV-4A',
-  'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'DS-2', 'DS-3',
+  'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'SCHED-2', 'APP-A', 'DS-1', 'DS-2',
   'CERT', 'PE-1'];
 // Fence: no racking-mount image asset (SolFence has no public doc) and no
 // registry rail accessory → equipment DS page only.
@@ -60,20 +64,45 @@ const LEGACY_SEQ_ONE_DS = LEGACY_SEQ.filter(id => id !== 'DS-2' && id !== 'DS-3'
 // Ground: no datasheet images resolve for the fixture's equipment at all.
 const LEGACY_SEQ_NO_DS = LEGACY_SEQ.filter(id => !id.startsWith('DS-'));
 
-const FIXTURES: Array<{ name: string; mk: () => any; seq: string[] }> = [
-  { name: 'roof micro',  mk: () => clone(roofProject),   seq: LEGACY_SEQ },
-  { name: 'roof string', mk: roofStringProject,          seq: LEGACY_SEQ },
-  { name: 'pure fence',  mk: () => clone(fenceProject),  seq: LEGACY_SEQ_ONE_DS },
-  { name: 'pure ground', mk: () => clone(groundProject), seq: LEGACY_SEQ_NO_DS },
+const FIXTURES: Array<{ name: string; mk: () => any; seq: string[]; roof: boolean }> = [
+  { name: 'roof micro',  mk: () => clone(roofProject),   seq: LEGACY_SEQ,        roof: true },
+  { name: 'roof string', mk: roofStringProject,          seq: LEGACY_SEQ,        roof: true },
+  { name: 'pure fence',  mk: () => clone(fenceProject),  seq: LEGACY_SEQ_ONE_DS, roof: false },
+  { name: 'pure ground', mk: () => clone(groundProject), seq: LEGACY_SEQ_NO_DS,  roof: false },
 ];
 
-for (const { name, mk, seq } of FIXTURES) {
+// W9/§15 formal continuation sheets (do not belong to the discipline backbone):
+//   • PV-4C.1 — roof structural-calc overflow (roof only), immediately after PV-4C
+//   • SCHED-2 … SCHED-(N+1) — long-BOM overflow, contiguous right after SCHED
+// The count varies with BOM size, so the pin asserts the exact BACKBONE
+// (continuations excluded) PLUS the continuations' correct placement — not a
+// hard-coded continuation count that BOM changes would make brittle.
+const SCHED_CONT_RE = /^SCHED-\d+$/;
+const isContinuation = (id: string) => id === 'PV-4C.1' || SCHED_CONT_RE.test(id);
+const backbone = (ids: string[]) => ids.filter(id => !isContinuation(id));
+
+for (const { name, mk, seq, roof } of FIXTURES) {
   describe(`wave 6 sweep — ${name}`, () => {
     const input = mk();
     const html = generatePermitHTML(input);
 
-    it('sheet-manifest pin: exact legacy sequence, no suffixed sheets', () => {
-      expect(pageSeq(html)).toEqual(seq);
+    it('sheet-manifest pin: exact legacy backbone (continuations excluded), no suffixed sheets', () => {
+      // backbone(seq) drops SCHED-2 (now a continuation) from the legacy pin.
+      expect(backbone(pageSeq(html))).toEqual(backbone(seq));
+    });
+
+    it('§15 continuations sit in the right place (PV-4C.1 roof-only; SCHED-n contiguous & ordered)', () => {
+      const ids = pageSeq(html);
+      // PV-4C.1 appears iff roof, immediately after PV-4C
+      expect(ids.includes('PV-4C.1')).toBe(roof);
+      if (roof) expect(ids.indexOf('PV-4C.1')).toBe(ids.indexOf('PV-4C') + 1);
+      // SCHED continuations are contiguous, ordered, right after SCHED
+      const conts = ids.filter(id => SCHED_CONT_RE.test(id));
+      const schedAt = ids.indexOf('SCHED');
+      conts.forEach((id, k) => {
+        expect(id).toBe('SCHED-' + (k + 2));
+        expect(ids.indexOf(id)).toBe(schedAt + 1 + k);
+      });
     });
 
     it('zero hybrid chrome anywhere in the set (I-1/I-8)', () => {

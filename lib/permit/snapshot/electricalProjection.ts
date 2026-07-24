@@ -239,6 +239,147 @@ export function projectCanonicalBranch(snap: PermitDesignSnapshot | null | undef
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// §3/§4 (closeout 2026-07-23) — THE canonical projection of the SHARED branch
+// home-run raceway (the jbox→combiner conduit that carries all N branches
+// bundled). E-1's SEGMENT_2A conduit label and PV-4B's home-run row read THIS,
+// while the branch CONDUCTORS themselves ride the open-air Q-Cable trunk
+// (projectCanonicalBranch). Two physical sections, never one merged string.
+// ═══════════════════════════════════════════════════════════════════════════
+export interface SharedBranchRacewayProjection {
+  present: boolean;
+  physicalRacewayId: string | null;
+  racewayType: string | null;        // 'PVC Sch 80' …
+  tradeSizeIn: string | null;
+  necArticle: string | null;         // raceway-type authority (§7)
+  sharedCircuitCount: number | null;
+  conductorCount: number | null;
+  currentCarryingCount: number | null;
+  fillPct: number | null;
+  minimumCodeRacewaySize: string | null;
+  selectedRacewaySize: string | null;
+  upsizingReason: string | null;
+  oneWayFt: number | null;
+  /** display: 'PVC Sch 80 1-1/4" — 3 branches shared'. */
+  conduitLabel: string | null;
+}
+
+export function projectSharedBranchRaceway(snap: PermitDesignSnapshot | null | undefined): SharedBranchRacewayProjection {
+  const empty: SharedBranchRacewayProjection = {
+    present: false, physicalRacewayId: null, racewayType: null, tradeSizeIn: null, necArticle: null,
+    sharedCircuitCount: null, conductorCount: null, currentCarryingCount: null, fillPct: null,
+    minimumCodeRacewaySize: null, selectedRacewaySize: null, upsizingReason: null, oneWayFt: null,
+    conduitLabel: null,
+  };
+  const elec = snap?.electrical;
+  if (!elec) return empty;
+  const raceways = (elec.physicalRaceways ?? []);
+  const rw = raceways.find(r => /BRANCH-HOMERUN/.test(r.physicalRacewayId)) ?? null;
+  const seg = (elec.routeSegments ?? []).find(r => r.segmentId === 'BRANCH_HOMERUN_RUN') ?? null;
+  if (!rw && !seg) return empty;
+  const racewayType = rw?.racewayType ?? seg?.raceway ?? null;
+  const tradeSizeIn = rw?.selectedRacewaySize ?? seg?.tradeSizeIn ?? null;
+  const sharedCircuitCount = rw?.sharedCircuitCount ?? num(seg?.sharedCircuitCount);
+  const conduitLabel = (racewayType && tradeSizeIn)
+    ? `${racewayType} ${tradeSizeIn}${sharedCircuitCount && sharedCircuitCount > 1 ? ` — ${sharedCircuitCount} branches shared` : ''}`
+    : (racewayType ?? null);
+  return {
+    present: true,
+    physicalRacewayId: rw?.physicalRacewayId ?? seg?.physicalRacewayId ?? null,
+    racewayType, tradeSizeIn,
+    necArticle: rw?.necArticle ?? seg?.racewayNecArticle ?? null,
+    sharedCircuitCount,
+    conductorCount: rw?.conductorCount ?? null,
+    currentCarryingCount: rw?.currentCarryingCount ?? null,
+    fillPct: num(rw?.fillPct) ?? num(seg?.fillPct),
+    minimumCodeRacewaySize: rw?.minimumCodeRacewaySize ?? seg?.minimumCodeRacewaySize ?? null,
+    selectedRacewaySize: rw?.selectedRacewaySize ?? tradeSizeIn,
+    upsizingReason: rw?.upsizingReason ?? seg?.upsizingReason ?? null,
+    oneWayFt: num(seg?.oneWayFt),
+    conduitLabel,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §2 (closeout 2026-07-23) — THE ONE canonical route-description accessor for
+// conduit type/article. PV-1 drawing labels/callouts/notes/legend AND the
+// titleBlock construction note read THIS — never `project.conduitType || 'EMT'`.
+// It projects the ACTUAL physical raceway objects; when none exist it returns an
+// honest PENDING descriptor (never a fabricated 'EMT'). The NEC article is the
+// raceway-type authority's article (PVC→352, EMT→358 …), so a PVC run can never
+// print an EMT-only citation (§7). One entry per distinct raceway type+size.
+// ═══════════════════════════════════════════════════════════════════════════
+export interface RacewayDescriptorEntry {
+  racewayType: string;               // 'PVC Sch 80'
+  tradeSizeIn: string | null;        // '1-1/4"'
+  necArticle: string | null;         // '352'
+  supportArticle: string | null;     // '352.30'
+  sharedCircuitCount: number | null;
+}
+export interface ConstructionRacewayDescriptor {
+  present: boolean;                  // false ⇒ no raceway objects → PENDING
+  entries: RacewayDescriptorEntry[];
+  /** one-line construction-note sentence, honest PENDING when no raceways. */
+  noteText: string;
+}
+
+const _SUPPORT_ARTICLE: Record<string, string> = {
+  '352': '352.30', '358': '358.30', '344': '344.30', '342': '342.30',
+  '350': '350.30', '356': '356.30', '348': '348.30',
+};
+
+export function projectRacewayDescriptor(snap: PermitDesignSnapshot | null | undefined): ConstructionRacewayDescriptor {
+  const elec = snap?.electrical;
+  const raceways = elec?.physicalRaceways ?? [];
+  // Build one entry per distinct (type, size) from the physical raceway objects;
+  // fall back to in-conduit route segments if the raceway array is absent.
+  const seen = new Set<string>();
+  const entries: RacewayDescriptorEntry[] = [];
+  for (const rw of raceways) {
+    const key = `${rw.racewayType}|${rw.selectedRacewaySize ?? ''}`;
+    if (seen.has(key)) continue; seen.add(key);
+    entries.push({
+      racewayType: rw.racewayType,
+      tradeSizeIn: rw.selectedRacewaySize ?? null,
+      necArticle: rw.necArticle || null,
+      supportArticle: rw.supportArticle || (_SUPPORT_ARTICLE[rw.necArticle] ?? null),
+      sharedCircuitCount: rw.sharedCircuitCount ?? null,
+    });
+  }
+  if (entries.length === 0) {
+    for (const seg of (elec?.routeSegments ?? [])) {
+      if (!seg.raceway || seg.raceway === 'FREE_AIR') continue;
+      const key = `${seg.raceway}|${seg.tradeSizeIn ?? ''}`;
+      if (seen.has(key)) continue; seen.add(key);
+      entries.push({
+        racewayType: seg.raceway, tradeSizeIn: seg.tradeSizeIn ?? null,
+        necArticle: seg.racewayNecArticle ?? null,
+        supportArticle: seg.racewayNecArticle ? (_SUPPORT_ARTICLE[seg.racewayNecArticle] ?? null) : null,
+        sharedCircuitCount: num(seg.sharedCircuitCount),
+      });
+    }
+  }
+  if (entries.length === 0) {
+    return {
+      present: false, entries: [],
+      noteText: 'Conduit type: PENDING — see the conductor & conduit schedule (PV-4B) once the raceway authority is resolved. '
+        + 'Conduit fill shall not exceed 40% per NEC Chapter 9, Table 1.',
+    };
+  }
+  const typePhrase = entries
+    .map(e => `${e.racewayType}${e.tradeSizeIn ? ` (${e.tradeSizeIn})` : ''}`)
+    .join('; ');
+  const supportPhrase = entries
+    .map(e => `${e.racewayType} per NEC ${e.supportArticle ?? (e.necArticle ? `${e.necArticle}.30` : 'the applicable article')}`)
+    .join('; ');
+  return {
+    present: true,
+    entries,
+    noteText: `Conduit type: ${typePhrase}. Conduit supports: ${supportPhrase}. `
+      + `Conduit fill shall not exceed 40% per NEC Chapter 9, Table 1.`,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // W3 §topology-description — the ONE canonical electrical-topology sentence for
 // array/branch drawing captions (PV-1B) and any sheet that describes how the
 // modules connect. Micro designs are PARALLELED on an AC branch circuit — never

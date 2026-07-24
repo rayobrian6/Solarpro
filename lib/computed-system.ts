@@ -83,6 +83,7 @@ export type RunSegmentId =
   | 'DC_DISCO_TO_INV_RUN'
   | 'ROOF_RUN'
   | 'BRANCH_RUN'
+  | 'BRANCH_HOMERUN_RUN'       // §3/§4 — shared jbox→combiner conduit home-run (all branches bundled)
   | 'INV_TO_DISCO_RUN'
   | 'COMBINER_TO_DISCO_RUN'
   | 'DISCO_TO_METER_RUN'
@@ -96,8 +97,67 @@ export type RunSegmentId =
   | 'GENERATOR_TO_ATS_RUN'    // Generator output → ATS/BUI GEN terminals
   | 'ATS_TO_MSP_RUN';         // ATS LOAD output → MSP (standalone ATS only)
 
+// ─── Physical Raceway Authority (§3/§4 — post-campaign closeout 2026-07-23) ───
+// THE single canonical object for one PHYSICAL raceway (a run of conduit that
+// carries one or more circuits). A shared home-run raceway carries N branch
+// circuits bundled; an open-air Q-Cable section carries NO raceway (no object).
+// Every in-conduit RunSegment references its raceway via physicalRacewayId, and
+// the raceway object owns the shared-fill math + the NEC article (single source
+// the BOM §6/§7 pass consumes — never a renderer-local 'NEC 358' literal).
+export interface PhysicalRaceway {
+  physicalRacewayId: string;         // stable id (e.g. 'RW-BRANCH-HOMERUN')
+  racewayType: string;               // 'PVC Sch 80' | 'EMT' | 'PVC Sch 40' | 'RMC' | …
+  /** NEC article for the raceway TYPE — the ONLY source of the code citation.
+   *  EMT→358, PVC(Sch 40/80)→352, RMC→344, LFMC→350, FMC→348 (§7). */
+  necArticle: string;                // e.g. '352'
+  supportArticle: string;            // e.g. '352.30'
+  sharedCircuitCount: number;        // # branch/feeder circuits sharing this raceway
+  conductorCount: number;            // total conductors in the raceway (incl. EGC)
+  currentCarryingCount: number;      // CCC used for the ampacity derating
+  conductorAreaIn2: number | null;   // Σ conductor cross-sectional area
+  minimumCodeRacewaySize: string | null;   // smallest legal trade size at ≤40% fill
+  calculatedFillRacewaySize: string | null; // size the fill calc selected
+  selectedRacewaySize: string | null;       // the size actually specified on the sheets
+  fillPct: number | null;            // Σ area ÷ raceway internal area
+  upsizingReason: string | null;     // documented rationale when selected > minimum
+  deratingBasis: string | null;      // e.g. '6 CCC → 0.80 (NEC 310.15(C)(1))'
+  supportCondition: string | null;   // environmental / support conditions
+  provenance: string;                // where the object was built
+}
+
+/** §7 — map a raceway TYPE string to its governing NEC article + support rule.
+ *  The ONE source of raceway code citations; never a hardcoded '358' literal. */
+export function racewayNecArticle(racewayType: string | undefined | null): { article: string; supportArticle: string } {
+  const t = String(racewayType ?? '').toUpperCase();
+  if (t.includes('PVC')) return { article: '352', supportArticle: '352.30' }; // RNC (PVC Sch 40/80)
+  if (t.includes('RMC')) return { article: '344', supportArticle: '344.30' };
+  if (t.includes('IMC')) return { article: '342', supportArticle: '342.30' };
+  if (t.includes('LFMC')) return { article: '350', supportArticle: '350.30' };
+  if (t.includes('LFNC')) return { article: '356', supportArticle: '356.30' };
+  if (t.includes('FMC')) return { article: '348', supportArticle: '348.30' };
+  if (t.includes('EMT')) return { article: '358', supportArticle: '358.30' };
+  return { article: '300', supportArticle: '300.11' }; // generic wiring-method support fallback
+}
+
 export interface RunSegment {
   id: RunSegmentId;
+  // ── §3/§4 physical raceway authority (post-campaign closeout 2026-07-23) ────
+  /** the shared physical raceway this in-conduit segment rides (undefined ⇒
+   *  open-air / no raceway). Two segments with the SAME physicalRacewayId share
+   *  ONE conduit (bundled fill); a feeder-raceway change can never affect a
+   *  branch raceway unless they share this id. */
+  physicalRacewayId?: string;
+  /** the canonical raceway object (owns shared-fill math + NEC article). Present
+   *  only on the segment that DECLARES the raceway (the home-run carrier). */
+  physicalRaceway?: PhysicalRaceway;
+  /** # circuits sharing this segment's raceway (1 = dedicated; N = shared home-run). */
+  sharedCircuitCount?: number;
+  /** smallest legal trade size at ≤40% fill for the conductors in this raceway. */
+  minimumCodeRacewaySize?: string;
+  /** documented rationale when the selected raceway size exceeds the minimum. */
+  upsizingReason?: string | null;
+  /** what this physical section carries (single-sourced route description). */
+  electricalFunction?: string;
   /** Owning subsystem (contract §1.3 permit carriage). Absent on the legacy
    *  single-system path (N=1 keeps bare run ids — Invariant I-1); stamped by
    *  computeMultiSystem (Wave 2a) only when N>1. */
@@ -234,6 +294,9 @@ export interface ComputedSystem {
   runs: RunSegment[];         // ALL wiring runs — SLD reads from here
   runMap: Record<RunSegmentId, RunSegment>; // quick lookup
   segmentSchedule: SegmentScheduleRow[]; // canonical conductor bundle schedule
+  // §3/§4 — every PHYSICAL raceway as a first-class object (the BOM §6 pass
+  // iterates these; the shared home-run appears ONCE with sharedCircuitCount>1).
+  physicalRaceways: PhysicalRaceway[];
 
   // ── Conduit Schedule ─────────────────────────────────────────────────────
   conduitSchedule: ConduitScheduleRow[];
@@ -1318,6 +1381,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     DC_DISCO_TO_INV_RUN: rl.DC_DISCO_TO_INV_RUN ?? 10,
     ROOF_RUN: rl.ROOF_RUN ?? 30,
     BRANCH_RUN: rl.BRANCH_RUN ?? 50,
+    BRANCH_HOMERUN_RUN: (rl as Partial<Record<RunSegmentId, number>>).BRANCH_HOMERUN_RUN ?? rl.ARRAY_CONDUIT_RUN ?? 20,
     INV_TO_DISCO_RUN: rl.INV_TO_DISCO_RUN ?? 20,
     COMBINER_TO_DISCO_RUN: rl.COMBINER_TO_DISCO_RUN ?? 20,
     DISCO_TO_METER_RUN: rl.DISCO_TO_METER_RUN ?? 15,
@@ -1424,6 +1488,53 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       necReferences: ['NEC 690.8', 'NEC 690.8(B)', 'NEC 310.15'],
       conductorCallout: branchWire.conductorCallout,
       color: 'ac',
+      // §3 — BRANCH_RUN is the OPEN-AIR Q-Cable trunk (micro AC output → roof
+      // junction box). It carries NO raceway; the shared conduit home-run is a
+      // SEPARATE segment (BRANCH_HOMERUN_RUN). Stays open-air through back-pop.
+      electricalFunction: 'micro AC branch (Q-Cable trunk, open air 690.31(C))',
+      sharedCircuitCount: 1,
+    }));
+
+    // BRANCH_HOMERUN_RUN: the SHARED jbox→combiner conduit home-run. §3/§4 — all
+    // N branch circuits leave the roof junction box bundled in ONE physical
+    // raceway (e.g. 3 branches = 3×BLK + 3×RED + 1×GRN = 7×#10, 6 CCC → the
+    // smallest legal PVC Sch 80 is 1-1/4"). This is the ONLY branch segment that
+    // carries a raceway; the physicalRaceway authority object (with the shared-
+    // fill math + NEC article) is attached during back-population from the
+    // canonical JBOX_TO_COMBINER segment schedule row.
+    const _homerunConduitType = input.conduitType || 'PVC Sch 80';
+    runs.push(makeRunSegment('BRANCH_HOMERUN_RUN', 'BRANCH HOME-RUN (Shared Raceway)', 'ROOF JUNCTION BOX', 'AC COMBINER', {
+      sourceTerminal: 'JBOX_OUT',
+      destTerminal:   'IN',
+      conductorCount: 2,                 // per-circuit L1+L2 (bundle carries N circuits)
+      wireGauge: branchWire.gauge,
+      insulation: 'THWN-2',
+      egcGauge: branchWire.egcGauge,
+      neutralRequired: false,
+      isOpenAir: false,
+      systemVoltage: systemVoltageAC,
+      phase: '1Ø',
+      conduitType: _homerunConduitType,
+      conduitSize: branchWire.conduitSize,
+      conduitFillPct: branchWire.conduitFillPct,
+      onewayLengthFt: defaultRunLengths.ARRAY_CONDUIT_RUN,
+      continuousCurrent: acBranchCurrentA,
+      requiredAmpacity: acBranchCurrentA * 1.25,
+      effectiveAmpacity: branchWire.effectiveAmpacity,
+      tempDeratingFactor: branchWire.tempDerating,
+      conduitDeratingFactor: branchWire.conduitDerating,
+      ocpdAmps: acBranchOcpdAmps,
+      voltageDropPct: branchWire.voltageDropPct,
+      voltageDropVolts: branchWire.voltageDropVolts,
+      ampacityPass: branchWire.ampacityPass,
+      voltageDropPass: branchWire.voltageDropPass,
+      conduitFillPass: branchWire.conduitFillPct <= 40,
+      necReferences: ['NEC 690.31', 'NEC 690.8(B)', 'NEC 310.15'],
+      conductorCallout: branchWire.conductorCallout,
+      color: 'ac',
+      electricalFunction: 'branch home-run raceway (shared jbox→combiner conduit)',
+      physicalRacewayId: 'RW-BRANCH-HOMERUN',
+      sharedCircuitCount: acBranchCount,
     }));
 
     // COMBINER_TO_DISCO_RUN: AC combiner to AC disconnect
@@ -2102,9 +2213,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   //             INVERTER_TO_DISCO = AC feeder from inverter (INV_TO_DISCO_RUN)
   // METER_TO_MSP removed — no separate production meter per industry standard.
   // DISCO_TO_METER now maps directly to DISCO_TO_METER_RUN (AC Disco → MSP).
+  // §3/§4 CORRECTION (2026-07-23): the micro AC branch is TWO physical sections,
+  // not one. ARRAY_TO_JBOX (open-air Q-Cable trunk) back-populates BRANCH_RUN and
+  // stays open-air; JBOX_TO_COMBINER (the shared conduit) back-populates the NEW
+  // BRANCH_HOMERUN_RUN. Previously JBOX_TO_COMBINER was stamped onto the open-air
+  // BRANCH_RUN — merging two wiring methods so E-1 labeled the open-air home-run
+  // as in-conduit and PV-4B printed one "95 ft #12 in 1-1/4\" PVC" whole-branch
+  // string. ROOF_RUN (DC micro leads) keeps its own open-air sizing.
   const segTypeToRunId: Record<string, string> = isMicro ? {
-    'ARRAY_TO_JBOX':     'ROOF_RUN',
-    'JBOX_TO_COMBINER':  'BRANCH_RUN',
+    'ARRAY_TO_JBOX':     'BRANCH_RUN',
+    'JBOX_TO_COMBINER':  'BRANCH_HOMERUN_RUN',
     'COMBINER_TO_DISCO': 'COMBINER_TO_DISCO_RUN',
     'DISCO_TO_METER':    'DISCO_TO_METER_RUN',
     'MSP_TO_UTILITY':    'MSP_TO_UTILITY_RUN',
@@ -2149,6 +2267,37 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         seg.raceway === 'PVC_SCH80' ? 'PVC Sch 80' : run.conduitType
       );
       run.isOpenAir        = seg.raceway === 'OPEN_AIR';
+      // §3/§4 — build the PHYSICAL RACEWAY AUTHORITY object for the shared branch
+      // home-run from the canonical JBOX_TO_COMBINER row (bundled fill math), and
+      // record the minimum-code-size / selected-size provenance. calcConduitSize
+      // already picks the smallest legal trade size, so minimum == calculated ==
+      // selected here (no discretionary upsizing → upsizingReason null).
+      if (runId === 'BRANCH_HOMERUN_RUN' && seg.raceway !== 'OPEN_AIR') {
+        const _art = racewayNecArticle(run.conduitType);
+        const _ccc = seg.totalCurrentCarryingConductors;
+        const _condCount = seg.conductorBundle.reduce((s: number, c: ConductorBundle) => s + c.qty, 0);
+        run.physicalRacewayId = 'RW-BRANCH-HOMERUN';
+        run.minimumCodeRacewaySize = seg.conduitSize;
+        run.upsizingReason = null;
+        run.physicalRaceway = {
+          physicalRacewayId: 'RW-BRANCH-HOMERUN',
+          racewayType: run.conduitType,
+          necArticle: _art.article,
+          supportArticle: _art.supportArticle,
+          sharedCircuitCount: run.sharedCircuitCount ?? acBranchCount,
+          conductorCount: _condCount,
+          currentCarryingCount: _ccc,
+          conductorAreaIn2: isFinite(seg.totalConductorAreaIn2) ? +seg.totalConductorAreaIn2.toFixed(4) : null,
+          minimumCodeRacewaySize: seg.conduitSize,
+          calculatedFillRacewaySize: seg.conduitSize,
+          selectedRacewaySize: seg.conduitSize,
+          fillPct: isFinite(seg.fillPercent) ? +seg.fillPercent.toFixed(1) : null,
+          upsizingReason: null,
+          deratingBasis: `${_ccc} current-carrying conductors → ${(seg.conduitDeratingFactor ?? 1).toFixed(2)} adjustment (NEC 310.15(C)(1))`,
+          supportCondition: `${run.conduitType} secured per NEC ${_art.supportArticle}; roof junction box → AC combiner`,
+          provenance: `computeSystem JBOX_TO_COMBINER (${run.sharedCircuitCount ?? acBranchCount} branch circuits bundled — shared fill)`,
+        };
+      }
       run.ocpdAmps         = seg.ocpdAmps;
       run.continuousCurrent = seg.continuousCurrent;
       run.effectiveAmpacity = seg.effectiveAmpacity;
@@ -2184,6 +2333,48 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   }
 
   console.log(`[DATA_PROPAGATION] Validated: ${runs.length} runSegments -> ${segmentSchedule.length} conduit rows -> ${runs.length} equipment items`);
+
+  // ── Physical Raceway Authority (§3/§4/§6) ─────────────────────────────────
+  // One object per PHYSICAL raceway. Runs that DECLARE a raceway (the shared
+  // branch home-run) contribute their attached authority object; every other
+  // in-conduit run is a DEDICATED raceway (sharedCircuitCount=1) synthesized
+  // here so the BOM §6 pass iterates a COMPLETE per-raceway set (no project-
+  // level "all runs" roll-up). Open-air runs carry NO raceway (skipped).
+  const physicalRaceways: PhysicalRaceway[] = [];
+  const _seenRacewayIds = new Set<string>();
+  for (const run of runs) {
+    if (run.physicalRaceway) {
+      if (!_seenRacewayIds.has(run.physicalRaceway.physicalRacewayId)) {
+        _seenRacewayIds.add(run.physicalRaceway.physicalRacewayId);
+        physicalRaceways.push(run.physicalRaceway);
+      }
+      continue;
+    }
+    if (run.isOpenAir || run.conduitType === 'NONE' || run.conduitSize === 'N/A' || run.isUtilityOwned) continue;
+    const _art = racewayNecArticle(run.conduitType);
+    const _rid = `RW-${run.id}`;
+    if (_seenRacewayIds.has(_rid)) continue;
+    _seenRacewayIds.add(_rid);
+    run.physicalRacewayId = run.physicalRacewayId ?? _rid;
+    physicalRaceways.push({
+      physicalRacewayId: _rid,
+      racewayType: run.conduitType,
+      necArticle: _art.article,
+      supportArticle: _art.supportArticle,
+      sharedCircuitCount: run.sharedCircuitCount ?? 1,
+      conductorCount: run.conductorCount + (run.neutralRequired ? 1 : 0) + 1, // hots (+N) + EGC
+      currentCarryingCount: run.conductorCount + (run.neutralRequired ? 1 : 0),
+      conductorAreaIn2: null,
+      minimumCodeRacewaySize: run.conduitSize,
+      calculatedFillRacewaySize: run.conduitSize,
+      selectedRacewaySize: run.conduitSize,
+      fillPct: isFinite(run.conduitFillPct) ? +run.conduitFillPct.toFixed(1) : null,
+      upsizingReason: null,
+      deratingBasis: `${run.conductorCount + (run.neutralRequired ? 1 : 0)} current-carrying conductors (NEC 310.15(C)(1))`,
+      supportCondition: `${run.conduitType} secured per NEC ${_art.supportArticle}`,
+      provenance: `computeSystem ${run.id} (dedicated raceway)`,
+    });
+  }
 
   // ── Conduit Schedule ──────────────────────────────────────────────────────
   const conduitSchedule: ConduitScheduleRow[] = runs.filter(r => !r.isOpenAir && r.conduitType !== 'NONE' && r.conduitSize !== 'N/A').map((run, idx) => ({
@@ -2491,6 +2682,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     runs,
     runMap,
     segmentSchedule,
+    physicalRaceways,
     conduitSchedule,
     equipmentSchedule,
     bomQuantities,

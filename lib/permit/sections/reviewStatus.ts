@@ -64,14 +64,22 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
   }
   const orderedDomains = DOMAIN_ORDER.filter(d => byDomain.has(d));
 
-  const rowFor = (r: PermitReadinessBlocker): string => `
+  const rowFor = (r: PermitReadinessBlocker): string => {
+    // §17 — an ADVISORY blocker MUST render its written justification (why the
+    // missing fact cannot affect safety, code compliance, procurement, engineering
+    // approval, or permit acceptance). Single-sourced from the snapshot registry.
+    const justification = (r.severity === 'warning' && r.justification)
+      ? `<div style="margin-top:2px;font-size:5.8px;line-height:1.3;color:#7c5b12;"><span style="font-weight:900;">ADVISORY JUSTIFICATION:</span> ${escapeH(r.justification)}</div>`
+      : '';
+    return `
     <tr>
       <td style="text-align:center;">${sevBadge(r.severity)}</td>
       <td class="mono" style="font-weight:900;font-size:6.5px;white-space:nowrap;">${escapeH(r.code)}</td>
-      <td style="font-size:6.5px;line-height:1.3;">${escapeH(r.explanation)}</td>
+      <td style="font-size:6.5px;line-height:1.3;">${escapeH(r.explanation)}${justification}</td>
       <td style="font-size:6.3px;line-height:1.3;color:#1e3a5f;">${escapeH(r.resolutionAction)}</td>
       <td style="font-size:6px;line-height:1.25;color:#555;">${escapeH(r.affectedSheets.join(', ') || '—')}</td>
     </tr>`;
+  };
 
   const sectionFor = (domain: string): string => {
     const rows = (byDomain.get(domain) ?? []);
@@ -137,7 +145,7 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
 
       <div style="margin-top:6px;padding:3px 6px;font-size:6.3px;color:#555;line-height:1.35;border:var(--border);">
         Source: <span class="mono">permitReadiness.registry</span> on snapshot <span class="mono">${escapeH(snap?.meta.snapshotId ?? '—')}</span>.
-        BLOCKING = prevents permit-ready / issue; ADVISORY = surfaced, not gating.
+        BLOCKING = prevents permit-ready / issue; ADVISORY = surfaced, not gating (each advisory carries a written justification).
         Equipment-identity conflicts require OPERATOR reconciliation (never auto-resolved). Full per-attachment / per-segment machine-readable
         data is retained in the canonical object model (structural + electrical authority) referenced on PV-4B / PV-4C / E-1 / SCHED.
       </div>

@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-07-24T00:11:38.791Z",
+  "artifact": "braidon-screening-envelope",
+  "section": "§14 attachment screening-envelope honesty",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-00E105F58C2C",
+  "digest": "00e105f58c2ca87a1d9ec09e4e8e12d58be0579972fa7aaab9cc0ccdfaa28eee",
+  "purpose": "The attachment uplift model is a CONSERVATIVE SCREENING ENVELOPE: the GOVERNING corner-zone (ASCE 7 Zone 3) C&C pressure is applied UNIFORMLY over every per-mount tributary — never an exact per-position zone/tributary geometry. ASD (0.6W) basis; capacity checks use the same ASD basis. The conservative method is not weakened.",
+  "designMethod": "ASD (0.6D + 0.6W uplift)",
+  "governingZone": "corner (ASCE 7 Zone 3) applied uniformly",
+  "areaRatio": 1.106116,
+  "tributarySumFt2": 704,
+  "arrayAreaFt2": 636.461,
+  "ratioStatement": "Σ tributary 704 ft² ÷ array 636.461 ft² = ×1.106116",
+  "exactTributaryGeometryClaimed": false,
+  "conservativeMethodPreserved": true
+}

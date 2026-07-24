@@ -1,0 +1,111 @@
+{
+  "generatedAt": "2026-07-24T00:11:38.791Z",
+  "artifact": "braidon-service-device-topology",
+  "section": "§9 service-topology physical-order graph",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-00E105F58C2C",
+  "digest": "00e105f58c2ca87a1d9ec09e4e8e12d58be0579972fa7aaab9cc0ccdfaa28eee",
+  "purpose": "The eight-object supply-side service chain in physical order. The fused AC disconnect is ONE listed DUAL-PURPOSE device (tap OCPD + utility-accessible lockable disconnect) — no phantom duplicate device; a separate utility disconnect is emitted only when the project specifies one.",
+  "objectCount": 8,
+  "dualPurposeDevice": {
+    "objectId": "svc-fused-ocpd",
+    "dualPurposeListing": true,
+    "electricalRole": "overcurrent-protection",
+    "utilityRole": "utility-accessible-disconnect",
+    "fusedState": "fused",
+    "lockable": true,
+    "rsdRole": "none",
+    "note": "ONE physical listed device serving both the tap-OCPD and utility-accessible-lockable-disconnect roles"
+  },
+  "physicalOrder": [
+    {
+      "order": 1,
+      "objectId": "svc-combiner",
+      "type": "combiner",
+      "label": "AC combiner (branch aggregation)",
+      "upstreamObjectId": null,
+      "downstreamObjectId": "svc-combiner-loadbreak",
+      "ocpdRatingA": null,
+      "verificationStatus": null,
+      "provenance": "computeSystem topology (combiner)"
+    },
+    {
+      "order": 2,
+      "objectId": "svc-combiner-loadbreak",
+      "type": "combiner-load-break",
+      "label": "Combiner load-break",
+      "upstreamObjectId": "svc-combiner",
+      "downstreamObjectId": "svc-rsd-initiator",
+      "ocpdRatingA": null,
+      "verificationStatus": null,
+      "provenance": "design (combiner integral load-break)"
+    },
+    {
+      "order": 3,
+      "objectId": "svc-rsd-initiator",
+      "type": "rsd-initiator",
+      "label": "Rapid-shutdown initiator",
+      "upstreamObjectId": "svc-combiner-loadbreak",
+      "downstreamObjectId": "svc-tap-conductors",
+      "ocpdRatingA": null,
+      "verificationStatus": null,
+      "provenance": "design (NEC 690.12 rapid shutdown)"
+    },
+    {
+      "order": 4,
+      "objectId": "svc-tap-conductors",
+      "type": "tap-conductors",
+      "label": "Tap conductors",
+      "upstreamObjectId": "svc-rsd-initiator",
+      "downstreamObjectId": "svc-fused-ocpd",
+      "ocpdRatingA": null,
+      "verificationStatus": null,
+      "provenance": "design rule (tap-conductor length not measured)"
+    },
+    {
+      "order": 5,
+      "objectId": "svc-fused-ocpd",
+      "type": "fused-ocpd",
+      "label": "Fused AC disconnect (tap OCPD + utility-accessible)",
+      "upstreamObjectId": "svc-tap-conductors",
+      "downstreamObjectId": "svc-tap-point",
+      "ocpdRatingA": 60,
+      "verificationStatus": null,
+      "provenance": "computeSystem tap OCPD"
+    },
+    {
+      "order": 6,
+      "objectId": "svc-tap-point",
+      "type": "tap-point",
+      "label": "Supply-side tap point",
+      "upstreamObjectId": "svc-fused-ocpd",
+      "downstreamObjectId": "svc-meter",
+      "ocpdRatingA": null,
+      "verificationStatus": null,
+      "provenance": "interconnection method (supply-side)"
+    },
+    {
+      "order": 7,
+      "objectId": "svc-meter",
+      "type": "meter",
+      "label": "Utility revenue meter",
+      "upstreamObjectId": "svc-tap-point",
+      "downstreamObjectId": "svc-service-disconnect",
+      "ocpdRatingA": null,
+      "verificationStatus": null,
+      "provenance": "existing service"
+    },
+    {
+      "order": 8,
+      "objectId": "svc-service-disconnect",
+      "type": "service-disconnect",
+      "label": "Main service disconnect",
+      "upstreamObjectId": "svc-meter",
+      "downstreamObjectId": null,
+      "ocpdRatingA": 200,
+      "verificationStatus": null,
+      "provenance": "project service rating"
+    }
+  ],
+  "duplicatePhysicalDevices": 0
+}

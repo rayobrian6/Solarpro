@@ -18,7 +18,7 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
 import { peekSnapshot } from '../snapshot/read';
-import { projectCanonicalFeeder, projectCanonicalBranch } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway } from '../snapshot/electricalProjection';
 
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
@@ -71,6 +71,10 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // segment so E-1 stops printing the '3/4" EMT' literal while PV-4B / SCHED /
   // BOM project the real branch conduit (one segment authority, gate 3).
   const _snapBranch = projectCanonicalBranch(peekSnapshot(input));
+  // §3/§4 — the SHARED jbox→combiner home-run raceway (all branches bundled).
+  // E-1's SEGMENT_2A conduit label reads THIS; the branch CONDUCTORS ride the
+  // open-air Q-Cable trunk (_snapBranch). Two physical sections, never merged.
+  const _snapHomerun = projectSharedBranchRaceway(peekSnapshot(input));
 
   // ── Mount type — drives the PV-array glyph/labels in the renderer ──
   // (cad.systemType is canonical, e.g. 'solar_fence'; project.systemType is the
@@ -202,6 +206,11 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     branchConduitType:       _snapBranch.raceway ?? undefined,
     branchConduitSize:       _snapBranch.tradeSizeIn ?? undefined,
     branchIsOpenAir:         _snapBranch.raceway === 'FREE_AIR',
+    // §3/§4 — the shared home-run conduit (jbox→combiner). SEGMENT_2A prints this
+    // as the in-conduit section while the branch conductors are open-air Q-Cable.
+    homerunConduitType:      _snapHomerun.present ? (_snapHomerun.racewayType ?? undefined) : undefined,
+    homerunConduitSize:      _snapHomerun.present ? (_snapHomerun.tradeSizeIn ?? undefined) : undefined,
+    homerunSharedCircuits:   _snapHomerun.present ? (_snapHomerun.sharedCircuitCount ?? undefined) : undefined,
     acOCPD,
     mainPanelAmps:           mainAmps,
     // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot

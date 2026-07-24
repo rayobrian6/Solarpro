@@ -90,9 +90,16 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
   //    ATTACHMENT pages, and showing e.g. the IronRidge FlashFoot2 attachment
   //    instructions on a RT-MINI-pad job misstates the attachment product
   //    (Ray caught exactly this, 2026-07-20). No matching asset → no page.
+  // §10 (Ray: "preferably omit") — a rail datasheet is an AUTHORITATIVE appendix
+  // page only when a rail SKU is SELECTED + verified into the racking assembly.
+  // While the rail is pending (railSku unpinned), the registry-default rail
+  // (e.g. IronRidge XR100 for RT-MINI) is NOT the specified rail, so the page is
+  // OMITTED entirely — never shown as a reference that reads as authoritative,
+  // and its values feed no calc/BOM. The page returns automatically once a rail
+  // is genuinely pinned (railSku present ⇒ _railPending false).
   const railAcc = (mountId ? getRegistryEntryV4(mountId) : undefined)
     ?.requiredAccessories?.find(a => a.category === 'rail');
-  if (railAcc?.defaultManufacturer && railAcc?.defaultModel) {
+  if (!_railPending && railAcc?.defaultManufacturer && railAcc?.defaultModel) {
     const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
     const accBrand = norm(railAcc.defaultManufacturer);
     const accModel = norm(railAcc.defaultModel);
@@ -101,7 +108,7 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
       .filter(a => norm(a.brand) === accBrand
         && accModel.includes(norm(a.model).replace(/rail$/, '')))
       .sort((a, b) => b.model.length - a.model.length)[0] ?? null;
-    push('RACKING RAIL', railAsset, { railPending: _railPending });
+    push('RACKING RAIL', railAsset);
   }
 
   return out;

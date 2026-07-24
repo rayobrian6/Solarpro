@@ -18,7 +18,7 @@
 // ============================================================
 
 import type { CADModel } from '../cad/types';
-import { getMountingSystemById } from '../mounting-hardware-db';
+import { getMountingSystemById, classifyMountTopology } from '../mounting-hardware-db';
 import { getRackingById } from '../equipment-db';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../permit/utils/fireSetback';
 // W3 §route-verification — the CONDUIT RUN callout projects the ONE canonical
@@ -704,6 +704,21 @@ function roofComposition(
   // doesn't say "RAFTER" on PV-3 while the calcs certify a pre-engineered truss.
   const _frameLabel = d.isTruss ? 'TRUSS' : 'RAFTER';
 
+  // §11 — the attachment-base callout label is PROJECTED from the canonical mount
+  // TOPOLOGY (classifyMountTopology), NEVER inferred from the product name. The
+  // old name regex printed "DIRECT-ATTACH MOUNT" on RT-MINI, which is rail_paired
+  // (an L-foot/standoff base carrying a rail), contradicting the structural sheets.
+  const _mountSelC = (input?.project as { mountingSystemId?: string } | undefined)?.mountingSystemId
+    ? getMountingSystemById(String((input!.project as { mountingSystemId?: string }).mountingSystemId))
+    : undefined;
+  const _mountTopo = _mountSelC ? classifyMountTopology(_mountSelC).topology : 'unknown';
+  const _baseLabelP2 = _mountTopo === 'rail_paired' ? 'RAIL-PAIRED ROOF ATTACHMENT BASE'
+    : _mountTopo === 'rail_less' ? 'DIRECT-ATTACH MOUNT (RAIL-LESS)'
+    : 'MOUNT TOPOLOGY — PENDING VERIFICATION';
+  const _baseLabelP3 = _mountTopo === 'rail_paired' ? 'MOUNT BASE / RAIL ATTACHMENT'
+    : _mountTopo === 'rail_less' ? 'DIRECT-ATTACH FOOT'
+    : 'ATTACHMENT — PENDING VERIFICATION';
+
   const dataRows: DataRow[] = isPlan
     ? [
         { label: 'MODULE',         value: 'SEE EQUIPMENT SCHEDULE' },
@@ -741,8 +756,8 @@ function roofComposition(
       ]
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
-        { n: 2, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'DIRECT-ATTACH MOUNT' : 'MOUNTING RAIL', sub: d.mountSys },
-        { n: 3, label: /RT[- ]?MINI|RAIL-?LESS|ROOF ?TECH/i.test(d.mountSys) ? 'MOUNT BASE' : 'STANDOFF / L-FOOT', sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
+        { n: 2, label: _baseLabelP2, sub: d.mountSys },
+        { n: 3, label: _baseLabelP3, sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
         { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
         { n: 5, label: `${_frameLabel} ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
         { n: 6, label: d.conduitType + ' CONDUIT', sub: 'see conductor schedule' },

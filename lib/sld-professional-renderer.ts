@@ -293,6 +293,11 @@ export interface SLDProfessionalInput {
   branchConduitSize?:      string;
   branchConduitType?:      string;   // W1b — canonical BRANCH_RUN raceway (single source; no '3/4" EMT' literal)
   branchIsOpenAir?:        boolean;  // W1b — branch home-run in raceway (false) vs open-air Q-Cable (true)
+  // §3/§4 — the SHARED jbox→combiner home-run raceway (all branches bundled).
+  // SEGMENT_2A prints this in-conduit section; the Q-Cable branch stays open-air.
+  homerunConduitType?:     string;
+  homerunConduitSize?:     string;
+  homerunSharedCircuits?:  number;
   branchOcpdAmps?:         number;
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
   runs?:                   RunSegment[];
@@ -1687,6 +1692,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   const roofRun       = findRun('ROOF_RUN');
   const branchRun     = findRun('BRANCH_RUN');
+  // §3/§4 — the shared jbox→combiner conduit home-run (SEGMENT_2A). Distinct from
+  // the open-air Q-Cable BRANCH_RUN so E-1 never labels the open-air run in-conduit.
+  const branchHomerunRun = findRun('BRANCH_HOMERUN_RUN');
   // BUILD v24: Battery/BUI/Generator/ATS computed segments
   const batToBuiRun   = findRun('BATTERY_TO_BUI_RUN');
   const buiToMspRun   = findRun('BUI_TO_MSP_RUN');
@@ -1942,9 +1950,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
 
-    // SEGMENT 2: J-Box → Combiner
+    // SEGMENT 2: J-Box → Combiner  (§3/§4 — the SHARED conduit home-run)
     {
-      const run = branchRun;
+      // Prefer the dedicated home-run conduit segment; the open-air BRANCH_RUN is
+      // the Q-Cable trunk drawn as SEGMENT 1 and must NOT drive this in-conduit run.
+      const run = branchHomerunRun ?? branchRun;
       // Conductor gauge(s) from the branch plan's own callouts — mixed-OCPD
       // plans carry mixed gauges (#12 for 20A branches, #10 for a 25A branch).
       const _brGauges = [...new Set((input.microBranches ?? [])
@@ -1957,9 +1967,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       // raceway (branchConduitType/Size from the snapshot), never a hardcoded
       // '3/4" EMT'. Open-air Q-Cable branches print the 690.31(C) free-air label;
       // in-raceway home runs print the real raceway type + size (matching PV-4B).
-      const _brCondLine = input.branchIsOpenAir
-        ? 'OPEN AIR — NEC 690.31(C)'
-        : `IN ${input.branchConduitSize ?? '3/4"'} ${input.branchConduitType ?? 'EMT'}`;
+      // §3/§4 — SEGMENT_2A is the SHARED jbox→combiner raceway. Label it from the
+      // home-run raceway projection (bundled branches in conduit), NOT the open-air
+      // branch. Falls back to the legacy branch label only when no home-run object.
+      const _brCondLine = input.homerunConduitType
+        ? `IN ${input.homerunConduitSize ?? ''} ${input.homerunConduitType}${input.homerunSharedCircuits && input.homerunSharedCircuits > 1 ? ` (${input.homerunSharedCircuits} BRANCHES SHARED)` : ''}`.replace(/\s+/g, ' ').trim()
+        : (input.branchIsOpenAir
+            ? 'OPEN AIR — NEC 690.31(C)'
+            : `IN ${input.branchConduitSize ?? '3/4"'} ${input.branchConduitType ?? 'EMT'}`);
       const fb = [_brWireTxt, `1×#${egcNum} GRN EGC`, _brCondLine];
       const {lines, cnt} = runLines(run, fb);
       const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
@@ -2523,7 +2538,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
     {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
     {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
-    {dash:'4,2', stroke:BLK,       label:'DC Conductor in Conduit (USE-2/PV Wire)'},
+    // §8 closeout — the DC-conductor-in-conduit legend entry renders ONLY when a
+    // canonical DC-in-conduit segment exists. A pure 1:1 micro job has no field
+    // DC conductor (module→micro is the factory MC4 lead, open-air) — the entry
+    // is suppressed so the legend never advertises string materials it lacks.
+    ...(!isMicro ? [{dash:'4,2', stroke:BLK, label:'DC Conductor in Conduit (USE-2/PV Wire)'}] : []),
     ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#2E7D32', label:'Generator Output Conductor'}] : []),
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#E65100', label:'ATS Transfer Conductor'}] : []),
@@ -2835,8 +2854,18 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
           conduit: 'OPEN AIR', fill: 0,
           amp: input.branchOcpdAmps ? Math.round(input.branchOcpdAmps * 0.8 * 10) / 10 : 0,
           ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true }];
+    // §3/§4 — the SHARED jbox→combiner home-run raceway as its OWN row (all
+    // branches bundled in one conduit). Distinct from the open-air Q-Cable
+    // branch rows above — never one merged multi-method branch string.
+    const _homerunRow: SR[] = input.homerunConduitType ? [{
+      id: 'BR-HR', from: 'ROOF J-BOX', to: 'AC COMBINER',
+      conductors: `${(input.homerunSharedCircuits ?? 1)}×[${input.branchWireGauge ?? '#10 AWG'}] THWN-2 + 1×#${egcNum} GRN`,
+      conduit: `${input.homerunConduitType}${input.homerunConduitSize ? ' ' + input.homerunConduitSize : ''}`,
+      fill: 0, amp: 0, ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true,
+    }] : [];
     sRows = isMicro ? [
       ..._branchRows,
+      ..._homerunRow,
       {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
       {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ] : [
@@ -3796,7 +3825,11 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
     {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
     {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
-    {dash:'4,2', stroke:BLK,       label:'DC Conductor in Conduit (USE-2/PV Wire)'},
+    // §8 closeout — DC-in-conduit legend renders only when a lane actually has DC
+    // conductors in conduit (a string/optimizer lane). All-micro multi-lane sets
+    // carry no field DC conductor; suppress the entry rather than imply strings.
+    ...(lanes.some(b => laneTopology(b) !== 'MICRO')
+      ? [{dash:'4,2', stroke:BLK, label:'DC Conductor in Conduit (USE-2/PV Wire)'}] : []),
     ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
   ];
   const legH = 16 + legEntries.length * 11;

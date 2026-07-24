@@ -109,14 +109,26 @@ describe('§5 SERVICE TOPOLOGY — canonical objects (build + projection + valid
     return { input, snap, html };
   }
 
-  it('models the full six-object service chain as SEPARATE canonical objects', () => {
+  it('models the canonical service chain — §9 folds the utility disconnect onto the ONE listed fused device', () => {
     const { snap } = buildSupplySide();
     const topo = snap.electrical.serviceTopology;
     expect(topo).toBeTruthy();
     const types = topo.map(o => o.type);
-    for (const t of ['tap-point', 'tap-conductors', 'fused-ocpd', 'utility-disconnect', 'meter', 'service-disconnect']) {
+    // The always-separate objects.
+    for (const t of ['tap-point', 'tap-conductors', 'fused-ocpd', 'meter', 'service-disconnect']) {
       expect(types).toContain(t);
     }
+    // §9 (closeout): with no separate utility disconnect specified, the fused AC
+    // disconnect is a DUAL-PURPOSE listed device — it carries the utility role and
+    // NO phantom standalone utility-disconnect object is emitted.
+    const fused = topo.find(o => o.type === 'fused-ocpd')!;
+    expect(fused.dualPurposeListing).toBe(true);
+    expect(fused.utilityRole).toBe('utility-accessible-disconnect');
+    expect((fused.dualPurposeRoles ?? []).some(r => /utility/i.test(r))).toBe(true);
+    expect(types).not.toContain('utility-disconnect');   // never a duplicate device
+    // physical-order graph edges are present (upstream/downstream chain).
+    expect(fused.upstreamObjectId).toBeTruthy();
+    expect(fused.downstreamObjectId).toBeTruthy();
     // each object has an id + provenance (digest-covered authority)
     for (const o of topo) { expect(o.objectId).toBeTruthy(); expect(o.provenance?.source).toBeTruthy(); }
   });
@@ -136,7 +148,8 @@ describe('§5 SERVICE TOPOLOGY — canonical objects (build + projection + valid
   it('PV-4B projects the objects (not restated) — service chain table + PENDING tap rule', () => {
     const { html } = buildSupplySide();
     expect(html).toContain('Tap conductors');
-    expect(html).toContain('Fused AC disconnect (tap OCPD)');
+    // §9: the fused device label now names its dual role (tap OCPD + utility-accessible).
+    expect(html).toContain('Fused AC disconnect (tap OCPD');
     expect(html).toContain('Main service disconnect');
     expect(html).toMatch(/PENDING[^<]*length/i);   // honest tap-length state rendered
   });

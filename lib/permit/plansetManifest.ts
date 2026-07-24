@@ -12,7 +12,7 @@
 import type { PermitInput } from './types';
 import type { CADModel } from '@/lib/cad/types';
 import { buildSheetManifest, type SheetRef } from './sheetManifest';
-import { schedBomRowCount, SCHED_BOM_ROWS_FIRST } from './sections/structuralPages';
+import { schedBomRowCount, SCHED_BOM_ROWS_FIRST, schedContPageCount, roofStructuralHasContinuation } from './sections/structuralPages';
 import { equipmentDatasheetIndexRows } from './sections/datasheetAppendix';
 import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE } from './sections/subSystemSheets';
 import { pv2Title, pv3Title, type SysType } from './utils/helpers';
@@ -25,6 +25,7 @@ export function computePlansetManifest(input: PermitInput, cad: CADModel): Sheet
   const includeInternalValidation = input.permitOptions?.includeInternalValidation === true
     || input.planSetOptions?.includeInternalValidation === true;
   const includeSchedCont = schedBomRowCount(input.bom) > SCHED_BOM_ROWS_FIRST;
+  const schedContCount = schedContPageCount(input.bom);
 
   // Wave 5B: hybrid sets grow per-sub detail sheets — mirror generatePermit's
   // sub loop by passing the SAME ordered present-sub list.
@@ -37,11 +38,18 @@ export function computePlansetManifest(input: PermitInput, cad: CADModel): Sheet
   // primary system's topology through the SAME accessor the sheets use.
   const _isMicro = topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
 
+  // W9/§15 — roof structural calcs (PV-4C) spill to the PV-4C.1 continuation.
+  // Single-system roof only (hybrid uses per-sub structural sheets). Shared with
+  // the page assembly via roofStructuralHasContinuation so both agree.
+  const includePv4cCont = _tocSubs.length <= 1 && roofStructuralHasContinuation(cad.systemType);
+
   return buildSheetManifest({
     pv1Title: pv2Title(_tocPrimaryType as SysType),
     pv3Title: pv3Title(_tocPrimaryType as SysType),
     datasheets: equipmentDatasheetIndexRows(input),
     includeSchedCont,
+    schedContCount,
+    includePv4cCont,
     includeValidation: includeInternalValidation,
     includeCadAppendix: includeCADAppendixPreview,
     isMicro: _isMicro,

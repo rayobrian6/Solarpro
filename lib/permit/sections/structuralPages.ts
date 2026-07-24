@@ -14,7 +14,7 @@ import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { analyzeFenceWind } from '@/lib/structural/fenceWindEngine';
 import {
   projectStructuralFromInput, fmt, fmtStr, findCheck, checkResultLabel,
-  checkThresholdLabel, type StructuralProjection,
+  checkThresholdLabel, projectFastenerAssembly, type StructuralProjection,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
@@ -656,7 +656,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
 
 
 // ─── ROOF STRUCTURAL ──────────────────────────────────────────────────────────
-export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, part: 1 | 2 = 1): string {
   const { compliance, rulesResult, project } = input;
   const structural = compliance.structural;
   const cp = projectCodeAuthorityFromInput(input); const asce = cp.asceLabel;  // W4 §2 single-source
@@ -747,9 +747,25 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
     || 48;
   const _fracIn = (v: number) =>
     v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-  const lagDia    = _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
-  const lagEmbed  = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
+  // §12 — the ONE canonical fastener assembly (identical projection on PV-3 /
+  // APP-A / PE-1 / SCHED). PV-4C's attachment detail reads its diameter, embedment
+  // and TYPE from here — never a generic "5/16 stainless lag" literal (RT-MINI is
+  // a structural wood screw). While unverified, the cert label reads PENDING.
+  const _fa       = projectFastenerAssembly(input);
+  const lagDia    = _fa.diameterLabel ?? _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
+  const lagEmbed  = _fa.embedmentIn ?? _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
+  const _faType   = _fa.fastenerType ?? 'structural fastener';
 
+  // ── PV-4C is split into TWO physical sheets (W9/§15 page-fit): the combined
+  // wind/snow/framing/attachment analysis + dead-load + reaction schedule ran
+  // ~15in of content, ~5in past the fixed 11in page, silently clipping the page
+  // conclusion under overflow:hidden. PV-4C carries the summary + governing
+  // checks + canonical §8 reaction schedule; the attachment standard detail,
+  // governing ASD load combination, interpretation and page conclusion move to
+  // the FORMAL continuation sheet PV-4C.1 (own title block + manifest entry +
+  // snapshot-bound sheet index + page number). The full per-attachment data
+  // stays in the machine-readable canonical object model regardless. ──
+  if (part !== 2) {
   return `
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — ROOF MOUNT', pageNum, totalPages)}
@@ -834,17 +850,41 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <strong>DEAD LOAD INTERPRETATION:</strong>
         The added PV dead load of ${addedDL} PSF is distributed uniformly over the array footprint, for a combined roof
         dead load of ${totalDL} PSF. This represents a minimal addition relative to the existing roof dead load (typically
-        8–12 PSF for asphalt shingle on plywood sheathing). The existing roof structure is evaluated to confirm adequate
-        capacity for the combined loading condition per IBC Section 1607. The governing ${_governs} check at ${utilization}%
-        ${_utilRatio != null && _utilRatio <= 1.0 ? 'confirms the existing framing has adequate capacity' : 'indicates the modeled framing requires field verification of actual framing type/span or reinforcement'}
-        for the additional PV loading${_utilRatio != null && _utilRatio > 1.0 ? ' (bending utilization ' + bendUtil + '%; deflection ' + rafterDefl + '" vs ' + rafterAD + '" allowable)' : ''}.
+        8–12 PSF for asphalt shingle on plywood sheathing).
+        ${_reviewRequired
+          ? `<strong style="color:#b91c1c;">EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED.</strong>
+             The existing framing member size / spacing / species / clear span are not established from a verified project
+             authority (truss drawing, member layout, engineer calc), so NO framing utilization, capacity or adequacy
+             conclusion is asserted on this sheet — only the ADDED PV load is quantified above. A licensed structural review
+             of the existing framing is required before permit submission.`
+          : _utilRatio != null
+            ? `The existing roof structure is evaluated to confirm adequate capacity for the combined loading condition per
+               IBC Section 1607. The governing ${_governs} check at ${utilization}%
+               ${_utilRatio <= 1.0 ? 'confirms the existing framing has adequate capacity' : 'indicates the modeled framing requires field verification of actual framing type/span or reinforcement'}
+               for the additional PV loading${_utilRatio > 1.0 ? ' (bending utilization ' + bendUtil + '%; deflection ' + rafterDefl + '" vs ' + rafterAD + '" allowable)' : ''}.`
+            : 'Framing utilization data is not available — verify existing framing capacity per engineering analysis before installation.'}
       </div>
 
       <!-- §8 Attachment-ID Reaction Schedule + reconciliation (canonical objects) -->
       ${renderReactionSchedule(_proj)}
+      <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:var(--border);background:#f4f4f4;">
+        <strong>CONTINUED ON PV-4C.1:</strong> the roof-attachment standard detail, the governing ASD load combination (${asce} §2.4),
+        the structural interpretation and the roof structural PAGE CONCLUSION continue on sheet <strong>PV-4C.1</strong>.
+      </div>
+    </div>
+  </div>`;
+  }
+
+  // ── PV-4C.1 — FORMAL CONTINUATION SHEET ───────────────────────────────────
+  return `
+  <div class="page">
+    ${titleBlock(input, 'PV-4C.1', 'STRUCTURAL CALCULATIONS (CONT.) — DETAIL · LOAD COMBINATION · CONCLUSION', pageNum, totalPages)}
+    <div class="page-content">
+      ${structuralBannerHtml(_proj.banner)}
+      <div class="section-title">Roof Structural Calculations (Continued from PV-4C) — ${asce} §26/27 (Roof-Mounted PV)</div>
 
       <!-- Standard Detail: Roof Attachment -->
-      <div class="section-title">Standard Detail — Roof Attachment (Lag Bolt w/ Flashing, Typical)</div>
+      <div class="section-title">Standard Detail — Roof Attachment (Fastener per Racking Assembly, Typical)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);border:var(--border);padding:var(--xs);">
         <div style="text-align:center;">
           <svg viewBox="0 0 300 240" width="212" height="170" style="display:block;margin:0 auto;font-family:Arial,Helvetica,sans-serif;">
@@ -880,8 +920,8 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <rect x="146" y="86" width="8" height="6" fill="#6b7280" stroke="#3b4250" stroke-width="0.8"/>
             <line x1="150" y1="92" x2="150" y2="184" stroke="#6b7280" stroke-width="2.4"/>
             <g stroke="#3b4250" stroke-width="0.5"><line x1="146" y1="152" x2="154" y2="152"/><line x1="146" y1="158" x2="154" y2="158"/><line x1="146" y1="164" x2="154" y2="164"/><line x1="146" y1="170" x2="154" y2="170"/><line x1="146" y1="176" x2="154" y2="176"/></g>
-            <text x="160" y="130" font-size="6.5" fill="#1a2230">LAG SCREW</text>
-            <text x="160" y="138" font-size="6.5" fill="#1a2230">${lagDia}" DIA. SS</text>
+            <text x="160" y="130" font-size="6.5" fill="#1a2230">FASTENER</text>
+            <text x="160" y="138" font-size="6.5" fill="#1a2230">${lagDia}" DIA</text>
             <!-- embedment dimension -->
             <line x1="163" y1="134" x2="212" y2="134" stroke="#5b6472" stroke-width="0.5"/>
             <line x1="163" y1="184" x2="212" y2="184" stroke="#5b6472" stroke-width="0.5"/>
@@ -898,7 +938,8 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         </div>
         <div style="font-size:var(--f-sm);line-height:1.7;">
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">ROOF ATTACHMENT REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. Lag bolt: ${lagDia}" diameter minimum stainless steel, <strong>${lagEmbed}" minimum embedment into rafter.</strong></div>
+          <div style="margin-bottom:3px;">1. Fastener: ${escapeH(_faType)}, ${lagDia}" diameter, <strong>${lagEmbed}" minimum embedment into ${escapeH(_fa.substrate ?? 'rafter')}</strong> (${escapeH(_fa.pilotRuleLabel)}).</div>
+          <div style="margin-bottom:3px;font-size:6.8px;color:${_fa.verification === 'verified' ? '#333' : '#b45309'};"><strong>FASTENER ASSEMBLY:</strong> ${escapeH(_fa.line)} — <strong>${escapeH(_fa.certLabel)}</strong>.</div>
           <div style="margin-bottom:3px;">2. Flashing: Aluminum or stainless steel base flashing installed under existing roofing material per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">3. Sealant: Polyurethane or silicone roofing sealant at all roof penetrations per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">4. Attachment to structural framing members only — <strong>no attachment to sheathing or decking alone.</strong></div>
@@ -1106,6 +1147,14 @@ function renderReactionSchedule(proj: StructuralProjection): string {
       </div>`;
   }
 
+  // §14 — the CONSERVATIVE-ENVELOPE area ratio is a display ratio of two canonical
+  // areas (Σ per-mount tributary ÷ array footprint), stated explicitly so the
+  // screening basis is legible. Never an exact per-position tributary geometry.
+  const _areaRatio = (rr && rr.present && rr.arrayAreaFt2 && rr.tributarySumFt2)
+    ? (rr.tributarySumFt2 / rr.arrayAreaFt2)
+    : null;
+  const _areaRatioStr = _areaRatio != null ? `${_areaRatio.toFixed(3)}×` : '—';
+
   return `
       <div class="section-title">Attachment Reaction Schedule — Grouped by Load Case (${'ASCE 7'} §2.4 ASD) — ${atts.length} attachment${atts.length === 1 ? '' : 's'}, ${groups.length} distinct group${groups.length === 1 ? '' : 's'}</div>
       <table class="equip-table" style="width:100%;">
@@ -1119,7 +1168,7 @@ function renderReactionSchedule(proj: StructuralProjection): string {
       </table>
       <div style="padding:2px 6px;font-size:6.5px;color:#555;line-height:1.3;border:var(--border);border-top:none;">
         Reactions sourced from the canonical attachment objects (structural-engine-v4 mount layout). Uplift = ASD 0.6·W net C&amp;C over the per-mount tributary; Down = Dead + Snow over the same tributary.
-        <strong>CONSERVATIVE SCREENING ENVELOPE:</strong> the &ldquo;Zone&rdquo; column prints the GOVERNING corner (ASCE 7 Zone 3) C&amp;C pressure applied UNIFORMLY to every attachment, and each mount is charged a FULL interior tributary (end mounts included). This is an intentionally conservative screening basis, not an exact per-position zone/tributary distribution &mdash; a design that passes here passes at every position.
+        <strong>CONSERVATIVE SCREENING ENVELOPE:</strong> ALL attachments use the GOVERNING corner (ASCE 7 Zone 3) C&amp;C pressure applied UNIFORMLY, on an <strong>ASD basis</strong> (0.6·W uplift; D+S gravity) — the capacity checks on this sheet declare the SAME ASD load basis. Each mount is charged a FULL interior tributary (end mounts included); the Σ per-mount tributary is <strong>${_areaRatioStr}</strong> the array footprint (Σ tributary ÷ array area = ${rr && rr.present ? `${rr.tributarySumFt2 ?? '—'} ÷ ${rr.arrayAreaFt2 ?? '—'} ft²` : 'per canonical reconciliation'}). This is an intentionally conservative screening basis, NOT an exact per-position zone or tributary geometry &mdash; a design that passes here passes at every position.
         ${gated ? 'Capacity + SF are gated to PENDING (§9 — allowable source unverified).' : ''}
       </div>${footer}`;
 }
@@ -1129,7 +1178,22 @@ export function pageStructural(input: PermitInput, cad: CADModel, pageNum: numbe
   const sys = cad.systemType as string;
   if (isFence(sys))  return pageStructuralFence(input, cad, pageNum, totalPages);
   if (isGround(sys)) return pageStructuralGround(input, cad, pageNum, totalPages);
-  return pageStructuralRoof(input, cad, pageNum, totalPages);
+  return pageStructuralRoof(input, cad, pageNum, totalPages, 1);
+}
+
+/** PV-4C.1 — the formal continuation of the roof structural calculation sheet
+ *  (W9/§15 page-fit). Rendered ONLY for roof systems that carry a PV-4C; the
+ *  manifest gates it identically so the page set and sheet index never drift. */
+export function pageStructuralRoofContinuation(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+  return pageStructuralRoof(input, cad, pageNum, totalPages, 2);
+}
+
+/** Whether the roof structural sheet PV-4C spills to a PV-4C.1 continuation.
+ *  Single source shared by the manifest (sheet index / snapshot digest) and the
+ *  page assembly so both agree. Roof systems only (ground/fence have their own
+ *  single-sheet structural pages). */
+export function roofStructuralHasContinuation(systemType: unknown): boolean {
+  return isRoof(systemType as string);
 }
 
 
@@ -1276,7 +1340,21 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
     return html;
   }
 
-  return ''; // roof — no additional hardware table
+  // §12 — roof jobs project the ONE canonical fastener assembly (identical to
+  // PV-3 / APP-A / PE-1). Prior to this the roof case rendered no attachment line.
+  const _faS = projectFastenerAssembly(input);
+  if (!_faS.present) return '';
+  let rhtml = '<div class="section-title">Roof Attachment Hardware</div>';
+  rhtml += '<table class="equip-table">';
+  rhtml += '<thead><tr><th>Item</th><th>Fastener Assembly</th><th style="text-align:right">Qty/Mount</th><th>Embedment</th><th>Verification</th></tr></thead>';
+  rhtml += '<tbody>';
+  rhtml += '<tr><td class="fw7">Structural Fastener</td>'
+        + `<td data-sched-field="fastener">${escapeH(_faS.line)}</td>`
+        + `<td class="tr">${_faS.qtyPerMount ?? '—'}</td>`
+        + `<td>${_faS.embedmentIn != null ? _faS.embedmentIn + '" min' : '—'}</td>`
+        + `<td style="font-weight:bold;color:${_faS.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_faS.certLabel)}</td></tr>`;
+  rhtml += '</tbody></table>';
+  return rhtml;
 }
 
 // ── BOM Table Renderer (v48.x) ───────────────────────────────────────────────
@@ -1292,8 +1370,24 @@ export function schedBomRowCount(bom: PermitInput['bom']): number {
 }
 
 /** Max BOM rows on the primary SCHED sheet (it also carries the module/
- *  inverter tables); the continuation sheet is all-table and fits more. */
-export const SCHED_BOM_ROWS_FIRST = 15;
+ *  inverter tables + wire-sizing + conclusion); the continuation sheets are
+ *  all-table and fit more. W9/§15: reduced so the primary SCHED sheet's tables
+ *  + conclusion fit the fixed page. */
+export const SCHED_BOM_ROWS_FIRST = 10;
+
+/** Max BOM rows PER continuation sheet (SCHED-2, SCHED-3, …). All-table pages,
+ *  so a page holds more rows than the primary sheet. Chosen so a full
+ *  continuation page + its summary block never overflows the fixed 11in page. */
+export const SCHED_BOM_ROWS_CONT = 22;
+
+/** Number of SCHED continuation sheets required for a BOM of this size (0 when
+ *  it fits on the primary SCHED sheet). Single source shared by the manifest
+ *  (sheet index / snapshot digest) and the page assembly so both agree. */
+export function schedContPageCount(bom: PermitInput['bom']): number {
+  const rows = schedBomRowCount(bom);
+  if (rows <= SCHED_BOM_ROWS_FIRST) return 0;
+  return Math.ceil((rows - SCHED_BOM_ROWS_FIRST) / SCHED_BOM_ROWS_CONT);
+}
 
 /** Sub-system ordinal for BOM grouping (roof > ground > fence > unstamped). */
 const BOM_SUB_ORDER: Record<string, number> = { roof: 0, ground: 1, fence: 2 };
@@ -1392,9 +1486,9 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   }
 
   if (endRow < flat.length) {
-    // More rows follow on the continuation sheet — say so instead of clipping.
+    // More rows follow on the next continuation sheet — say so instead of clipping.
     html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-    html += '<td colspan="' + nCols + '" style="text-align:center;letter-spacing:1px;">CONTINUED ON SCHED-2 — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
+    html += '<td colspan="' + nCols + '" style="text-align:center;letter-spacing:1px;">CONTINUED ON NEXT SHEET — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
     html += '</tr>';
     html += '</tbody></table>';
     return html;
@@ -1421,14 +1515,19 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   return html;
 }
 
-/** Continuation sheet for long BOMs — rendered only when the BOM exceeds
- *  SCHED_BOM_ROWS_FIRST rows (generatePermit decides). */
-export function pageEquipmentScheduleCont(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+/** Continuation sheet(s) for long BOMs — rendered only when the BOM exceeds
+ *  SCHED_BOM_ROWS_FIRST rows (generatePermit decides). W9/§15: paginates across
+ *  as many sheets as the BOM needs (SCHED-2, SCHED-3, …), each capped at
+ *  SCHED_BOM_ROWS_CONT rows so no continuation page clips. `contIndex` is
+ *  0-based (0 = SCHED-2). */
+export function pageEquipmentScheduleCont(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, contIndex = 0): string {
+  const startRow = SCHED_BOM_ROWS_FIRST + contIndex * SCHED_BOM_ROWS_CONT;
+  const sheetId = contIndex === 0 ? 'SCHED-2' : `SCHED-${contIndex + 2}`;
   return `
   <div class="page">
-    ${titleBlock(input, 'SCHED-2', 'EQUIPMENT SCHEDULE (CONTINUED)', pageNum, totalPages)}
+    ${titleBlock(input, sheetId, 'EQUIPMENT SCHEDULE (CONTINUED)', pageNum, totalPages)}
     <div class="page-content">
-      ${renderBOMTable(input.bom, SCHED_BOM_ROWS_FIRST, Number.POSITIVE_INFINITY, { bySub: isHybridPlanset(cad) })}
+      ${renderBOMTable(input.bom, startRow, SCHED_BOM_ROWS_CONT, { bySub: isHybridPlanset(cad) })}
     </div>
   </div>`;
 }
@@ -1646,14 +1745,13 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       <!-- System-Specific Hardware Schedule -->
          ${renderHardwareSchedule(input, cad)}
 
-      <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
+      <div style="padding:3px 6px;margin-top:var(--xs);font-size:var(--f-sm);line-height:1.4;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — EQUIPMENT SCHEDULE:</strong>
         ${_schedAuth.isHybrid
           ? `This hybrid system utilizes ${system.totalPanels} modules across ${_schedAuth.subSystems.length} sub-systems (see the per-sub module tables above)`
           : `This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
         rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each`} for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
-        All equipment is UL-listed and installed per manufacturer specifications. Wire sizing has been verified per NEC 690.8 with appropriate derating applied.
-        The equipment selection complies with NEC ${_cpEq.nec ?? 'PENDING'} and applicable UL standards (UL 1741, UL 61730, UL 2703).
+        All equipment is UL-listed; wire sizing verified per NEC 690.8 with derating; equipment complies with NEC ${_cpEq.nec ?? 'PENDING'} and UL 1741 / 61730 / 2703.
       </div>
     </div>
   </div>`;
