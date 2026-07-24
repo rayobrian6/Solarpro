@@ -37,11 +37,29 @@ const DOMAIN_LABEL: Record<string, string> = {
 // Ordered so the reviewer reads the most consequential lanes first.
 const DOMAIN_ORDER = ['equipment', 'structural', 'electrical', 'code', 'document', 'review', 'other'];
 
+// §18 (closeout 2026-07-23) — RS-1 legibility floor. Core blocker text was
+// 6–6.5px (≈4.9pt at 17x11) — below the readable floor for a permit reviewer.
+// Every blocker's authority path + resolution action is now printed at an
+// effective ≥6.5pt (8.5px) and the registry paginates onto formal RS-1.n
+// continuation sheets when it no longer fits one page at the larger size.
+// Core blocker text at ≥6.5pt effective (8.7px ≈ 6.53pt at 17x11 96dpi) — was
+// 6–6.5px (≈4.9pt), below the readable floor. Every authority path + resolution
+// action is preserved (never abbreviated) at this size; page-fit stays strict.
+const RS_FONT = {
+  badge: '7.5px',
+  code: '8.7px',
+  issue: '8.7px',
+  justification: '7.6px',
+  resolution: '8.7px',
+  sheets: '8.2px',
+  domainHdr: '9px',
+};
+
 function sevBadge(sev: string): string {
   const blocking = sev === 'blocking';
   const bg = blocking ? '#b91c1c' : '#b45309';
   const label = blocking ? 'BLOCKING' : 'ADVISORY';
-  return `<span style="display:inline-block;background:${bg};color:#fff;font-weight:900;font-size:6px;letter-spacing:0.5px;padding:1px 4px;border-radius:2px;white-space:nowrap;">${label}</span>`;
+  return `<span style="display:inline-block;background:${bg};color:#fff;font-weight:900;font-size:${RS_FONT.badge};letter-spacing:0.5px;padding:1px 4px;border-radius:2px;white-space:nowrap;">${label}</span>`;
 }
 
 export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
@@ -69,15 +87,15 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
     // missing fact cannot affect safety, code compliance, procurement, engineering
     // approval, or permit acceptance). Single-sourced from the snapshot registry.
     const justification = (r.severity === 'warning' && r.justification)
-      ? `<div style="margin-top:2px;font-size:5.8px;line-height:1.3;color:#7c5b12;"><span style="font-weight:900;">ADVISORY JUSTIFICATION:</span> ${escapeH(r.justification)}</div>`
+      ? `<div style="margin-top:2px;font-size:${RS_FONT.justification};line-height:1.3;color:#7c5b12;"><span style="font-weight:900;">ADVISORY JUSTIFICATION:</span> ${escapeH(r.justification)}</div>`
       : '';
     return `
     <tr>
       <td style="text-align:center;">${sevBadge(r.severity)}</td>
-      <td class="mono" style="font-weight:900;font-size:6.5px;white-space:nowrap;">${escapeH(r.code)}</td>
-      <td style="font-size:6.5px;line-height:1.3;">${escapeH(r.explanation)}${justification}</td>
-      <td style="font-size:6.3px;line-height:1.3;color:#1e3a5f;">${escapeH(r.resolutionAction)}</td>
-      <td style="font-size:6px;line-height:1.25;color:#555;">${escapeH(r.affectedSheets.join(', ') || '—')}</td>
+      <td class="mono" style="font-weight:900;font-size:${RS_FONT.code};white-space:nowrap;">${escapeH(r.code)}</td>
+      <td style="font-size:${RS_FONT.issue};line-height:1.3;">${escapeH(r.explanation)}${justification}</td>
+      <td style="font-size:${RS_FONT.resolution};line-height:1.3;color:#1e3a5f;">${escapeH(r.resolutionAction)}</td>
+      <td style="font-size:${RS_FONT.sheets};line-height:1.25;color:#555;">${escapeH(r.affectedSheets.join(', ') || '—')}</td>
     </tr>`;
   };
 
@@ -86,7 +104,7 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
     if (!rows.length) return '';
     return `
       <div style="margin-top:5px;">
-        <div style="background:#111;color:#fff;font-weight:900;font-size:7px;letter-spacing:0.7px;padding:2px 6px;">
+        <div style="background:#111;color:#fff;font-weight:900;font-size:${RS_FONT.domainHdr};letter-spacing:0.7px;padding:2px 6px;">
           ${DOMAIN_LABEL[domain] ?? domain.toUpperCase()} &mdash; ${rows.length} ${rows.length === 1 ? 'BLOCKER' : 'BLOCKERS'}
         </div>
         <table class="equip-table" style="width:100%;table-layout:fixed;">

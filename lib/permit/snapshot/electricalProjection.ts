@@ -11,6 +11,7 @@
 // feeder + its route segment. Same field, same rounding, everywhere.
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitDesignSnapshot, RouteSegmentRecord } from './types';
+import { evaluateCompliance, type ComplianceResult } from './complianceState';
 
 export interface CanonicalFeederProjection {
   /** the canonical feeder route segment (undefined ⇒ segment authority absent). */
@@ -239,6 +240,64 @@ export function projectCanonicalBranch(snap: PermitDesignSnapshot | null | undef
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// §6/§7/§10 (closeout 2026-07-23) — THE canonical projection of the micro AC
+// branch trunk as a LISTED CABLE ASSEMBLY with GEOMETRY-DERIVED per-branch
+// lengths. PV-4B/E-1/SCHED/BOM/APP-A read THIS instead of a generic "#12 AWG
+// THWN-2" row for the open-air branch section (gate 6). The trunk description is
+// the assembly (manufacturer + model/SKU + construction + listing), NEVER a
+// translated THWN gauge. Lengths carry §10 taxonomy meaning + a segment/assembly
+// id so no printed number mixes a design route with a procurement quantity.
+// ═══════════════════════════════════════════════════════════════════════════
+import type { ListedCableAssembly, BranchCablePath } from './types';
+
+export interface ListedCableAssemblyProjection {
+  present: boolean;
+  assembly: ListedCableAssembly | null;
+  /** the free-air branch CONDUCTOR cell — the assembly description, never THWN. */
+  conductorCell: string;
+  /** short label for tight cells ('ENPHASE Q CABLE Q-12-10-240'). */
+  shortLabel: string;
+  /** per-branch cable-path objects (geometry-derived designed-installed lengths). */
+  branchPaths: BranchCablePath[];
+  /** Σ procurement footage (BOM basis) + Σ designed-installed (route basis). */
+  totalProcurementFt: number | null;
+  totalDesignedInstalledFt: number | null;
+  totalDrops: number | null;
+  lengthProvenance: 'geometry-derived' | 'estimated' | null;
+}
+
+export function projectListedCableAssembly(snap: PermitDesignSnapshot | null | undefined): ListedCableAssemblyProjection {
+  const asm = snap?.electrical?.listedCableAssembly ?? null;
+  const paths = snap?.electrical?.branchCablePaths ?? [];
+  const empty: ListedCableAssemblyProjection = {
+    present: false, assembly: null,
+    conductorCell: 'PENDING — branch cable assembly authority incomplete',
+    shortLabel: 'AC TRUNK CABLE', branchPaths: [],
+    totalProcurementFt: null, totalDesignedInstalledFt: null, totalDrops: null, lengthProvenance: null,
+  };
+  if (!asm) return empty;
+  const gauge = asm.conductorGauge ?? '';
+  const cnt = asm.conductorCount ?? null;
+  // conductor cell = the LISTED ASSEMBLY, never a bare THWN gauge (gate 6).
+  const conductorCell = `${asm.wiringMethodLabel}`
+    + (asm.sku ? ` · ${asm.sku}` : '')
+    + (cnt && gauge ? ` · ${cnt}×${gauge}` : gauge ? ` · ${gauge}` : '')
+    + (asm.maxBranchCurrentA ? ` · ${asm.maxBranchCurrentA}A branch (listed)` : '');
+  const shortLabel = `${asm.manufacturer.toUpperCase()} ${asm.ecosystem}`.trim() + (asm.sku ? ` ${asm.sku}` : '');
+  const totalProc = paths.reduce((s, p) => s + (p.procurementLengthFt ?? 0), 0);
+  const totalDesigned = paths.reduce((s, p) => s + (p.designedInstalledLengthFt ?? 0), 0);
+  const totalDrops = paths.reduce((s, p) => s + (p.dropCount ?? 0), 0) || asm.dropCount;
+  const geom = paths.length > 0 && paths.every(p => p.lengthProvenance === 'geometry-derived');
+  return {
+    present: true, assembly: asm, conductorCell, shortLabel, branchPaths: paths,
+    totalProcurementFt: totalProc > 0 ? Math.round(totalProc) : (asm.cableLengthFt ?? null),
+    totalDesignedInstalledFt: totalDesigned > 0 ? Math.round(totalDesigned * 10) / 10 : null,
+    totalDrops: totalDrops ?? null,
+    lengthProvenance: paths.length ? (geom ? 'geometry-derived' : 'estimated') : null,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // §3/§4 (closeout 2026-07-23) — THE canonical projection of the SHARED branch
 // home-run raceway (the jbox→combiner conduit that carries all N branches
 // bundled). E-1's SEGMENT_2A conduit label and PV-4B's home-run row read THIS,
@@ -254,6 +313,10 @@ export interface SharedBranchRacewayProjection {
   sharedCircuitCount: number | null;
   conductorCount: number | null;
   currentCarryingCount: number | null;
+  /** §1 — the home-run PHASE conductor gauge (from BRANCH_HOMERUN_RUN — the #10
+   *  the SVG/E-1 must print, NEVER the legacy #12-from-OCPD branch gauge). */
+  conductorGauge: string | null;
+  egcGauge: string | null;
   fillPct: number | null;
   minimumCodeRacewaySize: string | null;
   selectedRacewaySize: string | null;
@@ -266,7 +329,8 @@ export interface SharedBranchRacewayProjection {
 export function projectSharedBranchRaceway(snap: PermitDesignSnapshot | null | undefined): SharedBranchRacewayProjection {
   const empty: SharedBranchRacewayProjection = {
     present: false, physicalRacewayId: null, racewayType: null, tradeSizeIn: null, necArticle: null,
-    sharedCircuitCount: null, conductorCount: null, currentCarryingCount: null, fillPct: null,
+    sharedCircuitCount: null, conductorCount: null, currentCarryingCount: null,
+    conductorGauge: null, egcGauge: null, fillPct: null,
     minimumCodeRacewaySize: null, selectedRacewaySize: null, upsizingReason: null, oneWayFt: null,
     conduitLabel: null,
   };
@@ -290,6 +354,8 @@ export function projectSharedBranchRaceway(snap: PermitDesignSnapshot | null | u
     sharedCircuitCount,
     conductorCount: rw?.conductorCount ?? null,
     currentCarryingCount: rw?.currentCarryingCount ?? null,
+    conductorGauge: seg?.conductorGauge ?? null,
+    egcGauge: seg?.egcGauge ?? null,
     fillPct: num(rw?.fillPct) ?? num(seg?.fillPct),
     minimumCodeRacewaySize: rw?.minimumCodeRacewaySize ?? seg?.minimumCodeRacewaySize ?? null,
     selectedRacewaySize: rw?.selectedRacewaySize ?? tradeSizeIn,
@@ -409,4 +475,294 @@ export function branchLayoutCaption(snap: PermitDesignSnapshot | null | undefine
   const dev = isEnphase ? 'IQ MICROINVERTER' : 'MICROINVERTER';
   const trunk = isEnphase ? 'ENPHASE Q CABLE AC BRANCH (COLORED)' : 'AC BRANCH CIRCUIT (COLORED)';
   return `${dev} (▪) UNDER EACH MODULE · CONNECTED IN PARALLEL ON ${trunk} · DASHED = HOMERUN TO JB · SEE LEGEND IN DATA RAIL`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §1 (closeout 2026-07-23) — THE E-1 SECTIONED PHYSICAL SCHEDULE. E-1 renders
+// the CANONICAL section objects DIRECTLY: the open-air Q-Cable branch trunks
+// (per branch), the shared jbox→combiner home-run raceway (with its FULL current-
+// carrying-conductor inventory from the physicalRaceway object — 6 CCC for a
+// 3-branch design, NOT the fictitious #12 THWN the legacy microBranchRow OCPD-
+// sized), the combiner feeder, the disconnect→tap run, and the tap conductors.
+// Every §1 field is projected from the canonical snapshot — NEVER re-derived, and
+// the sections are NEVER merged into one generalized row. The compliance state of
+// each section is the ONE shared tri-state result (fail-closed on pending length /
+// blank fill / unmeasured tap length — no PASS on a hole, gate 3).
+//
+// Note: the branch trunks are the LISTED Enphase Q Cable assembly (TC-ER), not
+// THWN — a round-2 agent builds the full ListedCableAssembly object; this
+// projection renders the canonical branch/segment data as-is (labeled 'ENPHASE Q
+// CABLE (TC-ER)'), inventing no THWN translations.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface E1PhysicalSection {
+  /** the CANONICAL section id (segmentId or serviceTopology objectId) — gate 1. */
+  sectionId: string;
+  sectionLabel: string;
+  fromDevice: string;
+  toDevice: string;
+  /** cable/conductor type ('ENPHASE Q CABLE (TC-ER)' | 'THWN-2' | conductorSpec). */
+  cableType: string;
+  /** current-carrying conductor count — for the shared run this EQUALS the
+   *  physicalRaceway inventory exactly (gate 2). */
+  conductorCount: number | null;
+  /** total conductors incl. EGC where the raceway object carries it. */
+  totalConductorCount: number | null;
+  conductorSize: string | null;
+  /** grounding / bonding method + EGC size. */
+  bonding: string | null;
+  physicalRacewayId: string | null;
+  racewayType: string | null;
+  racewaySize: string | null;
+  operatingCurrentA: number | null;
+  continuousCurrentA: number | null;
+  ocpdA: number | null;
+  lengthFt: number | null;
+  lengthSource: string | null;
+  verificationStatus: string | null;
+  /** null ⇒ fill not applicable (open-air) OR not computed (pending). */
+  fillPct: number | null;
+  fillApplicable: boolean;
+  deratingFactor: number | null;
+  deratingBasis: string | null;
+  voltageDropPct: number | null;
+  vdLimitPct: number;
+  compliance: ComplianceResult;
+}
+
+const _VERIFIED_ROUTE = new Set(['field-measured', 'field-verified', 'as-built-verified']);
+
+function _seg(snap: PermitDesignSnapshot, id: string): RouteSegmentRecord | null {
+  return (snap.electrical?.routeSegments ?? []).find(r => r.segmentId === id) ?? null;
+}
+
+/** THE E-1 sectioned physical schedule (micro AC path). Returns [] for non-micro
+ *  topologies (E-1 keeps its per-sub source zone there). Pure. */
+export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | undefined): E1PhysicalSection[] {
+  const elec = snap?.electrical;
+  if (!elec || elec.topology !== 'MICRO') return [];
+  const sections: E1PhysicalSection[] = [];
+
+  const branchSeg = _seg(snap!, 'BRANCH_RUN');
+  const micro = snap!.equipment?.microInverters?.[0];
+  const isEnphase = /enphase/i.test((micro?.manufacturer ?? '').trim());
+  // §6 — the branch trunk cable TYPE is the LISTED ASSEMBLY (manufacturer + SKU),
+  // never a generic THWN gauge; §7 — its length is the per-branch geometric path.
+  const _asmProj = projectListedCableAssembly(snap);
+  const qCableLabel = _asmProj.present
+    ? `${_asmProj.assembly!.wiringMethodLabel}${_asmProj.assembly!.sku ? ` · ${_asmProj.assembly!.sku}` : ''}`
+    : (isEnphase ? 'ENPHASE Q CABLE (TC-ER)' : 'LISTED AC TRUNK CABLE (TC-ER)');
+  const _pathByBranch = new Map(_asmProj.branchPaths.map(p => [p.branchId, p]));
+  const branches = elec.branches ?? [];
+  const branchGnd = (elec.groundingObjects ?? []).filter(g => g.purpose === 'branch-egc');
+
+  // ── Q-Cable branch trunks (one canonical section per branch) ───────────────
+  branches.forEach((b, i) => {
+    const _bPath = _pathByBranch.get(b.branchId) ?? null;
+    const egc = branchGnd[i]?.conductorSize ?? branchGnd[0]?.conductorSize ?? branchSeg?.egcGauge ?? null;
+    const verified = branchSeg ? _VERIFIED_ROUTE.has(String(branchSeg.verificationStatus)) : false;
+    const pending: string[] = [];
+    if (branchSeg && !verified) pending.push('branch route length is a CAD-derived estimate (not field-verified)');
+    const vd = num(branchSeg?.voltageDropPct);
+    const compliance = evaluateCompliance({
+      requiredValues: [
+        { label: 'branch conductor size', value: branchSeg?.conductorGauge },
+        { label: 'branch OCPD', value: b.ocpdA, numeric: true },
+        { label: 'branch operating current', value: b.currentA, numeric: true },
+      ],
+      checks: [
+        { label: 'continuous ≤ OCPD (NEC 240.4)', pass: Number.isFinite(b.continuousA) && Number.isFinite(b.ocpdA) ? b.continuousA <= b.ocpdA : null },
+        { label: 'branch VD ≤ 2%', pass: vd == null ? null : vd <= 2 },
+      ],
+      pending,
+    });
+    sections.push({
+      sectionId: 'BRANCH_RUN',
+      sectionLabel: `AC BRANCH ${b.label} — Q-CABLE TRUNK (OPEN AIR)`,
+      fromDevice: `${b.label}: ${b.moduleCount} × MICROINVERTER`,
+      toDevice: 'ROOF J-BOX',
+      cableType: qCableLabel,
+      // §6 — the assembly's own conductor count/gauge (Q Cable = 2×#12), never the
+      // legacy segment gauge (the shared home-run's #10 belongs to a DIFFERENT run).
+      conductorCount: _asmProj.assembly?.conductorCount ?? num(branchSeg?.conductorCount),
+      totalConductorCount: (_asmProj.assembly?.conductorCount ?? branchSeg?.conductorCount) != null
+        ? (_asmProj.assembly?.conductorCount ?? branchSeg!.conductorCount!) + 1 : null,
+      conductorSize: _asmProj.assembly?.conductorGauge ?? branchSeg?.conductorGauge ?? null,
+      bonding: egc ? `${egc} Cu EGC (NEC 250.122 @ ${b.ocpdA}A) — with circuit conductors` : null,
+      physicalRacewayId: null,
+      racewayType: 'FREE AIR — NEC 690.31(C)',
+      racewaySize: null,
+      operatingCurrentA: num(b.currentA),
+      continuousCurrentA: num(b.continuousA),
+      ocpdA: num(b.ocpdA),
+      // §7 — per-branch geometric designed-installed length (not the shared 68-ft
+      // plane-width estimate); falls back to the segment length when no geometry.
+      lengthFt: _bPath?.designedInstalledLengthFt ?? num(branchSeg?.oneWayFt),
+      lengthSource: branchSeg?.lengthSource ?? null,
+      verificationStatus: branchSeg?.verificationStatus ?? branchSeg?.lengthSource ?? null,
+      fillPct: null,
+      fillApplicable: false,
+      deratingFactor: num(branchSeg?.tempDeratingFactor),
+      deratingBasis: 'free-air (no raceway fill adjustment)',
+      voltageDropPct: vd,
+      vdLimitPct: 2,
+      compliance,
+    });
+  });
+
+  // ── Shared branch home-run raceway (ALL branches bundled — the 6-CCC row) ───
+  const hr = projectSharedBranchRaceway(snap);
+  const hrSeg = _seg(snap!, 'BRANCH_HOMERUN_RUN');
+  if (hr.present) {
+    const verified = hrSeg ? _VERIFIED_ROUTE.has(String(hrSeg.verificationStatus)) : false;
+    const pending: string[] = [];
+    if (!verified) pending.push('home-run route length is a CAD-derived estimate (not field-verified)');
+    const vd = num(hrSeg?.voltageDropPct);
+    const opA = branches.reduce((s, b) => s + (Number.isFinite(b.currentA) ? b.currentA : 0), 0);
+    const contA = branches.reduce((s, b) => s + (Number.isFinite(b.continuousA) ? b.continuousA : 0), 0);
+    const compliance = evaluateCompliance({
+      requiredValues: [
+        { label: 'home-run conductor size', value: hr.conductorGauge },
+        { label: 'shared raceway type', value: hr.racewayType },
+        { label: 'current-carrying conductor count', value: hr.currentCarryingCount, numeric: true },
+        { label: 'conduit fill %', value: hr.fillPct, numeric: true },
+      ],
+      checks: [
+        { label: 'conduit fill ≤ 40%', pass: hr.fillPct == null ? null : hr.fillPct <= 40 },
+        { label: 'home-run VD ≤ 2%', pass: vd == null ? null : vd <= 2 },
+      ],
+      pending,
+    });
+    sections.push({
+      sectionId: 'BRANCH_HOMERUN_RUN',
+      sectionLabel: `SHARED BRANCH HOME-RUN RACEWAY (${hr.sharedCircuitCount ?? '—'} BRANCHES BUNDLED)`,
+      fromDevice: `ROOF J-BOX (${hr.sharedCircuitCount ?? '—'} branches)`,
+      toDevice: 'AC COMBINER',
+      cableType: hrSeg?.insulation ?? 'THWN-2',
+      conductorCount: hr.currentCarryingCount,
+      totalConductorCount: hr.conductorCount,
+      conductorSize: hr.conductorGauge,
+      bonding: hr.egcGauge ? `${hr.egcGauge} Cu EGC in raceway (NEC 250.122)` : null,
+      physicalRacewayId: hr.physicalRacewayId,
+      racewayType: hr.racewayType,
+      racewaySize: hr.selectedRacewaySize ?? hr.tradeSizeIn,
+      operatingCurrentA: opA > 0 ? Math.round(opA * 100) / 100 : null,
+      continuousCurrentA: contA > 0 ? Math.round(contA * 100) / 100 : null,
+      ocpdA: null,   // branches individually protected upstream; the raceway carries no single OCPD
+      lengthFt: hr.oneWayFt,
+      lengthSource: hrSeg?.lengthSource ?? null,
+      verificationStatus: hrSeg?.verificationStatus ?? hrSeg?.lengthSource ?? null,
+      fillPct: hr.fillPct,
+      fillApplicable: true,
+      deratingFactor: num(hrSeg?.tempDeratingFactor),
+      deratingBasis: null,
+      voltageDropPct: vd,
+      vdLimitPct: 2,
+      compliance,
+    });
+  }
+
+  // ── Combiner feeder + downstream service runs (COMBINER→DISCO, DISCO→TAP) ───
+  const feed = projectCanonicalFeeder(snap);
+  const raceways = elec.physicalRaceways ?? [];
+  const runRow = (
+    segId: string, label: string, applicableFillFromRw?: string,
+  ): void => {
+    const seg = _seg(snap!, segId);
+    if (!seg) return;
+    const rw = applicableFillFromRw ? raceways.find(r => r.physicalRacewayId === applicableFillFromRw) : null;
+    const fillPct = num(rw?.fillPct) ?? num(seg.fillPct);
+    const fillApplicable = (seg.raceway ?? '') !== 'FREE_AIR' && seg.raceway != null;
+    const verified = _VERIFIED_ROUTE.has(String(seg.verificationStatus));
+    const vd = num(seg.voltageDropPct);
+    const pending: string[] = [];
+    if (!verified) pending.push('feeder route length is a CAD-derived estimate (not field-verified)');
+    const compliance = evaluateCompliance({
+      requiredValues: [
+        { label: 'conductor size', value: seg.conductorGauge },
+        { label: 'raceway type', value: seg.raceway },
+        ...(fillApplicable ? [{ label: 'conduit fill %', value: fillPct, numeric: true }] : []),
+      ],
+      checks: [
+        { label: 'conduit fill ≤ 40%', pass: !fillApplicable ? true : (fillPct == null ? null : fillPct <= 40) },
+        { label: 'feeder VD ≤ 3%', pass: vd == null ? null : vd <= 3 },
+      ],
+      pending,
+    });
+    sections.push({
+      sectionId: segId,
+      sectionLabel: label,
+      fromDevice: seg.from,
+      toDevice: seg.to,
+      cableType: seg.insulation ?? 'THWN-2',
+      conductorCount: num(seg.conductorCount),
+      totalConductorCount: seg.conductorCount != null ? seg.conductorCount + 1 : null,
+      conductorSize: seg.conductorGauge,
+      bonding: seg.egcGauge ? `${seg.egcGauge} Cu EGC in raceway (NEC 250.122)` : null,
+      physicalRacewayId: seg.physicalRacewayId ?? null,
+      racewayType: seg.raceway === 'FREE_AIR' ? 'FREE AIR — NEC 690.31(C)' : seg.raceway,
+      racewaySize: seg.tradeSizeIn === 'NONE' || seg.tradeSizeIn === 'N/A' ? null : seg.tradeSizeIn,
+      operatingCurrentA: segId === 'COMBINER_TO_DISCO_RUN' ? feed.currentA : null,
+      continuousCurrentA: segId === 'COMBINER_TO_DISCO_RUN' ? feed.continuousA : null,
+      ocpdA: num(seg.ocpdA),
+      lengthFt: num(seg.oneWayFt),
+      lengthSource: seg.lengthSource ?? null,
+      verificationStatus: seg.verificationStatus ?? seg.lengthSource ?? null,
+      fillPct,
+      fillApplicable,
+      deratingFactor: num(seg.tempDeratingFactor),
+      deratingBasis: rw?.deratingBasis ?? null,
+      voltageDropPct: vd,
+      vdLimitPct: 3,
+      compliance,
+    });
+  };
+  runRow('COMBINER_TO_DISCO_RUN', 'COMBINER FEEDER → AC DISCONNECT', 'RW-COMBINER_TO_DISCO_RUN');
+  runRow('DISCO_TO_METER_RUN', 'FUSED DISCONNECT → SERVICE / TAP', 'RW-DISCO_TO_METER_RUN');
+
+  // ── Tap conductors (supply-side) — its OWN section, honest ≤10-ft PENDING ───
+  const tap = (elec.serviceTopology ?? []).find(o => o.type === 'tap-conductors');
+  if (tap) {
+    const rule = (tap.constraints ?? []).find(c => c.code === 'NEC-705.11(C)-TAP-10FT');
+    const pending: string[] = [];
+    if (rule?.state === 'pending') pending.push('tap-conductor length not measured — NEC 705.11(C) ≤10-ft rule PENDING');
+    const failures = rule?.state === 'fail' ? [{ label: 'tap conductors > 10 ft (NEC 705.11(C))', pass: false as const }] : [];
+    const compliance = evaluateCompliance({
+      requiredValues: [
+        { label: 'tap conductor spec', value: tap.conductorSpec },
+        { label: 'tap conductor length', value: tap.lengthFt, numeric: true },
+      ],
+      checks: failures,
+      pending,
+    });
+    sections.push({
+      sectionId: tap.objectId,
+      sectionLabel: 'TAP CONDUCTORS — SUPPLY-SIDE (NEC 705.11(C))',
+      fromDevice: 'SUPPLY-SIDE TAP POINT',
+      toDevice: 'FUSED AC DISCONNECT',
+      cableType: tap.conductorSpec ?? 'THWN-2',
+      conductorCount: null,
+      totalConductorCount: null,
+      conductorSize: tap.conductorSpec?.match(/#\d+(?:\/0)?\s*AWG/i)?.[0] ?? null,
+      bonding: 'with service conductors (NEC 250.122)',
+      physicalRacewayId: null,
+      racewayType: 'PER SERVICE ENTRANCE',
+      racewaySize: null,
+      operatingCurrentA: null,
+      continuousCurrentA: null,
+      ocpdA: null,
+      lengthFt: num(tap.lengthFt),
+      lengthSource: tap.lengthSource ?? null,
+      verificationStatus: tap.lengthSource === 'field-measurement' ? 'field-measured' : 'unverified-estimate',
+      fillPct: null,
+      fillApplicable: false,
+      deratingFactor: null,
+      deratingBasis: null,
+      voltageDropPct: null,
+      vdLimitPct: 3,
+      compliance,
+    });
+  }
+
+  return sections;
 }

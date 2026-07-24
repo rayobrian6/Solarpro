@@ -158,12 +158,19 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const deviceCount = isMicro ? totalPanels : undefined;
   // Branch rows come from the shared authority (same planner, same OCPD math)
   // so the SLD's conductor gauge tracks PV-4A/PV-4B instead of a hardcoded #10.
+  // §1 (closeout 2026-07-23) — the SVG branch/home-run gauge is the CANONICAL
+  // BRANCH_RUN conductor gauge (#10), NEVER the legacy microBranchRow wireGauge
+  // (wireGaugeForOcpd(20A) = #12 — the fictitious THWN branch this campaign kills).
+  // The listed trunk is drawn as 'ENPHASE Q CABLE (TC-ER)' open-air (SEGMENT 1);
+  // the shared jbox→combiner home-run (SEGMENT_2A) prints the physicalRaceway's
+  // full current-carrying inventory (6×#10 for a 3-branch design), not #12.
+  const _canonBranchGauge = _snapBranch.gauge ?? '#10 AWG';
   const microBranches = isMicro ? _auth.microBranches.map((b) => ({
     branchIndex: b.index,
     deviceCount: b.deviceCount,
     branchCurrentA: b.branchCurrentA,
     ocpdAmps: b.ocpdAmps,
-    conductorCallout: `${b.wireGauge} THWN-2`,
+    conductorCallout: `${_canonBranchGauge} THWN-2`,
     necReference: 'NEC 690.8(B)',
   })) : undefined;
 
@@ -211,6 +218,11 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     homerunConduitType:      _snapHomerun.present ? (_snapHomerun.racewayType ?? undefined) : undefined,
     homerunConduitSize:      _snapHomerun.present ? (_snapHomerun.tradeSizeIn ?? undefined) : undefined,
     homerunSharedCircuits:   _snapHomerun.present ? (_snapHomerun.sharedCircuitCount ?? undefined) : undefined,
+    // §1 — the shared home-run's FULL current-carrying-conductor inventory (2×#10
+    // per branch × N) from the canonical physicalRaceway object, so E-1's SEGMENT_2A
+    // graphic prints '6×#10 THWN-2' (gate 2), never the fictitious single #12.
+    homerunCurrentCarryingCount: _snapHomerun.present ? (_snapHomerun.currentCarryingCount ?? undefined) : undefined,
+    homerunConductorGauge:   _snapHomerun.present ? (_snapHomerun.conductorGauge ?? undefined) : undefined,
     acOCPD,
     mainPanelAmps:           mainAmps,
     // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot

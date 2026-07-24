@@ -179,6 +179,28 @@ export interface RouteSegmentRecord {
   operatingCurrentA?: number | null;   // the load current the VD formula uses
   continuousCurrentA?: number | null;  // operating × 1.25 (NEC 690.8(A))
   calculatedCurrentA?: number | null;  // engine sizing current (post-derate)
+  // ── §10 (closeout 2026-07-23) CANONICAL LENGTH TAXONOMY ─────────────────────
+  // One field per length MEANING so no sheet ever prints an unlabeled number that
+  // silently mixes a design route, a calc basis and a procurement quantity. Every
+  // printed length references THIS segment id + one of these fields (gate 10).
+  // Optional so pre-closeout serialization/digest is unchanged until populated.
+  /** the as-routed installed length derived from real geometry (coordinates). */
+  geometricDesignLengthFt?: number | null;
+  /** a heuristic field-length estimate when no geometry exists (plane widths, …). */
+  estimatedFieldLengthFt?: number | null;
+  /** a recorded field measurement (null until a tech measures the run). */
+  verifiedFieldLengthFt?: number | null;
+  /** the length the calc sheets (VD/ampacity) actually consumed. */
+  calculationLengthFt?: number | null;
+  /** the length the BOM orders (design/estimate × waste). */
+  procurementLengthFt?: number | null;
+  /** waste/slack multiplier applied to reach procurementLengthFt. */
+  wasteFactor?: number | null;
+  /** where oneWayFt / the taxonomy lengths came from (mirrors lengthSource but
+   *  distinguishes a coordinate derivation from a plane-width estimate). */
+  lengthProvenance?: 'geometry-derived' | 'estimated' | 'field-measured' | 'unknown';
+  /** the ONE verification state for the length taxonomy (mirrors verificationStatus). */
+  verificationState?: RouteVerificationState;
   voltageDropPct: number | null;
   /** which current the voltage-drop formula consumed (states the basis). */
   voltageDropCurrentBasis?: 'operating' | 'continuous' | 'calculated' | null;
@@ -211,6 +233,78 @@ export interface PhysicalRacewayRecord {
   upsizingReason: string | null;
   deratingBasis: string | null;
   supportCondition: string | null;
+  provenance: Provenance;
+}
+
+/** §6 (closeout 2026-07-23) — THE canonical LISTED CABLE ASSEMBLY authority for a
+ *  microinverter AC branch trunk (Enphase Q Cable, APsystems AC Bus, …). The
+ *  branch trunk is a manufacturer-listed factory-connectorized cable ASSEMBLY, not
+ *  a field-run THWN conductor: PV-4B/E-1/SCHED/BOM/APP-A project THIS instead of a
+ *  generic "#12 AWG THWN-2" row (gate 6 — never translated into generic THWN-2).
+ *  Honest null on any field the catalog does not record (with a note), never a
+ *  fabricated value. */
+export interface ListedCableAssembly {
+  assemblyId: string;                 // 'QCABLE-ASSEMBLY'
+  manufacturer: string;               // 'Enphase'
+  ecosystem: string;                  // 'IQ Q-Cable'
+  /** exact factory model / SKU for the selected orientation (portrait 60/72-cell
+   *  ⇒ Q-12-10-240). Null ⇒ genuinely unrecorded (see `skuNote`). */
+  model: string | null;
+  sku: string | null;
+  skuNote: string | null;             // why null / caveat when the SKU is unverified
+  /** conductor construction (e.g. 'two-wire, double-insulated'). */
+  conductorConstruction: string | null;
+  conductorCount: number | null;
+  conductorGauge: string | null;      // '#12 AWG'
+  /** insulation + listing basis (THHN/THWN-2, UL 9703/UL 3003; TC-ER / free-air). */
+  insulationListing: string | null;
+  /** the wiring-method label the sheets show for the open-air section. */
+  wiringMethodLabel: string;          // 'ENPHASE Q CABLE (TC-ER)'
+  /** molded connector drop spacing along the trunk (ft). */
+  connectorSpacingFt: number | null;
+  /** max branch current / OCPD the assembly is listed for (A). */
+  maxBranchCurrentA: number | null;
+  /** compatible micro models (per-model branch limits live on the electrical branch objects). */
+  compatibleMicroModels: string[];
+  /** total procurement cable length across all branches (ft) — mirrors the BOM. */
+  cableLengthFt: number | null;
+  /** connector-drops = one per micro (the real purchase unit). */
+  dropCount: number | null;
+  /** unused-connector sealing cap SKU (Q-SEAL-10) + branch-end terminator (Q-TERM-10). */
+  unusedDropCapSku: string | null;
+  terminatorSku: string | null;
+  sourceDocument: string | null;
+  /** 'catalog-sourced' (real SKU, per-model limits field-verify) | 'unverified'. */
+  verificationStatus: 'catalog-sourced' | 'field-verified' | 'unverified';
+  provenance: Provenance;
+}
+
+/** §7 (closeout 2026-07-23) — THE canonical per-branch CABLE-PATH object. The
+ *  trunk length is DERIVED GEOMETRICALLY from the branch's module coordinates +
+ *  branch assignment (order the micros along the branch, sum inter-module path
+ *  distances + a lead-in drop + documented waste) — NOT the plane-width heuristic
+ *  (deriveRunLengths BRANCH_RUN = Σ plane widths × slack, which produced the
+ *  un-reconcilable 3×68≠152). PV-4B lengths, SCHED qty, BOM qty and the evidence
+ *  harness all trace to these objects (gate 7). Four separated lengths per §10:
+ *  designed-installed (geometry), drop count, procurement (drops × pitch × waste),
+ *  waste allowance. */
+export interface BranchCablePath {
+  branchId: string;                   // 'br-1'
+  branchLabel: string;                // 'B1'
+  moduleCount: number;
+  /** connector-drops on this branch = moduleCount (one drop per micro). */
+  dropCount: number;
+  /** as-routed installed trunk length (ft) from the geometric module path. */
+  designedInstalledLengthFt: number | null;
+  /** the per-drop pitch used for the procurement quantity (ft). */
+  connectorSpacingFt: number | null;
+  /** procurement length (ft) = dropCount × pitch × waste (the BOM footage basis). */
+  procurementLengthFt: number | null;
+  wasteFactor: number;
+  /** 'geometry-derived' when module coordinates drove the path; 'estimated' fallback. */
+  lengthProvenance: 'geometry-derived' | 'estimated';
+  /** human-readable derivation (inter-module Σ + lead-in, or the estimate basis). */
+  derivation: string;
   provenance: Provenance;
 }
 
@@ -770,6 +864,13 @@ export interface PermitDesignSnapshot {
      *  The shared branch home-run appears ONCE (sharedCircuitCount>1). Optional
      *  so pre-closeout snapshots/digests are unchanged until the build populates. */
     physicalRaceways?: PhysicalRacewayRecord[];
+    /** §6 (closeout 07-23): the canonical LISTED CABLE ASSEMBLY (micro AC trunk).
+     *  Null for non-micro topologies / unknown trunk brand. Sheets project this
+     *  instead of a generic #12 THWN row for the open-air branch section. */
+    listedCableAssembly?: ListedCableAssembly | null;
+    /** §7 (closeout 07-23): per-branch geometric cable-path objects. BOM sums
+     *  them; PV-4B/SCHED/evidence reconcile against them. Empty when no coords. */
+    branchCablePaths?: BranchCablePath[];
     /** §5 (07-22): canonical service-interconnection objects (tap point, tap
      *  conductors, fused OCPD, utility disconnect, meter, service disconnect) —
      *  each with its OWN honest length + attached code rules. Supply-side designs

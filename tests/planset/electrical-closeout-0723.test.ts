@@ -10,8 +10,9 @@ import { describe, expect, it } from 'vitest';
 import { computeSystem, racewayNecArticle, type ComputedSystemInput } from '@/lib/computed-system';
 import { generatePermitHTML } from '@/lib/permit';
 import {
-  projectSharedBranchRaceway, projectRacewayDescriptor,
+  projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule,
 } from '@/lib/permit/snapshot/electricalProjection';
+import { evaluateCompliance } from '@/lib/permit/snapshot/complianceState';
 import { validatePermitDesignSnapshot } from '@/lib/permit/snapshot/validate';
 import { roofProject } from '../../test-fixtures/roofProject';
 import { csMicroInput } from '../goldens/wave0-fixtures';
@@ -202,5 +203,101 @@ describe('§1/§2/§3/§9 — rendered package (roofProject micro, supply-side t
     expect(html).toContain('Electrical Compliance Status');
     // the legacy advisory "NEC Rule Detail" table is gone.
     expect(html).not.toContain('NEC Rule Detail (advisory');
+  });
+});
+
+// ── WS-A §1–§5 rendered gates (E-1 sectioned schedule / tri-state / registry) ─
+describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (permanent gates 1–5)', () => {
+  function gen(method: string): { html: string; snap: PermitDesignSnapshot } {
+    const input: any = clone(roofProject);
+    input.project = input.project ?? {};
+    input.project.interconnectionMethod = method;
+    const html = generatePermitHTML(input);
+    const snap = (input as { _snapshot?: PermitDesignSnapshot })._snapshot!;
+    return { html, snap };
+  }
+
+  it('gate 1 — E-1 renders the CANONICAL section objects (segment ids), never one merged branch row', () => {
+    const { html, snap } = gen('SUPPLY_SIDE_TAP');
+    const secs = projectE1PhysicalSchedule(snap);
+    const ids = secs.map(s => s.sectionId);
+    expect(ids).toContain('BRANCH_RUN');
+    expect(ids).toContain('BRANCH_HOMERUN_RUN');
+    expect(ids).toContain('COMBINER_TO_DISCO_RUN');
+    expect(ids).toContain('svc-tap-conductors');
+    // per-branch Q-Cable rows: one per canonical branch, never merged.
+    expect(ids.filter(id => id === 'BRANCH_RUN').length).toBe(snap.electrical.branches.length);
+    // the schedule is rendered on E-1 with the canonical section ids visible.
+    expect(html).toContain('E-1 PHYSICAL CONDUCTOR / RACEWAY SCHEDULE');
+    expect(html).toContain('BRANCH_HOMERUN_RUN');
+  });
+
+  it('gate 2 — the shared home-run conductor count EQUALS the physicalRaceway current-carrying inventory', () => {
+    const { snap } = gen('SUPPLY_SIDE_TAP');
+    const secs = projectE1PhysicalSchedule(snap);
+    const hr = secs.find(s => s.sectionId === 'BRANCH_HOMERUN_RUN')!;
+    const rw = snap.electrical.physicalRaceways!.find(r => /BRANCH-HOMERUN/.test(r.physicalRacewayId))!;
+    expect(hr.conductorCount).toBe(rw.currentCarryingCount);
+    expect(hr.conductorCount).toBe(snap.electrical.branches.length * 2);   // 2×#10 per branch
+    // the home-run PHASE gauge is the canonical #10 — never the legacy #12-from-OCPD.
+    expect(hr.conductorSize).toBe('#10 AWG');
+  });
+
+  it('gate 2 (SVG) — the E-1 diagram shared home-run prints N#10, never #12 on the shared run', () => {
+    const { html, snap } = gen('SUPPLY_SIDE_TAP');
+    const noB64 = html.replace(/data:image[^"')]+/g, '');
+    // isolate the E-1 SVG (between the sheet title and the physical schedule).
+    const svg = noB64.slice(noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM'), noB64.indexOf('E-1 PHYSICAL CONDUCTOR'));
+    expect(svg).not.toContain('#12');
+    const ccc = snap.electrical.physicalRaceways!.find(r => /BRANCH-HOMERUN/.test(r.physicalRacewayId))!.currentCarryingCount;
+    expect(svg).toContain(`${ccc}#10 THWN-2`);
+  });
+
+  it('gate 3 — no E-1 section shows PASS while its route length is an estimate / fill blank / tap pending', () => {
+    const { snap } = gen('SUPPLY_SIDE_TAP');
+    const secs = projectE1PhysicalSchedule(snap);
+    expect(secs.length).toBeGreaterThan(0);
+    for (const s of secs) {
+      // every section here is estimate-length or tap-pending → never PASS.
+      expect(s.compliance.state).not.toBe('PASS');
+      expect(['FAIL', 'PENDING-REVIEW-REQUIRED']).toContain(s.compliance.state);
+    }
+  });
+
+  it('§2 tri-state — fail-closed: blank required ⇒ PENDING, violation ⇒ FAIL, all-present+passing ⇒ PASS', () => {
+    expect(evaluateCompliance({ requiredValues: [{ label: 'x', value: null, numeric: true }] }).state).toBe('PENDING-REVIEW-REQUIRED');
+    expect(evaluateCompliance({ requiredValues: [{ label: 'x', value: NaN, numeric: true }] }).state).toBe('PENDING-REVIEW-REQUIRED');
+    expect(evaluateCompliance({ requiredValues: [{ label: 'x', value: '' }] }).state).toBe('PENDING-REVIEW-REQUIRED');
+    expect(evaluateCompliance({ checks: [{ label: 'fill', pass: false }] }).state).toBe('FAIL');
+    // FAIL dominates a co-occurring pending.
+    expect(evaluateCompliance({ checks: [{ label: 'fill', pass: false }], pending: ['len'] }).state).toBe('FAIL');
+    expect(evaluateCompliance({ checks: [{ label: 'fill', pass: null }] }).state).toBe('PENDING-REVIEW-REQUIRED');
+    expect(evaluateCompliance({ requiredValues: [{ label: 'x', value: 25, numeric: true }], checks: [{ label: 'ok', pass: true }] }).state).toBe('PASS');
+  });
+
+  it('gate 4 — the rendered package carries NO live EMT text (no EMT raceway object exists)', () => {
+    const { html } = gen('SUPPLY_SIDE_TAP');
+    const noB64 = html.replace(/data:image[^"')]+/g, '');
+    expect(noB64).not.toMatch(/\bEMT\b/);
+  });
+
+  it('gate 5 — PV-4A electrical blocker multiset EQUALS the RS-1 electrical domain subset', () => {
+    const { html, snap } = gen('SUPPLY_SIDE_TAP');
+    const elecReg = (snap.permitReadiness.registry ?? []).filter(r => !r.resolved && r.domain === 'electrical');
+    expect(elecReg.length).toBeGreaterThan(0);
+    // every electrical registry code is projected onto PV-4A (the registry, not a
+    // hardcoded allowlist), and the blocking count == the registry's blocking count.
+    for (const r of elecReg) expect(html).toContain(r.code);
+    // the exact `TAP-CONDUCTOR-LENGTH-PENDING` code (not the old mismatched
+    // `TAP-LENGTH-PENDING`) is the one PV-4A now carries.
+    expect(html).toContain('TAP-CONDUCTOR-LENGTH-PENDING');
+    expect(html).not.toContain('TAP-LENGTH-PENDING<');
+  });
+
+  it('§5 — PV-4A branch table is the option-B RATING SUMMARY (no conductor/raceway column, no #12→combiner)', () => {
+    const { html } = gen('SUPPLY_SIDE_TAP');
+    expect(html).toContain('AC Branch Circuit Rating Summary');
+    // the sectioned physical conductor schedule lives on E-1, referenced from PV-4A.
+    expect(html).toMatch(/Physical conductor, cable-assembly and raceway schedule[\s\S]{0,80}on E-1/);
   });
 });

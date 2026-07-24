@@ -298,6 +298,11 @@ export interface SLDProfessionalInput {
   homerunConduitType?:     string;
   homerunConduitSize?:     string;
   homerunSharedCircuits?:  number;
+  // §1 — the shared home-run's current-carrying-conductor inventory + phase gauge
+  // from the canonical physicalRaceway object. SEGMENT_2A prints '${ccc}#${gauge}
+  // THWN-2' (e.g. 6#10) — never the legacy OCPD-derived #12.
+  homerunCurrentCarryingCount?: number;
+  homerunConductorGauge?:  string;
   branchOcpdAmps?:         number;
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
   runs?:                   RunSegment[];
@@ -1957,12 +1962,19 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const run = branchHomerunRun ?? branchRun;
       // Conductor gauge(s) from the branch plan's own callouts — mixed-OCPD
       // plans carry mixed gauges (#12 for 20A branches, #10 for a 25A branch).
+      // §1 — SEGMENT_2A is the SHARED jbox→combiner home-run: print the canonical
+      // physicalRaceway's FULL current-carrying inventory ('6#10 THWN-2') from
+      // homerunCurrentCarryingCount + homerunConductorGauge (gate 2 — count ==
+      // raceway inventory). Never the legacy per-branch #12-from-OCPD gauge.
+      const _hrGaugeNum = (input.homerunConductorGauge ?? '').replace('#', '').replace(' AWG', '').trim();
       const _brGauges = [...new Set((input.microBranches ?? [])
         .map(b => b.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
         .filter((g): g is string => !!g))];
-      const _brWireTxt = _brGauges.length
-        ? `${_brGauges.join('/')} AWG THWN-2`
-        : `${input.branchWireGauge??'#10 AWG'} THWN-2`;
+      const _brWireTxt = (input.homerunCurrentCarryingCount && _hrGaugeNum)
+        ? `${input.homerunCurrentCarryingCount}#${_hrGaugeNum} THWN-2`
+        : _brGauges.length
+          ? `${_brGauges.join('/')} AWG THWN-2`
+          : `${input.branchWireGauge??'#10 AWG'} THWN-2`;
       // W1b — the branch home-run conduit label PROJECTS the canonical BRANCH_RUN
       // raceway (branchConduitType/Size from the snapshot), never a hardcoded
       // '3/4" EMT'. Open-air Q-Cable branches print the 690.31(C) free-air label;

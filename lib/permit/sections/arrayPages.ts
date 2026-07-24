@@ -15,7 +15,7 @@ import { resolvePanelSpecs } from '../utils/panelSpecs';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
-import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
+import { resolveFireSetbackIn, arrayCoverageFrac, resolveFireSetbackBasis } from '../utils/fireSetback';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
@@ -519,13 +519,23 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // P0-2: same roof-sub module dims as the callout block above — never panel0.
   const _fsCov = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2, _fsMeanPitch);
   const _fsIn = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCov);
+  // \u00a715 \u2014 the setback GEOMETRY is a modeled design assumption; the authority
+  // BASIS stays PROVISIONAL until the AHJ + adopted IFC edition are verified.
+  // Never assert "per AHJ" against an unverified/pending IFC adoption.
+  const _fbArr = resolveFireSetbackBasis({ ifcEdition: _cpArr.ifc, verificationStatus: _cpArr.verificationStatus, ahjName: _cpArr.ahjName });
+  const _amendNote = _fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)'
+    : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)'
+    : (_fbArr.verified ? ' (per adopted AHJ amendment)' : ' (provisional \u2014 pending AHJ amendment verification)');
   const agSupplemental = isRoof(cadSystemType) ? `
-    <div class="draw-zone-hdr">FIRE SETBACKS (IFC \xa71204.2)</div>
+    <div class="draw-zone-hdr">FIRE SETBACKS \u2014 ${_fbArr.verified ? escapeH(_fbArr.citation) : 'PROVISIONAL BASIS'}</div>
+    <div style="padding:2px 4px;font-size:6px;line-height:1.4;font-weight:700;color:${_fbArr.verified ? '#127a3e' : '#8a5a00'};background:${_fbArr.verified ? '#eefaf0' : '#fff7e6'};border:1px solid ${_fbArr.verified ? '#127a3e' : '#c9962a'};margin:0 0 3px;">
+      ${escapeH(_fbArr.basisLabel)} \u2014 setback dimensions below are MODELED per IFC \xa71204.2; ${_fbArr.verified ? 'adopted requirement confirmed.' : 'not yet confirmed as an adopted AHJ requirement.'}
+    </div>
     <div style="padding:3px 4px;font-size:6.5px;line-height:1.6;color:#333;">
-      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 ${_cpArr.ifcLabel} \xa71204.2.1.1${_fsIn >= 36 && _fsCov > 0.33 ? ' (36" governs: array > 33% of roof area)' : _fsIn === 18 ? ' (18" exception: array \u2264 33% of roof area)' : ' (per AHJ amendment)'}</div>
-      <div>\u2022 18" clear at hips/valleys \u2014 ${_cpArr.ifcLabel} \xa71204.2.1.2</div>
+      <div>\u2022 ${_fsIn}" ridge fire setback \u2014 IFC ${_fbArr.verified ? escapeH(_cpArr.ifc as string) : '(edition pending)'} \xa71204.2.1.1${_amendNote}</div>
+      <div>\u2022 18" clear at hips/valleys \u2014 IFC ${_fbArr.verified ? escapeH(_cpArr.ifc as string) : '(edition pending)'} \xa71204.2.1.2</div>
       <div>\u2022 Modules may extend to eave (no eave req.)</div>
-      <div>\u2022 36" access pathway per AHJ</div>
+      <div>\u2022 36" access pathway \u2014 ${_fbArr.verified ? 'per adopted AHJ requirement' : 'modeled; pending AHJ / IFC verification'}</div>
       <div>\u2022 NEC 690.12 MLRS module-level RSD</div>
       ${_isMicro && totalStrings > 5 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner 6C accepts 5; remaining branches land on AC subpanel, see E-1</div>` : ''}
     </div>` :

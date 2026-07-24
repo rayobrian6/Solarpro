@@ -1447,15 +1447,38 @@ export function generatePermitHTML(
      tail. This scope tightens ONLY the cover's vertical rhythm (gaps, section
      padding, table cell padding) so every section — map + address included —
      fits within the printable box. No other sheet is affected. */
-  .cover-compact .col-stack { gap: 3px; }
+  /* §19 (closeout 2026-07-23): the left column (8 sections ending in the
+     flex:1 CONSTRUCTION NOTES) summed ~9px taller than the grid row, so the
+     bottom of CONSTRUCTION NOTES was silently clipped inside .page-body's
+     hidden overflow (invisible to the page-box pagefit scan). Tighten the
+     cover's vertical rhythm at the component level — col-stack gap 3→2px and
+     sec-body padding 3→2px — to give the notes room to reflow instead of
+     clipping. Cover-scoped only; no global tolerance. */
+  .cover-compact .col-stack { gap: 2px; }
   .cover-compact .page-body { margin-top: 5px; }
-  .cover-compact .sec-body { padding: 3px; }
-  .cover-compact .sec-hdr { padding: 2px var(--xs); }
+  .cover-compact .sec-body { padding: 2px; }
+  .cover-compact .sec-hdr { padding: 1px var(--xs); }
+  /* The SHEET INDEX is the left column's GROWING section (one row per sheet —
+     the set size varies per project). Tightening its row padding scales the
+     saving with sheet count, so CONSTRUCTION NOTES keeps its room as the set
+     grows, rather than clipping (§19). */
+  .cover-compact .sheet-index-table td { padding: 1px var(--xs); line-height: 1.15; }
+  .cover-compact .sheet-index-table th { padding: 2px var(--xs); }
+  .cover-compact .note-txt { line-height: 1.2; }
+  .cover-compact .note-row { margin-bottom: 0; }
   .cover-compact .info-table { font-size: 7.2px; }
   .cover-compact .info-table .il,
   .cover-compact .info-table .iv { padding-top: 1px; padding-bottom: 1px; font-size: 7px; }
-  .cover-compact .note-row { margin-bottom: 1px; }
-  .cover-compact .note-txt { line-height: 1.3; }
+  /* §19 (EP closeout 2026-07-24) — the ENGINEERING SUMMARY embeds the full
+     project address, whose length varies per project; a long live address wraps
+     1–2 extra lines and pushed the bottom of CONSTRUCTION NOTES ~10px past the
+     left column's hidden-overflow box on the live Braidon set (invisible to the
+     page-box scan, caught by the sub-sheet internal-clip scan). Tighten the
+     effective note density (the earlier duplicate rules set 1.2/0; these final
+     rules previously loosened them back to 1.3/1px) so CONSTRUCTION NOTES reflows
+     instead of clipping. Cover-scoped; content-scaling; no global tolerance. */
+  .cover-compact .note-row { margin-bottom: 0; }
+  .cover-compact .note-txt { line-height: 1.18; }
 
   /* ── Page footer ────────────────────────────────────────────────────────── */
   .page-footer {
@@ -2092,8 +2115,11 @@ export function generatePermitHTML(
      scope tightens ONLY the CERT sheet's blank-field rhythm + placeholder
      spacing so the full legal footer prints. No other sheet is affected; no
      certification content is removed. */
-  .cert-compact .cert-field { margin-bottom: 3px; }
-  .cert-compact .cf-val { min-height: 15px; padding-bottom: 2px; }
+  /* §19 (EP closeout 2026-07-24) — the live CERT date/footer row sat ~3px past
+     .page-content's hidden-overflow box; tighten the per-field vertical rhythm a
+     touch more so the full legal cert-footer prints. Cert-scoped; no content removed. */
+  .cert-compact .cert-field { margin-bottom: 2px; }
+  .cert-compact .cf-val { min-height: 14px; padding-bottom: 2px; }
   .cert-compact .cf-lbl { margin-top: 1px; }
   .cert-compact .cert-statement { padding: var(--xs); }
   .cert-compact .cert-header { margin-bottom: 3px; }

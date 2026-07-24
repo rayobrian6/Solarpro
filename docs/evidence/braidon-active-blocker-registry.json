@@ -1,14 +1,14 @@
 {
-  "generatedAt": "2026-07-24T01:11:40.884Z",
+  "generatedAt": "2026-07-24T20:35:03.204Z",
   "artifact": "braidon-active-blocker-registry",
   "section": "§17/§18 active blocker registry (reviewed severity)",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-2E65B042F09F",
-  "digest": "2e65b042f09fc1abbd194a2a68912ca84f0497e16a2475371031aa76ddb616b0",
+  "snapshotId": "PDS-69A79CD87335",
+  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
   "purpose": "Every active release blocker with its reviewed severity. §17 promoted three permit-critical advisories (conduit fill, tap-conductor length, module exact datasheet) to BLOCKING. §18 legitimate project blockers (REC-vs-Qcells identity, TEST name, blank designer, AHJ/code pending, route estimate, racking/framing unverified) are preserved — the promotions never suppress them.",
   "counts": {
-    "active": 15,
-    "blocking": 15,
+    "active": 14,
+    "blocking": 14,
     "warning": 0
   },
   "promotedToBlocking": [
@@ -21,13 +21,6 @@
       "code": "ROUTE-LENGTH-ESTIMATE",
       "severity": "blocking",
       "domain": "electrical",
-      "policyJustification": "legitimate project authority gap — preserved (§18)",
-      "message": ""
-    },
-    {
-      "code": "EQUIPMENT-IDENTITY-CONFLICT",
-      "severity": "blocking",
-      "domain": "equipment",
       "policyJustification": "legitimate project authority gap — preserved (§18)",
       "message": ""
     },
@@ -56,6 +49,20 @@
       "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
       "severity": "blocking",
       "domain": "structural",
+      "policyJustification": "legitimate project authority gap — preserved (§18)",
+      "message": ""
+    },
+    {
+      "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+      "severity": "blocking",
+      "domain": "structural",
+      "policyJustification": "legitimate project authority gap — preserved (§18)",
+      "message": ""
+    },
+    {
+      "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "severity": "blocking",
+      "domain": "document",
       "policyJustification": "legitimate project authority gap — preserved (§18)",
       "message": ""
     },
@@ -89,20 +96,6 @@
     },
     {
       "code": "PROJECT-AUTHORITY-UNVERIFIED",
-      "severity": "blocking",
-      "domain": "document",
-      "policyJustification": "legitimate project authority gap — preserved (§18)",
-      "message": ""
-    },
-    {
-      "code": "PROJECT-NAME-NONPRODUCTION",
-      "severity": "blocking",
-      "domain": "document",
-      "policyJustification": "legitimate project authority gap — preserved (§18)",
-      "message": ""
-    },
-    {
-      "code": "DESIGNER-OF-RECORD-MISSING",
       "severity": "blocking",
       "domain": "document",
       "policyJustification": "legitimate project authority gap — preserved (§18)",

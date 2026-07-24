@@ -1,0 +1,49 @@
+{
+  "generatedAt": "2026-07-24T20:36:50.723Z",
+  "artifact": "braidon-electrical-cross-sheet-matrix",
+  "section": "§1–§9 E-1 / PV-4A / PV-4B / SCHED electrical cross-sheet matrix",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-69A79CD87335",
+  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+  "purpose": "One canonical electrical value per fact, projected identically across E-1, PV-4A, PV-4B and the SCHED conductor schedule. Verifies the branch conductor, shared home-run inventory, listed Q-Cable assembly, feeder raceway and supply-side interconnection render consistently and never as a fabricated #12-to-combiner branch conductor.",
+  "facts": {
+    "sharedHomerunInventory": {
+      "canonical": "6×#10 AWG (ccc=6, cnt=7)",
+      "e1Svg": {
+        "present": true
+      },
+      "e1Schedule": {
+        "present": true
+      }
+    },
+    "listedQCableAssembly": {
+      "canonical": "Enphase Q-12-10-240 (31 drops)",
+      "skuRendered": {
+        "present": true
+      },
+      "neverGenericThwn": true
+    },
+    "feederRaceway": {
+      "canonical": "PVC Sch 80 1-1/4\"",
+      "rendered": {
+        "present": true
+      }
+    },
+    "pv4aBranchTable": {
+      "form": "option-B rating summary (no conductor/raceway column)",
+      "rendered": {
+        "present": true
+      }
+    },
+    "supplySideInterconnection": {
+      "method": "SUPPLY-SIDE TAP (NEC 705.11)",
+      "bareCompliesCount": 0,
+      "tapPendingShown": true
+    },
+    "tapCode": {
+      "canonicalCode": "TAP-CONDUCTOR-LENGTH-PENDING",
+      "renderedExact": true,
+      "staleCodeAbsent": true
+    }
+  }
+}

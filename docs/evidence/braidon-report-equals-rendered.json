@@ -1,0 +1,110 @@
+{
+  "generatedAt": "2026-07-24T20:37:17.867Z",
+  "artifact": "braidon-report-equals-rendered",
+  "section": "gate 20 — evidence JSON == re-extracted rendered values",
+  "purpose": "Every key snapshot value (snapshot id, digest, feeder conduit, listed Q-Cable SKU + drop count, blocking-blocker count, module model) is re-extracted from the RENDERED planset HTML and matched. Zero mismatches in both original (frozen fixture) and live (DB) modes.",
+  "original": {
+    "snapshotId": "PDS-69A79CD87335",
+    "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+    "mode": "original",
+    "sheetCount": 21,
+    "reconciled": [
+      {
+        "name": "snapshotId",
+        "reportVal": "PDS-69A79CD87335",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "PDS-69A79CD87335"
+        ]
+      },
+      {
+        "name": "digestPrefix",
+        "reportVal": "69a79cd87335",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "69a79cd873358ae61584"
+        ]
+      },
+      {
+        "name": "feederConduit",
+        "reportVal": "PVC Sch 80 1-1/4\"",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableSku",
+        "reportVal": "Q-12-10-240",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableDropCount",
+        "reportVal": "31",
+        "matchedInRendered": true
+      },
+      {
+        "name": "blockingBlockerCount",
+        "reportVal": "14",
+        "matchedInRendered": true,
+        "rs1Rendered": null
+      },
+      {
+        "name": "moduleModel",
+        "reportVal": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W",
+        "matchedInRendered": true
+      }
+    ],
+    "mismatches": [],
+    "gatesPass": "20/20"
+  },
+  "live": {
+    "snapshotId": "PDS-36AF18EB13AA",
+    "digest": "36af18eb13aa222ec9eda00e9b82ab726b7b63f1c9b54126534190478d212846",
+    "mode": "live",
+    "sheetCount": 21,
+    "reconciled": [
+      {
+        "name": "snapshotId",
+        "reportVal": "PDS-36AF18EB13AA",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "PDS-36AF18EB13AA"
+        ]
+      },
+      {
+        "name": "digestPrefix",
+        "reportVal": "36af18eb13aa",
+        "matchedInRendered": true,
+        "titleBlockValues": [
+          "36af18eb13aa222ec9ed"
+        ]
+      },
+      {
+        "name": "feederConduit",
+        "reportVal": "PVC Sch 80 1-1/4\"",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableSku",
+        "reportVal": "Q-12-10-240",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableDropCount",
+        "reportVal": "31",
+        "matchedInRendered": true
+      },
+      {
+        "name": "blockingBlockerCount",
+        "reportVal": "17",
+        "matchedInRendered": true,
+        "rs1Rendered": null
+      },
+      {
+        "name": "moduleModel",
+        "reportVal": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W",
+        "matchedInRendered": true
+      }
+    ],
+    "mismatches": [],
+    "gatesPass": "20/20"
+  }
+}

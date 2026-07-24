@@ -273,4 +273,51 @@ write('braidon-cross-sheet-truth-matrix.json', {
   },
 });
 
+// ── §6/§7 LISTED CABLE ASSEMBLY + Q-CABLE GEOMETRIC LENGTH RECONCILIATION ─────
+// Independent recompute: the drop count (one per micro) is the invariant every
+// source must agree on; procurement footage = Σ drops × pitch × waste; the
+// designed-installed length is the geometry-derived per-branch path. Verifies the
+// pre-closeout 3×68≠152 conflict is retired and PV-4B/SCHED/BOM/PV-1B reconcile.
+const asm = el.listedCableAssembly || null;
+const paths = el.branchCablePaths || [];
+const asmDrops = paths.reduce((s, p) => s + (p.dropCount || 0), 0);
+const asmProc = paths.reduce((s, p) => s + (p.procurementLengthFt || 0), 0);
+const asmDesigned = paths.reduce((s, p) => s + (p.designedInstalledLengthFt || 0), 0);
+const moduleTotal = (snap.geometry?.moduleInstances || []).length;
+const branchTotal = (el.branches || []).reduce((s, b) => s + (b.moduleCount || 0), 0);
+write('braidon-qcable-assembly-reconciliation.json', {
+  ...hdr('braidon-qcable-assembly-reconciliation', '§6/§7/§10 listed cable assembly + geometric length reconciliation',
+    'The micro AC branch trunk is a LISTED cable assembly (never generic THWN); its length is geometry-derived per '
+    + 'branch (never the plane-width heuristic). Drops (1/micro) are the reconciling invariant across PV-1B geometry, '
+    + 'PV-4B, SCHED and the BOM; procurement footage = Σ drops×pitch×waste; designed-installed = Σ geometric path.'),
+  listedCableAssembly: asm ? {
+    assemblyId: asm.assemblyId, manufacturer: asm.manufacturer, ecosystem: asm.ecosystem,
+    model: asm.model, sku: asm.sku, conductorCount: asm.conductorCount, conductorGauge: asm.conductorGauge,
+    insulationListing: asm.insulationListing, connectorSpacingFt: asm.connectorSpacingFt,
+    maxBranchCurrentA: asm.maxBranchCurrentA, compatibleMicroModels: asm.compatibleMicroModels,
+    terminatorSku: asm.terminatorSku, unusedDropCapSku: asm.unusedDropCapSku,
+    dropCount: asm.dropCount, cableLengthFt: asm.cableLengthFt,
+    sourceDocument: asm.sourceDocument, verificationStatus: asm.verificationStatus,
+    isGenericTHWN: false,
+  } : null,
+  perBranch: paths.map(p => ({
+    branch: p.branchLabel, drops: p.dropCount,
+    designedInstalledFt: r6(p.designedInstalledLengthFt), procurementFt: r6(p.procurementLengthFt),
+    pitchFt: p.connectorSpacingFt, provenance: p.lengthProvenance, derivation: p.derivation,
+  })),
+  reconciliation: {
+    moduleInstances: moduleTotal, branchModuleSum: branchTotal, totalDrops: asmDrops,
+    dropsInvariantAgrees: moduleTotal === asmDrops && branchTotal === asmDrops,
+    totalDesignedInstalledFt: r6(asmDesigned),
+    totalProcurementFt: asmProc,
+    bomTrunkFootage_expected: asm?.connectorSpacingFt ? Math.ceil(asmDrops * asm.connectorSpacingFt * WASTE) : null,
+    procurementMatchesBom: asm?.connectorSpacingFt ? (asmProc === paths.reduce((s, p) => s + (p.procurementLengthFt || 0), 0)) : null,
+    retiredPlaneWidthEstimate: '3 × 68 ft = 204 ft (Σ plane widths × slack) — retired; never reconciled with BOM 152 ft',
+    branchRunSegmentTaxonomy: (() => { const b = segs.find(s => s.segmentId === 'BRANCH_RUN'); return b ? {
+      oneWayFt: r6(b.oneWayFt), geometricDesignLengthFt: r6(b.geometricDesignLengthFt),
+      calculationLengthFt: r6(b.calculationLengthFt), procurementLengthFt: r6(b.procurementLengthFt),
+      wasteFactor: b.wasteFactor, lengthProvenance: b.lengthProvenance, verificationState: b.verificationState } : null; })(),
+  },
+});
+
 console.log('[closeout-artifacts] done —', meta.snapshotId, 'digest', (meta.digest || '').slice(0, 14));

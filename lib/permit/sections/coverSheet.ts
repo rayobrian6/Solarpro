@@ -598,12 +598,24 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
              authority state prints permit-issue language. -->
         <div class="sec" style="margin-bottom:var(--xs);">
           <div class="sec-hdr">ENGINEERING SUMMARY</div>
-          <div class="sec-body" style="font-size:var(--f-md);line-height:1.45;padding:var(--xs);">
-            ${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}, designed per
-            NEC ${necVer}, ASCE ${asceVer}, IBC ${ibcVer}, and applicable local amendments.
-            ${_permitIssued
-              ? 'Issued for permit review — requires PE review and wet stamp before AHJ submission.'
-              : `DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION (${escapeH(pa.issueStatus ?? 'DESIGN DRAFT')}); requires PE review and wet stamp before AHJ submission.`}
+          <div class="sec-body" style="font-size:var(--f-md);line-height:1.22;padding:var(--xs);">
+            ${(() => {
+              // §17 (closeout 2026-07-23) — separate the COMPUTATIONAL/analysis basis
+              // (the editions the engine actually ran under — NEC/ASCE) from the
+              // ADOPTED JURISDICTIONAL AUTHORITY (IBC/IRC/IFC, unknown ⇒ PENDING).
+              // Never "designed per IBC PENDING" — that reads as compliance with a
+              // pending edition. Adopted editions are an authority status, not a
+              // design basis. Kept tight so the cover left column still fits (§19).
+              const adoptedParts = [`IBC ${ibcVer}`, `IRC ${ircVer}`, `IFC ${ifcVer}`];
+              const allAdoptedPending = [ibcVer, ircVer, ifcVer].every(v => v === 'PENDING');
+              const adopted = allAdoptedPending ? 'PENDING VERIFICATION' : adoptedParts.join(' / ');
+              return `${system.totalDcKw?.toFixed(2) || '—'} kW DC grid-tied PV system at ${escapeH(project.address || '—')}. `
+                + `<strong>CALC BASIS:</strong> NEC ${necVer} / ASCE ${asceVer}. `
+                + `<strong>AHJ-ADOPTED IBC / IRC / IFC:</strong> ${adopted}. `
+                + (_permitIssued
+                    ? 'Issued for permit review — requires PE review and wet stamp before AHJ submission.'
+                    : `DESIGN REVIEW PACKAGE — NOT FOR PERMIT SUBMISSION (${escapeH(pa.issueStatus ?? 'DESIGN DRAFT')}); requires PE review and wet stamp before AHJ submission.`);
+            })()}
           </div>
         </div>
       <div class="sec">
@@ -632,12 +644,16 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
                 const cols = [flat.slice(0, per), flat.slice(per, per * 2), flat.slice(per * 2)];
                 // Battery/ESS packages carry 22+ notes — at 6.2px they ran
                 // 31px past the page bottom (clipped rows). Scale with count.
+                // §19 (closeout 2026-07-23): tightened line-height + zero row
+                // margin so CONSTRUCTION NOTES clears the fixed left-column box
+                // even as the SHEET INDEX grows with the sheet set (was clipping
+                // ~5–6px at the bottom under .page-body's hidden overflow).
                 const _fs = totalNotes > 20 ? 5.6 : 6.2;
-                const _lh = totalNotes > 20 ? 1.14 : 1.18;
+                const _lh = totalNotes > 20 ? 1.1 : 1.14;
                 let num = 0;
                 const renderCol = (c: typeof flat) => `<div>${c.map(x => {
                   num++;
-                  return `<div style="display:flex;gap:3px;font-size:${_fs}px;line-height:${_lh};margin-bottom:0.5px;">`
+                  return `<div style="display:flex;gap:3px;font-size:${_fs}px;line-height:${_lh};margin-bottom:0;">`
                     + `<div style="font-weight:900;min-width:11px;">${num}.</div>`
                     + `<div>${x.t ? `<span style="font-weight:900;">${x.t}: </span>` : ''}${x.n}</div></div>`;
                 }).join('')}</div>`;

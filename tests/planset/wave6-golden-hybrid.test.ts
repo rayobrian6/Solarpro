@@ -239,7 +239,9 @@ describe('wave 6 golden — multi-lane E-1', () => {
 // ═════ 4. PV-4A / PV-4B — per-sub schedules at the golden counts ═════════════
 describe('wave 6 golden — electrical sheets', () => {
   it('PV-4A: one circuit schedule per sub, each from its OWN equipment (I-3)', () => {
-    expect(html).toMatch(/AC Branch Circuit Schedule — ROOF — 48 MODULES — Enphase IQ8M \(MICRO\)/);
+    // §5 (closeout 2026-07-23) — PV-4A micro branch table → option-B RATING
+    // SUMMARY (device facts only); the sectioned physical schedule lives on E-1.
+    expect(html).toMatch(/AC Branch Circuit Rating Summary — ROOF — 48 MODULES — Enphase IQ8M \(MICRO\)/);
     expect(html).toMatch(/DC String Schedule — GROUND — 26 MODULES — Solis S6-GR1P8K \(STRING\)/);
     expect(html).toMatch(/DC String Schedule — FENCE — 17 MODULES — SolFence SF-OPT-3800 \(OPTIMIZER\)/);
   });

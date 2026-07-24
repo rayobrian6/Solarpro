@@ -20,12 +20,31 @@
 import type { CADModel } from '../cad/types';
 import { getMountingSystemById, classifyMountTopology } from '../mounting-hardware-db';
 import { getRackingById } from '../equipment-db';
-import { resolveFireSetbackIn, arrayCoverageFrac } from '../permit/utils/fireSetback';
+import { resolveFireSetbackIn, arrayCoverageFrac, resolveFireSetbackBasis } from '../permit/utils/fireSetback';
+import { projectCodeAuthority } from '../permit/snapshot/codeAuthorityProjection';
 // W3 §route-verification — the CONDUIT RUN callout projects the ONE canonical
 // route provenance authority (never a hardcoded "route field-verified" literal;
 // gate 2: no "field-verified" without a recorded field measurement).
-import { routeProvenanceLabel } from '../permit/snapshot/electricalProjection';
+import { routeProvenanceLabel, projectCanonicalFeeder, projectRacewayDescriptor } from '../permit/snapshot/electricalProjection';
 import type { PermitDesignSnapshot } from '../permit/snapshot/types';
+
+// §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
+// conduit description routes through the CANONICAL physical-raceway projection —
+// NEVER `project.conduitType || 'EMT'` (the fabricated EMT beside a PVC run). The
+// feeder conduit (the run PV-1/PV-3 draw) is the single source; absent raceway
+// authority prints an honest 'PENDING — SEE SCHEDULE', never a default 'EMT'.
+function canonicalConduitType(snap: PermitDesignSnapshot | null | undefined): string {
+  const feed = projectCanonicalFeeder(snap);
+  if (feed.raceway) {
+    return (feed.tradeSizeIn ? `${feed.raceway} ${feed.tradeSizeIn}` : feed.raceway).toUpperCase();
+  }
+  const desc = projectRacewayDescriptor(snap);
+  if (desc.present && desc.entries.length) {
+    const e = desc.entries[0];
+    return (e.tradeSizeIn ? `${e.racewayType} ${e.tradeSizeIn}` : e.racewayType).toUpperCase();
+  }
+  return 'PENDING — SEE SCHEDULE';
+}
 
 export type SysType = 'roof' | 'ground_mount' | 'solar_fence';
 export type ViewType = 'plan' | 'structural';
@@ -488,7 +507,9 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
       || 48,
     lagSpec:       `${_fracIn(_lagDiaIn)}" DIA × ${_lagLenIn}" ${_lagType}`,
     embedSpec:     `${_embedIn}" MIN THREAD EMBEDMENT`,
-    conduitType:   ((p?.conduitType as string) || 'EMT').toUpperCase(),
+    // §3 — conduit description from the canonical physical-raceway projection
+    // (feeder conduit), never the renderer-local `|| 'EMT'` default (gate 4).
+    conduitType:   canonicalConduitType((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null),
     // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
     windSpeedMph:  (snapWind(input) ?? ((cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115)),
     totalPanels:   cad.totalPanels ?? 0,
@@ -748,7 +769,14 @@ function roofComposition(
   const callouts: CalloutItem[] = isPlan
     ? [
         { n: 1, label: 'PV MODULE ARRAY', sub: `${d.totalPanels} mod @ ${d.dcKw} kW DC` },
-        { n: 2, label: 'FIRE SETBACKS', sub: `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' access pathway — IFC §1204.2 per AHJ` },
+        // §15 — the setback DIMENSIONS are modeled; the authority BASIS is
+        // provisional until the AHJ identity + adopted IFC edition are verified
+        // (never "per AHJ" on an unverified assumption; drives off codeAuthority).
+        { n: 2, label: 'FIRE SETBACKS', sub: (() => {
+            const _cp = projectCodeAuthority((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null);
+            const _fb = resolveFireSetbackBasis({ ifcEdition: _cp.ifc, verificationStatus: _cp.verificationStatus, ahjName: _cp.ahjName });
+            return `${d.fireSetbackFt}' ridge · 18" hip/valley · ${d.pathwayFt}' pathway (MODELED) — ${_fb.calloutSuffix}`;
+          })() },
         { n: 3, label: 'RIDGE LINE', sub: `${d.pitchStr} pitch` },
         { n: 4, label: 'CONDUIT RUN', sub: `${routeProvenanceLabel((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null)} — ${d.conduitType}` },
         // 'truss'.toLowerCase()+'s' printed "trusss" on PV-1 — pluralize properly.
@@ -760,7 +788,7 @@ function roofComposition(
         { n: 3, label: _baseLabelP3, sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
         { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
         { n: 5, label: `${_frameLabel} ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
-        { n: 6, label: d.conduitType + ' CONDUIT', sub: 'see conductor schedule' },
+        { n: 6, label: /PENDING/.test(d.conduitType) ? 'CONDUIT' : d.conduitType + ' CONDUIT', sub: /PENDING/.test(d.conduitType) ? 'raceway authority pending — see conductor schedule' : 'see conductor schedule' },
         { n: 7, label: 'BONDING JUMPER', sub: 'NEC 690.43' },
       ];
 

@@ -26,11 +26,18 @@ import { buildConductorAuthority, type SubSystemConductorAuthority } from '../ut
 import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
 import {
   extractStructuralInputFromCAD,
   deriveStructuralBOM,
 } from '@/lib/bom-system-profiles';
+// §2 (closeout 2026-07-23) — SCHED AC-branch Status projects the ONE shared
+// tri-state compliance result, NEVER an unconditional "✓". A branch with a blank
+// required rating or an over-limit OCPD can no longer print a green check.
+import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
+import { microMaxPerBranch, microBranchMaxOcpdA } from '../utils/branching';
+import { peekSnapshot } from '../snapshot/read';
+import { projectListedCableAssembly } from '../snapshot/electricalProjection';
 
 
 export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
@@ -56,13 +63,19 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
   const rackAsset = getManufacturerAsset(mountId, 'racking_detail');
   if (rackAsset) {
     const src = rackAsset.docTitle || (rackAsset.sourceUrl ? new URL(rackAsset.sourceUrl).hostname : '');
+    // §12 — is the cited document APPLICABLE to the selected mount version?
+    const _mountSys = mountId ? getMountingSystemById(mountId) : undefined;
+    const _appl = evaluateDocumentApplicability(_mountSys?.model ?? rackAsset.model, rackAsset, null);
     // Provenance as a GENERAL NOTE in the data rail — a one-line citation must
     // not consume a whole secondary-view band of the draw zone.
     comp.generalNotes = [
       ...(comp.generalNotes ?? []),
       `ATTACHMENT PER ${rackAsset.brand.toUpperCase()} ${rackAsset.model.toUpperCase()} MANUFACTURER DOCUMENTATION ON FILE: `
         + `${src}${rackAsset.pageRef ? ' — ' + rackAsset.pageRef : ''}`
-        + `${rackAsset.imageUrl ? '. REPRODUCED FULL-PAGE IN THE DATASHEET APPENDIX (DS SERIES).' : '. FIELD-VERIFY AGAINST CURRENT REVISION.'}`,
+        + `${rackAsset.imageUrl ? '. REPRODUCED FULL-PAGE IN THE DATASHEET APPENDIX (DS SERIES).' : '. FIELD-VERIFY AGAINST CURRENT REVISION.'}`
+        + (_appl.state === 'unverified'
+            ? ` DOCUMENT APPLICABILITY UNVERIFIED — the on-file ${_appl.documentProduct ?? 'document'} covers a different product version than the selected mount ${(_mountSys?.model ?? rackAsset.model)}; NOT AUTHORITATIVE until a version-exact document or verified alias evidence is provided (EQUIPMENT-DOCUMENT-APPLICABILITY).`
+            : ''),
     ];
   }
 
@@ -755,6 +768,11 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const lagDia    = _fa.diameterLabel ?? _fracIn(_mountSel?.mount?.fastenerDiameterIn ?? 0.375);
   const lagEmbed  = _fa.embedmentIn ?? _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
   const _faType   = _fa.fastenerType ?? 'structural fastener';
+  // §14 — the ONE canonical spacing authority. "MAXIMUM ALLOWED" language renders
+  // ONLY when a verified source establishes it; otherwise the sheet prints the
+  // DESIGN spacing + PENDING STRUCTURAL VERIFICATION (never 48" as an allowable).
+  const _spc      = _proj.spacingAuthority;
+  const _spcVerified = _spc.verificationState === 'verified';
 
   // ── PV-4C is split into TWO physical sheets (W9/§15 page-fit): the combined
   // wind/snow/framing/attachment analysis + dead-load + reaction schedule ran
@@ -828,7 +846,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <tr><td>Attachment Capacity (allowable)</td><td class="cv"${_capGated ? ' style="color:#b45309;font-weight:bold;"' : ''}>${lagCapDisp}</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
             <tr><td>Capacity Check (SF)</td><td class="cv">${sfCellHtml}</td></tr>
-            <tr><td>Max Allowed Spacing</td><td class="cv">${maxSpacing}"</td></tr>
+            <tr><td>Attach Spacing (design)</td><td class="cv">${_spc.designSpacingIn != null ? _spc.designSpacingIn + '&quot; O.C.' : (maxSpacing !== '—' ? maxSpacing + '&quot;' : '—')} <span style="font-weight:bold;color:${_spcVerified ? '#000' : '#b45309'};">${_spcVerified ? '&mdash; MAX ALLOWED (VERIFIED)' : '&mdash; PENDING VERIF.'}</span></td></tr>
           </table>
           ${_capGated ? `<div style="font-size:6.5px;line-height:1.3;color:#b45309;padding:2px 3px;">CAPACITY GATE (§9): the published allowable is UNVERIFIED (RT-MINI structural source not archived / applicability unconfirmed). Demand is canonical; the capacity comparison is INDETERMINATE pending a verified structural source — no PASS is asserted.</div>` : ''}
         </div>
@@ -944,7 +962,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <div style="margin-bottom:3px;">3. Sealant: Polyurethane or silicone roofing sealant at all roof penetrations per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">4. Attachment to structural framing members only — <strong>no attachment to sheathing or decking alone.</strong></div>
           <div style="margin-bottom:3px;">5. Torque: Per manufacturer specification (typically 8–12 ft-lbs for 5/16", 15–20 ft-lbs for 3/8").</div>
-          <div style="margin-bottom:3px;">6. Spacing: <strong>${attachSpace}" max O.C.</strong> along rail, verified per structural analysis above.</div>
+          <div style="margin-bottom:3px;">6. ${escapeH(_spc.designLabel)} along rail — <strong style="color:${_spcVerified ? '#333' : '#b45309'};">${escapeH(_spc.statusLabel)}</strong>${_spcVerified ? '.' : ' (design value; MAXIMUM ALLOWED needs a verified source).'}</div>
           <div style="margin-bottom:3px;">7. Verify roof framing at each attachment point — no attachments at splices or unsupported sheathing.</div>
           <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Detail is typical — verify with mounting system manufacturer installation manual for project-specific requirements.</div>
         </div>
@@ -1549,16 +1567,53 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // from the shared conductor authority (same values PV-4A/PV-4B/E-1/BOM print),
   // not a hardcoded 20A/#10 row.
   const _schedAuth = buildConductorAuthority(input, cad);
+  // §6 (closeout 2026-07-23) — the micro AC branch conductor is the LISTED Q-Cable
+  // ASSEMBLY (manufacturer + model/SKU), never a generic "#12 AWG THWN-2 + EGC".
+  // peekSnapshot (non-throwing) so standalone unit renders fall back to the callout.
+  const _schedAsm = projectListedCableAssembly(peekSnapshot(input));
+  const _schedBranchConductorCell = (fallback: string): string =>
+    _schedAsm.present ? _schedAsm.conductorCell : fallback;
   // 75°C ampacity display keyed to conductor size (NEC 310.16).
   const _schedAmpacity = (gauge: string): string => ({
     '#12 AWG': '25A (#12)', '#10 AWG': '35A (#10)', '#8 AWG': '50A (#8)',
     '#6 AWG': '65A (#6)', '#4 AWG': '85A (#4)',
   } as Record<string, string>)[gauge] ?? gauge;
+  // §2 — the AC-branch Status cell is the ONE shared tri-state result: a branch
+  // only shows ✓ PASS when its rating values are present AND continuous ≤ OCPD ≤
+  // mfr branch max AND devices ≤ mfr per-branch limit; a blank rating ⇒ PENDING,
+  // an over-limit branch ⇒ FAIL. Replaces the unconditional "&check;".
+  const _schedBranchStatus = (
+    b: { deviceCount: number; ocpdAmps: number; branchCurrentA: number; continuousA: number },
+    model?: string | null, mfr?: string | null,
+  ): string => {
+    const lim = microMaxPerBranch(model, mfr);
+    const ocpdLim = microBranchMaxOcpdA(model, mfr);
+    return complianceBadge(evaluateCompliance({
+      requiredValues: [
+        { label: 'device count', value: b.deviceCount, numeric: true },
+        { label: 'branch OCPD', value: b.ocpdAmps, numeric: true },
+        { label: 'continuous current', value: b.continuousA, numeric: true },
+      ],
+      checks: [
+        { label: 'continuous ≤ OCPD (NEC 240.4)', pass: Number.isFinite(b.continuousA) && Number.isFinite(b.ocpdAmps) ? b.continuousA <= b.ocpdAmps : null },
+        { label: `devices ≤ mfr per-branch limit (${lim})`, pass: lim > 0 ? b.deviceCount <= lim : null },
+        { label: `OCPD ≤ mfr branch max (${ocpdLim}A)`, pass: ocpdLim > 0 ? b.ocpdAmps <= ocpdLim : null },
+      ],
+    }));
+  };
+  const _schedStringStatus = (s: { ampacityA: number | null; ocpdAmps: number | null }): string =>
+    complianceBadge(evaluateCompliance({
+      requiredValues: [
+        { label: 'string ampacity', value: s.ampacityA, numeric: true },
+        { label: 'string OCPD', value: s.ocpdAmps, numeric: true },
+      ],
+    }));
+  const _schedTopEq = _schedAuth.subSystems[0]?.equipment;
   const _schedAcRows = (_schedIsMicro && _schedPP.length ? _schedAuth.microBranches : []).map((b) => {
     return `<tr><td class="fw7 mono">B${b.index}</td><td>${b.deviceCount} &times; microinverter</td>`
       + `<td class="tr mono">${b.branchCurrentA.toFixed(1)}A</td><td class="tr mono">${b.continuousA.toFixed(1)}A</td>`
-      + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td>${b.conductorCallout}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
-      + `<td class="center fw7">&check;</td></tr>`;
+      + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td style="font-size:7.5px">${_schedBranchConductorCell(b.conductorCallout)}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
+      + `<td class="center">${_schedBranchStatus(b, _schedTopEq?.inverterModel, _schedTopEq?.inverterManufacturer)}</td></tr>`;
   }).join('');
   // ── Wave 5B hybrid chrome ──────────────────────────────────────────────
   const _schedHybrid = _schedAuth.isHybrid;
@@ -1575,8 +1630,8 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       const rows = sub.microBranches.map(b =>
         `<tr><td class="fw7 mono">B${b.index}</td><td>${b.deviceCount} &times; microinverter</td>`
         + `<td class="tr mono">${b.branchCurrentA.toFixed(1)}A</td><td class="tr mono">${b.continuousA.toFixed(1)}A</td>`
-        + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td>${b.conductorCallout}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
-        + `<td class="center fw7">&check;</td></tr>`).join('');
+        + `<td class="tr mono fw7">${b.ocpdAmps}A</td><td style="font-size:7.5px">${_schedBranchConductorCell(b.conductorCallout)}</td><td class="tr">${_schedAmpacity(b.wireGauge)}</td>`
+        + `<td class="center">${_schedBranchStatus(b, eq2.inverterModel, eq2.inverterManufacturer)}</td></tr>`).join('');
       return `
       <div class="section-title">AC Branch Circuit Schedule &mdash; ${hdr} &mdash; NEC 690.8(A)</div>
       <table class="equip-table">
@@ -1591,7 +1646,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       + `<td>${s.wireGauge} USE-2</td>`
       + `<td class="tr">${s.voltageDropPct != null ? s.voltageDropPct.toFixed(2) + '%' : '—'}</td>`
       + `<td class="tr">${s.lengthFt != null ? s.lengthFt + ' ft' : '—'}</td>`
-      + `<td class="center fw7">&check;</td></tr>`).join('');
+      + `<td class="center">${_schedStringStatus(s)}</td></tr>`).join('');
     return `
       <div class="section-title">DC String Wire Sizing &mdash; ${hdr} &mdash; NEC 690.8</div>
       <table class="equip-table">
@@ -1626,10 +1681,24 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
     <div class="page-content">
       <div class="section-title">Solar Modules${_schedHybrid ? ' — per sub-system (hybrid)' : _schedIsMicro ? ' — each module paired 1:1 with a microinverter (no series DC string)' : ''}</div>
       <table class="equip-table">
-        <thead><tr><th>${_schedGroupLabel}</th>${_schedHybrid ? '<th>System</th>' : ''}<th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
+        <thead><tr><th>${_schedGroupLabel}</th>${_schedHybrid ? '<th>System</th>' : ''}<th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>${_schedIsMicro ? 'Module DC Lead' : 'Wire'}</th><th>${_schedIsMicro ? 'Connector' : 'Run (ft)'}</th></tr></thead>
         <tbody>
           ${system.inverters?.flatMap((inv, invIdx) =>
-            inv.strings?.map((str, strIdx) => `
+            inv.strings?.map((str, strIdx) => {
+              // §8 (closeout 2026-07-23) — on a 1:1 microinverter topology there is
+              // NO field-installed DC string wire: each module connects to its
+              // microinverter through the module's FACTORY-INTEGRATED DC leads
+              // (MC4/EN4 connectors, NEC 690.31). There is no canonical DC route
+              // segment, so we NEVER print a field-installed DC gauge/run (the old
+              // `str.wireGauge` / `str.wireLength` row was an unbacked #10/22-ft
+              // fabrication). We show the factory-lead fact from the module record.
+              const _dcLeadCell = _schedIsMicro
+                ? 'Factory-integrated leads'
+                : `${str.wireGauge}`;
+              const _dcRunCell = _schedIsMicro
+                ? 'MC4 / EN4 (690.31)'
+                : `${str.wireLength}`;
+              return `
             <tr>
               <td class="fw7">${invIdx + 1}-${strIdx + 1}</td>
               ${_schedHybrid ? `<td class="fw7">${_schedSubOf(inv)}</td>` : ''}
@@ -1639,9 +1708,10 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
               <td class="tr">${str.panelVoc}V</td>
               <td class="tr">${str.panelIsc}A</td>
               <td class="tr fw7">${(str.panelCount * str.panelWatts / 1000).toFixed(2)}</td>
-              <td>${str.wireGauge}</td>
-              <td class="tr">${str.wireLength}</td>
-            </tr>`) || []
+              <td${_schedIsMicro ? ' style="font-size:7.5px"' : ''}>${_dcLeadCell}</td>
+              <td class="tr"${_schedIsMicro ? ' style="font-size:7.5px"' : ''}>${_dcRunCell}</td>
+            </tr>`;
+            }) || []
           ).join('')}
           <tr style="background:#f5f5f5;font-weight:bold">
             <td colspan="${_schedHybrid ? 4 : 3}">TOTAL</td><td class="tr">${system.totalPanels}</td>
@@ -1650,6 +1720,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           </tr>
         </tbody>
       </table>
+      ${/* §8 — the DC-connection fact is carried by the "Module DC Lead" /
+           "Connector" columns above (Factory-integrated leads · MC4/EN4, 690.31);
+           no separate note needed (keeps SCHED page-content within its box). */''}
       <div class="section-title">Inverters${_schedHybrid ? ' — per sub-system (hybrid)' : ''}</div>
       <table class="equip-table">
         <thead><tr><th>#</th>${_schedHybrid ? '<th>System</th>' : ''}<th>Type</th><th>Manufacturer</th><th>Model</th><th>AC kW</th><th>Max DC V</th><th>Efficiency</th><th>UL Listing</th></tr></thead>

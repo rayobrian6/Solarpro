@@ -153,3 +153,132 @@ export function getManufacturerAsset(
 export function getManufacturerAssetsByCategory(category: ManufacturerAssetCategory | string): ManufacturerAsset[] {
   return MANUFACTURER_ASSETS.filter(a => a.category === category);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §12 (CO-C) — PRODUCT-VERSION DOCUMENT APPLICABILITY GATE
+// ───────────────────────────────────────────────────────────────────────────
+// getManufacturerAsset resolves an asset by equipmentId/category only, with NO
+// SKU↔document version applicability check. The `racking_detail:rooftech-mini`
+// record keys model "RT-MINI" but its document is the "RT-MINI II Installation
+// Manual" — a DIFFERENT product version. Citing it as the attachment authority
+// for a selected RT-MINI is unproven.
+//
+// This pure evaluator compares the SELECTED equipment model to the product the
+// document ACTUALLY covers (parsed from the asset's own docTitle). Applicability
+// is 'verified' ONLY when they match exactly OR a VERIFIED cross-reference/alias
+// evidence record is supplied. Absent that, it is 'unverified' — the caller emits
+// the EQUIPMENT-DOCUMENT-APPLICABILITY blocker and labels the sheet
+// non-authoritative. No alias record is fabricated here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface DocumentApplicabilityAlias {
+  /** the SKU/model the alias evidence confirms the document applies to. */
+  selectedModel: string;
+  /** the document product the alias maps FROM (e.g. 'RT-MINI II'). */
+  documentProduct: string;
+  /** true only when this alias is a VERIFIED registry evidence record. */
+  verified: boolean;
+  /** the evidence source (verified registry document id / label). */
+  evidenceRef: string | null;
+}
+
+export interface DocumentApplicability {
+  state: 'verified' | 'unverified';
+  /** the selected equipment model the document is being cited for. */
+  selectedModel: string | null;
+  /** the product the document actually covers, parsed from its docTitle. */
+  documentProduct: string | null;
+  /** the verified cross-reference/alias evidence that cleared it, or null. */
+  crossReferenceEvidence: string | null;
+  reason: string;
+}
+
+const _normP = (s: string | null | undefined): string =>
+  (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// A trailing PRODUCT-VERSION differentiator: a Roman numeral (II/III/IV/…), a
+// decimal / "vN.N" version, or "Gen N" / "Mk N". A BARE integer (XR100, RM10) is
+// a MODEL number, not a version, and is deliberately NOT matched — so naming
+// variance between a model and its manual title never reads as a version mismatch.
+const _VERSION_TOKEN = '(?:I{2,3}|IV|VI{0,3}|IX|X|v\\d+(?:\\.\\d+)?|\\d+\\.\\d+|Gen\\s*\\d+|Mk\\s*\\d+)';
+
+/** Parse the product identity the document ACTUALLY covers from its title,
+ *  anchored on the asset's own model plus any trailing VERSION differentiator the
+ *  title appends (word-bounded). Returns the asset model unchanged when the title
+ *  does not restate the product with an added version — so a document that simply
+ *  has a different marketing title is NOT treated as a different product. */
+function documentProductFromAsset(asset: ManufacturerAsset): string | null {
+  const title = asset.docTitle ?? '';
+  const base = asset.model ?? '';
+  if (!base) return title ? title : null;
+  const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(esc + '(?:\\s+' + _VERSION_TOKEN + '(?=\\s|$|[^A-Za-z0-9]))?', 'i').exec(title);
+  return m ? m[0].replace(/\s+/g, ' ').trim() : base;
+}
+
+/**
+ * Evaluate whether a manufacturer document (asset) is applicable to a SELECTED
+ * equipment model. Pure/deterministic.
+ *
+ * The ONLY thing this gate flags is a genuine PRODUCT-VERSION conflation: the
+ * asset's own document names a DIFFERENT version than the asset's model (the
+ * `racking_detail:rooftech-mini` record keys model "RT-MINI" but its document is
+ * the "RT-MINI II Installation Manual"). Mere naming variance between a model and
+ * its manual title (e.g. mount "IronRidge XR100" ↔ "XR Flush Mount Installation
+ * Manual") is NOT a version mismatch and stays 'verified'. A verified alias
+ * evidence record (never fabricated) is the only path to 'verified' when the
+ * versions genuinely differ.
+ */
+export function evaluateDocumentApplicability(
+  selectedModel: string | null | undefined,
+  asset: ManufacturerAsset | null | undefined,
+  aliasEvidence?: DocumentApplicabilityAlias | null,
+): DocumentApplicability {
+  if (!asset) {
+    return {
+      state: 'verified', selectedModel: selectedModel ?? null, documentProduct: null,
+      crossReferenceEvidence: null, reason: 'No manufacturer document on file — nothing to gate.',
+    };
+  }
+  const documentProduct = documentProductFromAsset(asset);
+  const assetModel = _normP(asset.model);
+  const docProduct = _normP(documentProduct);
+  // The document names the SAME product version as the asset's model ⇒ no version
+  // conflation ⇒ applicable (naming variance is fine; the equipment id keyed it).
+  if (!assetModel || !docProduct || assetModel === docProduct) {
+    return {
+      state: 'verified', selectedModel: selectedModel ?? null, documentProduct,
+      crossReferenceEvidence: null,
+      reason: 'The on-file document matches the asset product version (no version conflation).',
+    };
+  }
+  // The asset's document is a DIFFERENT version than the asset's model. If the
+  // SELECTED mount is the asset's BASE product (not the document's version) and no
+  // verified alias evidence bridges them, applicability is UNVERIFIED.
+  const sel = _normP(selectedModel);
+  const selMatchesBase = !!sel && (sel === assetModel || sel.includes(assetModel) || assetModel.includes(sel));
+  const selIsDocVersion = !!sel && sel === docProduct;
+  if (aliasEvidence && aliasEvidence.verified
+    && _normP(aliasEvidence.selectedModel) === sel
+    && _normP(aliasEvidence.documentProduct) === docProduct) {
+    return {
+      state: 'verified', selectedModel: selectedModel ?? null, documentProduct,
+      crossReferenceEvidence: aliasEvidence.evidenceRef ?? 'verified alias evidence record',
+      reason: 'A verified cross-reference/alias evidence record establishes applicability across product versions.',
+    };
+  }
+  if (selMatchesBase && !selIsDocVersion) {
+    return {
+      state: 'unverified', selectedModel: selectedModel ?? null, documentProduct,
+      crossReferenceEvidence: null,
+      reason: `The on-file document covers ${documentProduct ?? 'a different product version'}, a different product `
+        + `version than the selected ${selectedModel ?? asset.model}, and no verified cross-reference/alias evidence establishes applicability.`,
+    };
+  }
+  // Selected model already matches the document's version, or is unrelated — no gate.
+  return {
+    state: 'verified', selectedModel: selectedModel ?? null, documentProduct,
+    crossReferenceEvidence: null,
+    reason: 'The selected model matches the document product version.',
+  };
+}

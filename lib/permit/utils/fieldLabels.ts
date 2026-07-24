@@ -33,10 +33,16 @@ interface RawLabel {
   appliesWhen: string;
 }
 
+/** §16 — which interconnection SIDE a label belongs to. The design's canonical
+ *  service topology selects the applicable set: a 705.12 load-side placard must
+ *  never render on a 705.11 supply-side system, and vice-versa. 'general' labels
+ *  (utility-interactive markings, DC/RSD/grounding placards) apply to both. */
+export type InterconnectSide = 'supply-side-only' | 'load-side-only' | 'general';
+
 export interface FieldLabel {
   id: string;            // display id, L-1..
   refId: string;         // source id from the dataset
-  necRef: string;        // code ref resolved to the job's NEC edition
+  necRef: string;        // code ref resolved to the job's NEC edition + topology
   placement: string;     // where it's installed
   lines: string[];       // rendered lines (signal word first when present)
   bg: string;
@@ -44,6 +50,7 @@ export interface FieldLabel {
   letterHeightIn: number;
   material: string;
   required: boolean;     // does it apply to THIS system?
+  interconnectSide: InterconnectSide;  // §16 — topology classification
 }
 
 interface Ctx {
@@ -54,8 +61,34 @@ interface Ctx {
   acDisconnect: boolean;
 }
 
-// Which system conditions require each label. Engineering judgment lives here
-// (the raw data carries the wording/codes/colors, not the boolean gating).
+// §16 — INTERCONNECTION-SIDE classification. The design's canonical topology
+// (705.11 supply-side vs 705.12 load-side) selects the applicable set. A
+// load-side-only label (the back-fed-breaker "do not relocate" placard —
+// meaningless without a back-fed breaker) must NOT render on a supply-side tap;
+// the supply-side line-side-tap warning must NOT render on a load-side system.
+// Everything else is a general utility-interactive / DC / RSD / grounding label
+// that applies regardless of side. Any id not listed defaults to 'general'.
+const LABEL_INTERCONNECT_SIDE: Record<string, InterconnectSide> = {
+  'backfeed-breaker-do-not-relocate': 'load-side-only',   // NEC 705.12(B)(2)(3)(b)
+  'line-side-tap-warning': 'supply-side-only',            // NEC 705.11
+};
+
+export function labelInterconnectSide(refId: string): InterconnectSide {
+  return LABEL_INTERCONNECT_SIDE[refId] ?? 'general';
+}
+
+/** Is a label's topology side compatible with THIS design's interconnection? */
+function sideApplies(side: InterconnectSide, isSupply: boolean): boolean {
+  if (side === 'supply-side-only') return isSupply;
+  if (side === 'load-side-only') return !isSupply;
+  return true;
+}
+
+// Which system conditions require each label (NON-topology gating — battery,
+// micro, rapid-shutdown, AC disconnect). The interconnection SIDE gate is
+// applied separately via LABEL_INTERCONNECT_SIDE so it is single-sourced and
+// testable. Engineering judgment lives here (the raw data carries the
+// wording/codes/colors, not the boolean gating).
 const REQUIRED_WHEN: Record<string, (c: Ctx) => boolean> = {
   'rapid-shutdown-building-placard': c => c.rapidShutdown,
   'rapid-shutdown-array-boundary-label': c => c.rapidShutdown,
@@ -67,16 +100,49 @@ const REQUIRED_WHEN: Record<string, (c: Ctx) => boolean> = {
   'dc-photovoltaic-power-source-ratings': c => !c.isMicro,
   'ac-point-of-connection-disconnect': () => true,
   'ac-disconnect-marking': c => c.acDisconnect,
-  'backfeed-breaker-do-not-relocate': c => !c.isSupply,
+  'backfeed-breaker-do-not-relocate': () => true,   // side gated via LABEL_INTERCONNECT_SIDE
   'dual-power-source-inverter-output': () => true,
   'multiple-sources-of-power-directory': () => true,
-  'line-side-tap-warning': c => c.isSupply,
+  'line-side-tap-warning': () => true,              // side gated via LABEL_INTERCONNECT_SIDE
   'photovoltaic-system-connected': () => true,
   'ess-disconnect': c => c.hasBattery,
   'ess-master-placard': c => c.hasBattery,
   'grounding-electrode-conductor-marking': () => true,
   'inverter-listing-label': () => true,
 };
+
+// §16 — NEC 705 section clauses are SIDE-SPECIFIC. On a supply-side (705.11)
+// design a load-side 705.12 clause is wrong authority and must not print; on a
+// load-side (705.12) design the supply-side 705.11 clause must not print. 705.10
+// (grouped power-source directory) and everything else is general (both sides).
+//   • 705.11 / 705.12(A)  → supply-side (705.12(A) was the 2017 supply-side ref)
+//   • 705.12(B..)/705.12/705.13 → load-side
+function necSectionSide(part: string): 'supply' | 'load' | 'general' {
+  const s = part.trim();
+  if (/705\.11\b/.test(s)) return 'supply';
+  if (/705\.12\(A\)/.test(s)) return 'supply';
+  if (/705\.13\b/.test(s)) return 'load';
+  if (/705\.12/.test(s)) return 'load';
+  return 'general';
+}
+
+/** Drop side-contradicting NEC section clauses from a compound section string
+ *  ("705.10 / 705.12(B)(2)" → "705.10" on a supply-side design). Never blank. */
+function filterSectionByTopology(section: string, isSupply: boolean): string {
+  const parts = section.split('/').map(p => p.trim()).filter(Boolean);
+  if (parts.length <= 1) {
+    // single clause: drop only if it directly contradicts the design side
+    const side = necSectionSide(section);
+    if (side === 'general') return section;
+    return (isSupply ? side === 'supply' : side === 'load') ? section : '';
+  }
+  const kept = parts.filter(p => {
+    const side = necSectionSide(p);
+    if (side === 'general') return true;
+    return isSupply ? side === 'supply' : side === 'load';
+  });
+  return (kept.length ? kept : parts).join(' / ');
+}
 
 /** §11 — resolve the label's code SECTION references. NEC follows the AHJ's
  *  adopted cycle (`necYear`, the jurisdiction's NEC — the same source
@@ -85,7 +151,7 @@ const REQUIRED_WHEN: Record<string, (c: Ctx) => boolean> = {
  *  placard JSON's baked-in "IFC 2021" literal may NEVER leak, because the IFC
  *  authority is unverified/pending on most jobs — an "IFC 2021" claim was a
  *  FALSE edition. A missing IFC edition prints PENDING (section still cited). */
-function resolveRef(codeRefs: RawLabel['codeRefs'], necYear: string, ifcEd: string | null): string {
+function resolveRef(codeRefs: RawLabel['codeRefs'], necYear: string, ifcEd: string | null, isSupply: boolean): string {
   const nec = codeRefs.filter(c => /NEC/i.test(c.code));
   const ifc = codeRefs.filter(c => /IFC/i.test(c.code));
   const necPick = nec.find(c => c.code.includes(necYear)) ?? nec[nec.length - 1];
@@ -93,7 +159,11 @@ function resolveRef(codeRefs: RawLabel['codeRefs'], necYear: string, ifcEd: stri
   // (or the latest listed section when pending — the section, not its edition).
   const ifcPick = (ifcEd ? ifc.find(c => c.code.includes(ifcEd)) : undefined) ?? ifc[ifc.length - 1];
   const parts: string[] = [];
-  if (necPick) parts.push(`NEC ${necYear} ${necPick.section}`);
+  if (necPick) {
+    // §16 — strip side-contradicting NEC 705 clauses (no 705.12 on supply-side).
+    const necSection = filterSectionByTopology(necPick.section, isSupply);
+    if (necSection) parts.push(`NEC ${necYear} ${necSection}`);
+  }
   if (ifcPick) parts.push(`IFC ${ifcEd ?? 'PENDING'} ${ifcPick.section}`);
   return parts.join('  ·  ') || (codeRefs[0] ? `${codeRefs[0].code} ${codeRefs[0].section}` : '');
 }
@@ -171,7 +241,10 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
   const raw = (fieldLabelData as { labels: RawLabel[] }).labels;
   let n = 0;
   return raw.map((l): FieldLabel => {
-    const required = (REQUIRED_WHEN[l.id] ?? (() => true))(ctx);
+    // §16 — required = (system condition) AND (interconnection side applies).
+    const side = labelInterconnectSide(l.id);
+    const conditionRequired = (REQUIRED_WHEN[l.id] ?? (() => true))(ctx);
+    const required = conditionRequired && sideApplies(side, isSupply);
     const filledText = FILLS[l.id] ? fillBlanks(l.text, FILLS[l.id]) : l.text;
     const textLines = filledText.split('\n').map(s => s.trim()).filter(Boolean);
     // Ensure the ANSI signal word leads the lines so the renderer styles it.
@@ -181,7 +254,7 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
     return {
       id: `L-${n}`,
       refId: l.id,
-      necRef: resolveRef(l.codeRefs, year, _cp.ifc),
+      necRef: resolveRef(l.codeRefs, year, _cp.ifc, isSupply),
       placement: l.location,
       lines,
       bg: l.colors.background || '#ffffff',
@@ -189,6 +262,7 @@ export function selectFieldLabels(input: PermitInput, cad: CADModel): FieldLabel
       letterHeightIn: l.minLetterHeightIn,
       material: l.material,
       required,
+      interconnectSide: side,
     };
   });
 }

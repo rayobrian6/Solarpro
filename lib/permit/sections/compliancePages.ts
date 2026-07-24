@@ -1097,6 +1097,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             // identically onto PV-3 / PE-1 / SCHED. No fabricated "×4\" SS lag"
             // length formula. PENDING VERIFIED FASTENER ASSEMBLY when unresolved.
             const _fa = projectFastenerAssembly(input);
+            // §14 — canonical spacing authority (design vs maximum-verified).
+            const _spc = projectStructuralFromInput(input).spacingAuthority;
             const _fastenerDisp = _fa.present ? escapeH(_fa.line) : 'PENDING VERIFIED FASTENER ASSEMBLY';
             const _embedDisp = _fa.embedmentIn != null
               ? `Min. ${_fa.embedmentIn}" thread embedment into ${escapeH(_fa.substrate ?? 'rafter')}`
@@ -1108,13 +1110,18 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             <tr><td class="il">Mount Topology</td><td class="iv" data-app-a-field="mountTopology">${escapeH(String(_mountTopo))}</td></tr>
             <tr><td class="il">Material</td><td class="iv">${_mSel?.rail?.materialAlloy || 'Aluminum — per manufacturer listing'}</td></tr>
             <tr><td class="il">Rail Profile</td><td class="iv" data-app-a-field="railModel">${_railProfile}</td></tr>
-            <tr><td class="il">Max Attach Spacing</td><td class="iv">${(() => {
-              // Engineering-resolved spacing first (same chain as PV-3/PE-1) —
-              // the racking's rated 48" printed here beside PV-3's resolved 24".
-              const _spc = input.compliance?.structural?.attachment?.maxAllowedSpacing
-                || (project.attachmentSpacing as number | undefined)
-                || _mSel?.mount?.maxSpacingIn;
-              return _spc ? `${_spc}" O.C.` : 'Per PV-3 / structural calc';
+            <tr><td class="il">${_spc.verificationState === 'verified' ? 'Max Attach Spacing' : 'Attach Spacing (design)'}</td><td class="iv">${(() => {
+              // §14 — DESIGN spacing + verification state. "MAX" language renders
+              // ONLY when a verified source establishes it; otherwise the design
+              // value + PENDING STRUCTURAL VERIFICATION (never 48" as an allowable).
+              const _dsn = _spc.designSpacingIn
+                ?? input.compliance?.structural?.attachment?.maxAllowedSpacing
+                ?? (project.attachmentSpacing as number | undefined)
+                ?? _mSel?.mount?.maxSpacingIn;
+              const _val = _dsn ? `${_dsn}&quot; O.C.` : 'Per PV-3 / structural calc';
+              return _spc.verificationState === 'verified'
+                ? `${_val} (MAX ALLOWED &mdash; VERIFIED)`
+                : `${_val} <span style="color:#b45309;font-weight:bold;">&mdash; PENDING STRUCTURAL VERIFICATION</span>`;
             })()}</td></tr>
             ${_isRoof ? `<tr><td class="il">Attachment</td><td class="iv">${_mSel?.mount?.model || 'Per PV-3 attachment detail'}</td></tr>` : ''}
             ${_isRoof ? `<tr><td class="il">Fastener</td><td class="iv" data-app-a-field="fastener">${_fastenerDisp}</td></tr>` : ''}

@@ -113,6 +113,29 @@ describe('W9 §16 — issue wording is derived, never a hard-coded "Issued for p
   });
 });
 
+// ── §18 (gate 18) — RS-1 legibility + every blocker preserved ───────────────
+describe('§18 — RS-1 prints every active blocker at the enlarged (≥6.5pt) size', () => {
+  const { html, snap } = render();
+  const registry = (snap.permitReadiness?.registry ?? []).filter((r: any) => !r.resolved);
+
+  it('the review-status registry has blockers to show (fixture sanity)', () => {
+    expect(registry.length).toBeGreaterThan(10);
+  });
+
+  it('core RS-1 blocker text is enlarged to an effective >=6.5pt (8.7px)', () => {
+    // was 6–6.5px (≈4.9pt) — below the readable floor for a permit reviewer.
+    expect(html).toContain('font-size:8.7px');
+  });
+
+  it('EVERY active registry blocker code is present on the rendered set (none abbreviated away)', () => {
+    for (const b of registry) {
+      expect(html, `blocker ${b.code} missing from RS-1`).toContain(b.code);
+      // its resolution action / authority path is preserved verbatim (not truncated)
+      if (b.resolutionAction) expect(html).toContain(b.resolutionAction);
+    }
+  });
+});
+
 // ── TRUE GEOMETRY PAGE-FIT VALIDATOR (Chromium) ─────────────────────────────
 // The definitive check: rendered element geometry vs the printable box. Any
 // non-SVG element extending past the printable bottom — even clipped under
@@ -138,6 +161,11 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
       const page = await browser.newPage({ viewport: { width: 1700, height: 1120 }, deviceScaleFactor: 1 });
       await page.setContent(html, { waitUntil: 'load' });
       const report = await page.evaluate(() => {
+        const clipsY = (root: Element) => {
+          const cs = getComputedStyle(root);
+          return cs.overflowY === 'hidden' || cs.overflowY === 'clip'
+              || cs.overflow === 'hidden' || cs.overflow === 'clip';
+        };
         const pages = Array.from(document.querySelectorAll('.page')) as HTMLElement[];
         return pages.map((pg, i) => {
           const cs = getComputedStyle(pg);
@@ -159,13 +187,52 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
             }
           });
           const belowByIn = (maxBottom - contentBottom) / 96;
-          return { i, belowByIn: +belowByIn.toFixed(3), worst, hasTitleBlock: !!pg.querySelector('.title-block') };
+
+          // §19 — SUB-SHEET internal clip: a block taller than its own hidden-
+          // overflow container is silently truncated even when the page fits.
+          // Measure the deepest NON-SVG content overflow per vertical clip
+          // container (an oversized <svg> cropped to a viewport is intentional
+          // bleed, excluded). Scale-corrected for the fit-to-width transform.
+          const pgScale = pr.height / pg.offsetHeight;
+          let internalWorstPx = 0; let internalWorst = '';
+          for (const c of [pg, ...Array.from(pg.querySelectorAll('*'))] as HTMLElement[]) {
+            if (c.tagName.toLowerCase() === 'svg' || c.closest('svg')) continue;
+            if (!clipsY(c)) continue;
+            if (c.scrollHeight - c.clientHeight <= 2) continue;  // no clip
+            const cr = c.getBoundingClientRect();
+            const cPadB = parseFloat(getComputedStyle(c).paddingBottom) || 0;
+            const contentBottomLayout = c.clientTop + (c.clientHeight - cPadB);
+            let over = 0; let wEl = '';
+            for (const el of Array.from(c.querySelectorAll('*'))) {
+              if (el.tagName.toLowerCase() === 'svg' || el.closest('svg')) continue;
+              const ecs = getComputedStyle(el);
+              if (ecs.position === 'absolute' || ecs.position === 'fixed') continue;
+              const r = el.getBoundingClientRect();
+              if (r.width === 0 && r.height === 0) continue;
+              if ((el.textContent || '').trim() === '' && r.height < 4) continue;
+              const ov = (r.bottom - cr.top) / pgScale - contentBottomLayout;
+              if (ov > over) { over = ov; wEl = (c.className || c.tagName) + ' clips ' + ((el.className || el.tagName) + ' :: ' + (el.textContent || '').trim().slice(0, 36)); }
+            }
+            if (over > internalWorstPx) { internalWorstPx = over; internalWorst = wEl; }
+          }
+
+          return { i, belowByIn: +belowByIn.toFixed(3), worst, hasTitleBlock: !!pg.querySelector('.title-block'),
+                   internalWorstPx: +internalWorstPx.toFixed(1), internalWorst };
         });
       });
 
       // physical page count agrees with the manifest
       expect(report.length).toBe(snap.projectAuthority.sheetIndex.length);
       for (const r of report) expect(r.hasTitleBlock, `page ${r.i} missing title block`).toBe(true);
+
+      // §19 — no MEANINGFUL sub-sheet internal clip (real content severed by a
+      // nested hidden-overflow box). >2px of non-SVG content past a clip box.
+      const INTERNAL_TOL_PX = 2;
+      const internalClips = report
+        .map(r => ({ ...r, id: snap.projectAuthority.sheetIndex[r.i]?.id ?? String(r.i) }))
+        .filter(r => r.internalWorstPx > INTERNAL_TOL_PX);
+      const iDetail = internalClips.map(r => `${r.id}: +${r.internalWorstPx}px [${r.internalWorst}]`).join('  |  ');
+      expect(internalClips, `internal-clipped sheets: ${iDetail}`).toEqual([]);
 
       // A page is CLIPPED when a non-SVG element extends meaningfully past the
       // printable box. Clean full-bleed sheets sit ≤ ~0.38in below the content

@@ -189,8 +189,16 @@ export function buildConstructionNotes(input: PermitInput): string[] {
   const ircVer = cp.irc ?? 'PENDING';
   const ifcVer = cp.ifc ?? 'PENDING';
   const asceVer = cp.asce ?? 'PENDING';
+  // §17 (closeout 2026-07-23) — do NOT assert conformance to a PENDING edition.
+  // Separate the analysis basis (NEC/ASCE — the editions the engine ran under)
+  // from the AHJ-adopted IBC/IRC/IFC editions (a jurisdictional authority status,
+  // verified before submission). When adopted editions are unknown they read
+  // PENDING VERIFICATION, never "conform to PENDING IBC".
+  const _adopted = [ibcVer, ircVer, ifcVer].every(v => v === 'PENDING')
+    ? 'the AHJ-adopted IBC / IRC / IFC editions (PENDING VERIFICATION)'
+    : `the AHJ-adopted IBC ${ibcVer} / IRC ${ircVer} / IFC ${ifcVer} editions`;
   const notes: string[] = [
-    `All work shall conform to NEC ${necVer}, ${ibcVer} IBC, ${ircVer} IRC, ${ifcVer} IFC, ASCE ${asceVer}, applicable state amendments, and AHJ requirements. All equipment shall be listed and labeled per NEC 110.3(B).`,
+    `Analysis basis: NEC ${necVer} and ASCE ${asceVer}. All work shall additionally conform to ${_adopted}, applicable state amendments, and AHJ requirements once verified. All equipment shall be listed and labeled per NEC 110.3(B).`,
     `Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).`,
     // Interconnection note follows the ACTUAL method — the load-side backfeed
     // boilerplate on a supply-side-tap job re-introduced the exact set-wide

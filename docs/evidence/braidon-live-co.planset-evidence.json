@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T01:11:18.785Z",
+  "generatedAt": "2026-07-24T20:39:46.689Z",
   "harness": "planset-evidence-co (final closeout rendered-truth, 20 permanent gates)",
   "mode": "live",
-  "htmlPath": "_tmp_braidon_live.html",
-  "snapshotId": "PDS-2E65B042F09F",
-  "digest": "2e65b042f09fc1abbd194a2a68912ca84f0497e16a2475371031aa76ddb616b0",
+  "htmlPath": "../../AppData/Local/Temp/_ep_live.html",
+  "snapshotId": "PDS-36AF18EB13AA",
+  "digest": "36af18eb13aa222ec9eda00e9b82ab726b7b63f1c9b54126534190478d212846",
   "project": "BRAIDON M PILLA — Solar TEST",
   "sheetCount": 21,
   "sheetIds": [
@@ -126,6 +126,8 @@
     "TAP-CONDUCTOR-LENGTH-PENDING",
     "FRAMING-AUTHORITY-UNVERIFIED",
     "PENDING-RACKING-ASSEMBLY-SELECTION",
+    "FASTENER-ASSEMBLY-UNVERIFIED",
+    "EQUIPMENT-DOCUMENT-APPLICABILITY",
     "WIND-SNOW-AUTHORITY-UNRESOLVED",
     "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
     "RACKING-CAPACITY-APPLICABILITY-GAP",
@@ -140,19 +142,19 @@
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-2E65B042F09F",
+        "reportVal": "PDS-36AF18EB13AA",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-2E65B042F09F"
+          "PDS-36AF18EB13AA"
         ],
-        "sld": "PDS-2E65B042F09F"
+        "sld": "PDS-36AF18EB13AA"
       },
       {
         "name": "digestPrefix",
-        "reportVal": "2e65b042f09f",
+        "reportVal": "36af18eb13aa",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "2e65b042f09fc1abbd19"
+          "36af18eb13aa222ec9ed"
         ]
       },
       {
@@ -185,7 +187,7 @@
       },
       {
         "name": "blockingBlockerCount",
-        "reportVal": "15",
+        "reportVal": "17",
         "matchedInRendered": true,
         "rs1Rendered": null
       }
@@ -352,7 +354,7 @@
       "gate": 15,
       "id": "geometry-page-fit",
       "ok": true,
-      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 missing-title-block=0",
+      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0",
       "evidence": null
     },
     {
@@ -380,7 +382,7 @@
       "gate": 19,
       "id": "severity-policy-compliant",
       "ok": true,
-      "detail": "promotedNotBlocking=0 activeWarnings=0 blockingCount=15",
+      "detail": "promotedNotBlocking=0 activeWarnings=0 blockingCount=17",
       "evidence": {
         "notBlocking": [],
         "anyWarning": []

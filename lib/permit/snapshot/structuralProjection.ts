@@ -83,8 +83,80 @@ export interface StructuralProjection {
   // module footprint (exact catalog dims — never generic 66×40)
   moduleWidthIn: number | null;
   moduleHeightIn: number | null;
+  // §14 canonical attachment-spacing authority (design vs maximum-verified)
+  spacingAuthority: SpacingAuthority;
   // banner (§12)
   banner: StructuralBanner;
+}
+
+// ── §14 CANONICAL ATTACHMENT-SPACING AUTHORITY ────────────────────────────────
+// ONE spacing object projected identically onto PV-3 / PV-4C / APP-A / PE-1.
+// It separates the DESIGN attachment spacing (the value the layout was drawn to)
+// from a MAXIMUM-VERIFIED spacing (an allowable a VERIFIED source establishes for
+// the selected assembly + conditions). Until a verified source exists,
+// maximumVerifiedSpacingIn is null and no sheet may call the design spacing the
+// "maximum allowed" — it renders "DESIGN ATTACHMENT SPACING: N IN. O.C." +
+// "PENDING STRUCTURAL VERIFICATION". "MAXIMUM ALLOWED" language appears ONLY when
+// verificationState === 'verified'.
+export interface SpacingAuthority {
+  /** the design attachment spacing the array/rack layout was drawn to (in). */
+  designSpacingIn: number | null;
+  /** an ALLOWABLE maximum a verified source establishes for the selected
+   *  assembly + conditions — null until such a source exists. */
+  maximumVerifiedSpacingIn: number | null;
+  /** the verified source document establishing the maximum, or null. */
+  sourceDocument: string | null;
+  /** the roof zone / area the spacing applies to, or null when unresolved. */
+  applicableRoofZone: string | null;
+  /** the governing load conditions for the spacing, or null when unresolved. */
+  loadConditions: string | null;
+  /** 'verified' only when a source establishes a maximum for the exact assembly. */
+  verificationState: 'verified' | 'unverified';
+  /** the ONE design line every sheet prints ("DESIGN ATTACHMENT SPACING: 48 IN. O.C."). */
+  designLabel: string;
+  /** the status line: "PENDING STRUCTURAL VERIFICATION" (unverified) or
+   *  "MAXIMUM ALLOWED: N IN. O.C. (VERIFIED)" (verified). */
+  statusLabel: string;
+}
+
+/** Project the ONE canonical spacing authority from a structural projection.
+ *  Read-only: labels existing canonical fields, performs no engineering calc.
+ *  A maximum is 'verified' ONLY when the assembly is NOT capacity-gated AND a
+ *  verified rail-span/capacity source is present — never from the bare design 48. */
+export function projectSpacingAuthority(proj: StructuralProjection): SpacingAuthority {
+  const ra = proj.rackingAssembly as (RackingAssemblyRecord & {
+    railSku?: string | null; spanCantileverSource?: string | null;
+    assemblyVerification?: { spanSource?: string; overall?: string };
+  }) | null;
+  const designSpacingIn = proj.attachmentSpacingIn ?? null;
+  // A maximum-verified spacing requires a verified span/capacity source for the
+  // SELECTED assembly and NOT being capacity-gated. RT-MINI (unpinned rail,
+  // unarchived capacity source) is gated ⇒ no verified maximum exists.
+  const _spanVerified = ra?.assemblyVerification?.spanSource === 'verified';
+  const _hasSpanSource = !!ra?.spanCantileverSource;
+  const verified = !proj.capacityGated && _spanVerified && _hasSpanSource;
+  const maximumVerifiedSpacingIn = verified ? designSpacingIn : null;
+  const sourceDocument = verified ? (ra?.spanCantileverSource ?? null) : null;
+  const designStr = designSpacingIn != null ? String(Math.round(designSpacingIn)) : EMDASH;
+  return {
+    designSpacingIn,
+    maximumVerifiedSpacingIn,
+    sourceDocument,
+    applicableRoofZone: proj.roofPlaneObjects.length > 0 ? 'Array attachment field (all roof planes)' : null,
+    loadConditions: proj.windSpeedMph != null
+      ? `${fmt(proj.windSpeedMph)} mph wind${proj.roofSnowPsf != null ? ` · ${fmt(proj.roofSnowPsf)} psf roof snow` : ''}${proj.asceEdition ? ` (${proj.asceEdition})` : ''}`
+      : null,
+    verificationState: verified ? 'verified' : 'unverified',
+    designLabel: `DESIGN ATTACHMENT SPACING: ${designStr} IN. O.C.`,
+    statusLabel: verified
+      ? `MAXIMUM ALLOWED: ${designStr} IN. O.C. (VERIFIED${sourceDocument ? ' — ' + sourceDocument : ''})`
+      : 'PENDING STRUCTURAL VERIFICATION',
+  };
+}
+
+/** Convenience: spacing authority straight from a PermitInput. */
+export function projectSpacingAuthorityFromInput(input: PermitInput): SpacingAuthority {
+  return projectSpacingAuthority(projectStructuralFromInput(input));
 }
 
 export interface StructuralBanner {
@@ -114,6 +186,7 @@ const STRUCTURAL_BLOCKER_CODES = new Set([
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
   'RACKING-CAPACITY-APPLICABILITY-GAP',
   'PENDING-RACKING-ASSEMBLY-SELECTION',
+  'FASTENER-ASSEMBLY-UNVERIFIED',      // §13 — own fastener-authority code
 ]);
 
 /** §9 — racking-capacity gap codes that gate a capacity PASS off any sheet. */
@@ -171,7 +244,7 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
   const framingObservation = st?.framingObservation ?? null;
   const framingCapacityAuthority = st?.framingCapacityAuthority ?? null;
   const framingUnverified = !(framingCapacityAuthority && framingCapacityAuthority.verified === true);
-  return {
+  const _base = {
     present: !!snap,
     env,
     checks: st?.checks ?? [],
@@ -204,8 +277,14 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
     spliceCount: st?.spliceCount ?? null,
     moduleWidthIn: mod0?.widthIn ?? null,
     moduleHeightIn: mod0?.heightIn ?? null,
+    // §14 spacing authority is computed AFTER the base fields it reads.
+    spacingAuthority: (undefined as unknown as SpacingAuthority),
     banner: structuralBanner(snap),
   };
+  // §14 — fill the canonical spacing authority from the assembled base fields
+  // (needs attachmentSpacingIn / capacityGated / rackingAssembly already set).
+  _base.spacingAuthority = projectSpacingAuthority(_base as StructuralProjection);
+  return _base as StructuralProjection;
 }
 
 /** Convenience: project straight from a PermitInput (section renderers that

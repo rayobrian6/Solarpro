@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T01:11:40.884Z",
+  "generatedAt": "2026-07-24T20:35:03.204Z",
   "artifact": "braidon-physical-raceway-graph",
   "section": "§6 physical raceway objects (no \"all runs\" roll-up)",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-2E65B042F09F",
-  "digest": "2e65b042f09fc1abbd194a2a68912ca84f0497e16a2475371031aa76ddb616b0",
+  "snapshotId": "PDS-69A79CD87335",
+  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
   "purpose": "Each physical raceway independently generates its material, size, length, couplings, straps and fittings — labelled to its raceway id. The §7 NEC article is carried by the raceway type (PVC→352), never a hardcoded 358.",
   "raceways": [
     {

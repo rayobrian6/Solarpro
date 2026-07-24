@@ -36,6 +36,8 @@ import { utilityDisplayName } from '../utils/helpers';   // §15(b) — human ut
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA, type BranchPlanPanel } from '../utils/branching';
 import { getDesignTemps } from '../utils/designTemps';
+import { resolveTrunkCablePlan } from '@/lib/equipment/trunkCable';
+import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, getPanelById } from '@/lib/equipment-db';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
@@ -717,6 +719,108 @@ export function buildPermitDesignSnapshot(
       ?? (opts?.projectId ?? (proj.projectId ?? null)),
   });
 
+  // ═══ §6/§7 (closeout 07-23) LISTED CABLE ASSEMBLY + GEOMETRIC CABLE PATHS ══
+  // The micro AC branch trunk is a manufacturer-LISTED factory-connectorized
+  // cable ASSEMBLY (Enphase Q Cable, …), and its length is derived GEOMETRICALLY
+  // from each branch's module coordinates — not the plane-width heuristic that
+  // could never reconcile with the BOM drops×pitch footage (3×68 ≠ 152). Both are
+  // built here (moduleInstances + branches now available) and projected on
+  // PV-4B/E-1/SCHED/BOM/APP-A. Non-micro / unknown-trunk-brand ⇒ null/[].
+  let listedCableAssembly: import('./types').ListedCableAssembly | null = null;
+  let branchCablePaths: import('./types').BranchCablePath[] = [];
+  if (isMicro && branches.length > 0) {
+    const _microMfr = eq.inverterManufacturer ?? microInverters[0]?.manufacturer ?? '';
+    const _microModel = eq.inverterModel ?? microInverters[0]?.model ?? '';
+    // dominant module orientation → trunk cable spacing variant (portrait 60/72-cell).
+    const _oCount = { portrait: 0, landscape: 0 };
+    for (const mi of structAuth.moduleInstances) {
+      if (mi.orientation === 'landscape') _oCount.landscape++;
+      else _oCount.portrait++;
+    }
+    const _orient: 'portrait' | 'landscape' = _oCount.landscape > _oCount.portrait ? 'landscape' : 'portrait';
+    const _microDeviceCount = branches.reduce((s, b) => s + b.moduleCount, 0) || microUnits.length;
+    const _trunkPlan = resolveTrunkCablePlan({
+      brand: _microMfr, model: _microModel, deviceCount: _microDeviceCount,
+      orientation: _orient, branchCountOverride: branches.length,
+    });
+    const _pitch = _trunkPlan?.cable.connectorSpacingFt ?? null;
+    // module centre coordinates grouped by branch (canonical plan-ft frame).
+    const _centersByBranch = new Map<string, { x: number; y: number }[]>();
+    for (const mi of structAuth.moduleInstances) {
+      const pts = mi.polygon?.points ?? [];
+      if (!pts.length || !mi.branchId) continue;
+      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+      (_centersByBranch.get(mi.branchId) ?? _centersByBranch.set(mi.branchId, []).get(mi.branchId)!).push({ x: cx, y: cy });
+    }
+    const _paths = deriveBranchCablePaths(
+      branches.map(b => ({ branchId: b.branchId, branchLabel: b.label, moduleCount: b.moduleCount,
+        moduleCentersFt: _centersByBranch.get(b.branchId) ?? [] })),
+      _pitch,
+    );
+    branchCablePaths = _paths.map(p => ({
+      branchId: p.branchId, branchLabel: p.branchLabel, moduleCount: p.moduleCount, dropCount: p.dropCount,
+      designedInstalledLengthFt: p.designedInstalledLengthFt, connectorSpacingFt: p.connectorSpacingFt,
+      procurementLengthFt: p.procurementLengthFt, wasteFactor: p.wasteFactor,
+      lengthProvenance: p.lengthProvenance, derivation: p.derivation,
+      provenance: { source: 'deriveBranchCablePaths (geometry)', note: p.lengthProvenance },
+    }));
+    if (_trunkPlan) {
+      const _cbl = _trunkPlan.cable;
+      const _sys = _trunkPlan.system;
+      const _totalDrops = branchCablePaths.reduce((s, p) => s + p.dropCount, 0) || _microDeviceCount;
+      const _totalProc = branchCablePaths.reduce((s, p) => s + (p.procurementLengthFt ?? 0), 0) || _trunkPlan.approxFeet;
+      const _isEnphase = /enphase/i.test(_microMfr);
+      listedCableAssembly = {
+        assemblyId: 'QCABLE-ASSEMBLY',
+        manufacturer: _sys.brand,
+        ecosystem: _sys.ecosystem,
+        model: _cbl.sku ?? null,
+        sku: _cbl.sku ?? null,
+        skuNote: null,
+        conductorConstruction: _isEnphase ? 'two-wire, double-insulated (factory-connectorized)' : `${_cbl.conductors}-conductor factory-connectorized cable`,
+        conductorCount: _cbl.conductors ?? null,
+        conductorGauge: Number.isFinite(_cbl.gaugeAwg) ? `#${_cbl.gaugeAwg} AWG` : null,
+        insulationListing: _isEnphase
+          ? 'THHN/THWN-2 conductors; UL 9703 (cable assemblies) / UL 3003 (raw cable); permitted in free air per NEC 690.31(C)'
+          : 'listed AC trunk cable assembly; permitted in free air per NEC 690.31(C)',
+        wiringMethodLabel: _isEnphase ? 'ENPHASE Q CABLE (TC-ER)' : `${_sys.brand.toUpperCase()} AC TRUNK (TC-ER)`,
+        connectorSpacingFt: _cbl.connectorSpacingFt ?? null,
+        maxBranchCurrentA: _sys.branchOcpdA ?? null,
+        compatibleMicroModels: Object.keys(_sys.deviceBranchLimits ?? {}),
+        cableLengthFt: _totalProc > 0 ? Math.round(_totalProc) : null,
+        dropCount: _totalDrops,
+        unusedDropCapSku: _sys.connectors.sealingCap?.sku ?? null,
+        terminatorSku: _sys.connectors.terminator?.sku ?? null,
+        sourceDocument: _isEnphase
+          ? 'Enphase IQ Cable accessories Data Sheet DSH-00247-1.0 (2024-07-03)'
+          : `${_sys.brand} AC trunk cable datasheet`,
+        verificationStatus: 'catalog-sourced',
+        provenance: { source: 'resolveTrunkCablePlan + trunk-cable catalog', ref: _cbl.sku ?? null },
+      };
+    }
+    // §7/§10 — patch the canonical BRANCH_RUN route segment length taxonomy so
+    // PV-4B/E-1 project the geometric designed-installed length (not the 68-ft
+    // plane-width estimate) and reference the per-branch cable-path objects.
+    const _branchSeg = routeSegments.find(r => r.segmentId === 'BRANCH_RUN');
+    if (_branchSeg && branchCablePaths.length) {
+      const _geom = branchCablePaths.every(p => p.lengthProvenance === 'geometry-derived');
+      const _sumDesigned = branchCablePaths.reduce((s, p) => s + (p.designedInstalledLengthFt ?? 0), 0);
+      const _sumProc = branchCablePaths.reduce((s, p) => s + (p.procurementLengthFt ?? 0), 0);
+      const _maxDesigned = Math.max(...branchCablePaths.map(p => p.designedInstalledLengthFt ?? 0));
+      // oneWayFt = the LONGEST branch (the VD/calc basis); taxonomy carries the rest.
+      if (_maxDesigned > 0) _branchSeg.oneWayFt = Math.round(_maxDesigned);
+      _branchSeg.geometricDesignLengthFt = _geom && _sumDesigned > 0 ? Math.round(_sumDesigned * 10) / 10 : null;
+      _branchSeg.estimatedFieldLengthFt = _geom ? null : (_sumDesigned > 0 ? Math.round(_sumDesigned * 10) / 10 : null);
+      _branchSeg.verifiedFieldLengthFt = null;
+      _branchSeg.calculationLengthFt = _maxDesigned > 0 ? Math.round(_maxDesigned) : null;
+      _branchSeg.procurementLengthFt = _sumProc > 0 ? Math.round(_sumProc) : null;
+      _branchSeg.wasteFactor = branchCablePaths[0]?.wasteFactor ?? null;
+      _branchSeg.lengthProvenance = _geom ? 'geometry-derived' : 'estimated';
+      _branchSeg.verificationState = 'cad-derived-estimate';
+    }
+  }
+
   // ═══ W4 §1 CANONICAL CODE AUTHORITY ════════════════════════════════════
   // THE single source for every printed edition. NEC comes from the best real
   // adoption authority (resolved AHJ record / server-enriched jurisdiction);
@@ -1175,6 +1279,8 @@ export function buildPermitDesignSnapshot(
       groundingObjects,
       routeSegments,
       physicalRaceways,
+      listedCableAssembly,
+      branchCablePaths,
       serviceTopology,
       feeder: {
         conductorId: feederConductorId,

@@ -230,25 +230,43 @@ export interface FenceMountAnalysis {
   notes: string[];
 }
 
+/** One racking-BOM line. §11 (CO-C): `partNumber` is honestly nullable (null ⇒
+ *  no orderable SKU yet), and `pending`/`orderable` mark ASSEMBLY-DEPENDENT parts
+ *  (clamps / rail / splice / L-foot / T-bolt / bonding) that cannot be specified
+ *  until the rail assembly is selected. A pending row is NON-orderable and is
+ *  excluded from procurement totals; it renders "PENDING RACKING ASSEMBLY
+ *  SELECTION" instead of a manufacturer SKU. Confirmed mount-base parts (mount,
+ *  lag bolt) stay orderable. Omitting `orderable` means orderable (back-compat). */
+export interface RackingBOMRow {
+  qty: number;
+  unit: string;
+  description: string;
+  partNumber: string | null;
+  /** true ⇒ assembly-dependent part awaiting rail-assembly selection. */
+  pending?: boolean;
+  /** false ⇒ not an orderable procurement line (excluded from totals). */
+  orderable?: boolean;
+}
+
 export interface RackingBOM {
   /** Mounting-system manufacturer (from the hardware DB) — lets BOM consumers
    *  emit real racking lines even when no equipment-registry entry resolves. */
   manufacturer: string;
   /** Mounting-system display model (e.g. 'RT-MINI Flush Mount'). */
   systemModel: string;
-  rails: { qty: number; lengthFt: number; unit: string; description: string; partNumber: string };
-  railSplices: { qty: number; unit: string; description: string; partNumber: string };
-  mounts: { qty: number; unit: string; description: string; partNumber: string };
-  lFeet: { qty: number; unit: string; description: string; partNumber: string };
-  midClamps: { qty: number; unit: string; description: string; partNumber: string };
-  endClamps: { qty: number; unit: string; description: string; partNumber: string };
-  groundLugs: { qty: number; unit: string; description: string; partNumber: string };
-  lagBolts: { qty: number; unit: string; description: string; partNumber: string };
+  rails: RackingBOMRow & { lengthFt: number };
+  railSplices: RackingBOMRow;
+  mounts: RackingBOMRow;
+  lFeet: RackingBOMRow;
+  midClamps: RackingBOMRow;
+  endClamps: RackingBOMRow;
+  groundLugs: RackingBOMRow;
+  lagBolts: RackingBOMRow;
   // Rail-attachment (T-/carriage) bolts joining each mount/L-foot to the rail —
   // distinct from lag bolts (mount→rafter). 0 for rail-less systems.
-  mountingBolts: { qty: number; unit: string; description: string; partNumber: string };
-  flashingKits: { qty: number; unit: string; description: string; partNumber: string };
-  bondingClips: { qty: number; unit: string; description: string; partNumber: string };
+  mountingBolts: RackingBOMRow;
+  flashingKits: RackingBOMRow;
+  bondingClips: RackingBOMRow;
   ballastBlocks?: { qty: number; weightLbs: number; unit: string; description: string };
   piles?: { qty: number; unit: string; description: string; embedmentFt: number };
 }
@@ -1039,6 +1057,43 @@ function calcRackingBOM(
       partNumber: hw.bondingHardware,
     },
   };
+
+  // ── §11 (CO-C): ASSEMBLY-DEPENDENT parts are NOT orderable BOM authority while
+  //    the rail assembly is unselected ──────────────────────────────────────────
+  // When a rail-based mount carries NO own rail spec, its exact rail SKU is
+  // PENDING SELECTION (the RT-MINI + compatible-rail case). Every part whose exact
+  // SKU is a FUNCTION of that unselected rail — rail, splice, L-foot (mount→rail
+  // adapter), mid/end clamps, rail T-bolt, and UL 2703 module-frame bonding — must
+  // NOT print as a confirmed manufacturer/SKU line. They are marked PENDING +
+  // non-orderable (excluded from procurement totals). The quantities REMAIN
+  // (geometry-derived) so downstream consumers still reconcile counts, but no
+  // procurement SKU is asserted. CONFIRMED mount-base parts stay orderable: the
+  // mount/pad, the lag bolt into the rafter, self-flashing, and the NEC 690.47
+  // ground lugs (mount-base electrical bonding, independent of the rail).
+  //
+  // REGENERATION ON SELECTION: the canonical racking-assembly record
+  // (lib/permit/snapshot/rackingAssembly.ts) is the selection driver — once its
+  // rail SKU is pinned, `system.rail` is populated here, `railUnpinned` is false,
+  // and these rows re-emit as real orderable SKUs (rail length, spans, clamp /
+  // splice counts, bonding) on the next build. Candidate rails/clamps are operator-
+  // UI data, never permit BOM authority, until then.
+  const railUnpinned = isRailBased && !system.rail;
+  if (railUnpinned) {
+    const PENDING_TAIL = 'PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION';
+    const gate = (row: RackingBOMRow, part: string): void => {
+      row.partNumber = null;
+      row.pending = true;
+      row.orderable = false;
+      row.description = `${part} — ${PENDING_TAIL}`;
+    };
+    gate(bom.rails, 'Rail');
+    gate(bom.railSplices, 'Rail splice');
+    gate(bom.lFeet, 'L-foot / mount-to-rail adapter');
+    gate(bom.midClamps, 'Mid clamp');
+    gate(bom.endClamps, 'End clamp');
+    gate(bom.mountingBolts, 'Rail T-bolt / mount-to-rail bolt');
+    gate(bom.bondingClips, 'Module-frame bonding (UL 2703)');
+  }
 
   // ── Ballast Blocks (commercial) ────────────────────────────────────────
   if (isBallasted && ballastAnalysis) {

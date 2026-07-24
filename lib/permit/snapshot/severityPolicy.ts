@@ -89,6 +89,30 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     justification: '',
   },
 
+  // §13 (CO-C) — the roof-attachment fastener assembly is UNVERIFIED (its
+  // withdrawal-capacity source document is not archived / the racking-capacity
+  // authority is gated). This is mount-BASE hardware, verifiable independent of
+  // the rail selection, so it carries its OWN blocker code (a relationship note
+  // to PENDING-RACKING-ASSEMBLY-SELECTION is rendered on RS-1, not a parent code).
+  // It affects the attachment uplift path (safety), cannot show the NEC/IBC
+  // attachment detail satisfied (code), fixes the ordered fastener SKU
+  // (procurement), and the PE stamp depends on a verified fastener assembly
+  // (engineering) — so it is BLOCKING.
+  'FASTENER-ASSEMBLY-UNVERIFIED': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // §12 (CO-C) — the cited manufacturer install/detail document covers a DIFFERENT
+  // product version than the selected mount (RT-MINI II manual vs selected RT-MINI)
+  // and no VERIFIED cross-reference/alias evidence record establishes applicability.
+  // The attachment detail / spacing / fastener callouts on PV-3 / DS-3 / APP-A
+  // cannot be shown applicable to the selected SKU (code + engineering approval),
+  // and an AHJ requires the applicable-product document — so it is BLOCKING.
+  'EQUIPMENT-DOCUMENT-APPLICABILITY': {
+    impact: { safety: false, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
   // ── LEGITIMATELY ADVISORY (impact touches no axis; justification required) ────
   // The microinverter's electrical parameters are already taken from the canonical
   // equipment-db record the engine itself uses; only the archived manufacturer PDF

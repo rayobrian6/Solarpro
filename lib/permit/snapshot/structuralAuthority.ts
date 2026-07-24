@@ -22,6 +22,7 @@ import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
 import { buildRackingAssembly, type RackingCapacityDocumentEvidence } from './rackingAssembly';
+import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
 import {
   runSnapshotStructuralEngine, reconcileReactions, type FramingInputs,
   type StructuralReactionReconciliation,
@@ -797,6 +798,55 @@ function collectBlockers(
         + (_railUnpinned ? 'rail/splice SKU is unpinned (PENDING SELECTION); ' : '')
         + 'PENDING RACKING ASSEMBLY SELECTION, NOT FOR PERMIT SUBMISSION. Pin the exact rail/splice SKU, '
         + 'archive the capacity/compatibility authority, and resolve span/cantilever source before permit-ready.' });
+  }
+  // §13 (CO-C) — FASTENER-ASSEMBLY-UNVERIFIED. The roof-attachment fastener
+  // assembly is mount-BASE hardware, verifiable independent of the rail selection,
+  // so it carries its OWN blocker code (NOT a child of PENDING-RACKING-ASSEMBLY-
+  // SELECTION — a relationship note is rendered on RS-1). The fastener is VERIFIED
+  // only when it is NOT capacity-gated AND the assembly's own fastener element is
+  // verified (model + count + embedment present) AND a source document exists —
+  // the SAME condition projectFastenerAssembly uses to render the certLabel, so
+  // the visible "PENDING VERIFIED FASTENER ASSEMBLY" label always maps to this
+  // registry code (gate 13). Deterministic; no fabricated evidence.
+  {
+    const ra = a.rackingAssembly as unknown as {
+      datasheetSource?: string | null; capacitySource?: string | null;
+      assemblyVerification?: { fastener?: string };
+      structuralAuthorityGaps?: { code: string; severity: string }[];
+    } | null;
+    if (ra) {
+      const _CAP_GATE = new Set([
+        'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+        'RACKING-CAPACITY-APPLICABILITY-GAP',
+        'ATTACHMENT-CAPACITY-SOURCE-MISSING',
+      ]);
+      const _capGated = (ra.structuralAuthorityGaps ?? [])
+        .some(g => g.severity === 'blocking' && _CAP_GATE.has(g.code));
+      const _fastenerSource = ra.datasheetSource ?? ra.capacitySource ?? ctx.mountSystem?.iccEsReport ?? null;
+      const _fastenerVerified = !_capGated
+        && ra.assemblyVerification?.fastener === 'verified'
+        && !!_fastenerSource;
+      if (!_fastenerVerified) {
+        b.push({ code: 'FASTENER-ASSEMBLY-UNVERIFIED',
+          message: 'Roof-attachment fastener assembly UNVERIFIED — withdrawal-capacity source not archived / capacity gated. '
+            + 'Mount-base authority, independent of rail selection (related to but distinct from PENDING-RACKING-ASSEMBLY-SELECTION).' });
+      }
+    }
+  }
+  // §12 (CO-C) — EQUIPMENT-DOCUMENT-APPLICABILITY. The manufacturer install/detail
+  // document cited on PV-3 / DS-3 / APP-A must cover the SELECTED mount's exact
+  // product version. When the on-file document is for a DIFFERENT version
+  // (RT-MINI II manual vs the selected RT-MINI) and no VERIFIED cross-reference /
+  // alias evidence record establishes applicability, the citation is not
+  // authoritative — block permit-ready. No alias record is fabricated here.
+  if (ctx.mountSystem) {
+    const _asset = getManufacturerAsset(ctx.mountSystem.id, 'racking_detail');
+    const _appl = evaluateDocumentApplicability(ctx.mountSystem.model, _asset, null);
+    if (_asset && _appl.state === 'unverified') {
+      b.push({ code: 'EQUIPMENT-DOCUMENT-APPLICABILITY',
+        message: `Manufacturer document applicability UNVERIFIED — cited ${_appl.documentProduct ?? 'document'} covers a different `
+          + `product version than the selected mount ${ctx.mountSystem.model}; no verified alias evidence. Provide the version-exact document.` });
+    }
   }
   if (!ctx.windAuthoritative || !ctx.snowAuthoritative) {
     b.push({ code: 'WIND-SNOW-AUTHORITY-UNRESOLVED',

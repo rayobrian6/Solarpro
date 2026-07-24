@@ -1,0 +1,83 @@
+{
+  "generatedAt": "2026-07-24T20:35:03.204Z",
+  "artifact": "braidon-qcable-assembly-reconciliation",
+  "section": "§6/§7/§10 listed cable assembly + geometric length reconciliation",
+  "project": "BRAIDON M PILLA — Solar TEST",
+  "snapshotId": "PDS-69A79CD87335",
+  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+  "purpose": "The micro AC branch trunk is a LISTED cable assembly (never generic THWN); its length is geometry-derived per branch (never the plane-width heuristic). Drops (1/micro) are the reconciling invariant across PV-1B geometry, PV-4B, SCHED and the BOM; procurement footage = Σ drops×pitch×waste; designed-installed = Σ geometric path.",
+  "listedCableAssembly": {
+    "assemblyId": "QCABLE-ASSEMBLY",
+    "manufacturer": "Enphase",
+    "ecosystem": "IQ Q-Cable",
+    "model": "Q-12-10-240",
+    "sku": "Q-12-10-240",
+    "conductorCount": 2,
+    "conductorGauge": "#12 AWG",
+    "insulationListing": "THHN/THWN-2 conductors; UL 9703 (cable assemblies) / UL 3003 (raw cable); permitted in free air per NEC 690.31(C)",
+    "connectorSpacingFt": 4.25,
+    "maxBranchCurrentA": 20,
+    "compatibleMicroModels": [
+      "IQ8M",
+      "IQ8A",
+      "IQ8H",
+      "IQ8AC"
+    ],
+    "terminatorSku": "Q-TERM-10",
+    "unusedDropCapSku": "Q-SEAL-10",
+    "dropCount": 31,
+    "cableLengthFt": 152,
+    "sourceDocument": "Enphase IQ Cable accessories Data Sheet DSH-00247-1.0 (2024-07-03)",
+    "verificationStatus": "catalog-sourced",
+    "isGenericTHWN": false
+  },
+  "perBranch": [
+    {
+      "branch": "B1",
+      "drops": 11,
+      "designedInstalledFt": 42.9,
+      "procurementFt": 54,
+      "pitchFt": 4.25,
+      "provenance": "geometry-derived",
+      "derivation": "Σ inter-module path 38.7 ft (nearest-neighbour through 11 micro centres) + 4.25 ft lead-in = 42.9 ft installed; procurement = 11 drops × 4.25 ft pitch × 1.15 waste"
+    },
+    {
+      "branch": "B2",
+      "drops": 10,
+      "designedInstalledFt": 58.3,
+      "procurementFt": 49,
+      "pitchFt": 4.25,
+      "provenance": "geometry-derived",
+      "derivation": "Σ inter-module path 54.0 ft (nearest-neighbour through 10 micro centres) + 4.25 ft lead-in = 58.3 ft installed; procurement = 10 drops × 4.25 ft pitch × 1.15 waste"
+    },
+    {
+      "branch": "B3",
+      "drops": 10,
+      "designedInstalledFt": 39.3,
+      "procurementFt": 49,
+      "pitchFt": 4.25,
+      "provenance": "geometry-derived",
+      "derivation": "Σ inter-module path 35.0 ft (nearest-neighbour through 10 micro centres) + 4.25 ft lead-in = 39.3 ft installed; procurement = 10 drops × 4.25 ft pitch × 1.15 waste"
+    }
+  ],
+  "reconciliation": {
+    "moduleInstances": 31,
+    "branchModuleSum": 31,
+    "totalDrops": 31,
+    "dropsInvariantAgrees": true,
+    "totalDesignedInstalledFt": 140.5,
+    "totalProcurementFt": 152,
+    "bomTrunkFootage_expected": 152,
+    "procurementMatchesBom": true,
+    "retiredPlaneWidthEstimate": "3 × 68 ft = 204 ft (Σ plane widths × slack) — retired; never reconciled with BOM 152 ft",
+    "branchRunSegmentTaxonomy": {
+      "oneWayFt": 58,
+      "geometricDesignLengthFt": 140.5,
+      "calculationLengthFt": 58,
+      "procurementLengthFt": 152,
+      "wasteFactor": 1.15,
+      "lengthProvenance": "geometry-derived",
+      "verificationState": "cad-derived-estimate"
+    }
+  }
+}

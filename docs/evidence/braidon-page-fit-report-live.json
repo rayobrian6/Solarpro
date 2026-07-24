@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-24T20:35:04.730Z",
+  "generatedAt": "2026-07-24T20:35:06.315Z",
   "artifact": "braidon-page-fit-report",
   "method": "Playwright 17×11 (96dpi); per logical sheet, lowest NON-SVG descendant vs printable box (page height − bottom padding); SVG bleed excluded. §19: plus sub-sheet internal-clip scan — every hidden-overflow container vs its own descendants.",
   "tolInches": 0.5,
@@ -25,7 +25,7 @@
       "belowByIn": -0.19,
       "clipped": false,
       "hasTitleBlock": true,
-      "worstElement": "page-content :: NOT FOR PERMIT SUBMISSION — 14 OPEN RELEASE ",
+      "worstElement": "page-content :: NOT FOR PERMIT SUBMISSION — 17 OPEN RELEASE ",
       "internalWorstPx": 0,
       "internalClips": []
     },
@@ -35,7 +35,7 @@
       "belowByIn": -0.19,
       "clipped": false,
       "hasTitleBlock": true,
-      "worstElement": "page-draw layout-plan-dominant :: ROOF PLAN — 31 MOD @ 12.40 kWdc | COMPOSITIO",
+      "worstElement": "page-draw layout-plan-dominant :: ROOF PLAN — 31 MOD @ 12.40 kWdc | SHINGLE RO",
       "internalWorstPx": 0,
       "internalClips": []
     },
