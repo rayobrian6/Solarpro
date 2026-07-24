@@ -818,7 +818,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       // terminator/sealing-cap COUNT derives from the ACTUAL AC-branch topology
       // (branchCount below), never a branches+1 heuristic.
       items.push(addItem('ac', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
-        cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft), continuous per branch × ${plan.branchCount}`,
+        cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft procurement = drops×pitch×waste; NOT the geometric cable-path length), continuous per branch × ${plan.branchCount}`,
         plan.dropCount, 'ea', 'NEC 690.31', 'one connector-drop per device', `${trunkDeviceCount} drops`, true));
       log.push({ stageId: 'ac', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
         quantity: plan.dropCount, derivedFrom: 'trunkCable resolver (drops)', formula: `${trunkDeviceCount} drops ≈ ${plan.approxFeet} ft`, necReference: 'NEC 690.31' });
@@ -2184,7 +2184,7 @@ function generateBOMV4PerSubSystem(
         const { system, cable } = plan;
         const orientLabel = cable.orientation === 'fixed' ? '' : ` (${cable.orientation})`;
         push(key, addItem('ac', 'trunk_cable', system.brand, `${system.ecosystem}${orientLabel}`,
-          cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft), continuous per branch × ${plan.branchCount} — ${key} sub-system`,
+          cable.sku, `AC trunk — 1 drop per micro @ ${cable.connectorSpacingFt} ft pitch (≈${plan.approxFeet} ft procurement = drops×pitch×waste; NOT the geometric cable-path length), continuous per branch × ${plan.branchCount} — ${key} sub-system`,
           plan.dropCount, 'ea', 'NEC 690.31', `${key} sub-system: one connector-drop per device`, `${s.deviceCount} drops`, true));
         log.push({ stageId: 'ac', category: 'trunk_cable', item: `${system.ecosystem}${orientLabel}`,
           quantity: plan.dropCount, derivedFrom: `trunkCable resolver (${key} sub-system drops)`, formula: `${s.deviceCount} drops ≈ ${plan.approxFeet} ft`, necReference: 'NEC 690.31' });

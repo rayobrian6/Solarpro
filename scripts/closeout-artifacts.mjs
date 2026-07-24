@@ -300,16 +300,63 @@ write('braidon-qcable-assembly-reconciliation.json', {
     sourceDocument: asm.sourceDocument, verificationStatus: asm.verificationStatus,
     isGenericTHWN: false,
   } : null,
-  perBranch: paths.map(p => ({
-    branch: p.branchLabel, drops: p.dropCount,
-    designedInstalledFt: r6(p.designedInstalledLengthFt), procurementFt: r6(p.procurementLengthFt),
-    pitchFt: p.connectorSpacingFt, provenance: p.lengthProvenance, derivation: p.derivation,
-  })),
+  // §Q — ITEMIZED per-branch derivation: each length COMPONENT counted exactly
+  // once (inter-module chain + one lead-in), proving no overlap/service-loop/
+  // connector-spacing/transition length is double-counted or omitted. The
+  // connector pitch is the PROCUREMENT unit only — it is NOT added to the designed
+  // path (that would double-count). procurement is drop-count based, not designed×waste.
+  perBranch: paths.map(p => {
+    const pitch = p.connectorSpacingFt;
+    const designed = p.designedInstalledLengthFt;
+    // designed = Σ inter-module center path + one lead-in (= one pitch); recover the
+    // two itemized components from the canonical fields (no re-derivation of geometry).
+    const leadInFt = pitch != null ? r6(pitch) : null;
+    const interModuleFt = (designed != null && leadInFt != null) ? r6(Math.round((designed - leadInFt) * 10) / 10) : null;
+    const procExceeded = designed != null && p.procurementLengthFt != null && designed > p.procurementLengthFt;
+    return {
+      branch: p.branchLabel, drops: p.dropCount, pitchFt: pitch, wasteFactor: WASTE,
+      provenance: p.lengthProvenance,
+      // ── designed-installed CABLE PATH (geometry) — itemized components ──
+      cablePathGeometry: {
+        interModuleChainFt: interModuleFt,   // Σ nearest-neighbour centre-to-centre (counted once)
+        leadInFt,                            // one branch-start lead-in drop (counted once)
+        serviceLoopFt: 0,                    // none modeled (would be an ADD, itemized here if present)
+        transitionFt: 0,                     // none modeled
+        designedInstalledFt: r6(designed),   // = interModuleChain + leadIn (no other term)
+        note: 'connector pitch is NOT added to the designed path (it is the procurement unit) — no double count',
+      },
+      // ── procurement footage (BOM order basis) — drop-count derivation ──
+      procurement: {
+        formula: pitch != null ? `ceil(${p.dropCount} drops × ${pitch} ft pitch × ${WASTE} waste)` : null,
+        procurementFt: r6(p.procurementLengthFt),
+        basis: 'drop-count × molded pitch × waste (manufacturer ordering unit) — NOT designed×waste',
+      },
+      designedExceedsProcurement: procExceeded,
+      derivation: p.derivation,
+    };
+  }),
   reconciliation: {
     moduleInstances: moduleTotal, branchModuleSum: branchTotal, totalDrops: asmDrops,
     dropsInvariantAgrees: moduleTotal === asmDrops && branchTotal === asmDrops,
     totalDesignedInstalledFt: r6(asmDesigned),
     totalProcurementFt: asmProc,
+    // §Q sanity: procurement (drop-based order) should envelope the geometric
+    // designed-installed path. When designed EXCEEDS procurement the module spacing
+    // outran the connector pitch — flagged honestly, never tuned.
+    designedExceedsProcurement: asmDesigned > asmProc,
+    designedVsProcurementNote: asmDesigned > asmProc
+      ? `⚠ Σ designed-installed ${r6(asmDesigned)} ft EXCEEDS Σ procurement ${asmProc} ft — module spacing outran the ${asm?.connectorSpacingFt ?? '—'} ft connector pitch; the drop-based order undershoots the installed path. FIELD-VERIFY Q-Cable length / add jumpers (not tuned).`
+      : `Σ designed-installed ${r6(asmDesigned)} ft ≤ Σ procurement ${asmProc} ft (sanity OK — procurement envelopes the designed path).`,
+    quantityLabelScheme: {
+      'E-1 Length column (Q-Cable rows)': 'cable path (geometry) — BranchCablePath.designedInstalledLengthFt, source QCABLE-ASSEMBLY:Bn',
+      'E-1 Length column (feeder/home-run/disco rows)': 'route (one-way) — RouteSegment.oneWayFt, source segmentId',
+      'PV-4B branch length cell': 'cable path (geom) — same BranchCablePath object',
+      'PV-4B / E-1 reconciliation note': 'drops (invariant) · cable path (geometry) · procurement (drops×pitch×waste)',
+      'SCHED AC branch conductor cell': 'LISTED ASSEMBLY conductor (no length printed)',
+      'PV-1B circuit layout': 'drop count (per-micro invariant) — no length printed',
+      'BOM AC trunk line': 'drops (order qty) + ≈procurement ft (drops×pitch×waste)',
+      'this evidence artifact': 'itemized cable-path components + drop-based procurement, per BranchCablePath object',
+    },
     bomTrunkFootage_expected: asm?.connectorSpacingFt ? Math.ceil(asmDrops * asm.connectorSpacingFt * WASTE) : null,
     procurementMatchesBom: asm?.connectorSpacingFt ? (asmProc === paths.reduce((s, p) => s + (p.procurementLengthFt || 0), 0)) : null,
     retiredPlaneWidthEstimate: '3 × 68 ft = 204 ft (Σ plane widths × slack) — retired; never reconciled with BOM 152 ft',

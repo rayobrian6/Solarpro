@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-24T20:35:03.204Z",
+  "generatedAt": "2026-07-24T22:02:30.843Z",
   "artifact": "braidon-qcable-assembly-reconciliation",
   "section": "§6/§7/§10 listed cable assembly + geometric length reconciliation",
   "project": "BRAIDON M PILLA — Solar TEST",
@@ -35,28 +35,67 @@
     {
       "branch": "B1",
       "drops": 11,
-      "designedInstalledFt": 42.9,
-      "procurementFt": 54,
       "pitchFt": 4.25,
+      "wasteFactor": 1.15,
       "provenance": "geometry-derived",
+      "cablePathGeometry": {
+        "interModuleChainFt": 38.7,
+        "leadInFt": 4.25,
+        "serviceLoopFt": 0,
+        "transitionFt": 0,
+        "designedInstalledFt": 42.9,
+        "note": "connector pitch is NOT added to the designed path (it is the procurement unit) — no double count"
+      },
+      "procurement": {
+        "formula": "ceil(11 drops × 4.25 ft pitch × 1.15 waste)",
+        "procurementFt": 54,
+        "basis": "drop-count × molded pitch × waste (manufacturer ordering unit) — NOT designed×waste"
+      },
+      "designedExceedsProcurement": false,
       "derivation": "Σ inter-module path 38.7 ft (nearest-neighbour through 11 micro centres) + 4.25 ft lead-in = 42.9 ft installed; procurement = 11 drops × 4.25 ft pitch × 1.15 waste"
     },
     {
       "branch": "B2",
       "drops": 10,
-      "designedInstalledFt": 58.3,
-      "procurementFt": 49,
       "pitchFt": 4.25,
+      "wasteFactor": 1.15,
       "provenance": "geometry-derived",
+      "cablePathGeometry": {
+        "interModuleChainFt": 54.1,
+        "leadInFt": 4.25,
+        "serviceLoopFt": 0,
+        "transitionFt": 0,
+        "designedInstalledFt": 58.3,
+        "note": "connector pitch is NOT added to the designed path (it is the procurement unit) — no double count"
+      },
+      "procurement": {
+        "formula": "ceil(10 drops × 4.25 ft pitch × 1.15 waste)",
+        "procurementFt": 49,
+        "basis": "drop-count × molded pitch × waste (manufacturer ordering unit) — NOT designed×waste"
+      },
+      "designedExceedsProcurement": true,
       "derivation": "Σ inter-module path 54.0 ft (nearest-neighbour through 10 micro centres) + 4.25 ft lead-in = 58.3 ft installed; procurement = 10 drops × 4.25 ft pitch × 1.15 waste"
     },
     {
       "branch": "B3",
       "drops": 10,
-      "designedInstalledFt": 39.3,
-      "procurementFt": 49,
       "pitchFt": 4.25,
+      "wasteFactor": 1.15,
       "provenance": "geometry-derived",
+      "cablePathGeometry": {
+        "interModuleChainFt": 35.1,
+        "leadInFt": 4.25,
+        "serviceLoopFt": 0,
+        "transitionFt": 0,
+        "designedInstalledFt": 39.3,
+        "note": "connector pitch is NOT added to the designed path (it is the procurement unit) — no double count"
+      },
+      "procurement": {
+        "formula": "ceil(10 drops × 4.25 ft pitch × 1.15 waste)",
+        "procurementFt": 49,
+        "basis": "drop-count × molded pitch × waste (manufacturer ordering unit) — NOT designed×waste"
+      },
+      "designedExceedsProcurement": false,
       "derivation": "Σ inter-module path 35.0 ft (nearest-neighbour through 10 micro centres) + 4.25 ft lead-in = 39.3 ft installed; procurement = 10 drops × 4.25 ft pitch × 1.15 waste"
     }
   ],
@@ -67,6 +106,18 @@
     "dropsInvariantAgrees": true,
     "totalDesignedInstalledFt": 140.5,
     "totalProcurementFt": 152,
+    "designedExceedsProcurement": false,
+    "designedVsProcurementNote": "Σ designed-installed 140.5 ft ≤ Σ procurement 152 ft (sanity OK — procurement envelopes the designed path).",
+    "quantityLabelScheme": {
+      "E-1 Length column (Q-Cable rows)": "cable path (geometry) — BranchCablePath.designedInstalledLengthFt, source QCABLE-ASSEMBLY:Bn",
+      "E-1 Length column (feeder/home-run/disco rows)": "route (one-way) — RouteSegment.oneWayFt, source segmentId",
+      "PV-4B branch length cell": "cable path (geom) — same BranchCablePath object",
+      "PV-4B / E-1 reconciliation note": "drops (invariant) · cable path (geometry) · procurement (drops×pitch×waste)",
+      "SCHED AC branch conductor cell": "LISTED ASSEMBLY conductor (no length printed)",
+      "PV-1B circuit layout": "drop count (per-micro invariant) — no length printed",
+      "BOM AC trunk line": "drops (order qty) + ≈procurement ft (drops×pitch×waste)",
+      "this evidence artifact": "itemized cable-path components + drop-based procurement, per BranchCablePath object"
+    },
     "bomTrunkFootage_expected": 152,
     "procurementMatchesBom": true,
     "retiredPlaneWidthEstimate": "3 × 68 ft = 204 ft (Σ plane widths × slack) — retired; never reconciled with BOM 152 ft",

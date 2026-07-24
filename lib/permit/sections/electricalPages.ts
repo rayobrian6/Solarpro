@@ -147,7 +147,10 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         + `<br/><span style="color:#666">${x.fillApplicable ? (x.fillPct != null ? `fill ${x.fillPct.toFixed(1)}%` : 'fill PENDING') : 'open air'}`
         + `${x.deratingFactor != null ? ` · derate ${x.deratingFactor.toFixed(2)}` : ''}</span></td>`
       + `<td class="tr" style="font-size:6.5px">${n(x.operatingCurrentA, 1, 'A')} op<br/>${n(x.continuousCurrentA, 1, 'A')} cont<br/>${x.ocpdA != null ? `${x.ocpdA}A OCPD` : '—'}</td>`
-      + `<td class="tr" style="font-size:6.5px">${x.lengthFt != null ? `${x.lengthFt} ft` : 'PENDING'}<br/><span style="color:#666">${s(x.verificationStatus)}</span></td>`
+      + `<td class="tr" style="font-size:6.5px">${x.lengthFt != null ? `${x.lengthFt} ft` : 'PENDING'}`
+        + `${x.lengthLabel ? `<br/><span style="color:#333">${x.lengthLabel}</span>` : ''}`
+        + `${x.lengthObjectId ? `<br/><span class="mono" style="color:#888;font-size:5.5px">${x.lengthObjectId}</span>` : ''}`
+        + `<br/><span style="color:#666">${s(x.verificationStatus)}</span></td>`
       + `<td class="tr" style="font-size:6.5px">${x.voltageDropPct != null ? `${x.voltageDropPct.toFixed(2)}%` : '—'}<br/><span style="color:#666">≤${x.vdLimitPct}%</span></td>`
       + `<td class="center" style="font-size:6.5px">${complianceBadge(x.compliance)}</td>`
       + `</tr>`;
@@ -161,7 +164,7 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
           <th style="width:16%">Cable · Conductors · Bonding</th>
           <th style="width:16%">Physical Raceway · Fill · Derate</th>
           <th style="width:12%">Currents</th>
-          <th style="width:12%">Length · Verify</th>
+          <th style="width:12%">Length (quantity · source) · Verify</th>
           <th style="width:9%">V-Drop</th>
           <th style="width:15%">Compliance</th>
         </tr></thead>
@@ -173,6 +176,11 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         the combiner feeder, and the supply-side tap conductors — never merged. Compliance is the shared tri-state
         authority: no section shows PASS while its route length is an estimate, its conduit fill is uncomputed, or the
         NEC 705.11(C) ≤10-ft tap rule is unmeasured.
+        <br/><strong>Length quantities:</strong> the Q-Cable branch rows print the <em>cable path (geometry)</em> —
+        the designed-installed trunk path (Σ inter-module + lead-in) traced to each <span class="mono">QCABLE-ASSEMBLY:Bn</span>
+        object; the home-run / feeder / disconnect rows print the <em>route (one-way)</em> estimate traced to their run
+        segment id. These are DIFFERENT quantities from the BOM Q-Cable <em>procurement</em> footage (Σ drops × pitch ×
+        waste, drop-count basis) — one quantity per label, never conflated.
       </div>
     </div>`;
 }
@@ -641,7 +649,13 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               return _auth.microBranches.map((b) => {
                 const _bp = _brPathById.get(`B${b.index}`) ?? null;
                 const _bLen = _bp?.designedInstalledLengthFt ?? _branch.oneWayFt;
-                const _bLenTxt = _bLen != null ? `${_bLen} ft` : '—';
+                // §Q — NAME the quantity inline (compact, no extra row): the branch
+                // trunk length is the geometric cable path (designed-installed), NOT a
+                // route estimate or the BOM procurement footage. The reconciliation note
+                // below + E-1's per-row label/object-id carry the full authority.
+                const _bLenTxt = _bLen != null
+                  ? `${_bLen} ft <span style="color:#888;font-size:5.5px">${_bp ? '(cable path)' : '(route est.)'}</span>`
+                  : '—';
                 // §6 — compact assembly SKU here (the full listed-assembly authority
                 // is the dedicated table below); never a generic THWN gauge.
                 const _condCellAsm = _asm.present
@@ -718,7 +732,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         return `
       <div style="padding:1px 6px;font-size:6.5px;line-height:1.18;border:var(--border);border-top:none;background:#eef4fa;">
         <strong>LISTED AC TRUNK CABLE ASSEMBLY (${a.assemblyId}, §6/§7/§10):</strong>
-        ${a.manufacturer} ${a.ecosystem} <span class="mono">${a.sku ?? 'PENDING'}</span>${a.conductorCount && a.conductorGauge ? ` · ${a.conductorCount}×${a.conductorGauge}` : ''} · ${a.connectorSpacingFt != null ? a.connectorSpacingFt + 'ft O.C.' : ''} · ${a.maxBranchCurrentA != null ? a.maxBranchCurrentA + 'A branch (TC-ER, 690.31(C))' : ''}. <strong>Lengths:</strong> ${_asmB.totalDrops ?? '—'} drops (BOM/PV-1B invariant) · designed <span class="mono">${_asmB.totalDesignedInstalledFt != null ? _asmB.totalDesignedInstalledFt.toFixed(1) : '—'}ft</span> (geometry; per-branch in Length col) · procurement <span class="mono">${_asmB.totalProcurementFt ?? '—'}ft</span> (drops×${a.connectorSpacingFt ?? '—'}ft×waste=BOM); distinct meanings per BranchCablePath object.
+        ${a.manufacturer} ${a.ecosystem} <span class="mono">${a.sku ?? 'PENDING'}</span>${a.conductorCount && a.conductorGauge ? ` · ${a.conductorCount}×${a.conductorGauge}` : ''} · ${a.connectorSpacingFt != null ? a.connectorSpacingFt + 'ft O.C.' : ''} · ${a.maxBranchCurrentA != null ? a.maxBranchCurrentA + 'A branch (TC-ER, 690.31(C))' : ''}. <strong>Lengths (one quantity per label):</strong> ${_asmB.totalDrops ?? '—'} drops (BOM/PV-1B invariant) · <em>cable path (geometry)</em> <span class="mono">${_asmB.totalDesignedInstalledFt != null ? _asmB.totalDesignedInstalledFt.toFixed(1) : '—'}ft</span> (Σ BranchCablePath designed-installed; per-branch in Length col) · <em>procurement</em> <span class="mono">${_asmB.totalProcurementFt ?? '—'}ft</span> (Σ drops×${a.connectorSpacingFt ?? '—'}ft pitch×waste — drop-count basis, not designed×waste); distinct quantities per BranchCablePath object.${_asmB.designedExceedsProcurement ? ` <strong style="color:#b00">⚠ designed &gt; procurement — module spacing outran the connector pitch; FIELD-VERIFY Q-Cable length / add jumpers (not tuned).</strong>` : ''}
       </div>`;
       })()}
       ${(_feed.raceway || _feed.tradeSizeIn) ? `

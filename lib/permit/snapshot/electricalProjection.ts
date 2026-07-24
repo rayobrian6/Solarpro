@@ -264,6 +264,13 @@ export interface ListedCableAssemblyProjection {
   totalDesignedInstalledFt: number | null;
   totalDrops: number | null;
   lengthProvenance: 'geometry-derived' | 'estimated' | null;
+  /** §Q sanity — procurement (drop-count × pitch × waste) should envelope the
+   *  geometric designed-installed path. When designed EXCEEDS procurement the
+   *  module spacing outran the connector pitch (the drop-based order undershoots
+   *  the installed path) — flagged honestly, never tuned away. */
+  designedExceedsProcurement: boolean;
+  /** one-line reconciliation sentence naming the two distinct quantities + the sanity result. */
+  reconciliationNote: string | null;
 }
 
 export function projectListedCableAssembly(snap: PermitDesignSnapshot | null | undefined): ListedCableAssemblyProjection {
@@ -274,6 +281,7 @@ export function projectListedCableAssembly(snap: PermitDesignSnapshot | null | u
     conductorCell: 'PENDING — branch cable assembly authority incomplete',
     shortLabel: 'AC TRUNK CABLE', branchPaths: [],
     totalProcurementFt: null, totalDesignedInstalledFt: null, totalDrops: null, lengthProvenance: null,
+    designedExceedsProcurement: false, reconciliationNote: null,
   };
   if (!asm) return empty;
   const gauge = asm.conductorGauge ?? '';
@@ -288,12 +296,27 @@ export function projectListedCableAssembly(snap: PermitDesignSnapshot | null | u
   const totalDesigned = paths.reduce((s, p) => s + (p.designedInstalledLengthFt ?? 0), 0);
   const totalDrops = paths.reduce((s, p) => s + (p.dropCount ?? 0), 0) || asm.dropCount;
   const geom = paths.length > 0 && paths.every(p => p.lengthProvenance === 'geometry-derived');
+  const _proc = totalProc > 0 ? Math.round(totalProc) : (asm.cableLengthFt ?? null);
+  const _designed = totalDesigned > 0 ? Math.round(totalDesigned * 10) / 10 : null;
+  // §Q sanity — the two quantities are DIFFERENT (design geometry vs drop-count
+  // procurement); procurement should envelope the designed path. designed >
+  // procurement ⇒ module spacing outran the connector pitch (order undershoots).
+  const _exceeds = _designed != null && _proc != null && _designed > _proc;
+  const _note = (_designed != null && _proc != null)
+    ? `designed-installed ${_designed} ft (Σ geometric per-branch cable path, BranchCablePath objects) `
+      + `vs procurement ${_proc} ft (Σ drops × ${asm.connectorSpacingFt ?? '—'} ft pitch × waste — drop-count basis, not designed×waste). `
+      + (_exceeds
+        ? `⚠ designed EXCEEDS procurement — module spacing outran the connector pitch; FIELD-VERIFY Q-Cable length / add jumpers (not tuned).`
+        : `designed ≤ procurement (sanity OK).`)
+    : null;
   return {
     present: true, assembly: asm, conductorCell, shortLabel, branchPaths: paths,
-    totalProcurementFt: totalProc > 0 ? Math.round(totalProc) : (asm.cableLengthFt ?? null),
-    totalDesignedInstalledFt: totalDesigned > 0 ? Math.round(totalDesigned * 10) / 10 : null,
+    totalProcurementFt: _proc,
+    totalDesignedInstalledFt: _designed,
     totalDrops: totalDrops ?? null,
     lengthProvenance: paths.length ? (geom ? 'geometry-derived' : 'estimated') : null,
+    designedExceedsProcurement: _exceeds,
+    reconciliationNote: _note,
   };
 }
 
@@ -518,6 +541,17 @@ export interface E1PhysicalSection {
   continuousCurrentA: number | null;
   ocpdA: number | null;
   lengthFt: number | null;
+  /** §Q (2026-07-24 Q-Cable reconciliation) — WHAT QUANTITY lengthFt is, so the
+   *  one shared "Length" column never mixes a geometric cable-path with a route
+   *  one-way estimate under one unlabeled number. 'cable-path-geometry' = the
+   *  BranchCablePath designed-installed path (Σ inter-module + lead-in); 'route-
+   *  one-way' = the segment's oneWayFt route estimate; 'tap-measured-estimate' =
+   *  a supply-side tap run (measured or pending). */
+  lengthKind: 'cable-path-geometry' | 'route-one-way' | 'tap-measured-estimate' | null;
+  /** short human label printed next to the figure ('cable path (geometry)'). */
+  lengthLabel: string | null;
+  /** the SOURCE object the figure traces to ('QCABLE-ASSEMBLY:B1' | segmentId | tap objectId). */
+  lengthObjectId: string | null;
   lengthSource: string | null;
   verificationStatus: string | null;
   /** null ⇒ fill not applicable (open-air) OR not computed (pending). */
@@ -598,6 +632,13 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       // §7 — per-branch geometric designed-installed length (not the shared 68-ft
       // plane-width estimate); falls back to the segment length when no geometry.
       lengthFt: _bPath?.designedInstalledLengthFt ?? num(branchSeg?.oneWayFt),
+      // §Q — NAME the quantity + its source object so the Length column never mixes
+      // a geometric cable-path with a route estimate under one unlabeled number.
+      lengthKind: _bPath?.designedInstalledLengthFt != null ? 'cable-path-geometry' : 'route-one-way',
+      lengthLabel: _bPath?.designedInstalledLengthFt != null ? 'cable path (geometry)' : 'route (one-way est.)',
+      lengthObjectId: _bPath?.designedInstalledLengthFt != null
+        ? `${_asmProj.assembly?.assemblyId ?? 'QCABLE-ASSEMBLY'}:${b.branchId}`
+        : 'BRANCH_RUN',
       lengthSource: branchSeg?.lengthSource ?? null,
       verificationStatus: branchSeg?.verificationStatus ?? branchSeg?.lengthSource ?? null,
       fillPct: null,
@@ -650,6 +691,9 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       continuousCurrentA: contA > 0 ? Math.round(contA * 100) / 100 : null,
       ocpdA: null,   // branches individually protected upstream; the raceway carries no single OCPD
       lengthFt: hr.oneWayFt,
+      lengthKind: 'route-one-way',
+      lengthLabel: 'route (one-way)',
+      lengthObjectId: 'BRANCH_HOMERUN_RUN',
       lengthSource: hrSeg?.lengthSource ?? null,
       verificationStatus: hrSeg?.verificationStatus ?? hrSeg?.lengthSource ?? null,
       fillPct: hr.fillPct,
@@ -706,6 +750,9 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       continuousCurrentA: segId === 'COMBINER_TO_DISCO_RUN' ? feed.continuousA : null,
       ocpdA: num(seg.ocpdA),
       lengthFt: num(seg.oneWayFt),
+      lengthKind: 'route-one-way',
+      lengthLabel: 'route (one-way)',
+      lengthObjectId: segId,
       lengthSource: seg.lengthSource ?? null,
       verificationStatus: seg.verificationStatus ?? seg.lengthSource ?? null,
       fillPct,
@@ -752,6 +799,9 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       continuousCurrentA: null,
       ocpdA: null,
       lengthFt: num(tap.lengthFt),
+      lengthKind: 'tap-measured-estimate',
+      lengthLabel: tap.lengthFt != null ? 'tap run (measured)' : 'tap run (≤10 ft PENDING)',
+      lengthObjectId: tap.objectId,
       lengthSource: tap.lengthSource ?? null,
       verificationStatus: tap.lengthSource === 'field-measurement' ? 'field-measured' : 'unverified-estimate',
       fillPct: null,
