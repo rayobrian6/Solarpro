@@ -688,8 +688,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
             ${_peSiteLoading(input)}
                                     <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">${_isTruss ? 'Roof Framing (Truss) Analysis' : 'Rafter Bending &amp; Deflection Analysis'}</td></tr>
             ${_reviewRequired ? `
-            <tr><td class="il">Framing Authority</td><td class="iv" style="font-weight:bold;color:#b91c1c;">UNVERIFIED</td><td class="il">Framing</td><td class="iv">${_isTruss ? 'Pre-Engineered Truss' : `Stick (${framingType})`}</td></tr>
-            <tr><td class="il">Capacity Basis</td><td class="iv" colspan="3">Code default (${_isTruss ? 'BCSI generic table' : 'NDS generic'}) &mdash; NOT project engineering authority. Member size / spacing / species / clear span are not verified against a truss drawing, mfr data or engineer calc.</td></tr>
+            <tr><td class="il">Observed Framing</td><td class="iv" colspan="3" data-observed-framing="pe-1">${escapeH(_sp.observedFramingLine)} &mdash; ${escapeH(_sp.observedFramingSource)}</td></tr>
+            <tr><td class="il">Framing Capacity</td><td class="iv" colspan="3" style="font-weight:bold;color:#b91c1c;">EXISTING FRAMING CAPACITY NOT VERIFIED &mdash; PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED (operator-entered geometry is OBSERVATION, not capacity authority)</td></tr>
             <tr><td class="il">Result</td><td class="iv" colspan="3" style="font-weight:bold;color:#b45309;">ENGINEERING REVIEW REQUIRED &mdash; NO FRAMING PASS/FAIL CONCLUSION ISSUED (no utilization asserted)</td></tr>` : _isTruss ? `
             <tr><td class="il">Analysis Basis</td><td class="iv">BCSI capacity table</td><td class="il">Framing</td><td class="iv">Pre-Engineered Truss</td></tr>
             <tr><td class="il">Total Load</td><td class="iv">${totalLoadPsf} psf</td><td class="il">Truss Span</td><td class="iv">${rafterSpanFt} ft${!project.rafterSpan ? ' (PER ROOF GEOMETRY &mdash; FIELD VERIFY)' : ''}</td></tr>

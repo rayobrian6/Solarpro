@@ -5,6 +5,12 @@ import { validatePermitDesignSnapshot, blockingViolations } from '@/lib/permit/s
 import { contentRevision } from '@/lib/permit/snapshot/digest';
 import { buildRackingAssembly } from '@/lib/permit/snapshot/rackingAssembly';
 import { runSnapshotStructuralEngine, isFramingVerified } from '@/lib/permit/snapshot/structuralEngine';
+import {
+  buildFramingObservation, resolveFramingCapacityAuthority,
+  type FramingCapacityDocumentEvidence,
+} from '@/lib/permit/snapshot/framingAuthority';
+import { pickVerifiedDocument, toFramingClearanceEvidence } from '@/lib/documents/registry';
+import type { RegistryDocument } from '@/lib/documents/types';
 import { deriveStructuralBom, reconcileStructuralBom } from '@/lib/permit/snapshot/structuralBom';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
@@ -72,10 +78,12 @@ describe('W3 structural authority — canonical objects on the real snapshot', (
     expect(snap.structural.env.ultimateWindSpeedMph).toBe(snap.structural.loads.windSpeedMph);
   });
 
-  it('framing-unverified blocker fires (Braidon: framing defaulted)', () => {
+  it('framing-authority-unverified blocker fires (no verified capacity authority)', () => {
     const codes = snap.permitReadiness.blockers.map(b => b.code);
-    expect(codes).toContain('STRUCTURAL-FRAMING-UNVERIFIED');
+    expect(codes).toContain('FRAMING-AUTHORITY-UNVERIFIED');   // canonical (framing-authority gate)
+    expect(codes).not.toContain('STRUCTURAL-FRAMING-UNVERIFIED'); // legacy code retired from emission
     expect(snap.structural.engine.engineeringReviewRequired).toBe(true);
+    expect(snap.structural.framingCapacityAuthority).toBeNull();
     const framing = snap.structural.checks.find(c => c.limitState === 'framing-capacity');
     expect(framing?.passes).toBeNull(); // never a fabricated pass
   });
@@ -169,7 +177,13 @@ describe('W3 — RT-MINI capacity sourcing (600 allowable is authority)', () => 
   });
 });
 
-describe('W3 — framing honesty in the structural engine', () => {
+// ═══════════════════════════════════════════════════════════════════════════
+// FRAMING-AUTHORITY GATE (2026-07-23) — the seven §7 regression tests.
+// Contract: framing is VERIFIED only by a FramingCapacityAuthority (verified +
+// archived project-applicable document, or a digest-bound engineer review).
+// Operator-entered field COMPLETENESS is OBSERVATION, never capacity authority.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('FRAMING-AUTHORITY GATE — observation vs capacity authority', () => {
   const baseResult: any = {
     mountLayout: { safetyFactor: 1.49, mountCapacityLbs: 500, upliftPerMountLbs: 336,
       downwardPerMountLbs: 0, mountsPerRail: 4, mountSpacingIn: 48, tributaryAreaPerMountFt2: 5.3 },
@@ -183,29 +197,142 @@ describe('W3 — framing honesty in the structural engine', () => {
   };
   const baseInput: any = { panelCount: 12, panelWeightLbs: 49, rackingWeightPerPanelLbs: 4,
     framingType: 'truss', rafterSize: '2x6' };
+  // The live Braidon operator-complete framing (truss / 2x6 / 24" / DF-L / 12 ft).
+  const OPERATOR_COMPLETE = { framingType: 'truss', rafterSize: '2x6', rafterSpacing: 24,
+    rafterSpecies: 'Douglas Fir-Larch', rafterSpan: 12 };
+  const DIGEST = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
 
-  it('unverified framing ⇒ review required, framing pass is null, but attachment check still verified', () => {
-    const out = runSnapshotStructuralEngine(baseResult, baseInput, {}); // no framing authority
+  // a clearly-SYNTHETIC verified+archived truss document (never committed as real evidence)
+  const trussDocEvidence = (over: Partial<FramingCapacityDocumentEvidence> = {}): FramingCapacityDocumentEvidence => ({
+    documentId: 'TEST-DOC-truss-0001', documentClass: 'truss_design_drawing',
+    documentIdentity: '[TEST] Truss design drawing — synthetic',
+    sha256: 'a'.repeat(64), verificationState: 'verified', status: 'current', archivedInRepo: true,
+    issuer: 'Acme Truss Co. (TEST)', revisionOrDate: 'Rev A 2026-01-01',
+    projectApplicability: 'project 4030b664', memberOrTrussIdentity: 'T1 common truss',
+    designLoads: '20 psf LL + 15 psf DL', allowableCapacities: 'per sealed drawing',
+    bearingConditions: '2 bearing walls', deflectionLimits: 'L/240', engineerOrManufacturerVerification: 'sealed',
+    hasFramingCapacityClaim: true, ...over,
+  });
+
+  // ── §7.1 — operator-complete fields DON'T clear. ──────────────────────────
+  it('§7.1 operator-complete framing fields do NOT verify capacity (no authority ⇒ review required)', () => {
+    expect(isFramingVerified(null)).toBe(false);
+    const out = runSnapshotStructuralEngine(baseResult, baseInput, OPERATOR_COMPLETE, null);
     expect(out.framingVerified).toBe(false);
     expect(out.engine.engineeringReviewRequired).toBe(true);
     const framing = out.checks.find(c => c.limitState === 'framing-capacity')!;
     expect(framing.passes).toBeNull();
-    expect(framing.demand).toBeNull();      // did NOT emit fabricated truss capacity
+    expect(framing.demand).toBeNull();      // no numeric framing capacity while unverified
     const att = out.checks.find(c => c.limitState === 'attachment-uplift')!;
-    expect(att.passes).toBe(true);          // attachment check is verified regardless
-    expect(out.engine.passes).toBeNull();   // cannot certify PASS under review
+    expect(att.passes).toBe(true);          // attachment check verified regardless
+    expect(out.engine.passes).toBeNull();   // added-PV-load calcs unaffected but no framing PASS
+    expect(out.engine.moduleDeadLoadLbs).not.toBeNull();
   });
 
-  it('fully-specified framing ⇒ review not required and the framing check is verified', () => {
-    const framing = { framingType: 'rafter', rafterSize: '2x6', rafterSpacing: 16,
-      rafterSpecies: 'Douglas Fir-Larch', rafterSpan: 12 };
-    expect(isFramingVerified(framing)).toBe(true);
-    const out = runSnapshotStructuralEngine(baseResult, baseInput, framing);
+  // ── §7.2 — observation populates without a PASS. ──────────────────────────
+  it('§7.2 operator data populates the observation record but asserts NO pass', () => {
+    const obs = buildFramingObservation({ ...OPERATOR_COMPLETE, source: 'operator-entered' })!;
+    expect(obs.framingType).toBe('truss');
+    expect(obs.nominalMemberSizeIn).toBe('2x6');
+    expect(obs.spacingIn).toBe(24);
+    expect(obs.measuredSpanFt).toBe(12);
+    expect(obs.geometryComplete).toBe(true);      // OBSERVATION completeness ONLY
+    expect(obs.source).toBe('operator-entered');
+    expect(obs.observer).toBeNull();              // honest null (bare DB row)
+    expect(obs.observedAtIso).toBeNull();
+    // completeness never constructs a capacity authority
+    expect(resolveFramingCapacityAuthority({})).toBeNull();
+  });
+
+  // ── §7.3 — a generic BCSI table CANNOT be capacity authority. ─────────────
+  it('§7.3 a generic BCSI table cannot construct a FramingCapacityAuthority', () => {
+    // a BCSI screening default: not a framing-capacity document class, and no
+    // framing capacity claim → resolver returns null.
+    const bcsi = trussDocEvidence({ documentClass: 'bcsi_generic_table' as any, hasFramingCapacityClaim: false });
+    expect(resolveFramingCapacityAuthority({ documentEvidence: bcsi, projectApplicabilityKey: '4030b664' })).toBeNull();
+    // even a framing-class doc that only screens (no capacity claim) fails
+    const screenOnly = trussDocEvidence({ hasFramingCapacityClaim: false });
+    expect(resolveFramingCapacityAuthority({ documentEvidence: screenOnly, projectApplicabilityKey: '4030b664' })).toBeNull();
+  });
+
+  // ── §7.4 — an archived, applicable truss document CLEARS (through registry). ─
+  it('§7.4 a verified+archived applicable truss document clears (resolved through lib/documents)', () => {
+    // registry-shaped synthetic record → registry filter → clearance evidence → authority
+    const doc: RegistryDocument = {
+      id: 'TEST-DOC-truss-0001', documentClass: 'truss_design_drawing',
+      manufacturerOrIssuer: 'Acme Truss Co. (TEST)', equipmentId: null,
+      equipmentModelApplicability: 'project 4030b664', title: '[TEST] Truss design drawing',
+      revision: 'Rev A', documentDate: '2026-01-01', archivedFileIdentity: 'test.pdf',
+      archivedInRepo: true, sha256: 'a'.repeat(64), source: 'test', jurisdictionBoundary: null,
+      applicabilityNotes: 'project 4030b664', status: 'current', supersedesId: null, supersededById: null,
+      extractedClaims: { framing: { projectApplicability: 'project 4030b664', memberOrTrussIdentity: 'T1',
+        allowableCapacities: 'per drawing', hasFramingCapacityClaim: true } },
+      verificationState: 'verified', reviewer: 'test', verifiedBy: 'test', verifiedAt: '2026-01-02',
+      verificationNotes: null, createdBy: 'test', createdAt: '2026-01-02T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z',
+    };
+    const picked = pickVerifiedDocument([doc], {
+      documentClass: ['truss_design_drawing', 'manufacturer_structural_calc', 'stamped_structural_analysis'],
+      equipmentModel: '4030b664', requireFramingCapacity: true, projectApplicabilityKey: '4030b664',
+    });
+    expect(picked?.id).toBe('TEST-DOC-truss-0001');
+    const evidence = toFramingClearanceEvidence(picked)!;
+    const auth = resolveFramingCapacityAuthority({ documentEvidence: evidence, projectApplicabilityKey: '4030b664' });
+    expect(auth).not.toBeNull();
+    expect(auth!.kind).toBe('archived-document');
+    expect(auth!.verified).toBe(true);
+    expect(isFramingVerified(auth)).toBe(true);
+    const out = runSnapshotStructuralEngine(baseResult, baseInput, OPERATOR_COMPLETE, auth);
     expect(out.engine.engineeringReviewRequired).toBe(false);
     const chk = out.checks.find(c => c.limitState === 'framing-capacity')!;
     expect(chk.passes).toBe(true);
     expect(chk.dcRatio).toBeCloseTo(0.38, 2);
     expect(out.engine.passes).toBe(true);
+  });
+
+  // ── §7.5 — a digest-bound engineer review CLEARS. ─────────────────────────
+  it('§7.5 a licensed-engineer review bound to the current digest clears', () => {
+    const review = { reviewedSnapshotDigest: DIGEST, reviewerName: 'Jane Roe, PE',
+      reviewerLicense: 'PE-12345', licenseState: 'IL', approvedAtIso: '2026-07-23T00:00:00Z' };
+    const auth = resolveFramingCapacityAuthority({ reviewEvidence: review, currentDigest: DIGEST });
+    expect(auth).not.toBeNull();
+    expect(auth!.kind).toBe('engineer-review');
+    expect(auth!.reviewedSnapshotDigest).toBe(DIGEST);
+    expect(isFramingVerified(auth)).toBe(true);
+    const out = runSnapshotStructuralEngine(baseResult, baseInput, OPERATOR_COMPLETE, auth);
+    expect(out.engine.engineeringReviewRequired).toBe(false);
+    expect(out.checks.find(c => c.limitState === 'framing-capacity')!.passes).toBe(true);
+  });
+
+  // ── §7.6 — a digest CHANGE invalidates a prior review. ────────────────────
+  it('§7.6 a snapshot digest change invalidates the prior review (no longer covered)', () => {
+    const review = { reviewedSnapshotDigest: DIGEST, reviewerName: 'Jane Roe, PE',
+      reviewerLicense: 'PE-12345', licenseState: 'IL', approvedAtIso: '2026-07-23T00:00:00Z' };
+    // review covers the OLD digest; the current digest changed → not covered → null
+    const changed = 'ffffffff' + DIGEST.slice(8);
+    const auth = resolveFramingCapacityAuthority({ reviewEvidence: review, currentDigest: changed });
+    expect(auth).toBeNull();
+    const out = runSnapshotStructuralEngine(baseResult, baseInput, OPERATOR_COMPLETE, auth);
+    expect(out.engine.engineeringReviewRequired).toBe(true);  // invalidated → review required again
+  });
+
+  // ── §7.7 — live-shaped and fixture-shaped inputs follow the SAME rule. ────
+  it('§7.7 live-shaped (operator-complete) and fixture-shaped inputs both stay UNVERIFIED without authority', () => {
+    // fixture-shaped: the real snapshot (framing defaulted)
+    const fixtureSnap = realSnapshot();
+    expect(fixtureSnap.structural.framingCapacityAuthority).toBeNull();
+    expect(fixtureSnap.structural.engine.engineeringReviewRequired).toBe(true);
+    // live-shaped: operator-complete framing fields, no document/review → SAME rule
+    const liveSnap = realSnapshot(p => {
+      p.project.framingType = 'truss'; p.project.rafterSize = '2x6'; p.project.rafterSpacing = 24;
+      p.project.rafterSpecies = 'Douglas Fir-Larch'; p.project.rafterSpan = 12;
+    });
+    expect(liveSnap.structural.framingObservation?.geometryComplete).toBe(true); // observation complete
+    expect(liveSnap.structural.framingCapacityAuthority).toBeNull();             // but NO capacity authority
+    expect(liveSnap.structural.engine.engineeringReviewRequired).toBe(true);     // → still UNVERIFIED
+    const codes = liveSnap.permitReadiness.blockers.map(b => b.code);
+    expect(codes).toContain('FRAMING-AUTHORITY-UNVERIFIED');
+    const framing = liveSnap.structural.checks.find(c => c.limitState === 'framing-capacity');
+    expect(framing?.passes).toBeNull();
   });
 });
 

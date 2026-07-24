@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T00:11:42.682Z",
+  "generatedAt": "2026-07-24T01:11:18.785Z",
   "harness": "planset-evidence-co (final closeout rendered-truth, 20 permanent gates)",
   "mode": "live",
-  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/PermitPackage-BRAIDON-closeout.html",
-  "snapshotId": "PDS-00E105F58C2C",
-  "digest": "00e105f58c2ca87a1d9ec09e4e8e12d58be0579972fa7aaab9cc0ccdfaa28eee",
+  "htmlPath": "_tmp_braidon_live.html",
+  "snapshotId": "PDS-2E65B042F09F",
+  "digest": "2e65b042f09fc1abbd194a2a68912ca84f0497e16a2475371031aa76ddb616b0",
   "project": "BRAIDON M PILLA — Solar TEST",
   "sheetCount": 21,
   "sheetIds": [
@@ -55,7 +55,7 @@
   ],
   "topology": "MICRO",
   "supplySide": true,
-  "framingUnverified": false,
+  "framingUnverified": true,
   "feeder": {
     "conduitLabel": "PVC Sch 80 1-1/4\"",
     "voltageDropPct": 0.36936055005081303
@@ -124,6 +124,7 @@
     "EQUIPMENT-IDENTITY-CONFLICT",
     "CONDUIT-FILL-PENDING",
     "TAP-CONDUCTOR-LENGTH-PENDING",
+    "FRAMING-AUTHORITY-UNVERIFIED",
     "PENDING-RACKING-ASSEMBLY-SELECTION",
     "WIND-SNOW-AUTHORITY-UNRESOLVED",
     "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
@@ -139,19 +140,19 @@
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-00E105F58C2C",
+        "reportVal": "PDS-2E65B042F09F",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-00E105F58C2C"
+          "PDS-2E65B042F09F"
         ],
-        "sld": "PDS-00E105F58C2C"
+        "sld": "PDS-2E65B042F09F"
       },
       {
         "name": "digestPrefix",
-        "reportVal": "00e105f58c2c",
+        "reportVal": "2e65b042f09f",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "00e105f58c2ca87a1d9e"
+          "2e65b042f09fc1abbd19"
         ]
       },
       {
@@ -184,7 +185,7 @@
       },
       {
         "name": "blockingBlockerCount",
-        "reportVal": "14",
+        "reportVal": "15",
         "matchedInRendered": true,
         "rs1Rendered": null
       }
@@ -337,7 +338,7 @@
       "gate": 13,
       "id": "no-unverified-framing-capacity",
       "ok": true,
-      "detail": "framingUnverified=false adequateVerdict=true capacityRow=true notVerifiedShown=true",
+      "detail": "framingUnverified=true adequateVerdict=false capacityRow=false notVerifiedShown=true",
       "evidence": null
     },
     {
@@ -364,38 +365,9 @@
     {
       "gate": 17,
       "id": "continuations-have-title-block-and-manifest",
-      "ok": false,
-      "detail": "continuations=PV-0,PV-1,PV-3,PV-4C.1,E-1,PV-5,PV-6,SCHED-2,SCHED-3 issues=4",
-      "evidence": [
-        {
-          "cid": "PV-1",
-          "inManifest": true,
-          "rendered": true,
-          "hasTb": true,
-          "hasContinuationTitle": false
-        },
-        {
-          "cid": "PV-3",
-          "inManifest": true,
-          "rendered": true,
-          "hasTb": true,
-          "hasContinuationTitle": false
-        },
-        {
-          "cid": "E-1",
-          "inManifest": true,
-          "rendered": true,
-          "hasTb": true,
-          "hasContinuationTitle": false
-        },
-        {
-          "cid": "PV-6",
-          "inManifest": true,
-          "rendered": true,
-          "hasTb": true,
-          "hasContinuationTitle": false
-        }
-      ]
+      "ok": true,
+      "detail": "continuations=PV-4C.1,SCHED-2,SCHED-3 issues=0",
+      "evidence": []
     },
     {
       "gate": 18,
@@ -408,7 +380,7 @@
       "gate": 19,
       "id": "severity-policy-compliant",
       "ok": true,
-      "detail": "promotedNotBlocking=0 activeWarnings=0 blockingCount=14",
+      "detail": "promotedNotBlocking=0 activeWarnings=0 blockingCount=15",
       "evidence": {
         "notBlocking": [],
         "anyWarning": []
@@ -424,10 +396,8 @@
   ],
   "summary": {
     "total": 20,
-    "passed": 19,
-    "failed": [
-      "gate 17: continuations-have-title-block-and-manifest"
-    ],
-    "allPass": false
+    "passed": 20,
+    "failed": [],
+    "allPass": true
   }
 }

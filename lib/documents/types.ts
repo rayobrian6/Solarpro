@@ -17,6 +17,12 @@ export const DOCUMENT_CLASSES = [
   'ul_listing',
   'utility_requirements',
   'ahj_code_adoption',
+  // FRAMING-AUTHORITY GATE (2026-07-23) — the ONLY document classes that can
+  // construct a FramingCapacityAuthority (existing framing capacity). A generic
+  // BCSI screening table is NOT one of these.
+  'truss_design_drawing',
+  'manufacturer_structural_calc',
+  'stamped_structural_analysis',
 ] as const;
 export type DocumentClass = (typeof DOCUMENT_CLASSES)[number];
 
@@ -52,6 +58,21 @@ export interface ExtractedEngineeringClaims {
     /** true only when the doc actually STATES a structural (uplift) capacity.
      *  A flashing / water-resistance report sets this false. */
     hasStructuralCapacityClaim?: boolean;
+  };
+  /** FRAMING-AUTHORITY GATE §9 framing-capacity applicability claims — required
+   *  for an existing-framing capacity clear (truss drawing / mfr calc / stamped). */
+  framing?: {
+    /** the exact project/building this document is applicable to. */
+    projectApplicability?: string | null;
+    memberOrTrussIdentity?: string | null;
+    designLoads?: string | null;
+    allowableCapacities?: string | null;
+    bearingConditions?: string | null;
+    deflectionLimits?: string | null;
+    engineerOrManufacturerVerification?: string | null;
+    /** true only when the doc actually STATES a framing (member/truss) capacity.
+     *  A roof-covering / flashing report sets this false. */
+    hasFramingCapacityClaim?: boolean;
   };
 }
 
@@ -95,6 +116,10 @@ export interface DocumentResolverCriteria {
   jurisdiction?: string | null;
   /** When set, require structural claims (racking capacity path). */
   requireStructuralCapacity?: boolean;
+  /** When set, require framing-capacity claims (framing-authority gate path). */
+  requireFramingCapacity?: boolean;
+  /** the exact project/building applicability the framing document must cover. */
+  projectApplicabilityKey?: string | null;
 }
 
 export function isDocumentClass(x: unknown): x is DocumentClass {

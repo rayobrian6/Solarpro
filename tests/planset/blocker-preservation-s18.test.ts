@@ -30,7 +30,7 @@ const LEGIT_BLOCKERS = [
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
   'RACKING-CAPACITY-APPLICABILITY-GAP',
   'ENGINEERING-REVIEW-PENDING',
-  'STRUCTURAL-FRAMING-UNVERIFIED',
+  'FRAMING-AUTHORITY-UNVERIFIED',
 ] as const;
 
 /** Reproduce the live Braidon state that triggers the identity blockers. */

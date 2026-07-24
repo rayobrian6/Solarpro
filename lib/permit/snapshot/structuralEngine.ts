@@ -11,7 +11,10 @@
 // rafter/truss capacity (computed off the fabricated TRUSS_CAPACITY_PSF/NDS
 // defaults) is NEVER reported as a verified pass. No generic truss table.
 // ═══════════════════════════════════════════════════════════════════════════
-import type { StructuralCheck, StructuralEngineResult, LimitState, AttachmentObject, StructuralEnv } from './types';
+import type {
+  StructuralCheck, StructuralEngineResult, LimitState, AttachmentObject, StructuralEnv,
+  FramingCapacityAuthority,
+} from './types';
 import type { StructuralResultV4, StructuralInputV4 } from '@/lib/structural-engine-v4';
 import { MIN_ATTACHMENT_SF, ASD_WIND_FACTOR } from '@/lib/structural/attachmentCapacity';
 
@@ -29,19 +32,27 @@ export interface StructuralEngineOutput {
   framingVerified: boolean;
 }
 
-/** Framing is VERIFIED only when the operator supplied every authority the
- *  rafter/truss capacity depends on. Any default ⇒ unverified (review required).*/
-export function isFramingVerified(f: FramingInputs): boolean {
-  return !!(f.framingType && f.rafterSize && f.rafterSpacing && f.rafterSpecies && f.rafterSpan);
+/** FRAMING-AUTHORITY GATE (2026-07-23): framing is VERIFIED **only** when a
+ *  FramingCapacityAuthority record exists (a verified + archived project-applicable
+ *  document, or a digest-bound licensed-engineer review). Operator-entered field
+ *  COMPLETENESS is OBSERVATION, never capacity authority — a fully-typed truss /
+ *  2x6 / 24" / DF-L / 12 ft does NOT verify on its own. */
+export function isFramingVerified(capacityAuthority: FramingCapacityAuthority | null | undefined): boolean {
+  return !!(capacityAuthority && capacityAuthority.verified === true);
 }
 
 export function runSnapshotStructuralEngine(
   result: StructuralResultV4 | null | undefined,
   input: StructuralInputV4 | null | undefined,
+  /** operator-entered / observed framing geometry — PRELIMINARY modeling input
+   *  ONLY (describes the OBSERVED member; never verifies capacity). */
   framing: FramingInputs,
+  /** the verified framing CAPACITY authority (or null). This — NOT `framing`
+   *  completeness — decides verification (Ray's ruling). */
+  capacityAuthority?: FramingCapacityAuthority | null,
 ): StructuralEngineOutput {
   const prov = { source: 'snapshot structural engine (over canonical objects)' };
-  const framingVerified = isFramingVerified(framing);
+  const framingVerified = isFramingVerified(capacityAuthority);
 
   if (!result || !input) {
     return {
@@ -116,7 +127,12 @@ export function runSnapshotStructuralEngine(
     });
   }
 
-  // ── §8 framing-capacity limit state — HONEST ────────────────────────────
+  // ── FRAMING-CAPACITY limit state — OBSERVATION vs CAPACITY AUTHORITY ─────
+  // Verified ONLY when a FramingCapacityAuthority exists (archived applicable
+  // document or digest-bound engineer review). Operator-entered geometry is
+  // OBSERVATION and produces NO verdict — the framing check renders PRELIMINARY /
+  // NON-AUTHORITATIVE (passes:null, no numeric capacity). The added-PV-load calcs
+  // below are unaffected either way.
   const reviewReasons: string[] = [];
   if (framingVerified) {
     checks.push({
@@ -126,28 +142,29 @@ export function runSnapshotStructuralEngine(
       dcRatio: round(raf.overallUtilization), safetyFactor: null,
       requiredThreshold: 1.0, thresholdKind: 'max-dc-ratio',
       passes: raf.overallUtilization <= 1.0,
-      governingSource: `structural-engine-v4 rafterAnalysis (${raf.framingType} ${raf.size} @ ${raf.spacingIn}" ${raf.species})`,
+      governingSource: `verified framing CAPACITY authority (${capacityAuthority?.kind}${
+        capacityAuthority?.documentClass ? ` — ${capacityAuthority.documentClass}` : ''}) `
+        + `over rafterAnalysis (${raf.framingType} ${raf.size} @ ${raf.spacingIn}" ${raf.species})`,
       provenance: prov,
     });
   } else {
-    const missing: string[] = [];
-    if (!framing.framingType) missing.push('framing type');
-    if (!framing.rafterSize) missing.push('rafter/truss size');
-    if (!framing.rafterSpacing) missing.push('member spacing');
-    if (!framing.rafterSpecies) missing.push('species/grade');
-    if (!framing.rafterSpan) missing.push('clear span');
     reviewReasons.push(
-      `Roof framing UNVERIFIED — ${missing.join(', ')} defaulted. The V4 rafter/truss capacity `
-      + `is computed from NDS/BCSI defaults and is NOT engineering authority; a licensed structural `
-      + `review of the existing framing is required before permit submission.`);
+      'EXISTING FRAMING CAPACITY NOT VERIFIED — no project-specific structural authority '
+      + '(archived truss design drawing / manufacturer capacity calc / stamped analysis, or a '
+      + 'licensed-engineer review bound to the current snapshot digest) establishes the existing '
+      + 'framing capacity. Operator-entered / observed framing geometry is OBSERVATION only and does '
+      + 'NOT verify capacity; the code-default rafter/truss capacity is NOT engineering authority. A '
+      + 'project-specific structural review is required before permit submission.');
     checks.push({
       checkId: 'chk-framing-capacity',
       limitState: 'framing-capacity',
+      // PRELIMINARY / NON-AUTHORITATIVE — no numeric framing capacity, no verdict.
       demand: null, capacity: null, dcRatio: null, safetyFactor: null,
       requiredThreshold: 1.0, thresholdKind: 'max-dc-ratio',
       passes: null,
-      governingSource: 'ENGINEERING REVIEW REQUIRED — framing size/spacing/species/span not verified '
-        + '(V4 default truss/rafter capacity is not authority)',
+      governingSource: 'PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED — no verified framing capacity '
+        + 'authority (operator-entered / observed geometry is not capacity authority; the code-default '
+        + 'truss/rafter capacity is PRELIMINARY / NON-AUTHORITATIVE)',
       provenance: prov,
     });
   }

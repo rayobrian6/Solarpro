@@ -186,6 +186,7 @@ export function baseSnapshot(): PermitDesignSnapshot {
                 distributedRoofLoadPsf: null, totalRailLoadLbsPerFt: null, governingUtilization: 0.4,
                 governingLimitState: 'attachment-uplift', passes: true, engineeringReviewRequired: false,
                 reviewReasons: [], provenance: { source: 'test' } },
+      framingObservation: null, framingCapacityAuthority: null,
       bom: [], bomReconciliation: { ok: true, basis: 'no-structural-objects', checks: [] },
       reactionReconciliation: { ok: true, present: false, attachmentCount: 0, reactionModelCount: null,
         arrayAreaFt2: null, tributarySumFt2: null, appliedUpliftPsfAsd: null, appliedSnowPsf: null,

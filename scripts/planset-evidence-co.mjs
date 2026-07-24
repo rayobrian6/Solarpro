@@ -66,9 +66,14 @@ const segs = el.routeSegments || [];
 const rws = el.physicalRaceways || [];
 const topo = el.serviceTopology || [];
 
-// framing-verified state (directive §13 gate is conditioned on UNVERIFIED framing)
-const framingUnverified = registryCodes.includes('STRUCTURAL-FRAMING-UNVERIFIED')
-  || st?.engine?.engineeringReviewRequired === true;
+// framing-verified state (directive §13 gate is conditioned on UNVERIFIED framing).
+// FRAMING-AUTHORITY GATE: canonical code FRAMING-AUTHORITY-UNVERIFIED (legacy
+// STRUCTURAL-FRAMING-UNVERIFIED aliased) OR no verified capacity authority. This
+// now fires on the LIVE package too (operator-complete framing is not authority).
+const framingUnverified = registryCodes.includes('FRAMING-AUTHORITY-UNVERIFIED')
+  || registryCodes.includes('STRUCTURAL-FRAMING-UNVERIFIED')
+  || st?.engine?.engineeringReviewRequired === true
+  || !(st?.framingCapacityAuthority && st.framingCapacityAuthority.verified === true);
 
 // ── gate machinery ─────────────────────────────────────────────────────────
 const gates = [];

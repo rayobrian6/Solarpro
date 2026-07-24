@@ -20,6 +20,7 @@ import {
   isDocumentStatus,
 } from './types';
 import type { RackingCapacityDocumentEvidence } from '@/lib/permit/snapshot/rackingAssembly';
+import type { FramingCapacityDocumentEvidence } from '@/lib/permit/snapshot/framingAuthority';
 
 // ── Row ⇄ record mapping ──────────────────────────────────────────────────────
 
@@ -277,6 +278,16 @@ export function pickVerifiedDocument(
       if (!s || s.hasStructuralCapacityClaim !== true) return false;
       if (!(s.asdAllowableLbs != null && s.asdAllowableLbs > 0)) return false;
     }
+    // FRAMING-AUTHORITY GATE — require a framing-capacity claim + exact project
+    // applicability. A generic BCSI table (no framing claim) never resolves here.
+    if (criteria.requireFramingCapacity === true) {
+      const fr = d.extractedClaims?.framing;
+      if (!fr || fr.hasFramingCapacityClaim !== true) return false;
+      const key = (criteria.projectApplicabilityKey ?? '').trim().toLowerCase();
+      const applic = (fr.projectApplicability ?? d.applicabilityNotes ?? '').toLowerCase();
+      if (key) { if (!applic.includes(key)) return false; }
+      else if (!applic) return false;   // must carry explicit project applicability
+    }
     if (jur) {
       const dj = (d.extractedClaims?.structural?.jurisdiction ?? d.jurisdictionBoundary ?? '').toLowerCase();
       if (!dj.includes(jur)) return false;
@@ -345,4 +356,61 @@ export async function resolveRackingCapacityDocument(args: {
     requireStructuralCapacity: true,
   });
   return toRackingClearanceEvidence(doc);
+}
+
+// ── Adapter: registry document → FRAMING-AUTHORITY capacity evidence ──────────
+
+/**
+ * Convert a resolved registry document into the evidence shape consumed by
+ * lib/permit/snapshot/framingAuthority.resolveFramingCapacityAuthority. Returns
+ * null when the document carries no framing capacity claim (so a non-framing doc
+ * can never accidentally clear the FRAMING-AUTHORITY-UNVERIFIED blocker).
+ */
+export function toFramingClearanceEvidence(
+  doc: RegistryDocument | null | undefined,
+): FramingCapacityDocumentEvidence | null {
+  if (!doc) return null;
+  const f = doc.extractedClaims?.framing;
+  return {
+    documentId: doc.id,
+    documentClass: doc.documentClass,
+    documentIdentity: doc.title,
+    sha256: doc.sha256,
+    verificationState: doc.verificationState,
+    status: doc.status,
+    archivedInRepo: doc.archivedInRepo,
+    issuer: doc.manufacturerOrIssuer ?? null,
+    revisionOrDate: doc.revision ?? doc.documentDate ?? null,
+    projectApplicability: f?.projectApplicability ?? doc.applicabilityNotes ?? doc.equipmentModelApplicability ?? null,
+    memberOrTrussIdentity: f?.memberOrTrussIdentity ?? null,
+    designLoads: f?.designLoads ?? null,
+    allowableCapacities: f?.allowableCapacities ?? null,
+    bearingConditions: f?.bearingConditions ?? null,
+    deflectionLimits: f?.deflectionLimits ?? null,
+    engineerOrManufacturerVerification: f?.engineerOrManufacturerVerification ?? null,
+    hasFramingCapacityClaim: f?.hasFramingCapacityClaim === true,
+  };
+}
+
+/**
+ * High-level: resolve the verified, project-applicable framing-capacity document
+ * (truss design drawing / manufacturer structural calc / stamped analysis) that
+ * clears the FRAMING-AUTHORITY-UNVERIFIED blocker, or null. This is what
+ * generatePermit wires in (async) and passes to buildStructuralAuthority via
+ * { framingCapacityDocument }.
+ */
+export async function resolveFramingCapacityDocument(args: {
+  equipmentId?: string | null;
+  projectApplicabilityKey?: string | null;
+  jurisdiction?: string | null;
+}): Promise<FramingCapacityDocumentEvidence | null> {
+  const doc = await findVerifiedDocument({
+    documentClass: ['truss_design_drawing', 'manufacturer_structural_calc', 'stamped_structural_analysis'],
+    equipmentId: args.equipmentId ?? null,
+    equipmentModel: args.projectApplicabilityKey ?? null,
+    jurisdiction: args.jurisdiction ?? null,
+    requireFramingCapacity: true,
+    projectApplicabilityKey: args.projectApplicabilityKey ?? null,
+  });
+  return toFramingClearanceEvidence(doc);
 }

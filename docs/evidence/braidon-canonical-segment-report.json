@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T00:11:40.816Z",
+  "generatedAt": "2026-07-24T01:18:58.950Z",
   "artifact": "braidon-canonical-segment-report",
   "section": "§3 segment authority / §5 service topology / §6 route provenance (correction 2026-07-22)",
   "project": "BRAIDON (GreenLancer feedback-session planset)",
-  "snapshotId": "PDS-00E105F58C2C",
-  "digest": "00e105f58c2ca87a1d9ec09e4e8e12d58be0579972fa7aaab9cc0ccdfaa28eee",
+  "snapshotId": "PDS-2E65B042F09F",
+  "digest": "2e65b042f09fc1abbd194a2a68912ca84f0497e16a2475371031aa76ddb616b0",
   "purpose": "The EXACT single set of canonical electrical objects every sheet (E-1/PV-4A/PV-4B/SCHED/BOM) projects. One raceway/size/VD/length per run — the displayed length equals the length used in the formula; the six-object service chain is modelled separately so the ≤10-ft tap rule is never conflated with a downstream feeder run.",
   "routeProvenanceLabel": "CAD-DERIVED ESTIMATE — FIELD VERIFY",
   "canonicalFeederProjection": {

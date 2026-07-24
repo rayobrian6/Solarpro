@@ -16,8 +16,9 @@ import type {
   PermitDesignSnapshot, StructuralEnv, StructuralCheck, AttachmentObject,
   RailObject, ModuleInstance, RoofPlaneObject, RackingAssemblyRecord,
   StructuralEngineResult, StructuralBomRow, StructuralBomReconciliation,
-  StructuralReactionReconciliation,
+  StructuralReactionReconciliation, FramingObservation, FramingCapacityAuthority,
 } from './types';
+import { observedFramingLine, observedSourceLabel } from './framingAuthority';
 import { peekSnapshot } from './read';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
@@ -46,6 +47,18 @@ export interface StructuralProjection {
   roofPlaneObjects: RoofPlaneObject[];
   rackingAssembly: RackingAssemblyRecord | null;
   engine: StructuralEngineResult | null;
+  // FRAMING-AUTHORITY GATE — the OBSERVED framing record + the verified CAPACITY
+  // authority (null ⇒ UNVERIFIED). Renderers print the OBSERVED FRAMING block +
+  // NOT-VERIFIED notice from these; they never treat observation as capacity.
+  framingObservation: FramingObservation | null;
+  framingCapacityAuthority: FramingCapacityAuthority | null;
+  /** true ⇒ no verified framing CAPACITY authority ⇒ no numeric framing capacity /
+   *  utilization / PASS / adequate may render. */
+  framingUnverified: boolean;
+  /** the OBSERVED FRAMING line, e.g. "TRUSS / 2×6 @ 24 IN. O.C. / APPROX. 12 FT SPAN". */
+  observedFramingLine: string;
+  /** the source label, e.g. "SOURCE: OPERATOR-ENTERED — NOT CAPACITY-VERIFIED". */
+  observedFramingSource: string;
   // §10 structural BOM (object-derived rows + reconciliation)
   bom: StructuralBomRow[];
   bomReconciliation: StructuralBomReconciliation | null;
@@ -86,7 +99,8 @@ export interface StructuralBanner {
 }
 
 const STRUCTURAL_BLOCKER_CODES = new Set([
-  'STRUCTURAL-FRAMING-UNVERIFIED',
+  'FRAMING-AUTHORITY-UNVERIFIED',    // canonical (framing-authority gate)
+  'STRUCTURAL-FRAMING-UNVERIFIED',   // legacy alias
   'ATTACHMENT-CAPACITY-SOURCE-MISSING',
   'FASTENER-CONFIG-MISSING',
   'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED',
@@ -154,6 +168,9 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
   const capacityGated =
     [...CAPACITY_GATE_BLOCKER_CODES].some(c => _blockerCodes.has(c))
     || _rackGaps.some(g => g.severity === 'blocking' && CAPACITY_GATE_BLOCKER_CODES.has(g.code));
+  const framingObservation = st?.framingObservation ?? null;
+  const framingCapacityAuthority = st?.framingCapacityAuthority ?? null;
+  const framingUnverified = !(framingCapacityAuthority && framingCapacityAuthority.verified === true);
   return {
     present: !!snap,
     env,
@@ -164,6 +181,11 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
     roofPlaneObjects: geo?.roofPlaneObjects ?? [],
     rackingAssembly: st?.rackingAssembly ?? null,
     engine: st?.engine ?? null,
+    framingObservation,
+    framingCapacityAuthority,
+    framingUnverified,
+    observedFramingLine: observedFramingLine(framingObservation),
+    observedFramingSource: observedSourceLabel(framingObservation),
     bom: st?.bom ?? [],
     bomReconciliation: st?.bomReconciliation ?? null,
     reactionReconciliation: st?.reactionReconciliation ?? null,

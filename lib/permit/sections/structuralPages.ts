@@ -802,10 +802,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <table class="calc-table">
             <tr><td>${_isTruss ? 'Truss @ Spacing' : 'Rafter Size'}</td><td class="cv">${rafterSize} @ ${rafterSpace}" O.C.</td></tr>
             ${_reviewRequired ? `
-            <tr><td>Framing Authority</td><td class="cv" style="font-weight:bold;color:#b91c1c;">UNVERIFIED</td></tr>
-            <tr><td>Capacity Basis</td><td class="cv">Code default — NOT engineering authority</td></tr>
+            <tr><td>Observed Framing</td><td class="cv" data-observed-framing="pv-4c">${escapeH(_proj.observedFramingLine)}</td></tr>
+            <tr><td>Source</td><td class="cv" style="font-size:6.5px;color:#b45309;">${escapeH(_proj.observedFramingSource)}</td></tr>
+            <tr><td>Framing Capacity</td><td class="cv" style="font-weight:bold;color:#b91c1c;">NOT VERIFIED</td></tr>
             <tr><td>Utilization</td><td class="cv" style="font-weight:bold;color:#b45309;">REVIEW REQ.</td></tr>
-            <tr><td>Basis</td><td class="cv">Licensed structural review of existing framing required</td></tr>
             ` : _isTruss ? `
             <tr><td>Truss Load Capacity</td><td class="cv">${trussCapPsf} PSF</td></tr>
             <tr><td>Total Roof Load</td><td class="cv">${trussLoadPsf} PSF</td></tr>
@@ -852,11 +852,11 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         dead load of ${totalDL} PSF. This represents a minimal addition relative to the existing roof dead load (typically
         8–12 PSF for asphalt shingle on plywood sheathing).
         ${_reviewRequired
-          ? `<strong style="color:#b91c1c;">EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED.</strong>
-             The existing framing member size / spacing / species / clear span are not established from a verified project
-             authority (truss drawing, member layout, engineer calc), so NO framing utilization, capacity or adequacy
-             conclusion is asserted on this sheet — only the ADDED PV load is quantified above. A licensed structural review
-             of the existing framing is required before permit submission.`
+          ? `<strong style="color:#b91c1c;">OBSERVED FRAMING: ${escapeH(_proj.observedFramingLine)} — ${escapeH(_proj.observedFramingSource)}. EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED.</strong>
+             The observed framing geometry is OPERATOR-ENTERED OBSERVATION and does not verify capacity; the existing framing
+             capacity is not established from a verified project authority (archived truss drawing, manufacturer calc, stamped
+             analysis, or a digest-bound engineer review), so NO framing utilization, capacity or adequacy conclusion is
+             asserted on this sheet — only the ADDED PV load is quantified above.`
           : _utilRatio != null
             ? `The existing roof structure is evaluated to confirm adequate capacity for the combined loading condition per
                IBC Section 1607. The governing ${_governs} check at ${utilization}%

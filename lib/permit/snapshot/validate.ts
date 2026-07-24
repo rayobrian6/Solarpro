@@ -481,9 +481,12 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
       add('V24', 'structural.checks[framing-capacity].passes', true, 'W3 structural engine',
         ['PV-4C', 'CERT', 'PE-1'], 'framing check reports PASS while engineering review is required — fabricated truss capacity forbidden');
     }
-    if (!s.permitReadiness.blockers.some(b => b.code === 'STRUCTURAL-FRAMING-UNVERIFIED')) {
+    // FRAMING-AUTHORITY GATE — canonical code FRAMING-AUTHORITY-UNVERIFIED
+    // (successor to STRUCTURAL-FRAMING-UNVERIFIED; either satisfies the invariant).
+    if (!s.permitReadiness.blockers.some(b =>
+        b.code === 'FRAMING-AUTHORITY-UNVERIFIED' || b.code === 'STRUCTURAL-FRAMING-UNVERIFIED')) {
       add('V24', 'permitReadiness.blockers', s.permitReadiness.blockers.map(b => b.code), 'W3 structural authority',
-        ['PV-0', 'VAL-1'], 'engineering review required but no STRUCTURAL-FRAMING-UNVERIFIED blocker present');
+        ['PV-0', 'VAL-1'], 'engineering review required but no FRAMING-AUTHORITY-UNVERIFIED blocker present');
     }
   }
   // V25 — REACTION HONESTY (§11): an attachment reaction exceeding its adjusted

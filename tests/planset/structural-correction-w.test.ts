@@ -240,8 +240,10 @@ describe('W8 — PE-1 projects the SAME gated state as PV-4C', () => {
 
   it('framing renders INDETERMINATE (no utilization %, no PASS) when framing authority is unverified', () => {
     expect(pe1).toContain('ENGINEERING REVIEW REQUIRED');
-    expect(pe1).toMatch(/Framing Authority/);
-    expect(pe1).toMatch(/UNVERIFIED/);
+    // FRAMING-AUTHORITY GATE — the OBSERVED FRAMING block + NOT VERIFIED notice
+    expect(pe1).toMatch(/Observed Framing/);
+    expect(pe1).toMatch(/NOT VERIFIED/);
+    expect(pe1).toContain('EXISTING FRAMING CAPACITY NOT VERIFIED');
     // no fabricated 45-psf / 69% framing utilization printed
     expect(pe1).not.toMatch(/Load Utilization/);
     expect(pe1).not.toMatch(/Truss Capacity/);

@@ -246,7 +246,7 @@ if (buildSldImplPresent || buildSldCallPresent) bypasses.push('dead buildSLD imp
 // ── expected honest blockers + issue state ───────────────────────────────────
 const blockerCodes = (snap.permitReadiness?.blockers || []).map(b => b.code);
 const EXPECTED = MODE === 'original'
-  ? ['ROUTE-LENGTH-ESTIMATE', 'STRUCTURAL-FRAMING-UNVERIFIED', 'WIND-SNOW-AUTHORITY-UNRESOLVED',
+  ? ['ROUTE-LENGTH-ESTIMATE', 'FRAMING-AUTHORITY-UNVERIFIED', 'WIND-SNOW-AUTHORITY-UNRESOLVED',
      'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED', 'RACKING-CAPACITY-APPLICABILITY-GAP',
      'CODE-AUTHORITY-INCOMPLETE', 'ENGINEERING-REVIEW-PENDING']
   : ['CODE-AUTHORITY-INCOMPLETE', 'ENGINEERING-REVIEW-PENDING'];

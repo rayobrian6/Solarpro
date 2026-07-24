@@ -584,10 +584,70 @@ export interface StructuralCheck {
   provenance: Provenance;
 }
 
+/** FRAMING-AUTHORITY GATE (2026-07-23) — the OBSERVED framing record. Operator-
+ *  entered / site-survey / field-measured / photo geometry + material descriptions.
+ *  This establishes OBSERVED geometry ONLY; it can NEVER independently verify
+ *  framing CAPACITY (Ray's ruling: operator-entered completeness is OBSERVATION,
+ *  never capacity authority). `geometryComplete` records field completeness for
+ *  provenance — it does NOT mean the framing is capacity-verified. */
+export type FramingObservationSource =
+  'operator-entered' | 'site-survey' | 'field-measurement' | 'photo-evidence';
+export interface FramingObservation {
+  source: FramingObservationSource | null;
+  framingType: string | null;              // 'truss' | 'rafter' | …
+  nominalMemberSizeIn: string | null;      // e.g. '2x6'
+  spacingIn: number | null;                // member spacing, inches
+  apparentSpeciesGrade: string | null;     // e.g. 'Douglas Fir-Larch'
+  measuredSpanFt: number | null;           // clear span, feet
+  roofCovering: string | null;
+  bearingObservations: string | null;
+  confidence: 'high' | 'medium' | 'low' | null;
+  observer: string | null;                 // honest null when the source is a bare DB row
+  observedAtIso: string | null;            // honest null when unrecorded
+  evidenceRefs: string[];
+  /** true when every geometry field is populated. OBSERVATION completeness ONLY —
+   *  never a capacity-verification signal (the whole point of this gate). */
+  geometryComplete: boolean;
+  provenance: Provenance;
+}
+
+/** FRAMING-AUTHORITY GATE — the CAPACITY authority record. A FramingCapacity-
+ *  Authority record EXISTS ONLY when a valid, verified capacity source cleared:
+ *  either (a) a verified + archived, project-applicable document resolved THROUGH
+ *  lib/documents (truss design drawing / manufacturer structural calc / stamped
+ *  analysis), or (b) a licensed-engineer review record bound to the CURRENT
+ *  snapshot digest. A generic BCSI table, operator-entered dimensions, or assumed
+ *  species/grade can NEVER construct one. Presence == verification (`verified`
+ *  is always true; a null record ⇒ unverified). */
+export type FramingCapacityAuthorityKind = 'archived-document' | 'engineer-review';
+export interface FramingCapacityAuthority {
+  kind: FramingCapacityAuthorityKind;
+  verified: true;
+  verifiedAtIso: string | null;
+  // ── archived-document path (resolved through lib/documents) ──
+  documentId: string | null;
+  documentClass: string | null;            // a framing-capacity document class
+  documentHash: string | null;             // sha256 of the archived file
+  issuer: string | null;
+  revisionOrDate: string | null;
+  projectApplicability: string | null;     // exact project/building applicability
+  memberOrTrussIdentity: string | null;
+  designLoads: string | null;
+  allowableCapacities: string | null;
+  bearingConditions: string | null;
+  deflectionLimits: string | null;
+  engineerOrManufacturerVerification: string | null;
+  // ── engineer-review path ──
+  reviewedSnapshotDigest: string | null;   // MUST equal the current snapshot digest
+  reviewerName: string | null;
+  reviewerLicense: string | null;
+  provenance: Provenance;
+}
+
 /** §8 — structural engine result computed from the canonical objects. Framing
- *  honesty: when framing/truss/species/grade/span authority is insufficient the
- *  engine emits engineeringReviewRequired and NEVER derives a pass from a
- *  fabricated truss-capacity default. */
+ *  honesty: when no verified framing CAPACITY authority exists the engine emits
+ *  engineeringReviewRequired and NEVER derives a pass from a fabricated truss-
+ *  capacity default or from operator-entered geometry (which is observation). */
 export interface StructuralEngineResult {
   moduleDeadLoadLbs: number | null;
   rackingDeadLoadLbs: number | null;
@@ -742,6 +802,15 @@ export interface PermitDesignSnapshot {
     env: StructuralEnv;
     checks: StructuralCheck[];
     engine: StructuralEngineResult;
+    // ── FRAMING-AUTHORITY GATE (2026-07-23) ─────────────────────────────────
+    /** The OBSERVED framing record (operator-entered / surveyed geometry). Never
+     *  a capacity-verification signal on its own. Null when no observation exists. */
+    framingObservation: FramingObservation | null;
+    /** The verified framing CAPACITY authority (archived project-applicable
+     *  document via lib/documents, OR a digest-bound licensed-engineer review).
+     *  Null ⇒ capacity UNVERIFIED ⇒ FRAMING-AUTHORITY-UNVERIFIED fires and the
+     *  framing check renders PRELIMINARY / NON-AUTHORITATIVE (passes:null). */
+    framingCapacityAuthority: FramingCapacityAuthority | null;
     // ── W3 §10 — structural BOM derived FROM the objects above ──────────────
     /** Every structural/racking BOM row, quantity traceable to module/rail/
      *  attachment objects (source IDs or auditable aggregation). SOLE quantity

@@ -58,7 +58,8 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'CODE-AUTHORITY-INCOMPLETE': 'code',
   'PROJECT-AUTHORITY-UNVERIFIED': 'document',
   'ENGINEERING-REVIEW-PENDING': 'review',
-  'STRUCTURAL-FRAMING-UNVERIFIED': 'structural',
+  'FRAMING-AUTHORITY-UNVERIFIED': 'structural',   // canonical (framing-authority gate)
+  'STRUCTURAL-FRAMING-UNVERIFIED': 'structural',  // legacy alias (mapped for back-compat)
   'STRUCTURAL-UTILIZATION-EXCEEDED': 'structural',
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED': 'structural',
   'RACKING-CAPACITY-APPLICABILITY-GAP': 'structural',

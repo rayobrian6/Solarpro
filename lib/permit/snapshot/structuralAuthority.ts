@@ -11,7 +11,12 @@ import type {
   ModuleInstance, RoofPlaneObject, RailObject, AttachmentObject, StructuralEnv,
   StructuralCheck, StructuralEngineResult, RackingAssemblyRecord, Polygon2D,
   RoofEdgeClass, EquipmentRecord, ModuleSpec, Provenance, DrawingTransform, CoordinateMeta,
+  FramingObservation, FramingCapacityAuthority,
 } from './types';
+import {
+  buildFramingObservation, resolveFramingCapacityAuthority,
+  type FramingCapacityDocumentEvidence, type FramingEngineerReviewEvidence,
+} from './framingAuthority';
 import type { StructuralResultV4, StructuralInputV4 } from '@/lib/structural-engine-v4';
 import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
@@ -63,6 +68,19 @@ export interface StructuralAuthorityCtx {
    *  RT-MINI blockers stay firing (fail-soft). */
   capacityDocument?: RackingCapacityDocumentEvidence | null;
   projectJurisdiction?: string | null;
+  /** FRAMING-AUTHORITY GATE — the resolved evidence for the framing CAPACITY
+   *  authority. The document path is resolved async THROUGH lib/documents (a
+   *  verified + archived truss-drawing / manufacturer-calc / stamped-analysis
+   *  covering the exact project); the engineer-review path is a licensed review
+   *  bound to the current snapshot digest. null on both ⇒ capacity UNVERIFIED ⇒
+   *  FRAMING-AUTHORITY-UNVERIFIED fires (the honest Braidon outcome). */
+  framingCapacityDocument?: FramingCapacityDocumentEvidence | null;
+  framingEngineerReview?: FramingEngineerReviewEvidence | null;
+  /** the current snapshot digest — validates the engineer-review binding. Absent
+   *  at pure build (circular) ⇒ the review path stays unverified there. */
+  framingReviewDigest?: string | null;
+  /** the exact project/building applicability key the framing document must cover. */
+  framingProjectApplicabilityKey?: string | null;
 }
 
 export interface StructuralAuthorityBundle {
@@ -74,6 +92,8 @@ export interface StructuralAuthorityBundle {
   env: StructuralEnv;
   checks: StructuralCheck[];
   engine: StructuralEngineResult;
+  framingObservation: FramingObservation | null;
+  framingCapacityAuthority: FramingCapacityAuthority | null;
   bom: StructuralBomRow[];
   bomReconciliation: StructuralBomReconciliation;
   reactionReconciliation: StructuralReactionReconciliation;   // §8 attachment-reaction closure
@@ -94,8 +114,26 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
     capacityDocument: ctx.capacityDocument ?? null,
     projectJurisdiction: ctx.projectJurisdiction ?? null,
   });
-  const framingVerified = !!(ctx.framing.framingType && ctx.framing.rafterSize
-    && ctx.framing.rafterSpacing && ctx.framing.rafterSpecies && ctx.framing.rafterSpan);
+  // FRAMING-AUTHORITY GATE — the OBSERVED framing record + the verified CAPACITY
+  // authority (or null). framingVerified is now driven by the CAPACITY AUTHORITY,
+  // NEVER by operator-field completeness (Ray's ruling). Operator geometry rides
+  // as OBSERVATION + preliminary modeling only.
+  const framingObservation = buildFramingObservation({
+    source: 'operator-entered',
+    framingType: ctx.framing.framingType ?? null,
+    rafterSize: ctx.framing.rafterSize ?? null,
+    rafterSpacing: ctx.framing.rafterSpacing ?? null,
+    rafterSpecies: ctx.framing.rafterSpecies ?? null,
+    rafterSpan: ctx.framing.rafterSpan ?? null,
+    roofCovering: ctx.roofCovering ?? null,
+  });
+  const framingCapacityAuthority = resolveFramingCapacityAuthority({
+    documentEvidence: ctx.framingCapacityDocument ?? null,
+    reviewEvidence: ctx.framingEngineerReview ?? null,
+    currentDigest: ctx.framingReviewDigest ?? null,
+    projectApplicabilityKey: ctx.framingProjectApplicabilityKey ?? null,
+  });
+  const framingVerified = !!(framingCapacityAuthority && framingCapacityAuthority.verified === true);
 
   // §2 — the canonical→sheet transform AUTHORITY. The snapshot OWNS the plan
   // rotation (the "squaring" geo-registration): DT-SITE is a plan-rotation whose
@@ -130,7 +168,7 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
   // structural remains an ESTIMATE on its own path — do NOT run the roof framing
   // engine on a non-roof run and manufacture a roof-framing review flag.
   const { engine, checks } = ctx.isRoofSystem
-    ? runSnapshotStructuralEngine(roofRun, roofInput, ctx.framing)
+    ? runSnapshotStructuralEngine(roofRun, roofInput, ctx.framing, framingCapacityAuthority)
     : {
         checks: buildFenceChecks(ctx),
         engine: {
@@ -191,6 +229,7 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
 
   return {
     moduleInstances, roofPlaneObjects, rackingAssembly, rails, attachments, env, checks, engine,
+    framingObservation, framingCapacityAuthority,
     bom, bomReconciliation, reactionReconciliation, drawingTransforms, blockers,
   };
 }
@@ -714,9 +753,15 @@ function collectBlockers(
   const directMount = !!ctx.mountSystem && mountTopo?.topology === 'rail_less';
 
   if (a.engine.engineeringReviewRequired) {
-    b.push({ code: 'STRUCTURAL-FRAMING-UNVERIFIED',
+    // FRAMING-AUTHORITY GATE — canonical code FRAMING-AUTHORITY-UNVERIFIED
+    // (successor to STRUCTURAL-FRAMING-UNVERIFIED). Fires whenever no verified
+    // framing CAPACITY authority exists — INCLUDING the live Braidon row whose
+    // operator-entered fields are complete (observation is not capacity authority).
+    b.push({ code: 'FRAMING-AUTHORITY-UNVERIFIED',
       message: a.engine.reviewReasons[0]
-        ?? 'Roof framing authority insufficient — licensed structural review required before permit submission' });
+        ?? 'No verified framing CAPACITY authority — a project-specific structural review (archived truss '
+           + 'drawing / manufacturer calc / stamped analysis, or a digest-bound engineer review) is required '
+           + 'before permit submission. Operator-entered framing geometry is OBSERVATION, not capacity authority.' });
   }
   if (!a.rackingAssembly || a.rackingAssembly.publishedCapacityAllowableLbs == null || a.rackingAssembly.capacitySource == null) {
     b.push({ code: 'ATTACHMENT-CAPACITY-SOURCE-MISSING',

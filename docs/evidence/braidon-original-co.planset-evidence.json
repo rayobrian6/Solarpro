@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T00:12:32.720Z",
+  "generatedAt": "2026-07-24T01:11:09.472Z",
   "harness": "planset-evidence-co (final closeout rendered-truth, 20 permanent gates)",
   "mode": "original",
   "htmlPath": "_tmp_braidon_original.html",
-  "snapshotId": "PDS-B7FBCEEDBD28",
-  "digest": "b7fbceedbd28c213ade871affbdb3fae690759e7a2db66c048f04d35d2bb8b20",
+  "snapshotId": "PDS-27C8B1270466",
+  "digest": "27c8b1270466bc15880630b1b71aa5a0f0c2d46e08c56e8259cd90ac5c382f21",
   "project": "BRAIDON M PILLA — Solar TEST",
   "sheetCount": 21,
   "sheetIds": [
@@ -123,7 +123,7 @@
     "ROUTE-LENGTH-ESTIMATE",
     "CONDUIT-FILL-PENDING",
     "TAP-CONDUCTOR-LENGTH-PENDING",
-    "STRUCTURAL-FRAMING-UNVERIFIED",
+    "FRAMING-AUTHORITY-UNVERIFIED",
     "PENDING-RACKING-ASSEMBLY-SELECTION",
     "WIND-SNOW-AUTHORITY-UNRESOLVED",
     "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
@@ -137,19 +137,19 @@
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-B7FBCEEDBD28",
+        "reportVal": "PDS-27C8B1270466",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-B7FBCEEDBD28"
+          "PDS-27C8B1270466"
         ],
-        "sld": "PDS-B7FBCEEDBD28"
+        "sld": "PDS-27C8B1270466"
       },
       {
         "name": "digestPrefix",
-        "reportVal": "b7fbceedbd28",
+        "reportVal": "27c8b1270466",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "b7fbceedbd28c213ade8"
+          "27c8b1270466bc158806"
         ]
       },
       {

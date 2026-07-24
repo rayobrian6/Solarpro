@@ -109,11 +109,11 @@ describe('§13 (Gate 13) — unverified framing renders no capacity/adequacy', (
     expect(html).not.toContain('confirms the existing framing has adequate capacity');
   });
 
-  it('the STRUCTURAL-FRAMING-UNVERIFIED blocker covers the framing authority gap', () => {
+  it('the FRAMING-AUTHORITY-UNVERIFIED blocker covers the framing authority gap', () => {
     const snap: any = input._snapshot;
     const codes = (snap?.permitReadiness?.registry ?? snap?.permitReadiness?.blockers ?? [])
       .map((b: any) => b.code);
-    expect(codes).toContain('STRUCTURAL-FRAMING-UNVERIFIED');
+    expect(codes).toContain('FRAMING-AUTHORITY-UNVERIFIED');
   });
 });
 

@@ -172,27 +172,43 @@ write('braidon-racking-fastener-state.json', {
   blockers: (pr.registry ?? []).filter(b => !b.resolved && /RACKING|RAIL|FASTENER|RT-?MINI/i.test(b.code)).map(b => b.code),
 });
 
-// ── §13 FRAMING-AUTHORITY REPORT ─────────────────────────────────────────────
+// ── FRAMING-AUTHORITY GATE REPORT (2026-07-23) ───────────────────────────────
 const engine = st.engine || {};
-const reviewRequired = engine.engineeringReviewRequired === true || (pr.registry ?? []).some(b => !b.resolved && b.code === 'STRUCTURAL-FRAMING-UNVERIFIED');
+const framingObservation = st.framingObservation ?? null;
+const framingCapacityAuthority = st.framingCapacityAuthority ?? null;
+const reviewRequired = engine.engineeringReviewRequired === true
+  || (pr.registry ?? []).some(b => !b.resolved && (b.code === 'FRAMING-AUTHORITY-UNVERIFIED' || b.code === 'STRUCTURAL-FRAMING-UNVERIFIED'))
+  || !(framingCapacityAuthority && framingCapacityAuthority.verified === true);
 write('braidon-framing-authority.json', {
-  ...hdr('braidon-framing-authority', '§13 existing-framing capacity authority',
-    'The existing roof framing capacity is NOT certified from generic BCSI/NDS defaults. The engine may quantify '
-    + 'ADDED PV dead load, but a framing PASS/utilization/"adequate" verdict requires archived project structural '
-    + 'authority. When unverified the sheet prints EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC '
-    + 'STRUCTURAL REVIEW REQUIRED and the STRUCTURAL-FRAMING-UNVERIFIED blocker fires.'),
+  ...hdr('braidon-framing-authority', 'framing-authority gate — observation vs capacity authority',
+    "Ray's ruling: operator-entered / field-observed data establishes OBSERVED geometry ONLY and can NEVER "
+    + 'independently prove framing CAPACITY. Verification requires a FramingCapacityAuthority: a verified + '
+    + 'archived project-applicable document (truss design drawing / manufacturer structural calc / stamped '
+    + 'analysis) resolved through lib/documents, OR a licensed-engineer review bound to the current snapshot '
+    + 'digest. A generic BCSI table / operator-entered dimensions / assumed grade inform PRELIMINARY modeling '
+    + 'only. When unverified the sheet prints EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC '
+    + 'STRUCTURAL REVIEW REQUIRED and the FRAMING-AUTHORITY-UNVERIFIED blocker fires — INCLUDING on the live '
+    + 'Braidon row whose operator-entered framing fields are complete.'),
   engineeringReviewRequired: reviewRequired,
   reviewReasons: engine.reviewReasons ?? [],
+  framingObservation,
+  framingCapacityAuthority,
+  observationCompleteButNotVerified: !!(framingObservation && framingObservation.geometryComplete
+    && !(framingCapacityAuthority && framingCapacityAuthority.verified === true)),
   addedDeadLoadPsf: r6(engine.addedDeadLoadPsf),
   distributedRoofLoadPsf: r6(engine.distributedRoofLoadPsf),
   governing: st.governing ?? null,
   observedFramingKeptSeparateFromVerifiedCapacity: true,
-  evidenceThatWouldClear: 'Archived truss drawing / member layout / species-grade / plates / bearing / clear span / '
-    + 'design loads / deflection limits / manufacturer BCSI approval, or a licensed engineer calculation bound to the project.',
+  clearingPaths: [
+    'A verified + archived, project-applicable document resolved through lib/documents — document class '
+      + 'truss_design_drawing / manufacturer_structural_calc / stamped_structural_analysis (sha-256, current, verified).',
+    'A licensed-engineer review record bound to the CURRENT snapshot digest (invalidated by any digest change '
+      + 'unless a new review covers the new digest).',
+  ],
   note: reviewRequired
-    ? 'UNVERIFIED — no capacity/utilization/PASS/adequate verdict is asserted; only added PV load quantified.'
-    : 'Operator supplied complete framing dimensions (type/size/spacing/species/span); per the established structural '
-      + 'contract the modeled capacity renders. Archived-document authority remains the stronger future gate.',
+    ? 'UNVERIFIED — no capacity/utilization/PASS/adequate verdict is asserted; only added PV load quantified. '
+      + 'Operator-entered framing completeness is OBSERVATION, not capacity authority.'
+    : 'A verified framing CAPACITY authority is present; the modeled framing comparison renders as authoritative.',
 });
 
 // ── §14 SCREENING-ENVELOPE REPORT ────────────────────────────────────────────

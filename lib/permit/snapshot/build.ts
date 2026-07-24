@@ -29,6 +29,7 @@ import { computePlansetManifest } from '../plansetManifest';
 import { hybridSheetSections, SUB_LABEL } from '../sections/subSystemSheets';
 import { buildStructuralAuthority, type StructuralRunsBundle } from './structuralAuthority';
 import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
+import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } from './framingAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { utilityDisplayName } from '../utils/helpers';   // §15(b) — human utility name, never a slug
@@ -71,6 +72,13 @@ export function buildPermitDesignSnapshot(
     /** §12 gate: a snapshot_digest_invalidations ledger entry forces the review-
      *  coverage precondition false. Conservative default when unresolved. */
     digestInvalidatedByLedger?: boolean;
+    /** FRAMING-AUTHORITY GATE — resolved evidence for the framing CAPACITY
+     *  authority (async-resolved THROUGH lib/documents / the review record by the
+     *  caller). null ⇒ capacity UNVERIFIED ⇒ FRAMING-AUTHORITY-UNVERIFIED fires. */
+    framingCapacityDocument?: FramingCapacityDocumentEvidence | null;
+    framingEngineerReview?: FramingEngineerReviewEvidence | null;
+    framingReviewDigest?: string | null;
+    framingProjectApplicabilityKey?: string | null;
   },
 ): PermitDesignSnapshot {
   const { project, system, compliance } = input;
@@ -701,6 +709,12 @@ export function buildPermitDesignSnapshot(
     // blockers firing (fail-soft).
     capacityDocument: opts?.capacityDocument ?? null,
     projectJurisdiction: opts?.projectJurisdiction ?? null,
+    // FRAMING-AUTHORITY GATE — evidence for the framing CAPACITY authority.
+    framingCapacityDocument: opts?.framingCapacityDocument ?? null,
+    framingEngineerReview: opts?.framingEngineerReview ?? null,
+    framingReviewDigest: opts?.framingReviewDigest ?? null,
+    framingProjectApplicabilityKey: opts?.framingProjectApplicabilityKey
+      ?? (opts?.projectId ?? (proj.projectId ?? null)),
   });
 
   // ═══ W4 §1 CANONICAL CODE AUTHORITY ════════════════════════════════════
@@ -1213,6 +1227,10 @@ export function buildPermitDesignSnapshot(
       env: structAuth.env,
       checks: structAuth.checks,
       engine: structAuth.engine,
+      // FRAMING-AUTHORITY GATE — OBSERVED framing (operator-entered geometry) +
+      // the verified CAPACITY authority (or null ⇒ FRAMING-AUTHORITY-UNVERIFIED).
+      framingObservation: structAuth.framingObservation,
+      framingCapacityAuthority: structAuth.framingCapacityAuthority,
       // §10 — structural BOM rows + reconciliation, derived from the objects.
       bom: structAuth.bom,
       bomReconciliation: structAuth.bomReconciliation,

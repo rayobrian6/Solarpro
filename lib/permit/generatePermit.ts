@@ -1048,6 +1048,10 @@ export function generatePermitHTML(
       projectJurisdiction: snapshotAuthority?.projectJurisdiction ?? null,
       manufacturerDocumentsArchived: snapshotAuthority?.manufacturerDocumentsArchived ?? null,
       digestInvalidatedByLedger: snapshotAuthority?.digestInvalidatedByLedger ?? false,
+      // FRAMING-AUTHORITY GATE — verified framing-capacity document (or null ⇒
+      // FRAMING-AUTHORITY-UNVERIFIED keeps firing). Fail-soft.
+      framingCapacityDocument: snapshotAuthority?.framingCapacityDocument ?? null,
+      framingProjectApplicabilityKey: snapshotAuthority?.framingProjectApplicabilityKey ?? null,
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);

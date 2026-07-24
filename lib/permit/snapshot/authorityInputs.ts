@@ -14,7 +14,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitInput } from '../types';
 import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
-import { resolveRackingCapacityDocument } from '@/lib/documents/registry';
+import type { FramingCapacityDocumentEvidence } from './framingAuthority';
+import { resolveRackingCapacityDocument, resolveFramingCapacityDocument } from '@/lib/documents/registry';
 import { listActiveInvalidations } from '@/lib/reconciliation/reconcile';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
@@ -32,6 +33,12 @@ export interface SnapshotAuthorityInputs {
    *  precondition false. Unavailable ⇒ conservative `true` (unknown must not
    *  satisfy the gate). */
   digestInvalidatedByLedger: boolean;
+  /** FRAMING-AUTHORITY GATE — the VERIFIED, project-applicable framing-capacity
+   *  document (truss drawing / mfr calc / stamped analysis) or null. Fail-soft to
+   *  null ⇒ FRAMING-AUTHORITY-UNVERIFIED stays firing (the honest Braidon outcome). */
+  framingCapacityDocument: FramingCapacityDocumentEvidence | null;
+  /** the exact project/building applicability key the framing document must cover. */
+  framingProjectApplicabilityKey: string | null;
 }
 
 /** Resolve the async document + ledger authority for a permit input. Never
@@ -79,5 +86,23 @@ export async function resolveSnapshotAuthorityInputs(input: PermitInput): Promis
     }
   }
 
-  return { capacityDocument, projectJurisdiction: jurisdiction, manufacturerDocumentsArchived, digestInvalidatedByLedger };
+  // ── FRAMING-AUTHORITY GATE — the verified, project-applicable framing-capacity
+  //    document. Fail-soft to null (no document ⇒ FRAMING-AUTHORITY-UNVERIFIED
+  //    keeps firing). The exact-project applicability key is the project id. ────
+  const framingProjectApplicabilityKey: string | null = projectId ?? proj.apn ?? proj.address ?? null;
+  let framingCapacityDocument: FramingCapacityDocumentEvidence | null = null;
+  try {
+    framingCapacityDocument = await resolveFramingCapacityDocument({
+      equipmentId: null,
+      projectApplicabilityKey: framingProjectApplicabilityKey,
+      jurisdiction,
+    });
+  } catch {
+    framingCapacityDocument = null;
+  }
+
+  return {
+    capacityDocument, projectJurisdiction: jurisdiction, manufacturerDocumentsArchived,
+    digestInvalidatedByLedger, framingCapacityDocument, framingProjectApplicabilityKey,
+  };
 }
