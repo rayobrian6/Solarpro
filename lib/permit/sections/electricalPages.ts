@@ -726,13 +726,25 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const _perBranch = _asmB.branchPaths
           .map(p => `${p.branchLabel} ${p.dropCount}d/${p.designedInstalledLengthFt != null ? p.designedInstalledLengthFt.toFixed(0) : '—'}ft`)
           .join(' · ');
+        // §Q — the canonical procurement-sufficiency authority. When the ordered
+        // (drop-based) footage is SHORT of the Σ designed-installed path, the base
+        // cable quantity is NOT an orderable final total (NON-ORDERABLE / PENDING
+        // SOLUTION, like the racking pattern) and a fail-closed
+        // QCABLE-PROCUREMENT-INSUFFICIENT blocker fires — never a "jumpers required"
+        // note. Speculative jumpers are excluded from authoritative totals.
+        const _ps = _snap?.electrical?.procurementSufficiency ?? null;
+        const _short = !!_ps?.insufficient;
+        const _procTxt = _ps?.procurementLengthFt ?? _asmB.totalProcurementFt ?? '—';
+        const _insuffBlock = _short
+          ? ` <strong style="color:#b00">⚠ PROCUREMENT INSUFFICIENCY (QCABLE-PROCUREMENT-INSUFFICIENT — BLOCKING): designed ${_ps!.totalDesignedInstalledFt} ft + allowance ${_ps!.requiredServiceLoopAllowanceFt} ft (${_ps!.allowanceProvenance}) &gt; procurement ${_ps!.procurementLengthFt} ft by <span class="mono">${_ps!.deficitFt} ft</span>. Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE CABLE QUANTITY only — NON-ORDERABLE / PENDING SOLUTION (verified listed extension required; "jumpers required" does NOT clear this). Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. See RS-1.</strong>`
+          : '';
         // Compact one-line authority + reconciliation note (the per-branch designed
         // lengths already print in the branch rows; the full per-branch math lives on
         // E-1's sectioned schedule + the evidence artifact). Keeps PV-4B page-fit.
         return `
       <div style="padding:1px 6px;font-size:6.5px;line-height:1.18;border:var(--border);border-top:none;background:#eef4fa;">
         <strong>LISTED AC TRUNK CABLE ASSEMBLY (${a.assemblyId}, §6/§7/§10):</strong>
-        ${a.manufacturer} ${a.ecosystem} <span class="mono">${a.sku ?? 'PENDING'}</span>${a.conductorCount && a.conductorGauge ? ` · ${a.conductorCount}×${a.conductorGauge}` : ''} · ${a.connectorSpacingFt != null ? a.connectorSpacingFt + 'ft O.C.' : ''} · ${a.maxBranchCurrentA != null ? a.maxBranchCurrentA + 'A branch (TC-ER, 690.31(C))' : ''}. <strong>Lengths (one quantity per label):</strong> ${_asmB.totalDrops ?? '—'} drops (BOM/PV-1B invariant) · <em>cable path (geometry)</em> <span class="mono">${_asmB.totalDesignedInstalledFt != null ? _asmB.totalDesignedInstalledFt.toFixed(1) : '—'}ft</span> (Σ BranchCablePath designed-installed; per-branch in Length col) · <em>procurement</em> <span class="mono">${_asmB.totalProcurementFt ?? '—'}ft</span> (Σ drops×${a.connectorSpacingFt ?? '—'}ft pitch×waste — drop-count basis, not designed×waste); distinct quantities per BranchCablePath object.${_asmB.designedExceedsProcurement ? ` <strong style="color:#b00">⚠ designed &gt; procurement — module spacing outran the connector pitch; FIELD-VERIFY Q-Cable length / add jumpers (not tuned).</strong>` : ''}
+        ${a.manufacturer} ${a.ecosystem} <span class="mono">${a.sku ?? 'PENDING'}</span>${a.conductorCount && a.conductorGauge ? ` · ${a.conductorCount}×${a.conductorGauge}` : ''} · ${a.connectorSpacingFt != null ? a.connectorSpacingFt + 'ft O.C.' : ''} · ${a.maxBranchCurrentA != null ? a.maxBranchCurrentA + 'A branch (TC-ER, 690.31(C))' : ''}. <strong>Lengths (one quantity per label):</strong> ${_asmB.totalDrops ?? '—'} drops (BOM/PV-1B invariant) · <em>cable path (geometry)</em> <span class="mono">${_asmB.totalDesignedInstalledFt != null ? _asmB.totalDesignedInstalledFt.toFixed(1) : '—'}ft</span> (Σ BranchCablePath designed-installed; per-branch in Length col) · <em>procurement (base cable qty)</em> <span class="mono">${_procTxt}ft</span> (Σ drops×${a.connectorSpacingFt ?? '—'}ft pitch×waste — drop-count basis, not designed×waste); distinct quantities per BranchCablePath object.${_insuffBlock}
       </div>`;
       })()}
       ${(_feed.raceway || _feed.tradeSizeIn) ? `

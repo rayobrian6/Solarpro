@@ -44,6 +44,8 @@ import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { collectEquipmentDocumentBlockers } from './equipmentProjection';
 import { classifyBlockerSeverity } from './severityPolicy';
+import { buildProcurementSufficiency, procurementInsufficiencyPayload } from './procurementSufficiency';
+import type { CableExtensionSolution, ProcurementSufficiency } from './types';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 
 const fuzz = <T extends { model: string }>(list: T[], model?: string | null): T | undefined => {
@@ -81,6 +83,11 @@ export function buildPermitDesignSnapshot(
     framingEngineerReview?: FramingEngineerReviewEvidence | null;
     framingReviewDigest?: string | null;
     framingProjectApplicabilityKey?: string | null;
+    /** §Q — canonical Q-Cable procurement-deficit resolution solutions, async-
+     *  resolved by the caller (operator selection + verified lib/documents record).
+     *  Empty/undefined ⇒ no solution ⇒ QCABLE-PROCUREMENT-INSUFFICIENT stays firing
+     *  when the design is short (the honest live outcome today). */
+    cableExtensionSolutions?: CableExtensionSolution[] | null;
   },
 ): PermitDesignSnapshot {
   const { project, system, compliance } = input;
@@ -728,6 +735,7 @@ export function buildPermitDesignSnapshot(
   // PV-4B/E-1/SCHED/BOM/APP-A. Non-micro / unknown-trunk-brand ⇒ null/[].
   let listedCableAssembly: import('./types').ListedCableAssembly | null = null;
   let branchCablePaths: import('./types').BranchCablePath[] = [];
+  let procurementSufficiency: ProcurementSufficiency | null = null;
   if (isMicro && branches.length > 0) {
     const _microMfr = eq.inverterManufacturer ?? microInverters[0]?.manufacturer ?? '';
     const _microModel = eq.inverterModel ?? microInverters[0]?.model ?? '';
@@ -799,6 +807,19 @@ export function buildPermitDesignSnapshot(
         provenance: { source: 'resolveTrunkCablePlan + trunk-cable catalog', ref: _cbl.sku ?? null },
       };
     }
+    // §Q (2026-07-24) — Q-CABLE PROCUREMENT SUFFICIENCY. Compare the Σ geometric
+    // designed-installed cable path against the drop-based procurement footage.
+    // procurement < Σ designed + allowance(0) ⇒ the ordered cable is SHORT of the
+    // installed path ⇒ QCABLE-PROCUREMENT-INSUFFICIENT (pushed below). Cleared only
+    // by a VERIFIED CableExtensionSolution (opts.cableExtensionSolutions — empty on
+    // live today ⇒ the blocker stays active). Pure/deterministic → digest-safe.
+    procurementSufficiency = buildProcurementSufficiency({
+      assembly: listedCableAssembly,
+      branchPaths: branchCablePaths,
+      selectedSystem: `${_microMfr} ${_microModel}`.trim() || (listedCableAssembly?.wiringMethodLabel ?? 'micro / Q Cable'),
+      solutions: opts?.cableExtensionSolutions ?? [],
+    });
+
     // §7/§10 — patch the canonical BRANCH_RUN route segment length taxonomy so
     // PV-4B/E-1 project the geometric designed-installed length (not the 68-ft
     // plane-width estimate) and reference the per-branch cable-path objects.
@@ -888,6 +909,7 @@ export function buildPermitDesignSnapshot(
       // set by severityPolicy.ts; these META fields are documentary and kept in sync.
       'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
       'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.serviceTopology[svc-tap-conductors].constraints', sheets: ['PV-4B', 'PV-6', 'E-1'], resolution: 'Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).' },
+      'QCABLE-PROCUREMENT-INSUFFICIENT': { severity: 'blocking', authorityPath: 'electrical.procurementSufficiency', sheets: ['PV-4B', 'SCHED', 'E-1', 'RS-1'], resolution: 'Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. "Jumpers required" by assertion does NOT clear this.' },
       'CODE-AUTHORITY-INCOMPLETE': { severity: 'blocking', authorityPath: 'codeAuthority.editions', sheets: ['PV-0', 'CERT', 'PE-1'], resolution: 'Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.' },
       'PROJECT-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'projectAuthority', sheets: ['PV-0', 'CERT'], resolution: 'Verify address / APN / municipal boundary / AHJ / fire authority via the document registry (no postal inference).' },
       'PROJECT-NAME-NONPRODUCTION': { severity: 'blocking', authorityPath: 'project.projectName', sheets: ['PV-0'], resolution: 'Replace the non-production ("TEST") project name with the real project identity before issue.' },
@@ -914,6 +936,7 @@ export function buildPermitDesignSnapshot(
         affectedSheets: over?.affectedSheets ?? m?.sheets ?? (isStruct ? STRUCT_DEFAULT.sheets : []),
         explanation,
         resolutionAction: over?.resolutionAction ?? m?.resolution ?? (isStruct ? STRUCT_DEFAULT.resolution : 'Resolve the missing authority before permit-ready.'),
+        payload: over?.payload ?? null,
         provenance: over?.provenance ?? { source: 'snapshot build (permitReadiness)', ref: null },
         createdAtIso: _capturedIso,
         createdVersion: String(PLANSET_ENGINE_VERSION),
@@ -993,6 +1016,21 @@ export function buildPermitDesignSnapshot(
       && (o.constraints ?? []).some(k => k.state === 'pending'))) {
       push('TAP-CONDUCTOR-LENGTH-PENDING',
         'Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)');
+    }
+    // §Q — Q-CABLE PROCUREMENT INSUFFICIENCY. The Σ geometric designed-installed
+    // cable path exceeds the drop-based procurement footage (+ allowance 0): the
+    // ordered listed cable is SHORT of the as-routed installed path. This is a
+    // FAIL-CLOSED blocker (procurement + engineering approval + permit acceptance),
+    // never a FIELD-VERIFY/"jumpers required" note. Only a VERIFIED
+    // CableExtensionSolution clears it (none wired on live ⇒ it stays firing).
+    if (procurementSufficiency?.insufficient) {
+      const ps = procurementSufficiency;
+      // Concise one-line explanation (banner/cover render this); the full per-branch
+      // + resolution detail lives in resolutionAction + payload, shown on RS-1.
+      push('QCABLE-PROCUREMENT-INSUFFICIENT',
+        `Q-Cable procurement ${ps.procurementLengthFt} ft is SHORT of the ${ps.totalDesignedInstalledFt} ft designed-installed path `
+          + `(+${ps.requiredServiceLoopAllowanceFt} ft allowance) by ${ps.deficitFt} ft — base cable quantity NON-ORDERABLE / PENDING a VERIFIED listed cable-extension solution.`,
+        { payload: procurementInsufficiencyPayload(ps), provenance: { source: 'electrical.procurementSufficiency', ref: ps.assemblyId } });
     }
     // §12: W3 canonical structural blockers (framing unverified, missing
     // capacity/fastener source, unsupported mixed assembly, wind/snow
@@ -1281,6 +1319,7 @@ export function buildPermitDesignSnapshot(
       physicalRaceways,
       listedCableAssembly,
       branchCablePaths,
+      procurementSufficiency,
       serviceTopology,
       feeder: {
         conductorId: feederConductorId,

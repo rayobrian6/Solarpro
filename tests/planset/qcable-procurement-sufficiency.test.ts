@@ -1,0 +1,273 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Q-CABLE PROCUREMENT SUFFICIENCY GATE (2026-07-24) — the SEVEN mandated tests.
+//
+// Ray's ruling: a Q-Cable procurement deficit (Σ geometric designed-installed
+// cable path > drop-based procurement footage + allowance) is NOT a FIELD-VERIFY /
+// "jumpers required" note — it is a FAIL-CLOSED blocking condition
+// (QCABLE-PROCUREMENT-INSUFFICIENT) that clears ONLY via a VERIFIED
+// CableExtensionSolution. These seven tests pin that contract end-to-end.
+// ═══════════════════════════════════════════════════════════════════════════
+import { describe, it, expect } from 'vitest';
+import { generatePermitHTML } from '@/lib/permit';
+import { generateCADLayout } from '@/lib/cad/cadEngine';
+import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
+import {
+  buildProcurementSufficiency,
+  evaluateCableExtensionClearance,
+  procurementInsufficiencyPayload,
+} from '@/lib/permit/snapshot/procurementSufficiency';
+import { classifyBlockerSeverity } from '@/lib/permit/snapshot/severityPolicy';
+import { pageConductorSchedule } from '@/lib/permit/sections/electricalPages';
+import { pageEquipmentSchedule } from '@/lib/permit/sections/structuralPages';
+import { pageReviewStatus } from '@/lib/permit/sections/reviewStatus';
+import type {
+  BranchCablePath, ListedCableAssembly, CableExtensionSolution, PermitReadinessBlocker,
+} from '@/lib/permit/snapshot/types';
+
+const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
+
+const ASM = (): ListedCableAssembly => ({
+  assemblyId: 'QCABLE-ASSEMBLY', manufacturer: 'Enphase', ecosystem: 'IQ Q-Cable',
+  model: 'Q-12-10-240', sku: 'Q-12-10-240', skuNote: null,
+  conductorConstruction: 'two-wire', conductorCount: 2, conductorGauge: '#12 AWG',
+  insulationListing: 'TC-ER', wiringMethodLabel: 'ENPHASE Q CABLE (TC-ER)',
+  connectorSpacingFt: 4.25, maxBranchCurrentA: 20, compatibleMicroModels: ['IQ8A'],
+  cableLengthFt: 152, dropCount: 31, unusedDropCapSku: null, terminatorSku: null,
+  sourceDocument: null, verificationStatus: 'catalog-sourced', provenance: { source: 'test' },
+});
+
+const PATH = (
+  id: string, label: string, drops: number, designed: number, proc: number,
+): BranchCablePath => ({
+  branchId: id, branchLabel: label, moduleCount: drops, dropCount: drops,
+  designedInstalledLengthFt: designed, connectorSpacingFt: 4.25,
+  procurementLengthFt: proc, wasteFactor: 1.15, lengthProvenance: 'geometry-derived',
+  derivation: 'test', provenance: { source: 'test' },
+});
+
+// Verified extension document evidence (SYNTHETIC, test-only — NEVER committed as
+// real evidence): a clearly-fake archived+hashed verified manufacturer document.
+const VERIFIED_DOC = () => ({
+  documentId: 'TEST-FAKE-DOC-0001', documentClass: 'combiner_documentation',
+  documentIdentity: 'TEST-ONLY synthetic Q-Cable extension listing (NOT REAL EVIDENCE)',
+  verificationState: 'verified', status: 'current', archivedInRepo: true,
+  sha256: '0000000000000000000000000000000000000000000000000000000000000000',
+  coversExtensionSku: 'Q-EXT-TEST-10', compatibleSystem: 'Enphase IQ8A / Q Cable',
+  revisionOrDate: '2026-07-24',
+});
+
+const VERIFIED_SOLUTION = (deficit: number): CableExtensionSolution => ({
+  solutionId: 'sol-test-1', kind: 'verified-jumper-extension', selectedSku: 'Q-EXT-TEST-10',
+  quantity: 3, addedLengthFt: deficit + 5, locations: ['br-1', 'br-2', 'br-3'],
+  compatibilityVerified: true, compatibleSystemNote: 'IQ8A / Q Cable',
+  manufacturerDocument: VERIFIED_DOC() as any,
+  representedInDrawings: true, representedInSchedules: true, representedInBom: true,
+  vdInstallationRecalculated: true, note: null, provenance: { source: 'test' },
+});
+
+// ── TEST 1 — fixture: no blocker (designed 140.5 ≤ procurement 152). ──────────
+describe('§Q test 1 — fixture is SUFFICIENT (no blocker) at 140.5 ≤ 152', () => {
+  const input: any = clone(braidonOriginalAuditFixture);
+  input.generatedAtIso = '2026-07-24T12:00:00Z';
+  generatePermitHTML(input);
+  const snap = input._snapshot;
+  const ps = snap.electrical.procurementSufficiency;
+
+  it('procurementSufficiency present, not insufficient, deficit 0, sufficient status', () => {
+    expect(ps.present).toBe(true);
+    expect(ps.totalDesignedInstalledFt).toBeLessThanOrEqual(ps.procurementLengthFt);
+    expect(ps.insufficient).toBe(false);
+    expect(ps.deficitFt).toBe(0);
+    expect(ps.verificationStatus).toBe('sufficient');
+    // allowance is honestly 0 with recorded provenance (no in-repo allowance rule)
+    expect(ps.requiredServiceLoopAllowanceFt).toBe(0);
+    expect(ps.allowanceProvenance).toBe('no-allowance-authority-recorded');
+  });
+  it('no QCABLE-PROCUREMENT-INSUFFICIENT blocker in the registry', () => {
+    const codes = (snap.permitReadiness.registry ?? []).map((r: any) => r.code);
+    expect(codes).not.toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
+  });
+});
+
+// ── TEST 2 — live-shaped: blocker ACTIVE (designed 166.5 > procurement 152). ──
+describe('§Q test 2 — live-shaped deficit is BLOCKING at 166.5 > 152', () => {
+  const paths = [PATH('br-1', 'B1', 13, 64.0, 64), PATH('br-2', 'B2', 13, 63.2, 63), PATH('br-3', 'B3', 5, 39.3, 25)];
+  const ps = buildProcurementSufficiency({ assembly: ASM(), branchPaths: paths, selectedSystem: 'Enphase IQ8A' });
+
+  it('insufficient with deficit 14.5 and unresolved status', () => {
+    expect(ps!.totalDesignedInstalledFt).toBe(166.5);
+    expect(ps!.procurementLengthFt).toBe(152);
+    expect(ps!.insufficient).toBe(true);
+    expect(ps!.deficitFt).toBe(14.5);
+    expect(ps!.verificationStatus).toBe('insufficient-unresolved');
+    expect(ps!.affectedBranchIds.length).toBeGreaterThan(0);
+    expect(ps!.manufacturerDocumentAuthority).toBeNull();
+  });
+  it('the code is classified BLOCKING by the severity policy', () => {
+    expect(classifyBlockerSeverity('QCABLE-PROCUREMENT-INSUFFICIENT').severity).toBe('blocking');
+  });
+});
+
+// ── TEST 3 — geometry change ACTIVATES and CLEARS the deficit. ────────────────
+describe('§Q test 3 — geometry change activates / clears the deficit', () => {
+  const asm = ASM();
+  // TIGHT spacing (3 ft < 4.25 ft pitch): designed path < drop-based procurement.
+  const tight = deriveBranchCablePaths(
+    [{ branchId: 'br-1', branchLabel: 'B1', moduleCount: 8,
+       moduleCentersFt: Array.from({ length: 8 }, (_, i) => ({ x: i * 3, y: 0 })) }],
+    4.25,
+  ).map(p => ({ ...p, provenance: { source: 'test' } }));
+  const psTight = buildProcurementSufficiency({ assembly: asm, branchPaths: tight, selectedSystem: 'Enphase IQ8A' });
+
+  // WIDE spacing (9 ft > pitch): designed path outruns the drop-based procurement.
+  const wide = deriveBranchCablePaths(
+    [{ branchId: 'br-1', branchLabel: 'B1', moduleCount: 8,
+       moduleCentersFt: Array.from({ length: 8 }, (_, i) => ({ x: i * 9, y: 0 })) }],
+    4.25,
+  ).map(p => ({ ...p, provenance: { source: 'test' } }));
+  const psWide = buildProcurementSufficiency({ assembly: asm, branchPaths: wide, selectedSystem: 'Enphase IQ8A' });
+
+  it('tight geometry is sufficient (no blocker)', () => {
+    expect(psTight!.insufficient).toBe(false);
+    expect(psTight!.deficitFt).toBe(0);
+  });
+  it('widening the geometry activates the deficit', () => {
+    expect(psWide!.insufficient).toBe(true);
+    expect(psWide!.deficitFt).toBeGreaterThan(0);
+    expect(psWide!.totalDesignedInstalledFt!).toBeGreaterThan(psWide!.procurementLengthFt!);
+  });
+});
+
+// ── TEST 4 — a VERIFIED canonical solution CLEARS the blocker. ────────────────
+describe('§Q test 4 — verified CableExtensionSolution clears the deficit', () => {
+  const paths = [PATH('br-1', 'B1', 13, 64.0, 64), PATH('br-2', 'B2', 13, 63.2, 63), PATH('br-3', 'B3', 5, 39.3, 25)];
+  const deficit = 14.5;
+  const sol = VERIFIED_SOLUTION(deficit);
+
+  it('the pure clearance evaluator accepts the verified solution', () => {
+    const res = evaluateCableExtensionClearance({ selectedSystem: 'Enphase IQ8A', deficitFt: deficit }, sol);
+    expect(res.cleared).toBe(true);
+    expect(res.missing).toEqual([]);
+  });
+  it('buildProcurementSufficiency marks it resolved-by-verified-solution (blocker off)', () => {
+    const ps = buildProcurementSufficiency({ assembly: ASM(), branchPaths: paths, selectedSystem: 'Enphase IQ8A', solutions: [sol] });
+    expect(ps!.insufficient).toBe(false);
+    expect(ps!.verificationStatus).toBe('resolved-by-verified-solution');
+    expect(ps!.clearedBySolutionId).toBe('sol-test-1');
+    // one resolution option is now SELECTED
+    expect(ps!.resolutionOptions.some(o => o.selected)).toBe(true);
+  });
+});
+
+// ── TEST 5 — an UNVERIFIED note can NEVER clear the blocker. ──────────────────
+describe('§Q test 5 — unverified note cannot clear the deficit', () => {
+  const paths = [PATH('br-1', 'B1', 13, 64.0, 64), PATH('br-2', 'B2', 13, 63.2, 63), PATH('br-3', 'B3', 5, 39.3, 25)];
+  // A free-text "jumpers required" note: no SKU, no document, nothing represented.
+  const note: CableExtensionSolution = {
+    solutionId: 'sol-note', kind: 'verified-jumper-extension', selectedSku: null,
+    quantity: null, addedLengthFt: null, locations: [], compatibilityVerified: false,
+    compatibleSystemNote: 'jumpers required', manufacturerDocument: null,
+    representedInDrawings: false, representedInSchedules: false, representedInBom: false,
+    vdInstallationRecalculated: false, note: 'add jumpers in the field', provenance: { source: 'test' },
+  };
+
+  it('the pure clearance evaluator rejects the note (many missing conditions)', () => {
+    const res = evaluateCableExtensionClearance({ selectedSystem: 'Enphase IQ8A', deficitFt: 14.5 }, note);
+    expect(res.cleared).toBe(false);
+    expect(res.missing).toContain('selected_sku');
+    expect(res.missing).toContain('manufacturer_document');
+  });
+  it('even partial evidence (verified doc but no drawings/BOM/VD) cannot clear', () => {
+    const partial = VERIFIED_SOLUTION(14.5);
+    partial.representedInBom = false;   // not in the BOM
+    partial.vdInstallationRecalculated = false;
+    const res = evaluateCableExtensionClearance({ selectedSystem: 'Enphase IQ8A', deficitFt: 14.5 }, partial);
+    expect(res.cleared).toBe(false);
+    const ps = buildProcurementSufficiency({ assembly: ASM(), branchPaths: paths, selectedSystem: 'Enphase IQ8A', solutions: [note, partial] });
+    expect(ps!.insufficient).toBe(true);
+    expect(ps!.verificationStatus).toBe('insufficient-unresolved');
+    expect(ps!.clearedBySolutionId).toBeNull();
+  });
+});
+
+// ── Shared: a live-shaped INSUFFICIENT rendered package (fixture snapshot with
+//    an injected deficit + blocker). Renders PV-4B / SCHED / RS-1 from ONE snapshot. ──
+function buildInsufficientRender() {
+  const input: any = clone(braidonOriginalAuditFixture);
+  input.generatedAtIso = '2026-07-24T12:00:00Z';
+  generatePermitHTML(input);
+  const cad = generateCADLayout(input);
+  const snap = clone(input._snapshot);   // frozen — clone before mutating
+  const paths = [PATH('br-1', 'B1', 13, 64.0, 64), PATH('br-2', 'B2', 13, 63.2, 63), PATH('br-3', 'B3', 5, 39.3, 25)];
+  const ps = buildProcurementSufficiency({ assembly: ASM(), branchPaths: paths, selectedSystem: 'Enphase IQ8A' })!;
+  snap.electrical.procurementSufficiency = ps;
+  const blocker: PermitReadinessBlocker = {
+    code: 'QCABLE-PROCUREMENT-INSUFFICIENT', severity: 'blocking', justification: '',
+    domain: 'electrical', authorityPath: 'electrical.procurementSufficiency',
+    affectedSheets: ['PV-4B', 'SCHED', 'E-1', 'RS-1'],
+    explanation: `Q-Cable procurement is SHORT: Σ designed-installed ${ps.totalDesignedInstalledFt} ft EXCEEDS procurement ${ps.procurementLengthFt} ft by ${ps.deficitFt} ft. Base cable quantity is NON-ORDERABLE / PENDING SOLUTION.`,
+    resolutionAction: 'Procurement: select a VERIFIED listed cable-extension product.',
+    payload: procurementInsufficiencyPayload(ps),
+    provenance: { source: 'electrical.procurementSufficiency', ref: 'QCABLE-ASSEMBLY' },
+    createdAtIso: '2026-07-24T12:00:00Z', createdVersion: 'test', resolved: false, resolutionAuditRef: null,
+  };
+  snap.permitReadiness.registry = [...(snap.permitReadiness.registry ?? []), blocker];
+  snap.permitReadiness.blockers = [...(snap.permitReadiness.blockers ?? []), { code: blocker.code, message: blocker.explanation }];
+  snap.permitReadiness.ready = false;
+  input._snapshot = snap;   // reassign (property not frozen)
+  return { input, cad, ps, blocker };
+}
+
+// ── TEST 6 — BOM / RS-1 / PV-4B render IDENTICAL deficit + status. ────────────
+describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insufficiency', () => {
+  const { input, cad, ps } = buildInsufficientRender();
+  const pv4b = pageConductorSchedule(input, cad, 7, 30);
+  const sched = pageEquipmentSchedule(input, cad, 20, 30);
+  const rs1 = pageReviewStatus(input, cad, 25, 30);
+  const deficitTxt = `${ps.deficitFt} ft`;
+
+  it('PV-4B shows PROCUREMENT INSUFFICIENCY, the deficit, and NON-ORDERABLE', () => {
+    expect(pv4b).toContain('PROCUREMENT INSUFFICIENCY');
+    expect(pv4b).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect(pv4b).toContain(deficitTxt);
+    expect(pv4b).toContain('NON-ORDERABLE');
+  });
+  it('SCHED BOM shows the base cable quantity, the deficit, and NON-ORDERABLE', () => {
+    expect(sched).toContain('AC TRUNK CABLE (BOM)');
+    expect(sched).toContain('CURRENT BASE CABLE QUANTITY');
+    expect(sched).toContain(deficitTxt);
+    expect(sched).toContain('NON-ORDERABLE');
+  });
+  it('RS-1 shows the blocker code, the payload, and the same deficit', () => {
+    expect(rs1).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect(rs1).toContain('DEFICIT PAYLOAD:');
+    expect(rs1).toContain(deficitTxt);
+    expect(rs1).toContain('NOT SEL');   // resolution options enumerated, none selected
+  });
+  it('all three surfaces agree on the numeric deficit (single source)', () => {
+    for (const html of [pv4b, sched, rs1]) expect(html).toContain(deficitTxt);
+  });
+});
+
+// ── TEST 7 — report-equals-rendered: payload deficit + blocker state match. ───
+describe('§Q test 7 — evidence payload deficit + blocker state equal the rendered surfaces', () => {
+  const { input, cad, ps, blocker } = buildInsufficientRender();
+  const rs1 = pageReviewStatus(input, cad, 25, 30);
+  const payload = blocker.payload as Record<string, any>;
+
+  it('payload deficit + procurement + designed equal the sufficiency object', () => {
+    expect(payload.deficitFt).toBe(ps.deficitFt);
+    expect(payload.procurementLengthFt).toBe(ps.procurementLengthFt);
+    expect(payload.totalDesignedInstalledFt).toBe(ps.totalDesignedInstalledFt);
+    expect(payload.verificationStatus).toBe('insufficient-unresolved');
+    expect(payload.manufacturerDocumentAuthority).toBeNull();
+  });
+  it('the rendered RS-1 carries the payload deficit + the blocking state', () => {
+    expect(rs1).toContain(`${payload.deficitFt} ft`);
+    expect(rs1).toContain('BLOCKING');
+    // report-equals-rendered: the blocker is BLOCKING (gates permit-ready)
+    expect(classifyBlockerSeverity(blocker.code).severity).toBe('blocking');
+    expect(input._snapshot.permitReadiness.ready).toBe(false);
+  });
+});

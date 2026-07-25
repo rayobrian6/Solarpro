@@ -72,6 +72,7 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'EQUIPMENT-DOCUMENT-APPLICABILITY': 'document',       // §12 — product-version applicability gap
   'CONDUIT-FILL-PENDING': 'electrical',
   'TAP-CONDUCTOR-LENGTH-PENDING': 'electrical',
+  'QCABLE-PROCUREMENT-INSUFFICIENT': 'electrical',   // §Q — procurement deficit gate
   'PROJECT-NAME-NONPRODUCTION': 'document',
   'DESIGNER-OF-RECORD-MISSING': 'document',
   'MODULE-EXACT-DATASHEET-PENDING': 'document',

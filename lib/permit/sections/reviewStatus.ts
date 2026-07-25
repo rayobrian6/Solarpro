@@ -82,6 +82,27 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
   }
   const orderedDomains = DOMAIN_ORDER.filter(d => byDomain.has(d));
 
+  // §Q — render a blocker's STRUCTURED payload (currently the Q-Cable procurement
+  // deficit) as a DENSE 2-line block beneath its explanation, so RS-1 carries the
+  // machine-readable detail (SKU, spacing, per-branch paths, procurement derivation,
+  // deficit, resolution options, verification status) verbatim while staying page-fit.
+  const payloadBlock = (r: PermitReadinessBlocker): string => {
+    const p = r.payload;
+    if (!p || typeof p !== 'object') return '';
+    const perBranch = Array.isArray(p.perBranchPaths)
+      ? (p.perBranchPaths as any[]).map(b => `${escapeH(String(b.branchLabel))} ${b.dropCount}d ${b.designedInstalledLengthFt ?? '—'}/${b.procurementLengthFt ?? '—'}ft`).join(' · ')
+      : '';
+    const opts = Array.isArray(p.resolutionOptions)
+      ? (p.resolutionOptions as any[]).map(o => `${escapeH(String(o.kind))}=${o.selected ? 'SEL' : 'NOT SEL'}`).join(' · ')
+      : '';
+    return `<div style="margin-top:1px;font-size:${RS_FONT.justification};line-height:1.25;color:#334155;border-left:2px solid #b91c1c;padding-left:4px;">`
+      + `<span style="font-weight:900;color:#b91c1c;">DEFICIT PAYLOAD:</span> SKU ${escapeH(String(p.selectedQCableSku ?? '—'))} @ ${escapeH(String(p.connectorDropSpacingFt ?? '—'))}ft drop · `
+      + `designed ${escapeH(String(p.totalDesignedInstalledFt ?? '—'))}ft + allowance ${escapeH(String(p.requiredServiceLoopAllowanceFt ?? '—'))}ft (${escapeH(String(p.allowanceProvenance ?? ''))}) `
+      + `vs procurement ${escapeH(String(p.procurementLengthFt ?? '—'))}ft ⇒ <span style="color:#b91c1c;font-weight:900;">deficit ${escapeH(String(p.deficitFt ?? '—'))} ft</span> · `
+      + `branches ${escapeH(perBranch)} · affected ${escapeH((p.affectedBranchIds as any[] ?? []).join(', ') || '—')} · `
+      + `mfr-doc authority null · status ${escapeH(String(p.verificationStatus ?? ''))} · resolution: ${escapeH(opts)}</div>`;
+  };
+
   const rowFor = (r: PermitReadinessBlocker): string => {
     // §17 — an ADVISORY blocker MUST render its written justification (why the
     // missing fact cannot affect safety, code compliance, procurement, engineering
@@ -93,7 +114,7 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
     <tr>
       <td style="text-align:center;">${sevBadge(r.severity)}</td>
       <td class="mono" style="font-weight:900;font-size:${RS_FONT.code};white-space:nowrap;">${escapeH(r.code)}</td>
-      <td style="font-size:${RS_FONT.issue};line-height:1.3;">${escapeH(r.explanation)}${justification}</td>
+      <td style="font-size:${RS_FONT.issue};line-height:1.3;">${escapeH(r.explanation)}${justification}${payloadBlock(r)}</td>
       <td style="font-size:${RS_FONT.resolution};line-height:1.3;color:#1e3a5f;">${escapeH(r.resolutionAction)}</td>
       <td style="font-size:${RS_FONT.sheets};line-height:1.25;color:#555;">${escapeH(r.affectedSheets.join(', ') || '—')}</td>
     </tr>`;

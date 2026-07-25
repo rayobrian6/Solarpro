@@ -308,6 +308,124 @@ export interface BranchCablePath {
   provenance: Provenance;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Q-CABLE PROCUREMENT SUFFICIENCY GATE (2026-07-24) — the FAIL-CLOSED deficit.
+//
+// The §7 geometric per-branch cable path (BranchCablePath.designedInstalledLengthFt)
+// is the AS-ROUTED installed trunk length. The drop-based procurement footage
+// (ListedCableAssembly.cableLengthFt = Σ ceil(drops × pitch × waste)) is what the
+// BOM orders. When Σ designed-installed (+ any manufacturer-documented service-loop
+// allowance) EXCEEDS the procurement footage, the ordered cable is SHORT of the
+// installed path — a real procurement deficit. Ray's ruling: this is NOT a
+// FIELD-VERIFY / "add jumpers" note by assertion; it is a BLOCKING condition
+// (QCABLE-PROCUREMENT-INSUFFICIENT) that can only be cleared by a VERIFIED
+// CableExtensionSolution (exact listed product + verified manufacturer document +
+// system compatibility + quantity/location + drawings/schedules/BOM + recalculated
+// VD/installation). An unverified free-text note can NEVER clear it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The verified manufacturer document evidence a CableExtensionSolution must carry
+ *  to clear the QCABLE-PROCUREMENT-INSUFFICIENT blocker. Same discipline as the
+ *  RT-MINI racking / framing document evidence: resolved THROUGH lib/documents and
+ *  evaluated purely — verified + current + archived + hashed + exact-product. */
+export interface CableExtensionDocumentEvidence {
+  documentId: string | null;
+  documentClass: string;
+  documentIdentity: string | null;
+  verificationState: string;                 // must be 'verified'
+  status: string;                            // must be 'current'
+  archivedInRepo: boolean;                    // must be true
+  sha256: string | null;                     // must be present
+  /** exact extension/jumper/cable product SKU the document covers. */
+  coversExtensionSku: string | null;
+  /** the micro/trunk system the document states compatibility with (IQ8A / Q-Cable). */
+  compatibleSystem: string | null;
+  revisionOrDate: string | null;
+}
+
+/** A canonical proposed resolution to a Q-Cable procurement deficit. It clears the
+ *  blocker ONLY when EVERY field is satisfied (see evaluateCableExtensionClearance):
+ *  an exact selected listed product, verified compatibility with the selected
+ *  IQ8A/Q-Cable system, a VERIFIED manufacturer document, quantity/location as
+ *  canonical data, representation in the drawings/schedules/BOM, and recalculated
+ *  VD/installation. Solution objects are empty on a live design today (no operator
+ *  selection path wired), so the blocker stays active — by design. */
+export interface CableExtensionSolution {
+  solutionId: string;
+  /** which of the four enumerated resolution kinds this solution is. */
+  kind: 'verified-jumper-extension' | 'alternate-listed-cable' | 'route-layout-revision' | 'field-wireable-connector';
+  /** exact selected listed product SKU (null ⇒ not selected ⇒ cannot clear). */
+  selectedSku: string | null;
+  quantity: number | null;
+  /** installed length this solution adds (ft) — must cover the deficit to clear. */
+  addedLengthFt: number | null;
+  /** branch ids / drop locations the solution is placed at (canonical data). */
+  locations: string[];
+  /** verified compatible with the selected IQ8A / Q-Cable system. */
+  compatibilityVerified: boolean;
+  compatibleSystemNote: string | null;
+  /** the verified manufacturer document (via lib/documents). null ⇒ cannot clear. */
+  manufacturerDocument: CableExtensionDocumentEvidence | null;
+  representedInDrawings: boolean;
+  representedInSchedules: boolean;
+  representedInBom: boolean;
+  vdInstallationRecalculated: boolean;
+  note: string | null;
+  provenance: Provenance;
+}
+
+/** One of the enumerated resolution options for the deficit, each honestly marked
+ *  SELECTED / NOT SELECTED. Rendered on RS-1 as the blocker's resolution menu. */
+export interface ProcurementResolutionOption {
+  kind: CableExtensionSolution['kind'];
+  description: string;
+  selected: boolean;
+}
+
+/** §Q (2026-07-24) — THE canonical Q-Cable procurement-sufficiency authority. One
+ *  object per micro design; PV-4B / BOM / RS-1 / evidence all project it. When
+ *  `insufficient` is true and no verified solution clears it, the build emits the
+ *  BLOCKING QCABLE-PROCUREMENT-INSUFFICIENT registry entry (carrying `payload`). */
+export interface ProcurementSufficiency {
+  present: boolean;
+  assemblyId: string | null;
+  sku: string | null;
+  connectorSpacingFt: number | null;
+  wasteFactor: number | null;
+  perBranch: {
+    branchId: string; branchLabel: string; dropCount: number;
+    designedInstalledLengthFt: number | null; procurementLengthFt: number | null;
+  }[];
+  /** Σ geometric designed-installed cable path (ft) — the installed-length truth. */
+  totalDesignedInstalledFt: number | null;
+  /** Σ drop-based procurement footage (ft) — the BOM base cable quantity. */
+  procurementLengthFt: number | null;
+  /** the shown derivation: "Σ drops × pitch × waste = N ft". */
+  procurementDerivation: string | null;
+  /** honest service-loop/transition allowance (ft). 0 unless a manufacturer/design
+   *  rule is recorded in-repo — see allowanceProvenance. */
+  requiredServiceLoopAllowanceFt: number;
+  /** 'no-allowance-authority-recorded' when 0 (no in-repo Q-Cable allowance rule). */
+  allowanceProvenance: string;
+  allowanceNote: string;
+  /** designed-installed + allowance — the sufficiency threshold. */
+  thresholdFt: number | null;
+  /** max(0, threshold − procurement). >0 ⇒ short. */
+  deficitFt: number;
+  /** procurement < designed-installed + allowance. */
+  insufficient: boolean;
+  affectedBranchIds: string[];
+  resolutionOptions: ProcurementResolutionOption[];
+  /** ALWAYS null — no manufacturer-documented extension authority is archived. */
+  manufacturerDocumentAuthority: null;
+  verificationStatus: 'sufficient' | 'insufficient-unresolved' | 'resolved-by-verified-solution';
+  solutions: CableExtensionSolution[];
+  clearedBySolutionId: string | null;
+  /** the clearance evaluation of the clearing solution (null when none attempted). */
+  clearance: { cleared: boolean; missing: string[]; reasons: string[] } | null;
+  provenance: Provenance;
+}
+
 /** §5 (07-22) — a code constraint attached to a service-topology object. The
  *  compliance `state` is HONESTLY derived from the object's own length state:
  *  a ≤N-ft rule on an object with an unknown length is 'pending', never 'pass'. */
@@ -871,6 +989,10 @@ export interface PermitDesignSnapshot {
     /** §7 (closeout 07-23): per-branch geometric cable-path objects. BOM sums
      *  them; PV-4B/SCHED/evidence reconcile against them. Empty when no coords. */
     branchCablePaths?: BranchCablePath[];
+    /** §Q (2026-07-24): Q-Cable procurement-sufficiency authority. When
+     *  `insufficient` and unresolved, the build emits the BLOCKING
+     *  QCABLE-PROCUREMENT-INSUFFICIENT registry entry. Null for non-micro. */
+    procurementSufficiency?: ProcurementSufficiency | null;
     /** §5 (07-22): canonical service-interconnection objects (tap point, tap
      *  conductors, fused OCPD, utility disconnect, meter, service disconnect) —
      *  each with its OWN honest length + attached code rules. Supply-side designs
@@ -988,6 +1110,12 @@ export interface PermitReadinessBlocker {
   explanation: string;
   /** the concrete action that resolves the blocker. */
   resolutionAction: string;
+  /** OPTIONAL structured payload for blockers that carry machine-readable detail
+   *  beyond the human explanation (e.g. QCABLE-PROCUREMENT-INSUFFICIENT: SKU,
+   *  spacing, per-branch paths, procurement derivation, deficit, resolution
+   *  options, verification status). Rendered on RS-1; consumed by the evidence
+   *  harness. Null for blockers with no structured payload. */
+  payload?: Record<string, unknown> | null;
   /** where the blocker was detected. */
   provenance: { source: string; ref: string | null };
   /** snapshot generation time (meta.generatedAtIso) — NOT Date.now (pure/digest-safe). */

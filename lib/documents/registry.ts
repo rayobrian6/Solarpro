@@ -21,6 +21,7 @@ import {
 } from './types';
 import type { RackingCapacityDocumentEvidence } from '@/lib/permit/snapshot/rackingAssembly';
 import type { FramingCapacityDocumentEvidence } from '@/lib/permit/snapshot/framingAuthority';
+import type { CableExtensionDocumentEvidence, CableExtensionSolution } from '@/lib/permit/snapshot/types';
 
 // ── Row ⇄ record mapping ──────────────────────────────────────────────────────
 
@@ -413,4 +414,69 @@ export async function resolveFramingCapacityDocument(args: {
     projectApplicabilityKey: args.projectApplicabilityKey ?? null,
   });
   return toFramingClearanceEvidence(doc);
+}
+
+// ── Adapter: registry document → §Q CABLE-EXTENSION document evidence ──────────
+
+/** Convert a resolved registry document into the CableExtensionDocumentEvidence
+ *  shape consumed by evaluateCableExtensionClearance. Returns null for a missing
+ *  document (so nothing clears the Q-Cable procurement blocker by accident). */
+export function toCableExtensionEvidence(
+  doc: RegistryDocument | null | undefined,
+  coversExtensionSku?: string | null,
+): CableExtensionDocumentEvidence | null {
+  if (!doc) return null;
+  const v = (doc.extractedClaims?.values ?? {}) as Record<string, unknown>;
+  return {
+    documentId: doc.id,
+    documentClass: doc.documentClass,
+    documentIdentity: doc.title,
+    verificationState: doc.verificationState,
+    status: doc.status,
+    archivedInRepo: doc.archivedInRepo,
+    sha256: doc.sha256,
+    coversExtensionSku: (typeof v.coversExtensionSku === 'string' ? v.coversExtensionSku : null)
+      ?? coversExtensionSku ?? doc.equipmentModelApplicability ?? null,
+    compatibleSystem: (typeof v.compatibleSystem === 'string' ? v.compatibleSystem : null)
+      ?? doc.applicabilityNotes ?? null,
+    revisionOrDate: doc.revision ?? doc.documentDate ?? null,
+  };
+}
+
+/**
+ * §Q — resolve the canonical Q-Cable procurement-deficit resolution solutions for
+ * a design. A solution is emitted ONLY when an operator-selected extension product
+ * SKU is backed by a VERIFIED, current, archived manufacturer document (combiner /
+ * UL-listing document class). No selection ⇒ empty ⇒ the QCABLE-PROCUREMENT-
+ * INSUFFICIENT blocker stays firing on a short design. Fail-soft on DB error.
+ *
+ * NOTE: this resolves the DOCUMENT authority only. The remaining clearance
+ * conditions (quantity/location, drawings/schedules/BOM representation, VD/install
+ * recalculation, added-length ≥ deficit) come from the operator selection record;
+ * with none wired today the returned array is empty. evaluateCableExtensionClearance
+ * (pure) is the single gate that decides whether a solution actually clears.
+ */
+export async function resolveCableExtensionSolutions(args: {
+  selectedExtensionSkus?: string[] | null;
+  jurisdiction?: string | null;
+}): Promise<CableExtensionSolution[]> {
+  const skus = (args.selectedExtensionSkus ?? []).filter(s => typeof s === 'string' && s.trim().length > 0);
+  if (skus.length === 0) return [];   // no operator selection ⇒ no solution
+  const out: CableExtensionSolution[] = [];
+  for (const sku of skus) {
+    const doc = await findVerifiedDocument({
+      documentClass: ['combiner_documentation', 'ul_listing'],
+      equipmentId: null,
+      equipmentModel: sku,
+      jurisdiction: args.jurisdiction ?? null,
+    });
+    // Only the document authority is resolvable here; the rest of the canonical
+    // solution fields require an operator selection record that is not yet wired,
+    // so we emit nothing (never a partially-fabricated clearing solution).
+    if (!doc) continue;
+    // A verified document alone does NOT clear the blocker (quantity/location/
+    // drawings/VD are still required) — but if a full selection record existed it
+    // would be constructed here. Today: skip (fail-closed).
+  }
+  return out;
 }

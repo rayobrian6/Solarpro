@@ -15,7 +15,8 @@
 import type { PermitInput } from '../types';
 import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import type { FramingCapacityDocumentEvidence } from './framingAuthority';
-import { resolveRackingCapacityDocument, resolveFramingCapacityDocument } from '@/lib/documents/registry';
+import type { CableExtensionSolution } from './types';
+import { resolveRackingCapacityDocument, resolveFramingCapacityDocument, resolveCableExtensionSolutions } from '@/lib/documents/registry';
 import { listActiveInvalidations } from '@/lib/reconciliation/reconcile';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
@@ -39,6 +40,11 @@ export interface SnapshotAuthorityInputs {
   framingCapacityDocument: FramingCapacityDocumentEvidence | null;
   /** the exact project/building applicability key the framing document must cover. */
   framingProjectApplicabilityKey: string | null;
+  /** §Q — canonical Q-Cable procurement-deficit resolution solutions, each backed
+   *  by a VERIFIED manufacturer document. Empty until an operator selects an
+   *  extension product AND its verified document is archived ⇒
+   *  QCABLE-PROCUREMENT-INSUFFICIENT stays firing (the honest live outcome today). */
+  cableExtensionSolutions: CableExtensionSolution[];
 }
 
 /** Resolve the async document + ledger authority for a permit input. Never
@@ -101,8 +107,23 @@ export async function resolveSnapshotAuthorityInputs(input: PermitInput): Promis
     framingCapacityDocument = null;
   }
 
+  // ── §Q Q-Cable procurement-deficit resolution solutions. Fail-soft to []. A
+  //    solution is emitted ONLY when an operator-selected extension product has a
+  //    VERIFIED manufacturer document; none exist today ⇒ empty ⇒ the deficit
+  //    blocker stays firing on a short design. ───────────────────────────────────
+  let cableExtensionSolutions: CableExtensionSolution[] = [];
+  try {
+    cableExtensionSolutions = await resolveCableExtensionSolutions({
+      selectedExtensionSkus: Array.isArray(proj.cableExtensionSkus) ? proj.cableExtensionSkus : [],
+      jurisdiction,
+    });
+  } catch {
+    cableExtensionSolutions = [];
+  }
+
   return {
     capacityDocument, projectJurisdiction: jurisdiction, manufacturerDocumentsArchived,
     digestInvalidatedByLedger, framingCapacityDocument, framingProjectApplicabilityKey,
+    cableExtensionSolutions,
   };
 }

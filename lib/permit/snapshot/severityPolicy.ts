@@ -113,6 +113,21 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     justification: '',
   },
 
+  // §Q (2026-07-24) — Q-CABLE PROCUREMENT INSUFFICIENCY. The Σ geometric
+  // designed-installed cable path exceeds the drop-based procurement footage (the
+  // ordered listed cable is SHORT of the as-routed installed path). This directly
+  // affects WHAT GETS ORDERED (procurement — the base cable quantity cannot be the
+  // orderable total), the ENGINEERING APPROVAL (a design whose ordered cable does
+  // not reach the installed path cannot be approved by assertion — "jumpers
+  // required" is not a solution without a verified extension product), and PERMIT
+  // ACCEPTANCE (the reviewer/AHJ sees a package whose BOM cannot build the drawn
+  // circuit). Cleared ONLY by a VERIFIED CableExtensionSolution — never by a
+  // free-text note. So it is BLOCKING.
+  'QCABLE-PROCUREMENT-INSUFFICIENT': {
+    impact: { safety: false, codeCompliance: false, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
   // ── LEGITIMATELY ADVISORY (impact touches no axis; justification required) ────
   // The microinverter's electrical parameters are already taken from the canonical
   // equipment-db record the engine itself uses; only the archived manufacturer PDF

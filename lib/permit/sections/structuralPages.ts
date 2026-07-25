@@ -1570,9 +1570,22 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // §6 (closeout 2026-07-23) — the micro AC branch conductor is the LISTED Q-Cable
   // ASSEMBLY (manufacturer + model/SKU), never a generic "#12 AWG THWN-2 + EGC".
   // peekSnapshot (non-throwing) so standalone unit renders fall back to the callout.
-  const _schedAsm = projectListedCableAssembly(peekSnapshot(input));
+  const _schedSnap = peekSnapshot(input);
+  const _schedAsm = projectListedCableAssembly(_schedSnap);
   const _schedBranchConductorCell = (fallback: string): string =>
     _schedAsm.present ? _schedAsm.conductorCell : fallback;
+  // §Q — the AC-trunk BOM quantity annotation. When the drop-based procurement
+  // footage is short of the Σ designed-installed path, the base cable quantity is
+  // NON-ORDERABLE / PENDING SOLUTION (like the racking pattern) with the deficit shown.
+  const _schedPS = _schedSnap?.electrical?.procurementSufficiency ?? null;
+  // Render the AC-trunk BOM annotation ONLY when the procurement is SHORT (the
+  // meaningful, fail-closed case). When sufficient, SCHED stays unchanged (no extra
+  // line ⇒ no page-fit regression); the base cable quantity + "sanity OK" note
+  // already print on PV-4B's LISTED AC TRUNK CABLE ASSEMBLY block.
+  const _schedTrunkBomNote = (_schedAsm.present && _schedPS?.insufficient)
+    ? `<div style="padding:1px 4px;font-size:7px;line-height:1.25;border:var(--border);border-top:none;background:#fdecec;">
+        <strong>AC TRUNK CABLE (BOM):</strong> base cable quantity <span class="mono">${_schedPS.procurementLengthFt ?? '—'} ft</span> = CURRENT BASE CABLE QUANTITY &mdash; <strong style="color:#b00">PROCUREMENT INSUFFICIENCY: short of the ${_schedPS.totalDesignedInstalledFt} ft designed-installed path by ${_schedPS.deficitFt} ft. NON-ORDERABLE / PENDING SOLUTION</strong> (verified listed cable-extension required; QCABLE-PROCUREMENT-INSUFFICIENT, see RS-1).</div>`
+    : '';
   // 75°C ampacity display keyed to conductor size (NEC 310.16).
   const _schedAmpacity = (gauge: string): string => ({
     '#12 AWG': '25A (#12)', '#10 AWG': '35A (#10)', '#8 AWG': '50A (#8)',
@@ -1670,10 +1683,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>Status</th></tr></thead>
         <tbody>${_schedAcRows || '<tr><td colspan="8" class="center">AC branch layout pending module placement &mdash; see PV-4A</td></tr>'}</tbody>
       </table>
-      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.4;border:var(--border);border-top:none;background:#fafafa;">
         <strong>WIRE SIZING INTERPRETATION (MICROINVERTER):</strong>
-        Each module is paired 1:1 with a microinverter, so this system has no DC series string and no DC source-circuit sizing &mdash; DC / Voc / Isc string calculations do not apply.
-        AC branch (trunk) circuits are sized per NEC 690.8(A) with the continuous-duty factor (&times;1.25); each branch is protected at its calculated OCPD (see table) and terminates at the AC combiner. THWN-2 (90&deg;C) conductors are specified.
+        Each module pairs 1:1 with a microinverter (no DC series string / no DC source-circuit sizing). AC branch (trunk) circuits are sized per NEC 690.8(A) &times;1.25 continuous; each is protected at its calculated OCPD (see table) and terminates at the AC combiner.
       </div>`;
   return `
   <div class="page">
@@ -1764,6 +1776,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       })()}
       <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string;
            hybrid: one block PER SUB from the shared conductor authority) -->
+      ${(_schedHybrid || _schedIsMicro) ? _schedTrunkBomNote : ''}
       ${_schedHybrid ? _schedHybridWireBlocks : _schedIsMicro ? _schedAcBranchBlock : `
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>
       <table class="equip-table">

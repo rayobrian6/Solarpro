@@ -1052,6 +1052,10 @@ export function generatePermitHTML(
       // FRAMING-AUTHORITY-UNVERIFIED keeps firing). Fail-soft.
       framingCapacityDocument: snapshotAuthority?.framingCapacityDocument ?? null,
       framingProjectApplicabilityKey: snapshotAuthority?.framingProjectApplicabilityKey ?? null,
+      // §Q — async-resolved Q-Cable procurement-deficit resolution solutions
+      // (operator selection + verified lib/documents record). Empty today ⇒
+      // QCABLE-PROCUREMENT-INSUFFICIENT stays firing when the design is short.
+      cableExtensionSolutions: snapshotAuthority?.cableExtensionSolutions ?? [],
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);

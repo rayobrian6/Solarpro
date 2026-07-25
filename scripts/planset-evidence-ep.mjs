@@ -6,7 +6,7 @@
 //
 // The EP successor to planset-evidence-co.mjs. It regenerates NOTHING: it reads
 // the REAL rendered permit package HTML + its PermitDesignSnapshot and runs the
-// 20 PERMANENT EP GATES from docs/ELECTRICAL-PROCUREMENT-CLOSEOUT-DIRECTIVE.md
+// 21 PERMANENT EP GATES from docs/ELECTRICAL-PROCUREMENT-CLOSEOUT-DIRECTIVE.md
 // ("Permanent regression gates (rendered output)") against the RENDERED output
 // (+ the snapshot authority it must equal). Gate 19 invokes the TRUE geometry
 // page-fit validator (scripts/planset-pagefit.mjs — incl. internal-clip scan).
@@ -264,6 +264,15 @@ const conduitLabel = (F?.conduit?.raceway && F?.conduit?.tradeSizeIn) ? `${F.con
 rcheck('feederConduit', conduitLabel, !conduitLabel || html.includes(conduitLabel.replace(/"/g, '&quot;')));
 rcheck('qcableSku', asm?.sku, asm?.sku == null || html.includes(asm.sku));
 rcheck('qcableDropCount', dropSum, dropSum === 0 || new RegExp(`\\b${dropSum}\\b`).test(html));
+// §Q — Q-Cable procurement sufficiency reconciles into report-equals-rendered:
+// the deficit + blocker state must be present on the rendered surfaces exactly as
+// the snapshot carries them.
+const _ps = el.procurementSufficiency || null;
+const _qcableBlocker = registryCodes.includes('QCABLE-PROCUREMENT-INSUFFICIENT');
+rcheck('qcableProcurementInsufficient', _ps ? !!_ps.insufficient : false,
+  _ps ? (!!_ps.insufficient === _qcableBlocker) : !_qcableBlocker, { rs1BlockerPresent: _qcableBlocker });
+rcheck('qcableDeficitFt', _ps ? _ps.deficitFt : 0,
+  !_ps || !_ps.insufficient || new RegExp(`${_ps.deficitFt}\\s*ft`).test(html));
 const blockingCount = registry.filter(r => r.severity === 'blocking').length;
 const rs1 = (rawHtml.split('<div class="page').find(p => /ACTIVE RELEASE BLOCKERS/i.test(p)) ?? '');
 const rs1BlockingNum = (() => { const m = rs1.match(/BLOCKING<\/span>\s*<span[^>]*>(\d+)</) ?? rs1.match(/(\d+)\s*(?:OPEN\s*)?(?:RELEASE\s*)?BLOCKERS?/i); return m ? Number(m[1]) : null; })();
@@ -275,11 +284,36 @@ const mismatches = reconcile.filter(r => !r.matchedInRendered);
 gate(20, 'evidence-equals-rendered', mismatches.length === 0,
   `reconciled=${reconcile.length} mismatches=${mismatches.length}`, mismatches);
 
+// ═══ GATE 21 — Q-Cable procurement sufficiency: fail-closed deficit blocker. ══
+// The §Q gate. In BOTH modes the sufficiency object must be present and CONSISTENT
+// with the registry (insufficient ⇔ QCABLE-PROCUREMENT-INSUFFICIENT blocker), and
+// when short the deficit + NON-ORDERABLE + PROCUREMENT INSUFFICIENCY must render on
+// PV-4B/SCHED/RS-1. Mode expectation (Ray's honest states): the FROZEN FIXTURE
+// (original) is SUFFICIENT (no blocker); the LIVE design is SHORT (blocker PRESENT).
+const g21_present = !!_ps && _ps.present === true;
+const g21_consistent = g21_present && (!!_ps.insufficient === _qcableBlocker);
+const g21_renderedWhenShort = !g21_present || !_ps.insufficient
+  || (new RegExp(`${_ps.deficitFt}\\s*ft`).test(html)
+      && /NON-ORDERABLE/i.test(html) && /PROCUREMENT INSUFFICIENC/i.test(html)
+      && /QCABLE-PROCUREMENT-INSUFFICIENT/.test(html));
+const g21_allowanceHonest = !g21_present
+  || (_ps.requiredServiceLoopAllowanceFt === 0 && _ps.allowanceProvenance === 'no-allowance-authority-recorded');
+const g21_modeOk = MODE === 'live'
+  ? (g21_present && _ps.insufficient === true && _qcableBlocker)
+  : (g21_present && _ps.insufficient === false && !_qcableBlocker);
+gate(21, 'qcable-procurement-sufficiency',
+  g21_present && g21_consistent && g21_renderedWhenShort && g21_allowanceHonest && g21_modeOk,
+  `mode=${MODE} present=${g21_present} insufficient=${_ps ? _ps.insufficient : null} blocker=${_qcableBlocker} `
+  + `designed=${_ps ? _ps.totalDesignedInstalledFt : null} proc=${_ps ? _ps.procurementLengthFt : null} `
+  + `deficit=${_ps ? _ps.deficitFt : null} consistent=${g21_consistent} renderedWhenShort=${g21_renderedWhenShort} `
+  + `allowanceHonest=${g21_allowanceHonest} modeOk=${g21_modeOk}`,
+  _ps ? { insufficient: _ps.insufficient, deficitFt: _ps.deficitFt, verificationStatus: _ps.verificationStatus } : null);
+
 // ═══ assemble + emit ════════════════════════════════════════════════════════
 const failed = gates.filter(g => !g.ok);
 const report = {
   generatedAt: new Date().toISOString(),
-  harness: 'planset-evidence-ep (electrical/procurement closeout rendered-truth, 20 permanent gates)',
+  harness: 'planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates)',
   mode: MODE,
   htmlPath: path.relative(repoRoot, htmlPath).replace(/\\/g, '/'),
   snapshotId: meta.snapshotId, digest: meta.digest,
