@@ -62,6 +62,182 @@ function sevBadge(sev: string): string {
   return `<span style="display:inline-block;background:${bg};color:#fff;font-weight:900;font-size:${RS_FONT.badge};letter-spacing:0.5px;padding:1px 4px;border-radius:2px;white-space:nowrap;">${label}</span>`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PPC §2 — BLOCKER-DETAIL COMPONENT SELECTION BY CANONICAL PAYLOAD SCHEMA
+//
+// THE defect this replaces: there was no selection at all. `payloadBlock(r)` was
+// invoked unconditionally for every registry row and its only predicate was
+// "payload is a non-null object" — so the ONE hardcoded template in the codebase,
+// the Q-Cable PROCUREMENT-DEFICIT template, was bolted onto every blocker that
+// carried any structured payload. The grounding blocker (which has a rich, fully
+// correct payload of its own) shared exactly ONE field name with that template, so
+// RS-1 rendered a "DEFICIT PAYLOAD" box of em-dashes — SKU —, drop spacing —,
+// deficit — ft — on a blocker that has no deficit, plus a hardcoded literal string
+// "mfr-doc authority null" that read no field at all.
+//
+// THE RULE: the detail component is chosen by the blocker's canonical PAYLOAD
+// SCHEMA, keyed on its code. A schema-less code renders the GENERIC component
+// (honest key/value pairs of what the payload actually carries) — never a foreign
+// template's empty fields. Fail-safe: an unmapped code ⇒ 'generic'.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The canonical payload schemas RS-1 can render. */
+export type BlockerPayloadSchema =
+  /** electrical.procurementSufficiency → procurementInsufficiencyPayload() */
+  | 'qcable-procurement-deficit'
+  /** electrical.openAirGroundingAuthority → the grounding-authority payload */
+  | 'qcable-grounding-authority'
+  /** no dedicated schema — render only the fields the payload actually has. */
+  | 'generic';
+
+/**
+ * Code → payload schema. EVERY code the snapshot build can push is listed
+ * explicitly (documentary + testable), so adding a payload-carrying blocker
+ * without giving it a component is a visible omission rather than a silent
+ * mis-render. Codes with no structured payload map to 'generic'.
+ */
+export const BLOCKER_PAYLOAD_SCHEMA: Record<string, BlockerPayloadSchema> = {
+  // ── the TWO schema-typed payloads ─────────────────────────────────────────
+  'QCABLE-PROCUREMENT-INSUFFICIENT': 'qcable-procurement-deficit',
+  'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'qcable-grounding-authority',
+  // ── electrical ────────────────────────────────────────────────────────────
+  'ROUTE-LENGTH-ESTIMATE': 'generic',
+  'FEEDER-RACEWAY-AUTHORITY': 'generic',
+  'BRANCH-RACEWAY-AUTHORITY': 'generic',
+  'RACEWAY-SEGMENT-CONFLICT': 'generic',
+  'CONDUIT-FILL-PENDING': 'generic',
+  'TAP-CONDUCTOR-LENGTH-PENDING': 'generic',
+  // ── structural (structuralAuthority.blockers) ─────────────────────────────
+  'FRAMING-AUTHORITY-UNVERIFIED': 'generic',
+  'PENDING-RACKING-ASSEMBLY-SELECTION': 'generic',
+  'FASTENER-ASSEMBLY-UNVERIFIED': 'generic',
+  'FASTENER-CONFIG-MISSING': 'generic',
+  'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': 'generic',
+  'ATTACHMENT-CAPACITY-SOURCE-MISSING': 'generic',
+  'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED': 'generic',
+  'MOUNT-TOPOLOGY-UNKNOWN': 'generic',
+  'DIRECT-MOUNT-GEOMETRY-MISSING': 'generic',
+  'REACTIONS-UNTRACEABLE': 'generic',
+  'RAIL-QUANTITY-UNTRACEABLE': 'generic',
+  'STRUCTURAL-UTILIZATION-EXCEEDED': 'generic',
+  'STRUCTURAL-BOM-RECONCILIATION-FAILED': 'generic',
+  'STRUCTURAL-REACTION-RECONCILIATION-FAILED': 'generic',
+  'SITE-GEOMETRY-MISSING': 'generic',
+  'MODULE-DIMENSIONS-UNVERIFIED': 'generic',
+  // ── racking capacity provenance (rackingAssembly.structuralAuthorityGaps) ──
+  'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED': 'generic',
+  'RACKING-CAPACITY-APPLICABILITY-GAP': 'generic',
+  'RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED': 'generic',
+  // ── equipment / document ──────────────────────────────────────────────────
+  'EQUIPMENT-IDENTITY-CONFLICT': 'generic',
+  'EQUIPMENT-DOCUMENT-APPLICABILITY': 'generic',
+  'EQUIPMENT-DOCUMENT-UNVERIFIED': 'generic',
+  'MODULE-EXACT-DATASHEET-PENDING': 'generic',
+  // ── code / project / review ───────────────────────────────────────────────
+  'CODE-AUTHORITY-INCOMPLETE': 'generic',
+  'PROJECT-AUTHORITY-UNVERIFIED': 'generic',
+  'PROJECT-NAME-NONPRODUCTION': 'generic',
+  'DESIGNER-OF-RECORD-MISSING': 'generic',
+  'ENGINEERING-REVIEW-PENDING': 'generic',
+};
+
+/** Fail-safe accessor: an unmapped code can only ever reach the GENERIC
+ *  component — it can never inherit another blocker's template. */
+export function blockerPayloadSchema(code: string): BlockerPayloadSchema {
+  return BLOCKER_PAYLOAD_SCHEMA[code] ?? 'generic';
+}
+
+const _pBox = (accent: string, title: string, body: string, schema: BlockerPayloadSchema): string =>
+  // PPC §2 / gate 3 — the box carries the SCHEMA it was selected by, so a rendered-
+  // truth harness can assert "this blocker's payload component is the one its
+  // canonical schema mandates" per row, rather than inferring it from a heading.
+  `<div data-blocker-payload-schema="${schema}" style="margin-top:1px;font-size:${RS_FONT.justification};line-height:1.25;color:#334155;border-left:2px solid ${accent};padding-left:4px;">`
+  + `<span style="font-weight:900;color:${accent};">${title}</span> ${body}</div>`;
+
+const _s = (v: unknown): string => escapeH(v == null || v === '' ? '—' : String(v));
+
+/** COMPONENT — Q-Cable procurement deficit (electrical.procurementSufficiency). */
+function payloadProcurementDeficit(p: Record<string, unknown>): string {
+  const perBranch = Array.isArray(p.perBranchPaths)
+    ? (p.perBranchPaths as Array<Record<string, unknown>>)
+      .map(b => `${escapeH(String(b.branchLabel))} ${b.dropCount}d ${b.designedInstalledLengthFt ?? '—'}/${b.procurementLengthFt ?? '—'}ft`)
+      .join(' · ')
+    : '';
+  const opts = Array.isArray(p.resolutionOptions)
+    ? (p.resolutionOptions as Array<Record<string, unknown>>)
+      .map(o => `${escapeH(String(o.kind))}=${o.selected ? 'SEL' : 'NOT SEL'}`).join(' · ')
+    : '';
+  return _pBox('#b91c1c', 'DEFICIT PAYLOAD:',
+    `SKU ${_s(p.selectedQCableSku)} @ ${_s(p.connectorDropSpacingFt)}ft drop · `
+    + `designed ${_s(p.totalDesignedInstalledFt)}ft + allowance ${_s(p.requiredServiceLoopAllowanceFt)}ft (${_s(p.allowanceProvenance)}) `
+    + `vs procurement ${_s(p.procurementLengthFt)}ft ⇒ <span style="color:#b91c1c;font-weight:900;">deficit ${_s(p.deficitFt)} ft</span> · `
+    + `branches ${escapeH(perBranch)} · affected ${escapeH((p.affectedBranchIds as unknown[] ?? []).join(', ') || '—')} · `
+    // reads the FIELD (the retired template hardcoded the literal string "null")
+    + `mfr-doc authority ${_s(p.manufacturerDocumentAuthority)} · status ${_s(p.verificationStatus)} · resolution: ${escapeH(opts)}`,
+    'qcable-procurement-deficit');
+}
+
+/** COMPONENT — open-air grounding authority (electrical.openAirGroundingAuthority).
+ *  Ray's field list: selected micro SKU, Q-Cable SKU, authority result, verification
+ *  state, applicable manufacturer document, document hash, applicability, equipment
+ *  classification, candidate EGC quantity + orderability, resolution action,
+ *  affected segment ids. NO procurement-deficit fields. */
+function payloadGroundingAuthority(p: Record<string, unknown>): string {
+  const av = (p.applicabilityVerification ?? null) as {
+    verdict?: string; failures?: string[];
+  } | null;
+  const bond = (p.rackingModuleBondingRequirement ?? null) as
+    { required?: boolean; codeBasis?: string } | null;
+  const hash = p.documentHash ? String(p.documentHash).slice(0, 12) : null;
+  const nonOrderable = p.bomRowState === 'design-quantity-non-orderable';
+  const segIds = Array.isArray(p.affectedSegmentIds)
+    ? (p.affectedSegmentIds as unknown[]).join(', ')
+    : Array.isArray(p.segmentIds) ? (p.segmentIds as unknown[]).join(', ')
+      : Array.isArray(p.branchIds) ? (p.branchIds as unknown[]).join(', ') : '';
+  return _pBox('#b45309', 'GROUNDING AUTHORITY PAYLOAD:',
+    `selected micro <span class="mono">${_s(p.selectedMicroinverterSku)}</span> + cable assembly <span class="mono">${_s(p.selectedCableAssemblySku)}</span>`
+    + ` (module ${_s(p.selectedModuleSku)}, mount/bonding ${_s(p.selectedMountingBondingSystem)}, jurisdiction ${_s(p.projectJurisdiction)}) · `
+    + `<span style="font-weight:900;color:#b45309;">authority result ${_s(p.outcome)}</span> · verification ${_s(p.verificationStatus)} · `
+    + `manufacturer document ${_s(p.documentId)}${p.documentSectionOrPage ? ` (${_s(p.documentSectionOrPage)})` : ''} · SHA-256 ${hash ? escapeH(hash) : 'NONE'} · `
+    + `applicability ${_s(av?.verdict)}${av?.failures?.length ? ` — ${escapeH(String(av.failures[0]))}` : ''} · `
+    + `equipment classification ${_s(p.equipmentInsulationClassification)} · `
+    + `conductor construction ${_s(p.cableConductorCount)}-conductor${p.cableConductorConstruction ? ` (${_s(p.cableConductorConstruction)})` : ''} `
+    + `— <strong>NON-DETERMINATIVE</strong> · `
+    + `candidate EGC ${_s(p.candidateQuantityFt)} ft — <span style="font-weight:900;color:#b45309;">${nonOrderable ? 'NON-ORDERABLE (candidate design quantity, not part of the approved installation)' : escapeH(String(p.bomRowState ?? '—'))}</span> · `
+    + `affected segments ${escapeH(segIds || '—')} · `
+    + `module/racking bonding ${bond?.required ? 'REQUIRED — independent' : _s(bond?.required)} (${_s(bond?.codeBasis)}) · `
+    + `resolution: archive + verify the exact-SKU manufacturer grounding document (see RESOLUTION ACTION)`,
+    'qcable-grounding-authority');
+}
+
+/** COMPONENT — GENERIC. Renders ONLY the primitive fields the payload actually
+ *  carries, so an unknown schema can never print another template's empty fields. */
+function payloadGeneric(p: Record<string, unknown>): string {
+  const pairs = Object.entries(p)
+    .filter(([, v]) => v != null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+    .map(([k, v]) => `${escapeH(k)} ${escapeH(String(v))}`);
+  const nested = Object.entries(p)
+    .filter(([, v]) => v != null && typeof v === 'object')
+    .map(([k]) => escapeH(k));
+  if (!pairs.length && !nested.length) return '';
+  return _pBox('#475569', 'BLOCKER PAYLOAD:',
+    `${pairs.join(' · ')}${nested.length ? `${pairs.length ? ' · ' : ''}structured: ${nested.join(', ')} (see the canonical object model)` : ''}`,
+    'generic');
+}
+
+/** THE dispatcher — component selected by canonical payload schema, never by
+ *  "payload is an object". */
+export function renderBlockerPayload(r: PermitReadinessBlocker): string {
+  const p = r.payload;
+  if (!p || typeof p !== 'object') return '';
+  const schema = blockerPayloadSchema(r.code);
+  switch (schema) {
+    case 'qcable-procurement-deficit': return payloadProcurementDeficit(p);
+    case 'qcable-grounding-authority': return payloadGroundingAuthority(p);
+    default: return payloadGeneric(p);
+  }
+}
+
 export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const snap = peekSnapshot(input);
   const registry: PermitReadinessBlocker[] = (snap?.permitReadiness?.registry ?? []).filter(r => !r.resolved);
@@ -82,26 +258,7 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
   }
   const orderedDomains = DOMAIN_ORDER.filter(d => byDomain.has(d));
 
-  // §Q — render a blocker's STRUCTURED payload (currently the Q-Cable procurement
-  // deficit) as a DENSE 2-line block beneath its explanation, so RS-1 carries the
-  // machine-readable detail (SKU, spacing, per-branch paths, procurement derivation,
-  // deficit, resolution options, verification status) verbatim while staying page-fit.
-  const payloadBlock = (r: PermitReadinessBlocker): string => {
-    const p = r.payload;
-    if (!p || typeof p !== 'object') return '';
-    const perBranch = Array.isArray(p.perBranchPaths)
-      ? (p.perBranchPaths as any[]).map(b => `${escapeH(String(b.branchLabel))} ${b.dropCount}d ${b.designedInstalledLengthFt ?? '—'}/${b.procurementLengthFt ?? '—'}ft`).join(' · ')
-      : '';
-    const opts = Array.isArray(p.resolutionOptions)
-      ? (p.resolutionOptions as any[]).map(o => `${escapeH(String(o.kind))}=${o.selected ? 'SEL' : 'NOT SEL'}`).join(' · ')
-      : '';
-    return `<div style="margin-top:1px;font-size:${RS_FONT.justification};line-height:1.25;color:#334155;border-left:2px solid #b91c1c;padding-left:4px;">`
-      + `<span style="font-weight:900;color:#b91c1c;">DEFICIT PAYLOAD:</span> SKU ${escapeH(String(p.selectedQCableSku ?? '—'))} @ ${escapeH(String(p.connectorDropSpacingFt ?? '—'))}ft drop · `
-      + `designed ${escapeH(String(p.totalDesignedInstalledFt ?? '—'))}ft + allowance ${escapeH(String(p.requiredServiceLoopAllowanceFt ?? '—'))}ft (${escapeH(String(p.allowanceProvenance ?? ''))}) `
-      + `vs procurement ${escapeH(String(p.procurementLengthFt ?? '—'))}ft ⇒ <span style="color:#b91c1c;font-weight:900;">deficit ${escapeH(String(p.deficitFt ?? '—'))} ft</span> · `
-      + `branches ${escapeH(perBranch)} · affected ${escapeH((p.affectedBranchIds as any[] ?? []).join(', ') || '—')} · `
-      + `mfr-doc authority null · status ${escapeH(String(p.verificationStatus ?? ''))} · resolution: ${escapeH(opts)}</div>`;
-  };
+  const payloadBlock = (r: PermitReadinessBlocker): string => renderBlockerPayload(r);
 
   const rowFor = (r: PermitReadinessBlocker): string => {
     // §17 — an ADVISORY blocker MUST render its written justification (why the

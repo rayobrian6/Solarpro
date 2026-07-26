@@ -11,6 +11,12 @@ import { isFence, isGround, isRoof, getEquipmentContext } from '@/lib/system';
 import { getInverterTopology, topologyToLegacy } from '@/lib/system/systemAccessors';
 import { topologyDisplayLabel } from '../utils/helpers';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+// PPC §3 (latent) — VAL-1 read `canonical.structure.attachSpacingIn`, a SECOND
+// spacing source (`project.attachmentSpacing || 48` at canonical.ts) with no
+// verification state, so VAL-1 could state a spacing the structural authority has
+// not verified (and could disagree with PV-1/PV-3/PV-4C/APP-A/PE-1). It now projects
+// the ONE canonical spacing authority.
+import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -32,6 +38,10 @@ export function pageValidationSummary(
   // a bare cast crashed VAL-1 (and the whole planset) on `.ahj` when undefined.
   const jurisdiction = (compliance.jurisdiction ?? {}) as Record<string, any>;
   const _cpVal = projectCodeAuthorityFromInput(input);   // W4 §2 code editions
+  // PPC §3 — the ONE canonical attachment-spacing authority (design + status).
+  const _spcVal = projectStructuralFromInput(input).spacingAuthority;
+  const _spcValIn = _spcVal?.designSpacingIn ?? canonical.structure.attachSpacingIn;
+  const _spcValTag = _spcVal?.verificationState === 'verified' ? '' : ' (DESIGN — PENDING STRUCTURAL VERIFICATION)';
   const _asce = _cpVal.asceLabel;
   const _isFence = isFence(sys);
   const _isGround = isGround(sys);
@@ -116,7 +126,7 @@ export function pageValidationSummary(
                ? `qz=${qzDisp} | p=${windPressDisp} | F=${windForce} | M=${windMoment} | D_req=${reqEmbed} | D_prov=${provEmbed}`
                : _isGround
                ? `Pile depth: ${canonical.structure.pileDepthFt.toFixed(1)} ft | Spacing: ${canonical.structure.pileSpacingFt.toFixed(1)} ft O.C. | Tilt: ${canonical.structure.tiltDeg}°`
-               : `Rafter: ${canonical.structure.rafterSize} @ ${canonical.structure.rafterSpacingIn}" O.C. | Attachment: ${canonical.structure.attachSpacingIn}" O.C.`,
+               : `Rafter: ${canonical.structure.rafterSize} @ ${canonical.structure.rafterSpacingIn}" O.C. | Attachment: ${_spcValIn}" O.C.${_spcValTag}`,
       // Roof status reads the REAL structural result — this was hardcoded
       // 'PASS' and printed "ALL CHECKS PASSED" over a failing rafter check.
       status: _isFence ? (embedStatus as CheckStatus) : (() => {
@@ -609,7 +619,7 @@ export function pageValidationSummary(
             ` : `
             <tr><td>Rafter</td><td class="cv">${canonical.structure.rafterSize}</td></tr>
             <tr><td>Rafter Spacing</td><td class="cv">${canonical.structure.rafterSpacingIn}" O.C.</td></tr>
-            <tr><td>Attach Spacing</td><td class="cv">${canonical.structure.attachSpacingIn}" O.C.</td></tr>
+            <tr><td>Attach Spacing</td><td class="cv">${_spcValIn}" O.C.${_spcValTag}</td></tr>
             `}
           </table>
         </div>

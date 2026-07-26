@@ -1,0 +1,265 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.362Z",
+  "artifact": "braidon-ppc-blocker-schema-reconciliation",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§2 — the blocker-detail component is selected by canonical PAYLOAD SCHEMA",
+  "before": {
+    "mechanism": "NO selection at all — reviewStatus.ts:91 predicate was \"payload is a non-null object\", and the ONE hardcoded template was the Q-Cable procurement-DEFICIT template",
+    "consequence": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED rendered a DEFICIT PAYLOAD box of em-dashes (SKU —, drop —, deficit —) plus the hardcoded literal string \"mfr-doc authority null\", which read no field at all"
+  },
+  "after": {
+    "mechanism": "BLOCKER_PAYLOAD_SCHEMA[code] → component; unknown codes fail safe to generic",
+    "declaredCodeCount": 36,
+    "mapping": [
+      {
+        "code": "ATTACHMENT-CAPACITY-SOURCE-MISSING",
+        "schema": "generic"
+      },
+      {
+        "code": "BRANCH-RACEWAY-AUTHORITY",
+        "schema": "generic"
+      },
+      {
+        "code": "CODE-AUTHORITY-INCOMPLETE",
+        "schema": "generic"
+      },
+      {
+        "code": "CONDUIT-FILL-PENDING",
+        "schema": "generic"
+      },
+      {
+        "code": "DESIGNER-OF-RECORD-MISSING",
+        "schema": "generic"
+      },
+      {
+        "code": "DIRECT-MOUNT-GEOMETRY-MISSING",
+        "schema": "generic"
+      },
+      {
+        "code": "ENGINEERING-REVIEW-PENDING",
+        "schema": "generic"
+      },
+      {
+        "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "schema": "generic"
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "schema": "generic"
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-UNVERIFIED",
+        "schema": "generic"
+      },
+      {
+        "code": "EQUIPMENT-IDENTITY-CONFLICT",
+        "schema": "generic"
+      },
+      {
+        "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+        "schema": "generic"
+      },
+      {
+        "code": "FASTENER-CONFIG-MISSING",
+        "schema": "generic"
+      },
+      {
+        "code": "FEEDER-RACEWAY-AUTHORITY",
+        "schema": "generic"
+      },
+      {
+        "code": "FRAMING-AUTHORITY-UNVERIFIED",
+        "schema": "generic"
+      },
+      {
+        "code": "MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED",
+        "schema": "generic"
+      },
+      {
+        "code": "MODULE-DIMENSIONS-UNVERIFIED",
+        "schema": "generic"
+      },
+      {
+        "code": "MODULE-EXACT-DATASHEET-PENDING",
+        "schema": "generic"
+      },
+      {
+        "code": "MOUNT-TOPOLOGY-UNKNOWN",
+        "schema": "generic"
+      },
+      {
+        "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "schema": "generic"
+      },
+      {
+        "code": "PROJECT-AUTHORITY-UNVERIFIED",
+        "schema": "generic"
+      },
+      {
+        "code": "PROJECT-NAME-NONPRODUCTION",
+        "schema": "generic"
+      },
+      {
+        "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "schema": "qcable-grounding-authority"
+      },
+      {
+        "code": "QCABLE-PROCUREMENT-INSUFFICIENT",
+        "schema": "qcable-procurement-deficit"
+      },
+      {
+        "code": "RACEWAY-SEGMENT-CONFLICT",
+        "schema": "generic"
+      },
+      {
+        "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "schema": "generic"
+      },
+      {
+        "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "schema": "generic"
+      },
+      {
+        "code": "RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED",
+        "schema": "generic"
+      },
+      {
+        "code": "RAIL-QUANTITY-UNTRACEABLE",
+        "schema": "generic"
+      },
+      {
+        "code": "REACTIONS-UNTRACEABLE",
+        "schema": "generic"
+      },
+      {
+        "code": "ROUTE-LENGTH-ESTIMATE",
+        "schema": "generic"
+      },
+      {
+        "code": "SITE-GEOMETRY-MISSING",
+        "schema": "generic"
+      },
+      {
+        "code": "STRUCTURAL-BOM-RECONCILIATION-FAILED",
+        "schema": "generic"
+      },
+      {
+        "code": "STRUCTURAL-REACTION-RECONCILIATION-FAILED",
+        "schema": "generic"
+      },
+      {
+        "code": "STRUCTURAL-UTILIZATION-EXCEEDED",
+        "schema": "generic"
+      },
+      {
+        "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+        "schema": "generic"
+      }
+    ],
+    "unknownCodeFailsSafeToGeneric": true
+  },
+  "frozenFixture": {
+    "activeBlockerCount": 15,
+    "perBlocker": [
+      {
+        "code": "ROUTE-LENGTH-ESTIMATE",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "CONDUIT-FILL-PENDING",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "severity": "blocking",
+        "schema": "qcable-grounding-authority",
+        "hasStructuredPayload": true
+      },
+      {
+        "code": "FRAMING-AUTHORITY-UNVERIFIED",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "CODE-AUTHORITY-INCOMPLETE",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "PROJECT-AUTHORITY-UNVERIFIED",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "MODULE-EXACT-DATASHEET-PENDING",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      },
+      {
+        "code": "ENGINEERING-REVIEW-PENDING",
+        "severity": "blocking",
+        "schema": "generic",
+        "hasStructuredPayload": false
+      }
+    ],
+    "deficitTemplateRendered": false
+  },
+  "procurementInsufficientInput": {
+    "activeBlockerCount": 16,
+    "deficitTemplateRendered": true,
+    "deficitTemplateOccurrences": 1,
+    "groundingTemplateOccurrences": 1,
+    "note": "the frozen fixture does NOT trip QCABLE-PROCUREMENT-INSUFFICIENT, so the deficit component is verified against this second input (audit §0 non-vacuity requirement)"
+  }
+}

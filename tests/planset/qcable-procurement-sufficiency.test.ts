@@ -19,7 +19,8 @@ import {
 } from '@/lib/permit/snapshot/procurementSufficiency';
 import { classifyBlockerSeverity } from '@/lib/permit/snapshot/severityPolicy';
 import { pageConductorSchedule } from '@/lib/permit/sections/electricalPages';
-import { pageEquipmentSchedule } from '@/lib/permit/sections/structuralPages';
+import { generateBOMForPermit } from '@/lib/permit/utils/bomForPermit';
+import { pageEquipmentSchedule, pageEquipmentScheduleCont } from '@/lib/permit/sections/structuralPages';
 import { pageReviewStatus } from '@/lib/permit/sections/reviewStatus';
 import type {
   BranchCablePath, ListedCableAssembly, CableExtensionSolution, PermitReadinessBlocker,
@@ -216,6 +217,11 @@ function buildInsufficientRender() {
   snap.permitReadiness.blockers = [...(snap.permitReadiness.blockers ?? []), { code: blocker.code, message: blocker.explanation }];
   snap.permitReadiness.ready = false;
   input._snapshot = snap;   // reassign (property not frozen)
+  // PPC §9 — regenerate the BOM against the INSUFFICIENT snapshot so the §9
+  // post-pass (which reads electrical.procurementSufficiency through peekSnapshot)
+  // stamps the trunk-cable ROW with its own procurement state. Without this the
+  // rendered schedule shows the row bare — the exact §9 defect.
+  input.bom = generateBOMForPermit(input, cad);
   return { input, cad, ps, blocker };
 }
 
@@ -223,7 +229,12 @@ function buildInsufficientRender() {
 describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insufficiency', () => {
   const { input, cad, ps } = buildInsufficientRender();
   const pv4b = pageConductorSchedule(input, cad, 7, 30);
-  const sched = pageEquipmentSchedule(input, cad, 20, 30);
+  // The BOM is paginated across SCHED / SCHED-2 / SCHED-3; the trunk-cable ROW
+  // itself lands on a continuation sheet, so 'the SCHED surface' is all three.
+  const schedPrimary = pageEquipmentSchedule(input, cad, 20, 30);
+  const sched = schedPrimary
+    + pageEquipmentScheduleCont(input, cad, 21, 30, 0)
+    + pageEquipmentScheduleCont(input, cad, 22, 30, 1);
   const rs1 = pageReviewStatus(input, cad, 25, 30);
   const deficitTxt = `${ps.deficitFt} ft`;
 
@@ -233,11 +244,31 @@ describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insuff
     expect(pv4b).toContain(deficitTxt);
     expect(pv4b).toContain('NON-ORDERABLE');
   });
-  it('SCHED BOM shows the base cable quantity, the deficit, and NON-ORDERABLE', () => {
-    expect(sched).toContain('AC TRUNK CABLE (BOM)');
-    expect(sched).toContain('CURRENT BASE CABLE QUANTITY');
-    expect(sched).toContain(deficitTxt);
-    expect(sched).toContain('NON-ORDERABLE');
+  // ── UPDATED by the PPC corrective pass (§9), 2026-07-26 ────────────────────
+  // The retired assertions targeted a STANDALONE note ('AC TRUNK CABLE (BOM): …
+  // CURRENT BASE CABLE QUANTITY …') printed above the schedule. That note has been
+  // retired because the TRUNK BOM ROW ITSELF now carries the state — which is the
+  // stronger outcome and the actual §9 requirement: an operator reading the
+  // schedule row alone could previously order the insufficient quantity. The row
+  // states STATUS / REASON / DESIGNED-INSTALLED / ALLOWANCE / THRESHOLD /
+  // CURRENT BASE / DEFICIT / EXTENSION SOLUTION NOT SELECTED and is machine-tagged
+  // non-orderable; the primary sheet states the per-branch AFFECTED status.
+  it('the SCHED trunk BOM ROW itself carries the deficit state and is non-orderable', () => {
+    expect(sched).toContain('STATUS: NON-ORDERABLE');
+    expect(sched).toContain('REASON: QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect(sched).toContain(`CURRENT BASE ${ps.procurementLengthFt} FT`);
+    expect(sched).toContain(`DEFICIT ${ps.deficitFt} FT`);
+    expect(sched).toContain('EXTENSION SOLUTION NOT SELECTED');
+    expect(sched).toContain('data-bom-orderable="false"');
+    expect(sched).toContain(deficitTxt.replace(' ft', ' FT'));
+    // the selected cable identity is KEPT (the quantity is insufficient, not the cable)
+    expect(sched).toContain('Q-12-10-240');
+  });
+
+  it('the primary SCHED sheet states the per-branch procurement status', () => {
+    expect(schedPrimary).toContain('PROCUREMENT SUFFICIENCY:');
+    expect(schedPrimary).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect(schedPrimary).toContain('OVERALL RELEASE:');
   });
   it('RS-1 shows the blocker code, the payload, and the same deficit', () => {
     expect(rs1).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
@@ -246,7 +277,10 @@ describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insuff
     expect(rs1).toContain('NOT SEL');   // resolution options enumerated, none selected
   });
   it('all three surfaces agree on the numeric deficit (single source)', () => {
-    for (const html of [pv4b, sched, rs1]) expect(html).toContain(deficitTxt);
+    // PV-4B and RS-1 render the prose form ('14.5 ft'); the BOM row renders the
+    // schedule form ('DEFICIT 14.5 FT'). Same number, one source.
+    for (const html of [pv4b, rs1]) expect(html).toContain(deficitTxt);
+    expect(sched).toContain(`DEFICIT ${ps.deficitFt} FT`);
   });
 });
 

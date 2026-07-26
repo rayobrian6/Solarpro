@@ -10,8 +10,9 @@
 // projects THIS object, which reads ONLY the canonical snapshot.electrical
 // feeder + its route segment. Same field, same rounding, everywhere.
 // ═══════════════════════════════════════════════════════════════════════════
-import type { PermitDesignSnapshot, RouteSegmentRecord } from './types';
+import type { PermitDesignSnapshot, RouteSegmentRecord, GroundingSegment } from './types';
 import { evaluateCompliance, type ComplianceResult } from './complianceState';
+import { GROUNDING_PENDING_BONDING_CELL_LABEL } from './groundingAuthority';
 import {
   ampacityTable75C, ampacityTable90C, ambientCorrectionFactor, conductorCountAdjustmentFactor,
 } from '@/lib/computed-system';
@@ -446,6 +447,152 @@ export function projectOpenAirBranchGrounding(snap: PermitDesignSnapshot | null 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PPC §7 — THE canonical GroundingSegment projection.
+//
+// This replaces the legacy PV-4B project-level EGC row: a hardcoded `<tr>` that
+// relabelled the FEEDER's EGC gauge "Array → AC Disconnect (ground bus)" and
+// reprinted the FEEDER row's own conduit + length as if they were the grounding
+// run's. It had no id, no segment, no raceway of its own, no BOM line and no
+// authority state — it reconciled with nothing.
+//
+// Every grounding conductor a sheet renders is now ONE of these objects, built
+// from the per-purpose canonical `groundingObjects` + their `routeSegments` +
+// `physicalRaceways` + the open-air grounding authority. The six domains Ray
+// requires kept separate stay separate: nothing borrows another object's size,
+// raceway, length or authority state. Gate 10: no rendered grounding row without
+// a `groundingSegmentId`.
+//
+// PROJECTED, not stored — the snapshot digest is unchanged.
+// ═══════════════════════════════════════════════════════════════════════════
+const _PURPOSE_LABEL: Record<string, string> = {
+  'branch-egc': 'Open-air branch (listed cable assembly) equipment grounding',
+  'feeder-egc': 'Feeder equipment grounding conductor (in raceway)',
+  'raceway-bond': 'Raceway / enclosure bonding',
+  'gec': 'Grounding electrode conductor (GEC)',
+  'integrated-listed-method': 'Listed integrated grounding method',
+  'module-racking-bonding': 'Module-frame + racking bonding (UL 2703)',
+};
+
+export function projectGroundingSegments(
+  snap: PermitDesignSnapshot | null | undefined,
+): GroundingSegment[] {
+  const elec = snap?.electrical;
+  if (!elec) return [];
+  const objs = elec.groundingObjects ?? [];
+  if (objs.length === 0) return [];
+  const segs = elec.routeSegments ?? [];
+  const raceways = elec.physicalRaceways ?? [];
+  const oa = projectOpenAirBranchGrounding(snap);
+  const asm = projectListedCableAssembly(snap);
+  const branches = elec.branches ?? [];
+
+  const out: GroundingSegment[] = [];
+  // The OPEN-AIR branch section is ONE authority domain over all branches (the
+  // canonical model stores one branch-egc record per branch). It is rendered as
+  // ONE object naming every branch — not N near-identical rows that would read as
+  // N independent authorities.
+  const _branchEgcIds = objs.filter(g => g.purpose === 'branch-egc').map(g => g.groundingId);
+  let _branchEgcEmitted = false;
+  for (const g of objs) {
+    if (g.purpose === 'branch-egc') {
+      if (_branchEgcEmitted) continue;
+      _branchEgcEmitted = true;
+    }
+    const seg = segs.find(r => r.segmentId === g.segmentId) ?? null;
+    const rw = seg?.physicalRacewayId
+      ? raceways.find(r => r.physicalRacewayId === seg.physicalRacewayId) ?? null
+      : null;
+    const inRaceway = !!(seg?.raceway && seg.raceway !== 'FREE_AIR');
+    const racewayLabel = rw
+      ? `${rw.racewayType ?? 'raceway'}${rw.selectedRacewaySize ? ` ${rw.selectedRacewaySize}` : ''}`
+      : (inRaceway ? `${seg!.raceway}${seg!.tradeSizeIn ? ` ${seg!.tradeSizeIn}` : ''}` : null);
+    const isOpenAirBranch = g.purpose === 'branch-egc';
+
+    // The open-air branch object is the ONE domain the grounding authority
+    // governs. Its size / method / length / BOM state come from the authority —
+    // NOT from the raw record (whose conductorSize is an NEC-derived CANDIDATE).
+    if (isOpenAirBranch && oa.present) {
+      const pending = oa.outcome === 'PENDING_MANUFACTURER_AUTHORITY';
+      const noRow = oa.outcome === 'NO_SEPARATE_EGC_REQUIRED';
+      out.push({
+        groundingSegmentId: g.groundingId,
+        groundingId: g.groundingId,
+        purpose: 'branch-egc',
+        label: _PURPOSE_LABEL['branch-egc'],
+        fromDeviceId: branches.length ? `${branches.map(b => b.label).join('/')} MICROINVERTERS` : 'ARRAY MICROINVERTERS',
+        toDeviceId: 'ROOF J-BOX (branch transition)',
+        associatedSegmentId: g.segmentId,
+        associatedCircuitIds: oa.branchIds.length ? oa.branchIds : branches.map(b => b.branchId),
+        // PENDING ⇒ NO size is asserted; (A) ⇒ no conductor exists; (B) ⇒ the
+        // authority's NEC-derived size.
+        conductorSize: pending || noRow ? null : oa.conductorSize,
+        conductorMaterial: pending || noRow ? null : (oa.conductorMaterial === 'Al' ? 'Al' : 'Cu'),
+        insulationType: pending
+          ? null
+          : noRow
+            ? 'integral to the listed cable assembly (no additional conductor)'
+            : 'green insulated Cu, open-air along the branch trunk',
+        method: pending ? 'pending' : noRow ? 'integrated-listed' : 'conductor',
+        // FREE AIR — never the home-run/feeder conduit (the §7 defect).
+        physicalRacewayId: null,
+        racewayLabel: 'FREE AIR — NEC 690.31(C)',
+        lengthFt: pending || noRow ? null : oa.designedInstalledFt,
+        lengthSource: pending || noRow
+          ? 'not-established'
+          : (oa.lengthProvenance === 'geometry-derived' ? 'cable-path-geometry' : 'route-one-way'),
+        necBasis: oa.codeBasis,
+        authorityState: pending ? 'pending-manufacturer-authority' : 'verified',
+        installedConductorAsserted: oa.outcome === 'SEPARATE_EGC_REQUIRED',
+        bomLineId: noRow
+          ? null
+          : `GRN-OPENAIR-${(oa.conductorSize ?? '#12 AWG').replace('#', '').replace(' AWG', '').trim()}`,
+        bomRowState: oa.bomRowState,
+        provenance: `electrical.openAirGroundingAuthority + groundingObjects[${_branchEgcIds.join(', ')}]`
+          + `${asm.present ? ` + ${asm.assembly!.assemblyId}` : ''}`,
+      });
+      continue;
+    }
+
+    // Every other domain: NEC wiring-method / electrode authority on its OWN
+    // basis, with its OWN raceway + its OWN length provenance.
+    const noneRequired = g.method === 'none-required' || g.required === false;
+    out.push({
+      groundingSegmentId: g.groundingId,
+      groundingId: g.groundingId,
+      purpose: g.purpose,
+      label: _PURPOSE_LABEL[g.purpose] ?? g.purpose,
+      fromDeviceId: seg?.from ?? (g.associatedEquipment ?? '—'),
+      toDeviceId: seg?.to ?? (g.associatedEquipment ?? '—'),
+      associatedSegmentId: g.segmentId,
+      associatedCircuitIds: seg ? [seg.segmentId] : [],
+      conductorSize: g.method === 'conductor' ? g.conductorSize : null,
+      conductorMaterial: g.conductorMaterial,
+      insulationType: g.method === 'conductor'
+        ? (g.purpose === 'gec' ? 'bare Cu' : (seg?.insulation ?? 'THWN-2 green'))
+        : (g.method === 'raceway' ? 'raceway as the equipment grounding conductor (NEC 250.118)' : null),
+      method: g.method,
+      physicalRacewayId: inRaceway ? (seg?.physicalRacewayId ?? null) : null,
+      racewayLabel: inRaceway ? racewayLabel : (seg ? 'FREE AIR' : null),
+      lengthFt: noneRequired ? null : num(seg?.oneWayFt),
+      lengthSource: noneRequired
+        ? 'not-established'
+        : seg?.lengthSource === 'field-measurement'
+          ? 'field-measurement'
+          : seg?.oneWayFt != null ? 'route-one-way' : 'not-established',
+      necBasis: g.codeBasis,
+      authorityState: noneRequired ? 'not-required' : 'nec-derived',
+      installedConductorAsserted: g.method === 'conductor' && !noneRequired,
+      bomLineId: null,
+      bomRowState: noneRequired ? 'no-row' : 'orderable',
+      provenance: `groundingObjects['${g.groundingId}']`
+        + `${seg ? ` + routeSegments['${seg.segmentId}']` : ''}`
+        + `${rw ? ` + physicalRaceways['${rw.physicalRacewayId}']` : ''}`,
+    });
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // §3/§4 (closeout 2026-07-23) — THE canonical projection of the SHARED branch
 // home-run raceway (the jbox→combiner conduit that carries all N branches
 // bundled). E-1's SEGMENT_2A conduit label and PV-4B's home-run row read THIS,
@@ -836,8 +983,17 @@ export interface E1PhysicalSection {
   /** total conductors incl. EGC where the raceway object carries it. */
   totalConductorCount: number | null;
   conductorSize: string | null;
-  /** grounding / bonding method + EGC size. */
+  /** grounding / bonding method + EGC size. PPC §1 — for the OPEN-AIR branch
+   *  sections this is DERIVED FROM projectOpenAirBranchGrounding() (the canonical
+   *  document-based authority), NEVER from groundingObjects[].conductorSize. */
   bonding: string | null;
+  /** PPC §7/gate 10 — the canonical GroundingSegment this row's bonding cell
+   *  reconciles to. null ⇒ the section models no grounding object (never a row
+   *  that prints a conductor without an id). */
+  groundingSegmentId: string | null;
+  /** PPC §1 — true ⇒ the grounding authority for this section is PENDING, so the
+   *  cell asserts NO installed EGC. Machine-checkable by the rendered gate. */
+  bondingPendingAuthority: boolean;
   physicalRacewayId: string | null;
   racewayType: string | null;
   racewaySize: string | null;
@@ -896,11 +1052,42 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
   const _pathByBranch = new Map(_asmProj.branchPaths.map(p => [p.branchId, p]));
   const branches = elec.branches ?? [];
   const branchGnd = (elec.groundingObjects ?? []).filter(g => g.purpose === 'branch-egc');
+  // ── PPC §1 ROOT FIX ────────────────────────────────────────────────────────
+  // The open-air branch bonding cell PROJECTS the canonical, document-based
+  // grounding authority. It previously read groundingObjects[].conductorSize and
+  // printed `#12 AWG Cu EGC (NEC 250.122 @ 20A) — with circuit conductors` — an
+  // INSTALLED-conductor assertion, on the same sheet whose prose said PENDING
+  // MANUFACTURER AUTHORITY. The raw canonical object carries the NEC-DERIVED
+  // CANDIDATE size, which is not an installation. Only the authority decides
+  // whether anything is installed, so the authority is now the ONLY input here.
+  const _oaGnd = projectOpenAirBranchGrounding(snap);
+  const _oaSegmentId = _oaGnd.present
+    ? (branchGnd[0]?.groundingId ?? 'GRN-OPENAIR-BRANCH')
+    : null;
+  const _branchBondingCell = (b: { ocpdA: number }): string | null => {
+    if (!_oaGnd.present) return null;
+    switch (_oaGnd.outcome) {
+      // (C) fail-closed: state the pending method and explicitly DENY the
+      // installed-EGC assertion. No size, no 250.122 conclusion, no PASS.
+      case 'PENDING_MANUFACTURER_AUTHORITY':
+        return GROUNDING_PENDING_BONDING_CELL_LABEL;
+      // (A) the listed method installs no additional conductor in this section.
+      case 'NO_SEPARATE_EGC_REQUIRED':
+        return 'OPEN-AIR GROUNDING METHOD: LISTED INTEGRATED METHOD (NEC 690.43(C) / 110.3(B)) '
+          + '— NO ADDITIONAL OPEN-AIR EGC INSTALLED IN THIS SECTION';
+      // (B) an additional conductor IS installed — the honest assertion, with the
+      // size that the authority (not the raw object) established.
+      case 'SEPARATE_EGC_REQUIRED':
+        return `OPEN-AIR GROUNDING METHOD: ADDITIONAL EGC INSTALLED — `
+          + `${_oaGnd.conductorSize ?? 'NEC 250.122 size'} ${_oaGnd.conductorMaterial ?? 'Cu'} `
+          + `(NEC 250.122 @ ${b.ocpdA}A), run open-air along the branch trunk`;
+    }
+  };
 
   // ── Q-Cable branch trunks (one canonical section per branch) ───────────────
   branches.forEach((b, i) => {
     const _bPath = _pathByBranch.get(b.branchId) ?? null;
-    const egc = branchGnd[i]?.conductorSize ?? branchGnd[0]?.conductorSize ?? branchSeg?.egcGauge ?? null;
+    void i;
     const verified = branchSeg ? _VERIFIED_ROUTE.has(String(branchSeg.verificationStatus)) : false;
     const pending: string[] = [];
     if (branchSeg && !verified) pending.push('branch route length is a CAD-derived estimate (not field-verified)');
@@ -929,7 +1116,11 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       totalConductorCount: (_asmProj.assembly?.conductorCount ?? branchSeg?.conductorCount) != null
         ? (_asmProj.assembly?.conductorCount ?? branchSeg!.conductorCount!) + 1 : null,
       conductorSize: _asmProj.assembly?.conductorGauge ?? branchSeg?.conductorGauge ?? null,
-      bonding: egc ? `${egc} Cu EGC (NEC 250.122 @ ${b.ocpdA}A) — with circuit conductors` : null,
+      // §1 — authority-projected (see _branchBondingCell above); never the raw
+      // groundingObjects[].conductorSize installed-conductor string.
+      bonding: _branchBondingCell(b),
+      groundingSegmentId: _oaSegmentId,
+      bondingPendingAuthority: _oaGnd.outcome === 'PENDING_MANUFACTURER_AUTHORITY',
       physicalRacewayId: null,
       racewayType: 'FREE AIR — NEC 690.31(C)',
       racewaySize: null,
@@ -1008,7 +1199,12 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       conductorCount: hr.currentCarryingCount,
       totalConductorCount: hr.conductorCount,
       conductorSize: hr.conductorGauge,
+      // The in-raceway home-run EGC is a DISTINCT object with its OWN independent
+      // basis (a raceway wiring method needs an EGC regardless of the open-air
+      // outcome) — it never inherits, and never lends, the open-air state.
       bonding: hr.egcGauge ? `${hr.egcGauge} Cu EGC in raceway (NEC 250.122)` : null,
+      groundingSegmentId: hr.egcGauge ? 'GRN-HOMERUN-RACEWAY-EGC' : null,
+      bondingPendingAuthority: false,
       physicalRacewayId: hr.physicalRacewayId,
       racewayType: hr.racewayType,
       racewaySize: hr.selectedRacewaySize ?? hr.tradeSizeIn,
@@ -1083,6 +1279,8 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       totalConductorCount: seg.conductorCount != null ? seg.conductorCount + 1 : null,
       conductorSize: seg.conductorGauge,
       bonding: seg.egcGauge ? `${seg.egcGauge} Cu EGC in raceway (NEC 250.122)` : null,
+      groundingSegmentId: seg.egcGauge ? `GRN-${segId}-EGC` : null,
+      bondingPendingAuthority: false,
       physicalRacewayId: seg.physicalRacewayId ?? null,
       racewayType: seg.raceway === 'FREE_AIR' ? 'FREE AIR — NEC 690.31(C)' : seg.raceway,
       racewaySize: seg.tradeSizeIn === 'NONE' || seg.tradeSizeIn === 'N/A' ? null : seg.tradeSizeIn,
@@ -1146,7 +1344,9 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       conductorCount: null,
       totalConductorCount: null,
       conductorSize: tap.conductorSpec?.match(/#\d+(?:\/0)?\s*AWG/i)?.[0] ?? null,
-      bonding: 'with service conductors (NEC 250.122)',
+      bonding: 'EGC with the service conductors (NEC 250.122) — service/enclosure bonding domain',
+      groundingSegmentId: 'GRN-SERVICE-BOND',
+      bondingPendingAuthority: false,
       physicalRacewayId: null,
       racewayType: 'PER SERVICE ENTRANCE',
       racewaySize: null,

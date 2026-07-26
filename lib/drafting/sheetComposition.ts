@@ -27,6 +27,17 @@ import { projectCodeAuthority } from '../permit/snapshot/codeAuthorityProjection
 // gate 2: no "field-verified" without a recorded field measurement).
 import { routeProvenanceLabel, projectCanonicalFeeder, projectRacewayDescriptor } from '../permit/snapshot/electricalProjection';
 import type { PermitDesignSnapshot } from '../permit/snapshot/types';
+// PPC §3/§4 — THE fix for the second rendering stack. PV-1/PV-3 no longer read a
+// flat `attachSpacing` (a field literally sourced from `maxAllowedSpacing`) nor raw
+// mounting-hardware-db fastener rows: they consume the CANONICAL attachment-
+// installation authority (SpacingAuthority + FastenerAssembly + document
+// applicability + mount/racking states). No MAX/allowable spacing and no exact
+// fastener instruction can be composed without verified authority.
+import {
+  projectAttachmentInstallationAuthority,
+  type AttachmentInstallationAuthority,
+} from '../permit/snapshot/structuralProjection';
+import { getManufacturerAsset, evaluateDocumentApplicability } from '../manufacturer-assets-db';
 
 // §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
 // conduit description routes through the CANONICAL physical-raceway projection —
@@ -393,9 +404,12 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   rafterSize: string;
   rafterSpacing: number;
   isTruss: boolean;
-  attachSpacing: number;
-  lagSpec: string;
-  embedSpec: string;
+  /** PPC §3/§4 — the CANONICAL attachment authority. Replaces the old
+   *  `attachSpacing` (sourced from the legacy `maxAllowedSpacing` field, whose
+   *  NAME carried the max-allowed lie) and the raw `lagSpec` / `embedSpec`
+   *  strings. Emitters read `.spacingDesignLine` / `.spacingStatusLine` /
+   *  `.pendingLines` and NEVER compose a dimension of their own. */
+  attachment: AttachmentInstallationAuthority;
   azimuthLabel: string;
   conduitType: string;
   windSpeedMph: number;
@@ -447,23 +461,27 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   const fireSetbackFt = Math.round((resolveFireSetbackIn(_fireIn, _covFrac) / 12) * 10) / 10;
   const pathwayFt     = (_pathwayIn && _pathwayIn > 0) ? Math.round((_pathwayIn / 12) * 10) / 10 : 3;
 
-  // Fastener spec from the SELECTED mounting system so PV-3 can never
-  // contradict APP-A/PE-1. Lag LENGTH must physically deliver the embedment:
-  // length ≥ embedment + ~1.5" of deck/flashing/foot stack-up — the old
-  // static '3" lag / 2-1/2" embedment' pair was impossible to build.
+  // PPC §3/§4 — the ONE attachment authority. The old block read
+  // mounting-hardware-db directly (`fastenerDiameterIn` / `fastenerEmbedmentIn`
+  // / `fastenerLengthIn` → `lagSpec` / `embedSpec`) and printed the result
+  // unconditionally, and sourced spacing from `compliance.structural.attachment
+  // .maxAllowedSpacing` — a field whose NAME asserted a maximum nobody verified.
+  // Both are replaced by the canonical projection; the descriptor now carries
+  // authority + verification state, not fabricated dimension strings.
   const _mountSel = (p?.mountingSystemId as string)
     ? getMountingSystemById(p.mountingSystemId as string)
     : undefined;
-  const _fracIn = (v: number) =>
-    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-  const _lagDiaIn  = _mountSel?.mount?.fastenerDiameterIn ?? 0.375;
-  const _embedIn   = _mountSel?.mount?.fastenerEmbedmentIn ?? 2.5;
-  // §10 — prefer the EXACT manufacturer product length; only estimate (embed +
-  // ~1.5" stack-up) when the mount record does not pin a length. Keeps PV-3 in
-  // agreement with the notes / PE-1 / BOM (RT-MINI = 3.5" screw, never a 4" lag).
-  const _lagLenIn  = _mountSel?.mount?.fastenerLengthIn ?? (Math.ceil((_embedIn + 1.5) * 2) / 2);
-  const _lagType   = (_mountSel?.mount?.fastenerType ?? 'SS lag').toUpperCase();
-  const _ca = ((c?.structural ?? {}) as Record<string, any>)?.attachment;
+  const _snapRoof = (input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null;
+  const _mountIdRoof = (p?.mountingSystemId as string) ?? null;
+  const _rackAsset = _mountIdRoof ? getManufacturerAsset(_mountIdRoof, 'racking_detail') : null;
+  const _applRoof = _rackAsset
+    ? evaluateDocumentApplicability(_mountSel?.model ?? _rackAsset.model, _rackAsset, null)
+    : null;
+  const attachment = projectAttachmentInstallationAuthority(
+    _snapRoof, _mountIdRoof,
+    _rackAsset ? { model: _rackAsset.model, docTitle: _rackAsset.docTitle } : null,
+    _applRoof ? { state: _applRoof.state, documentProduct: _applRoof.documentProduct } : null,
+  );
   const _mountName = ((input?.project as any)?._canonical?.mountSystem as string)
     || (p?.mountingSystem as string)
     || (_mountSel ? `${_mountSel.manufacturer} ${_mountSel.model}` : 'IRONRIDGE XR100');
@@ -499,14 +517,9 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     isTruss: ((c?.structural as any)?.rafter?.framingType === 'truss')
       || (((c?.structural as any)?.rafter?.bendingMoment === 0)
         && (((c?.structural as any)?.rafter?.allowableBendingMoment as number) || 0) > 0),
-    // Engineering-resolved spacing first (V4 mount layout — e.g. auto-resolved
-    // 36"), then the user's input, then the racking system's rated max.
-    attachSpacing: (_ca?.maxAllowedSpacing as number)
-      || (p?.attachmentSpacing as number)
-      || _mountSel?.mount?.maxSpacingIn
-      || 48,
-    lagSpec:       `${_fracIn(_lagDiaIn)}" DIA × ${_lagLenIn}" ${_lagType}`,
-    embedSpec:     `${_embedIn}" MIN THREAD EMBEDMENT`,
+    // PPC §3/§4 — the canonical attachment authority (design spacing + status +
+    // fastener/document gating). NO renderer-local spacing or dimension source.
+    attachment,
     // §3 — conduit description from the canonical physical-raceway projection
     // (feeder conduit), never the renderer-local `|| 'EMT'` default (gate 4).
     conduitType:   canonicalConduitType((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null),
@@ -719,8 +732,27 @@ function roofComposition(
   // rail-less products (RT-APEX / E Mount AIR / explicit "rail-less") get the
   // direct-attach treatment. (RT-MINI research 2026-07-09, sourced.)
   const _railless = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(d.mountSys);
-  const _attachDisplay = _railless ? '48" O.C. STAGGERED' : `${d.attachSpacing}" O.C. MAX`;
-  const _attachInto = _railless ? 'direct-attach mounts @ 48" O.C. staggered' : `L-foot @ ${d.attachSpacing}" O.C.`;
+  // PPC §3 — ONE spacing authority, rendered as a DESIGN value + its verification
+  // STATUS. The old expressions printed `${attachSpacing}" O.C. MAX` (and a
+  // hardcoded 48" on the rail-less branch) — an unverified maximum-allowed claim
+  // on PV-1 + PV-3 while the canonical authority said PENDING VERIFICATION.
+  const _att = d.attachment;
+  const _attachDisplay = _att.spacingShortLabel + (_railless ? ' STAGGERED' : '');
+  const _attachInto = _railless
+    ? `direct-attach mounts @ ${_att.spacingShortLabel} staggered`
+    : `L-foot @ ${_att.spacingShortLabel}`;
+  // PPC §4 — while the attachment authority is not fully verified NO exact
+  // fastener dimension / embedment / torque / pilot / coating / sealant string may
+  // be composed. The observed geometry stays in `_att.fastener` for regeneration.
+  const _exact = _att.exactInstructionsAllowed;
+  const _fa = _att.fastener;
+  const _lagRow = _exact
+    ? `${_fa.diameterLabel ?? '—'}" DIA × ${_fa.lengthIn ?? '—'}" ${(_fa.fastenerType ?? '').toUpperCase()}`.trim()
+    : 'PENDING VERIFIED SELECTION';
+  const _embedRow = _exact
+    ? `${_fa.embedmentIn ?? '—'}" MIN THREAD EMBEDMENT`
+    : 'NOT ESTABLISHED';
+  const _hardwareRow = _exact && _fa.material ? _fa.material.toUpperCase() : 'PENDING VERIFIED SELECTION';
   // Framing term matches the structural authority (PV-4C/PE-1/CERT) so the set
   // doesn't say "RAFTER" on PV-3 while the calcs certify a pre-engineered truss.
   const _frameLabel = d.isTruss ? 'TRUSS' : 'RAFTER';
@@ -750,18 +782,22 @@ function roofComposition(
         { label: 'AZIMUTH',        value: d.azimuthLabel },
         { label: 'FIRE SETBACK',   value: `${d.fireSetbackFt}' RIDGE · 18" HIP · ${d.pathwayFt}' PATHWAY`, bold: true },
         { label: 'FRAMING',        value: `${d.rafterSize} @ ${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: _attachDisplay },
+        { label: 'DESIGN ATTACHMENT SPACING', value: _attachDisplay },
+        { label: 'SPACING STATUS', value: _att.spacingStatusLine, highlight: !_exact },
         { label: 'MODULES',        value: `${d.totalPanels} @ ${d.dcKw} kWdc`, bold: true },
       ]
     : [
         { label: 'MOUNTING SYS',   value: d.mountSys },
         { label: `${_frameLabel} SIZE`,    value: d.rafterSize },
         { label: `${_frameLabel} SPACING`, value: `${d.rafterSpacing}" O.C.` },
-        { label: 'ATTACH SPACING', value: _attachDisplay,   bold: true },
-        { label: 'LAG BOLT',       value: d.lagSpec },
-        { label: 'EMBEDMENT',      value: d.embedSpec,                      bold: true, highlight: true },
+        { label: 'DESIGN ATTACHMENT SPACING', value: _attachDisplay,   bold: true },
+        { label: 'SPACING STATUS', value: _att.spacingStatusLine, highlight: !_exact },
+        // PPC §4 — dimensionless while unverified (no diameter / length / embedment
+        // / coating may print without the five verified conditions).
+        { label: 'FASTENER ASSEMBLY', value: _lagRow },
+        { label: 'EMBEDMENT',      value: _embedRow,                        bold: true, highlight: !_exact },
         { label: 'ROOF TYPE',      value: d.roofType },
-        { label: 'HARDWARE',       value: '316 S.S. THROUGHOUT' },
+        { label: 'HARDWARE',       value: _hardwareRow },
         { label: 'WIND SPEED',     value: `${d.windSpeedMph} MPH Vult` },
         { label: 'DESIGN CODE',    value: 'ASCE 7-22 / NEC 690.43' },
       ];
@@ -785,17 +821,33 @@ function roofComposition(
     : [
         { n: 1, label: 'PV MODULE', sub: 'see equipment schedule' },
         { n: 2, label: _baseLabelP2, sub: d.mountSys },
-        { n: 3, label: _baseLabelP3, sub: `${d.lagSpec} — ${d.embedSpec.toLowerCase()}` },
-        { n: 4, label: 'FLASHING', sub: 'under all penetrations' },
+        // PPC §4 — callout ③ used to print the exact lag spec + embedment.
+        { n: 3, label: _baseLabelP3, sub: _exact
+            ? `${_lagRow} — ${_embedRow.toLowerCase()}`
+            : 'fastener assembly pending verified selection — installation details not established' },
+        { n: 4, label: 'FLASHING', sub: _exact
+            ? 'under all penetrations per the verified manufacturer document'
+            : 'flashing / sealant instructions pending verified document applicability' },
         { n: 5, label: `${_frameLabel} ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
         { n: 6, label: /PENDING/.test(d.conduitType) ? 'CONDUIT' : d.conduitType + ' CONDUIT', sub: /PENDING/.test(d.conduitType) ? 'raceway authority pending — see conductor schedule' : 'see conductor schedule' },
         { n: 7, label: 'BONDING JUMPER', sub: 'NEC 690.43' },
       ];
 
+  // PPC §3 — the ONE canonical spacing line, printed verbatim on PV-1 AND PV-3,
+  // plus (PV-3) Ray's exact fastener PENDING block + the non-authoritative
+  // reference-detail banner. Any sheet-scoped gate reads these strings.
+  const generalNotes: string[] = isPlan
+    ? [_att.spacingLine]
+    : [_att.spacingLine, ..._att.pendingLines];
+
   return {
     systemType:     'roof',
     viewType,
-    sheetId:        isPlan ? 'PV-2' : 'PV-3',
+    // PPC §3 sub-finding — the plan composition is rendered by pageRoofPlan as
+    // **PV-1** (arrayPages.ts titleBlock); the old 'PV-2' declaration pointed every
+    // sheet-scoped gate at the wrong sheet. 'PV-2' only exists on the standalone
+    // CAD path (renderPlanSet.ts), which does not read this field for its title.
+    sheetId:        isPlan ? 'PV-1' : 'PV-3',
     primaryView:    isPlan ? 'roof_plan' : 'roof_cross_section',
     secondaryViews: isPlan ? ['setbacks', 'obstructions'] : ['attachment_detail' as SecondaryViewId],
     dataSections:   isPlan
@@ -806,11 +858,12 @@ function roofComposition(
     dataPct:        18,
     drawHeader:     isPlan
       ? `ROOF PLAN — ${d.totalPanels} MOD @ ${d.dcKw} kWdc | ${d.roofType} ROOF @ ${d.pitchStr} | AZ: ${d.azimuthLabel} | ${d.mountSys}`
-      : `ATTACHMENT DETAIL — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${_attachDisplay}`,
+      : `ATTACHMENT DETAIL (REFERENCE${_exact ? '' : ' — NON-AUTHORITATIVE'}) — ${d.mountSys} | ${d.rafterSize} @ ${d.rafterSpacing}" O.C. | ATTACH: ${_attachDisplay}${_exact ? '' : ' — PENDING STRUCTURAL VERIFICATION'}`,
     secondaryHeader: isPlan ? 'SETBACK & OBSTRUCTION OVERLAY' : 'ATTACHMENT DETAIL — NTS',
     dataTitle:      isPlan ? 'SYSTEM DATA' : 'ATTACHMENT SPECS',
     dataRows,
     callouts,
+    generalNotes,
     requires:       isPlan
       ? ['roof', 'roof.planes', 'roof.planes[0].polygon']
       : ['roof', 'roof.planes'],

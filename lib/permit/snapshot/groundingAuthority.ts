@@ -67,10 +67,23 @@ export const GROUNDING_AUTHORITY_BLOCKER_CODE = 'QCABLE-GROUNDING-AUTHORITY-UNVE
  *  "separate EGC required", never "no EGC required", never PASS/VERIFIED. */
 export const GROUNDING_PENDING_LABEL = 'GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY';
 
-/** The non-orderable BOM label for the candidate open-air EGC row while PENDING
- *  (mirrors FASTENER_NON_ORDERABLE_LABEL — the established pattern). */
+/** PPC §1 — THE label the E-1 / PV-4B / SCHED *conductor* cells print for the
+ *  open-air branch section while the outcome is PENDING. It states BOTH facts a
+ *  reviewer needs and asserts NOTHING: the method is pending, and no installed
+ *  open-air EGC is being claimed. The previous cell derived a `#12 AWG Cu EGC …
+ *  with circuit conductors` string straight off groundingObjects[].conductorSize
+ *  — an INSTALLED-conductor assertion rendered on the same sheet as the PENDING
+ *  prose. Never "#12 EGC", never "with circuit conductors", never PASS. */
+export const GROUNDING_PENDING_BONDING_CELL_LABEL =
+  'OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED';
+
+/** PPC §1 — the non-orderable label for the CANDIDATE open-air EGC quantity while
+ *  PENDING (mirrors FASTENER_NON_ORDERABLE_LABEL — the established pattern). Ray's
+ *  binding wording: the quantity is a candidate, it cannot be ordered, and it is
+ *  NOT part of the approved installation. */
 export const GROUNDING_NON_ORDERABLE_LABEL =
-  'PROPOSED / DESIGN QUANTITY — NON-ORDERABLE / PENDING MANUFACTURER GROUNDING AUTHORITY';
+  'CANDIDATE DESIGN QUANTITY — NON-ORDERABLE / NOT PART OF THE APPROVED INSTALLATION / '
+  + 'PENDING EXACT MANUFACTURER AUTHORITY';
 
 // ── the document's OWN declared applicability ────────────────────────────────
 

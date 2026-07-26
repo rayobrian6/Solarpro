@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.417Z",
+  "artifact": "braidon-ppc-issue-state-language-scan",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§10 — ONE issue-state language accessor; approved-design language only on a digest-bound engineering approval",
+  "accessor": "projectIssueStateLanguage() — lib/permit/snapshot/projectAuthorityProjection.ts",
+  "language": {
+    "issueStatus": "PENDING ENGINEERING REVIEW",
+    "approved": false,
+    "openBlockers": 15,
+    "packageLabel": "DESIGN REVIEW PACKAGE",
+    "computedFromLabel": "SITE-COMPUTED FROM THE CURRENT DESIGN-REVIEW SNAPSHOT — NOT YET APPROVED",
+    "deviationReferenceLabel": "the design of record as issued for review",
+    "stateTag": "DESIGN REVIEW — NOT VERIFIED"
+  },
+  "before": {
+    "occurrences": [
+      {
+        "sheet": "PV-5",
+        "text": "RATED VALUES ON THIS SHEET ARE SITE-COMPUTED FROM THE APPROVED DESIGN"
+      },
+      {
+        "sheet": "PV-5",
+        "text": "Any deviation from the approved design shall be reported to the engineer of record."
+      },
+      {
+        "sheet": "CERT",
+        "text": "Any deviation from the approved design must be reported to the engineer of record prior to installation."
+      },
+      {
+        "sheet": "PE-1F (unreached on this design)",
+        "text": "Any deviations from the approved design shall be reported…"
+      },
+      {
+        "sheet": "PE-1G (unreached on this design)",
+        "text": "Any deviations from the approved design shall be reported…"
+      },
+      {
+        "sheet": "PE-1 roof variant (unreached)",
+        "text": "Any deviations from the approved design shall be reported…"
+      }
+    ],
+    "note": "the 3 PE-letter variants render only on fence / ground-mount / other roof jobs — they would have regressed gate 14 on those designs and are routed through the same accessor (deviationReferenceLabel)"
+  },
+  "after": {
+    "packageScan": {
+      "approved design": 0,
+      "approved plans": 0,
+      "engineer approved": 0,
+      "permit approved": 0,
+      "construction approved": 0
+    },
+    "pv5Basis": {
+      "honestBasisRendered": true,
+      "approvedDesignRendered": false,
+      "labelCountLinePreserved": true
+    },
+    "deviationReferenceLabel": "the design of record as issued for review"
+  },
+  "approvalPath": {
+    "rule": "only a digest-bound engineering approval may produce approved-design language",
+    "requires": "issueStatus ∈ {REVIEWED, PERMIT-READY, ISSUED FOR PERMIT} (V34 already requires those to be bound to the CURRENT digest) AND zero open blocking release items",
+    "currentIssueStatus": "PENDING ENGINEERING REVIEW",
+    "openBlockers": 15,
+    "approved": false
+  }
+}

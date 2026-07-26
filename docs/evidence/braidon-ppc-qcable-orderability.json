@@ -1,0 +1,157 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.416Z",
+  "artifact": "braidon-ppc-qcable-orderability",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§9 — the insufficient Q-Cable BOM row is ITSELF non-orderable; blocked rows can never enter an orderable export",
+  "before": {
+    "renderedRow": "Enphase | IQ Q-Cable (portrait) | Q-12-10-240 | 31 | ea",
+    "defect": "no row-level state at all — an operator reading the schedule continuation alone could order the insufficient quantity. The warning existed only in prose elsewhere.",
+    "seam": "bom-engine-v4 is a PRE-snapshot engine with no access to procurementSufficiency, so the fix is a post-pass in bomForPermit (mirroring the §5e fastener post-pass)."
+  },
+  "frozenFixture": {
+    "procurementSufficiency": {
+      "insufficient": false,
+      "totalDesignedInstalledFt": 140.5,
+      "requiredServiceLoopAllowanceFt": 0,
+      "thresholdFt": 140.5,
+      "procurementLengthFt": 152,
+      "deficitFt": 0
+    },
+    "trunkRows": [
+      {
+        "partNumber": "Q-12-10-240",
+        "manufacturer": "Enphase",
+        "quantity": 31,
+        "nonOrderable": false,
+        "nonOrderableReason": null
+      }
+    ],
+    "note": "SUFFICIENT on the frozen fixture — the row is correctly NOT marked; §9 is verified against the procurement-insufficient input below (audit §0 non-vacuity requirement)"
+  },
+  "procurementInsufficientInput": {
+    "procurementSufficiency": {
+      "insufficient": true,
+      "totalDesignedInstalledFt": 140.5,
+      "requiredServiceLoopAllowanceFt": 26,
+      "allowanceProvenance": "ppc-harness-synthetic-allowance-authority",
+      "thresholdFt": 166.5,
+      "procurementLengthFt": 152,
+      "deficitFt": 14.5,
+      "verificationStatus": "insufficient-unresolved"
+    },
+    "trunkRows": [
+      {
+        "partNumber": "Q-12-10-240",
+        "manufacturer": "Enphase",
+        "quantity": 31,
+        "nonOrderable": true,
+        "nonOrderableReason": "STATUS: NON-ORDERABLE · REASON: QCABLE-PROCUREMENT-INSUFFICIENT · DESIGNED-INSTALLED 140.5 FT · ALLOWANCE 26 FT (ppc-harness-synthetic-allowance-authority) · THRESHOLD 166.5 FT · CURRENT BASE 152 FT · DEFICIT 14.5 FT · EXTENSION SOLUTION NOT SELECTED",
+        "selectedCableIdentityKept": true,
+        "orderableForProcurement": false
+      }
+    ],
+    "procurementApproval": {
+      "totalLineItems": 48,
+      "orderableLineItems": 36,
+      "excludedLineItems": 12,
+      "excludedByClass": {
+        "non-orderable-design-quantity": 11,
+        "quantity-pending": 1
+      },
+      "partial": true,
+      "exclusions": [
+        {
+          "category": "sealing_cap",
+          "partNumber": "Q-SEAL-10",
+          "quantity": 0,
+          "unit": "ea",
+          "exclusionClass": "quantity-pending"
+        },
+        {
+          "category": "trunk_cable",
+          "partNumber": "Q-12-10-240",
+          "quantity": 31,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "wire",
+          "partNumber": "GRN-OPENAIR-12",
+          "quantity": 162,
+          "unit": "ft",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "end_clamp",
+          "partNumber": "TBD",
+          "quantity": 8,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "grounding",
+          "partNumber": "TBD",
+          "quantity": 31,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "l_foot",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "lag_bolt",
+          "partNumber": "PENDING-FASTENER-VERIFICATION",
+          "quantity": 128,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "mid_clamp",
+          "partNumber": "TBD",
+          "quantity": 60,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "mount_hardware",
+          "partNumber": "TBD",
+          "quantity": 64,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "racking",
+          "partNumber": "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "quantity": 1,
+          "unit": "lot",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "rail",
+          "partNumber": "TBD",
+          "quantity": 20,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "splice",
+          "partNumber": "TBD",
+          "quantity": 16,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        }
+      ]
+    },
+    "exportGate": {
+      "rule": "a blocked row can never enter an orderable export",
+      "exportedRowCount": 36,
+      "blockedRowCount": 12,
+      "anyBlockedRowExported": false
+    }
+  }
+}

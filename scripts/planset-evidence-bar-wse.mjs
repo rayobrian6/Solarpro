@@ -199,10 +199,19 @@ if (isMicro) {
       !assertsNoEgc, assertsNoEgc ? 'a no-EGC assertion is rendered' : 'none');
     check(7, 'the blocking QCABLE-GROUNDING-AUTHORITY-UNVERIFIED code is shown',
       noB64.includes('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED'));
-    check(7, 'the candidate EGC quantity is a NON-ORDERABLE design quantity',
-      g.bomRowState === 'design-quantity-non-orderable' && g.nonOrderable === true
-      && noB64.includes('NON-ORDERABLE / PENDING MANUFACTURER GROUNDING AUTHORITY'),
-      `bomRowState=${g.bomRowState} labelRendered=${noB64.includes('NON-ORDERABLE / PENDING MANUFACTURER GROUNDING AUTHORITY')}`);
+    // PPC §1 — Ray's mandated CANDIDATE label. Asserted by its three required
+    // clauses (class), not by one fixed sentence: the candidate quantity is a
+    // candidate, is not orderable, and is NOT part of the approved installation.
+    {
+      const _candidateClauses = /CANDIDATE DESIGN QUANTITY/i.test(noB64)
+        && /NON-ORDERABLE/i.test(noB64)
+        && /NOT PART OF THE APPROVED INSTALLATION/i.test(noB64)
+        && /PENDING EXACT MANUFACTURER AUTHORITY/i.test(noB64);
+      check(7, 'the candidate EGC quantity is a NON-ORDERABLE candidate design quantity',
+        g.bomRowState === 'design-quantity-non-orderable' && g.nonOrderable === true
+        && _candidateClauses,
+        `bomRowState=${g.bomRowState} candidateLabelClauses=${_candidateClauses}`);
+    }
     check(7, 'no PASS / VERIFIED grounding claim is rendered for this section',
       !/grounding[^.<]{0,60}✓\s*PASS/i.test(noB64)
     // case-SENSITIVE: a claim token 'VERIFIED', never the lowercase prose

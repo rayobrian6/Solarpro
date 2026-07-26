@@ -28,7 +28,9 @@ import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { projectStructuralFromInput, fmt, fmtStr, findCheck, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
-import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import {
+  projectProjectAuthorityFromInput, projectIssueStateLanguageFromInput,
+} from '../snapshot/projectAuthorityProjection';
 
 /** D-6 (Ray, binding 2026-07-20) / snapshot V13 / W4 correction Section 2:
  *  certification language may activate ONLY when the snapshot carries an
@@ -55,6 +57,17 @@ export function certificationApproved(input: PermitInput): boolean {
 function issueStateLabel(input: PermitInput): string {
   const pa = projectProjectAuthorityFromInput(input);
   return pa.issueStatus ?? 'DESIGN DRAFT';
+}
+
+/** PPC §10 / gate 14 — how a contractor-deviation clause on THIS sheet must refer
+ *  to the design of record. Never the literal "the approved design": that phrase
+ *  is produced only by the ONE issue-state language accessor, and only when a
+ *  digest-bound engineering approval exists with nothing blocking release. The
+ *  PE-letter certification blocks gate on `certificationApproved()` (digest-bound
+ *  review) which can still be true while blocking release items are open, so the
+ *  language must come from the accessor rather than from the block's own gate. */
+function deviationReference(input: PermitInput): string {
+  return projectIssueStateLanguageFromInput(input).deviationReferenceLabel;
 }
 
 export function certificationGateBanner(input: PermitInput): string {
@@ -222,7 +235,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
         <strong>LIMITATION OF LIABILITY:</strong>
         This engineering document is prepared for the specific project and installation address identified herein; it is not transferable to other projects or locations.
         The engineer of record's liability is limited to the engineering design as documented. The installing contractor is responsible for field verification of all conditions,
-        adherence to manufacturer installation requirements, and compliance with all applicable building codes. Any deviation from the approved design must be reported to the
+        adherence to manufacturer installation requirements, and compliance with all applicable building codes. Any deviation from ${escapeH(deviationReference(input))} must be reported to the
         engineer of record prior to installation. This document expires 180 days from the date of certification unless extended in writing by the engineer of record.
       </div>
 
@@ -429,7 +442,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
                 wind overturning and lateral loads at the design wind speed of ${windSpeed} mph, Exposure Category ${exposure},
                 per ${asce} &sect;29.4 (Cf = 1.3). Dead load and ground snow load per ${asce} &sect;26 and &sect;7 respectively.
                 Field conditions shall be verified by the installing contractor.
-                Any deviations from the approved design shall be reported to the engineer of record prior to installation.
+                Any deviations from ${escapeH(deviationReference(input))} shall be reported to the engineer of record prior to installation.
               </div>
             </div>
           </div>` : _pePendingCertStatement()}
@@ -538,7 +551,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
                 per ${asce} &sect;27. Ground snow load per ${asce} &sect;7 (slope reduction factor per array tilt angle
                 of ${tiltDeg}&deg;). Geotechnical conditions shall be confirmed by a licensed geotechnical engineer.
                 Field conditions shall be verified by the installing contractor.
-                Any deviations from the approved design shall be reported to the engineer of record prior to installation.
+                Any deviations from ${escapeH(deviationReference(input))} shall be reported to the engineer of record prior to installation.
               </div>
             </div>
           </div>` : _pePendingCertStatement()}
@@ -739,7 +752,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
                 per ${asce} &sect;26/27. Roof framing of ${rafterSize} @ ${rafterSpace}" O.C. (${_isTruss ? 'truss' : 'stick'} construction, span ${rafterSpanFt} ft) confirmed adequate for
                 the combined dead load (${totalLoadPsf} psf), wind, and snow loading per IBC Section 1607 and ${asce} &sect;2.3.
                 Field conditions shall be verified by the installing contractor.
-                Any deviations from the approved design shall be reported to the engineer of record prior to installation.
+                Any deviations from ${escapeH(deviationReference(input))} shall be reported to the engineer of record prior to installation.
               </div>` : `
               <div class="f-sm mt-xs" style="line-height:1.6;border:2px solid #cc0000;padding:var(--xs);">
                 <strong style="color:#cc0000;">STRUCTURAL REVIEW REQUIRED &mdash; DO NOT ISSUE:</strong>

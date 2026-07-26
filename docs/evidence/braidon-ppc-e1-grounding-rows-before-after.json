@@ -1,0 +1,72 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.359Z",
+  "artifact": "braidon-ppc-e1-grounding-rows-before-after",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§1 — E-1 must not assert an installed open-air EGC",
+  "authority": {
+    "outcome": "PENDING_MANUFACTURER_AUTHORITY",
+    "verificationState": "PENDING MANUFACTURER AUTHORITY — fail-closed; no grounding conclusion is drawn for this section",
+    "renderLabel": "GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY",
+    "bomRowState": "design-quantity-non-orderable",
+    "candidateQuantityFt": 162,
+    "conductorSizeCandidate": "#12 AWG"
+  },
+  "before": {
+    "surface": "projectE1PhysicalSchedule() BRANCH_RUN section, bonding column",
+    "source": "electricalProjection.ts:932 — bonding: `${egc} Cu EGC (NEC 250.122 @ ${b.ocpdA}A) — with circuit conductors`",
+    "renderedValue": "#12 AWG Cu EGC (NEC 250.122 @ 20A) — with circuit conductors",
+    "defect": "an INSTALLED-conductor assertion derived from groundingObjects[].conductorSize, never consulting the grounding authority; the same sheet simultaneously printed PENDING MANUFACTURER AUTHORITY in its prose block",
+    "groundingSegmentId": null
+  },
+  "after": [
+    {
+      "sectionId": "BRANCH_RUN",
+      "sectionLabel": "AC BRANCH B1 — Q-CABLE TRUNK (OPEN AIR)",
+      "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
+      "bondingPendingAuthority": true,
+      "groundingSegmentId": "gnd-br-1"
+    },
+    {
+      "sectionId": "BRANCH_RUN",
+      "sectionLabel": "AC BRANCH B2 — Q-CABLE TRUNK (OPEN AIR)",
+      "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
+      "bondingPendingAuthority": true,
+      "groundingSegmentId": "gnd-br-1"
+    },
+    {
+      "sectionId": "BRANCH_RUN",
+      "sectionLabel": "AC BRANCH B3 — Q-CABLE TRUNK (OPEN AIR)",
+      "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
+      "bondingPendingAuthority": true,
+      "groundingSegmentId": "gnd-br-1"
+    }
+  ],
+  "inRacewayRowsUnchangedAndSeparate": [
+    {
+      "sectionId": "BRANCH_HOMERUN_RUN",
+      "bonding": "#12 AWG Cu EGC in raceway (NEC 250.122)",
+      "groundingSegmentId": "GRN-HOMERUN-RACEWAY-EGC"
+    },
+    {
+      "sectionId": "COMBINER_TO_DISCO_RUN",
+      "bonding": "#10 AWG Cu EGC in raceway (NEC 250.122)",
+      "groundingSegmentId": "GRN-COMBINER_TO_DISCO_RUN-EGC"
+    },
+    {
+      "sectionId": "DISCO_TO_METER_RUN",
+      "bonding": "#10 AWG Cu EGC in raceway (NEC 250.122)",
+      "groundingSegmentId": "GRN-DISCO_TO_METER_RUN-EGC"
+    },
+    {
+      "sectionId": "svc-tap-conductors",
+      "bonding": "EGC with the service conductors (NEC 250.122) — service/enclosure bonding domain",
+      "groundingSegmentId": "GRN-SERVICE-BOND"
+    }
+  ],
+  "renderedProof": {
+    "openAirPendingLabelOccurrences": 4,
+    "notAssertedOccurrences": 4,
+    "retiredLiteralOccurrences": 0
+  }
+}

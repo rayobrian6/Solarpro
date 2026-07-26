@@ -1,0 +1,83 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.393Z",
+  "artifact": "braidon-ppc-pv3-authority-before-after",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§4 — PV-3 consumes FastenerAssembly + EquipmentDocumentApplicability + MountAssemblyAuthority + RackingAssemblyAuthority",
+  "rootCause": "THE headline finding — TWO rendering stacks, one authority layer. lib/permit/sections/* was wired to the snapshot; lib/drafting/* (PV-1, PV-3 and the CAD templates) was fed a flat descriptor and was NOT. `grep spacingAuthority lib/drafting` returned 0 hits, and neither drafting file imported projectFastenerAssembly or evaluateDocumentApplicability. That is why four consecutive authority campaigns all \"landed\" while PV-3 kept printing exact instructions.",
+  "authority": {
+    "fastenerVerification": "unverified",
+    "fastenerNonOrderable": true,
+    "fastenerMaterial": null,
+    "pilotRuleLabel": "no pilot hole",
+    "exactInstructionsAllowed": false,
+    "conditions": {
+      "exactSkuSelected": false,
+      "documentApplicabilityVerified": false,
+      "documentArchivedHashBound": false,
+      "fastenerAssemblyVerified": false,
+      "selectionBoundToCurrentDigest": true
+    },
+    "pendingLines": [
+      "FASTENER ASSEMBLY: PENDING VERIFIED SELECTION",
+      "INSTALLATION DETAILS: NOT ESTABLISHED",
+      "DOCUMENT APPLICABILITY: RT-MINI II MANUAL NOT VERIFIED FOR SELECTED RT-MINI",
+      "REFERENCE DETAIL: NON-AUTHORITATIVE — DO NOT INSTALL FROM THIS DETAIL"
+    ],
+    "referenceDetailBanner": "REFERENCE DETAIL: NON-AUTHORITATIVE — DO NOT INSTALL FROM THIS DETAIL"
+  },
+  "before": {
+    "renderedInstructions": [
+      "5/16\" DIA × 3.5\" STRUCTURAL WOOD SCREW (leader ④)",
+      "2.5\" MIN EMBED / EMBEDMENT: 2.5\" MIN INTO RAFTER",
+      "DRIVE TORQUE: 8–12 FT-LBS — NO OVERDRIVE (FABRICATED from the fastener diameter)",
+      "PILOT HOLE: 7/32\" DIA — RAFTER CENTER (FABRICATED, and it CONTRADICTED the authority: the racking record sets pilotHoleRequired:false / 'no pilot hole')",
+      "LAG BOLT: …, 316 SS (asserted a COATING while FastenerAssembly.material is null)",
+      "ALPHASEAL BUTYL FLASHING (SELF-SEAL) — hardcoded product name",
+      "WATERPROOFING notes: SEALANT AT EVERY LAG, 1-1/2\" MIN EDGE DISTANCE"
+    ],
+    "sharpestFinding": "PV-3 printed a pilot-hole requirement the snapshot explicitly negates, and attributed its dimensions to a manual whose own applicability note on the SAME sheet said \"NOT AUTHORITATIVE\"."
+  },
+  "after": {
+    "pendingBlockRendered": [
+      "FASTENER ASSEMBLY: PENDING VERIFIED SELECTION",
+      "INSTALLATION DETAILS: NOT ESTABLISHED",
+      "DOCUMENT APPLICABILITY: RT-MINI II MANUAL NOT VERIFIED FOR SELECTED RT-MINI",
+      "REFERENCE DETAIL: NON-AUTHORITATIVE — DO NOT INSTALL FROM THIS DETAIL"
+    ],
+    "referenceDetailBannerRendered": true,
+    "withheldClasses": {
+      "diameter": {
+        "renderedOnPv3": false
+      },
+      "lengthSpec": {
+        "renderedOnPv3": false
+      },
+      "embedment": {
+        "renderedOnPv3": false
+      },
+      "torque": {
+        "renderedOnPv3": false
+      },
+      "pilot": {
+        "renderedOnPv3": false
+      },
+      "coating": {
+        "renderedOnPv3": false
+      },
+      "sealantProduct": {
+        "renderedOnPv3": false
+      },
+      "screwCount": {
+        "renderedOnPv3": false
+      }
+    },
+    "fabricatedDerivationsDeleted": {
+      "rule": "no installation parameter may be derived from another dimension without a cited document",
+      "torqueDeclarationInSource": false,
+      "pilotDeclarationInSource": false
+    },
+    "detailStillRenders": true
+  },
+  "standingRule": "An authority projection is NOT landed until the lib/drafting descriptor consumes it. A grep of lib/permit/sections alone is never sufficient evidence."
+}

@@ -246,7 +246,33 @@ export interface RackingBOMRow {
   pending?: boolean;
   /** false ⇒ not an orderable procurement line (excluded from totals). */
   orderable?: boolean;
+  /** PPC §5 — Ray's canonical procurement classification (A/B/C/D). Every row
+   *  carries one; the label is the rendered text. See PROCUREMENT_CLASS_LABEL. */
+  procurementClass?: ProcurementClass;
+  /** false ⇒ the row's manufacturer may NOT be displayed (no verified assembly). */
+  manufacturerDisplayAllowed?: boolean;
+  /** false ⇒ the row's part number may NOT be displayed as a selected SKU. */
+  skuDisplayAllowed?: boolean;
 }
+
+// ── PPC §5 — PROCUREMENT CLASSIFICATION (Ray's A/B/C/D) ───────────────────────
+// A row's class is authority, not cosmetics: only class A may be ordered, appear
+// in an authoritative procurement total, or display a manufacturer / exact SKU.
+//   A VERIFIED / ORDERABLE            — exact selected part, verified authority
+//   B DESIGN QUANTITY / NON-ORDERABLE — quantity is geometry-derived and real, but
+//                                       the exact part depends on an UNSELECTED
+//                                       assembly (Ray: 'PENDING RACKING ASSEMBLY
+//                                       SELECTION'); no mfr / SKU may print
+//   C CANDIDATE / NOT SELECTED        — a proposed part with no selection at all
+//   D EXCLUDED FROM TOTALS            — modeled at zero / not applicable
+export type ProcurementClass = 'A' | 'B' | 'C' | 'D';
+
+export const PROCUREMENT_CLASS_LABEL: Record<ProcurementClass, string> = {
+  A: 'VERIFIED — ORDERABLE',
+  B: 'DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION',
+  C: 'CANDIDATE — NOT SELECTED',
+  D: 'EXCLUDED FROM TOTALS',
+};
 
 export interface RackingBOM {
   /** Mounting-system manufacturer (from the hardware DB) — lets BOM consumers
@@ -1079,11 +1105,17 @@ function calcRackingBOM(
   // UI data, never permit BOM authority, until then.
   const railUnpinned = isRailBased && !system.rail;
   if (railUnpinned) {
-    const PENDING_TAIL = 'PENDING RACKING ASSEMBLY SELECTION — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION';
+    const PENDING_TAIL = `${PROCUREMENT_CLASS_LABEL.B} — assembly-dependent on the unselected rail SKU · NOT FOR PERMIT SUBMISSION`;
     const gate = (row: RackingBOMRow, part: string): void => {
       row.partNumber = null;
       row.pending = true;
       row.orderable = false;
+      // PPC §5 — the row is class B and NEITHER its manufacturer NOR a SKU may be
+      // displayed: the rendered SCHED-3 rows still carried an intact 'Roof Tech'
+      // manufacturer cell beside the pending prose, which reads as a selected part.
+      row.procurementClass = 'B';
+      row.manufacturerDisplayAllowed = false;
+      row.skuDisplayAllowed = false;
       row.description = `${part} — ${PENDING_TAIL}`;
     };
     gate(bom.rails, 'Rail');
@@ -1093,6 +1125,59 @@ function calcRackingBOM(
     gate(bom.endClamps, 'End clamp');
     gate(bom.mountingBolts, 'Rail T-bolt / mount-to-rail bolt');
     gate(bom.bondingClips, 'Module-frame bonding (UL 2703)');
+    // PPC §5 — the MOUNT-BASE line too (Ray). `system.mount.model` is a MODEL,
+    // never a verified purchase SKU — the canonical racking record itself records
+    // `mountSku: null` while the BOM printed 'RT-MINI-01' from the equipment
+    // registry as though a part had been selected. The quantity (one per
+    // attachment) is real and stays; the SKU/manufacturer display does not.
+    bom.mounts.pending = true;
+    bom.mounts.orderable = false;
+    bom.mounts.procurementClass = 'B';
+    bom.mounts.manufacturerDisplayAllowed = false;
+    bom.mounts.skuDisplayAllowed = false;
+    bom.mounts.description = `Roof attachment mount base (${mountLayout.mountSpacingIn}" spacing) — ${PENDING_TAIL}`;
+  }
+
+  // ── PPC §5 — classify EVERY row (no row leaves the engine unclassified) ──────
+  // Rows the gate above already handled keep class B. A zero-quantity / N-A row is
+  // class D (excluded from totals). A row with an exact part number and a verified
+  // assembly is class A; a row with no part number and no selection is class C.
+  // The engine sees the ASSEMBLY (rail pinned or not) but not the permit-readiness
+  // authorities (fastener verification, archived capacity document, document
+  // applicability). Its classification is therefore a BASELINE that the authority
+  // layer may only LOWER, never raise: `bomForPermit` downgrades the roof fastener
+  // row while FASTENER-ASSEMBLY-UNVERIFIED is active, and the canonical snapshot
+  // rows are classified in `lib/permit/snapshot/structuralBom.ts` with the full
+  // authority in hand. Mount-base parts that do NOT depend on the rail selection
+  // (lag/structural fastener, NEC 690.47 ground lugs, self-flashing) keep their
+  // engine-level orderability here — that carve-out is the CO-C §11 ruling.
+  {
+    const _classify = (row: RackingBOMRow | undefined): void => {
+      if (!row || row.procurementClass) return;
+      if (!(row.qty > 0) || /^N\/A/i.test(row.description)) {
+        row.procurementClass = 'D';
+        row.orderable = false;
+        row.manufacturerDisplayAllowed = false;
+        row.skuDisplayAllowed = false;
+        return;
+      }
+      if (row.partNumber) {
+        row.procurementClass = 'A';
+        row.orderable = row.orderable ?? true;
+        row.manufacturerDisplayAllowed = true;
+        row.skuDisplayAllowed = true;
+        return;
+      }
+      // No exact part at all — a CANDIDATE, never an orderable line.
+      row.procurementClass = 'C';
+      row.orderable = false;
+      row.manufacturerDisplayAllowed = false;
+      row.skuDisplayAllowed = false;
+    };
+    for (const _k of ['rails', 'railSplices', 'mounts', 'lFeet', 'midClamps', 'endClamps',
+      'groundLugs', 'lagBolts', 'mountingBolts', 'flashingKits', 'bondingClips'] as const) {
+      _classify(bom[_k] as RackingBOMRow | undefined);
+    }
   }
 
   // ── Ballast Blocks (commercial) ────────────────────────────────────────

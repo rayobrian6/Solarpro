@@ -45,7 +45,7 @@ import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { collectEquipmentDocumentBlockers } from './equipmentProjection';
 import { classifyBlockerSeverity } from './severityPolicy';
-import { buildProcurementSufficiency, procurementInsufficiencyPayload } from './procurementSufficiency';
+import { buildProcurementSufficiency, procurementInsufficiencyPayload, type QCableServiceLoopAllowance } from './procurementSufficiency';
 import {
   resolveOpenAirGroundingAuthority, buildGroundingDomainGraph,
   GROUNDING_AUTHORITY_BLOCKER_CODE, type GroundingDocumentEvidence,
@@ -93,6 +93,12 @@ export function buildPermitDesignSnapshot(
      *  Empty/undefined ⇒ no solution ⇒ QCABLE-PROCUREMENT-INSUFFICIENT stays firing
      *  when the design is short (the honest live outcome today). */
     cableExtensionSolutions?: CableExtensionSolution[] | null;
+    /** §Q — a DOCUMENTED Q-Cable service-loop / transition allowance. STRICTER-
+     *  ONLY: it raises the sufficiency threshold and can never clear a deficit.
+     *  null/undefined ⇒ allowance 0 with provenance
+     *  `no-allowance-authority-recorded` (byte-identical to before this seam, so
+     *  a design without one keeps its digest). */
+    qcableServiceLoopAllowance?: QCableServiceLoopAllowance | null;
     /** §2 (BAR) — VERIFIED climate-hazard source (ASCE 7 Hazard-Tool report / AHJ
      *  climate ordinance) resolved by the caller through lib/documents. null ⇒ no
      *  archived source ⇒ operator-entered wind/snow stay UNVERIFIED ⇒
@@ -855,6 +861,7 @@ export function buildPermitDesignSnapshot(
       branchPaths: branchCablePaths,
       selectedSystem: `${_microMfr} ${_microModel}`.trim() || (listedCableAssembly?.wiringMethodLabel ?? 'micro / Q Cable'),
       solutions: opts?.cableExtensionSolutions ?? [],
+      serviceLoopAllowance: opts?.qcableServiceLoopAllowance ?? null,
     });
 
     // §7/§10 — patch the canonical BRANCH_RUN route segment length taxonomy so
@@ -1180,6 +1187,11 @@ export function buildPermitDesignSnapshot(
             candidateQuantityFt: ga.quantityFt,
             bomRowState: ga.bomRowState,
             verificationStatus: ga.verificationStatus,
+            // PPC §2 — Ray's RS-1 field list requires the AFFECTED SEGMENT IDS on
+            // the grounding payload (the schema-typed component renders them).
+            affectedSegmentIds: ga.segmentIds,
+            affectedBranchIds: ga.branchIds,
+            resolutionRequirement: ga.resolutionRequirement,
           },
           provenance: { source: 'electrical.openAirGroundingAuthority', ref: ga.selectedCableAssemblySku },
         });

@@ -65,6 +65,58 @@ const pe1 = pageWhere(p => p.includes('data-env-source="pe-1"')).pop() ?? '';
 const sched = pageWhere(p => p.includes('PAGE CONCLUSION — EQUIPMENT SCHEDULE')
   || p.includes('PAGE CONCLUSION &mdash; EQUIPMENT SCHEDULE')).pop() ?? '';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PPC §1 — THE INSTALLED-OPEN-AIR-EGC ASSERTION-CLASS SCANNER (gate 1).
+//
+// Written against the CLASS of statement, never an enumerated phrase list. The
+// retired gate tested three "separate EGC" wordings, so the E-1 schedule's own
+// bonding cell (`#12 AWG Cu EGC (NEC 250.122 @ 20A) — with circuit conductors`)
+// sailed through every campaign. Cross-checked by the same predicate in
+// tests/planset/ppc-ws1-projection-procurement.test.ts.
+//
+// A violation is any rendered statement that, inside a BLOCK about the open-air /
+// listed-cable-assembly section (block scope matters: in a schedule the section
+// label and its bonding cell are two <td>s of the same <tr>), names an equipment
+// grounding conductor AND presents it as installed — by stating a conductor size
+// or by using an installation predicate — without an explicit pending / candidate
+// / negating qualifier.
+// ═══════════════════════════════════════════════════════════════════════════
+const _CTX_OPEN_AIR = /open[- ]air|q[- ]?cable|branch trunk|free air|690\.31\(c\)/i;
+const _TOK_EGC = /\begc\b|equipment grounding conductor|grounding conductor/i;
+const _TOK_SIZE = /#\s?\d+(?:\/0)?\s*awg|#\s?\d+\b/i;
+const _PRED_INSTALLED =
+  /\b(installed|install|is run|are run|run with|routed with|with circuit conductors|shall be run|provide|provided|is required|are required|required by)\b/i;
+const _QUAL_PENDING =
+  /not asserted|pending manufacturer authority|pending exact manufacturer authority|candidate design quantity|non-orderable|not established|not determinative|not part of the approved installation|pending\b/i;
+const _QUAL_NEGATED =
+  /\bno\s+(additional\s+|separate\s+|raceway\s+)?(equipment grounding conductor|egc|grounding conductor)\b|\bis not (installed|required|asserted)\b|\bnone (is |are )?(installed|required)\b/i;
+
+function installedOpenAirEgcAssertions(sourceHtml) {
+  const strip = (h) => h
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/data:image[^"')]+/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(td|span|strong|em|text|th)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&mdash;/g, '—').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&rsquo;/g, "'");
+  const out = [];
+  // SVG has no rows: each <text>/<g> label is its own block, otherwise every
+  // legitimate IN-RACEWAY EGC label in the single-line diagram would inherit the
+  // diagram's open-air context.
+  for (const block of sourceHtml.split(/<\/tr>|<\/div>|<\/li>|<\/p>|<\/table>|<\/text>|<\/g>|<\/svg>/i)) {
+    const text = strip(block);
+    if (!_CTX_OPEN_AIR.test(text)) continue;
+    for (const seg of text.split(/\n+|(?<=[.;])\s+|\s·\s/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean)) {
+      if (!_TOK_EGC.test(seg)) continue;
+      if (!(_TOK_SIZE.test(seg) || _PRED_INSTALLED.test(seg))) continue;
+      if (_QUAL_PENDING.test(seg) || _QUAL_NEGATED.test(seg)) continue;
+      out.push(seg);
+    }
+  }
+  return out;
+}
+
 const gates = [];
 const gate = (num, id, ok, detail, evidence) => {
   gates.push({ gate: num, id, ok: !!ok, detail: detail ?? null, evidence: evidence ?? null });
@@ -283,13 +335,31 @@ if (wseArt?.openAirBranchGrounding?.outcome) {
     rcheck('groundingPendingRendered', 'GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY',
       noB64.includes('GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY')
       && noB64.includes('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED'));
-    rcheck('groundingNoAssertionWhilePending', 'no separate-EGC / no-EGC assertion',
-      !/SEPARATE\s+(EQUIPMENT GROUNDING CONDUCTOR|EGC)/i.test(noB64)
-      && !/SEPARATE\s+#?\d+[^.]{0,40}EGC/i.test(noB64)
-      && !/no (separate |additional )?EGC (is )?required/i.test(noB64));
+    // PPC §1 / GATE 1 — the ASSERTION-CLASS scan. The retired check was a PHRASE
+    // LIST (three regexes for "separate EGC" wordings), which is precisely why
+    // `#12 AWG Cu EGC (NEC 250.122 @ 20A) — with circuit conductors` — an
+    // INSTALLED-conductor assertion in the E-1 schedule's own bonding column —
+    // passed cleanly through four consecutive authority campaigns. The gate now
+    // asserts on the CLASS: zero rendered statements that name an EGC inside an
+    // open-air/listed-cable-assembly context and present it as installed.
+    const _assertions = installedOpenAirEgcAssertions(rawHtml);
+    rcheck('groundingNoAssertionWhilePending', 'zero installed-open-air-EGC assertions',
+      _assertions.length === 0, { assertions: _assertions.slice(0, 8) });
     rcheck('groundingCandidateNonOrderable', 'design-quantity-non-orderable',
       gr.bomRowState === 'design-quantity-non-orderable'
-      && noB64.includes('NON-ORDERABLE / PENDING MANUFACTURER GROUNDING AUTHORITY'));
+      // Ray's mandated candidate-EGC label (all three clauses, class not phrase)
+      && /CANDIDATE DESIGN QUANTITY/i.test(noB64)
+      && /NON-ORDERABLE/i.test(noB64)
+      && /NOT PART OF THE APPROVED INSTALLATION/i.test(noB64));
+    // PPC §7 / GATE 10 — no rendered grounding conductor row without a canonical
+    // GroundingSegment id (the legacy PV-4B project-level EGC row had none).
+    const _gsegTags = (noB64.match(/data-grounding-segment-id="([^"]*)"/g) ?? [])
+      .map(t => (t.match(/="([^"]*)"/) ?? [])[1]);
+    rcheck('groundingRowsCarrySegmentId', 'every grounding row has a groundingSegmentId',
+      _gsegTags.length > 0 && _gsegTags.every(v => v && v.trim().length > 0),
+      { renderedSegmentIds: _gsegTags });
+    rcheck('legacyProjectLevelEgcRowDeleted', 'no Array→AC-Disconnect(ground bus) EGC row',
+      !/AC Disconnect \(ground bus\)/i.test(noB64));
   } else if (gr.outcome === 'SEPARATE_EGC_REQUIRED' && gr.bomFootageFt != null) {
     rcheck('openAirEgcFootage', gr.bomFootageFt,
       (noB64.match(new RegExp(`${gr.bomFootageFt}\\s*ft`, 'g')) ?? []).length >= 2);

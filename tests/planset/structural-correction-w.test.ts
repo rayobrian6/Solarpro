@@ -184,8 +184,12 @@ describe('§10 — RT-MINI exact racking assembly', () => {
     expect(/rail-?less/i.test(html)).toBe(false);
     expect(html).not.toContain('RAIL-COMPAT');
     expect(html).not.toContain('Rail-less / direct-attach');
-    // the ONE fastener spec (5/16" wood screw) — not a 3/8" lag, not a 4" SS lag
-    expect(html).toMatch(/STRUCTURAL WOOD SCREW/);
+    // PPC §4 SUPERSEDES the positive half of this assertion: while the fastener
+    // assembly is UNVERIFIED (and the on-file RT-MINI II document is not applicable
+    // to the selected RT-MINI) NO exact fastener spec may render on ANY sheet — the
+    // ONE canonical pending label prints instead. The negative assertions stand:
+    // whatever renders is never a 3/8" lag or a 4" SS lag.
+    expect(html).toMatch(/PENDING VERIFIED (FASTENER ASSEMBLY|SELECTION)/);
     expect(html).not.toMatch(/3\/8&quot; diameter/);
     expect(html).not.toMatch(/4&quot; SS LAG/);
   });

@@ -1056,6 +1056,8 @@ export function generatePermitHTML(
       // (operator selection + verified lib/documents record). Empty today ⇒
       // QCABLE-PROCUREMENT-INSUFFICIENT stays firing when the design is short.
       cableExtensionSolutions: snapshotAuthority?.cableExtensionSolutions ?? [],
+      // §Q — DOCUMENTED service-loop allowance (stricter-only; null ⇒ allowance 0).
+      qcableServiceLoopAllowance: snapshotAuthority?.qcableServiceLoopAllowance ?? null,
       // BAR §2 — async-resolved VERIFIED climate-hazard source (ASCE 7 Hazard-Tool
       // report / AHJ climate ordinance extract). null ⇒ operator-entered wind/snow
       // stay OBSERVATION/OVERRIDE ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires.
@@ -2038,7 +2040,12 @@ export function generatePermitHTML(
   }
 
   /* ── NEC rules summary bar ──────────────────────────────────────────────── */
-  .rules-summary { display: flex; flex-direction: row; border: var(--border); border-bottom: none; margin-bottom: var(--xs); overflow: hidden; }
+  /* PPC gate 17 — flex-shrink:0. As a shrinkable flex item in the page-content
+     column this tile row was squeezed to clientHeight 0 (its numbers CLIPPED away
+     entirely) the moment PV-4A carried one more electrical blocker line. A status
+     summary that silently disappears under content pressure is the same class of
+     defect as a clipped page conclusion. */
+  .rules-summary { display: flex; flex-direction: row; flex-shrink: 0; border: var(--border); border-bottom: none; margin-bottom: var(--xs); overflow: hidden; }
   .rs { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--xs) var(--sm); border-right: var(--border); flex: 1; }
   .rs:last-child { border-right: none; }
   .rs-val { font-size: var(--f-3xl); font-weight: 900; color: #000; font-family: var(--mono); }

@@ -38,7 +38,16 @@ import {
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { microMaxPerBranch, microBranchMaxOcpdA } from '../utils/branching';
 import { peekSnapshot } from '../snapshot/read';
+// PPC §6 — the SCHED branch matrix projects the canonical route / grounding
+// authorities (read-only) beside the per-branch procurement sufficiency. No sheet
+// re-derives any of them, and none is invented per branch: route carries a GLOBAL
+// verification state + a per-branch length PROVENANCE, grounding is ONE global
+// outcome scoped by branchIds, only procurement genuinely varies per branch.
+import { routeVerificationStatus, routeVerificationLabel, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 import { projectListedCableAssembly } from '../snapshot/electricalProjection';
+// PPC §5/§9 — the AUTHORITATIVE PROCUREMENT TOTAL / orderable-export subset. The
+// schedule renders this COMPUTED object; it no longer asserts exclusions in prose.
+import { buildProcurementApproval, type PermitBOMItem } from '../utils/bomForPermit';
 
 
 export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
@@ -755,10 +764,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // requirements block used to print "3/8" / 48" max" beside a lag analysis
   // that resolved 5/16" @ 24" for the same job.
   const _mountSel   = project.mountingSystemId ? getMountingSystemById(project.mountingSystemId) : undefined;
-  const attachSpace = structural?.attachment?.maxAllowedSpacing
-    || project.attachmentSpacing
-    || _mountSel?.mount?.maxSpacingIn
-    || 48;
+  // PPC §3 — DEAD + mis-modelled: this read `compliance.structural.attachment
+  // .maxAllowedSpacing` (the same legacy field whose NAME was the §3 root cause)
+  // and had NO consumer. The canonical spacing authority (`_spc`, below) is the
+  // ONE source every PV-4C/PV-4C.1 spacing string projects.
   const _fracIn = (v: number) =>
     v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
   // §12 — the ONE canonical fastener assembly (identical projection on PV-3 /
@@ -974,8 +983,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <div style="margin-bottom:3px;">2. Flashing: Aluminum or stainless steel base flashing installed under existing roofing material per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">3. Sealant: Polyurethane or silicone roofing sealant at all roof penetrations per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">4. Attachment to structural framing members only — <strong>no attachment to sheathing or decking alone.</strong></div>
-          <div style="margin-bottom:3px;">5. Torque: Per manufacturer specification (typically 8–12 ft-lbs for 5/16", 15–20 ft-lbs for 3/8").</div>
-          <div style="margin-bottom:3px;">6. ${escapeH(_spc.designLabel)} along rail — <strong style="color:${_spcVerified ? '#333' : '#b45309'};">${escapeH(_spc.statusLabel)}</strong>${_spcVerified ? '.' : ' (design value; MAXIMUM ALLOWED needs a verified source).'}</div>
+          <div style="margin-bottom:3px;">5. Torque: ${_fa.nonOrderable
+            ? '<strong style="color:#b45309;">NOT ESTABLISHED</strong> — no verified fastener assembly, so no drive torque may be stated (the diameter-keyed &ldquo;typical&rdquo; values previously printed here were not a manufacturer specification).'
+            : 'Per the verified manufacturer specification for the archived fastener assembly.'}</div>
+          <div style="margin-bottom:3px;">6. ${escapeH(_spc.designLabel)} along rail — <strong style="color:${_spcVerified ? '#333' : '#b45309'};">${escapeH(_spc.statusLabel)}</strong>${_spcVerified ? '.' : ' (design value; an allowable-spacing limit requires a verified source and none is archived).'}</div>
           <div style="margin-bottom:3px;">7. Verify roof framing at each attachment point — no attachments at splices or unsupported sheathing.</div>
           <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Detail is typical — verify with mounting system manufacturer installation manual for project-specific requirements.</div>
         </div>
@@ -1521,10 +1532,22 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
       // §6 (BAR) — a NON-ORDERABLE row states its DESIGN-QUANTITY status on the
       // quantity cell itself and is machine-tagged, so the quantity can never be
       // read as an authoritative procurement total.
-      html += (item as { nonOrderable?: boolean }).nonOrderable
-        ? '<td class="tr fw7" data-bom-orderable="false" style="color:#b45309;">' + item.quantity
+      // PPC §8 — a row whose QUANTITY IS NOT ESTABLISHED may never print a bare
+      // number: the sealing-cap row said "QUANTITY PENDING" in its description while
+      // the cell printed a certain `0`. The two states are distinct (non-orderable =
+      // authority unverified; quantity-pending = the count is unknown) and both are
+      // now read from DECLARED fields — no `as { nonOrderable?: boolean }` cast.
+      html += item.nonOrderable
+        ? '<td class="tr fw7" data-bom-orderable="false" data-bom-quantity-state="'
+          + (item.quantityState ?? 'established') + '" style="color:#b45309;">' + item.quantity
           + ' <span style="font-size:6px;font-weight:900;white-space:nowrap;">(DESIGN QTY — NOT ORDERABLE)</span></td>'
-        : '<td class="tr fw7">' + item.quantity + '</td>';
+        : item.quantityState === 'pending'
+          // no nowrap — this cell is ~5% wide; the label MUST wrap inside it
+          ? '<td class="tr fw7" data-bom-orderable="false" data-bom-quantity-state="pending" style="color:#b45309;">'
+            + '<span style="font-size:6px;font-weight:900;line-height:1.15;">'
+            + escapeH(item.quantityStateLabel ?? (item.quantity + ' MODELED / FIELD QUANTITY PENDING'))
+            + '</span></td>'
+          : '<td class="tr fw7" data-bom-orderable="true" data-bom-quantity-state="established">' + item.quantity + '</td>';
       html += '<td>' + item.unit + '</td>';
       html += '<td class="mono f-lg" style="font-size:7px;color:#2255aa;">' + (item.necReference || '—') + '</td>';
       html += '<td style="font-size:7px;color:#666;">' + (item.derivedFrom || '—') + '</td>';
@@ -1541,10 +1564,35 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
     return html;
   }
 
+  // PPC §5/§9 — the AUTHORITATIVE PROCUREMENT TOTAL is a COMPUTED object, not
+  // prose. `TOTAL LINE ITEMS` stays as a distinct count (it counts everything,
+  // including pending rows — that is what it means), and beneath it the schedule
+  // now prints the total that procurement may actually act on: the ORDERABLE
+  // subset only, with the excluded rows named. Before this there was no orderable
+  // total at all — only this all-inclusive count plus a sentence that named 2 of
+  // the 9 excluded rows, telling the reader the other 7 were included.
+  // Scope = the FULL BOM (every line the package orders), not the rows this table
+  // happens to show: panels/inverters render in their own schedules above, and an
+  // "authoritative procurement total" that silently omitted them would be a second,
+  // narrower total — the exact class of defect this pass exists to kill.
+  const _proc = buildProcurementApproval(bom as PermitBOMItem[]);
   html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-  html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS</td>';
+  html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS (THIS SCHEDULE, ALL ROWS INCLUDING PENDING)</td>';
   html += '<td class="tr">' + flat.length + '</td>';
   html += '<td colspan="3"></td>';
+  html += '</tr>';
+  html += '<tr style="background:' + (_proc.partial ? '#7c2d12' : '#166534') + ';color:#fff;font-weight:bold;"'
+    + ' data-procurement-total="' + _proc.orderableLineItems + '"'
+    + ' data-procurement-excluded="' + _proc.excludedLineItems + '"'
+    + ' data-procurement-partial="' + (_proc.partial ? 'true' : 'false') + '">';
+  html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">'
+    + 'AUTHORITATIVE PROCUREMENT TOTAL &mdash; ORDERABLE ROWS ONLY (FULL BOM)</td>';
+  html += '<td class="tr">' + _proc.orderableLineItems + '</td>';
+  html += '<td colspan="3" style="font-size:7px;">'
+    + (_proc.partial
+      ? _proc.excludedLineItems + ' row' + (_proc.excludedLineItems === 1 ? '' : 's') + ' EXCLUDED'
+      : 'no exclusions')
+    + '</td>';
   html += '</tr>';
   html += '</tbody></table>';
 
@@ -1556,17 +1604,40 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   html += requiredCount + ' items are required per NEC / manufacturer specification. ';
   html += 'All quantities are derived from CAD geometry and equipment registry — no manual estimates. ';
   html += 'Structural items are computed from array layout per the governing structural code editions (see cover sheet GOVERNING CODES). ';
-  html += 'Electrical items are sized per NEC 690.8, 705.12, 310.15 and equipment registry rules.';
-  // §6 (BAR) — the procurement-total boundary is stated explicitly: rows carrying
-  // a DESIGN QUANTITY are excluded from the authoritative procurement totals.
-  const _nonOrderableRows = bomItems.filter(i => (i as { nonOrderable?: boolean }).nonOrderable === true);
-  if (_nonOrderableRows.length) {
-    html += ' <span style="color:#b45309;font-weight:bold;">'
-      + _nonOrderableRows.length + ' line item' + (_nonOrderableRows.length === 1 ? '' : 's')
-      + ' carr' + (_nonOrderableRows.length === 1 ? 'ies' : 'y')
-      + ' a DESIGN QUANTITY ONLY and are EXCLUDED from the authoritative procurement totals '
-      + 'pending verified authority (see RS-1): '
-      + _nonOrderableRows.map(i => escapeH(String(i.category).replace(/_/g, ' '))).join(', ') + '.</span>';
+  // PPC §6 — the hardcoded `705.12` here is a LOAD-SIDE-only article and this
+  // summary has no topology in scope; conductor sizing does not depend on the
+  // interconnection article at all, so the inapplicable clause is DROPPED rather
+  // than guessed. The design's governing interconnection article is stated once,
+  // topology-driven, on PV-4B / E-1 / the AC branch schedule.
+  html += 'Electrical items are sized per NEC 690.8 and 310.15 and equipment registry rules '
+    + '(the governing NEC 705 interconnection article for this design is stated on the AC branch schedule and PV-4B).';
+  // PPC §5/§9 — the exclusion statement is now DERIVED from the computed
+  // procurement-approval object, so it can never again enumerate a subset of the
+  // excluded rows (the old prose filtered on `nonOrderable` alone and named only
+  // `wire, lag bolt` while 7 pending racking rows plus the pending-quantity cap row
+  // were also excluded — the sentence itself asserted they were included).
+  if (_proc.partial) {
+    // ONE dense block (SCHED is the densest sheet in the set — an 11-line bullet
+    // list pushed the page conclusion past the printable box, gate 13). Every
+    // excluded row is still NAMED with its part number, quantity and exclusion
+    // class; each row's own full reason prints on the row itself, above.
+    // 6.3px/1.15 (was 7px/1.3) — SCHED is the densest sheet in the set and the
+    // exclusion enumeration grows with the excluded-row count (a procurement-
+    // insufficient design adds a 12th). At 7px it pushed the page conclusion 25px
+    // past the printable box (gate 17). No content is dropped.
+    html += '<div style="margin-top:1px;font-size:6.3px;color:#7c2d12;line-height:1.15;">';
+    html += '<strong>AUTHORITATIVE PROCUREMENT TOTAL &mdash; ORDERABLE ROWS ONLY: '
+      + _proc.orderableLineItems + ' of ' + _proc.totalLineItems + ' BOM line items. '
+      + _proc.excludedLineItems + ' EXCLUDED from this total AND from every procurement export</strong> ('
+      + _proc.excludedCountByClass['non-orderable-design-quantity'] + ' DESIGN/CANDIDATE quantity, '
+      + _proc.excludedCountByClass['quantity-pending'] + ' QUANTITY NOT ESTABLISHED &mdash; each row states its own reason above; see RS-1): ';
+    html += _proc.exclusions.map(e =>
+      '<span data-procurement-excluded-row="' + escapeH(e.exclusionClass) + '">'
+      + escapeH(e.category.replace(/_/g, ' ')) + ' [' + escapeH(e.partNumber) + ', '
+      + e.quantity + ' ' + escapeH(e.unit) + ', ' + escapeH(e.exclusionClass) + ']</span>').join(' &middot; ');
+    html += '. <strong>This package is NOT an approved procurement release.</strong></div>';
+  } else {
+    html += ' <span style="font-weight:bold;">' + escapeH(_proc.statement) + '</span>';
   }
   html += '</div>';
 
@@ -1633,7 +1704,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // line ⇒ no page-fit regression); the base cable quantity + "sanity OK" note
   // already print on PV-4B's LISTED AC TRUNK CABLE ASSEMBLY block.
   const _schedTrunkBomNote = (_schedAsm.present && _schedPS?.insufficient)
-    ? `<div style="padding:1px 4px;font-size:7px;line-height:1.25;border:var(--border);border-top:none;background:#fdecec;">
+    ? `<div style="padding:1px 4px;font-size:6.4px;line-height:1.15;border:var(--border);border-top:none;background:#fdecec;">
         <strong>AC TRUNK CABLE (BOM):</strong> base cable quantity <span class="mono">${_schedPS.procurementLengthFt ?? '—'} ft</span> = CURRENT BASE CABLE QUANTITY &mdash; <strong style="color:#b00">PROCUREMENT INSUFFICIENCY: short of the ${_schedPS.totalDesignedInstalledFt} ft designed-installed path by ${_schedPS.deficitFt} ft. NON-ORDERABLE / PENDING SOLUTION</strong> (verified listed cable-extension required; QCABLE-PROCUREMENT-INSUFFICIENT, see RS-1).</div>`
     : '';
   // GROUNDING AUTHORITY (2026-07-25) — SCHED renders the open-air branch grounding
@@ -1653,13 +1724,27 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // only shows ✓ PASS when its rating values are present AND continuous ≤ OCPD ≤
   // mfr branch max AND devices ≤ mfr per-branch limit; a blank rating ⇒ PENDING,
   // an over-limit branch ⇒ FAIL. Replaces the unconditional "&check;".
-  const _schedBranchStatus = (
+  // PPC §6 — the tri-state logic is CORRECT; the COLUMN LABEL was the lie. This
+  // result covers ampacity / device-rating ONLY (continuous ≤ OCPD, devices ≤ mfr
+  // per-branch limit, OCPD ≤ mfr branch max). It says NOTHING about route
+  // authority, grounding authority or procurement sufficiency — all three of which
+  // are PENDING/BLOCKED on this design — so a bare "✓ PASS" under a generic
+  // "Status" column read as a branch-wide release. The column is now
+  // "AMPACITY / DEVICE-RATING RESULT" and a pass renders
+  // "PASS — ELECTRICAL RATING ONLY", with the other authorities stated per branch
+  // in the companion BRANCH RELEASE STATUS matrix below.
+  const SCHED_RATING_COL = 'AMPACITY / DEVICE-RATING RESULT';
+  const _ratingCell = (r: ReturnType<typeof evaluateCompliance>): string =>
+    r.state === 'PASS'
+      ? `<span class="mono fw7" style="color:#127a3e">PASS &mdash; ELECTRICAL RATING ONLY</span>`
+      : complianceBadge(r);
+  const _schedBranchResult = (
     b: { deviceCount: number; ocpdAmps: number; branchCurrentA: number; continuousA: number },
     model?: string | null, mfr?: string | null,
-  ): string => {
+  ) => {
     const lim = microMaxPerBranch(model, mfr);
     const ocpdLim = microBranchMaxOcpdA(model, mfr);
-    return complianceBadge(evaluateCompliance({
+    return evaluateCompliance({
       requiredValues: [
         { label: 'device count', value: b.deviceCount, numeric: true },
         { label: 'branch OCPD', value: b.ocpdAmps, numeric: true },
@@ -1670,10 +1755,14 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         { label: `devices ≤ mfr per-branch limit (${lim})`, pass: lim > 0 ? b.deviceCount <= lim : null },
         { label: `OCPD ≤ mfr branch max (${ocpdLim}A)`, pass: ocpdLim > 0 ? b.ocpdAmps <= ocpdLim : null },
       ],
-    }));
+    });
   };
+  const _schedBranchStatus = (
+    b: { deviceCount: number; ocpdAmps: number; branchCurrentA: number; continuousA: number },
+    model?: string | null, mfr?: string | null,
+  ): string => _ratingCell(_schedBranchResult(b, model, mfr));
   const _schedStringStatus = (s: { ampacityA: number | null; ocpdAmps: number | null }): string =>
-    complianceBadge(evaluateCompliance({
+    _ratingCell(evaluateCompliance({
       requiredValues: [
         { label: 'string ampacity', value: s.ampacityA, numeric: true },
         { label: 'string OCPD', value: s.ocpdAmps, numeric: true },
@@ -1706,7 +1795,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       return `
       <div class="section-title">AC Branch Circuit Schedule &mdash; ${hdr} &mdash; NEC 690.8(A)</div>
       <table class="equip-table">
-        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>Status</th></tr></thead>
+        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>${SCHED_RATING_COL}</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="8" class="center">AC branch layout pending module placement &mdash; see PV-4A</td></tr>'}</tbody>
       </table>`;
     }
@@ -1721,10 +1810,82 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
     return `
       <div class="section-title">DC String Wire Sizing &mdash; ${hdr} &mdash; NEC 690.8</div>
       <table class="equip-table">
-        <thead><tr><th>String</th><th>Isc&times;1.25 (A)</th><th>OCPD (A)</th><th>Wire</th><th>V-Drop</th><th>Length</th><th>Status</th></tr></thead>
+        <thead><tr><th>String</th><th>Isc&times;1.25 (A)</th><th>OCPD (A)</th><th>Wire</th><th>V-Drop</th><th>Length</th><th>${SCHED_RATING_COL}</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="7" class="center">String plan pending &mdash; see PV-4B</td></tr>'}</tbody>
       </table>`;
   };
+  // PPC §6 — TOPOLOGY-DRIVEN code reference. The section title hardcoded
+  // "NEC 690.8(A) / 705.12" — a LOAD-SIDE-only article — on a design whose
+  // canonical interconnection rule is 705.11 (supply side). The article now comes
+  // from the snapshot's own interconnection rule.
+  const _schedIsSupply = _schedSnap?.project?.interconnection?.rule === '705.11';
+  const _sched705 = _schedIsSupply ? '705.11' : '705.12';
+  // PPC §6 — BRANCH RELEASE STATUS. The rating column answers ampacity/device
+  // rating only; these are the OTHER authorities, per branch, from the canonical
+  // objects. Never fabricated: the route verification state is schedule-level
+  // (there is ONE BRANCH_RUN segment) with a per-branch length PROVENANCE; the
+  // grounding outcome is one global result scoped to branchIds; the Q-Cable deficit
+  // is NOT apportioned per branch (AFFECTED / NOT AFFECTED only).
+  const _schedBranchAuthorityBlock = (() => {
+    if (!_schedIsMicro || !_schedSnap) return '';
+    const _rows = _schedAuth.microBranches;
+    if (!_rows.length) return '';
+    const _routeSt = routeVerificationStatus(_schedSnap);
+    const _routeVerified = _routeSt === 'field-measured' || _routeSt === 'field-verified' || _routeSt === 'as-built-verified';
+    const _gnd = projectOpenAirBranchGrounding(_schedSnap);
+    const _gndPending = _gnd.verificationState !== 'verified';
+    const _paths = _schedSnap.electrical?.branchCablePaths ?? [];
+    const _affected = new Set(_schedPS?.insufficient ? (_schedPS.affectedBranchIds ?? []) : []);
+    const _amber = (t: string) => `<strong style="color:#b45309">${t}</strong>`;
+    const BRANCH_RUN_SEGMENT_LABEL = 'BRANCH_RUN';
+    // A value that is IDENTICAL on every branch is stated ONCE (repeating it reads
+    // as N independent determinations). The instant any branch differs, every branch
+    // prints its own — the collapse is conditional, never assumed.
+    const _provAll = _rows.map(b => (_paths.find(pp => pp.branchLabel === `B${b.index}`)
+      ?? _paths[b.index - 1] ?? null)?.lengthProvenance ?? null);
+    const _provUniform = _provAll.length > 0 && _provAll.every(v => v === _provAll[0]);
+    // The two SCHEDULE-LEVEL authority statements (identical for every branch).
+    const _routeCellShared = _routeVerified
+      ? `ROUTE AUTHORITY: VERIFIED (${escapeH(routeVerificationLabel(_routeSt))})`
+      : `ROUTE AUTHORITY: ${_amber('PENDING')} &mdash; ${escapeH(routeVerificationLabel(_routeSt))}`;
+    const _gndCellShared = `GROUNDING AUTHORITY: ${_gndPending ? _amber('PENDING MANUFACTURER AUTHORITY') : 'VERIFIED'}`;
+    // Rendered as compact per-branch LINES inside the existing interpretation box —
+    // SCHED is the densest sheet in the set and a separate titled table pushed the
+    // page conclusion 115px past the printable box (page-fit gate 17).
+    const _lines = _rows.map(b => {
+      const _label = `B${b.index}`;
+      const _path = _paths.find(pp => pp.branchLabel === _label) ?? _paths[b.index - 1] ?? null;
+      const _prov = _path?.lengthProvenance ?? null;
+      const _procCell = 'PROCUREMENT SUFFICIENCY: ' + (!_schedPS?.insufficient
+        ? 'NOT AFFECTED'
+        : ((_affected.has(_path?.branchId ?? '') || _affected.size === 0)
+            ? _amber('AFFECTED &mdash; QCABLE-PROCUREMENT-INSUFFICIENT')
+            : 'NOT AFFECTED'));
+      const _release = (_routeVerified && !_gndPending && !_schedPS?.insufficient && !_schedHasBlockers)
+        ? 'RELEASED' : _amber('BLOCKED');
+      // The two SCHEDULE-LEVEL authorities (route verification state, grounding
+      // outcome) are stated ONCE in the header, not repeated verbatim on every
+      // branch: they carry the SAME value for every branch by construction, and
+      // repeating them read as three independent per-branch determinations — which
+      // is precisely the fabrication §6 forbids. What is genuinely per-branch stays
+      // per-branch: the length PROVENANCE and the procurement-sufficiency AFFECTED
+      // state. (It is also what keeps this block inside SCHED's ~1 line of slack
+      // when the deficit fires and the procurement cell grows — gate 17.)
+      return `<div><strong class="mono">${_label}</strong> &mdash; `
+        + `${_provUniform ? '' : `length provenance: ${_prov ? escapeH(_prov) : 'NOT ESTABLISHED'} &middot; `}`
+        + `${_procCell} &middot; OVERALL RELEASE: ${_release}</div>`;
+    }).join('');
+    // Header line: scope + the two schedule-level authorities + the honesty caveats.
+    const _b = _rows.map(r => `B${r.index}`).join(', ');
+    return `<div style="margin-top:1px;font-size:6px;line-height:1.15;">`
+      + `<div><strong>BRANCH RELEASE STATUS &mdash; authorities beyond the ${escapeH(SCHED_RATING_COL)} column</strong>`
+      + ` &middot; ${_routeCellShared} (schedule-level: ONE ${escapeH(BRANCH_RUN_SEGMENT_LABEL)} segment for ${escapeH(_b)}`
+      + `${_provUniform ? `; length provenance ${escapeH(String(_provAll[0] ?? 'NOT ESTABLISHED'))} on every branch` : '; per-branch length PROVENANCE below'})`
+      + ` &middot; ${_gndCellShared} (ONE authority scoped to ${escapeH(_b)})`
+      + `<span style="color:#555;"> &middot; the &Sigma; Q-Cable deficit is NOT apportioned per branch &middot; blockers: RS-1</span></div>`
+      + _lines
+      + `</div>`;
+  })();
   const _schedHybridWireBlocks = _schedHybrid
     ? _schedAuth.subSystems.map(_schedSubWireBlock).join('') + `
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
@@ -1733,17 +1894,22 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
         as AC branch circuits (&times;1.25 continuous), string/optimizer sub-systems as DC source circuits (Isc &times; 1.25,
         OCPD per 690.8(B)). Values match PV-4A / PV-4B / E-1 (shared conductor authority). Rooftop temperature adder
         applies to ROOF sub-system circuits only.
+        ${_schedBranchAuthorityBlock}
       </div>`
     : '';
   const _schedAcBranchBlock = `
-      <div class="section-title">AC Branch Circuit Schedule &mdash; NEC 690.8(A) / 705.12</div>
+      <div class="section-title">AC Branch Circuit Schedule &mdash; NEC 690.8(A) / ${_sched705}</div>
       <table class="equip-table">
-        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>Status</th></tr></thead>
+        <thead><tr><th>Branch</th><th>Devices</th><th>Output (A)</th><th>&times;1.25 Cont. (A)</th><th>OCPD (A)</th><th>Conductor</th><th>Ampacity (90&deg;C)</th><th>${SCHED_RATING_COL}</th></tr></thead>
         <tbody>${_schedAcRows || '<tr><td colspan="8" class="center">AC branch layout pending module placement &mdash; see PV-4A</td></tr>'}</tbody>
       </table>
-      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.4;border:var(--border);border-top:none;background:#fafafa;">
+      ${/* PPC gate 17 — 7.4px/1.2 (was var(--f-md)/1.4). SCHED is the densest sheet
+            in the set and this box now carries the BRANCH RELEASE STATUS matrix,
+            whose procurement cell grows when the Q-Cable deficit fires. */''}
+      <div style="padding:2px var(--xs);font-size:7.4px;line-height:1.2;border:var(--border);border-top:none;background:#fafafa;">
         <strong>WIRE SIZING INTERPRETATION (MICROINVERTER):</strong>
-        Each module pairs 1:1 with a microinverter (no DC series string / no DC source-circuit sizing). AC branch (trunk) circuits are sized per NEC 690.8(A) &times;1.25 continuous; each is protected at its calculated OCPD (see table) and terminates at the AC combiner.
+        Each module pairs 1:1 with a microinverter (no DC source circuits). AC branch trunks are sized per NEC 690.8(A) &times;1.25 continuous, each protected at its calculated OCPD (see table), terminating at the AC combiner.
+        ${_schedBranchAuthorityBlock}
       </div>`;
   return `
   <div class="page">
@@ -1834,11 +2000,17 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       })()}
       <!-- Wire Sizing Justification (topology-aware: AC branches for micro, DC source circuits for string;
            hybrid: one block PER SUB from the shared conductor authority) -->
-      ${(_schedHybrid || _schedIsMicro) ? _schedTrunkBomNote : ''}
+      ${/* PPC §9 / gate 17 — the standalone trunk-cable deficit note is RETIRED: the
+            trunk BOM row itself now carries STATUS: NON-ORDERABLE / REASON /
+            DESIGNED-INSTALLED / CURRENT BASE / DEFICIT / EXTENSION SOLUTION NOT
+            SELECTED (that row is what an operator reading this schedule acts on), and
+            PV-4B + RS-1 carry the full authority statement. Printing the same deficit
+            twice on one sheet is the duplication this pass removes — and it is what
+            pushed SCHED's page conclusion past the printable box. */''}
       ${_schedHybrid ? _schedHybridWireBlocks : _schedIsMicro ? _schedAcBranchBlock : `
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>
       <table class="equip-table">
-        <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Isc×1.25 (A)</th><th>OCPD ≥ Isc×1.56 (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
+        <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Isc×1.25 (A)</th><th>OCPD ≥ Isc×1.56 (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>${SCHED_RATING_COL}</th></tr></thead>
         <tbody>
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => {
@@ -1859,7 +2031,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
               <td>${str.wireGauge} USE-2</td>
               <td class="tr">30A (#10), 40A (#8)</td>
               <td class="tr">≥ ${isc125}A</td>
-              <td class="center fw7">✓</td>
+              <td class="center">${_schedStringStatus({ ampacityA: _aStr?.ampacityA ?? null, ocpdAmps: ocpd })}</td>
             </tr>`;
             }) || []
           ).join('')}

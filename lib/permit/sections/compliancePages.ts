@@ -21,16 +21,24 @@ import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
-import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
 import { getSnapshot } from '../snapshot/read';
 import { projectStructuralFromInput, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+// PPC §10 — PV-5's rated-value basis line comes from THE issue-state language
+// accessor (digest-bound). It previously asserted "FROM THE APPROVED DESIGN" while
+// the package carried open blocking release items and no seal.
+import { projectIssueStateLanguageFromInput } from '../snapshot/projectAuthorityProjection';
 
 export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { compliance } = input;
   // W4 §2: NEC edition projects from the snapshot codeAuthority (single source).
   const cp = projectCodeAuthorityFromInput(input);
   const necVer = cp.nec ?? 'PENDING';
+  // PPC §10 — the ONE issue-state language set (digest-bound). Approved-design
+  // wording is reachable ONLY through this accessor and ONLY when a digest-bound
+  // engineering approval exists with zero open blocking release items.
+  const _issueLang = projectIssueStateLanguageFromInput(input);
   const _isRoof = isRoof(cad.systemType);
   const _isFence = isFence(cad.systemType);
   const _isGround = isGround(cad.systemType);
@@ -432,7 +440,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
         ALL WARNING LABELS SHALL BE PERMANENTLY INSTALLED, WEATHER-RESISTANT (UL 969), AND MEET MINIMUM CHARACTER HEIGHT REQUIREMENTS PER NEC ${necVer} &mdash;
         LETTERING MIN. 3/8" HEIGHT FOR FIELD-APPLIED LABELS, OR AS SPECIFIED BY MANUFACTURER FOR LISTED LABELS.
         COLOR: WHITE LETTERING ON RED BACKGROUND (${necVer === '2023' ? 'NEC 690.12(D)' : 'NEC 690.56'}) UNLESS OTHERWISE NOTED.
-        RATED VALUES ON THIS SHEET ARE SITE-COMPUTED FROM THE APPROVED DESIGN &mdash; DESIGN LOW TEMP ${tMinC}&deg;C (${escapeH(_temps.source).toUpperCase()}).
+        RATED VALUES ON THIS SHEET ARE ${escapeH(_issueLang.computedFromLabel)} &mdash; DESIGN LOW TEMP ${tMinC}&deg;C (${escapeH(_temps.source).toUpperCase()}).
       </div>
 
       <div style="display:grid;grid-template-columns:59fr 41fr;gap:10px;align-items:start;">
@@ -492,7 +500,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
               <div>
                 <div style="font-weight:900;font-size:7.4px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">STRUCTURAL / INSTALLATION</div>
                 <div style="margin-bottom:2px;">1. Contractor shall verify ${_isRoof ? 'roof framing type, size, spacing, and condition prior to installation' : _isFence ? 'fence post layout, spacing, and foundation conditions prior to installation' : 'ground mount pile layout, soil conditions, and site grades prior to installation'}.</div>
-                <div style="margin-bottom:2px;">2. Any deviation from the approved design shall be reported to the engineer of record.</div>
+                <div style="margin-bottom:2px;">2. Any deviation from ${escapeH(_issueLang.deviationReferenceLabel)} shall be reported to the engineer of record.</div>
                 <div style="margin-bottom:2px;">3. ${_isRoof ? 'All roof penetrations shall be waterproofed per roofing manufacturer requirements.' : 'All below-grade conduit and conductors shall be rated for wet/direct burial locations per NEC 300.5.'}</div>
                 <div style="margin-bottom:2px;">4. Module and racking installation per manufacturer instructions and UL 2703 listing.</div>
                 <div style="margin-bottom:2px;">5. Maintain fire-access pathways and ridge setbacks per IFC &sect;1204.2.1 as shown on PV-1.</div>
@@ -1152,18 +1160,33 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               ?? _fuzz(MICROINVERTERS, _inv0?.model)?.id;
             const _batId = _fuzz(BATTERIES, (project._canonical as { battery?: { model?: string } })?.battery?.model
               || (project as { batteryModel?: string }).batteryModel)?.id;
-            const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>): string => {
+            // PPC §4 / gate 6 — "on file" is a document-AVAILABILITY statement, but a
+            // ✓ beside "Racking: Roof Tech RT-MINI — Roof Tech RT-MINI II Installation
+            // Manual" presents that manual as the APPLICABLE authority for the
+            // SELECTED mount, which EQUIPMENT-DOCUMENT-APPLICABILITY says it is not.
+            // Availability and applicability are two different facts; the row now
+            // states both, from the same accessor PV-3 / APP-A / PE-1 already use.
+            const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>, selectedModel?: string | null): string => {
               if (!a || (!a.sourceUrl && !a.imageUrl)) return '';
               const host = a.sourceUrl ? (() => { try { return new URL(a.sourceUrl!).hostname.replace(/^www\./, ''); } catch { return ''; } })() : '';
               const bits = [a.docTitle, a.pageRef, host].filter(Boolean).join(' · ');
               const mark = a.verified ? '✓ on file' : 'on file';
-              return `<li><strong>${label}:</strong> ${a.brand} ${a.model} — ${bits || 'manufacturer datasheet'} <span style="color:#0a7a2f;font-weight:700;">(${mark})</span></li>`;
+              const _appl = selectedModel !== undefined
+                ? evaluateDocumentApplicability(selectedModel ?? a.model, a, null) : null;
+              const _applTag = _appl && _appl.state !== 'verified'
+                ? ` <span data-ds-applicability="${escapeH(_appl.state)}" style="color:#b45309;font-weight:700;">`
+                  + `— APPLICABILITY ${escapeH(_appl.state.toUpperCase())}: the document covers `
+                  + `${escapeH(_appl.documentProduct ?? 'a different product version')}, NOT VERIFIED for the selected `
+                  + `${escapeH(String(selectedModel ?? a.model))} — NOT AUTHORITATIVE for installation requirements</span>`
+                : '';
+              return `<li><strong>${label}:</strong> ${a.brand} ${a.model} — ${bits || 'manufacturer datasheet'} <span style="color:#0a7a2f;font-weight:700;">(${mark})</span>${_applTag}</li>`;
             };
             const rows = [
               _cite('Module', getManufacturerAsset(_dbPanel?.id, 'module_spec')),
               _cite('Inverter', getManufacturerAsset(_invId, 'inverter_spec') || getManufacturerAsset(_invId, 'microinverter_spec') || getManufacturerAsset(_invId, 'optimizer_spec')),
               _cite('Battery', getManufacturerAsset(_batId, 'battery_spec')),
-              _cite('Racking', getManufacturerAsset(project.mountingSystemId, 'racking_detail')),
+              _cite('Racking', getManufacturerAsset(project.mountingSystemId, 'racking_detail'),
+                getMountingSystemById(project.mountingSystemId ?? '')?.model ?? null),
               // Brand-integrated AC combiner / gateway ("the brains") — datasheet
               // required for plan review; cited by device name (no image on file).
               (() => {

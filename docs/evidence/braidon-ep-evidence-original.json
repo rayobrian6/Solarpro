@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:29.887Z",
+  "generatedAt": "2026-07-26T20:39:48.427Z",
   "harness": "planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates + chained BAR WS-E)",
   "mode": "original",
-  "htmlPath": "_tmp_braidon_original.html",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "htmlPath": "_tmp_ppc_fixture.html",
+  "snapshotId": "PDS-E17B052701C1",
+  "digest": "e17b052701c1e589be1fcdbbe9ee16d373b0fd13f8c21c8e1eda4f12a27a8add",
   "project": "BRAIDON M PILLA — Solar TEST",
   "sheetCount": 21,
   "sheetIds": [
@@ -117,18 +117,18 @@
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-D307252768B7",
+        "reportVal": "PDS-E17B052701C1",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-D307252768B7"
+          "PDS-E17B052701C1"
         ]
       },
       {
         "name": "digestPrefix",
-        "reportVal": "d307252768b7",
+        "reportVal": "e17b052701c1",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "d307252768b751a619ca"
+          "e17b052701c1e589be1f"
         ]
       },
       {
@@ -294,7 +294,7 @@
       "gate": 16,
       "id": "no-load-side-only-labels-on-supply-side",
       "ok": true,
-      "detail": "supplySide=true backfedBreakerApplicability=N/A",
+      "detail": "supplySide=true loadSideOnlyClauseCited=false backfedRowMarkedNA=true backfedBreakerApplicability=null",
       "evidence": null
     },
     {
@@ -317,7 +317,7 @@
       "gate": 19,
       "id": "geometry-page-fit-incl-internal-clips",
       "ok": true,
-      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0",
+      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
       "evidence": null
     },
     {

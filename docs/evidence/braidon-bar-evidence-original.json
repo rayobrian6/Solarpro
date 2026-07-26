@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:28.230Z",
+  "generatedAt": "2026-07-26T20:39:46.700Z",
   "harness": "planset-evidence-bar (blocker & authority reconciliation, 14 permanent gates; 4/5/6/7/9/10/11 chained to bar-wse)",
   "mode": "original",
-  "htmlPath": "_tmp_braidon_original.html",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "htmlPath": "_tmp_ppc_fixture.html",
+  "snapshotId": "PDS-E17B052701C1",
+  "digest": "e17b052701c1e589be1fcdbbe9ee16d373b0fd13f8c21c8e1eda4f12a27a8add",
   "sheetCount": 21,
   "sheetIds": [
     "PV-0",
@@ -940,7 +940,7 @@
             "gate": 7,
             "name": "the pending outcome renders the PENDING MANUFACTURER AUTHORITY label",
             "pass": true,
-            "detail": "label occurrences=6"
+            "detail": "label occurrences=10"
           },
           {
             "gate": 7,
@@ -962,9 +962,9 @@
           },
           {
             "gate": 7,
-            "name": "the candidate EGC quantity is a NON-ORDERABLE design quantity",
+            "name": "the candidate EGC quantity is a NON-ORDERABLE candidate design quantity",
             "pass": true,
-            "detail": "bomRowState=design-quantity-non-orderable labelRendered=true"
+            "detail": "bomRowState=design-quantity-non-orderable candidateLabelClauses=true"
           },
           {
             "gate": 7,
@@ -1106,14 +1106,14 @@
       "gate": 13,
       "id": "page-fit-zero-meaningful-clipping",
       "ok": true,
-      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0",
+      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
       "evidence": null
     },
     {
       "gate": 14,
       "id": "snapshot-identity-consistent-across-sheets",
       "ok": true,
-      "detail": "sheets=21 withStamp=21 idMismatch=0 digestMismatch=0 manifest=21 manifestEqPages=true snapshot=PDS-D307252768B7",
+      "detail": "sheets=21 withStamp=21 idMismatch=0 digestMismatch=0 manifest=21 manifestEqPages=true snapshot=PDS-E17B052701C1",
       "evidence": {
         "idMismatch": [],
         "digestMismatch": [],

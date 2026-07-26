@@ -1,0 +1,71 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.414Z",
+  "artifact": "braidon-ppc-grounding-segment-bom-reconciliation",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§7 gate 10 — every grounding object reconciles to a BOM derivation or orders nothing",
+  "linkKinds": {
+    "declared-id": "the object carries its own bomLineId and that row exists",
+    "matched-by-conductor-identity": "no bomLineId is declared on the object, but exactly one BOM wire row carries the same conductor identity (gauge + EGC role). HONEST GAP: the link is derived here, not declared by the object — see knownFollowUp below.",
+    "matched-by-authority-label": "the object DECLARES a bomLineId, but it is the GROUNDING object's id (e.g. GRN-OPENAIR-12), not the BOM row's id, so it does not resolve directly. The BOM row is identified unambiguously by its authority label (CANDIDATE DESIGN QUANTITY, open-air). HONEST GAP: same follow-up as above — the link is derived, not resolvable.",
+    "orders-nothing": "bomRowState 'no-row' — the object correctly orders no material (bonded to the existing GES / a listed integrated method / the raceway itself)"
+  },
+  "reconciliation": [
+    {
+      "groundingSegmentId": "gnd-br-1",
+      "purpose": "branch-egc",
+      "method": "pending",
+      "conductorSize": null,
+      "authorityState": "pending-manufacturer-authority",
+      "bomRowState": "design-quantity-non-orderable",
+      "bomLineId": "GRN-OPENAIR-12",
+      "linkKind": "matched-by-authority-label",
+      "bomRow": {
+        "category": "wire",
+        "partNumber": "GRN-OPENAIR-12",
+        "quantity": 162,
+        "unit": "ft",
+        "nonOrderable": true,
+        "quantityState": "established"
+      }
+    },
+    {
+      "groundingSegmentId": "gnd-feeder",
+      "purpose": "feeder-egc",
+      "method": "conductor",
+      "conductorSize": "#10 AWG",
+      "authorityState": "nec-derived",
+      "bomRowState": "orderable",
+      "bomLineId": null,
+      "linkKind": "matched-by-conductor-identity",
+      "bomRow": {
+        "id": "bom-v4-0012",
+        "category": "wire",
+        "partNumber": "THWN2-GRN-10",
+        "quantity": 41,
+        "unit": "ft",
+        "nonOrderable": false,
+        "quantityState": "established"
+      }
+    },
+    {
+      "groundingSegmentId": "gnd-gec",
+      "purpose": "gec",
+      "method": "none-required",
+      "conductorSize": null,
+      "authorityState": "not-required",
+      "bomRowState": "no-row",
+      "bomLineId": null,
+      "linkKind": "orders-nothing",
+      "bomRow": null
+    }
+  ],
+  "knownFollowUp": {
+    "id": "GROUNDING-BOMLINEID-BACKREFERENCE",
+    "statement": "the grounding objects do not carry a RESOLVABLE BOM row id: the feeder-EGC object declares none, and the open-air object declares its own grounding-object id (GRN-OPENAIR-12) rather than a BOM row id. Both links are derived here (by conductor identity and by authority label respectively). projectGroundingSegments is a pure snapshot projection and BOM row ids are assigned after the snapshot is built, so declaring the link needs a BOM-id back-reference pass.",
+    "severity": "reconciliation is complete and unambiguous today; the LINK is derived rather than declared, which is weaker evidence than gate 10 ultimately wants"
+  },
+  "allReconcile": true,
+  "renderedIdTags": 11,
+  "legacyProjectLevelRowPresent": false
+}

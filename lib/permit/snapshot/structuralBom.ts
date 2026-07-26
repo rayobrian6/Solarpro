@@ -38,7 +38,34 @@ export interface StructuralBomRow {
   objectCount?: number;              // N objects the aggregation ran over
   derivedFrom: string;               // prose derivation note
   provenance: Provenance;
+  // ── PPC §5 — PROCUREMENT CLASSIFICATION on the canonical (snapshot) row ──────
+  // The object-derived rows are the reconciliation authority, so the classification
+  // lives here too: any consumer reading the snapshot (not just the V4 engine
+  // result) can tell an ORDERABLE line from a design quantity, and no consumer may
+  // print a manufacturer / exact SKU for a row whose assembly is unselected.
+  /** A VERIFIED/ORDERABLE · B DESIGN QTY/NON-ORDERABLE · C CANDIDATE/NOT SELECTED · D EXCLUDED. */
+  procurementClass: StructuralProcurementClass;
+  /** the ONE rendered classification label (see STRUCTURAL_PROCUREMENT_CLASS_LABEL). */
+  procurementClassLabel: string;
+  /** false ⇒ NOT an orderable procurement line (excluded from authoritative totals). */
+  orderable: boolean;
+  /** false ⇒ the row's manufacturer may not be displayed. */
+  manufacturerDisplayAllowed: boolean;
+  /** false ⇒ the row's part number may not be displayed as a selected SKU. */
+  skuDisplayAllowed: boolean;
+  /** why the row is not class A (null when it is). */
+  nonOrderableReason: string | null;
 }
+
+/** PPC §5 — Ray's four procurement classes (mirrors structural-engine-v4). */
+export type StructuralProcurementClass = 'A' | 'B' | 'C' | 'D';
+
+export const STRUCTURAL_PROCUREMENT_CLASS_LABEL: Record<StructuralProcurementClass, string> = {
+  A: 'VERIFIED — ORDERABLE',
+  B: 'DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION',
+  C: 'CANDIDATE — NOT SELECTED',
+  D: 'EXCLUDED FROM TOTALS',
+};
 
 export interface StructuralBomReconCheck {
   name: string;
@@ -99,7 +126,9 @@ export function deriveStructuralBom(o: StructuralBomObjects): StructuralBomRow[]
   if (attachments.length === 0) return [];
   const railed = rails.length > 0;
 
-  const rows: StructuralBomRow[] = [];
+  // PPC §5 — rows are built without the classification fields and stamped by
+  // `classifyStructuralBomRows` on the way out (one classifier, one place).
+  const rows: StructuralBomRowDraft[] = [];
   const railIds = rails.map(r => r.railId);
   const attIds = attachments.map(a => a.attachmentId);
   const modIds = moduleInstances.map(m => m.instanceId);
@@ -213,7 +242,79 @@ export function deriveStructuralBom(o: StructuralBomObjects): StructuralBomRow[]
     provenance: PROV('flashing qty from attachment method + mount self-flashing topology'),
   });
 
-  return rows;
+  return classifyStructuralBomRows(rows, o);
+}
+
+/** A structural BOM row before PPC §5 classification is stamped on it. */
+export type StructuralBomRowDraft = Omit<StructuralBomRow,
+  'procurementClass' | 'procurementClassLabel' | 'orderable'
+  | 'manufacturerDisplayAllowed' | 'skuDisplayAllowed' | 'nonOrderableReason'>;
+
+/** Row keys whose EXACT part is a function of the rail assembly selection. */
+const ASSEMBLY_DEPENDENT_KEYS = new Set([
+  'rails', 'railSplices', 'lFeet', 'mountingBolts', 'midClamps', 'endClamps', 'bondingClips',
+]);
+
+/**
+ * PPC §5 — stamp Ray's A/B/C/D procurement classification onto every canonical
+ * structural BOM row. Deterministic, read-only, no fabrication:
+ *   • qty 0 / not-applicable                        ⇒ D EXCLUDED FROM TOTALS
+ *   • assembly-dependent part while the rail SKU is unpinned
+ *     (and the MOUNT BASE while `mountSku` is null — a model is not a purchase
+ *     SKU, and the record itself says null while the BOM printed 'RT-MINI-01')
+ *                                                    ⇒ B DESIGN QUANTITY / NON-ORDERABLE
+ *   • roof fastener while the fastener assembly is unverified ⇒ B
+ *   • an exact part with a verified assembly          ⇒ A VERIFIED / ORDERABLE
+ *   • anything else (no part selected)                ⇒ C CANDIDATE / NOT SELECTED
+ * Class A is the ONLY class that may be ordered, counted in an authoritative
+ * procurement total, or display a manufacturer / exact SKU.
+ */
+export function classifyStructuralBomRows(
+  rows: StructuralBomRowDraft[], o: StructuralBomObjects,
+): StructuralBomRow[] {
+  const ra = o.rackingAssembly as (RackingAssemblyRecord & {
+    assemblyVerification?: { railSku?: string; fastener?: string; overall?: string };
+    structuralAuthorityGaps?: { code: string; severity: string }[];
+  }) | null;
+  const railPending = !ra
+    || (ra.railSku == null && (ra.railModel == null || /PENDING/i.test(ra.railModel)));
+  const mountSkuPending = !ra || ra.mountSku == null;
+  // The fastener is VERIFIED on exactly the condition projectFastenerAssembly uses:
+  // its own element state, an archived source document, and NOT capacity-gated —
+  // so the BOM class can never disagree with the rendered PENDING label.
+  const _capGated = (ra?.structuralAuthorityGaps ?? []).some(g => g.severity === 'blocking'
+    && ['RACKING-CAPACITY-SOURCE-NOT-ARCHIVED', 'RACKING-CAPACITY-APPLICABILITY-GAP',
+        'ATTACHMENT-CAPACITY-SOURCE-MISSING'].includes(g.code));
+  const fastenerVerified = ra?.assemblyVerification?.fastener === 'verified'
+    && !_capGated
+    && !!(ra?.datasheetSource ?? ra?.capacitySource);
+  const assemblyVerified = ra?.assemblyVerification?.overall === 'verified';
+
+  return rows.map((r): StructuralBomRow => {
+    const stamp = (
+      procurementClass: StructuralProcurementClass, nonOrderableReason: string | null,
+    ): StructuralBomRow => ({
+      ...r,
+      procurementClass,
+      procurementClassLabel: STRUCTURAL_PROCUREMENT_CLASS_LABEL[procurementClass],
+      orderable: procurementClass === 'A',
+      manufacturerDisplayAllowed: procurementClass === 'A',
+      skuDisplayAllowed: procurementClass === 'A',
+      nonOrderableReason,
+    });
+    if (!(r.qty > 0)) return stamp('D', 'modeled quantity is zero / not applicable to this assembly');
+    if (ASSEMBLY_DEPENDENT_KEYS.has(r.key) && railPending) {
+      return stamp('B', 'assembly-dependent on the unselected rail SKU (PENDING RACKING ASSEMBLY SELECTION)');
+    }
+    if (r.key === 'mounts' && mountSkuPending) {
+      return stamp('B', 'no exact mount SKU is selected on the canonical racking assembly (mountSku is null)');
+    }
+    if (r.key === 'lagBolts' && !fastenerVerified) {
+      return stamp('B', 'roof-attachment fastener assembly UNVERIFIED (FASTENER-ASSEMBLY-UNVERIFIED)');
+    }
+    if (r.partNumber && assemblyVerified) return stamp('A', null);
+    return stamp('C', r.partNumber ? 'racking assembly is not verified' : 'no exact part selected');
+  });
 }
 
 /** Reconcile the object-derived rows against the §10 checklist and, when

@@ -382,11 +382,27 @@ const _fracFast = (v: number | null | undefined): string | null =>
 /** Project the ONE canonical fastener assembly for a permit input. Read-only —
  *  resolves & labels existing canonical fields, performs no engineering calc. */
 export function projectFastenerAssembly(input: PermitInput): FastenerAssembly {
-  const proj = projectStructuralFromInput(input);
+  return projectFastenerAssemblyFromSnapshot(
+    peekSnapshot(input),
+    (input.project as { mountingSystemId?: string }).mountingSystemId,
+  );
+}
+
+/** PPC §4 — the same canonical fastener assembly, reachable from a SNAPSHOT +
+ *  the selected mounting-system id. Added so the SECOND rendering stack
+ *  (`lib/drafting`, which holds a snapshot on the RenderContext rather than a
+ *  PermitInput) projects the identical object instead of reading the raw
+ *  mounting-hardware-db record. `projectFastenerAssembly(input)` delegates here,
+ *  so the two stacks cannot diverge. */
+export function projectFastenerAssemblyFromSnapshot(
+  snap: PermitDesignSnapshot | null | undefined,
+  mountingSystemId: string | null | undefined,
+): FastenerAssembly {
+  const proj = projectStructural(snap);
   const ra = proj.rackingAssembly as (RackingAssemblyRecord & {
     assemblyVerification?: { fastener?: 'verified' | 'pending' | 'unverified' };
   }) | null;
-  const mountId = (input.project as { mountingSystemId?: string }).mountingSystemId;
+  const mountId = mountingSystemId ?? undefined;
   const mount = mountId ? getMountingSystemById(mountId) : undefined;
   const m = mount?.mount;
 
@@ -445,5 +461,164 @@ export function projectFastenerAssembly(input: PermitInput): FastenerAssembly {
     diameterIn, diameterLabel, lengthIn, qtyPerMount, material, headDrive,
     pilotHoleRequired, pilotRuleLabel, embedmentIn, substrate, rafterDeckMethod,
     sourceDocument, verification, nonOrderable, line, certLabel,
+  };
+}
+
+// ── PPC §3/§4 — THE ATTACHMENT-INSTALLATION AUTHORITY (one object, both stacks) ─
+// The corrective-pass root fix. `lib/permit/sections/*` reached the spacing +
+// fastener authorities; `lib/drafting/*` (PV-1 / PV-3) never did — it was fed a
+// flat descriptor built from raw mounting-hardware-db reads, which is why PV-3
+// printed exact diameters/embedment/torque/pilot instructions (and a pilot rule
+// the snapshot NEGATES) while FASTENER-ASSEMBLY-UNVERIFIED and
+// EQUIPMENT-DOCUMENT-APPLICABILITY were both active.
+//
+// This bundle is the ONE thing a drawing/annotation emitter may consume. Exact
+// installation instructions (diameter / length / embedment / torque / pilot /
+// coating / sealant / screw count / manufacturer instruction) may render ONLY when
+// `exactInstructionsAllowed` — i.e. ALL FIVE conditions hold:
+//   1 exact SKU selected (mount SKU pinned + rail SKU pinned when rail-based)
+//   2 document applicability VERIFIED for the selected product version
+//   3 the cited document is ARCHIVED with a recorded content hash
+//   4 the fastener assembly itself is VERIFIED
+//   5 the selection is carried by the CURRENT digested snapshot (not a sidecar)
+// Otherwise the emitter prints `pendingLines` verbatim and banners the detail
+// NON-AUTHORITATIVE. The observed geometry stays in `fastener` (so the exact
+// instructions auto-regenerate the moment the five conditions clear) — it is just
+// not RENDERABLE.
+export interface AttachmentInstallationAuthority {
+  /** the ONE canonical spacing authority (design value + verification state). */
+  spacing: SpacingAuthority;
+  /** the ONE canonical fastener assembly (fields observed; display gated). */
+  fastener: FastenerAssembly;
+  /** manufacturer-document applicability for the cited install document. */
+  documentApplicability: {
+    state: 'verified' | 'unverified';
+    selectedModel: string | null;
+    documentProduct: string | null;
+    documentTitle: string | null;
+  } | null;
+  /** per-condition truth (all five must hold for exact instructions). */
+  conditions: {
+    exactSkuSelected: boolean;
+    documentApplicabilityVerified: boolean;
+    documentArchivedHashBound: boolean;
+    fastenerAssemblyVerified: boolean;
+    selectionBoundToCurrentDigest: boolean;
+  };
+  /** mount-assembly / racking-assembly verification states (honest tri-state). */
+  mountAssemblyState: 'verified' | 'pending' | 'unverified';
+  rackingAssemblyState: 'verified' | 'pending' | 'unverified';
+  /** true ⇒ exact dims/torque/pilot/coating/sealant instructions MAY render. */
+  exactInstructionsAllowed: boolean;
+  /** Ray's exact PENDING block (empty when exactInstructionsAllowed). */
+  pendingLines: string[];
+  /** the reference-detail banner (null when exactInstructionsAllowed). */
+  referenceDetailBanner: string | null;
+  /** 'DESIGN ATTACHMENT SPACING: 48 IN. O.C.' — never a MAX/allowable claim. */
+  spacingDesignLine: string;
+  /** 'PENDING STRUCTURAL VERIFICATION' (or the verified maximum statement). */
+  spacingStatusLine: string;
+  /** the ONE combined spacing line every sheet may print verbatim. */
+  spacingLine: string;
+  /** short in-drawing spacing annotation ('48" O.C. (DESIGN)') — no MAX word. */
+  spacingShortLabel: string;
+}
+
+/** The non-authoritative reference-detail banner (PPC §4, Ray's wording). */
+export const REFERENCE_DETAIL_BANNER =
+  'REFERENCE DETAIL: NON-AUTHORITATIVE — DO NOT INSTALL FROM THIS DETAIL';
+
+/** Project the attachment-installation authority from a snapshot + mount id.
+ *  Read-only; fail-closed (no snapshot ⇒ nothing may print exact instructions). */
+export function projectAttachmentInstallationAuthority(
+  snap: PermitDesignSnapshot | null | undefined,
+  mountingSystemId: string | null | undefined,
+  asset?: { model: string | null; docTitle: string | null } | null,
+  applicability?: { state: 'verified' | 'unverified'; documentProduct: string | null } | null,
+): AttachmentInstallationAuthority {
+  const proj = projectStructural(snap);
+  const spacing = proj.spacingAuthority;
+  const fastener = projectFastenerAssemblyFromSnapshot(snap, mountingSystemId);
+  const mount = mountingSystemId ? getMountingSystemById(mountingSystemId) : undefined;
+  const ra = proj.rackingAssembly as (RackingAssemblyRecord & {
+    assemblyVerification?: {
+      railSku?: 'verified' | 'pending' | 'unverified';
+      fastener?: 'verified' | 'pending' | 'unverified';
+      overall?: 'verified' | 'pending';
+    };
+    capacityProvenance?: { sourceDocument?: { archivedInRepo?: boolean; documentHash?: string | null } };
+  }) | null;
+
+  const selectedModel = ra?.mountModel ?? mount?.mount?.model ?? mount?.model ?? null;
+  const documentApplicability = applicability
+    ? {
+        state: applicability.state,
+        selectedModel,
+        documentProduct: applicability.documentProduct,
+        documentTitle: asset?.docTitle ?? null,
+      }
+    : null;
+
+  // 1 — exact SKU selected. The mount SKU is honestly null on the canonical
+  //     record while unpinned (RT-MINI: `mountSku: null`), and a rail-based
+  //     assembly additionally needs its rail SKU pinned.
+  const _railPending = ra
+    ? (ra.railSku == null && (ra.railModel == null || /PENDING/i.test(ra.railModel)))
+    : true;
+  const exactSkuSelected = !!ra && ra.mountSku != null && !_railPending;
+  // 2 — document applicability. No cited document ⇒ nothing authorizes exact
+  //     manufacturer instructions either (fail closed).
+  const documentApplicabilityVerified = documentApplicability?.state === 'verified';
+  // 3 — archived + hash-bound source document.
+  const _srcDoc = ra?.capacityProvenance?.sourceDocument ?? null;
+  const documentArchivedHashBound = !!_srcDoc?.archivedInRepo
+    && !!_srcDoc?.documentHash && String(_srcDoc.documentHash).trim().length >= 16;
+  // 4 — the fastener assembly itself.
+  const fastenerAssemblyVerified = fastener.verification === 'verified';
+  // 5 — the selection rides on the CURRENT digested snapshot (the record is part
+  //     of this snapshot's digest), not a stale sidecar.
+  const selectionBoundToCurrentDigest = !!snap?.meta?.digest && !!ra;
+
+  const exactInstructionsAllowed = exactSkuSelected
+    && documentApplicabilityVerified
+    && documentArchivedHashBound
+    && fastenerAssemblyVerified
+    && selectionBoundToCurrentDigest;
+
+  const _docLine = documentApplicability
+    ? (documentApplicability.state === 'verified'
+        ? `DOCUMENT APPLICABILITY: VERIFIED FOR SELECTED ${fmtStr(selectedModel).toUpperCase()}`
+        : `DOCUMENT APPLICABILITY: ${fmtStr(documentApplicability.documentProduct).toUpperCase()} MANUAL NOT VERIFIED FOR SELECTED ${fmtStr(selectedModel).toUpperCase()}`)
+    : 'DOCUMENT APPLICABILITY: NO VERSION-EXACT MANUFACTURER DOCUMENT ON FILE';
+
+  const pendingLines = exactInstructionsAllowed ? [] : [
+    'FASTENER ASSEMBLY: PENDING VERIFIED SELECTION',
+    'INSTALLATION DETAILS: NOT ESTABLISHED',
+    _docLine,
+    REFERENCE_DETAIL_BANNER,
+  ];
+
+  const _designStr = spacing.designSpacingIn != null
+    ? String(Math.round(spacing.designSpacingIn)) : EMDASH;
+  const mountAssemblyState: 'verified' | 'pending' | 'unverified' =
+    !ra ? 'unverified' : (exactSkuSelected && fastenerAssemblyVerified ? 'verified' : 'pending');
+  const rackingAssemblyState: 'verified' | 'pending' | 'unverified' =
+    !ra ? 'unverified' : (ra.assemblyVerification?.overall === 'verified' ? 'verified' : 'pending');
+
+  return {
+    spacing, fastener, documentApplicability,
+    conditions: {
+      exactSkuSelected, documentApplicabilityVerified, documentArchivedHashBound,
+      fastenerAssemblyVerified, selectionBoundToCurrentDigest,
+    },
+    mountAssemblyState, rackingAssemblyState,
+    exactInstructionsAllowed, pendingLines,
+    referenceDetailBanner: exactInstructionsAllowed ? null : REFERENCE_DETAIL_BANNER,
+    spacingDesignLine: spacing.designLabel,
+    spacingStatusLine: spacing.statusLabel,
+    spacingLine: `${spacing.designLabel} / STATUS: ${spacing.statusLabel}`,
+    spacingShortLabel: spacing.verificationState === 'verified'
+      ? `${_designStr}" O.C. (VERIFIED)`
+      : `${_designStr}" O.C. (DESIGN)`,
   };
 }

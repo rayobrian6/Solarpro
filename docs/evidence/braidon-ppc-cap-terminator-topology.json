@@ -1,0 +1,39 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.415Z",
+  "artifact": "braidon-ppc-cap-terminator-topology",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§8 — a PENDING cap quantity may never render as a certain zero",
+  "rootCause": "type gap — the BOM row quantity is a number, so \"PENDING\" was inexpressible. The row DESCRIPTION said QUANTITY PENDING while the quantity argument was a computed hard 0, so SCHED-2 printed \"Q-SEAL-10 | 0 | ea\": zero MODELED rendered as zero REQUIRED.",
+  "fix": "a new row state quantityState: 'established' | 'pending' plus quantityStateLabel; the quantity cell prints the label and the row is EXCLUDED from procurement approval. A hard certain zero is legal only once the exact cable-piece topology proves every drop / occupied / unused / end / terminator / cap object.",
+  "sealingCaps": [
+    {
+      "partNumber": "Q-SEAL-10",
+      "quantity": 0,
+      "unit": "ea",
+      "quantityState": "pending",
+      "quantityStateLabel": "0 MODELED / FIELD QUANTITY PENDING",
+      "orderableForProcurement": false,
+      "descriptionStatesPending": true
+    }
+  ],
+  "terminators": [
+    {
+      "partNumber": "Q-TERM-10",
+      "quantity": 3,
+      "unit": "ea",
+      "quantityState": "established",
+      "separateCanonicalType": true
+    }
+  ],
+  "invariants": {
+    "everyCapIsPending": true,
+    "noCapIsOrderable": true,
+    "terminatorsStayEstablished": true,
+    "capsAndTerminatorsNotMerged": true
+  },
+  "renderedProof": {
+    "pendingLabelOccurrences": 1,
+    "pendingQuantityStateTags": 1
+  }
+}

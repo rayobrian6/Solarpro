@@ -1,0 +1,69 @@
+{
+  "generatedAt": "2026-07-26T20:34:38.407Z",
+  "artifact": "braidon-ppc-branch-status-matrix",
+  "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "finding": "§6 — SCHED branch \"PASS\" semantics + topology-driven code references",
+  "before": {
+    "column": "Status",
+    "value": "✓ PASS",
+    "defect": "the tri-state logic was CORRECT (it truthfully reported ampacity / device rating) but the generic column label made it read as a branch-wide release while grounding was pending, the route estimated and procurement insufficient",
+    "sectionTitle": "AC Branch Circuit Schedule — NEC 690.8(A) / 705.12  (705.12 is LOAD-SIDE only; this design's canonical interconnection rule is 705.11)"
+  },
+  "after": {
+    "column": "AMPACITY / DEVICE-RATING RESULT",
+    "passValue": "PASS — ELECTRICAL RATING ONLY",
+    "companionMatrix": "BRANCH RELEASE STATUS",
+    "sectionTitleArticle": "705.11"
+  },
+  "derivabilityRuling": {
+    "note": "what is genuinely per-branch at HEAD — nothing else may be invented",
+    "routeAuthority": {
+      "scope": "SCHEDULE-LEVEL (there is exactly ONE BRANCH_RUN segment)",
+      "perBranchFact": "length PROVENANCE only",
+      "renderedOnce": true
+    },
+    "groundingAuthority": {
+      "scope": "ONE global outcome scoped by branchIds",
+      "perBranchFact": "none — the same value on every branch",
+      "renderedOnce": true
+    },
+    "procurementSufficiency": {
+      "scope": "GENUINELY PER-BRANCH (affectedBranchIds)",
+      "perBranchFact": "AFFECTED / NOT AFFECTED"
+    },
+    "deficitApportionment": "FORBIDDEN — the Σ deficit is never apportioned per branch"
+  },
+  "renderedFixture": {
+    "ratingColumn": true,
+    "qualifiedPass": true,
+    "barePassBadge": false,
+    "releaseMatrix": true,
+    "overallReleaseBlocked": true,
+    "perBranchApportionment": false
+  },
+  "renderedProcurementInsufficientInput": {
+    "affectedBranchIds": [
+      "br-2"
+    ],
+    "affectedRendered": true,
+    "overallReleaseBlocked": true,
+    "perBranchApportionment": false
+  },
+  "topologyCitations": {
+    "interconnectionRule": "705.11",
+    "loadSideOnlyClausesRendered": {
+      "705.12(D)": 0,
+      "705.12(B)(2)(3)(e)": 0,
+      "705.13": 0,
+      "bare per NEC 705.12": 0,
+      "NEC 690.8(A) / 705.12 heading": 0
+    },
+    "legitimateNotApplicableStatementsPreserved": true,
+    "sanitizerBypassFixed": {
+      "site": "lib/permit/utils/fieldLabels.ts — the topology filter stripped the only NEC clause and the fallback then returned codeRefs[0] UNFILTERED",
+      "consequenceBefore": "load-side-only 705.12(D)(2)(3)(b) printed on a supply-side design",
+      "loadSideClauseNowRendered": false
+    }
+  }
+}

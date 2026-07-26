@@ -1,6 +1,6 @@
 {
   "ok": true,
-  "snapshotId": "PDS-D307252768B7",
+  "snapshotId": "PDS-E17B052701C1",
   "topology": "MICRO",
   "gatesRun": 40,
   "gatesFailed": 0,
@@ -9,13 +9,13 @@
       "gate": 0,
       "name": "E-1 exports the BAR WS-E canonical evidence stamp",
       "pass": true,
-      "detail": "snapshotId=PDS-D307252768B7"
+      "detail": "snapshotId=PDS-E17B052701C1"
     },
     {
       "gate": 0,
       "name": "the exported stamp binds to THIS snapshot",
       "pass": true,
-      "detail": "stamp=PDS-D307252768B7 snapshot=PDS-D307252768B7"
+      "detail": "stamp=PDS-E17B052701C1 snapshot=PDS-E17B052701C1"
     },
     {
       "gate": 4,
@@ -141,7 +141,7 @@
       "gate": 7,
       "name": "the pending outcome renders the PENDING MANUFACTURER AUTHORITY label",
       "pass": true,
-      "detail": "label occurrences=6"
+      "detail": "label occurrences=10"
     },
     {
       "gate": 7,
@@ -163,9 +163,9 @@
     },
     {
       "gate": 7,
-      "name": "the candidate EGC quantity is a NON-ORDERABLE design quantity",
+      "name": "the candidate EGC quantity is a NON-ORDERABLE candidate design quantity",
       "pass": true,
-      "detail": "bomRowState=design-quantity-non-orderable labelRendered=true"
+      "detail": "bomRowState=design-quantity-non-orderable candidateLabelClauses=true"
     },
     {
       "gate": 7,

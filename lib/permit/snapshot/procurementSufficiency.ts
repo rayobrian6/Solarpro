@@ -130,9 +130,31 @@ export function evaluateCableExtensionClearance(
   return { cleared: missing.length === 0, missing, reasons };
 }
 
+/**
+ * A DOCUMENTED Q-Cable service-loop / transition allowance. The module contract
+ * above already states the rule: a manufacturer- or design-documented allowance
+ * RAISES the threshold and therefore makes this gate STRICTER — it can only ever
+ * create or enlarge a deficit, never clear one (clearing is the exclusive job of
+ * `evaluateCableExtensionClearance`). Absent (null) ⇒ the honest 0-allowance path
+ * with provenance `no-allowance-authority-recorded`, byte-identical to before this
+ * record existed, so the snapshot digest of a design without one is unchanged.
+ */
+export interface QCableServiceLoopAllowance {
+  /** the allowance in feet applied to the Σ designed-installed path. */
+  allowanceFt: number;
+  /** the document / rule this number comes from (never a bare assertion). */
+  documentId: string;
+  /** free text recorded verbatim on the sufficiency object. */
+  note: string;
+  /** provenance tag rendered in place of 'no-allowance-authority-recorded'. */
+  provenance: string;
+}
+
 export interface BuildProcurementSufficiencyArgs {
   assembly: ListedCableAssembly | null;
   branchPaths: BranchCablePath[];
+  /** §Q — a DOCUMENTED service-loop allowance (stricter-only). null ⇒ allowance 0. */
+  serviceLoopAllowance?: QCableServiceLoopAllowance | null;
   /** the exact selected system label for compatibility (IQ8A / Q Cable). */
   selectedSystem: string;
   /** candidate resolution solutions (empty on live today). */
@@ -173,12 +195,19 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
   const procurement = Math.round(branchPaths.reduce((s, p) => s + (p.procurementLengthFt ?? 0), 0));
   const totalDrops = branchPaths.reduce((s, p) => s + (p.dropCount ?? 0), 0);
 
-  // ── ALLOWANCE — honest 0 (no in-repo Q-Cable allowance authority). ──────────
-  const requiredServiceLoopAllowanceFt = 0;
-  const allowanceProvenance = 'no-allowance-authority-recorded';
-  const allowanceNote =
-    'No manufacturer/design Q-Cable service-loop or transition allowance is recorded in-repo; allowance = 0. '
-    + 'A manufacturer-documented allowance would RAISE this threshold (making the gate stricter).';
+  // ── ALLOWANCE — honest 0 unless a DOCUMENTED allowance is supplied. ─────────
+  // A documented allowance can only RAISE the threshold (stricter); it can never
+  // clear a deficit. With none supplied the three values below are byte-identical
+  // to the pre-record behaviour, so an unchanged design keeps its digest.
+  const _allow = args.serviceLoopAllowance ?? null;
+  const requiredServiceLoopAllowanceFt = _allow && _allow.allowanceFt > 0 ? round1(_allow.allowanceFt) : 0;
+  const allowanceProvenance = _allow && _allow.allowanceFt > 0
+    ? _allow.provenance : 'no-allowance-authority-recorded';
+  const allowanceNote = _allow && _allow.allowanceFt > 0
+    ? `Documented Q-Cable service-loop / transition allowance ${round1(_allow.allowanceFt)} ft per ${_allow.documentId}: ${_allow.note} `
+      + 'A documented allowance RAISES this threshold (stricter); it can never clear a deficit.'
+    : 'No manufacturer/design Q-Cable service-loop or transition allowance is recorded in-repo; allowance = 0. '
+      + 'A manufacturer-documented allowance would RAISE this threshold (making the gate stricter).';
 
   const thresholdFt = round1(totalDesigned + requiredServiceLoopAllowanceFt);
   const rawInsufficient = procurement < thresholdFt;

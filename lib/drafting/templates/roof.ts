@@ -27,7 +27,8 @@ import type { DraftingInput } from '../types';
 import type { DesignIntent } from '../designIntent';
 import type { CADModel } from '../../cad/types';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
-import { projectStructural } from '../../permit/snapshot/structuralProjection';
+import { projectStructural, projectAttachmentInstallationAuthority } from '../../permit/snapshot/structuralProjection';
+import { getManufacturerAsset, evaluateDocumentApplicability } from '../../manufacturer-assets-db';
 import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { applyAffine, fitAffine, emitPlacementManifestComment } from '../../permit/snapshot/coordinateAuthority';
 import type { PlacementEntry } from '../../permit/snapshot/types';
@@ -211,6 +212,17 @@ export function drawRoofPlan(
     ?? (project as any).resolvedAttachSpacingIn
     ?? project.attachmentSpacing
     ?? 48;
+  // PPC §3 — PV-1's spacing ANNOTATIONS project the canonical spacing authority
+  // (design value + verification state). The numeric above stays the GEOMETRY
+  // driver (where feet are drawn); every printed spacing string comes from here,
+  // so PV-1 can no longer state a spacing the structural authority has not verified.
+  const _attP = projectAttachmentInstallationAuthority(
+    ctx?.snapshot ?? null,
+    ((project as any).mountingSystemId as string | undefined) ?? null,
+  );
+  /** '(DESIGN)' / '(VERIFIED)' suffixed short spacing label, e.g. '48" O.C. (DESIGN)'. */
+  const _ocLabelP = _attP.spacingShortLabel;
+  const _spacingPendingP = _attP.spacing.verificationState !== 'verified';
   // Fire setbacks — CORRECT AHJ DATABASE SEMANTICS (Ray, 2026-07-01): per the
   // IFC code table behind applyCodeBasis, ahjRidgeSetbackIn is the FIRE SETBACK
   // (drawn as a band on every edge) and ahjRoofSetbackIn is the ACCESS PATHWAY
@@ -1644,9 +1656,12 @@ export function drawRoofPlan(
           ],
       '3. ATTACHMENT SUBJECT TO FRAMING',
       '   LOCATION — SEE PV-3.',
+      // PPC §3 — the ONE canonical spacing line, verbatim, on PV-1.
+      `3C. ${_attP.spacingDesignLine}`,
+      `   STATUS: ${_attP.spacingStatusLine}.`,
       ...(!isRailless
         ? [
-            `3B. RAILS ON FEET @ ${railFootOcIn}" O.C. STAGGERED,`,
+            `3B. RAILS ON FEET @ ${_ocLabelP} STAGGERED,`,
             '   FEET ON RAFTERS; RAILS AT 25%/75% OF',
             '   MODULE. END OVERHANG ≤ 18" — DECK-MOUNT',
             '   (◻) WHERE NO RAFTER FALLS IN RANGE.',
@@ -1770,7 +1785,7 @@ export function drawRoofPlan(
     const _sbHatch = `<rect x="0" y="-5" width="14" height="9" fill="url(#hatch-setback)" opacity="0.6" stroke="#cc2222" stroke-width="0.5"/>`;
     const lg: Array<{ swatch: string; label: string }> = [
       { swatch: `<rect x="0" y="-5" width="14" height="9" fill="#fdfdfd" stroke="#2c4a75" stroke-width="0.7"/><circle cx="3.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="-2.8" r="1" fill="#2a5db0"/><circle cx="3.5" cy="1.8" r="1" fill="#2a5db0"/><circle cx="10.5" cy="1.8" r="1" fill="#2a5db0"/>`, label: 'PV MODULE + ATTACHMENT PTS' },
-      ...(!isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${railFootOcIn}" O.C.` }] : [{ swatch: `<rect x="4" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/><rect x="9" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/>`, label: 'DIRECT-ATTACH MOUNTS (RAIL-LESS)' }]),
+      ...(!isRailless ? [{ swatch: `<line x1="0" y1="-2.5" x2="14" y2="-2.5" stroke="#5a6478" stroke-width="0.8"/><line x1="0" y1="2.5" x2="14" y2="2.5" stroke="#5a6478" stroke-width="0.8"/><circle cx="3" cy="-2.5" r="1" fill="#2a5db0"/><circle cx="11" cy="2.5" r="1" fill="#2a5db0"/>`, label: `RAIL + RAFTER FOOT @ ${_ocLabelP}` }] : [{ swatch: `<rect x="4" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/><rect x="9" y="-2.5" width="2.8" height="2.8" fill="#2a5db0"/>`, label: 'DIRECT-ATTACH MOUNTS (RAIL-LESS)' }]),
       ...(_deckMountUsed ? [{ swatch: `<rect x="4.5" y="-2.5" width="5" height="5" fill="#fff" stroke="#b45309" stroke-width="1"/>`, label: 'DECK-MOUNTED FOOT (NO RAFTER)' }] : []),
       ...(_encroachCount > 0 ? [{
         swatch: `<rect x="4" y="-3.5" width="6" height="6" fill="none" stroke="#cc0000" stroke-width="1" transform="rotate(45 7 -0.5)"/>`,
@@ -1884,8 +1899,9 @@ export function drawRoofPlan(
     // roofMaxY+24..+40; the callout used to print through the dim line)
     txtCallout(Math.max(botP.x - 40, dz.x + 4), roofMaxY + 48, 'start',
       [!isRailless
-        ? `(N) ${mountSys} RAIL FEET @ ${railFootOcIn}" O.C. STAGGERED`
-        : `(N) ${mountSys} DIRECT MOUNTS @ ${attachSp}" O.C.`,
+        ? `(N) ${mountSys} RAIL FEET @ ${_ocLabelP} STAGGERED`
+        : `(N) ${mountSys} DIRECT MOUNTS @ ${_ocLabelP}`,
+       ...(_spacingPendingP ? ['SPACING: PENDING STRUCTURAL VERIFICATION'] : []),
        `INTO FRAMING — SEE PV-3`],
       botP.x - 2, botP.y + 4);
   }
@@ -2026,6 +2042,24 @@ export function drawRoofStructural(
   // resolved spacing), never a sheet literal; PV-3 and PV-1 now agree.
   const _spD = projectStructural(ctx?.snapshot);
   const _cpRf = projectCodeAuthority(ctx?.snapshot);   // W4 §2 code editions
+  // PPC §3/§4 — PV-3 now consumes the CANONICAL attachment-installation authority
+  // (spacing + fastener assembly + document applicability + mount/racking states).
+  // Previously this function read `_mSelD.mount.fastener*` straight out of
+  // mounting-hardware-db and printed exact dims / torque / pilot / coating
+  // unconditionally — while FASTENER-ASSEMBLY-UNVERIFIED and
+  // EQUIPMENT-DOCUMENT-APPLICABILITY were both blocking.
+  const _attD = (() => {
+    const _mid = (project as any).mountingSystemId as string | undefined;
+    const _asset = _mid ? getManufacturerAsset(_mid, 'racking_detail') : null;
+    const _appl = _asset ? evaluateDocumentApplicability(_mSelD?.model ?? _asset.model, _asset, null) : null;
+    return projectAttachmentInstallationAuthority(
+      ctx?.snapshot ?? null, _mid ?? null,
+      _asset ? { model: _asset.model, docTitle: _asset.docTitle } : null,
+      _appl ? { state: _appl.state, documentProduct: _appl.documentProduct } : null,
+    );
+  })();
+  /** true ⇒ the five verified conditions hold and exact instructions may print. */
+  const _exactD = _attD.exactInstructionsAllowed;
   const attachSp   = _spD.attachmentSpacingIn
     ?? (project as any).resolvedAttachSpacingIn
     ?? project.attachmentSpacing
@@ -2037,15 +2071,19 @@ export function drawRoofStructural(
   // RT-MINI is an L-FOOT + RAIL base (railed), NOT rail-less — only genuine
   // rail-less products get the direct-mount detail. (Matches roof-plan + BOM.)
   const isRaillessD = /RAIL-?LESS|RT[- ]?APEX|E[ -]?MOUNT ?AIR/i.test(mountSys);
-  const _fracD = (v: number) =>
-    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : `${v}`;
-  const _lagDiaD  = _mSelD?.mount?.fastenerDiameterIn ?? 0.375;
-  const _embedD   = _mSelD?.mount?.fastenerEmbedmentIn ?? 2.5;
-  // §10 — prefer the EXACT manufacturer product length + type so the PV-3 detail
-  // matches the notes / PE-1 / BOM (RT-MINI = 3.5" wood screw, never a 4" lag).
-  const _lagLenD  = _mSelD?.mount?.fastenerLengthIn ?? (Math.ceil((_embedD + 1.5) * 2) / 2);
-  const _lagTypeD = (_mSelD?.mount?.fastenerType ?? 'SS lag').toUpperCase();
-  const lagLabelD = `${_fracD(_lagDiaD)}" DIA × ${_lagLenD}" ${_lagTypeD}`;
+  // PPC §4 — fastener FACTS come from the canonical assembly, and are RENDERABLE
+  // only when the five verified conditions hold. `_embedD` is retained as the
+  // SVG-geometry driver (the section is drawn to the observed embedment) but its
+  // LABELS print PENDING while unverified — mirroring PV-4C.1.
+  const _embedD   = _attD.fastener.embedmentIn ?? _mSelD?.mount?.fastenerEmbedmentIn ?? 2.5;
+  const _embedLblD = _exactD ? `${_embedD}" MIN EMBED` : 'EMBEDMENT: PENDING';
+  const lagLabelD = _exactD
+    ? [
+        _attD.fastener.diameterLabel ? `${_attD.fastener.diameterLabel}" DIA` : null,
+        _attD.fastener.lengthIn != null ? `× ${_attD.fastener.lengthIn}"` : null,
+        (_attD.fastener.fastenerType ?? '').toUpperCase() || null,
+      ].filter(Boolean).join(' ')
+    : 'FASTENER ASSEMBLY: PENDING VERIFIED SELECTION';
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
   // W3 §2 — exact catalog module dims from the snapshot (no generic 66×40).
   const panelLenIn = _spD.moduleHeightIn ?? project.panelLengthIn ?? 0;
@@ -2358,7 +2396,7 @@ export function drawRoofStructural(
   // extension lines from bolt to dim line
   els.push(`<line x1="${_edX.toFixed(1)}" y1="${_rafTop.toFixed(1)}" x2="${(_boltX - 2).toFixed(1)}" y2="${_rafTop.toFixed(1)}" stroke="#cc0000" stroke-width="${DIM}"/>`);
   els.push(`<line x1="${_edX.toFixed(1)}" y1="${_tipY.toFixed(1)}" x2="${(_boltX - 2).toFixed(1)}" y2="${_tipY.toFixed(1)}" stroke="#cc0000" stroke-width="${DIM}"/>`);
-  els.push(drawText(_edX - 3, (_rafTop + _tipY) / 2 + 2, `${_embedD}" MIN EMBED`, { anchor: 'end', fontSize: 5.4, fontWeight: 'bold', fill: '#cc0000' }));
+  els.push(drawText(_edX - 3, (_rafTop + _tipY) / 2 + 2, _embedLblD, { anchor: 'end', fontSize: 5.4, fontWeight: 'bold', fill: '#cc0000' }));
 
   // rail-less character note (left of assembly, small italic)
   els.push(drawText(_cx - roofW * 0.42, deckTop - 30, isRaillessD ? 'LOW-PROFILE — NO RAIL' : 'RAIL-MOUNTED', { anchor: 'start', fontSize: 5.2, italic: true, fill: '#555' }));
@@ -2369,7 +2407,9 @@ export function drawRoofStructural(
     { ax: _cx + _clEar - 3,     ay: _clampAnchorY,               text: `${_label2}` },
     { ax: _cx + _plW / 2 - 2,   ay: _plTop + 1.5,                text: 'MOUNT BASE PLATE + T-BOLT' },
     { ax: _boltX + _headW / 2,  ay: _headTop + 2.5,              text: `${lagLabelD}` },
-    { ax: _cx + _butW / 2 - 4,  ay: _padTop + 1.5,               text: 'ALPHASEAL BUTYL FLASHING (SELF-SEAL)' },
+    // PPC §4 — the hardcoded product name ('ALPHASEAL BUTYL') is a manufacturer
+    // instruction/product assertion; it may print only under verified applicability.
+    { ax: _cx + _butW / 2 - 4,  ay: _padTop + 1.5,               text: _exactD ? 'ALPHASEAL BUTYL FLASHING (SELF-SEAL)' : 'MOUNT BASE FLASHING — PENDING VERIFIED SELECTION' },
     { ax: _rlx + roofW - 8,     ay: deckTop + _shH / 2,          text: `${roofType} SHINGLE / UNDERLAYMENT` },
     { ax: _rlx + roofW - 8,     ay: _rafTop + _rafH / 2,         text: `SHEATHING (5/8" OSB) + ${rafterSz} RAFTER @ ${rafterSp}" O.C.` },
   ];
@@ -2416,15 +2456,18 @@ export function drawRoofStructural(
   // Row 2 — attachment spacing at its true scaled length, on the next row
   // (+68 clears row 1's relocated line + label — at +44 the two labels
   // printed on top of each other).
+  // PPC §3 — the DESIGN attachment spacing + its verification state, in INCHES
+  // (the old label printed `4'-0" ATTACH. O.C. MAX`: an unverified maximum, in a
+  // unit that contradicted the `48"` the specs table printed inches away).
   els.push(drawOverallDimension(
     secX + bayW, secX + bayW + Math.min(attachSp * IN_PX, roofRun - bayW),
     roofBaseY + 68, 16,
-    ftToFtIn(attachSp / 12) + ' ATTACH. O.C. MAX'
+    `${_attD.spacingShortLabel} DESIGN ATTACH. O.C.`
   ));
 
   // L3 — Lag embedment (vertical, left)
   els.push(drawVerticalDimension(
-    secX + 5, roofBaseY, roofBaseY - 30, 10, `${_embedD}" MIN. EMBED`
+    secX + 5, roofBaseY, roofBaseY - 30, 10, _exactD ? `${_embedD}" MIN. EMBED` : 'EMBEDMENT: PENDING'
   ));
 
   // ── FASTENER & HARDWARE SCHEDULE + ROOFING NOTES (below the section) ──
@@ -2434,25 +2477,50 @@ export function drawRoofStructural(
     const hby = roofBaseY + 100;
     const hbw = (dz.width - 24) / 2;
     const hbx1 = secX, hbx2 = secX + hbw + 24;
-    const _torque = _lagDiaD <= 0.3125 ? '8–12 FT-LBS' : '15–20 FT-LBS';
-    const _pilot = _lagDiaD <= 0.3125 ? '7/32"' : '1/4"';
-    const hwRows: Array<[string, string]> = [
-      ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
-      ['LAG BOLT', `${lagLabelD}, 316 SS`],
-      ['EMBEDMENT', `${_embedD}" MIN INTO RAFTER`],
-      ['PILOT HOLE', `${_pilot} DIA — RAFTER CENTER`],
-      ['DRIVE TORQUE', `${_torque} — NO OVERDRIVE`],
-      ['FLASHING', 'MFR FLASHING — ALL PENETRATIONS'],
-      ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'],
-    ];
-    const rfNotes = [
-      `1. FLASH ALL PENETRATIONS PER MOUNTING MFR MANUAL.`,
-      `2. SEALANT AT EVERY LAG — ${roofType}-COMPATIBLE.`,
-      `3. ATTACH TO FRAMING ONLY — NEVER SHEATHING ALONE.`,
-      `4. NO ATTACHMENT AT SPLICES; 1-1/2" MIN EDGE DISTANCE.`,
-      `5. REPAIR DAMAGED ROOFING BEFORE MOUNTING.`,
-      `6. VERIFY ROOFING MFR WARRANTY COMPATIBILITY.`,
-    ];
+    // PPC §4 — the FABRICATED derivations are DELETED. The old code invented a
+    // drive torque and a pilot-hole diameter from the fastener DIAMETER
+    // (`_lagDiaD <= 0.3125 ? '8–12 FT-LBS' : '15–20 FT-LBS'` and
+    // `? '7/32"' : '1/4"'`) with no source at all — and the pilot line
+    // CONTRADICTED the snapshot, which records `pilotHoleRequired: false`
+    // ('no pilot hole') for the selected RT-MINI. Torque / pilot / coating are now
+    // rendered ONLY from the verified canonical assembly, and the assembly carries
+    // no torque field, so they print PENDING until a verified source exists.
+    const hwRows: Array<[string, string]> = _exactD
+      ? [
+        ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
+        ['FASTENER', lagLabelD],
+        ['EMBEDMENT', `${_embedD}" MIN INTO RAFTER`],
+        ['PILOT HOLE', _attD.fastener.pilotRuleLabel.toUpperCase()],
+        ['MATERIAL / COATING', (_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()],
+        ['FLASHING', 'PER THE VERIFIED MANUFACTURER DOCUMENT'],
+        ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'],
+      ]
+      : [
+        ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
+        ['FASTENER ASSEMBLY', 'PENDING VERIFIED SELECTION'],
+        ['INSTALLATION DETAILS', 'NOT ESTABLISHED'],
+        ['EMBEDMENT / TORQUE / PILOT', 'WITHHELD — NO VERIFIED SOURCE'],
+        ['MATERIAL / COATING', 'WITHHELD — NO VERIFIED SOURCE'],
+        ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'],
+      ];
+    const rfNotes = _exactD
+      ? [
+        `1. FLASH ALL PENETRATIONS PER MOUNTING MFR MANUAL.`,
+        `2. SEALANT AT EVERY FASTENER — ${roofType}-COMPATIBLE.`,
+        `3. ATTACH TO FRAMING ONLY — NEVER SHEATHING ALONE.`,
+        `4. NO ATTACHMENT AT SPLICES; 1-1/2" MIN EDGE DISTANCE.`,
+        `5. REPAIR DAMAGED ROOFING BEFORE MOUNTING.`,
+        `6. VERIFY ROOFING MFR WARRANTY COMPATIBILITY.`,
+      ]
+      // While unverified: NO sealant / edge-distance / manufacturer-manual
+      // instruction (they are exactly the instructions the unapplicable document
+      // would have supplied). The general-practice statements that assert no
+      // dimension and cite no document remain.
+      : [
+        ..._attD.pendingLines.map((l, i) => `${i + 1}. ${l}`),
+        `${_attD.pendingLines.length + 1}. ATTACH TO FRAMING ONLY — NEVER SHEATHING ALONE.`,
+        `${_attD.pendingLines.length + 2}. REPAIR DAMAGED ROOFING BEFORE MOUNTING.`,
+      ];
     const rowH = 15, hdrH = 14;
     // Left: hardware schedule table
     els.push(`<rect x="${hbx1}" y="${hby}" width="${hbw}" height="${hdrH}" fill="#000"/>`);
@@ -2486,12 +2554,23 @@ export function drawRoofStructural(
   const noteY = noteHdrY + 18;
 
   // ROOF-SPECIFIC NOTES (no fence/ground terms)
+  // PPC §3/§4 — the fastener/coating/embedment notes are AUTHORITY-GATED, and the
+  // spacing note prints the DESIGN value + its verification STATUS (never
+  // `4'-0" O.C. MAX`). The coating claim ('316 SS OR HOT-DIP GALVANIZED') is
+  // withheld while `FastenerAssembly.material` is an honest null.
   const notes = [
     'VERIFY RAFTER SIZE + SPACING IN FIELD.',
-    'ALL HARDWARE: 316 SS OR HOT-DIP GALVANIZED.',
-    `MIN. LAG THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
-    `LAG BOLT: ${lagLabelD}.`,
-    `ATTACH. SPACING: ${ftToFtIn(attachSp / 12)} O.C. MAX.`,
+    ...(_exactD
+      ? [
+        `ALL HARDWARE: ${(_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()}.`,
+        `MIN. THREAD EMBEDMENT INTO RAFTER: ${_embedD}".`,
+        `FASTENER: ${lagLabelD}.`,
+      ]
+      : [
+        'FASTENER ASSEMBLY: PENDING VERIFIED SELECTION.',
+        'INSTALLATION DETAILS: NOT ESTABLISHED.',
+      ]),
+    `${_attD.spacingDesignLine} — ${_attD.spacingStatusLine}.`,
     `WIND LOAD: ${windSpeedMph ?? '—'} MPH — REF: ${_cpRf.asceLabel}`,
     `${totalPanels} MODULES — ${dcKw.toFixed(2)} kW DC`,
     `REF: NEC 690.43 / IBC 1609 / ${_cpRf.asceLabel}`,
@@ -2508,9 +2587,15 @@ export function drawRoofStructural(
   // structural attachment sheet; it lives on the electrical/system sheets.)
 
   // Scale note
+  // PPC §4 — the detail itself stays drawn (the geometry is real), but while the
+  // assembly/document authority is unverified it is banner-marked NON-AUTHORITATIVE
+  // so no installer can build from it.
   els.push(drawText(zones.dims.left, H - 8,
-    'CROSS-SECTION SCHEMATIC — VERIFY RAFTER SIZE, SPACING + EMBEDMENT IN FIELD — NTS', {
-      anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
+    _exactD
+      ? 'CROSS-SECTION SCHEMATIC — VERIFY RAFTER SIZE, SPACING + EMBEDMENT IN FIELD — NTS'
+      : `CROSS-SECTION REFERENCE FIGURE — ${_attD.referenceDetailBanner} — NTS`, {
+      anchor: 'start', fontSize: 6.5, fill: _exactD ? '#888' : '#b00', italic: true,
+      fontWeight: _exactD ? 'normal' : 'bold',
     }));
 
   els.push(drawSVGClose());

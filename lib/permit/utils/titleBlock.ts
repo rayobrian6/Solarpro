@@ -232,10 +232,15 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     ).noteText,
     `Equipment grounding conductor (EGC) shall be sized per NEC 250.122. All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: ${project.wireGauge || '#10 AWG'} per NEC 690.45.`,
     `${project.acDisconnect ? 'AC disconnect switch required and shown on SLD' : 'AC disconnect — see SLD for requirements'}. Disconnect shall be within sight of inverter, accessible, and rated for available fault current per NEC 690.15.`,
-    `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC 705.12 and manufacturer requirements.`,
+    // PPC §6 — the inverter-output citation is TOPOLOGY-DEPENDENT. It printed NEC
+    // 705.12 (load-side) unconditionally, including on 705.11 supply-side designs —
+    // the same defect the interconnection note above already avoids.
+    `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.11' : '705.12'} and manufacturer requirements.`,
     `Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.`,
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
-    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
+    // PPC §6 — 705.12(B)(2)(3)(e) is a LOAD-SIDE marking clause; on a supply-side
+    // (705.11) design the applicable interconnection marking clause is 705.10 / 705.11.
+    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.10 / 705.11' : '705.12(B)(2)(3)(e)'}, and IFC ${ifcVer} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
     // Statutory site/clearance notes \u2014 migrated from the retired PV-1 site sheet
     // (2026-07-08 fold) so they persist in the set's general notes.
     `All electrical equipment \u2014 inverters, disconnects, main service panel, and junction/combiner boxes \u2014 shall be located a minimum of 3 ft from the gas meter supply and demand piping.`,

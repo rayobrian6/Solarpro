@@ -121,6 +121,65 @@ export interface GroundingRecord {
   provenance: Provenance;
 }
 
+/** PPC §7 — THE canonical rendered grounding conductor object.
+ *
+ *  Every grounding/bonding conductor row a sheet prints must BE one of these.
+ *  The defect this type retires: PV-4B appended a hardcoded `<tr>` ("EGC | Array
+ *  → AC Disconnect (ground bus) | #10 AWG bare Cu | PVC Sch 80 1-1/4" | 20 ft")
+ *  built from the FEEDER's EGC gauge and the FEEDER row's own conduit/length
+ *  reprinted verbatim — a grounding run with no id, no segment, no raceway of its
+ *  own, no BOM line and no authority state. It reconciled with nothing.
+ *
+ *  A GroundingSegment carries its identity (`groundingSegmentId`), its endpoints,
+ *  the circuit/segment it parallels, its size + type, the PHYSICAL raceway it
+ *  actually occupies (null ⇒ free air / not in a raceway — never another run's
+ *  conduit), its length AND the provenance of that length, its NEC basis, its
+ *  authority state, and the BOM line it derives. Projected (not stored) — see
+ *  projectGroundingSegments() in electricalProjection.ts — so the snapshot digest
+ *  is unchanged. */
+export interface GroundingSegment {
+  /** stable canonical id — gate 10: no rendered grounding row without one. */
+  groundingSegmentId: string;
+  /** the canonical GroundingRecord this projects (null for domain-only nodes). */
+  groundingId: string | null;
+  /** which of the SIX distinct grounding objects this is (Ray §1: kept separate). */
+  purpose: GroundingRecord['purpose'] | 'module-racking-bonding';
+  /** human label for the schedule row. */
+  label: string;
+  fromDeviceId: string;
+  toDeviceId: string;
+  /** the circuit / route segment this grounding conductor is associated with. */
+  associatedSegmentId: string | null;
+  associatedCircuitIds: string[];
+  /** conductor size — null when the method installs no conductor, or when the
+   *  authority has not established one (PENDING). NEVER borrowed from another
+   *  object (the feeder-EGC-relabelled-as-array-EGC defect). */
+  conductorSize: string | null;
+  conductorMaterial: 'Cu' | 'Al' | null;
+  /** insulation / conductor type ('bare', 'THWN-2 green', 'integral to the listed
+   *  cable assembly', …). null ⇒ not established. */
+  insulationType: string | null;
+  /** the method (conductor / raceway / listed-integrated / none-required / pending). */
+  method: GroundingRecord['method'] | 'pending';
+  /** the PHYSICAL raceway this conductor occupies — null when free-air or when no
+   *  raceway object carries it. Never another segment's conduit string. */
+  physicalRacewayId: string | null;
+  racewayLabel: string | null;
+  lengthFt: number | null;
+  /** where lengthFt came from — 'cable-path-geometry' | 'route-one-way' |
+   *  'not-established'. A null length prints PENDING, never a borrowed number. */
+  lengthSource: 'cable-path-geometry' | 'route-one-way' | 'field-measurement' | 'not-established';
+  necBasis: string;
+  /** the authority state of THIS object: verified | pending | not-required. */
+  authorityState: 'verified' | 'pending-manufacturer-authority' | 'nec-derived' | 'not-required';
+  /** true ⇒ the object exists but NO installed conductor may be asserted. */
+  installedConductorAsserted: boolean;
+  /** the BOM line (partNumber) this segment derives, or null when it orders nothing. */
+  bomLineId: string | null;
+  bomRowState: 'no-row' | 'orderable' | 'design-quantity-non-orderable';
+  provenance: string;
+}
+
 /** W1 §route-verification — the five allowed states for a run's length/route
  *  evidence. An estimate can NEVER be presented as field-verified (gate 2). */
 export type RouteVerificationState =

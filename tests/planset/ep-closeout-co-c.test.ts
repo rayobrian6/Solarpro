@@ -74,10 +74,29 @@ describe('§11 racking BOM — assembly-dependent rows gated while rail unpinned
       expect(row.description, `${k}.description`).toMatch(/PENDING RACKING ASSEMBLY SELECTION/);
       expect(row.qty, `${k}.qty > 0 (geometry preserved)`).toBeGreaterThan(0);
     }
-    // Confirmed mount-base parts stay orderable (real SKU).
-    expect(rb.mounts.pending).not.toBe(true);
-    expect(rb.mounts.partNumber).toBeTruthy();
+    // PPC §5 SUPERSEDES the original CO-C carve-out for the MOUNT BASE: Ray now
+    // requires the mount-base line gated too, because the canonical racking record
+    // itself carries `mountSku: null` while the BOM printed a registry id
+    // ('RT-MINI-01') as though a part had been selected. The mount QUANTITY (one per
+    // attachment) is real and preserved; its SKU/manufacturer display is not.
+    expect(rb.mounts.pending).toBe(true);
+    expect(rb.mounts.orderable).toBe(false);
+    expect(rb.mounts.procurementClass).toBe('B');
+    expect(rb.mounts.skuDisplayAllowed).toBe(false);
+    expect(rb.mounts.manufacturerDisplayAllowed).toBe(false);
+    expect(rb.mounts.qty).toBeGreaterThan(0);
+    // Mount-base parts that do NOT depend on the rail selection keep their
+    // engine-level orderability (the authority layer downgrades the fastener row
+    // separately while FASTENER-ASSEMBLY-UNVERIFIED is active).
     expect(rb.lagBolts.pending).not.toBe(true);
     expect(rb.groundLugs.pending).not.toBe(true);
+    // PPC §5 — every row carries a procurement classification, and the gated ones
+    // carry Ray's exact class-B label.
+    for (const k of ['rails', 'railSplices', 'lFeet', 'midClamps', 'endClamps', 'mountingBolts', 'bondingClips'] as const) {
+      expect(rb[k].procurementClass, `${k}.procurementClass`).toBe('B');
+      expect(rb[k].manufacturerDisplayAllowed, `${k}.mfrDisplay`).toBe(false);
+      expect(rb[k].skuDisplayAllowed, `${k}.skuDisplay`).toBe(false);
+      expect(rb[k].description).toContain('DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION');
+    }
   });
 });

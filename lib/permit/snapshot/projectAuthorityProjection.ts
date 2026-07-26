@@ -166,3 +166,77 @@ export function projectProjectAuthority(
 export function projectProjectAuthorityFromInput(input: PermitInput): ProjectAuthorityProjection {
   return projectProjectAuthority(peekSnapshot(input));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PPC §10 — THE ONE ISSUE-STATE LANGUAGE ACCESSOR.
+//
+// Before this, every sheet hand-rolled its own phrase for the package's issue
+// state (coverSheet's "DESIGN REVIEW PACKAGE", SCHED's re-derived blocker gate,
+// PV-5's flatly false "SITE-COMPUTED FROM THE APPROVED DESIGN"). The authority
+// already existed and was digest-bound (`deriveIssueState` → `issueStatus`,
+// validated by V33/V34); only the LANGUAGE was missing, so the false phrase
+// survived four campaigns.
+//
+// Rule: APPROVED-DESIGN language ('approved design', 'approved plans', 'engineer
+// approved', 'permit approved', 'construction approved') may be produced ONLY by
+// this accessor, and ONLY when a digest-bound engineering approval exists —
+// i.e. issueStatus ∈ {REVIEWED, PERMIT-READY, ISSUED FOR PERMIT} (V34 already
+// requires those to be bound to the CURRENT digest) AND no blocking release item
+// is open. Everything else prints the design-review-snapshot wording.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const APPROVED_ISSUE_STATES = new Set<ProjectIssueState>([
+  'REVIEWED', 'PERMIT-READY', 'ISSUED FOR PERMIT',
+]);
+
+export interface IssueStateLanguage {
+  /** the canonical issue state (null ⇒ no project-authority record). */
+  issueStatus: ProjectIssueState | null;
+  /** true ⇒ a digest-bound engineering approval exists AND nothing blocks release. */
+  approved: boolean;
+  /** count of open blocking release items (registry-derived). */
+  openBlockers: number;
+  /** the package noun: 'DESIGN REVIEW PACKAGE' | 'APPROVED DESIGN'. */
+  packageLabel: string;
+  /** basis clause for site-computed values ('…FROM THE CURRENT DESIGN-REVIEW
+   *  SNAPSHOT — NOT YET APPROVED' while pending). */
+  computedFromLabel: string;
+  /** how a contractor-deviation note must refer to the design of record. */
+  deviationReferenceLabel: string;
+  /** short state tag for a badge ('DESIGN REVIEW — NOT VERIFIED'). */
+  stateTag: string;
+}
+
+/** Project the ONE issue-state language set from a snapshot (null-safe). */
+export function projectIssueStateLanguage(
+  snap: PermitDesignSnapshot | null | undefined,
+): IssueStateLanguage {
+  const proj = projectProjectAuthority(snap);
+  const openBlockers = (snap?.permitReadiness?.registry ?? [])
+    .filter(r => r.severity === 'blocking' && !r.resolved).length;
+  const _ready = snap?.permitReadiness?.ready !== false;
+  const approved = !!proj.issueStatus
+    && APPROVED_ISSUE_STATES.has(proj.issueStatus)
+    && openBlockers === 0
+    && _ready;
+  return {
+    issueStatus: proj.issueStatus,
+    approved,
+    openBlockers,
+    packageLabel: approved ? 'APPROVED DESIGN' : 'DESIGN REVIEW PACKAGE',
+    computedFromLabel: approved
+      ? 'SITE-COMPUTED FROM THE APPROVED DESIGN'
+      : 'SITE-COMPUTED FROM THE CURRENT DESIGN-REVIEW SNAPSHOT — NOT YET APPROVED',
+    deviationReferenceLabel: approved
+      ? 'the approved design'
+      : 'the design of record as issued for review',
+    stateTag: approved
+      ? (proj.issueStatus ?? 'REVIEWED')
+      : 'DESIGN REVIEW — NOT VERIFIED',
+  };
+}
+
+/** Convenience: issue-state language straight from a PermitInput. */
+export function projectIssueStateLanguageFromInput(input: PermitInput): IssueStateLanguage {
+  return projectIssueStateLanguage(peekSnapshot(input));
+}

@@ -446,6 +446,21 @@ export interface PermitInput {
     /** Wave 2c per-sub stamp ('roof'|'ground'|'fence') — present only when the
      *  BOM was generated with per-subsystem inputs; SCHED groups by it. */
     subSystem?: string;
+    // ── PPC §5/§8/§9 PROCUREMENT ORDERABILITY (declared on all three carriers:
+    // RackingBOMRow → BOMLineItemV4 → PermitBOMItem/PermitInput['bom']). Declaring
+    // it here retires the renderer cast `(item as { nonOrderable?: boolean })` at
+    // structuralPages.ts — the smell that marked the dropped-flag boundary.
+    /** DESIGN/CANDIDATE quantity only — excluded from the authoritative procurement
+     *  total and from every orderable export. */
+    nonOrderable?: boolean;
+    /** why (governing blocker code + reason). */
+    nonOrderableReason?: string;
+    /** 'pending' ⇒ the quantity is NOT established; the cell may never print a bare
+     *  number and the row is excluded from procurement approval. */
+    quantityState?: 'established' | 'pending';
+    /** what the quantity cell prints while pending, e.g. '0 MODELED / FIELD
+     *  QUANTITY PENDING'. */
+    quantityStateLabel?: string;
     // Legacy compat
     ulListing?: string;
   }>;

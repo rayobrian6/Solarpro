@@ -233,10 +233,25 @@ gate(15, 'unverified-fire-basis-never-ahj-requirement',
 const backfedRowM = html.match(/705\.12\(D\)\(2\)\(3\)\(b\)\s*<\/td>\s*<td[^>]*>\s*([^<]+?)\s*</i)
   ?? strip(html).match(/705\.12\(D\)\(2\)\(3\)\(b\)\s*(N\/A|YES\*?)/i);
 const backfedApplic = backfedRowM ? decode(backfedRowM[1].trim()) : null;
-const g16_backfedNa = !isSupplySide || (backfedApplic != null && /N\/A/i.test(backfedApplic));
+// UPDATED by the PPC pass (2026-07-26), §6 / PPC gate 9. The premise above — that
+// the load-side-only clause is PRESENT and merely marked N/A — was itself the
+// weaker outcome. `fieldLabels.ts` had a sanitizer BYPASS: when the topology filter
+// stripped the only NEC clause it fell back to `codeRefs[0]` UNFILTERED, printing
+// `705.12(D)(2)(3)(b)` on a supply-side design. With that bypass fixed the clause is
+// not cited at all (the label row itself survives, honestly N/A, citing 705.10). So
+// the gate now accepts EITHER: the clause is ABSENT (strongest — nothing load-side-
+// only is cited), or it is present and marked N/A. It still FAILS if the clause is
+// present as a requirement.
+const backfedClauseCited = /705\.12\(D\)\(2\)\(3\)\(b\)/i.test(html);
+const backfedRowNa = /Backfed Breaker\s*N\/A/i.test(strip(html))
+  || (backfedApplic != null && /N\/A/i.test(backfedApplic));
+const g16_backfedNa = !isSupplySide
+  || (!backfedClauseCited && backfedRowNa)
+  || (backfedApplic != null && /N\/A/i.test(backfedApplic));
 gate(16, 'no-load-side-only-labels-on-supply-side',
   g16_backfedNa,
-  `supplySide=${isSupplySide} backfedBreakerApplicability=${backfedApplic}`, null);
+  `supplySide=${isSupplySide} loadSideOnlyClauseCited=${backfedClauseCited} `
+  + `backfedRowMarkedNA=${backfedRowNa} backfedBreakerApplicability=${backfedApplic}`, null);
 
 // ═══ GATE 17 — pending adopted codes are never compliance authority. ═════════
 const g17_split = html.includes('CALC BASIS:') && html.includes('AHJ-ADOPTED IBC / IRC / IFC:') && html.includes('PENDING VERIFICATION');

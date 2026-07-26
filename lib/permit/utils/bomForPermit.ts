@@ -86,6 +86,15 @@ export interface PermitBOMItem {
    *  verifies (today: FASTENER-ASSEMBLY-UNVERIFIED). The quantity is retained so
    *  the exact orderable row auto-regenerates on verification. */
   nonOrderable?: boolean;
+  /** PPC §5/§9 — WHY the row is non-orderable (governing blocker code + reason).
+   *  Rendered on the schedule so the row states its own status. */
+  nonOrderableReason?: string;
+  /** PPC §8 — is the QUANTITY established? 'pending' ⇒ the cell may never print a
+   *  bare number and the row is excluded from procurement approval. */
+  quantityState?: 'established' | 'pending';
+  /** PPC §8 — the label the quantity cell prints while pending, e.g.
+   *  '0 MODELED / FIELD QUANTITY PENDING'. */
+  quantityStateLabel?: string;
   unitCost?: number;
   totalCost?: number;
   /** Wave 5B passthrough of the Wave-2c per-sub stamp ('roof'|'ground'|'fence')
@@ -175,6 +184,13 @@ function v4ToPermit(item: BOMLineItemV4): PermitBOMItem {
     // Per-sub stamp survives into the permit BOM (set by generateBOMV4 only
     // when the generation input carries subSystems — Wave 2c).
     subSystem:    item.subSystem,
+    // PPC §5/§8 — the orderability / quantity state crosses the LAST type
+    // boundary (BOMLineItemV4 → PermitBOMItem). Dropping it here is what left the
+    // renderer casting `(item as { nonOrderable?: boolean })`.
+    nonOrderable:       item.nonOrderable,
+    nonOrderableReason: item.nonOrderableReason,
+    quantityState:      item.quantityState,
+    quantityStateLabel: item.quantityStateLabel,
   };
 }
 
@@ -905,6 +921,55 @@ export function generateBOMForPermit(
     }
   }
 
+  // ── 5f. PPC §9 — the Q-CABLE TRUNK ROW ITSELF carries its procurement state ──
+  // The PV-4B / SCHED continuation prose was already correct, but the BOM row read
+  // `Enphase | IQ Q-Cable (portrait) | Q-12-10-240 | 31 | ea` with NO row-level
+  // state: an operator reading the schedule alone could order the insufficient
+  // quantity. bom-engine-v4 cannot fix this — it is a PRE-snapshot engine with no
+  // access to procurementSufficiency — so the seam is this post-pass, exactly
+  // mirroring 5e. Ray's requirement: keep the SELECTED CABLE IDENTITY visible
+  // (never withhold the SKU — the cable is correctly selected; the QUANTITY is
+  // insufficient) while the row states STATUS / REASON / DESIGNED-INSTALLED /
+  // CURRENT BASE / DEFICIT / EXTENSION SOLUTION NOT SELECTED.
+  const _psBom = peekSnapshot(input)?.electrical?.procurementSufficiency ?? null;
+  if (_psBom?.insufficient) {
+    const _selKind = (_psBom.resolutionOptions ?? []).find(o => o.selected)?.kind ?? null;
+    const _extTxt = _selKind
+      ? `EXTENSION SOLUTION: ${_selKind}`
+      : 'EXTENSION SOLUTION NOT SELECTED';
+    for (const it of merged) {
+      if (it.category !== 'trunk_cable') continue;
+      it.nonOrderable = true;
+      // ONE wording for both the machine reason and the rendered cell. The ALLOWANCE
+      // term is stated explicitly: the deficit is measured against the THRESHOLD
+      // (designed-installed + any documented service-loop allowance), so a row that
+      // printed only designed-vs-base read as arithmetically WRONG the moment an
+      // allowance existed — "140.5 FT vs 152 FT ⇒ DEFICIT 14.5 FT". Every term shows.
+      const _allowTxt = `ALLOWANCE ${_psBom.requiredServiceLoopAllowanceFt ?? 0} FT`
+        + ` (${_psBom.allowanceProvenance ?? 'no-allowance-authority-recorded'})`;
+      const _stateTxt =
+        `STATUS: NON-ORDERABLE · REASON: QCABLE-PROCUREMENT-INSUFFICIENT · `
+        + `DESIGNED-INSTALLED ${_psBom.totalDesignedInstalledFt ?? '—'} FT · ${_allowTxt} · `
+        + `THRESHOLD ${_psBom.thresholdFt ?? '—'} FT · `
+        + `CURRENT BASE ${_psBom.procurementLengthFt ?? '—'} FT · `
+        + `DEFICIT ${_psBom.deficitFt} FT · ${_extTxt}`;
+      it.nonOrderableReason = _stateTxt;
+      // The CELL states the row's own procurement state and its bases, then points
+      // at RS-1. It deliberately does NOT restate the resolution requirement, the
+      // "jumpers required does not clear this" caveat or the affected-branch list —
+      // those are on RS-1's DEFICIT PAYLOAD and PV-4B verbatim, and repeating them
+      // here made the row wrap far enough to clip the continuation sheet (gate 17).
+      it.description =
+        `${_stateTxt}. DESIGNED-INSTALLED = Σ BranchCablePath geometry; CURRENT BASE = `
+        + `Σ drops × ${_psBom.connectorSpacingFt ?? '—'} ft pitch × waste. `
+        + `Base quantity is NOT an orderable total; EXCLUDED from the authoritative `
+        + `procurement total. Selected cable identity unchanged — resolution + affected `
+        + `branches on RS-1. ${it.description ?? ''}`;
+      it.derivedFrom = `procurement sufficiency authority (verification=${_psBom.verificationStatus}) — base cable quantity, non-orderable`;
+      log.push(`[bomForPermit] §9 trunk_cable row NON-ORDERABLE: base ${_psBom.procurementLengthFt} ft short of ${_psBom.totalDesignedInstalledFt} ft by ${_psBom.deficitFt} ft (${_extTxt})`);
+    }
+  }
+
   // ── 6. Sort by stageId ordinal ───────────────────────────
   const STAGE_ORDER: Record<string, number> = {
     array: 1, dc: 2, inverter: 3, ac: 4, structural: 5, monitoring: 6, labels: 7,
@@ -954,4 +1019,140 @@ export function summarizeBOM(items: PermitBOMItem[]): BOMSummary {
     hasStructural,
     hasElectrical,
   };
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// PPC §5/§9 — THE AUTHORITATIVE PROCUREMENT TOTAL / ORDERABLE EXPORT SUBSET
+//
+// This object did not exist. The package asserted "EXCLUDED from the authoritative
+// procurement totals" in PROSE only: SCHED emitted `TOTAL LINE ITEMS = flat.length`
+// (which COUNTS the pending rows) plus a sentence that enumerated only the two rows
+// tagged by the hand-written post-passes — thereby actively telling the reader that
+// the seven pending racking rows WERE included. There was no orderable subset and
+// no procurement-export path filtering on orderability anywhere in lib/.
+//
+// So §5's "authoritative procurement total excludes every pending row" and §9's
+// "procurement-export gate" required BUILDING this, not correcting a total.
+//
+//   EXCLUSION RULE (fail-closed, both axes):
+//     • nonOrderable === true              ⇒ excluded (design/candidate quantity)
+//     • quantityState === 'pending'        ⇒ excluded (quantity not established)
+//   A row is orderable ONLY when neither holds. Anything unknown stays orderable
+//   only because it carries NO pending/non-orderable authority state at all — the
+//   flags are set BY the authorities, so an unflagged row is a verified row.
+//
+// `orderableProcurementExport()` is the ONE export gate: a blocked row can never
+// enter an orderable export, because the export is DERIVED from this subset.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Why a row is excluded from procurement approval. */
+export type ProcurementExclusionClass =
+  /** DESIGN / CANDIDATE quantity — authority unverified (racking assembly,
+   *  fastener assembly, open-air grounding, insufficient Q-Cable). */
+  | 'non-orderable-design-quantity'
+  /** the quantity itself is not established (sealing caps: field quantity). */
+  | 'quantity-pending';
+
+export interface ProcurementExclusion {
+  category: string;
+  model: string;
+  partNumber: string;
+  quantity: number;
+  unit: string;
+  exclusionClass: ProcurementExclusionClass;
+  reason: string;
+}
+
+export interface ProcurementApproval {
+  /** every BOM line, orderable or not (the SCHED "TOTAL LINE ITEMS" count). */
+  totalLineItems: number;
+  /** the AUTHORITATIVE procurement total: the count of orderable lines ONLY. */
+  orderableLineItems: number;
+  excludedLineItems: number;
+  /** Σ quantity of the orderable subset, per unit — never mixes ft with ea. */
+  orderableQuantityByUnit: Record<string, number>;
+  /** THE only export-eligible rows. */
+  orderableRows: PermitBOMItem[];
+  /** every excluded row, with its class + reason (rendered, never implied). */
+  exclusions: ProcurementExclusion[];
+  excludedCountByClass: Record<ProcurementExclusionClass, number>;
+  /** true ⇒ at least one row is excluded, so the total is a SUBSET and the
+   *  procurement package cannot be approved as-is. */
+  partial: boolean;
+  /** the sentence the schedule renders — states the total AND what is excluded. */
+  statement: string;
+}
+
+/** Is this row eligible for the authoritative procurement total / an export? */
+export function isOrderableForProcurement(item: PermitBOMItem): boolean {
+  return item.nonOrderable !== true && item.quantityState !== 'pending';
+}
+
+/** Build THE authoritative procurement approval object (pure). */
+export function buildProcurementApproval(items: PermitBOMItem[]): ProcurementApproval {
+  const orderableRows: PermitBOMItem[] = [];
+  const exclusions: ProcurementExclusion[] = [];
+  const excludedCountByClass: Record<ProcurementExclusionClass, number> = {
+    'non-orderable-design-quantity': 0,
+    'quantity-pending': 0,
+  };
+  const orderableQuantityByUnit: Record<string, number> = {};
+
+  for (const it of items) {
+    if (isOrderableForProcurement(it)) {
+      orderableRows.push(it);
+      const u = it.unit || 'ea';
+      orderableQuantityByUnit[u] = (orderableQuantityByUnit[u] ?? 0) + (Number.isFinite(it.quantity) ? it.quantity : 0);
+      continue;
+    }
+    const cls: ProcurementExclusionClass = it.nonOrderable === true
+      ? 'non-orderable-design-quantity'
+      : 'quantity-pending';
+    excludedCountByClass[cls]++;
+    exclusions.push({
+      category: it.category,
+      model: it.model,
+      partNumber: it.partNumber,
+      quantity: it.quantity,
+      unit: it.unit,
+      exclusionClass: cls,
+      reason: it.nonOrderableReason
+        ?? (cls === 'quantity-pending'
+          ? (it.quantityStateLabel ?? 'QUANTITY PENDING — the modeled count is not the established field quantity')
+          : 'DESIGN QUANTITY ONLY — pending verified authority (see RS-1)'),
+    });
+  }
+
+  const partial = exclusions.length > 0;
+  const statement = partial
+    ? `AUTHORITATIVE PROCUREMENT TOTAL: ${orderableRows.length} of ${items.length} line items are ORDERABLE. `
+      + `${exclusions.length} line item${exclusions.length === 1 ? ' is' : 's are'} EXCLUDED from this total and from every `
+      + `procurement export — ${excludedCountByClass['non-orderable-design-quantity']} DESIGN/CANDIDATE quantit`
+      + `${excludedCountByClass['non-orderable-design-quantity'] === 1 ? 'y' : 'ies'} (authority unverified) and `
+      + `${excludedCountByClass['quantity-pending']} with a QUANTITY NOT ESTABLISHED. `
+      + `Excluded: ${exclusions.map(e => `${e.category.replace(/_/g, ' ')} (${e.exclusionClass})`).join('; ')}. `
+      + `This package is NOT an approved procurement release.`
+    : `AUTHORITATIVE PROCUREMENT TOTAL: all ${items.length} line items are ORDERABLE — no row carries a design-only `
+      + `quantity or an unestablished quantity.`;
+
+  return {
+    totalLineItems: items.length,
+    orderableLineItems: orderableRows.length,
+    excludedLineItems: exclusions.length,
+    orderableQuantityByUnit,
+    orderableRows,
+    exclusions,
+    excludedCountByClass,
+    partial,
+    statement,
+  };
+}
+
+/**
+ * THE procurement-export gate (gate 13). Any orderable export — purchase order,
+ * CSV, distributor cart — MUST be derived from this function. A blocked row cannot
+ * enter it: the subset is computed from the same fail-closed predicate the rendered
+ * authoritative total uses, so the export and the sheet can never disagree.
+ */
+export function orderableProcurementExport(items: PermitBOMItem[]): PermitBOMItem[] {
+  return buildProcurementApproval(items).orderableRows;
 }

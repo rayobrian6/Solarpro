@@ -16,6 +16,7 @@ import type { PermitInput } from '../types';
 import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import type { FramingCapacityDocumentEvidence } from './framingAuthority';
 import type { CableExtensionSolution } from './types';
+import type { QCableServiceLoopAllowance } from './procurementSufficiency';
 import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { resolveRackingCapacityDocument, resolveFramingCapacityDocument, resolveCableExtensionSolutions, resolveClimateHazardDocument } from '@/lib/documents/registry';
 import { listActiveInvalidations } from '@/lib/reconciliation/reconcile';
@@ -46,6 +47,12 @@ export interface SnapshotAuthorityInputs {
    *  extension product AND its verified document is archived ⇒
    *  QCABLE-PROCUREMENT-INSUFFICIENT stays firing (the honest live outcome today). */
   cableExtensionSolutions: CableExtensionSolution[];
+  /** §Q — a DOCUMENTED Q-Cable service-loop / transition allowance. STRICTER-ONLY:
+   *  a documented allowance RAISES the sufficiency threshold and can NEVER clear a
+   *  deficit (clearing is exclusively `evaluateCableExtensionClearance`). No such
+   *  allowance rule is archived in-repo, so this resolves to null today and the
+   *  allowance stays an honest 0 with provenance `no-allowance-authority-recorded`. */
+  qcableServiceLoopAllowance: QCableServiceLoopAllowance | null;
   /** BAR §2 — the VERIFIED, project-applicable climate-hazard source (ASCE 7
    *  Hazard-Tool report / AHJ climate ordinance extract) that can construct a
    *  VERIFIED EnvironmentalLoadAuthority. Fail-soft to null ⇒ operator-entered
@@ -146,6 +153,9 @@ export async function resolveSnapshotAuthorityInputs(input: PermitInput): Promis
   return {
     capacityDocument, projectJurisdiction: jurisdiction, manufacturerDocumentsArchived,
     digestInvalidatedByLedger, framingCapacityDocument, framingProjectApplicabilityKey,
-    cableExtensionSolutions, environmentalSource,
+    cableExtensionSolutions,
+    // no in-repo Q-Cable service-loop allowance authority exists ⇒ honest null.
+    qcableServiceLoopAllowance: null,
+    environmentalSource,
   };
 }

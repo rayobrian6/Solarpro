@@ -141,7 +141,12 @@ function filterSectionByTopology(section: string, isSupply: boolean): string {
     if (side === 'general') return true;
     return isSupply ? side === 'supply' : side === 'load';
   });
-  return (kept.length ? kept : parts).join(' / ');
+  // PPC §6 — the second half of the sanitizer bypass: when NOTHING survives the
+  // topology filter this returned EVERY part (`kept.length ? kept : parts`), so a
+  // compound all-load-side citation ('705.12(B)(3) / 705.13') printed intact on a
+  // supply-side design. An empty result is the honest answer — resolveRef then
+  // omits the NEC clause rather than citing the wrong side.
+  return kept.join(' / ');
 }
 
 /** §11 — resolve the label's code SECTION references. NEC follows the AHJ's
@@ -165,7 +170,21 @@ function resolveRef(codeRefs: RawLabel['codeRefs'], necYear: string, ifcEd: stri
     if (necSection) parts.push(`NEC ${necYear} ${necSection}`);
   }
   if (ifcPick) parts.push(`IFC ${ifcEd ?? 'PENDING'} ${ifcPick.section}`);
-  return parts.join('  ·  ') || (codeRefs[0] ? `${codeRefs[0].code} ${codeRefs[0].section}` : '');
+  // PPC §6 — SANITIZER BYPASS FIX. The old fallback returned `codeRefs[0]`
+  // UNFILTERED whenever the topology filter stripped the only NEC clause and no
+  // IFC ref existed — which printed the load-side-only clause
+  // `NEC 2017 705.12(D)(2)(3)(b)` (dataset entry backfeed-breaker-do-not-relocate)
+  // on a SUPPLY-SIDE design, i.e. the topology gate leaked through its own
+  // fallback. The fallback now re-applies `filterSectionByTopology`, and when
+  // nothing survives it returns an empty string (the label's own `required` flag is
+  // already false on the wrong side, so the row simply carries no citation) —
+  // never a citation the design's topology excludes.
+  if (parts.length) return parts.join('  ·  ');
+  for (const c of codeRefs) {
+    const _sec = /NEC/i.test(c.code) ? filterSectionByTopology(c.section, isSupply) : c.section;
+    if (_sec) return `${c.code} ${_sec}`;
+  }
+  return '';
 }
 
 /** Replace successive ____ blanks with values (real field labels are fill-in). */

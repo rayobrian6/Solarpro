@@ -557,6 +557,39 @@ const SUB_SYSTEM_EMIT_ORDER: readonly SubSystemKey[] = ['roof', 'ground', 'fence
 // Emits the structural engine's real rackingBOM lines. NB: rb.mounts is covered
 // by the racking "lot"/attachment lines and rb.groundLugs is subsumed by the
 // per-module bonding clips — both omitted to avoid double-counting.
+// --- PPC S5 -- the MOUNT-BASE ("racking lot") line's procurement state --------
+// Ray's row-family ruling: the mount base is class B too while the racking
+// assembly is unselected. The registry racking lot line printed
+// `Roof Tech - RT-MINI-01 - 1 lot` with `data-bom-orderable="true"` -- an
+// authoritative selected SKU -- while the canonical racking record itself carries
+// `mountSku: null` and calcRackingBOM had already ruled every assembly-dependent
+// row PENDING. `rb.mounts.pending` is the single source for "the assembly is not
+// pinned"; when it is set the lot line withholds its manufacturer and SKU and is
+// excluded from the authoritative procurement total. The QUANTITY (1 lot) is real
+// and stays.
+function _rackingLotState(rb: { mounts?: { pending?: boolean; orderable?: boolean } } | undefined): {
+  pending: boolean;
+  mfr: (m: string) => string;
+  sku: (p: string) => string;
+  orderability: { nonOrderable: boolean; nonOrderableReason: string } | undefined;
+} {
+  const pending = rb?.mounts?.pending === true || rb?.mounts?.orderable === false;
+  return {
+    pending,
+    mfr: (m: string) => (pending ? '—' : m),
+    sku: (partNumber: string) => (pending ? 'PENDING-RACKING-ASSEMBLY-SELECTION' : partNumber),
+    orderability: pending
+      ? {
+          nonOrderable: true,
+          nonOrderableReason:
+            'PENDING-RACKING-ASSEMBLY-SELECTION — the mount-base assembly is not selected (the canonical '
+            + 'racking record carries mountSku: null); the product MODEL is not a verified purchase SKU. '
+            + 'DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)',
+        }
+      : undefined,
+  };
+}
+
 function emitRackingBOMInto(
   items: BOMLineItemV4[],
   log: BOMDerivationEntry[],
@@ -564,15 +597,36 @@ function emitRackingBOMInto(
   mfr: string,
   subSystem?: BOMSystemType,
 ): void {
-  const emitRB = (category: string, r: { qty: number; unit?: string; description: string; partNumber: string } | undefined, nec: string) => {
+  // PPC §5 ROOT FIX — PROPAGATE the classification instead of discarding it.
+  // calcRackingBOM() already sets `pending:true, orderable:false` on every
+  // assembly-dependent row while the rail SKU is unpinned (structural-engine-v4
+  // `railUnpinned` gate). This emitter's destructured parameter type did not even
+  // mention those fields, so the flags died at the type boundary and SCHED-3
+  // printed bare quantities plus an intact manufacturer on rows the engine had
+  // already ruled NON-ORDERABLE. The manufacturer is now withheld on a pending row
+  // as well — a pending assembly has no selected manufacturer to name.
+  const emitRB = (
+    category: string,
+    r: { qty: number; unit?: string; description: string; partNumber: string | null; pending?: boolean; orderable?: boolean } | undefined,
+    nec: string,
+  ) => {
     if (!r || r.qty <= 0) return;
-    items.push(addItem('structural', category, mfr,
+    const _pending = r.pending === true || r.orderable === false;
+    items.push(addItem('structural', category, _pending ? '—' : mfr,
       r.description, r.partNumber ?? 'TBD', r.description,
       Math.ceil(r.qty), 'ea', nec, 'structuralEngine.rackingBOM', 'calcRackingBOM', true,
-      undefined, undefined, undefined, subSystem));
+      undefined, undefined, undefined, subSystem,
+      _pending
+        ? {
+            nonOrderable: true,
+            nonOrderableReason:
+              'PENDING-RACKING-ASSEMBLY-SELECTION — assembly-dependent on the unselected rail SKU; '
+              + 'DESIGN QUANTITY ONLY, excluded from the authoritative procurement total (see RS-1)',
+          }
+        : undefined));
     log.push({ stageId: 'structural', category, item: r.partNumber,
       quantity: Math.ceil(r.qty), derivedFrom: 'structuralEngine.rackingBOM',
-      formula: 'calcRackingBOM', necReference: nec });
+      formula: `calcRackingBOM${_pending ? ' (PENDING RACKING ASSEMBLY SELECTION — non-orderable)' : ''}`, necReference: nec });
   };
   emitRB('rail', rb.rails, 'UL 2703');
   emitRB('splice', rb.railSplices, 'UL 2703');
@@ -859,12 +913,25 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         const _orderedDrops = plan.dropCount;
         const _occupiedDrops = trunkDeviceCount;          // one drop per micro
         const _establishedUnused = Math.max(0, _orderedDrops - _occupiedDrops); // 0 on a drop-count order
+        // PPC §8 — the description said QUANTITY PENDING while the quantity
+        // argument was a computed hard 0, so SCHED-2 printed "Q-SEAL-10 | 0 | ea":
+        // "zero MODELED" rendered as "zero REQUIRED". The modeled value is retained
+        // (it is the honest surplus the drop-count order establishes) but the row
+        // now carries quantityState:'pending', so the cell prints
+        // "0 MODELED / FIELD QUANTITY PENDING" and the row is EXCLUDED from
+        // procurement approval. A hard certain zero is legal only once the exact
+        // cable-piece topology proves every drop/occupied/unused/end/cap object.
         items.push(addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
           system.connectors.sealingCap.sku,
           `${system.connectors.sealingCap.description} — QUANTITY PENDING (topology-derived, NOT 1-per-branch): ${_orderedDrops} drops ordered = ${_occupiedDrops} micros = ${_occupiedDrops} occupied drops; drop-count procurement establishes ${_establishedUnused} surplus connectors (resolver models no fixed-section pieces). Field service-loop / dead-drop caps depend on cable routing — determine at field verification.`,
           _establishedUnused, 'ea', 'NEC 690.31',
           'topology: ordered drops − occupied drops (drop-count basis; field caps PENDING)',
-          `${_orderedDrops} ordered − ${_occupiedDrops} occupied = ${_establishedUnused} established; field caps PENDING`, false));
+          `${_orderedDrops} ordered − ${_occupiedDrops} occupied = ${_establishedUnused} established; field caps PENDING`, false,
+          undefined, undefined, undefined, undefined,
+          {
+            quantityState: 'pending',
+            quantityStateLabel: `${_establishedUnused} MODELED / FIELD QUANTITY PENDING`,
+          }));
         log.push({ stageId: 'ac', category: 'sealing_cap', item: system.connectors.sealingCap.description,
           quantity: _establishedUnused, derivedFrom: 'topology: ordered − occupied drops (field caps PENDING)', formula: `${_orderedDrops}-${_occupiedDrops}=${_establishedUnused}`, necReference: 'NEC 690.31' });
       }
@@ -1558,13 +1625,17 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // splices, bolts or clamps (SCHED-2 showed grounding only). The structural
     // engine's rackingBOM is self-sufficient (manufacturer + real quantities), so
     // emit the racking system + hardware from it instead of vanishing.
-    items.push(addItem('structural', 'racking', _roofRB.manufacturer, _roofRB.systemModel,
-      _roofRB.mounts.partNumber ?? _roofRB.systemModel,
-      `${_roofRB.manufacturer} ${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`,
-      1, 'lot', 'UL 2703', 'perSystem', '1', true));
-    items.push(addItem('structural', 'attachment', _roofRB.manufacturer,
-      _roofRB.mounts.description, _roofRB.mounts.partNumber ?? 'TBD', _roofRB.mounts.description,
-      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
+    const _lot = _rackingLotState(_roofRB);
+    items.push(addItem('structural', 'racking', _lot.mfr(_roofRB.manufacturer), _roofRB.systemModel,
+      _lot.sku(_roofRB.mounts.partNumber ?? _roofRB.systemModel),
+      `${_lot.pending ? '' : `${_roofRB.manufacturer} `}${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', 'UL 2703', 'perSystem', '1', true,
+      undefined, undefined, undefined, undefined, _lot.orderability));
+    items.push(addItem('structural', 'attachment', _lot.mfr(_roofRB.manufacturer),
+      _roofRB.mounts.description, _lot.sku(_roofRB.mounts.partNumber ?? 'TBD'), _roofRB.mounts.description,
+      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true,
+      undefined, undefined, undefined, undefined, _lot.orderability));
     log.push({ stageId: 'structural', category: 'racking', item: _roofRB.systemModel,
       quantity: 1, derivedFrom: 'structuralEngine.rackingBOM (no registry entry)', formula: '1', necReference: 'UL 2703' });
     emitRackingBOM(_roofRB, _roofRB.manufacturer);
@@ -1613,10 +1684,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       formula: '0', necReference: rackingEntry.iccEsReport });
   } else if (rackingEntry) {
     // Primary racking system
-    items.push(addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
-      rackingEntry.partNumber ?? rackingEntry.id,
-      `${rackingEntry.manufacturer} ${rackingEntry.model} — ${_suppressRailFormulas ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`,
-      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem', '1', true));
+    const _lot = _rackingLotState(_roofRB);
+    items.push(addItem('structural', 'racking', _lot.mfr(rackingEntry.manufacturer), rackingEntry.model,
+      _lot.sku(rackingEntry.partNumber ?? rackingEntry.id),
+      `${_lot.pending ? '' : `${rackingEntry.manufacturer} `}${rackingEntry.model} — ${_suppressRailFormulas ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem', '1', true,
+      undefined, undefined, undefined, undefined, _lot.orderability));
     log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
       quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: rackingEntry.iccEsReport });
 
@@ -2239,9 +2313,15 @@ function generateBOMV4PerSubSystem(
           const _orderedDrops = plan.dropCount;
           const _occupiedDrops = s.deviceCount;
           const _establishedUnused = Math.max(0, _orderedDrops - _occupiedDrops);
+          // PPC §8 (per-sub twin) — a PENDING quantity never renders as a certain 0.
           push(key, addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
             system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — QUANTITY PENDING (topology-derived, NOT 1-per-branch) — ${key} sub-system: ${_orderedDrops} drops ordered = ${_occupiedDrops} micros occupied; ${_establishedUnused} surplus connectors established. Field service-loop / dead-drop caps determine at field verification.`,
-            _establishedUnused, 'ea', 'NEC 690.31', 'topology: ordered − occupied drops (field caps PENDING)', `${_orderedDrops}-${_occupiedDrops}=${_establishedUnused}`, false));
+            _establishedUnused, 'ea', 'NEC 690.31', 'topology: ordered − occupied drops (field caps PENDING)', `${_orderedDrops}-${_occupiedDrops}=${_establishedUnused}`, false,
+            undefined, undefined, undefined, undefined,
+            {
+              quantityState: 'pending',
+              quantityStateLabel: `${_establishedUnused} MODELED / FIELD QUANTITY PENDING`,
+            }));
         }
       } else {
         // Unknown micro brand — generic AC trunk so the wire never silently vanishes.
@@ -2781,13 +2861,17 @@ function generateBOMV4PerSubSystem(
   })();
 
   if (!rackingEntry && _roofRB) {
-    push('roof', addItem('structural', 'racking', _roofRB.manufacturer, _roofRB.systemModel,
-      _roofRB.mounts.partNumber ?? _roofRB.systemModel,
-      `${_roofRB.manufacturer} ${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`,
-      1, 'lot', 'UL 2703', 'perSystem', '1', true));
-    push('roof', addItem('structural', 'attachment', _roofRB.manufacturer,
-      _roofRB.mounts.description, _roofRB.mounts.partNumber ?? 'TBD', _roofRB.mounts.description,
-      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true));
+    const _lot = _rackingLotState(_roofRB);
+    push('roof', addItem('structural', 'racking', _lot.mfr(_roofRB.manufacturer), _roofRB.systemModel,
+      _lot.sku(_roofRB.mounts.partNumber ?? _roofRB.systemModel),
+      `${_lot.pending ? '' : `${_roofRB.manufacturer} `}${_roofRB.systemModel} mounting system — quantities per structural analysis (PV-4C)`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', 'UL 2703', 'perSystem', '1', true,
+      undefined, undefined, undefined, 'roof', _lot.orderability));
+    push('roof', addItem('structural', 'attachment', _lot.mfr(_roofRB.manufacturer),
+      _roofRB.mounts.description, _lot.sku(_roofRB.mounts.partNumber ?? 'TBD'), _roofRB.mounts.description,
+      Math.ceil(_roofRB.mounts.qty), 'ea', 'ASCE 7-22', 'structuralEngine.rackingBOM', 'calcRackingBOM', true,
+      undefined, undefined, undefined, 'roof', _lot.orderability));
     emitRackingBOMInto(items, log, _roofRB, _roofRB.manufacturer, 'roof');
   } else if (rackingEntry && roofModules <= 0) {
     log.push({ stageId: 'structural', category: 'racking', item: rackingEntry.model,
@@ -2795,10 +2879,13 @@ function generateBOMV4PerSubSystem(
       formula: '0', necReference: rackingEntry.iccEsReport });
   } else if (rackingEntry) {
     const suppressRail = RAIL_LESS_ROOF_RACKING.has(rackingEntry.id) && !_roofRB;
-    push('roof', addItem('structural', 'racking', rackingEntry.manufacturer, rackingEntry.model,
-      rackingEntry.partNumber ?? rackingEntry.id,
-      `${rackingEntry.manufacturer} ${rackingEntry.model} — ${suppressRail ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`,
-      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem (roof sub-system)', '1', true));
+    const _lot = _rackingLotState(_roofRB);
+    push('roof', addItem('structural', 'racking', _lot.mfr(rackingEntry.manufacturer), rackingEntry.model,
+      _lot.sku(rackingEntry.partNumber ?? rackingEntry.id),
+      `${_lot.pending ? '' : `${rackingEntry.manufacturer} `}${rackingEntry.model} — ${suppressRail ? 'rail-less' : (rackingEntry.structuralSpecs?.requiresRail ? 'rail-based' : 'rail-less')} mount`
+      + `${_lot.pending ? ' — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION' : ''}`,
+      1, 'lot', rackingEntry.iccEsReport ?? 'UL 2703', 'perSystem (roof sub-system)', '1', true,
+      undefined, undefined, undefined, 'roof', _lot.orderability));
     if (_roofRB) {
       emitRackingBOMInto(items, log, _roofRB, rackingEntry.manufacturer, 'roof');
     } else {
@@ -3055,7 +3142,15 @@ function addItem(
   totalCost?: number,
   /** Wave 2c: owning sub-system — set ONLY by sub-scoped emission contexts.
    *  Conditionally spread so legacy lines stay byte-identical when serialized. */
-  subSystem?: BOMSystemType
+  subSystem?: BOMSystemType,
+  /** PPC §5/§8/§9 — procurement orderability / quantity state. Conditionally
+   *  spread: a row that passes nothing here serializes exactly as before. */
+  orderability?: {
+    nonOrderable?: boolean;
+    nonOrderableReason?: string;
+    quantityState?: 'established' | 'pending';
+    quantityStateLabel?: string;
+  },
 ): BOMLineItemV4 {
   return {
     id: nextId(),
@@ -3076,6 +3171,10 @@ function addItem(
     unitCost,
     totalCost,
     ...(subSystem !== undefined ? { subSystem } : {}),
+    ...(orderability?.nonOrderable !== undefined ? { nonOrderable: orderability.nonOrderable } : {}),
+    ...(orderability?.nonOrderableReason !== undefined ? { nonOrderableReason: orderability.nonOrderableReason } : {}),
+    ...(orderability?.quantityState !== undefined ? { quantityState: orderability.quantityState } : {}),
+    ...(orderability?.quantityStateLabel !== undefined ? { quantityStateLabel: orderability.quantityStateLabel } : {}),
   };
 }
 

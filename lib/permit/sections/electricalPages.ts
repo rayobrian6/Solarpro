@@ -14,8 +14,9 @@ import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
-import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, ampacityChainLines, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
-import { GROUNDING_PENDING_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
+import { GROUNDING_PENDING_LABEL, GROUNDING_PENDING_BONDING_CELL_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
+import { escapeH } from '../utils/drawing';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
@@ -143,7 +144,13 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
       + `<td style="font-size:6.5px"><span class="mono fw7">${x.sectionId}</span><br/><span style="color:#333">${x.sectionLabel}</span>`
         + `<br/><span style="color:#666">${s(x.fromDevice)} → ${s(x.toDevice)}</span></td>`
       + `<td style="font-size:6.5px">${s(x.cableType)}<br/><span class="mono">${condLine}</span>`
-        + `<br/><span style="color:#666">${s(x.bonding)}</span></td>`
+        // PPC §1/§7 — the bonding sub-cell is authority-projected and carries its
+        // canonical GroundingSegment id (gate 10: no rendered grounding conductor
+        // without one) plus a machine-readable pending/assertion tag.
+        + `<br/><span style="color:${x.bondingPendingAuthority ? '#b45309' : '#666'}"`
+          + `${x.groundingSegmentId ? ` data-grounding-segment-id="${x.groundingSegmentId}"` : ''}`
+          + ` data-grounding-pending="${x.bondingPendingAuthority ? 'true' : 'false'}">${s(x.bonding)}`
+          + `${x.groundingSegmentId ? `<br/><span class="mono" style="color:#888;font-size:5.5px">${x.groundingSegmentId}</span>` : ''}</span></td>`
       + `<td style="font-size:6.5px">${x.physicalRacewayId ? `<span class="mono fw7">${x.physicalRacewayId}</span><br/>` : ''}${raceway}`
         + `<br/><span style="color:#666">${x.fillApplicable ? (x.fillPct != null ? `fill ${x.fillPct.toFixed(1)}%` : 'fill PENDING') : 'open air'}</span>`
         // §4 — the FULL itemized ampacity chain (base × count-adj × ambient →
@@ -324,6 +331,89 @@ export function renderOpenAirBranchGroundingNote(
     </div>`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PPC §7 — the PV-4B GROUNDING & BONDING conductor rows, rendered from the
+// canonical GroundingSegment objects.
+//
+// What this replaces: a hardcoded `<tr>` that took the FEEDER's EGC gauge, called
+// it "Array → AC Disconnect (ground bus)", and reprinted the feeder row's own
+// conduit ("PVC Sch 80 1-1/4"") and length ("20 ft") as the grounding run's. That
+// row reconciled with nothing — no id, no segment, no raceway of its own, no BOM
+// line, no authority state.
+//
+// Now: one row per canonical object, each carrying its OWN id (rendered AND
+// machine-tagged via data-grounding-segment-id — gate 10), its own endpoints, its
+// own raceway (or FREE AIR), its own length + length provenance, its own NEC basis
+// and its own authority state. A PENDING object asserts NO installed conductor.
+// Six domains stay six objects; nothing borrows from another.
+// ═══════════════════════════════════════════════════════════════════════════
+export function renderGroundingSegmentRows(
+  snap: import('../snapshot/types').PermitDesignSnapshot | null | undefined,
+): string {
+  const segments = projectGroundingSegments(snap);
+  if (!segments.length) return '';
+  // Compact device labels — the canonical objects keep the full strings; the row
+  // prints the short form (PV-4B page-fit, gate 13).
+  const dev = (s: string): string => s.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  const shortLabel: Record<string, string> = {
+    'branch-egc': 'Open-air branch EGC',
+    'feeder-egc': 'Feeder EGC (raceway)',
+    'raceway-bond': 'Raceway / enclosure bond',
+    'gec': 'Grounding electrode conductor',
+    'integrated-listed-method': 'Listed integrated method',
+    'module-racking-bonding': 'Module / racking bonding',
+  };
+  const rows = segments.map(gs => {
+    // The conductor cell NEVER asserts an installed conductor for a PENDING
+    // object; it states the pending method + the explicit non-assertion. Kept
+    // compact (PV-4B page-fit, gate 13) — the full mandated label renders on E-1's
+    // bonding column and in the open-air grounding note.
+    const conductorCell = gs.authorityState === 'pending-manufacturer-authority'
+      ? `<strong style="color:#b45309">PENDING MFR AUTHORITY — INSTALLED EGC NOT ASSERTED</strong>`
+      : gs.method === 'integrated-listed'
+        ? 'LISTED INTEGRATED METHOD — no additional conductor'
+        : gs.method === 'none-required'
+          ? 'NOT REQUIRED — bonded to existing GES'
+          : gs.method === 'raceway'
+            ? 'raceway as EGC (250.118)'
+            : `${gs.conductorSize ?? 'PENDING'} ${gs.conductorMaterial ?? ''}`.trim();
+    const lengthCell = gs.lengthFt != null
+      ? `${gs.lengthFt} ft`
+      : (gs.method === 'none-required' || gs.method === 'integrated-listed' ? 'n/a' : 'NOT EST.');
+    // ONE dense line per canonical object. Rendered as a single colspan row rather
+    // than N nine-column rows: the ampacity / OCPD / V-drop columns are all "n/a"
+    // for a grounding conductor, and PV-4B has ~18px of printable slack (page-fit
+    // gate 13). Every field Ray requires is still present and machine-tagged —
+    // id, endpoints, size/method, raceway, length + its provenance, NEC basis,
+    // authority state — one object per line, nothing borrowed from another row.
+    return `<span data-grounding-segment-id="${escapeH(gs.groundingSegmentId)}"`
+      + ` data-grounding-authority-state="${escapeH(gs.authorityState)}"`
+      + ` data-grounding-length-source="${escapeH(gs.lengthSource)}"`
+      + ` data-grounding-nec-basis="${escapeH(gs.necBasis.split(/[—:]/)[0].trim().slice(0, 60))}"`
+      + ` data-grounding-bom-line="${escapeH(gs.bomLineId ?? '')}"`
+      + ` data-grounding-installed-asserted="${gs.installedConductorAsserted ? 'true' : 'false'}"`
+      + `>`
+      + `<strong>${escapeH(shortLabel[gs.purpose] ?? gs.label)}</strong> `
+      + `<span class="mono" style="color:#0f5c30;">${escapeH(gs.groundingSegmentId)}</span> `
+      + `[${escapeH(dev(gs.fromDeviceId))}&rarr;${escapeH(dev(gs.toDeviceId))} &middot; `
+      + `${conductorCell} &middot; ${escapeH(gs.racewayLabel ?? 'RACEWAY NOT EST.')} &middot; `
+      + `${lengthCell}${gs.lengthSource === 'not-established' ? '' : ` ${escapeH(gs.lengthSource)}`}]`
+      + `</span>`;
+  // One flowing dense paragraph rather than one line per object: PV-4B has ZERO
+  // printable slack (the page-content flex child cannot shrink), so a per-object
+  // line-per-row rendering clipped the page conclusion (gate 13). Every field is
+  // still present per object, each object still tagged with its own id + state.
+  }).join(' &nbsp;·&nbsp; ');
+  // 5.5px/1.1 (was 5.8px/1.18) — PV-4B's page-content flex child cannot shrink and
+  // this block grows with the open-air grounding explanation; at 5.8px a
+  // procurement-insufficient design clipped the page conclusion by 5.6px (gate 17).
+  return `<tr style="background:#f4fbf6"><td colspan="9" style="font-size:5.5px;line-height:1.1;padding:1px 4px;">`
+    + `<strong style="color:#0f5c30;">GROUNDING &amp; BONDING &mdash; CANONICAL GroundingSegment OBJECTS</strong> `
+    + `(own id / size / raceway / length / authority &mdash; nothing borrowed; NEC basis + BOM line machine-tagged): `
+    + rows
+    + `</td></tr>`;
+}
+
 // §5 (closeout 2026-07-23) — PV-4A AC BRANCH ELECTRICAL RATING SUMMARY (option B).
 // PV-4A no longer prints a conductor/raceway column implying a '#12 THWN-2 → IQ
 // Combiner' branch conductor (that fabricated conductor is the exact defect §5
@@ -464,18 +554,24 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   const _elecStatusLabel = _elecErrorCount > 0 ? 'BLOCKED — REVIEW REQUIRED'
     : _elecWarnCount > 0 ? 'PENDING — ITEMS OUTSTANDING' : 'COMPLIES';
   const _elecStatusColor = _elecErrorCount > 0 ? '#cc0000' : _elecWarnCount > 0 ? '#cc6600' : '#127a3e';
+  /** Cap a canonical authority string for this dense sheet, stating the cap and
+   *  where the full text lives. Never silently truncates. */
+  const _cap = (s: string, n: number): string =>
+    s.length > n ? `${s.slice(0, n).replace(/\s+\S*$/, '')}… (full text on RS-1)` : s;
   const _elecRegRow = (r: typeof _elecRegistry[number], sev: 'error' | 'warning') => {
     const seg = r.affectedSheets.length ? r.affectedSheets.join(', ') : '—';
     return `<tr style="background:${statusBg(sev)}">`
       + `<td style="color:${sev === 'error' ? '#cc0000' : '#cc6600'};font-weight:bold">${sev === 'error' ? 'BLOCKING' : 'PENDING'}</td>`
       + `<td class="mono f-lg">${r.code}</td>`
-      + `<td style="font-size:8px">${r.explanation}`
-      + `<br/><span style="color:#555">Authority: <span class="mono">${r.authorityPath}</span> · Sheets: ${seg}</span>`
-      // PV-4A is a DENSE calc sheet: a very long resolution string pushes the
-      // page past its printable box (the summary bar collapses and clips). The
-      // resolution is capped here with an explicit pointer; RS-1 renders the FULL
-      // canonical resolutionAction, so no authority text is lost.
-      + `<br/><span style="color:#555">Resolve: ${r.resolutionAction.length > 200 ? `${r.resolutionAction.slice(0, 200).replace(/\s+\S*$/, '')}… (full resolution on RS-1)` : r.resolutionAction}</span></td></tr>`;
+      // PV-4A is a DENSE calc sheet and this list grows one row per electrical
+      // blocker: at the full explanation + a 200-char resolution, a sixth blocker
+      // pushed the page conclusion 38px past the printable box (page-fit gate 17).
+      // BOTH strings are capped here with an explicit pointer to RS-1, which renders
+      // the FULL canonical explanation and resolutionAction — no authority text is
+      // lost, and the cap is stated rather than silent.
+      + `<td style="font-size:7.4px;line-height:1.2">${_cap(r.explanation, 190)}`
+      + `<br/><span style="color:#555">Authority: <span class="mono">${r.authorityPath}</span>`
+      + ` · Sheets: ${seg} · Resolve: ${_cap(r.resolutionAction, 130)}</span></td></tr>`;
   };
   const _elecSummaryCard = `
       <div class="rules-summary">
@@ -523,7 +619,16 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
       ${compliance.electrical ? `
       <table class="info-table">
         <tr><td class="il">DC Size</td><td class="iv">${compliance.electrical.summary?.totalDcKw?.toFixed(2)} kW</td><td class="il">AC Capacity</td><td class="iv">${compliance.electrical.summary?.totalAcKw?.toFixed(2)} kW</td></tr>
-        <tr><td class="il">Grounding Conductor</td><td class="iv">${_ic.feederEgcGauge}</td><td class="il">Interconnection</td><td class="iv" style="color:#000">${_ic.isSupplySide ? 'SUPPLY-SIDE TAP — 120% N/A (705.11)' : (_ic.rulePasses == null ? 'PENDING — busbar evaluation not on canonical snapshot' : (_ic.rulePasses ? '✓ 120% RULE PASS' : '✗ FAIL'))}</td></tr>
+        ${/* PPC §7 / gate 10 — a rendered row whose SUBJECT is a grounding conductor
+              must reconcile to a canonical GroundingSegment. This summary row printed
+              a bare feeder EGC gauge under the unqualified label "Grounding
+              Conductor", which reads as a project-wide grounding conductor — the same
+              collapse of six distinct objects into one that §1b killed on E-1. It now
+              names its DOMAIN and carries its object's id. */''}
+        <tr${(() => {
+          const _fe = projectGroundingSegments(_snapA).find(g => g.purpose === 'feeder-egc');
+          return _fe ? ` data-grounding-segment-id="${escapeH(_fe.groundingSegmentId)}"` : '';
+        })()}><td class="il">Feeder EGC (in raceway)</td><td class="iv">${_ic.feederEgcGauge}</td><td class="il">Interconnection</td><td class="iv" style="color:#000">${_ic.isSupplySide ? 'SUPPLY-SIDE TAP — 120% N/A (705.11)' : (_ic.rulePasses == null ? 'PENDING — busbar evaluation not on canonical snapshot' : (_ic.rulePasses ? '✓ 120% RULE PASS' : '✗ FAIL'))}</td></tr>
       </table>` : '<p style="color:#555;font-style:italic;padding:5px;text-align:center;font-size:8.5px">Run compliance check to populate this section.</p>'}
       <!-- Calculation Methodology -->
       <div class="section-title">Calculation Methodology — NEC ${necVer} Article 690</div>
@@ -537,7 +642,12 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           ${_ic.isSupplySide
             ? `<tr><td class="fw7">Interconnection</td><td>Supply-side tap: conductors ≥ 1.25 × PV output current; fused disconnect at tap</td><td class="mono">NEC 705.11</td><td>Line side of service disconnect — 120% rule N/A</td></tr>`
             : `<tr><td class="fw7">Backfeed Breaker</td><td>120% Rule: Main + PV ≤ Busbar × 1.2</td><td class="mono">NEC 705.12(B)(2)(3)</td><td>Load-side connection method</td></tr>`}
-          <tr class="bg-lt"><td class="fw7">EGC Sizing</td><td>Per NEC Table 250.122 based on OCPD</td><td class="mono">NEC 690.45, 250.122</td><td>Min. #12 AWG Cu for ≤ 20A circuits</td></tr>
+          ${/* PPC §1b / gate 10 — this is a METHOD row (a code rule), not a rendered
+                conductor: it is tagged as such so the grounding-row gate does not read
+                it as an untagged conductor assertion, and its note no longer states a
+                single gauge as if it were a PROJECT-WIDE minimum — each raceway /
+                segment is sized on ITS OWN OCPD from its own canonical object. */''}
+          <tr class="bg-lt" data-grounding-code-basis="true"><td class="fw7">EGC Sizing</td><td>Per NEC Table 250.122, on the OCPD of EACH circuit</td><td class="mono">NEC 690.45, 250.122</td><td>Sized per segment — not a project-wide minimum (see PV-4B GroundingSegment objects)</td></tr>
           <tr><td class="fw7">Voltage Drop</td><td>Vd = (2 × L × I × R) / 1000</td><td class="mono">NEC 210.19(A) FPN</td><td>Target ≤ 2% branch, ≤ 3% feeder</td></tr>
           <tr class="bg-lt"><td class="fw7">Conduit Fill</td><td>Per NEC Chapter 9, Table 1</td><td class="mono">NEC Ch. 9 Table 1</td><td>Max 40% fill for 3+ conductors</td></tr>
           <tr><td class="fw7">Rapid Shutdown</td><td>Array-level: ≤ 80V within 30s</td><td class="mono">NEC 690.12</td><td>Module-level per 690.12(B)(2)</td></tr>
@@ -850,14 +960,14 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <td>${_feedConduit}</td>
             <td>${_feedLenTxt}</td>
           </tr>
-          <tr style="background:#fff">
-            <td class="fw7">EGC</td>
-            <td>Array</td><td>${_ic.isSupplySide ? 'AC Disconnect (ground bus)' : 'Main Panel'}</td>
-            <td>${_ic.feederEgcGauge} bare Cu</td>
-            <td>—</td><td>—</td><td>—</td>
-            <td>${_feedConduit}</td>
-            <td>${_feedLenTxt}</td>
-          </tr>` : ''}
+          ${/* PPC §7 — the legacy hardcoded project-level EGC <tr> is DELETED.
+                It printed the FEEDER's EGC gauge relabelled "Array → AC Disconnect
+                (ground bus)" with the feeder row's own conduit + length reprinted
+                as if they were the grounding run's — a grounding conductor with no
+                id, no segment, no raceway of its own, no BOM line and no authority
+                state. Replaced by the canonical GroundingSegment objects below
+                (gate 10: every rendered grounding row carries a groundingSegmentId). */
+            renderGroundingSegmentRows(_snap)}` : ''}
         </tbody>
       </table>
       ${(() => {
@@ -891,7 +1001,12 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const _gndA = _gndB.authority;
         const _gndInline = !_gndB.present ? ''
           : _gndB.outcome === 'PENDING_MANUFACTURER_AUTHORITY'
-            ? ` <strong style="color:#b45309">${GROUNDING_PENDING_LABEL} (${GROUNDING_AUTHORITY_BLOCKER_CODE} — BLOCKING):</strong> the equipment grounding / bonding method for this open-air section of the exact selected <span class="mono">${_gndA?.selectedMicroinverterSku ?? 'micro'}</span> + <span class="mono">${_gndA?.selectedCableAssemblySku ?? 'cable'}</span> is NOT ESTABLISHED by any verified, exactly-applicable manufacturer document; the ${a.conductorCount ?? 2}-conductor construction is recorded and is NOT determinative. Candidate <span class="mono">${_gndB.conductorSize ?? '—'} ${_gndB.conductorMaterial ?? 'Cu'} ${_gndB.bomFootageFt ?? '—'}ft</span> = ${GROUNDING_NON_ORDERABLE_LABEL} (excluded from procurement totals). Module/racking bonding is a distinct, still-required item. See RS-1.`
+            // PPC §1 — compacted: the full pending explanation now renders ONCE per
+            // sheet (the GroundingSegment block + grounding note 3 above), not twice.
+            // The authority-bearing content is preserved: the pending label, the
+            // blocker code, the exact selected equipment, the non-determinative
+            // conductor count, and the CANDIDATE non-orderable quantity.
+            ? ` <strong style="color:#b45309">${GROUNDING_PENDING_LABEL} (${GROUNDING_AUTHORITY_BLOCKER_CODE} — BLOCKING):</strong> not established for the selected <span class="mono">${_gndA?.selectedMicroinverterSku ?? 'micro'}</span> + <span class="mono">${_gndA?.selectedCableAssemblySku ?? 'cable'}</span>; the ${a.conductorCount ?? 2}-conductor construction is NOT determinative. Candidate <span class="mono">${_gndB.conductorSize ?? '—'} ${_gndB.conductorMaterial ?? 'Cu'} ${_gndB.bomFootageFt ?? '—'}ft</span> = ${GROUNDING_NON_ORDERABLE_LABEL}. Module/racking bonding is distinct and still required. See RS-1.`
             : _gndB.outcome === 'NO_SEPARATE_EGC_REQUIRED'
               ? ` <strong>GROUNDING (LISTED METHOD):</strong> ${_gndB.sourceAuthority} — no additional grounding conductor is installed in this open-air section; module/racking bonding remains required on its own authority (${_gndA?.rackingModuleBondingRequirement.codeBasis ?? 'NEC 690.43'}).`
               : ` <strong>GROUNDING (${_gndA?.documentId ?? 'verified document'}, NEC 250.122/690.43(C)):</strong> an ADDITIONAL <strong>${_gndB.conductorSize ?? '#12'} ${_gndB.conductorMaterial ?? 'Cu'} EGC</strong> is required by the cited manufacturer instruction, run open-air with each branch trunk (${_gndB.branchIds.join(', ') || 'all branches'}); <em>BOM qty</em> <span class="mono">${_gndB.bomFootageFt ?? 'PENDING'}ft</span> = designed-installed <span class="mono">${_gndB.designedInstalledFt ?? '—'}ft</span> × ${_gndB.wasteFactor} waste (${_gndB.lengthProvenance ?? 'pending'}) — same route geometry as the trunk.`;
@@ -902,7 +1017,10 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         // lengths already print in the branch rows; the full per-branch math lives on
         // E-1's sectioned schedule + the evidence artifact). Keeps PV-4B page-fit.
         return `
-      <div style="padding:1px 6px;font-size:6.5px;line-height:1.18;border:var(--border);border-top:none;background:#eef4fa;">
+      <div style="padding:1px 6px;font-size:6.3px;line-height:1.1;border:var(--border);border-top:none;background:#eef4fa;">
+        ${/* PPC gate 17 — 1.25 leading: this note carries the open-air grounding
+              explanation AND (when the deficit fires) the procurement statement, and
+              PV-4B's page-content flex child cannot shrink. */''}
         <strong>LISTED AC TRUNK CABLE ASSEMBLY (${a.assemblyId}, §6/§7/§10):</strong>
         ${a.manufacturer} ${a.ecosystem} <span class="mono">${a.sku ?? 'PENDING'}</span>${a.conductorCount && a.conductorGauge ? ` · ${a.conductorCount}×${a.conductorGauge}` : ''} · ${a.connectorSpacingFt != null ? a.connectorSpacingFt + 'ft O.C.' : ''} · ${a.maxBranchCurrentA != null ? a.maxBranchCurrentA + 'A branch (TC-ER, 690.31(C))' : ''}. <strong>Lengths (one quantity per label):</strong> ${_asmB.totalDrops ?? '—'} drops (BOM/PV-1B invariant) · <em>cable path (geometry)</em> <span class="mono">${_asmB.totalDesignedInstalledFt != null ? _asmB.totalDesignedInstalledFt.toFixed(1) : '—'}ft</span> (Σ BranchCablePath designed-installed; per-branch in Length col) · <em>procurement (base cable qty)</em> <span class="mono">${_procTxt}ft</span> (Σ drops×${a.connectorSpacingFt ?? '—'}ft pitch×waste — drop-count basis, not designed×waste); distinct quantities per BranchCablePath object.${_insuffBlock}${_gndInline}
       </div>`;
@@ -1143,10 +1261,13 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <!-- module rail -->
             <rect x="18" y="61" width="264" height="10" fill="#dfe4ec" stroke="#1a2230" stroke-width="1.1"/>
             <text x="150" y="69" text-anchor="middle" font-size="6.5" fill="#1a2230" font-weight="bold">MODULE RAIL — BONDED (UL 2703)</text>
-            <!-- EGC rail -> inverter -->
+            <!-- EGC rail -> inverter / combiner. PPC §1 — this is the IN-RACEWAY
+                 home-run EGC domain and it is labelled with ITS OWN object's gauge.
+                 It used to print the FEEDER EGC gauge, collapsing two of the six
+                 distinct grounding objects into one detail label. -->
             <line x1="150" y1="71" x2="150" y2="94" stroke="#127a3e" stroke-width="1.8"/>
-            <text x="156" y="86" font-size="7" fill="#0f5c30" font-weight="bold">EGC</text>
-            <text x="156" y="94" font-size="6" fill="#0f5c30">${_ic.feederEgcGauge} Cu · 250.122</text>
+            <text x="156" y="86" font-size="7" fill="#0f5c30" font-weight="bold">RACEWAY EGC</text>
+            <text x="156" y="94" font-size="6" fill="#0f5c30">${projectSharedBranchRaceway(_snap).egcGauge ?? _feed.egcGauge ?? 'PENDING'} Cu · 250.118/250.122</text>
             <!-- inverter / combiner -->
             <rect x="108" y="94" width="84" height="26" fill="#f4f6f9" stroke="#1a2230" stroke-width="1.2" rx="1"/>
             <text x="150" y="110" text-anchor="middle" font-size="7" fill="#1a2230" font-weight="bold">INVERTER / AC COMBINER</text>
@@ -1166,8 +1287,12 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <text x="232" y="189" font-size="5.6" fill="#0f5c30" text-anchor="end">ELECTRODE · 250.166</text>
           </svg>
         </div>
-        <div style="font-size:var(--f-sm);line-height:1.2;">
-          <div style="font-weight:900;font-size:9px;margin-bottom:2px;letter-spacing:0.5px;">GROUNDING & BONDING REQUIREMENTS</div>
+        <!-- PPC §1b — 6.5px/1.15 (was var(--f-sm)/1.2): the canonical
+             GroundingSegment object list now renders on this sheet too, and PV-4B's
+             page-content flex child cannot shrink, so this note column gives back
+             the ~10px it needs. Still at the 6.5px note floor used sheet-wide. -->
+        <div style="font-size:6.5px;line-height:1.15;">
+          <div style="font-weight:900;font-size:8.5px;margin-bottom:1px;letter-spacing:0.5px;">GROUNDING & BONDING REQUIREMENTS</div>
           <div style="margin-bottom:1px;">1. All module frames bonded to mounting rail via ${(() => {
             // §11/§12 (closeout 2026-07-23): the bonding hardware is ASSEMBLY-
             // DEPENDENT — it cannot be pinned as authority until the rail assembly
@@ -1182,8 +1307,39 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               ? `${_bond} (listed to UL 2703)`
               : 'the racking manufacturer’s listed UL 2703 bonding hardware — <strong>PENDING RACKING ASSEMBLY SELECTION</strong> (bonding is assembly-dependent; specified once the rail assembly is confirmed)';
           })()}.</div>
-          <div style="margin-bottom:1px;">2. Equipment grounding conductor (EGC): ${_ic.feederEgcGauge} bare Cu min. per NEC 250.122 and 690.45.</div>
-          <div style="margin-bottom:1px;">3. EGC routed with circuit conductors in same raceway per NEC 690.43(A).</div>
+          ${(() => {
+            // ── PPC §1b — notes 2 + 3 are AUTHORITY-GATED and DOMAIN-SCOPED ────
+            // The retired notes were:
+            //   2. "Equipment grounding conductor (EGC): <feederEgcGauge> bare Cu
+            //       min. per NEC 250.122 and 690.45."  ← the FEEDER object's gauge
+            //       presented as a PROJECT-WIDE EGC minimum, collapsing two of the
+            //       six distinct grounding objects into one claim.
+            //   3. "EGC routed with circuit conductors in same raceway per NEC
+            //       690.43(A)."  ← asserts a RACEWAY method for the FREE-AIR branch
+            //       section, and asserts an installed EGC while the open-air
+            //       grounding authority is PENDING.
+            // Now: the IN-RACEWAY sections state their own independent NEC basis,
+            // and the OPEN-AIR branch section states the canonical authority's
+            // outcome — never an installed conductor while PENDING.
+            const _gN = projectOpenAirBranchGrounding(_snap);
+            const _hrN = projectSharedBranchRaceway(_snap);
+            const _rwEgcs = [
+              _hrN.present && _hrN.egcGauge ? `shared branch home-run ${_hrN.egcGauge}` : null,
+              _feed.egcGauge ? `combiner feeder ${_feed.egcGauge}` : null,
+            ].filter(Boolean).join('; ');
+            const note2 = _rwEgcs
+              ? `2. IN-RACEWAY EGCs (NEC 250.118/250.122, per-run OCPD): ${_rwEgcs} &mdash; not a project-wide minimum.`
+              : `2. IN-RACEWAY EGCs: NEC 250.118/250.122 on each run&rsquo;s own OCPD &mdash; PENDING (no canonical object).`;
+            const note3 = !_gN.present
+              ? `3. EGCs run with the circuit conductors of the SAME raceway (NEC 250.102) &mdash; in-raceway only.`
+              : _gN.outcome === 'PENDING_MANUFACTURER_AUTHORITY'
+                ? `3. Open-air branch, 690.31(C): <strong style="color:#b45309">${GROUNDING_PENDING_BONDING_CELL_LABEL}</strong> (${GROUNDING_AUTHORITY_BLOCKER_CODE} &mdash; RS-1); note 2 is in-raceway only.`
+                : _gN.outcome === 'NO_SEPARATE_EGC_REQUIRED'
+                  ? `3. Open-air branch, 690.31(C): LISTED INTEGRATED METHOD per ${escapeH(_gN.sourceAuthority)} &mdash; no additional conductor; note 2 is in-raceway only.`
+                  : `3. Open-air branch, 690.31(C): ADDITIONAL ${_gN.conductorSize ?? 'NEC 250.122'} ${_gN.conductorMaterial ?? 'Cu'} EGC required by ${escapeH(_gN.sourceAuthority)}; note 2 is in-raceway only.`;
+            return `<div style="margin-bottom:1px;">${note2}</div>`
+              + `<div style="margin-bottom:1px;">${note3}</div>`;
+          })()}
           <div style="margin-bottom:1px;">4. ${(() => {
             // §7 — project the canonical GEC grounding object. For a grid-tied
             // interconnected PV system the equipment grounding path bonds to the
