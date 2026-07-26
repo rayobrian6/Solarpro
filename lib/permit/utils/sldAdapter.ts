@@ -18,7 +18,7 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
 import { peekSnapshot } from '../snapshot/read';
-import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectListedCableAssembly } from '../snapshot/electricalProjection';
 
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
@@ -75,6 +75,17 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // E-1's SEGMENT_2A conduit label reads THIS; the branch CONDUCTORS ride the
   // open-air Q-Cable trunk (_snapBranch). Two physical sections, never merged.
   const _snapHomerun = projectSharedBranchRaceway(peekSnapshot(input));
+  // §8 — the LISTED open-air branch wiring-method identity the legend must name.
+  // Micro topology draws the Q-Cable assembly (SEGMENT 1, 'ENPHASE Q CABLE
+  // (TC-ER)'); the legend derives from THIS, never the hardcoded 'PV Wire/THWN-2'.
+  const _snapAsm = projectListedCableAssembly(peekSnapshot(input));
+  // §5 — the canonical BRANCH EGC (NEC 250.122 on the BRANCH OCPD), read from the
+  // per-purpose grounding object — the SAME record the E-1 schedule, PV-1B/PV-4B
+  // notes and the BOM open-air EGC footage row project (one source, gate 7).
+  const _snapBranchEgc = (peekSnapshot(input)?.electrical?.groundingObjects ?? [])
+    .find(g => g.purpose === 'branch-egc')?.conductorSize
+    ?? projectCanonicalBranch(peekSnapshot(input)).egcGauge
+    ?? null;
 
   // ── Mount type — drives the PV-array glyph/labels in the renderer ──
   // (cad.systemType is canonical, e.g. 'solar_fence'; project.systemType is the
@@ -223,6 +234,20 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // graphic prints '6×#10 THWN-2' (gate 2), never the fictitious single #12.
     homerunCurrentCarryingCount: _snapHomerun.present ? (_snapHomerun.currentCarryingCount ?? undefined) : undefined,
     homerunConductorGauge:   _snapHomerun.present ? (_snapHomerun.conductorGauge ?? undefined) : undefined,
+    // §8 — legend open-air identity = the listed Q-Cable assembly the sheet draws
+    // (micro only). The renderer's SEGMENT-1 label is the SAME assembly string.
+    openAirBranchWiringLabel: isMicro
+      ? (_snapAsm.present ? _snapAsm.assembly!.wiringMethodLabel
+          : /enphase/i.test(inverterMfr) ? 'ENPHASE Q CABLE (TC-ER)' : 'LISTED AC TRUNK CABLE (TC-ER)')
+      : undefined,
+    // §5 — the BRANCH-side EGCs come from their OWN canonical objects: the
+    // `branch-egc` grounding record (NEC 250.122 on the 20 A BRANCH OCPD → #12)
+    // and the shared home-run segment's own egcGauge. Previously both printed the
+    // FEEDER EGC (#10), so E-1 asserted a separate open-air EGC in a gauge no
+    // grounding object or BOM row carried (gate 7).
+    branchEgcGauge:          _snapBranchEgc ?? undefined,
+    homerunEgcGauge:         (_snapHomerun.present ? (_snapHomerun.egcGauge ?? undefined) : undefined)
+                               ?? _snapBranchEgc ?? undefined,
     acOCPD,
     mainPanelAmps:           mainAmps,
     // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot

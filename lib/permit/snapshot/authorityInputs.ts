@@ -16,7 +16,8 @@ import type { PermitInput } from '../types';
 import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import type { FramingCapacityDocumentEvidence } from './framingAuthority';
 import type { CableExtensionSolution } from './types';
-import { resolveRackingCapacityDocument, resolveFramingCapacityDocument, resolveCableExtensionSolutions } from '@/lib/documents/registry';
+import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
+import { resolveRackingCapacityDocument, resolveFramingCapacityDocument, resolveCableExtensionSolutions, resolveClimateHazardDocument } from '@/lib/documents/registry';
 import { listActiveInvalidations } from '@/lib/reconciliation/reconcile';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
@@ -45,6 +46,12 @@ export interface SnapshotAuthorityInputs {
    *  extension product AND its verified document is archived ⇒
    *  QCABLE-PROCUREMENT-INSUFFICIENT stays firing (the honest live outcome today). */
   cableExtensionSolutions: CableExtensionSolution[];
+  /** BAR §2 — the VERIFIED, project-applicable climate-hazard source (ASCE 7
+   *  Hazard-Tool report / AHJ climate ordinance extract) that can construct a
+   *  VERIFIED EnvironmentalLoadAuthority. Fail-soft to null ⇒ operator-entered
+   *  wind/snow remain OBSERVATION/OVERRIDE ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-
+   *  UNVERIFIED keeps firing (the honest live outcome today — nothing archived). */
+  environmentalSource: EnvironmentalLoadSourceEvidence | null;
 }
 
 /** Resolve the async document + ledger authority for a permit input. Never
@@ -121,9 +128,24 @@ export async function resolveSnapshotAuthorityInputs(input: PermitInput): Promis
     cableExtensionSolutions = [];
   }
 
+  // ── BAR §2 climate-hazard source. The applicability key is the SAME boundary
+  //    the pure gate checks (environmentalSourceVerified compares the document's
+  //    projectApplicability against the project/AHJ), so the DB filter and the
+  //    pure gate can never disagree. Fail-soft to null ⇒ operator-entered
+  //    wind/snow stay unverified ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED. ──────
+  let environmentalSource: EnvironmentalLoadSourceEvidence | null = null;
+  try {
+    environmentalSource = await resolveClimateHazardDocument({
+      projectApplicabilityKey: jurisdiction ?? proj.apn ?? proj.address ?? projectId,
+      jurisdiction,
+    });
+  } catch {
+    environmentalSource = null;   // DB unavailable (migration 113 not run / harness)
+  }
+
   return {
     capacityDocument, projectJurisdiction: jurisdiction, manufacturerDocumentsArchived,
     digestInvalidatedByLedger, framingCapacityDocument, framingProjectApplicabilityKey,
-    cableExtensionSolutions,
+    cableExtensionSolutions, environmentalSource,
   };
 }

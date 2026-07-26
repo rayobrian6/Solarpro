@@ -63,13 +63,21 @@ describe('BOM consumes the trunk resolver', () => {
   // are covered by truck-stock.test.
   const find = (bom: any, cat: string) => (bom.items || []).filter((i: any) => i.category === cat && i.stageId !== 'truck_stock');
 
-  it('emits the orientation-correct trunk SKU as drops + per-branch terminators/seals', () => {
+  it('emits the orientation-correct trunk SKU as drops + terminators from cable-end topology; caps PENDING (not 1/branch)', () => {
     const p: any = generateBOMV4(mk('portrait'));
     const trunk = find(p, 'trunk_cable')[0];
     expect(trunk.partNumber).toBe('Q-12-10-240');
     expect(trunk.quantity).toBe(52);          // per connector-drop
+    // §7 (BAR) — terminators = actual cable-end objects: one per branch far-end (4).
     expect(find(p, 'terminator')[0].quantity).toBe(4);
-    expect(find(p, 'sealing_cap')[0].quantity).toBe(4);
+    expect(find(p, 'terminator')[0].derivedFrom).toMatch(/cable-end objects/i);
+    // §7 — sealing caps are TOPOLOGY-DERIVED, not branchCount: the drop-count order
+    // (52 drops = 52 micros) establishes 0 surplus connectors → PENDING field caps.
+    const cap = find(p, 'sealing_cap')[0];
+    expect(cap.quantity).toBe(0);             // NOT 4 (branchCount)
+    expect(cap.quantity).not.toBe(4);
+    expect(cap.description).toMatch(/PENDING/);
+    expect(cap.derivedFrom).toMatch(/ordered.*occupied|topology/i);
     expect(find(p, 'connector').length).toBe(0); // single plane → no splices
     const l: any = generateBOMV4(mk('landscape'));
     expect(find(l, 'trunk_cable')[0].partNumber).toBe('Q-12-17-240');

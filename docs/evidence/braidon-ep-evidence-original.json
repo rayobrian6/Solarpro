@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T20:32:39.888Z",
-  "harness": "planset-evidence-ep (electrical/procurement closeout rendered-truth, 20 permanent gates)",
+  "generatedAt": "2026-07-26T00:15:53.515Z",
+  "harness": "planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates + chained BAR WS-E)",
   "mode": "original",
-  "htmlPath": "../../AppData/Local/Temp/_ep_orig.html",
-  "snapshotId": "PDS-69A79CD87335",
-  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/bar-orig.html",
+  "snapshotId": "PDS-CD0F6377533F",
+  "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
   "project": "BRAIDON M PILLA — Solar TEST",
   "sheetCount": 21,
   "sheetIds": [
@@ -103,7 +103,7 @@
     "PENDING-RACKING-ASSEMBLY-SELECTION",
     "FASTENER-ASSEMBLY-UNVERIFIED",
     "EQUIPMENT-DOCUMENT-APPLICABILITY",
-    "WIND-SNOW-AUTHORITY-UNRESOLVED",
+    "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
     "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
     "RACKING-CAPACITY-APPLICABILITY-GAP",
     "CODE-AUTHORITY-INCOMPLETE",
@@ -116,18 +116,18 @@
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-69A79CD87335",
+        "reportVal": "PDS-CD0F6377533F",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-69A79CD87335"
+          "PDS-CD0F6377533F"
         ]
       },
       {
         "name": "digestPrefix",
-        "reportVal": "69a79cd87335",
+        "reportVal": "cd0f6377533f",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "69a79cd873358ae61584"
+          "cd0f6377533f404ff20e"
         ]
       },
       {
@@ -143,6 +143,17 @@
       {
         "name": "qcableDropCount",
         "reportVal": "31",
+        "matchedInRendered": true
+      },
+      {
+        "name": "qcableProcurementInsufficient",
+        "reportVal": "false",
+        "matchedInRendered": true,
+        "rs1BlockerPresent": false
+      },
+      {
+        "name": "qcableDeficitFt",
+        "reportVal": "0",
         "matchedInRendered": true
       },
       {
@@ -180,7 +191,7 @@
       "gate": 3,
       "id": "e1-no-pass-with-pending",
       "ok": true,
-      "detail": "e1SchedFound=true noPASS=true pendingShown=true passCount=0",
+      "detail": "e1SchedFound=true noSectionPASS=true pendingShown=true sectionPassCount=0 ampacityVerdicts=2",
       "evidence": null
     },
     {
@@ -312,13 +323,36 @@
       "gate": 20,
       "id": "evidence-equals-rendered",
       "ok": true,
-      "detail": "reconciled=7 mismatches=0",
+      "detail": "reconciled=9 mismatches=0",
       "evidence": []
+    },
+    {
+      "gate": 21,
+      "id": "qcable-procurement-sufficiency",
+      "ok": true,
+      "detail": "mode=original present=true insufficient=false blocker=false designed=140.5 proc=152 deficit=0 consistent=true renderedWhenShort=true allowanceHonest=true modeOk=true",
+      "evidence": {
+        "insufficient": false,
+        "deficitFt": 0,
+        "verificationStatus": "sufficient"
+      }
+    },
+    {
+      "gate": 22,
+      "id": "bar-wse-electrical-authority-chained",
+      "ok": true,
+      "detail": "bar-wse exit=0 · [bar-wse] 33/33 gates passed → docs/evidence/braidon-ep-evidence-original.bar-wse.json",
+      "evidence": {
+        "out": "docs/evidence/braidon-ep-evidence-original.bar-wse.json",
+        "gatesRun": 33,
+        "gatesFailed": 0,
+        "failures": []
+      }
     }
   ],
   "summary": {
-    "total": 20,
-    "passed": 20,
+    "total": 22,
+    "passed": 22,
     "failed": [],
     "allPass": true
   }

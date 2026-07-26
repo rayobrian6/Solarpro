@@ -17,8 +17,10 @@ import type {
   RailObject, ModuleInstance, RoofPlaneObject, RackingAssemblyRecord,
   StructuralEngineResult, StructuralBomRow, StructuralBomReconciliation,
   StructuralReactionReconciliation, FramingObservation, FramingCapacityAuthority,
+  EnvironmentalLoadAuthority,
 } from './types';
 import { observedFramingLine, observedSourceLabel } from './framingAuthority';
+import { environmentalSourceLabel, environmentalStateTag } from './environmentalAuthority';
 import { peekSnapshot } from './read';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
@@ -75,6 +77,15 @@ export interface StructuralProjection {
   groundSnowPsf: number | null;
   roofSnowPsf: number | null;
   asceEdition: string | null;
+  // §2 (BAR) — the canonical ENVIRONMENTAL LOAD AUTHORITY + its provenance line.
+  // Renderers print the wind/snow values WITH `environmentalSourceLine` (e.g.
+  // "SOURCE: OPERATOR-ENTERED — NOT VERIFIED") and NEVER as verified design
+  // criteria while `environmentalUnverified` is true.
+  environmentalLoadAuthority: EnvironmentalLoadAuthority | null;
+  environmentalSourceLine: string;
+  /** the COMPACT inline state tag for dense calc sheets (PV-4C value cells). */
+  environmentalStateTag: string;
+  environmentalUnverified: boolean;
   attachmentCount: number | null;
   attachmentSpacingIn: number | null;
   railTotalFt: number | null;
@@ -176,7 +187,8 @@ const STRUCTURAL_BLOCKER_CODES = new Set([
   'ATTACHMENT-CAPACITY-SOURCE-MISSING',
   'FASTENER-CONFIG-MISSING',
   'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED',
-  'WIND-SNOW-AUTHORITY-UNRESOLVED',
+  'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',   // §2 (BAR) — env-load authority gate
+  'WIND-SNOW-AUTHORITY-UNRESOLVED',            // legacy alias (subsumed by the above)
   'REACTIONS-UNTRACEABLE',
   'STRUCTURAL-REACTION-RECONCILIATION-FAILED',
   'RAIL-QUANTITY-UNTRACEABLE',
@@ -270,6 +282,10 @@ export function projectStructural(snap: PermitDesignSnapshot | null | undefined)
     groundSnowPsf: env?.groundSnowPsf ?? st?.loads.snowPsf ?? null,
     roofSnowPsf: env?.roofSnowPsf ?? null,
     asceEdition: env?.codeAuthority.asceEdition ?? null,
+    environmentalLoadAuthority: env?.environmentalLoadAuthority ?? null,
+    environmentalSourceLine: environmentalSourceLabel(env?.environmentalLoadAuthority ?? null),
+    environmentalStateTag: environmentalStateTag(env?.environmentalLoadAuthority ?? null),
+    environmentalUnverified: (env?.environmentalLoadAuthority?.verificationStatus ?? 'unknown') !== 'verified',
     attachmentCount: st?.attachmentCount ?? null,
     attachmentSpacingIn: st?.attachmentSpacingIn ?? null,
     railTotalFt: st?.railTotalFt ?? null,
@@ -340,11 +356,24 @@ export interface FastenerAssembly {
   rafterDeckMethod: string | null;
   sourceDocument: string | null;   // archived datasheet / capacity source
   verification: 'verified' | 'unverified' | 'pending';
-  /** the ONE canonical descriptive line every sheet prints identically. */
+  /** §6 (BAR) — while NOT verified the fastener assembly is NON-ORDERABLE: no
+   *  manufacturer/SKU/diameter/length/coating/capacity may render, the calculated
+   *  attachment quantity is a DESIGN QUANTITY only, and it is excluded from
+   *  procurement totals (the racking/QCABLE non-orderable pattern). The geometry
+   *  fields above REMAIN populated (observed) so the exact orderable row auto-
+   *  regenerates when FastenerAssembly.verificationStatus === 'verified'. */
+  nonOrderable: boolean;
+  /** the ONE canonical descriptive line every sheet prints identically. Dimensionless
+   *  ('DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY') while
+   *  non-orderable; the full manufacturer/dim line only when verified. */
   line: string;
   /** certification-status label ('PENDING VERIFIED FASTENER ASSEMBLY' unless verified). */
   certLabel: string;
 }
+
+/** §6 (BAR) — the ONE canonical non-orderable label. Shown for the fastener line
+ *  and quantity while the assembly is not verified. */
+export const FASTENER_NON_ORDERABLE_LABEL = 'DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY';
 
 const _fracFast = (v: number | null | undefined): string | null =>
   v == null || !isFinite(v) ? null
@@ -387,6 +416,11 @@ export function projectFastenerAssembly(input: PermitInput): FastenerAssembly {
       : (proj.capacityGated ? 'unverified'
         : (vFast === 'verified' && !!sourceDocument ? 'verified' : 'unverified'));
 
+  // §6 (BAR) — the exact manufacturer/SKU/diameter/length/coating/embedment
+  // description prints ONLY when verified. While NON-ORDERABLE the line reveals no
+  // dimensions (the observed geometry stays in the fields above for regeneration);
+  // it prints the DESIGN-QUANTITY / NON-ORDERABLE label instead.
+  const nonOrderable = verification !== 'verified';
   const descParts = [
     [manufacturer, model].filter(Boolean).join(' ') || fastenerType || 'Structural fastener',
     diameterLabel ? `${diameterLabel}" dia` : null,
@@ -398,10 +432,10 @@ export function projectFastenerAssembly(input: PermitInput): FastenerAssembly {
     substrate ? `substrate: ${substrate}` : null,
   ].filter(Boolean).join(' · ');
   const line = !present
-    ? 'PENDING VERIFIED FASTENER ASSEMBLY'
+    ? FASTENER_NON_ORDERABLE_LABEL
     : verification === 'verified'
       ? descParts
-      : `${descParts} · UNVERIFIED (source document not archived)`;
+      : FASTENER_NON_ORDERABLE_LABEL;
   const certLabel = verification === 'verified'
     ? 'VERIFIED FASTENER ASSEMBLY'
     : 'PENDING VERIFIED FASTENER ASSEMBLY';
@@ -410,6 +444,6 @@ export function projectFastenerAssembly(input: PermitInput): FastenerAssembly {
     present, manufacturer, model, sku: ra?.mountSku ?? null, fastenerType,
     diameterIn, diameterLabel, lengthIn, qtyPerMount, material, headDrive,
     pilotHoleRequired, pilotRuleLabel, embedmentIn, substrate, rafterDeckMethod,
-    sourceDocument, verification, line, certLabel,
+    sourceDocument, verification, nonOrderable, line, certLabel,
   };
 }

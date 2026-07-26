@@ -1,0 +1,952 @@
+{
+  "generatedAt": "2026-07-26T00:15:38.630Z",
+  "harness": "planset-evidence-bar (blocker & authority reconciliation, 14 permanent gates; 4/5/6/7/9/10/11 chained to bar-wse)",
+  "mode": "original",
+  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/bar-orig.html",
+  "snapshotId": "PDS-CD0F6377533F",
+  "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
+  "sheetCount": 21,
+  "sheetIds": [
+    "PV-0",
+    "RS-1",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "manifestSheetIds": [
+    "PV-0",
+    "RS-1",
+    "PV-1",
+    "PV-1B",
+    "PV-3",
+    "PV-4C",
+    "PV-4C.1",
+    "E-1",
+    "PV-4A",
+    "PV-4B",
+    "PV-5",
+    "PV-6",
+    "SCHED",
+    "SCHED-2",
+    "SCHED-3",
+    "APP-A",
+    "DS-1",
+    "DS-2",
+    "DS-3",
+    "CERT",
+    "PE-1"
+  ],
+  "blockerRegistry": {
+    "blockingCount": 14,
+    "advisoryCount": 0,
+    "blockingCodes": [
+      "CODE-AUTHORITY-INCOMPLETE",
+      "CONDUIT-FILL-PENDING",
+      "ENGINEERING-REVIEW-PENDING",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "MODULE-EXACT-DATASHEET-PENDING",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "RACKING-CAPACITY-APPLICABILITY-GAP",
+      "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+      "ROUTE-LENGTH-ESTIMATE",
+      "TAP-CONDUCTOR-LENGTH-PENDING"
+    ],
+    "advisoryCodes": [],
+    "renderedRs1": [
+      {
+        "severity": "blocking",
+        "code": "FRAMING-AUTHORITY-UNVERIFIED"
+      },
+      {
+        "severity": "blocking",
+        "code": "PENDING-RACKING-ASSEMBLY-SELECTION"
+      },
+      {
+        "severity": "blocking",
+        "code": "FASTENER-ASSEMBLY-UNVERIFIED"
+      },
+      {
+        "severity": "blocking",
+        "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
+      },
+      {
+        "severity": "blocking",
+        "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED"
+      },
+      {
+        "severity": "blocking",
+        "code": "RACKING-CAPACITY-APPLICABILITY-GAP"
+      },
+      {
+        "severity": "blocking",
+        "code": "ROUTE-LENGTH-ESTIMATE"
+      },
+      {
+        "severity": "blocking",
+        "code": "CONDUIT-FILL-PENDING"
+      },
+      {
+        "severity": "blocking",
+        "code": "TAP-CONDUCTOR-LENGTH-PENDING"
+      },
+      {
+        "severity": "blocking",
+        "code": "CODE-AUTHORITY-INCOMPLETE"
+      },
+      {
+        "severity": "blocking",
+        "code": "EQUIPMENT-DOCUMENT-APPLICABILITY"
+      },
+      {
+        "severity": "blocking",
+        "code": "PROJECT-AUTHORITY-UNVERIFIED"
+      },
+      {
+        "severity": "blocking",
+        "code": "MODULE-EXACT-DATASHEET-PENDING"
+      },
+      {
+        "severity": "blocking",
+        "code": "ENGINEERING-REVIEW-PENDING"
+      }
+    ],
+    "rs1HeaderBlocking": 14,
+    "coverBannerTotal": 14,
+    "coverListed": 9,
+    "coverMore": 6,
+    "issueState": "PENDING ENGINEERING REVIEW",
+    "ready": false
+  },
+  "environmentalLoadAuthority": {
+    "ultimateWindSpeedMph": 115,
+    "windSpeedBasis": "code-minimum-default",
+    "riskCategory": null,
+    "exposureCategory": "C",
+    "groundSnowLoadPsf": 0,
+    "snowLoadBasis": "code-minimum-default",
+    "snowLoadSource": null,
+    "coordinates": {
+      "lat": 38.7061678,
+      "lng": -90.0461651
+    },
+    "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+    "sourceDocumentId": null,
+    "sourceDataset": null,
+    "sourceVersionOrDate": null,
+    "lookupTimestampIso": null,
+    "operatorOverrides": [],
+    "verificationStatus": "unverified",
+    "projectOrAhj": null,
+    "evidenceRef": null,
+    "provenance": {
+      "source": "environmental-load authority gate (BAR §2)",
+      "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+    }
+  },
+  "fastenerAssembly": {
+    "fastenerVerification": "verified",
+    "overall": "pending",
+    "screwLagModel": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+    "datasheetSource": "ICC-ES ESR-3575",
+    "verification": "unverified"
+  },
+  "chainedWse": {
+    "out": "docs/evidence/braidon-bar-evidence-original.wse.json",
+    "gatesRun": 33,
+    "gatesFailed": 0,
+    "artifacts": {
+      "sharedRacewayAmpacity": {
+        "sectionId": "BRANCH_HOMERUN_RUN",
+        "fillApplicable": true,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#10 AWG",
+        "baseTableAmpacityA": 40,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 35,
+        "currentCarryingCount": 6,
+        "countAdjustmentFactor": 0.8,
+        "countAdjustmentBasis": "6 CCC → 0.80 (NEC 310.15(C)(1))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 30.72,
+        "finalAllowableAmpacityA": 30.72,
+        "finalAllowableBasis": "min(corrected 30.72 A [90 °C base], 35 A [75 °C terminal, NEC 110.14(C)]) = 30.72 A",
+        "requiredContinuousA": 20,
+        "requiredContinuousBasis": "each #10 carries one branch; governing = max branch continuous (20A-OCPD branch, ×1.25 basis)",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      },
+      "ampacityBySection": [
+        {
+          "sectionId": "BRANCH_RUN",
+          "fillApplicable": false,
+          "present": true,
+          "conductorMaterial": "Cu",
+          "insulation": "THWN-2",
+          "insulationRatingC": 90,
+          "conductorSize": "#12 AWG",
+          "baseTableAmpacityA": 30,
+          "baseTableTempC": 90,
+          "terminalTempLimitC": 75,
+          "terminalTableAmpacityA": 25,
+          "currentCarryingCount": 2,
+          "countAdjustmentFactor": 1,
+          "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+          "ambientTempC": null,
+          "rooftopAdderC": null,
+          "effectiveAmbientTempC": null,
+          "ambientCorrectionFactor": 0.96,
+          "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+          "correctedAmpacityA": 28.8,
+          "finalAllowableAmpacityA": 25,
+          "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+          "requiredContinuousA": 20,
+          "requiredContinuousBasis": "branch continuous = 16A op × 1.25 (NEC 690.8(A))",
+          "ocpdA": 20,
+          "state": "PASS",
+          "necReferences": [
+            "NEC 310.16",
+            "NEC 310.15(B)(1)",
+            "NEC 310.15(C)(1)",
+            "NEC 110.14(C)",
+            "NEC 690.8(B)"
+          ],
+          "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+        },
+        {
+          "sectionId": "BRANCH_RUN",
+          "fillApplicable": false,
+          "present": true,
+          "conductorMaterial": "Cu",
+          "insulation": "THWN-2",
+          "insulationRatingC": 90,
+          "conductorSize": "#12 AWG",
+          "baseTableAmpacityA": 30,
+          "baseTableTempC": 90,
+          "terminalTempLimitC": 75,
+          "terminalTableAmpacityA": 25,
+          "currentCarryingCount": 2,
+          "countAdjustmentFactor": 1,
+          "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+          "ambientTempC": null,
+          "rooftopAdderC": null,
+          "effectiveAmbientTempC": null,
+          "ambientCorrectionFactor": 0.96,
+          "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+          "correctedAmpacityA": 28.8,
+          "finalAllowableAmpacityA": 25,
+          "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+          "requiredContinuousA": 18.174999999999997,
+          "requiredContinuousBasis": "branch continuous = 14.54A op × 1.25 (NEC 690.8(A))",
+          "ocpdA": 20,
+          "state": "PASS",
+          "necReferences": [
+            "NEC 310.16",
+            "NEC 310.15(B)(1)",
+            "NEC 310.15(C)(1)",
+            "NEC 110.14(C)",
+            "NEC 690.8(B)"
+          ],
+          "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+        },
+        {
+          "sectionId": "BRANCH_RUN",
+          "fillApplicable": false,
+          "present": true,
+          "conductorMaterial": "Cu",
+          "insulation": "THWN-2",
+          "insulationRatingC": 90,
+          "conductorSize": "#12 AWG",
+          "baseTableAmpacityA": 30,
+          "baseTableTempC": 90,
+          "terminalTempLimitC": 75,
+          "terminalTableAmpacityA": 25,
+          "currentCarryingCount": 2,
+          "countAdjustmentFactor": 1,
+          "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+          "ambientTempC": null,
+          "rooftopAdderC": null,
+          "effectiveAmbientTempC": null,
+          "ambientCorrectionFactor": 0.96,
+          "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+          "correctedAmpacityA": 28.8,
+          "finalAllowableAmpacityA": 25,
+          "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+          "requiredContinuousA": 18.174999999999997,
+          "requiredContinuousBasis": "branch continuous = 14.54A op × 1.25 (NEC 690.8(A))",
+          "ocpdA": 20,
+          "state": "PASS",
+          "necReferences": [
+            "NEC 310.16",
+            "NEC 310.15(B)(1)",
+            "NEC 310.15(C)(1)",
+            "NEC 110.14(C)",
+            "NEC 690.8(B)"
+          ],
+          "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+        },
+        {
+          "sectionId": "BRANCH_HOMERUN_RUN",
+          "fillApplicable": true,
+          "present": true,
+          "conductorMaterial": "Cu",
+          "insulation": "THWN-2",
+          "insulationRatingC": 90,
+          "conductorSize": "#10 AWG",
+          "baseTableAmpacityA": 40,
+          "baseTableTempC": 90,
+          "terminalTempLimitC": 75,
+          "terminalTableAmpacityA": 35,
+          "currentCarryingCount": 6,
+          "countAdjustmentFactor": 0.8,
+          "countAdjustmentBasis": "6 CCC → 0.80 (NEC 310.15(C)(1))",
+          "ambientTempC": null,
+          "rooftopAdderC": null,
+          "effectiveAmbientTempC": null,
+          "ambientCorrectionFactor": 0.96,
+          "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+          "correctedAmpacityA": 30.72,
+          "finalAllowableAmpacityA": 30.72,
+          "finalAllowableBasis": "min(corrected 30.72 A [90 °C base], 35 A [75 °C terminal, NEC 110.14(C)]) = 30.72 A",
+          "requiredContinuousA": 20,
+          "requiredContinuousBasis": "each #10 carries one branch; governing = max branch continuous (20A-OCPD branch, ×1.25 basis)",
+          "ocpdA": 20,
+          "state": "PASS",
+          "necReferences": [
+            "NEC 310.16",
+            "NEC 310.15(B)(1)",
+            "NEC 310.15(C)(1)",
+            "NEC 110.14(C)",
+            "NEC 690.8(B)"
+          ],
+          "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+        },
+        {
+          "sectionId": "COMBINER_TO_DISCO_RUN",
+          "fillApplicable": true,
+          "present": true,
+          "conductorMaterial": "Cu",
+          "insulation": "THWN-2",
+          "insulationRatingC": 90,
+          "conductorSize": "#6 AWG",
+          "baseTableAmpacityA": 75,
+          "baseTableTempC": 90,
+          "terminalTempLimitC": 75,
+          "terminalTableAmpacityA": 65,
+          "currentCarryingCount": 4,
+          "countAdjustmentFactor": 0.8,
+          "countAdjustmentBasis": "4 CCC → 0.80 (NEC 310.15(C)(1))",
+          "ambientTempC": null,
+          "rooftopAdderC": null,
+          "effectiveAmbientTempC": null,
+          "ambientCorrectionFactor": 0.96,
+          "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+          "correctedAmpacityA": 57.6,
+          "finalAllowableAmpacityA": 57.6,
+          "finalAllowableBasis": "min(corrected 57.60 A [90 °C base], 65 A [75 °C terminal, NEC 110.14(C)]) = 57.60 A",
+          "requiredContinuousA": 56.34895833333333,
+          "requiredContinuousBasis": "feeder continuous = PV output × 1.25 (NEC 690.8(A))",
+          "ocpdA": 60,
+          "state": "PASS",
+          "necReferences": [
+            "NEC 310.16",
+            "NEC 310.15(B)(1)",
+            "NEC 310.15(C)(1)",
+            "NEC 110.14(C)",
+            "NEC 690.8(B)"
+          ],
+          "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+        },
+        {
+          "sectionId": "DISCO_TO_METER_RUN",
+          "fillApplicable": true,
+          "present": true,
+          "conductorMaterial": "Cu",
+          "insulation": "THWN-2",
+          "insulationRatingC": 90,
+          "conductorSize": "#6 AWG",
+          "baseTableAmpacityA": 75,
+          "baseTableTempC": 90,
+          "terminalTempLimitC": 75,
+          "terminalTableAmpacityA": 65,
+          "currentCarryingCount": 4,
+          "countAdjustmentFactor": 0.8,
+          "countAdjustmentBasis": "4 CCC → 0.80 (NEC 310.15(C)(1))",
+          "ambientTempC": null,
+          "rooftopAdderC": null,
+          "effectiveAmbientTempC": null,
+          "ambientCorrectionFactor": 0.96,
+          "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+          "correctedAmpacityA": 57.6,
+          "finalAllowableAmpacityA": 57.6,
+          "finalAllowableBasis": "min(corrected 57.60 A [90 °C base], 65 A [75 °C terminal, NEC 110.14(C)]) = 57.60 A",
+          "requiredContinuousA": null,
+          "requiredContinuousBasis": "segment continuous current",
+          "ocpdA": 60,
+          "state": "PENDING",
+          "necReferences": [
+            "NEC 310.16",
+            "NEC 310.15(B)(1)",
+            "NEC 310.15(C)(1)",
+            "NEC 110.14(C)",
+            "NEC 690.8(B)"
+          ],
+          "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+        },
+        {
+          "sectionId": "svc-tap-conductors",
+          "fillApplicable": false,
+          "present": true,
+          "conductorMaterial": "Cu",
+          "insulation": "THWN-2",
+          "insulationRatingC": 90,
+          "conductorSize": "#6 AWG",
+          "baseTableAmpacityA": 75,
+          "baseTableTempC": 90,
+          "terminalTempLimitC": 75,
+          "terminalTableAmpacityA": 65,
+          "currentCarryingCount": null,
+          "countAdjustmentFactor": null,
+          "countAdjustmentBasis": null,
+          "ambientTempC": null,
+          "rooftopAdderC": null,
+          "effectiveAmbientTempC": null,
+          "ambientCorrectionFactor": null,
+          "ambientCorrectionBasis": null,
+          "correctedAmpacityA": null,
+          "finalAllowableAmpacityA": null,
+          "finalAllowableBasis": null,
+          "requiredContinuousA": null,
+          "requiredContinuousBasis": "supply-side tap — sizing per service authority (PENDING)",
+          "ocpdA": null,
+          "state": "PENDING",
+          "necReferences": [
+            "NEC 310.16",
+            "NEC 310.15(B)(1)",
+            "NEC 310.15(C)(1)",
+            "NEC 110.14(C)",
+            "NEC 690.8(B)"
+          ],
+          "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+        }
+      ],
+      "openAirBranchGrounding": {
+        "present": true,
+        "required": true,
+        "groundingMethod": "separate-conductor",
+        "conductorMaterial": "Cu",
+        "conductorSize": "#12 AWG",
+        "segmentIds": [
+          "BRANCH_RUN"
+        ],
+        "branchIds": [
+          "br-1",
+          "br-2",
+          "br-3"
+        ],
+        "pathBasis": "Σ per-branch BranchCablePath (same designed-installed geometry as the Q-Cable trunk)",
+        "designedInstalledFt": 140.5,
+        "lengthProvenance": "geometry-derived",
+        "wasteFactor": 1.15,
+        "bomFootageFt": 162,
+        "sourceAuthority": "Enphase IQ Q-Cable Q-12-10-240 = 2-conductor assembly (line+neutral), NO integrated EGC → separate #12 AWG Cu EGC required",
+        "codeBasis": "NEC 250.122 / 690.43(C)",
+        "equipmentCompatibility": "open-air branch EGC parallels the ENPHASE Q CABLE (TC-ER) trunk (TC-ER, free-air 690.31(C))",
+        "verificationState": "cad-derived (length follows branch trunk geometry) — field-verify",
+        "provenance": "groundingObjects[purpose=branch-egc] × 3 branches; length Σ BranchCablePath designed-installed"
+      },
+      "connectorTopology": {
+        "branchCount": 3,
+        "occupiedDrops": 31,
+        "perBranch": [
+          {
+            "branchId": "br-1",
+            "branchLabel": "B1",
+            "dropCount": 11,
+            "cableEndObjectId": "B1-END"
+          },
+          {
+            "branchId": "br-2",
+            "branchLabel": "B2",
+            "dropCount": 10,
+            "cableEndObjectId": "B2-END"
+          },
+          {
+            "branchId": "br-3",
+            "branchLabel": "B3",
+            "dropCount": 10,
+            "cableEndObjectId": "B3-END"
+          }
+        ]
+      },
+      "legend": {
+        "openAirWiringMethod": {
+          "assemblyId": "QCABLE-ASSEMBLY",
+          "wiringMethodLabel": "ENPHASE Q CABLE (TC-ER)",
+          "sku": "Q-12-10-240",
+          "conductorCount": 2,
+          "insulationListing": "THHN/THWN-2 conductors; UL 9703 (cable assemblies) / UL 3003 (raw cable); permitted in free air per NEC 690.31(C)"
+        },
+        "staleLiteralPresent": false,
+        "hasInConduitSegment": true,
+        "hasDcInConduitSegment": false
+      }
+    }
+  },
+  "reportEqualsRendered": {
+    "mismatches": []
+  },
+  "gates": [
+    {
+      "gate": 1,
+      "id": "blocker-multiset-equality-across-surfaces",
+      "ok": true,
+      "detail": "registry=14 (blocking 14 / advisory 0) rs1Rows=14 rs1Header=14 rs1Summary=14/0 coverBanner=14 (listed 9 +6 more) listEq=true renderedEq=true issueGate=true issueState=PENDING ENGINEERING REVIEW",
+      "evidence": {
+        "blockingCodes": [
+          "CODE-AUTHORITY-INCOMPLETE",
+          "CONDUIT-FILL-PENDING",
+          "ENGINEERING-REVIEW-PENDING",
+          "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+          "EQUIPMENT-DOCUMENT-APPLICABILITY",
+          "FASTENER-ASSEMBLY-UNVERIFIED",
+          "FRAMING-AUTHORITY-UNVERIFIED",
+          "MODULE-EXACT-DATASHEET-PENDING",
+          "PENDING-RACKING-ASSEMBLY-SELECTION",
+          "PROJECT-AUTHORITY-UNVERIFIED",
+          "RACKING-CAPACITY-APPLICABILITY-GAP",
+          "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+          "ROUTE-LENGTH-ESTIMATE",
+          "TAP-CONDUCTOR-LENGTH-PENDING"
+        ],
+        "advisoryCodes": [],
+        "missingFromRs1": [],
+        "extraOnRs1": []
+      }
+    },
+    {
+      "gate": 2,
+      "id": "wind-snow-provenance-and-verification-state",
+      "ok": true,
+      "detail": "record=true status=unverified windBasis=code-minimum-default snowBasis=code-minimum-default taggedSurfaces=4 missing=none tagsWithoutState=none stateAgrees=true blockerWhenUnverified=true noFalseLabel=true retiredCodeGone=true",
+      "evidence": {
+        "environmentalLoadAuthority": {
+          "ultimateWindSpeedMph": 115,
+          "windSpeedBasis": "code-minimum-default",
+          "riskCategory": null,
+          "exposureCategory": "C",
+          "groundSnowLoadPsf": 0,
+          "snowLoadBasis": "code-minimum-default",
+          "snowLoadSource": null,
+          "coordinates": {
+            "lat": 38.7061678,
+            "lng": -90.0461651
+          },
+          "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+          "sourceDocumentId": null,
+          "sourceDataset": null,
+          "sourceVersionOrDate": null,
+          "lookupTimestampIso": null,
+          "operatorOverrides": [],
+          "verificationStatus": "unverified",
+          "projectOrAhj": null,
+          "evidenceRef": null,
+          "provenance": {
+            "source": "environmental-load authority gate (BAR §2)",
+            "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+          }
+        },
+        "windSpeedSource": "code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority",
+        "envTags": [
+          {
+            "id": "pv-4c-wind",
+            "text": "CODE DEFAULT / NOT VERIFIED"
+          },
+          {
+            "id": "pv-4c-snow",
+            "text": "CODE DEFAULT / NOT VERIFIED"
+          },
+          {
+            "id": "pv-4c-conclusion",
+            "text": "SOURCE: CODE-MINIMUM DEFAULT — NOT VERIFIED"
+          },
+          {
+            "id": "pe-1",
+            "text": "SOURCE: CODE-MINIMUM DEFAULT — NOT VERIFIED"
+          }
+        ]
+      }
+    },
+    {
+      "gate": 3,
+      "id": "no-global-compliance-claim-with-blockers",
+      "ok": true,
+      "detail": "blocking=14 schedFound=true schedHonest=true bannerHonest=true falseClaims=none",
+      "evidence": {
+        "falseHits": []
+      }
+    },
+    {
+      "gate": 4,
+      "id": "six-ccc-ampacity-full-chain",
+      "ok": true,
+      "detail": "chained bar-wse: 12/12 checks pass",
+      "evidence": {
+        "checks": [
+          {
+            "gate": 4,
+            "name": "every rendered section exports an ampacity object",
+            "pass": true,
+            "detail": "7 sections"
+          },
+          {
+            "gate": 4,
+            "name": "each ampacity result carries EVERY directive field",
+            "pass": true,
+            "detail": ""
+          },
+          {
+            "gate": 4,
+            "name": "the shared >3-CCC raceway itemizes the count adjustment AND the ambient correction",
+            "pass": true,
+            "detail": "BRANCH_HOMERUN_RUN: 6CCC ×0.8 amb×0.96 | COMBINER_TO_DISCO_RUN: 4CCC ×0.8 amb×0.96 | DISCO_TO_METER_RUN: 4CCC ×0.8 amb×0.96"
+          },
+          {
+            "gate": 4,
+            "name": "corrected == base × countAdj × ambient, and final == min(corrected, 75 °C terminal)",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 4,
+            "name": "no sheet prints a bare \"derate 0.NN\" scalar cell",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 4,
+            "name": "the retired unquantified \"TEMPERATURE DERATING NOTE\" prose is gone",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 4,
+            "name": "the ampacity evidence block renders on E-1 + PV-4A + PV-4B",
+            "pass": true,
+            "detail": "3 occurrences"
+          },
+          {
+            "gate": 4,
+            "name": "the rendered chain cites 310.16",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 4,
+            "name": "the rendered chain cites 310.15(C)(1)",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 4,
+            "name": "the rendered chain cites 310.15(B)(1)",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 4,
+            "name": "the rendered chain cites 110.14(C)",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 4,
+            "name": "the rendered count/ambient factors EQUAL the exported canonical factors",
+            "pass": true,
+            "detail": "count=0.8 ambient=0.96"
+          }
+        ]
+      }
+    },
+    {
+      "gate": 5,
+      "id": "missing-ampacity-input-is-pending",
+      "ok": true,
+      "detail": "chained bar-wse: 2/2 checks pass",
+      "evidence": {
+        "checks": [
+          {
+            "gate": 5,
+            "name": "no ampacity result claims PASS on a missing input",
+            "pass": true,
+            "detail": ""
+          },
+          {
+            "gate": 5,
+            "name": "every incomplete ampacity result is PENDING",
+            "pass": true,
+            "detail": ""
+          }
+        ]
+      }
+    },
+    {
+      "gate": 6,
+      "id": "grounding-method-explicit",
+      "ok": true,
+      "detail": "chained bar-wse: 3/3 checks pass",
+      "evidence": {
+        "checks": [
+          {
+            "gate": 6,
+            "name": "exactly ONE grounding method is modeled and it is explicit",
+            "pass": true,
+            "detail": "groundingMethod=separate-conductor"
+          },
+          {
+            "gate": 6,
+            "name": "the grounding result carries its manufacturer + code basis",
+            "pass": true,
+            "detail": "NEC 250.122 / 690.43(C)"
+          },
+          {
+            "gate": 6,
+            "name": "no sheet claims the Q-Cable provides integrated equipment grounding",
+            "pass": true,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "gate": 7,
+      "id": "separate-egc-route-and-bom-quantity",
+      "ok": true,
+      "detail": "chained bar-wse: 4/4 checks pass",
+      "evidence": {
+        "checks": [
+          {
+            "gate": 7,
+            "name": "the separate EGC has an enumerated route (segment + branch objects)",
+            "pass": true,
+            "detail": "branches=3/3 segments=BRANCH_RUN"
+          },
+          {
+            "gate": 7,
+            "name": "the EGC length equals Σ BranchCablePath designed-installed (trunk geometry)",
+            "pass": true,
+            "detail": "egc=140.5 Σpaths=140.5"
+          },
+          {
+            "gate": 7,
+            "name": "the BOM footage = designed-installed × documented waste",
+            "pass": true,
+            "detail": "bom=162 expected=162 waste=1.15"
+          },
+          {
+            "gate": 7,
+            "name": "the sheets asserting a separate EGC print the SAME footage",
+            "pass": true,
+            "detail": "162 ft appears 3×"
+          }
+        ]
+      }
+    },
+    {
+      "gate": 8,
+      "id": "unverified-fasteners-non-orderable",
+      "ok": true,
+      "detail": "verification=unverified flagged=true label=true specLeaks=none blockerOnRs1=true",
+      "evidence": {
+        "fastenerAssembly": {
+          "fastenerVerification": "verified",
+          "overall": "pending",
+          "screwLagModel": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+          "datasheetSource": "ICC-ES ESR-3575",
+          "verification": "unverified"
+        },
+        "specLeaks": []
+      }
+    },
+    {
+      "gate": 9,
+      "id": "caps-equal-unused-connector-objects",
+      "ok": true,
+      "detail": "chained bar-wse: 3/3 checks pass",
+      "evidence": {
+        "checks": [
+          {
+            "gate": 9,
+            "name": "occupied drops == one per micro/module (the topology basis)",
+            "pass": true,
+            "detail": "drops=31 modules=31"
+          },
+          {
+            "gate": 9,
+            "name": "no BOM/sheet text justifies sealing caps as \"1 per AC branch\"",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 9,
+            "name": "the sealing-cap quantity is stated as topology-derived (or honest PENDING)",
+            "pass": true,
+            "detail": "cap row carries its ordered-vs-occupied derivation"
+          }
+        ]
+      }
+    },
+    {
+      "gate": 10,
+      "id": "terminators-equal-cable-end-objects",
+      "ok": true,
+      "detail": "chained bar-wse: 2/2 checks pass",
+      "evidence": {
+        "checks": [
+          {
+            "gate": 10,
+            "name": "one cable-end object per branch is enumerated (terminator basis)",
+            "pass": true,
+            "detail": "3 cable-end objects"
+          },
+          {
+            "gate": 10,
+            "name": "terminators are justified by cable-end objects, not a per-branch constant",
+            "pass": true,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "gate": 11,
+      "id": "legend-equals-segment-wiring-methods",
+      "ok": true,
+      "detail": "chained bar-wse: 5/5 checks pass",
+      "evidence": {
+        "checks": [
+          {
+            "gate": 11,
+            "name": "the stale \"Open Air — PV Wire/THWN-2\" legend literal is GONE on a micro sheet",
+            "pass": true,
+            "detail": null
+          },
+          {
+            "gate": 11,
+            "name": "the open-air legend entry names the LISTED assembly actually drawn",
+            "pass": true,
+            "detail": "ENPHASE Q CABLE (TC-ER)"
+          },
+          {
+            "gate": 11,
+            "name": "the in-conduit THWN-2 legend entry appears only when such a segment exists",
+            "pass": true,
+            "detail": "hasInConduit=true"
+          },
+          {
+            "gate": 11,
+            "name": "no DC-in-conduit legend entry on a design with no DC-in-conduit segment",
+            "pass": true,
+            "detail": "hasDcInConduit=false"
+          },
+          {
+            "gate": 11,
+            "name": "no generic \"PV Wire\" legend entry on an all-micro sheet",
+            "pass": true,
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "gate": 12,
+      "id": "report-equals-rendered-zero-mismatches",
+      "ok": true,
+      "detail": "0 mismatch(es)",
+      "evidence": {
+        "mismatches": []
+      }
+    },
+    {
+      "gate": 13,
+      "id": "page-fit-zero-meaningful-clipping",
+      "ok": true,
+      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0",
+      "evidence": null
+    },
+    {
+      "gate": 14,
+      "id": "snapshot-identity-consistent-across-sheets",
+      "ok": true,
+      "detail": "sheets=21 withStamp=21 idMismatch=0 digestMismatch=0 manifest=21 manifestEqPages=true snapshot=PDS-CD0F6377533F",
+      "evidence": {
+        "idMismatch": [],
+        "digestMismatch": [],
+        "sheetIds": [
+          "PV-0",
+          "RS-1",
+          "PV-1",
+          "PV-1B",
+          "PV-3",
+          "PV-4C",
+          "PV-4C.1",
+          "E-1",
+          "PV-4A",
+          "PV-4B",
+          "PV-5",
+          "PV-6",
+          "SCHED",
+          "SCHED-2",
+          "SCHED-3",
+          "APP-A",
+          "DS-1",
+          "DS-2",
+          "DS-3",
+          "CERT",
+          "PE-1"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "total": 14,
+    "passed": 14,
+    "failed": [],
+    "allPass": true
+  }
+}

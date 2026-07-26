@@ -1,0 +1,422 @@
+{
+  "section": "BAR — rendered truth matrix (the 14 permanent gates, both modes)",
+  "harness": "scripts/planset-evidence-bar.mjs (gates 4/5/6/7/9/10/11 chained to scripts/planset-evidence-bar-wse.mjs); exits non-zero on any violation",
+  "gateResults": [
+    {
+      "mode": "original",
+      "snapshotId": "PDS-CD0F6377533F",
+      "passed": 14,
+      "total": 14,
+      "allPass": true,
+      "gates": [
+        {
+          "gate": 1,
+          "id": "blocker-multiset-equality-across-surfaces",
+          "ok": true,
+          "detail": "registry=14 (blocking 14 / advisory 0) rs1Rows=14 rs1Header=14 rs1Summary=14/0 coverBanner=14 (listed 9 +6 more) listEq=true renderedEq=true issueGate=true issueState=PENDING ENGINEERING REVIEW"
+        },
+        {
+          "gate": 2,
+          "id": "wind-snow-provenance-and-verification-state",
+          "ok": true,
+          "detail": "record=true status=unverified windBasis=code-minimum-default snowBasis=code-minimum-default taggedSurfaces=4 missing=none tagsWithoutState=none stateAgrees=true blockerWhenUnverified=true noFalseLabel=true retiredCodeGone=true"
+        },
+        {
+          "gate": 3,
+          "id": "no-global-compliance-claim-with-blockers",
+          "ok": true,
+          "detail": "blocking=14 schedFound=true schedHonest=true bannerHonest=true falseClaims=none"
+        },
+        {
+          "gate": 4,
+          "id": "six-ccc-ampacity-full-chain",
+          "ok": true,
+          "detail": "chained bar-wse: 12/12 checks pass"
+        },
+        {
+          "gate": 5,
+          "id": "missing-ampacity-input-is-pending",
+          "ok": true,
+          "detail": "chained bar-wse: 2/2 checks pass"
+        },
+        {
+          "gate": 6,
+          "id": "grounding-method-explicit",
+          "ok": true,
+          "detail": "chained bar-wse: 3/3 checks pass"
+        },
+        {
+          "gate": 7,
+          "id": "separate-egc-route-and-bom-quantity",
+          "ok": true,
+          "detail": "chained bar-wse: 4/4 checks pass"
+        },
+        {
+          "gate": 8,
+          "id": "unverified-fasteners-non-orderable",
+          "ok": true,
+          "detail": "verification=unverified flagged=true label=true specLeaks=none blockerOnRs1=true"
+        },
+        {
+          "gate": 9,
+          "id": "caps-equal-unused-connector-objects",
+          "ok": true,
+          "detail": "chained bar-wse: 3/3 checks pass"
+        },
+        {
+          "gate": 10,
+          "id": "terminators-equal-cable-end-objects",
+          "ok": true,
+          "detail": "chained bar-wse: 2/2 checks pass"
+        },
+        {
+          "gate": 11,
+          "id": "legend-equals-segment-wiring-methods",
+          "ok": true,
+          "detail": "chained bar-wse: 5/5 checks pass"
+        },
+        {
+          "gate": 12,
+          "id": "report-equals-rendered-zero-mismatches",
+          "ok": true,
+          "detail": "0 mismatch(es)"
+        },
+        {
+          "gate": 13,
+          "id": "page-fit-zero-meaningful-clipping",
+          "ok": true,
+          "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0"
+        },
+        {
+          "gate": 14,
+          "id": "snapshot-identity-consistent-across-sheets",
+          "ok": true,
+          "detail": "sheets=21 withStamp=21 idMismatch=0 digestMismatch=0 manifest=21 manifestEqPages=true snapshot=PDS-CD0F6377533F"
+        }
+      ]
+    },
+    {
+      "mode": "live",
+      "snapshotId": "PDS-8910EFAC2AB8",
+      "passed": 14,
+      "total": 14,
+      "allPass": true,
+      "gates": [
+        {
+          "gate": 1,
+          "id": "blocker-multiset-equality-across-surfaces",
+          "ok": true,
+          "detail": "registry=18 (blocking 18 / advisory 0) rs1Rows=18 rs1Header=18 rs1Summary=18/0 coverBanner=18 (listed 9 +10 more) listEq=true renderedEq=true issueGate=true issueState=PENDING ENGINEERING REVIEW"
+        },
+        {
+          "gate": 2,
+          "id": "wind-snow-provenance-and-verification-state",
+          "ok": true,
+          "detail": "record=true status=unverified windBasis=operator-entered snowBasis=operator-entered taggedSurfaces=4 missing=none tagsWithoutState=none stateAgrees=true blockerWhenUnverified=true noFalseLabel=true retiredCodeGone=true"
+        },
+        {
+          "gate": 3,
+          "id": "no-global-compliance-claim-with-blockers",
+          "ok": true,
+          "detail": "blocking=18 schedFound=true schedHonest=true bannerHonest=true falseClaims=none"
+        },
+        {
+          "gate": 4,
+          "id": "six-ccc-ampacity-full-chain",
+          "ok": true,
+          "detail": "chained bar-wse: 12/12 checks pass"
+        },
+        {
+          "gate": 5,
+          "id": "missing-ampacity-input-is-pending",
+          "ok": true,
+          "detail": "chained bar-wse: 2/2 checks pass"
+        },
+        {
+          "gate": 6,
+          "id": "grounding-method-explicit",
+          "ok": true,
+          "detail": "chained bar-wse: 3/3 checks pass"
+        },
+        {
+          "gate": 7,
+          "id": "separate-egc-route-and-bom-quantity",
+          "ok": true,
+          "detail": "chained bar-wse: 4/4 checks pass"
+        },
+        {
+          "gate": 8,
+          "id": "unverified-fasteners-non-orderable",
+          "ok": true,
+          "detail": "verification=unverified flagged=true label=true specLeaks=none blockerOnRs1=true"
+        },
+        {
+          "gate": 9,
+          "id": "caps-equal-unused-connector-objects",
+          "ok": true,
+          "detail": "chained bar-wse: 3/3 checks pass"
+        },
+        {
+          "gate": 10,
+          "id": "terminators-equal-cable-end-objects",
+          "ok": true,
+          "detail": "chained bar-wse: 2/2 checks pass"
+        },
+        {
+          "gate": 11,
+          "id": "legend-equals-segment-wiring-methods",
+          "ok": true,
+          "detail": "chained bar-wse: 5/5 checks pass"
+        },
+        {
+          "gate": 12,
+          "id": "report-equals-rendered-zero-mismatches",
+          "ok": true,
+          "detail": "0 mismatch(es)"
+        },
+        {
+          "gate": 13,
+          "id": "page-fit-zero-meaningful-clipping",
+          "ok": true,
+          "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0"
+        },
+        {
+          "gate": 14,
+          "id": "snapshot-identity-consistent-across-sheets",
+          "ok": true,
+          "detail": "sheets=21 withStamp=21 idMismatch=0 digestMismatch=0 manifest=21 manifestEqPages=true snapshot=PDS-8910EFAC2AB8"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "mode": "original",
+      "snapshotId": "PDS-CD0F6377533F",
+      "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
+      "sheetCount": 21,
+      "quantities": [
+        {
+          "quantity": "blocker multiset",
+          "authority": "14 blocking / 0 advisory",
+          "surfaces": {
+            "registry": 14,
+            "rs1Header": 14,
+            "rs1Rows": 14,
+            "coverBanner": 14,
+            "evidenceJson": 14,
+            "issueGate": "PENDING ENGINEERING REVIEW"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "environmental verification state",
+          "authority": "unverified",
+          "surfaces": {
+            "pv4cWind": "tagged",
+            "pv4cSnow": "tagged",
+            "pv4cConclusion": "tagged",
+            "pe1": "tagged",
+            "rs1": "blocker listed"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "SCHED page conclusion",
+          "authority": "registry-derived (blockers present ⇒ COMPLIANCE NOT YET ESTABLISHED)",
+          "surfaces": {
+            "sched": "COMPLIANCE NOT YET ESTABLISHED / SEE RS-1",
+            "cover": "NOT FOR PERMIT SUBMISSION"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "shared-raceway final allowable",
+          "authority": "30.72 A (6 CCC)",
+          "surfaces": {
+            "e1": "itemized chain",
+            "pv4a": "itemized chain",
+            "pv4b": "itemized chain"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "open-air branch EGC footage",
+          "authority": "162 ft (140.5 ft × 1.15)",
+          "surfaces": {
+            "e1": "stated",
+            "pv4b": "stated",
+            "bom": "GRN-OPENAIR-12"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "grounding method",
+          "authority": "separate-conductor",
+          "surfaces": {
+            "e1": "explicit",
+            "pv1b": "explicit"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "fastener procurement state",
+          "authority": "non-orderable design quantity",
+          "surfaces": {
+            "sched3": "DESIGN QUANTITY — NON-ORDERABLE",
+            "bom": "excluded from totals",
+            "rs1": "FASTENER-ASSEMBLY-UNVERIFIED"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "sealing caps",
+          "authority": "PENDING (topology-derived, not 1-per-branch)",
+          "surfaces": {
+            "bom": "QUANTITY PENDING + derivation"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "terminators",
+          "authority": "3 cable-end objects",
+          "surfaces": {
+            "bom": "FAR-END object IDs listed"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "E-1 open-air legend",
+          "authority": "ENPHASE Q CABLE (TC-ER)",
+          "surfaces": {
+            "e1Legend": "generated from wiring-method objects"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "snapshot id / digest",
+          "authority": "PDS-CD0F6377533F / cd0f6377533f…",
+          "surfaces": {
+            "allSheets": "21 sheets stamped"
+          },
+          "agree": true
+        }
+      ]
+    },
+    {
+      "mode": "live",
+      "snapshotId": "PDS-8910EFAC2AB8",
+      "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
+      "sheetCount": 21,
+      "quantities": [
+        {
+          "quantity": "blocker multiset",
+          "authority": "18 blocking / 0 advisory",
+          "surfaces": {
+            "registry": 18,
+            "rs1Header": 18,
+            "rs1Rows": 18,
+            "coverBanner": 18,
+            "evidenceJson": 18,
+            "issueGate": "PENDING ENGINEERING REVIEW"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "environmental verification state",
+          "authority": "unverified",
+          "surfaces": {
+            "pv4cWind": "tagged",
+            "pv4cSnow": "tagged",
+            "pv4cConclusion": "tagged",
+            "pe1": "tagged",
+            "rs1": "blocker listed"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "SCHED page conclusion",
+          "authority": "registry-derived (blockers present ⇒ COMPLIANCE NOT YET ESTABLISHED)",
+          "surfaces": {
+            "sched": "COMPLIANCE NOT YET ESTABLISHED / SEE RS-1",
+            "cover": "NOT FOR PERMIT SUBMISSION"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "shared-raceway final allowable",
+          "authority": "30.72 A (6 CCC)",
+          "surfaces": {
+            "e1": "itemized chain",
+            "pv4a": "itemized chain",
+            "pv4b": "itemized chain"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "open-air branch EGC footage",
+          "authority": "192 ft (166.5 ft × 1.15)",
+          "surfaces": {
+            "e1": "stated",
+            "pv4b": "stated",
+            "bom": "GRN-OPENAIR-12"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "grounding method",
+          "authority": "separate-conductor",
+          "surfaces": {
+            "e1": "explicit",
+            "pv1b": "explicit"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "fastener procurement state",
+          "authority": "non-orderable design quantity",
+          "surfaces": {
+            "sched3": "DESIGN QUANTITY — NON-ORDERABLE",
+            "bom": "excluded from totals",
+            "rs1": "FASTENER-ASSEMBLY-UNVERIFIED"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "sealing caps",
+          "authority": "PENDING (topology-derived, not 1-per-branch)",
+          "surfaces": {
+            "bom": "QUANTITY PENDING + derivation"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "terminators",
+          "authority": "3 cable-end objects",
+          "surfaces": {
+            "bom": "FAR-END object IDs listed"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "E-1 open-air legend",
+          "authority": "ENPHASE Q CABLE (TC-ER)",
+          "surfaces": {
+            "e1Legend": "generated from wiring-method objects"
+          },
+          "agree": true
+        },
+        {
+          "quantity": "snapshot id / digest",
+          "authority": "PDS-8910EFAC2AB8 / 8910efac2ab8…",
+          "surfaces": {
+            "allSheets": "21 sheets stamped"
+          },
+          "agree": true
+        }
+      ]
+    }
+  ],
+  "disagreements": [],
+  "boundary": "No fabricated source, grounding authority, fastener SKU or manufacturer evidence. Every state below is the state the code actually produced; honest PENDING/UNVERIFIED states are recorded as such, not resolved."
+}

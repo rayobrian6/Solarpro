@@ -834,16 +834,39 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
           quantity: plan.splicePairs, derivedFrom: plan.spliceBasis, formula: `${plan.splicePairs}`, necReference: 'NEC 690.31' });
       }
 
+      // §7 (BAR closeout 2026-07-25) — CAPS/TERMINATORS FROM TOPOLOGY, not a
+      // per-branch constant. TERMINATORS = actual cable-end objects: exactly one
+      // per branch FAR-END (the end away from the J-box transition) = branchCount.
+      // That IS what the topology says, so the quantity is correct — but it is now
+      // derived from the cable-end objects (listed per id), never "1 per branch".
+      const _termEndIds = Array.from({ length: plan.branchCount }, (_, i) => `B${i + 1}-END`);
       items.push(addItem('ac', 'terminator', system.brand, system.connectors.terminator.description,
-        system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per AC branch end`,
-        plan.terminators, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount} branches`, true));
+        system.connectors.terminator.sku, `${system.connectors.terminator.description} — one per branch cable FAR-END (away from the J-box transition). Cable-end objects: ${_termEndIds.join(', ')}`,
+        plan.terminators, 'ea', 'NEC 690.31', 'actual cable-end objects (one per branch far-end)', `${_termEndIds.length} branch ends: ${_termEndIds.join(', ')}`, true));
       log.push({ stageId: 'ac', category: 'terminator', item: system.connectors.terminator.description,
-        quantity: plan.terminators, derivedFrom: '1 per AC branch', formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
+        quantity: plan.terminators, derivedFrom: 'actual cable-end objects (branch far-ends)', formula: `${_termEndIds.join(', ')}`, necReference: 'NEC 690.31' });
 
       if (system.connectors.sealingCap) {
+        // §7 — SEALING CAPS = actual UNUSED-connector objects, derived from the
+        // cable-piece connector inventory minus the occupied drops. The Q-Cable is
+        // sold BY DROP (soldBy:'drop'); the resolver orders exactly deviceCount
+        // drops (dropCount = deviceCount), so every ordered drop is occupied by a
+        // micro — the drop-count procurement establishes ZERO surplus connectors,
+        // and the resolver models no fixed-section pieces that would leave a
+        // surplus. Therefore the unused-connector count is NOT established by the
+        // procurement model → PENDING (field service-loop / dead-drop caps depend
+        // on cable routing not modeled). NEVER the old 1-per-branch guess.
+        const _orderedDrops = plan.dropCount;
+        const _occupiedDrops = trunkDeviceCount;          // one drop per micro
+        const _establishedUnused = Math.max(0, _orderedDrops - _occupiedDrops); // 0 on a drop-count order
         items.push(addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
-          system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per AC branch)`,
-          plan.sealingCaps, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount}`, false));
+          system.connectors.sealingCap.sku,
+          `${system.connectors.sealingCap.description} — QUANTITY PENDING (topology-derived, NOT 1-per-branch): ${_orderedDrops} drops ordered = ${_occupiedDrops} micros = ${_occupiedDrops} occupied drops; drop-count procurement establishes ${_establishedUnused} surplus connectors (resolver models no fixed-section pieces). Field service-loop / dead-drop caps depend on cable routing — determine at field verification.`,
+          _establishedUnused, 'ea', 'NEC 690.31',
+          'topology: ordered drops − occupied drops (drop-count basis; field caps PENDING)',
+          `${_orderedDrops} ordered − ${_occupiedDrops} occupied = ${_establishedUnused} established; field caps PENDING`, false));
+        log.push({ stageId: 'ac', category: 'sealing_cap', item: system.connectors.sealingCap.description,
+          quantity: _establishedUnused, derivedFrom: 'topology: ordered − occupied drops (field caps PENDING)', formula: `${_orderedDrops}-${_occupiedDrops}=${_establishedUnused}`, necReference: 'NEC 690.31' });
       }
     } else {
       // Unknown micro brand — generic AC trunk line so the wire never silently vanishes.
@@ -2200,16 +2223,25 @@ function generateBOMV4PerSubSystem(
             quantity: plan.splicePairs, derivedFrom: plan.spliceBasis, formula: `${plan.splicePairs}`, necReference: 'NEC 690.31' });
         }
 
+        // §7 (BAR closeout 2026-07-25) — terminators = actual cable-end objects
+        // (one per branch FAR-END), listed by id; not "1 per branch" by fiat.
+        const _termEndIds = Array.from({ length: plan.branchCount }, (_, i) => `${key}-B${i + 1}-END`);
         push(key, addItem('ac', 'terminator', system.brand, system.connectors.terminator.description,
-          system.connectors.terminator.sku, `${system.connectors.terminator.description} — 1 per AC branch end — ${key} sub-system`,
-          plan.terminators, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount} branches`, true));
+          system.connectors.terminator.sku, `${system.connectors.terminator.description} — one per branch cable FAR-END — ${key} sub-system. Cable-end objects: ${_termEndIds.join(', ')}`,
+          plan.terminators, 'ea', 'NEC 690.31', 'actual cable-end objects (one per branch far-end)', `${_termEndIds.join(', ')}`, true));
         log.push({ stageId: 'ac', category: 'terminator', item: system.connectors.terminator.description,
-          quantity: plan.terminators, derivedFrom: `1 per AC branch (${key})`, formula: `${plan.branchCount}`, necReference: 'NEC 690.31' });
+          quantity: plan.terminators, derivedFrom: `actual cable-end objects (branch far-ends, ${key})`, formula: `${_termEndIds.join(', ')}`, necReference: 'NEC 690.31' });
 
         if (system.connectors.sealingCap) {
+          // §7 — caps = actual unused-connector objects (PENDING): drop-count order
+          // = one drop per micro ⇒ all occupied ⇒ 0 established surplus; field caps
+          // depend on routing not modeled → PENDING. Never 1-per-branch.
+          const _orderedDrops = plan.dropCount;
+          const _occupiedDrops = s.deviceCount;
+          const _establishedUnused = Math.max(0, _orderedDrops - _occupiedDrops);
           push(key, addItem('ac', 'sealing_cap', system.brand, system.connectors.sealingCap.description,
-            system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — service-loop unused drops (1 per AC branch) — ${key} sub-system`,
-            plan.sealingCaps, 'ea', 'NEC 690.31', '1 per AC branch', `${plan.branchCount}`, false));
+            system.connectors.sealingCap.sku, `${system.connectors.sealingCap.description} — QUANTITY PENDING (topology-derived, NOT 1-per-branch) — ${key} sub-system: ${_orderedDrops} drops ordered = ${_occupiedDrops} micros occupied; ${_establishedUnused} surplus connectors established. Field service-loop / dead-drop caps determine at field verification.`,
+            _establishedUnused, 'ea', 'NEC 690.31', 'topology: ordered − occupied drops (field caps PENDING)', `${_orderedDrops}-${_occupiedDrops}=${_establishedUnused}`, false));
         }
       } else {
         // Unknown micro brand — generic AC trunk so the wire never silently vanishes.

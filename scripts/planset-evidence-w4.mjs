@@ -34,8 +34,13 @@ const ca = snap.codeAuthority || null;
 const pa = snap.projectAuthority || null;
 const st = snap.structural || null;
 
-// ── page split (INCLUDES the class="page sld-page" E-1 SLD sheet) ─────────────
-const pages = html.split(/<div class="page(?: sld-page)?"[ >]/).slice(1);
+// ── page split (EVERY sheet wrapper, whatever modifier classes it carries) ────
+// The old form enumerated modifier classes (`page` / `page sld-page`) and so silently
+// dropped any sheet added later with a different modifier — it counted 19 of the 21
+// live sheets and reported a false `authority.sheet-index` disagreement. Matches the
+// canonical form used by planset-evidence-ep/bar: the wrapper, then a space or the
+// closing quote (so `page-content` can never split a sheet).
+const pages = html.split(/<div class="page(?=[ "])/).slice(1);
 const sheetIdOf = (p) => (p.match(/tb-sheet-id">\s*([^<]+?)\s*</) ?? [])[1] ?? '?';
 const sheetIds = pages.map(sheetIdOf);
 const decode = (s) => String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
@@ -246,7 +251,7 @@ if (buildSldImplPresent || buildSldCallPresent) bypasses.push('dead buildSLD imp
 // ── expected honest blockers + issue state ───────────────────────────────────
 const blockerCodes = (snap.permitReadiness?.blockers || []).map(b => b.code);
 const EXPECTED = MODE === 'original'
-  ? ['ROUTE-LENGTH-ESTIMATE', 'FRAMING-AUTHORITY-UNVERIFIED', 'WIND-SNOW-AUTHORITY-UNRESOLVED',
+  ? ['ROUTE-LENGTH-ESTIMATE', 'FRAMING-AUTHORITY-UNVERIFIED', 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',
      'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED', 'RACKING-CAPACITY-APPLICABILITY-GAP',
      'CODE-AUTHORITY-INCOMPLETE', 'ENGINEERING-REVIEW-PENDING']
   : ['CODE-AUTHORITY-INCOMPLETE', 'ENGINEERING-REVIEW-PENDING'];

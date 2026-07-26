@@ -1,0 +1,148 @@
+{
+  "section": "BAR §5 — Q-Cable grounding authority (exactly ONE modeled result)",
+  "result": "B — SEPARATE EQUIPMENT GROUNDING CONDUCTOR REQUIRED",
+  "determination": {
+    "manufacturerAuthority": "lib/equipment/trunkCable.ts — Enphase IQ Q Cable Q-12-10-240 is a TWO-conductor assembly (line + neutral), sold by drop at 4.25 ft connector spacing. Two conductors ⇒ NO integrated equipment grounding conductor.",
+    "conclusion": "The listed Q-Cable assembly does NOT bond the branch. A separate EGC is required, run in the open air alongside the branch trunk. Options A (integrated-listed) and C (pending) are therefore NOT the modeled result.",
+    "notGuessed": "The determination comes from the in-repo equipment record for the exact selected SKU, not from an assumption."
+  },
+  "authority": {
+    "present": true,
+    "required": true,
+    "groundingMethod": "separate-conductor",
+    "conductorMaterial": "Cu",
+    "conductorSize": "#12 AWG",
+    "segmentIds": [
+      "BRANCH_RUN"
+    ],
+    "branchIds": [
+      "br-1",
+      "br-2",
+      "br-3"
+    ],
+    "pathBasis": "Σ per-branch BranchCablePath (same designed-installed geometry as the Q-Cable trunk)",
+    "designedInstalledFt": 166.5,
+    "lengthProvenance": "geometry-derived",
+    "wasteFactor": 1.15,
+    "bomFootageFt": 192,
+    "sourceAuthority": "Enphase IQ Q-Cable Q-12-10-240 = 2-conductor assembly (line+neutral), NO integrated EGC → separate #12 AWG Cu EGC required",
+    "codeBasis": "NEC 250.122 / 690.43(C)",
+    "equipmentCompatibility": "open-air branch EGC parallels the ENPHASE Q CABLE (TC-ER) trunk (TC-ER, free-air 690.31(C))",
+    "verificationState": "cad-derived (length follows branch trunk geometry) — field-verify",
+    "provenance": "groundingObjects[purpose=branch-egc] × 3 branches; length Σ BranchCablePath designed-installed"
+  },
+  "lengthDerivation": {
+    "basis": "Σ per-branch BranchCablePath (same designed-installed geometry as the Q-Cable trunk)",
+    "perBranch": [
+      {
+        "branchId": "br-1",
+        "designedInstalledLengthFt": 64
+      },
+      {
+        "branchId": "br-2",
+        "designedInstalledLengthFt": 63.2
+      },
+      {
+        "branchId": "br-3",
+        "designedInstalledLengthFt": 39.3
+      }
+    ],
+    "sumDesignedInstalledFt": 166.5,
+    "wasteFactor": 1.15,
+    "bomFootageFt": 192,
+    "formula": "Σ BranchCablePath designed-installed 166.5 ft × 1.15 waste = ceil ⇒ 192 ft ordered",
+    "note": "The EGC follows the SAME designed-installed geometry as the Q-Cable trunk it parallels — one length authority for both, so the sheets can never disagree.",
+    "priorState": "E-1 asserted an open-air EGC that the BOM never quantified (only THWN2-GRN-12 21 ft home-run + THWN2-GRN-10 41 ft feeder existed)."
+  },
+  "bomRow": {
+    "partNumber": "GRN-OPENAIR-12",
+    "size": "#12 AWG",
+    "quantityFt": 192
+  },
+  "groundingObjects": [
+    {
+      "groundingId": "gnd-br-1",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B1",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-br-2",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B2",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    },
+    {
+      "groundingId": "gnd-br-3",
+      "segmentId": "BRANCH_RUN",
+      "purpose": "branch-egc",
+      "required": true,
+      "method": "conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "sizingBasis": "NEC 250.122 @ 20A branch OCPD",
+      "associatedOcpdA": 20,
+      "associatedEquipment": "AC branch B3",
+      "manufacturerListingBasis": null,
+      "codeBasis": "NEC 250.122",
+      "provenance": {
+        "source": "computeSystem BRANCH_RUN"
+      }
+    }
+  ],
+  "renderedOn": [
+    "E-1 (open-air branch label + legend)",
+    "PV-1B",
+    "PV-4B",
+    "BOM"
+  ],
+  "gates": [
+    {
+      "mode": "original",
+      "gate": 6,
+      "ok": true,
+      "detail": "chained bar-wse: 3/3 checks pass"
+    },
+    {
+      "mode": "original",
+      "gate": 7,
+      "ok": true,
+      "detail": "chained bar-wse: 4/4 checks pass"
+    },
+    {
+      "mode": "live",
+      "gate": 6,
+      "ok": true,
+      "detail": "chained bar-wse: 3/3 checks pass"
+    },
+    {
+      "mode": "live",
+      "gate": 7,
+      "ok": true,
+      "detail": "chained bar-wse: 4/4 checks pass"
+    }
+  ],
+  "boundary": "No fabricated source, grounding authority, fastener SKU or manufacturer evidence. Every state below is the state the code actually produced; honest PENDING/UNVERIFIED states are recorded as such, not resolved."
+}

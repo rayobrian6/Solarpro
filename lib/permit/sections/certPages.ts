@@ -333,6 +333,7 @@ function _peSiteLoading(input: PermitInput): string {
   <tr class="bg-lt"><td class="il" colspan="4" style="font-weight:bold;text-align:center;">Site Loading Parameters</td></tr>
   <tr><td class="il">Design Wind Speed (Vult)</td><td class="iv">${windSpeed} mph</td><td class="il">Exposure Category</td><td class="iv">Cat. ${exposure}</td></tr>
   <tr><td class="il">Ground Snow Load (pg)</td><td class="iv">${snowLoad} psf</td><td class="il">Risk Category</td><td class="iv">${riskCat}</td></tr>
+  <tr><td class="il">Environmental Load Source</td><td class="iv" colspan="3" data-env-source="pe-1" style="color:${_sp.environmentalUnverified ? '#b45309' : '#000'};font-weight:bold;">${escapeH(_sp.environmentalSourceLine)}</td></tr>
   <tr><td class="il">Seismic Design Category</td><td class="iv">${sdc}</td><td class="il">Importance Factor</td><td class="iv">1.0</td></tr>`;
 }
 
@@ -679,8 +680,8 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
           <table class="info-table mb-xs">
             <tr><td class="il">Roof Type</td><td class="iv">${roofType}</td><td class="il">Roof Pitch</td><td class="iv">${roofPitch}</td></tr>
             <tr><td class="il">Rafter / Framing</td><td class="iv">${_isTruss ? `Pre-Engineered Truss (${rafterSize} chords)` : `${rafterSize} Lumber`}</td><td class="il">Spacing</td><td class="iv">${rafterSpace}" O.C.</td></tr>
-            <tr><td class="il">Attach Spacing</td><td class="iv">${_spc.designSpacingIn != null ? _spc.designSpacingIn : attachSpace}&quot; O.C. ${_spc.verificationState === 'verified' ? `(MAX ALLOWED, VERIFIED)` : `<span style="color:#b45309;font-weight:bold;">(design; PENDING VERIF.)</span>`}</td><td class="il">Fastener Dia.</td><td class="iv">${lagDia}"</td></tr>
-            <tr><td class="il">Min. Embedment</td><td class="iv">${lagEmbed}" into ${escapeH(_fa.substrate ?? 'rafter')}</td><td class="il">Fastener Status</td><td class="iv" style="font-weight:bold;color:${_fa.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_fa.certLabel)}</td></tr>
+            <tr><td class="il">Attach Spacing</td><td class="iv">${_spc.designSpacingIn != null ? _spc.designSpacingIn : attachSpace}&quot; O.C. ${_spc.verificationState === 'verified' ? `(MAX ALLOWED, VERIFIED)` : `<span style="color:#b45309;font-weight:bold;">(design; PENDING VERIF.)</span>`}</td><td class="il">Fastener Dia.</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagDia + '"'}</td></tr>
+            <tr><td class="il">Min. Embedment</td><td class="iv">${_fa.nonOrderable ? '<span style="color:#b45309;font-weight:bold;">PENDING VERIF.</span>' : lagEmbed + '" into ' + escapeH(_fa.substrate ?? 'rafter')}</td><td class="il">Fastener Status</td><td class="iv" style="font-weight:bold;color:${_fa.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_fa.certLabel)}</td></tr>
             <tr><td class="il">Fastener Assembly</td><td class="iv" colspan="3" data-pe-field="fastener">${escapeH(_fa.line)}</td></tr>
             <tr><td class="il">Roof Sheathing</td><td class="iv">No attachment to sheathing only</td><td class="il">Underlayment</td><td class="iv">Maintained per mfr. req.</td></tr>
           </table>

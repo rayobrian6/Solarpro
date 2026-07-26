@@ -1,31 +1,34 @@
 {
-  "generatedAt": "2026-07-22T02:38:00.758Z",
+  "generatedAt": "2026-07-26T00:15:55.627Z",
   "wave": "W3.1",
   "mode": "live",
   "evidenceRole": "CURRENT live database design (88-module hybrid) — supersedes docs/evidence/braidon-w3.planset-evidence.json.",
   "supersedes": null,
-  "snapshotId": "PDS-78865C4C4C5F",
-  "digest": "78865c4c4c5f523298d5c6d6d69b7477889c7c3c4375dfd234658b2f385ff871",
+  "snapshotId": "PDS-8910EFAC2AB8",
+  "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
   "schemaVersion": "1.0.0",
   "project": "BRAIDON (GreenLancer feedback-session planset)",
-  "sheetCount": 18,
+  "sheetCount": 21,
   "sheetIds": [
     "PV-0",
+    "RS-1",
     "PV-1",
     "PV-1B",
     "PV-3",
     "PV-4C",
+    "PV-4C.1",
+    "E-1",
     "PV-4A",
     "PV-4B",
     "PV-5",
     "PV-6",
     "SCHED",
     "SCHED-2",
+    "SCHED-3",
     "APP-A",
     "DS-1",
     "DS-2",
     "DS-3",
-    "DS-4",
     "CERT",
     "PE-1"
   ],
@@ -36,7 +39,7 @@
       "w31Status": "corrected",
       "mustCorrect": true,
       "provingCheck": "V23 structural.env.ultimateWindSpeedMph === structural.loads.windSpeedMph",
-      "result": "env 115 == loads 115 mph (single-sourced)",
+      "result": "env 110 == loads 110 mph (single-sourced)",
       "ok": true
     },
     {
@@ -45,7 +48,7 @@
       "w31Status": "corrected",
       "mustCorrect": true,
       "provingCheck": "attachment SF + allowable capacity are structural-engine-v4 owned (attachment.provenance)",
-      "result": "SF 1.487, allowable 600 lb from engine",
+      "result": "SF 1.625, allowable 600 lb from engine",
       "ok": true
     },
     {
@@ -130,7 +133,7 @@
       {
         "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
         "severity": "blocking",
-        "message": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer compatible rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically."
+        "message": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically."
       }
     ],
     "blockingGapsPromotedToBlockers": [
@@ -152,10 +155,21 @@
     "present": [
       "ROUTE-LENGTH-ESTIMATE",
       "EQUIPMENT-IDENTITY-CONFLICT",
-      "WIND-SNOW-AUTHORITY-UNRESOLVED",
+      "CONDUIT-FILL-PENDING",
+      "TAP-CONDUCTOR-LENGTH-PENDING",
+      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "PROJECT-NAME-NONPRODUCTION",
+      "DESIGNER-OF-RECORD-MISSING",
+      "MODULE-EXACT-DATASHEET-PENDING",
       "ENGINEERING-REVIEW-PENDING"
     ],
     "missing": [],
@@ -181,13 +195,13 @@
     "mountModel": "RT-MINI",
     "mountSku": null,
     "railManufacturer": null,
-    "railModel": "compatible-rail (SKU unpinned)",
+    "railModel": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION",
     "railSku": null,
     "lFootOrAdapter": "Roof Tech L-Foot",
     "tBoltFastener": "Rail T-bolt / mount-to-rail bolt",
     "midClamp": "RT-MINI Mid Clamp",
     "endClamp": "RT-MINI End Clamp",
-    "splice": "Compatible with IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent rail",
+    "splice": "PENDING RACKING ASSEMBLY SELECTION — rail/splice SKU not specified · NOT FOR PERMIT SUBMISSION",
     "groundingBonding": "RT-MINI Bond Clip",
     "compatibleModuleThicknessInRange": null,
     "installationCondition": "asphalt_shingle, wood_shake",
@@ -213,7 +227,7 @@
     "notes": [
       "CAPACITY AUTHORITY = 600 lb ASD ALLOWABLE (Roof Tech RT-MINI II PE letter, 613.2 lb weakest standard assembly, conservative round-down). The 900 lb \"ultimate\" (2×450) entries in equipment-db / equipment-registry-v4 are NOT structural authority (ESR-3575 is a flashing / water-resistance report and carries no structural value).",
       "W3.1 §4 — the cited PE structural letter is NOT archived in this repository (documentHash: null, source-document-not-archived); the 600 lb value is field-referenced and PROVISIONAL. Applicability to the selected mixed assembly / project jurisdiction is UNVERIFIED — see capacityProvenance and the RACKING-CAPACITY-* structural-authority gaps.",
-      "Mixed-manufacturer assembly: Roof Tech RT-MINI mount + compatible rail (Compatible with IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent rail). The mount record carries no rail span-limit authority, so rail span / cantilever checks are UNVERIFIABLE until the rail SKU is pinned."
+      "Mixed-manufacturer assembly: Roof Tech RT-MINI mount + rail from a different manufacturer — rail/splice SKU is PENDING SELECTION (not yet specified; NOT FOR PERMIT SUBMISSION). The mount record carries no rail span-limit authority, so rail span / cantilever checks are UNVERIFIABLE until the exact rail SKU is pinned."
     ],
     "capacityProvenance": {
       "mountModel": "RT-MINI",
@@ -250,12 +264,12 @@
       ],
       "assemblyApplicability": {
         "selectedMountModel": "RT-MINI",
-        "selectedRail": "compatible-rail (SKU unpinned)",
+        "selectedRail": null,
         "selectedSubstrate": "asphalt_shingle, wood_shake",
         "sourceCoversMount": true,
         "sourceCoversRail": false,
         "sourceCoversSubstrate": null,
-        "assessment": "The 600 lb ASD allowable covers the RT-MINI pad-to-rafter attachment for the weakest standard wood assembly ONLY. It does NOT establish rail span/cantilever capacity for the mixed-manufacturer compatible rail (SKU unpinned), and the source jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do NOT apply generically."
+        "assessment": "The 600 lb ASD allowable covers the RT-MINI pad-to-rafter attachment for the weakest standard wood assembly ONLY. It does NOT establish rail span/cantilever capacity for the mixed-manufacturer paired rail (SKU unpinned), and the source jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do NOT apply generically."
       },
       "provenance": {
         "source": "rackingAssembly.buildRackingAssembly",
@@ -272,10 +286,19 @@
       {
         "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
         "severity": "blocking",
-        "message": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer compatible rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically."
+        "message": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically."
       }
     ],
-    "recordRevision": "9dcfac3b324d"
+    "railStockLengthIn": null,
+    "spanCantileverSource": null,
+    "assemblyVerification": {
+      "railSku": "pending",
+      "capacitySource": "pending",
+      "spanSource": "pending",
+      "fastener": "verified",
+      "overall": "pending"
+    },
+    "recordRevision": "8b0e7670efd5"
   },
   "objectCounts": {
     "moduleInstances": 31,
@@ -325,8 +348,8 @@
       "renderedObjectIds": 142,
       "orphanRenderedIds": [],
       "idCoverageOk": true,
-      "placementManifests": 1,
-      "structuralObjectsPlaced": 111,
+      "placementManifests": 2,
+      "structuralObjectsPlaced": 142,
       "objectKindsPlacedFromCanonical": [
         "module",
         "rail",
@@ -1336,39 +1359,80 @@
   ],
   "loadReactionCapacity": {
     "env": {
-      "ultimateWindSpeedMph": 115,
-      "windSpeedSource": "code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority",
+      "ultimateWindSpeedMph": 110,
+      "windSpeedSource": "OPERATOR-ENTERED — NOT VERIFIED (observation/override; no archived climate-hazard source)",
       "exposureCategory": "C",
       "riskCategory": null,
-      "groundSnowPsf": 0,
-      "roofSnowPsf": 0,
+      "groundSnowPsf": 20,
+      "roofSnowPsf": 13.422,
       "buildingHeightFt": 15,
       "componentCladdingZones": [
         "corner"
       ],
-      "upliftPressurePsf": 61.152,
-      "downforcePressurePsf": 61.152,
+      "upliftPressurePsf": 55.95,
+      "downforcePressurePsf": 55.95,
       "codeAuthority": {
         "asceEdition": "ASCE 7-22",
         "source": "pending-w4-ahj-authority"
       },
+      "environmentalLoadAuthority": {
+        "ultimateWindSpeedMph": 110,
+        "windSpeedBasis": "operator-entered",
+        "riskCategory": null,
+        "exposureCategory": "C",
+        "groundSnowLoadPsf": 20,
+        "snowLoadBasis": "operator-entered",
+        "snowLoadSource": null,
+        "coordinates": {
+          "lat": 38.7061678,
+          "lng": -90.0461651
+        },
+        "addressUsed": "3 MELVIN DR APT A, GRANITE CITY, IL 62040",
+        "sourceDocumentId": null,
+        "sourceDataset": null,
+        "sourceVersionOrDate": null,
+        "lookupTimestampIso": null,
+        "operatorOverrides": [
+          "ultimateWindSpeedMph",
+          "groundSnowLoadPsf",
+          "exposureCategory"
+        ],
+        "verificationStatus": "unverified",
+        "projectOrAhj": "City of Granite City Building & Zoning",
+        "evidenceRef": null,
+        "provenance": {
+          "source": "environmental-load authority gate (BAR §2)",
+          "note": "environmental design values are OPERATOR-ENTERED / code-minimum defaults — OBSERVATION/OVERRIDE only, NOT verified design criteria (no archived, currency-reviewed climate-hazard source). Values drive the PRELIMINARY analysis; a verified source is required before permit submission."
+        }
+      },
       "provenance": {
         "source": "W3 structural authority",
-        "note": "wind/snow/exposure from canonical site → structural-engine-v4; ASCE edition via code-authority interface (AHJ population = W4)"
+        "note": "wind/snow/exposure = canonical ENVIRONMENTAL LOAD AUTHORITY (basis + verification state); roof pressures from structural-engine-v4; ASCE edition via code-authority interface (AHJ population = W4)"
       }
     },
     "checks": [
       {
         "checkId": "chk-attachment-uplift",
         "limitState": "attachment-uplift",
-        "demand": 403.606,
+        "demand": 369.273,
         "capacity": 600,
-        "dcRatio": 0.673,
-        "safetyFactor": 1.487,
+        "dcRatio": 0.615,
+        "safetyFactor": 1.625,
         "requiredThreshold": 1,
         "thresholdKind": "min-safety-factor",
         "passes": true,
         "governingSource": "structural-engine-v4 calcMountLayout + attachmentCapacity (ASD, Ω-normalized allowable)",
+        "loadBasis": {
+          "designMethod": "ASD",
+          "windPressureBasis": "ASCE 7-22 §26/29 C&C, GOVERNING corner (Zone 3) applied uniformly — conservative screening envelope; net uplift 55.95 psf",
+          "loadCombination": "0.6D + 0.6W (uplift)",
+          "zonePressurePsf": 55.95,
+          "tributaryAreaFt2": 11,
+          "reactionLbs": 369.273,
+          "capacityBasis": "ASD allowable (Ω-normalized; ultimate refused per attachmentCapacity)",
+          "adjustments": "0.6 ASD wind factor on demand; per-mount tributary 11 ft²",
+          "tributaryModel": "uniform CONSERVATIVE SCREENING ENVELOPE — full interior tributary charged at every mount (end mounts included)"
+        },
         "provenance": {
           "source": "snapshot structural engine (over canonical objects)"
         }
@@ -1376,14 +1440,14 @@
       {
         "checkId": "chk-framing-capacity",
         "limitState": "framing-capacity",
-        "demand": 0,
-        "capacity": 45,
-        "dcRatio": 0.392,
+        "demand": null,
+        "capacity": null,
+        "dcRatio": null,
         "safetyFactor": null,
         "requiredThreshold": 1,
         "thresholdKind": "max-dc-ratio",
-        "passes": true,
-        "governingSource": "structural-engine-v4 rafterAnalysis (truss 2x6 @ 24\" Douglas Fir-Larch)",
+        "passes": null,
+        "governingSource": "PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED — no verified framing capacity authority (operator-entered / observed geometry is not capacity authority; the code-default truss/rafter capacity is PRELIMINARY / NON-AUTHORITATIVE)",
         "provenance": {
           "source": "snapshot structural engine (over canonical objects)"
         }
@@ -1393,13 +1457,15 @@
       "moduleDeadLoadLbs": 1550,
       "rackingDeadLoadLbs": 124,
       "addedDeadLoadPsf": 2.642,
-      "distributedRoofLoadPsf": 17.642,
-      "totalRailLoadLbsPerFt": 48.517,
-      "governingUtilization": 0.673,
+      "distributedRoofLoadPsf": 31.065,
+      "totalRailLoadLbsPerFt": 85.428,
+      "governingUtilization": 0.615,
       "governingLimitState": "attachment-uplift",
-      "passes": true,
-      "engineeringReviewRequired": false,
-      "reviewReasons": [],
+      "passes": null,
+      "engineeringReviewRequired": true,
+      "reviewReasons": [
+        "EXISTING FRAMING CAPACITY NOT VERIFIED — no project-specific structural authority (archived truss design drawing / manufacturer capacity calc / stamped analysis, or a licensed-engineer review bound to the current snapshot digest) establishes the existing framing capacity. Operator-entered / observed framing geometry is OBSERVATION only and does NOT verify capacity; the code-default rafter/truss capacity is NOT engineering authority. A project-specific structural review is required before permit submission."
+      ],
       "provenance": {
         "source": "snapshot structural engine (over canonical objects)"
       }
@@ -1413,21 +1479,26 @@
         "y": 8.203
       },
       "roofZone": "corner",
-      "substrateMember": "truss 2x6",
+      "substrateMember": "unverified-framing",
       "attachmentMethod": "l_foot_lag",
       "fastenerModel": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
       "embedmentIn": 2.5,
       "tributaryAreaFt2": 11,
-      "upliftReactionLbs": 403.606,
-      "downwardReactionLbs": 0,
+      "upliftReactionLbs": 369.273,
+      "downwardReactionLbs": 176.711,
+      "deadReactionLbs": 29.066,
+      "snowReactionLbs": 147.645,
       "lateralReactionLbs": null,
       "allowableCapacityLbs": 600,
       "adjustmentFactors": {
         "omegaUltimateToAllowable": 1
       },
-      "utilization": 0.673,
-      "safetyFactor": 1.487,
+      "utilization": 0.615,
+      "safetyFactor": 1.625,
+      "zonePressurePsf": 55.95,
+      "loadBasis": "ASD",
+      "zoneModel": "CONSERVATIVE SCREENING ENVELOPE — governing corner (Zone 3) C&C pressure + full interior tributary applied uniformly (not an exact per-position classification)",
       "coord": {
         "coordinateSystemId": "CS-SITE-PLAN-FT",
         "units": "ft",
@@ -1446,9 +1517,9 @@
       }
     },
     "governing": {
-      "utilization": 0.673,
-      "safetyFactor": 1.4865981027434467,
-      "passes": true
+      "utilization": 0.615,
+      "safetyFactor": 1.624814868494387,
+      "passes": null
     }
   },
   "bomReconciliation": {
@@ -1659,7 +1730,7 @@
     "V21_arrayArea": "PASS — Σ polygon areas == exact catalog footprint",
     "V22_referentialIntegrity": "PASS — attachment↔rail↔module refs resolve",
     "V23_envSingleSource": "PASS — env == loads (115-vs-90 eliminated)",
-    "V24_framingHonesty": "PASS — framing authority present (no review required for this snapshot)",
+    "V24_framingHonesty": "PASS — review required, no fabricated pass",
     "V25_reactionHonesty": "PASS — no attachment reaction exceeds allowable without a blocker",
     "V26_unifiedFrame": "PASS — one canonical coordinate system across all physical objects",
     "V27_coordinateMetadata": "PASS — complete coordinate metadata + resolvable transform refs",
@@ -1700,8 +1771,36 @@
         "message": "subSystems.roof.panelId='rec-alpha-pure-405' (REC Group Alpha Pure-R 405W) vs fleet module 'Q.PEAK DUO BLK ML-G10+ 400W' — operator reconciliation required (migration 110 territory)"
       },
       {
-        "code": "WIND-SNOW-AUTHORITY-UNRESOLVED",
-        "message": "Wind/snow design authority unresolved (wind code-minimum default, snow unverified) — AHJ-confirmed values required"
+        "code": "CONDUIT-FILL-PENDING",
+        "message": "Feeder conduit fill is PENDING (not computed) — it must never be presented as a passing zero-error result on PV-4A/PV-4B"
+      },
+      {
+        "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+        "message": "Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)"
+      },
+      {
+        "code": "QCABLE-PROCUREMENT-INSUFFICIENT",
+        "message": "Q-Cable procurement 152 ft is SHORT of the 166.5 ft designed-installed path (+0 ft allowance) by 14.5 ft — base cable quantity NON-ORDERABLE / PENDING a VERIFIED listed cable-extension solution."
+      },
+      {
+        "code": "FRAMING-AUTHORITY-UNVERIFIED",
+        "message": "EXISTING FRAMING CAPACITY NOT VERIFIED — no project-specific structural authority (archived truss design drawing / manufacturer capacity calc / stamped analysis, or a licensed-engineer review bound to the current snapshot digest) establishes the existing framing capacity. Operator-entered / observed framing geometry is OBSERVATION only and does NOT verify capacity; the code-default rafter/truss capacity is NOT engineering authority. A project-specific structural review is required before permit submission."
+      },
+      {
+        "code": "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "message": "No verified exact racking assembly — rail/splice SKU is unpinned (PENDING SELECTION); PENDING RACKING ASSEMBLY SELECTION, NOT FOR PERMIT SUBMISSION. Pin the exact rail/splice SKU, archive the capacity/compatibility authority, and resolve span/cantilever source before permit-ready."
+      },
+      {
+        "code": "FASTENER-ASSEMBLY-UNVERIFIED",
+        "message": "Roof-attachment fastener assembly UNVERIFIED — withdrawal-capacity source not archived / capacity gated. Mount-base authority, independent of rail selection (related to but distinct from PENDING-RACKING-ASSEMBLY-SELECTION)."
+      },
+      {
+        "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
+        "message": "Manufacturer document applicability UNVERIFIED — cited RT-MINI II covers a different product version than the selected mount RT-MINI; no verified alias evidence. Provide the version-exact document."
+      },
+      {
+        "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+        "message": "Environmental load authority UNVERIFIED — wind operator-entered, snow operator-entered, exposure/risk carry no archived climate-hazard source; values are PRELIMINARY design criteria, not verified."
       },
       {
         "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
@@ -1709,11 +1808,27 @@
       },
       {
         "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
-        "message": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer compatible rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically."
+        "message": "The 600 lb source does not cover the exact selected assembly: the mixed-manufacturer paired rail (SKU unpinned) span/cantilever is unverified, and the PE-letter jurisdiction (ASCE 7-10, KY) is not confirmed for the project AHJ. Do not apply generically."
       },
       {
         "code": "CODE-AUTHORITY-INCOMPLETE",
         "message": "Code authority is incomplete for Madison County Building & Zoning — unknown adopted edition for IBC, IRC, IFC (printed PENDING — no inference). Archive + verify the adoption document (W4-D) before permit-ready."
+      },
+      {
+        "code": "PROJECT-AUTHORITY-UNVERIFIED",
+        "message": "Project legal authority (address, APN, municipal boundary, AHJ and fire authority) is operator-posted / postally inferred and not verified from an official source — county/city/AHJ must not be assumed from postal code alone. Verify via the document registry before permit-ready."
+      },
+      {
+        "code": "PROJECT-NAME-NONPRODUCTION",
+        "message": "Project name \"BRAIDON M PILLA — Solar TEST\" contains \"TEST\" — a non-production identity can never reach an ISSUED/production state"
+      },
+      {
+        "code": "DESIGNER-OF-RECORD-MISSING",
+        "message": "No designer / engineer-of-record is assigned — required before a production/issued set"
+      },
+      {
+        "code": "MODULE-EXACT-DATASHEET-PENDING",
+        "message": "Module Q.PEAK DUO BLK ML-G10+ 400W (400 W): the on-file document is the 385–405 W family datasheet, not the exact 400 W sheet."
       },
       {
         "code": "ENGINEERING-REVIEW-PENDING",
@@ -1721,7 +1836,8 @@
       }
     ],
     "structuralBlockersPresent": [
-      "WIND-SNOW-AUTHORITY-UNRESOLVED"
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED"
     ],
     "bannerRendered": true,
     "bannerHiddenViolation": false
@@ -1737,6 +1853,10 @@
         },
         {
           "sheet": "PV-0",
+          "value": 31
+        },
+        {
+          "sheet": "RS-1",
           "value": 31
         },
         {
@@ -1764,11 +1884,15 @@
           "value": 31
         },
         {
-          "sheet": "PV-4C",
+          "sheet": "PV-4C.1",
           "value": 31
         },
         {
-          "sheet": "PV-4C",
+          "sheet": "E-1",
+          "value": 31
+        },
+        {
+          "sheet": "E-1",
           "value": 31
         },
         {
@@ -1800,6 +1924,10 @@
           "value": 31
         },
         {
+          "sheet": "SCHED-3",
+          "value": 31
+        },
+        {
           "sheet": "APP-A",
           "value": 31
         },
@@ -1813,10 +1941,6 @@
         },
         {
           "sheet": "DS-3",
-          "value": 31
-        },
-        {
-          "sheet": "DS-4",
           "value": 31
         },
         {
@@ -1872,43 +1996,39 @@
     },
     {
       "quantity": "structural.env.windSpeedMph",
-      "authority": "115",
+      "authority": "110",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": 115
+          "value": 110
         },
         {
           "sheet": "PV-3",
-          "value": 115
+          "value": 110
         },
         {
           "sheet": "PV-3",
-          "value": 115
+          "value": 110
         },
         {
           "sheet": "PV-3",
-          "value": 115
+          "value": 110
         },
         {
           "sheet": "PV-4C",
-          "value": 115
+          "value": 110
         },
         {
-          "sheet": "PV-4C",
-          "value": 115
-        },
-        {
-          "sheet": "PE-1",
-          "value": 115
+          "sheet": "PV-4C.1",
+          "value": 110
         },
         {
           "sheet": "PE-1",
-          "value": 115
+          "value": 110
         }
       ],
       "distinctPrinted": [
-        "115"
+        "110"
       ],
       "agree": true,
       "blocking": true
@@ -1918,11 +2038,7 @@
       "authority": "C",
       "printedInstances": [
         {
-          "sheet": "PV-4C",
-          "value": "C"
-        },
-        {
-          "sheet": "PE-1",
+          "sheet": "PV-4C.1",
           "value": "C"
         }
       ],
@@ -1934,23 +2050,23 @@
     },
     {
       "quantity": "structural.env.groundSnowPsf",
-      "authority": "0",
+      "authority": "20",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": 0
+          "value": 20
         },
         {
           "sheet": "PV-4C",
-          "value": 0
+          "value": 20
         },
         {
           "sheet": "PE-1",
-          "value": 0
+          "value": 20
         }
       ],
       "distinctPrinted": [
-        "0"
+        "20"
       ],
       "agree": true,
       "blocking": true
@@ -1958,16 +2074,9 @@
     {
       "quantity": "structural.attachmentSpacingIn",
       "authority": "48",
-      "printedInstances": [
-        {
-          "sheet": "PE-1",
-          "value": 48
-        }
-      ],
-      "distinctPrinted": [
-        "48"
-      ],
-      "agree": true,
+      "printedInstances": [],
+      "distinctPrinted": [],
+      "agree": null,
       "blocking": true
     },
     {
@@ -2000,41 +2109,26 @@
     {
       "quantity": "structural.fastenerSpec",
       "authority": "5/16",
-      "printedInstances": [
-        {
-          "sheet": "PV-3",
-          "value": "5/16"
-        },
-        {
-          "sheet": "PV-3",
-          "value": "5/16"
-        },
-        {
-          "sheet": "PV-3",
-          "value": "5/16"
-        }
-      ],
-      "distinctPrinted": [
-        "5/16"
-      ],
-      "agree": true,
+      "printedInstances": [],
+      "distinctPrinted": [],
+      "agree": null,
       "blocking": false
     },
     {
       "quantity": "structural.upliftReactionLbs",
-      "authority": "404",
+      "authority": "369",
       "printedInstances": [
         {
           "sheet": "PV-4C",
-          "value": 404
+          "value": 369
         },
         {
           "sheet": "PE-1",
-          "value": 404
+          "value": 369
         }
       ],
       "distinctPrinted": [
-        "404"
+        "369"
       ],
       "agree": true,
       "blocking": true
@@ -2042,35 +2136,17 @@
     {
       "quantity": "structural.allowableCapacityLbs",
       "authority": "600",
-      "printedInstances": [
-        {
-          "sheet": "PV-4C",
-          "value": 600
-        }
-      ],
-      "distinctPrinted": [
-        "600"
-      ],
-      "agree": true,
+      "printedInstances": [],
+      "distinctPrinted": [],
+      "agree": null,
       "blocking": false
     },
     {
       "quantity": "structural.attachmentSafetyFactor",
-      "authority": "1.49",
-      "printedInstances": [
-        {
-          "sheet": "PV-4C",
-          "value": 1.49
-        },
-        {
-          "sheet": "PE-1",
-          "value": 1.49
-        }
-      ],
-      "distinctPrinted": [
-        "1.49"
-      ],
-      "agree": true,
+      "authority": "1.63",
+      "printedInstances": [],
+      "distinctPrinted": [],
+      "agree": null,
       "blocking": false
     },
     {
@@ -2091,8 +2167,8 @@
   ],
   "summary": {
     "truthRows": 16,
-    "agree": 10,
-    "coverageOnly": 6,
+    "agree": 6,
+    "coverageOnly": 10,
     "disagree": [],
     "blockingDisagree": [],
     "bomReconciliation": "PASS",
@@ -2100,10 +2176,21 @@
     "honestBlockers": [
       "ROUTE-LENGTH-ESTIMATE",
       "EQUIPMENT-IDENTITY-CONFLICT",
-      "WIND-SNOW-AUTHORITY-UNRESOLVED",
+      "CONDUIT-FILL-PENDING",
+      "TAP-CONDUCTOR-LENGTH-PENDING",
+      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "PENDING-RACKING-ASSEMBLY-SELECTION",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
+      "PROJECT-AUTHORITY-UNVERIFIED",
+      "PROJECT-NAME-NONPRODUCTION",
+      "DESIGNER-OF-RECORD-MISSING",
+      "MODULE-EXACT-DATASHEET-PENDING",
       "ENGINEERING-REVIEW-PENDING"
     ]
   }

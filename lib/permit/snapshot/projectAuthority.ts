@@ -60,6 +60,8 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'ENGINEERING-REVIEW-PENDING': 'review',
   'FRAMING-AUTHORITY-UNVERIFIED': 'structural',   // canonical (framing-authority gate)
   'STRUCTURAL-FRAMING-UNVERIFIED': 'structural',  // legacy alias (mapped for back-compat)
+  'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': 'structural',  // §2 (BAR) — env-load authority gate
+  'WIND-SNOW-AUTHORITY-UNRESOLVED': 'structural',           // legacy alias (subsumed by the above)
   'STRUCTURAL-UTILIZATION-EXCEEDED': 'structural',
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED': 'structural',
   'RACKING-CAPACITY-APPLICABILITY-GAP': 'structural',
@@ -87,7 +89,7 @@ export function classifyBlockerDomain(code: string): BlockerDomain {
   if (/^CODE-/.test(c)) return 'code';
   if (/^(EQUIP|EQUIPMENT-)/.test(c)) return 'equipment';
   if (/^(DOC|DOCUMENT|MANUFACTURER-DOC|MFR-DOC)/.test(c)) return 'document';
-  if (/^(STRUCT|RACK|ATTACH|DIRECT-MOUNT|FRAM|RAFTER|FENCE|PILE|WIND|SNOW)/.test(c)) return 'structural';
+  if (/^(STRUCT|RACK|ATTACH|DIRECT-MOUNT|FRAM|RAFTER|FENCE|PILE|WIND|SNOW|ENVIRONMENTAL)/.test(c)) return 'structural';
   if (/^(ROUTE|FEEDER|RACEWAY|CONDUCT|ELEC|SLD|INTERCONNECT|OCPD|BACKFEED)/.test(c)) return 'electrical';
   return 'other';
 }

@@ -22,6 +22,7 @@ import {
 import type { RackingCapacityDocumentEvidence } from '@/lib/permit/snapshot/rackingAssembly';
 import type { FramingCapacityDocumentEvidence } from '@/lib/permit/snapshot/framingAuthority';
 import type { CableExtensionDocumentEvidence, CableExtensionSolution } from '@/lib/permit/snapshot/types';
+import type { EnvironmentalLoadSourceEvidence } from '@/lib/permit/snapshot/environmentalAuthority';
 
 // ── Row ⇄ record mapping ──────────────────────────────────────────────────────
 
@@ -289,6 +290,20 @@ export function pickVerifiedDocument(
       if (key) { if (!applic.includes(key)) return false; }
       else if (!applic) return false;   // must carry explicit project applicability
     }
+    // BAR §2 — require a climate-hazard claim covering wind + snow + exposure/risk
+    // for the exact project, with an explicit currency review. A generic
+    // brochure/table with no per-project extract never resolves here.
+    if (criteria.requireEnvironmentalHazard === true) {
+      const en = d.extractedClaims?.environmental;
+      if (!en) return false;
+      if (!(en.coversWindSpeed === true && en.coversSnowLoad === true && en.coversExposureRisk === true)) return false;
+      if (!(en.windSpeedMph != null && en.groundSnowPsf != null)) return false;
+      if (!en.currencyConfirmedAtIso) return false;
+      const key = (criteria.projectApplicabilityKey ?? '').trim().toLowerCase();
+      const applic = (en.projectApplicability ?? d.applicabilityNotes ?? '').toLowerCase();
+      if (key) { if (!applic.includes(key)) return false; }
+      else if (!applic) return false;
+    }
     if (jur) {
       const dj = (d.extractedClaims?.structural?.jurisdiction ?? d.jurisdictionBoundary ?? '').toLowerCase();
       if (!dj.includes(jur)) return false;
@@ -414,6 +429,70 @@ export async function resolveFramingCapacityDocument(args: {
     projectApplicabilityKey: args.projectApplicabilityKey ?? null,
   });
   return toFramingClearanceEvidence(doc);
+}
+
+// ── Adapter: registry document → BAR §2 CLIMATE-HAZARD source evidence ─────────
+
+/**
+ * Convert a resolved climate-hazard registry document into the
+ * EnvironmentalLoadSourceEvidence shape consumed by
+ * buildEnvironmentalLoadAuthority. Returns null for a missing document so
+ * ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED keeps firing (fail-closed). Every
+ * value comes from the DOCUMENT's own extracted claims — never from an operator
+ * entry — so a resolved-but-incomplete extract still evaluates to unverified in
+ * environmentalSourceVerified().
+ */
+export function toEnvironmentalLoadSourceEvidence(
+  doc: RegistryDocument | null | undefined,
+): EnvironmentalLoadSourceEvidence | null {
+  if (!doc) return null;
+  const en = doc.extractedClaims?.environmental ?? {};
+  const lat = en.lat ?? null, lng = en.lng ?? null;
+  return {
+    documentId: doc.id,
+    dataset: en.dataset ?? doc.manufacturerOrIssuer ?? doc.title ?? null,
+    versionOrDate: doc.revision ?? doc.documentDate ?? null,
+    verificationState: doc.verificationState,
+    archivedInRepo: doc.archivedInRepo,
+    sha256: doc.sha256,
+    coversWindSpeed: en.coversWindSpeed === true,
+    coversSnowLoad: en.coversSnowLoad === true,
+    coversExposureRisk: en.coversExposureRisk === true,
+    windSpeedMph: en.windSpeedMph ?? null,
+    groundSnowPsf: en.groundSnowPsf ?? null,
+    exposureCategory: en.exposureCategory ?? null,
+    riskCategory: en.riskCategory ?? null,
+    coordinates: (lat != null || lng != null) ? { lat, lng } : null,
+    addressUsed: en.addressUsed ?? null,
+    projectApplicability: en.projectApplicability ?? doc.applicabilityNotes ?? null,
+    lookupTimestampIso: en.lookupTimestampIso ?? null,
+    currencyConfirmedAtIso: en.currencyConfirmedAtIso ?? null,
+  };
+}
+
+/**
+ * BAR §2 — resolve the VERIFIED, project-applicable climate-hazard source (ASCE 7
+ * Hazard-Tool report / AHJ climate ordinance extract) that can construct a
+ * VERIFIED EnvironmentalLoadAuthority, or null. This is what the async caller
+ * (resolveSnapshotAuthorityInputs) wires in and threads to
+ * buildPermitDesignSnapshot via { environmentalSource }.
+ *
+ * Nothing is archived today, so on live this resolves to null ⇒ operator-entered
+ * wind/snow stay OBSERVATION/OVERRIDE ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED.
+ */
+export async function resolveClimateHazardDocument(args: {
+  projectApplicabilityKey?: string | null;
+  jurisdiction?: string | null;
+}): Promise<EnvironmentalLoadSourceEvidence | null> {
+  const doc = await findVerifiedDocument({
+    documentClass: ['climate_hazard_dataset'],
+    equipmentId: null,
+    equipmentModel: args.projectApplicabilityKey ?? null,
+    jurisdiction: args.jurisdiction ?? null,
+    requireEnvironmentalHazard: true,
+    projectApplicabilityKey: args.projectApplicabilityKey ?? null,
+  });
+  return toEnvironmentalLoadSourceEvidence(doc);
 }
 
 // ── Adapter: registry document → §Q CABLE-EXTENSION document evidence ──────────

@@ -12,6 +12,7 @@ import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityPr
 import { projectRacewayDescriptor } from '../snapshot/electricalProjection';
 import type { PermitDesignSnapshot } from '../snapshot/types';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { projectFastenerAssembly } from '../snapshot/structuralProjection';
 
 /** §10 — the ONE verified fastener installation spec for the SELECTED mounting
  *  system (single source = mounting-hardware-db hardware.lagBolt + embedment).
@@ -19,8 +20,19 @@ import { getMountingSystemById } from '@/lib/mounting-hardware-db';
  *  the PV-3 detail, PE-1 and BOM print (RT-MINI: 2× 5/16" (8mm) wood screw,
  *  ~3.5" (90mm), no pilot hole). Falls back to the listed installation
  *  instructions when no mount is resolved — never a fabricated diameter. */
-function roofAttachmentNote(mountingSystemId: string | undefined): string {
+function roofAttachmentNote(input: PermitInput): string {
+  const mountingSystemId = (input.project as { mountingSystemId?: string }).mountingSystemId;
   const m = mountingSystemId ? getMountingSystemById(mountingSystemId) : undefined;
+  // §6 (BAR) — while the FastenerAssembly is NOT verified the assembly is
+  // NON-ORDERABLE: no manufacturer/SKU/diameter/length/coating/embedment may
+  // print on ANY sheet, general construction notes included. The note stays
+  // installable (it points at PV-3 + the listed instructions) and names the
+  // blocking authority instead of a dimension we cannot substantiate.
+  if (projectFastenerAssembly(input).nonOrderable) {
+    return `Roof attachments shall be installed per the selected mounting system's listed installation instructions `
+      + `and the PV-3 attachment detail; corrosion-resistant hardware throughout. Fastener manufacturer / model / `
+      + `diameter / length / coating / embedment WITHHELD &mdash; FASTENER-ASSEMBLY-UNVERIFIED (see RS-1).`;
+  }
   if (!m) {
     return `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. `
       + `Fasteners per the selected mounting system's listed installation instructions and PV-3 attachment detail; `
@@ -241,7 +253,7 @@ export function buildConstructionNotes(input: PermitInput): string[] {
           `All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: #10 AWG per NEC 690.45. Ground array grounding per NEC 690.47 and 250.166.`,
         ]
       : [
-          roofAttachmentNote((project as { mountingSystemId?: string }).mountingSystemId),
+          roofAttachmentNote(input),
           `Flashing shall be installed under all roof penetrations and sealed with approved sealant per manufacturer instructions. Verify roof framing at each attachment point. No attachments to sheathing only.`,
         ]),
     `Module-to-rail torque shall be per rail manufacturer specification. Rail splices installed per manufacturer details. All exposed hardware shall be stainless steel or corrosion-resistant equivalent per NEC 110.3(B).`,

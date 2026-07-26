@@ -190,7 +190,7 @@ describe('W4 §10 — missing direct-mount geometry blocks permit-ready', () => 
       cadPlanes: [], mountSystem: sys,
       structuralRuns: null,                              // ← no engine result → geometry unresolved
       framing: { framingType: null, rafterSize: null, rafterSpacing: null, rafterSpecies: null, rafterSpan: null },
-      windAuthoritative: false, snowAuthoritative: false,
+      windValuePresent: false, snowValuePresent: false,
       windSpeedMph: null, exposure: null, snowPsf: null, riskCategory: null, meanRoofHeightFt: null,
       asceEdition: 'ASCE 7-22', asceSource: 'default', ahjRidgeSetbackIn: null, roofCovering: null, fenceWind: null,
     };

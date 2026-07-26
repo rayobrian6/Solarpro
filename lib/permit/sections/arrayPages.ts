@@ -22,6 +22,12 @@ import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
 import { classifyPanel } from '../utils/subSystems';
 import { isHybridPlanset, primarySubKey, subScopedView, subScopedInput } from './subSystemSheets';
 import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../utils/branching';
+// §5 (BAR closeout 2026-07-25) — PV-1B is the AC BRANCH CIRCUIT LAYOUT, so the
+// open-air branch grounding method + its quantity must read the SAME canonical
+// authority E-1 / PV-4B project (gate 7: separate-EGC language on any sheet
+// requires the matching route + BOM quantity). Read-only projection.
+import { peekSnapshot } from '../snapshot/read';
+import { projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -497,6 +503,17 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const _fsCovEarly = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2Early, _fsMeanPitch);
   const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
 
+  // \u00a75 \u2014 the canonical open-air branch grounding authority (same object E-1 /
+  // PV-4B print). On a micro design the listed Q-Cable is a 2-conductor assembly
+  // with NO integrated EGC \u21d2 a SEPARATE open-air EGC is required; PV-1B states
+  // the method AND the BOM footage so the three sheets never disagree (gate 7).
+  const _agGnd = projectOpenAirBranchGrounding(peekSnapshot(input));
+  const _agGndCallout = (_isMicro && _agGnd.present && _agGnd.groundingMethod === 'separate-conductor')
+    ? [{ n: 5, label: 'NEC 250.122 Branch EGC',
+         sub: `SEPARATE ${_agGnd.conductorSize ?? '#10'} ${_agGnd.conductorMaterial ?? 'Cu'} EGC open-air with each branch trunk `
+            + `(Q-Cable = 2-cond., no integrated EGC) \u2014 ${_agGnd.bomFootageFt ?? 'PENDING'} ft (BOM); see E-1 / PV-4B` }]
+    : [];
+
   // Callout notes for data zone
   const agCalloutRows = [
     { n: 1, label: 'NEC 690.8', sub: _isMicro
@@ -506,6 +523,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa71204.2 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
        sub: isRoof(cadSystemType) ? `${_fsInEarly}" ridge \xb7 18" hip/valley setback` : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
     { n: 4, label: 'DC Capacity', sub: `${system.totalDcKw?.toFixed(2) || '\u2014'} kW DC` },
+    ..._agGndCallout,
   ].map(c =>
     `<div class="callout-row">` +
     `<span class="callout-bubble">${c.n}</span>` +

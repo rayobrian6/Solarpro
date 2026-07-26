@@ -759,6 +759,55 @@ export interface StructuralEnv {
     asceEdition: string | null;
     source: 'ahj-record' | 'pending-w4-ahj-authority' | 'default';
   };
+  /** §2 (BAR) — the canonical ENVIRONMENTAL LOAD AUTHORITY record. Operator-entered
+   *  wind/snow/exposure are OBSERVATIONS/OVERRIDES, never verified design criteria
+   *  without an archived provenance source (mirrors the framing observation-vs-
+   *  capacity gate). `verificationStatus` drives ENVIRONMENTAL-LOAD-AUTHORITY-
+   *  UNVERIFIED and every sheet prints the values WITH this provenance/state. */
+  environmentalLoadAuthority: EnvironmentalLoadAuthority;
+  provenance: Provenance;
+}
+
+/** §2 (BAR, 2026-07-25) — how an environmental design value was established. An
+ *  operator entry is an OBSERVATION/OVERRIDE (never verified authority); a bare
+ *  code default is PRELIMINARY only; only an archived, currency-reviewed source is
+ *  verified design criteria. */
+export type EnvironmentalLoadBasis =
+  'verified-source' | 'operator-entered' | 'code-minimum-default' | 'unavailable';
+export type EnvironmentalVerificationStatus = 'verified' | 'unverified' | 'unknown';
+
+/** §2 (BAR) — THE canonical environmental load authority. Presence of a value is
+ *  NOT authority: `verificationStatus === 'verified'` requires an archived,
+ *  currency-reviewed source covering wind + snow + exposure/risk for this project.
+ *  On the live design the values are operator-entered ⇒ basis 'operator-entered',
+ *  verificationStatus 'unverified', source null — and the values are printed WITH
+ *  that state, never as verified design criteria. */
+export interface EnvironmentalLoadAuthority {
+  // ── wind ──
+  ultimateWindSpeedMph: number | null;
+  windSpeedBasis: EnvironmentalLoadBasis;
+  riskCategory: string | null;
+  exposureCategory: string | null;
+  // ── snow ──
+  groundSnowLoadPsf: number | null;
+  snowLoadBasis: EnvironmentalLoadBasis;
+  snowLoadSource: string | null;
+  // ── location basis the values were (or should be) looked up against ──
+  coordinates: { lat: number | null; lng: number | null } | null;
+  addressUsed: string | null;
+  // ── source document / dataset ──
+  sourceDocumentId: string | null;
+  sourceDataset: string | null;            // e.g. 'ASCE 7 Hazard Tool', 'AHJ climate ordinance'
+  sourceVersionOrDate: string | null;
+  lookupTimestampIso: string | null;
+  // ── operator overrides (fields the operator posted without a verified source) ──
+  operatorOverrides: string[];
+  // ── verification ──
+  verificationStatus: EnvironmentalVerificationStatus;
+  /** the exact project/AHJ this authority record applies to. */
+  projectOrAhj: string | null;
+  /** archived-evidence reference (documentId/hash) when a verified source exists. */
+  evidenceRef: string | null;
   provenance: Provenance;
 }
 

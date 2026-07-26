@@ -40,7 +40,15 @@ const env = (): StructuralEnv => ({
   ultimateWindSpeedMph: 110, windSpeedSource: 'test', exposureCategory: 'C', riskCategory: 'II',
   groundSnowPsf: 20, roofSnowPsf: 4, buildingHeightFt: 15, componentCladdingZones: [],
   upliftPressurePsf: 20, downforcePressurePsf: 10,
-  codeAuthority: { asceEdition: 'ASCE 7-22', source: 'default' }, provenance: { source: 'test' },
+  codeAuthority: { asceEdition: 'ASCE 7-22', source: 'default' },
+  environmentalLoadAuthority: {
+    ultimateWindSpeedMph: 110, windSpeedBasis: 'operator-entered', riskCategory: 'II', exposureCategory: 'C',
+    groundSnowLoadPsf: 20, snowLoadBasis: 'operator-entered', snowLoadSource: null,
+    coordinates: null, addressUsed: null, sourceDocumentId: null, sourceDataset: null,
+    sourceVersionOrDate: null, lookupTimestampIso: null, operatorOverrides: ['ultimateWindSpeedMph', 'groundSnowLoadPsf'],
+    verificationStatus: 'unverified', projectOrAhj: null, evidenceRef: null, provenance: { source: 'test' },
+  },
+  provenance: { source: 'test' },
 });
 
 // ── §8 reconcileReactions unit behaviour ──────────────────────────────────────

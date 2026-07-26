@@ -55,7 +55,8 @@ import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { buildComputedRunsForPermit } from './computedRuns';
 import { peekSnapshot } from '../snapshot/read';
-import { projectCanonicalFeeder } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
+import { projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL } from '../snapshot/structuralProjection';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -79,6 +80,11 @@ export interface PermitBOMItem {
   formula?: string;
   notes?: string;
   required?: boolean;
+  /** §6 (BAR) — the row is a DESIGN QUANTITY only: it may NOT be ordered and is
+   *  excluded from the authoritative procurement totals until its authority
+   *  verifies (today: FASTENER-ASSEMBLY-UNVERIFIED). The quantity is retained so
+   *  the exact orderable row auto-regenerates on verification. */
+  nonOrderable?: boolean;
   unitCost?: number;
   totalCost?: number;
   /** Wave 5B passthrough of the Wave-2c per-sub stamp ('roof'|'ground'|'fence')
@@ -812,6 +818,70 @@ export function generateBOMForPermit(
       required: true,
     });
     log.push(`[bomForPermit] shared AC combiner panel: ${_sharedPanel.model} (${_sharedPanel.busbarA}A busbar, ${_acCollection!.perSource.length} sources)`);
+  }
+
+  // ── 5d. Open-air branch EGC (§5) — the footage the package was MISSING ────
+  // The listed Q-Cable is a 2-conductor assembly (line+neutral) with NO
+  // integrated EGC, so a SEPARATE #10 Cu EGC runs open-air alongside each branch
+  // trunk (build groundingObjects purpose='branch-egc', NEC 250.122). The V4
+  // conductor emitter EXCLUDES open-air sections, so this footage never got
+  // billed — E-1 asserted an open-air EGC the BOM never quantified. Emit it here
+  // from the canonical grounding authority, length = Σ branch cable-path
+  // designed-installed × waste (the SAME geometry as the trunk), labeled with the
+  // branch segment ids + the design-vs-procurement taxonomy.
+  const _oaGnd = projectOpenAirBranchGrounding(peekSnapshot(input));
+  if (_oaGnd.present && _oaGnd.groundingMethod === 'separate-conductor' && _oaGnd.bomFootageFt != null) {
+    const _gnGauge = (_oaGnd.conductorSize ?? '#10 AWG');
+    const _gn = _gnGauge.replace('#', '').replace(' AWG', '').trim();
+    merged.push({
+      stageId: 'ac',
+      stageLabel: STAGE_LABELS['ac'],
+      category: 'wire',
+      manufacturer: 'Southwire',
+      model: `${_gnGauge} ${_oaGnd.conductorMaterial ?? 'Cu'} Green EGC — open-air branch (Q-Cable)`,
+      partNumber: `GRN-OPENAIR-${_gn}`,
+      quantity: _oaGnd.bomFootageFt,
+      unit: 'ft',
+      description:
+        `Open-air branch equipment grounding conductor (${_oaGnd.branchIds.join(', ') || 'branches'}) — ${_oaGnd.sourceAuthority}. ` +
+        `procurement ${_oaGnd.bomFootageFt} ft = designed-installed ${_oaGnd.designedInstalledFt ?? '—'} ft (Σ BranchCablePath geometry) × ${_oaGnd.wasteFactor} waste; ` +
+        `parallels the open-air Q-Cable trunk (${_oaGnd.equipmentCompatibility}).`,
+      necReference: _oaGnd.codeBasis,
+      derivedFrom: `open-air branch grounding authority (${_oaGnd.provenance})`,
+      formula: `Σ designed-installed ${_oaGnd.designedInstalledFt ?? '—'} ft × ${_oaGnd.wasteFactor}`,
+      required: true,
+    });
+    log.push(`[bomForPermit] open-air branch EGC: ${_gnGauge} ${_oaGnd.bomFootageFt} ft (${_oaGnd.branchIds.length} branches, designed ${_oaGnd.designedInstalledFt} ft)`);
+  }
+
+  // ── 5e. §6 (BAR) — unverified fasteners are NON-ORDERABLE ────────────────
+  // While FastenerAssembly is not verified, the roof-attachment fastener row is a
+  // DESIGN QUANTITY only: the calculated quantity is RETAINED (so the exact
+  // orderable row auto-regenerates the moment the assembly verifies) but the
+  // manufacturer / SKU / diameter / length / coating / capacity are WITHHELD and
+  // the row is excluded from the authoritative procurement totals. Single source =
+  // the same FastenerAssembly projection SCHED-3 / PV-3 / APP-A / CERT read.
+  const _faBom = projectFastenerAssembly(input);
+  if (_faBom.nonOrderable) {
+    for (const it of merged) {
+      if (it.category !== 'lag_bolt') continue;
+      const _qtyPerMount = _faBom.qtyPerMount;
+      const _mounts = _qtyPerMount ? Math.round(it.quantity / _qtyPerMount) : null;
+      it.nonOrderable = true;
+      it.manufacturer = '—';
+      it.model = `Roof attachment fastener — ${FASTENER_NON_ORDERABLE_LABEL}`;
+      it.partNumber = 'PENDING-FASTENER-VERIFICATION';
+      it.description =
+        `DESIGN QUANTITY ONLY — NOT ORDERABLE and EXCLUDED from procurement totals until the fastener `
+        + `assembly is verified (FASTENER-ASSEMBLY-UNVERIFIED — see RS-1). Manufacturer, SKU, diameter, `
+        + `length, coating and capacity are WITHHELD until an archived, project-applicable fastener/capacity `
+        + `document is verified; the calculated quantity is retained so the exact orderable row regenerates on verification.`;
+      it.derivedFrom = `fastener assembly authority (verification=${_faBom.verification}) — design quantity, non-orderable`;
+      it.formula = _qtyPerMount != null && _mounts != null
+        ? `${_qtyPerMount} per mount × ${_mounts} mounts = ${it.quantity} (DESIGN QUANTITY)`
+        : `${it.quantity} (DESIGN QUANTITY)`;
+      log.push(`[bomForPermit] §6 fastener row NON-ORDERABLE: design qty ${it.quantity} ${it.unit} withheld from procurement (verification=${_faBom.verification})`);
+    }
   }
 
   // ── 6. Sort by stageId ordinal ───────────────────────────

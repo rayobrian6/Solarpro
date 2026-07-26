@@ -223,8 +223,11 @@ describe('W6 — APP-A racking section projects the canonical assembly, no banne
     // never the invented 5/16" × 4" Min. Stainless Steel string
     expect(html).not.toMatch(/5\/16"?\s*DIA\s*×\s*4"?\s*Min\.\s*Stainless/i);
     expect(html).not.toMatch(/×\s*4"\s*Min\.\s*Stainless Steel/i);
-    // it is either the canonical record fastener (structural wood screw) or PENDING
-    expect(m![1]).toMatch(/screw|lag|PENDING RACKING ASSEMBLY SELECTION/i);
+    // it is either the canonical record fastener (structural wood screw), the
+    // PENDING racking-assembly state, or — BAR §6 (2026-07-25) — the NON-ORDERABLE
+    // design-quantity label that withholds every fastener dimension while the
+    // assembly is unverified.
+    expect(m![1]).toMatch(/screw|lag|PENDING RACKING ASSEMBLY SELECTION|NON-ORDERABLE \/ PENDING VERIFIED FASTENER ASSEMBLY/i);
   });
 
   it('mount topology projects rail_paired for RT-MINI (never rail-less/direct-attach)', () => {

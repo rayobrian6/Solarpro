@@ -17,6 +17,9 @@ import {
   buildFramingObservation, resolveFramingCapacityAuthority,
   type FramingCapacityDocumentEvidence, type FramingEngineerReviewEvidence,
 } from './framingAuthority';
+import {
+  buildEnvironmentalLoadAuthority, type EnvironmentalLoadSourceEvidence,
+} from './environmentalAuthority';
 import type { StructuralResultV4, StructuralInputV4 } from '@/lib/structural-engine-v4';
 import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
@@ -53,9 +56,23 @@ export interface StructuralAuthorityCtx {
   mountSystem: MountingSystemSpec | null;
   structuralRuns: StructuralRunsBundle | null;
   framing: FramingInputs;
-  windAuthoritative: boolean; snowAuthoritative: boolean;
+  /** §2 (BAR) — a wind/snow VALUE is present (operator-entered or default). This
+   *  is NOT authority: presence never verifies. The blocker fires from the
+   *  ENVIRONMENTAL LOAD AUTHORITY verification state, not from these flags. */
+  windValuePresent: boolean; snowValuePresent: boolean;
   windSpeedMph: number | null; exposure: string | null; snowPsf: number | null;
   riskCategory: string | null;
+  /** §2 (BAR) — async-resolved VERIFIED climate-hazard source (lib/documents) for
+   *  the project. null ⇒ no archived source ⇒ operator-entered values stay
+   *  UNVERIFIED ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires (the honest live
+   *  outcome). */
+  environmentalSource?: EnvironmentalLoadSourceEvidence | null;
+  /** §2 (BAR) — the location basis the wind/snow values were (or should be) looked
+   *  up against, printed with the values so no reader treats an operator entry as
+   *  a resolved lookup. */
+  environmentalCoordinates?: { lat: number | null; lng: number | null } | null;
+  environmentalAddressUsed?: string | null;
+  environmentalCapturedAtIso?: string | null;
   meanRoofHeightFt: number | null;
   asceEdition: string; asceSource: 'ahj-record' | 'pending-w4-ahj-authority' | 'default';
   ahjRidgeSetbackIn: number | null;
@@ -225,7 +242,7 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
 
   const blockers = collectBlockers(ctx, {
     moduleInstances, roofPlaneObjects, rackingAssembly, rails, attachments, engine, checks, bomReconciliation,
-    reactionReconciliation,
+    reactionReconciliation, env,
   });
 
   return {
@@ -692,9 +709,30 @@ function buildFenceChecks(ctx: StructuralAuthorityCtx): StructuralCheck[] {
 
 // ── §7 environmental authority ──────────────────────────────────────────────
 function buildEnv(ctx: StructuralAuthorityCtx, run: StructuralResultV4 | null): StructuralEnv {
-  const windSource = ctx.windAuthoritative
-    ? 'canonical project/AHJ wind authority'
-    : 'code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority';
+  // §2 (BAR) — the canonical ENVIRONMENTAL LOAD AUTHORITY. Operator-entered
+  // wind/snow/exposure are OBSERVATIONS/OVERRIDES; a bare code default is
+  // PRELIMINARY. The record is verified ONLY via an archived, currency-reviewed
+  // climate-hazard source. windSpeedSource is now DERIVED from the authority's
+  // verification state (never "canonical … authority" for a bare operator entry).
+  const environmentalLoadAuthority = buildEnvironmentalLoadAuthority({
+    windSpeedMph: ctx.windSpeedMph,
+    exposureCategory: ctx.exposure,
+    riskCategory: ctx.riskCategory,
+    groundSnowPsf: ctx.snowPsf,
+    windOperatorEntered: ctx.windValuePresent,
+    snowOperatorEntered: ctx.snowValuePresent,
+    coordinates: ctx.environmentalCoordinates ?? null,
+    addressUsed: ctx.environmentalAddressUsed ?? null,
+    projectOrAhj: ctx.projectJurisdiction ?? null,
+    sourceEvidence: ctx.environmentalSource ?? null,
+    capturedAtIso: ctx.environmentalCapturedAtIso ?? null,
+  });
+  const verified = environmentalLoadAuthority.verificationStatus === 'verified';
+  const windSource = verified
+    ? `verified climate-hazard source (${environmentalLoadAuthority.sourceDataset ?? environmentalLoadAuthority.sourceDocumentId})`
+    : ctx.windValuePresent
+      ? 'OPERATOR-ENTERED — NOT VERIFIED (observation/override; no archived climate-hazard source)'
+      : 'code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority';
   return {
     ultimateWindSpeedMph: ctx.windSpeedMph,
     windSpeedSource: windSource,
@@ -707,15 +745,16 @@ function buildEnv(ctx: StructuralAuthorityCtx, run: StructuralResultV4 | null): 
     upliftPressurePsf: run ? r3(run.wind.netUpliftPressurePsf) : null,
     downforcePressurePsf: run ? r3(run.wind.netDownwardPressurePsf) : null,
     codeAuthority: { asceEdition: ctx.asceEdition, source: ctx.asceSource },
-    provenance: PROV('wind/snow/exposure from canonical site → structural-engine-v4; '
-      + 'ASCE edition via code-authority interface (AHJ population = W4)'),
+    environmentalLoadAuthority,
+    provenance: PROV('wind/snow/exposure = canonical ENVIRONMENTAL LOAD AUTHORITY (basis + verification state); '
+      + 'roof pressures from structural-engine-v4; ASCE edition via code-authority interface (AHJ population = W4)'),
   };
 }
 
 // ── §12 blockers ─────────────────────────────────────────────────────────────
 function collectBlockers(
   ctx: StructuralAuthorityCtx,
-  a: Pick<StructuralAuthorityBundle, 'moduleInstances' | 'roofPlaneObjects' | 'rackingAssembly' | 'rails' | 'attachments' | 'engine' | 'checks' | 'bomReconciliation' | 'reactionReconciliation'>,
+  a: Pick<StructuralAuthorityBundle, 'moduleInstances' | 'roofPlaneObjects' | 'rackingAssembly' | 'rails' | 'attachments' | 'engine' | 'checks' | 'bomReconciliation' | 'reactionReconciliation' | 'env'>,
 ): { code: string; message: string }[] {
   const b: { code: string; message: string }[] = [];
   // §10 — a BOM that does not reconcile with the structural objects is a
@@ -848,10 +887,26 @@ function collectBlockers(
           + `product version than the selected mount ${ctx.mountSystem.model}; no verified alias evidence. Provide the version-exact document.` });
     }
   }
-  if (!ctx.windAuthoritative || !ctx.snowAuthoritative) {
-    b.push({ code: 'WIND-SNOW-AUTHORITY-UNRESOLVED',
-      message: `Wind/snow design authority unresolved (wind ${ctx.windAuthoritative ? 'ok' : 'code-minimum default'}, `
-        + `snow ${ctx.snowAuthoritative ? 'ok' : 'unverified'}) — AHJ-confirmed values required` });
+  // §2 (BAR) — ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED (successor to WIND-SNOW-
+  // AUTHORITY-UNRESOLVED). Fires whenever the canonical ENVIRONMENTAL LOAD
+  // AUTHORITY is not VERIFIED — subsuming BOTH the null/code-minimum-default case
+  // AND the operator-entered-without-provenance case (the live Braidon row: 110
+  // mph / Exposure C / 20 psf are OPERATOR-ENTERED, an observation/override, never
+  // verified design criteria absent an archived, currency-reviewed climate-hazard
+  // source). One code, no duplicate. Values still drive the preliminary analysis
+  // and print WITH their basis/verification state.
+  const _env = a.env.environmentalLoadAuthority;
+  if (_env.verificationStatus !== 'verified') {
+    const _windLbl = _env.windSpeedBasis === 'operator-entered' ? 'operator-entered'
+      : _env.windSpeedBasis === 'code-minimum-default' ? 'code-minimum default' : 'not provided';
+    const _snowLbl = _env.snowLoadBasis === 'operator-entered' ? 'operator-entered'
+      : _env.snowLoadBasis === 'code-minimum-default' ? 'code-minimum default' : 'not provided';
+    // Concise one-line explanation (the CERT gate banner + cover render this); the
+    // full observation-vs-verified rationale lives in the registry resolutionAction,
+    // shown on RS-1 — the same split QCABLE-PROCUREMENT-INSUFFICIENT uses.
+    b.push({ code: 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',
+      message: `Environmental load authority UNVERIFIED — wind ${_windLbl}, snow ${_snowLbl}, exposure/risk carry no `
+        + `archived climate-hazard source; values are PRELIMINARY design criteria, not verified.` });
   }
   if (a.moduleInstances.length > 0 && a.attachments.length === 0) {
     // §10 — direct-mount geometry that could not be derived (product pattern

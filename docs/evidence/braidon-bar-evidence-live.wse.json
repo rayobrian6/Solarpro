@@ -1,0 +1,560 @@
+{
+  "ok": true,
+  "snapshotId": "PDS-8910EFAC2AB8",
+  "topology": "MICRO",
+  "gatesRun": 33,
+  "gatesFailed": 0,
+  "results": [
+    {
+      "gate": 0,
+      "name": "E-1 exports the BAR WS-E canonical evidence stamp",
+      "pass": true,
+      "detail": "snapshotId=PDS-8910EFAC2AB8"
+    },
+    {
+      "gate": 0,
+      "name": "the exported stamp binds to THIS snapshot",
+      "pass": true,
+      "detail": "stamp=PDS-8910EFAC2AB8 snapshot=PDS-8910EFAC2AB8"
+    },
+    {
+      "gate": 4,
+      "name": "every rendered section exports an ampacity object",
+      "pass": true,
+      "detail": "7 sections"
+    },
+    {
+      "gate": 4,
+      "name": "each ampacity result carries EVERY directive field",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "gate": 4,
+      "name": "the shared >3-CCC raceway itemizes the count adjustment AND the ambient correction",
+      "pass": true,
+      "detail": "BRANCH_HOMERUN_RUN: 6CCC ×0.8 amb×0.96 | COMBINER_TO_DISCO_RUN: 4CCC ×0.8 amb×0.96 | DISCO_TO_METER_RUN: 4CCC ×0.8 amb×0.96"
+    },
+    {
+      "gate": 4,
+      "name": "corrected == base × countAdj × ambient, and final == min(corrected, 75 °C terminal)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "no sheet prints a bare \"derate 0.NN\" scalar cell",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the retired unquantified \"TEMPERATURE DERATING NOTE\" prose is gone",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the ampacity evidence block renders on E-1 + PV-4A + PV-4B",
+      "pass": true,
+      "detail": "3 occurrences"
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 310.16",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 310.15(C)(1)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 310.15(B)(1)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered chain cites 110.14(C)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 4,
+      "name": "the rendered count/ambient factors EQUAL the exported canonical factors",
+      "pass": true,
+      "detail": "count=0.8 ambient=0.96"
+    },
+    {
+      "gate": 5,
+      "name": "no ampacity result claims PASS on a missing input",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "gate": 5,
+      "name": "every incomplete ampacity result is PENDING",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "gate": 6,
+      "name": "exactly ONE grounding method is modeled and it is explicit",
+      "pass": true,
+      "detail": "groundingMethod=separate-conductor"
+    },
+    {
+      "gate": 6,
+      "name": "the grounding result carries its manufacturer + code basis",
+      "pass": true,
+      "detail": "NEC 250.122 / 690.43(C)"
+    },
+    {
+      "gate": 7,
+      "name": "the separate EGC has an enumerated route (segment + branch objects)",
+      "pass": true,
+      "detail": "branches=3/3 segments=BRANCH_RUN"
+    },
+    {
+      "gate": 7,
+      "name": "the EGC length equals Σ BranchCablePath designed-installed (trunk geometry)",
+      "pass": true,
+      "detail": "egc=166.5 Σpaths=166.5"
+    },
+    {
+      "gate": 7,
+      "name": "the BOM footage = designed-installed × documented waste",
+      "pass": true,
+      "detail": "bom=192 expected=192 waste=1.15"
+    },
+    {
+      "gate": 7,
+      "name": "the sheets asserting a separate EGC print the SAME footage",
+      "pass": true,
+      "detail": "192 ft appears 3×"
+    },
+    {
+      "gate": 6,
+      "name": "no sheet claims the Q-Cable provides integrated equipment grounding",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 9,
+      "name": "occupied drops == one per micro/module (the topology basis)",
+      "pass": true,
+      "detail": "drops=31 modules=31"
+    },
+    {
+      "gate": 10,
+      "name": "one cable-end object per branch is enumerated (terminator basis)",
+      "pass": true,
+      "detail": "3 cable-end objects"
+    },
+    {
+      "gate": 9,
+      "name": "no BOM/sheet text justifies sealing caps as \"1 per AC branch\"",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 9,
+      "name": "the sealing-cap quantity is stated as topology-derived (or honest PENDING)",
+      "pass": true,
+      "detail": "cap row carries its ordered-vs-occupied derivation"
+    },
+    {
+      "gate": 10,
+      "name": "terminators are justified by cable-end objects, not a per-branch constant",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 11,
+      "name": "the stale \"Open Air — PV Wire/THWN-2\" legend literal is GONE on a micro sheet",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "gate": 11,
+      "name": "the open-air legend entry names the LISTED assembly actually drawn",
+      "pass": true,
+      "detail": "ENPHASE Q CABLE (TC-ER)"
+    },
+    {
+      "gate": 11,
+      "name": "the in-conduit THWN-2 legend entry appears only when such a segment exists",
+      "pass": true,
+      "detail": "hasInConduit=true"
+    },
+    {
+      "gate": 11,
+      "name": "no DC-in-conduit legend entry on a design with no DC-in-conduit segment",
+      "pass": true,
+      "detail": "hasDcInConduit=false"
+    },
+    {
+      "gate": 11,
+      "name": "no generic \"PV Wire\" legend entry on an all-micro sheet",
+      "pass": true,
+      "detail": null
+    }
+  ],
+  "artifacts": {
+    "sharedRacewayAmpacity": {
+      "sectionId": "BRANCH_HOMERUN_RUN",
+      "fillApplicable": true,
+      "present": true,
+      "conductorMaterial": "Cu",
+      "insulation": "THWN-2",
+      "insulationRatingC": 90,
+      "conductorSize": "#10 AWG",
+      "baseTableAmpacityA": 40,
+      "baseTableTempC": 90,
+      "terminalTempLimitC": 75,
+      "terminalTableAmpacityA": 35,
+      "currentCarryingCount": 6,
+      "countAdjustmentFactor": 0.8,
+      "countAdjustmentBasis": "6 CCC → 0.80 (NEC 310.15(C)(1))",
+      "ambientTempC": null,
+      "rooftopAdderC": null,
+      "effectiveAmbientTempC": null,
+      "ambientCorrectionFactor": 0.96,
+      "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+      "correctedAmpacityA": 30.72,
+      "finalAllowableAmpacityA": 30.72,
+      "finalAllowableBasis": "min(corrected 30.72 A [90 °C base], 35 A [75 °C terminal, NEC 110.14(C)]) = 30.72 A",
+      "requiredContinuousA": 20,
+      "requiredContinuousBasis": "each #10 carries one branch; governing = max branch continuous (20A-OCPD branch, ×1.25 basis)",
+      "ocpdA": 20,
+      "state": "PASS",
+      "necReferences": [
+        "NEC 310.16",
+        "NEC 310.15(B)(1)",
+        "NEC 310.15(C)(1)",
+        "NEC 110.14(C)",
+        "NEC 690.8(B)"
+      ],
+      "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+    },
+    "ampacityBySection": [
+      {
+        "sectionId": "BRANCH_RUN",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#12 AWG",
+        "baseTableAmpacityA": 30,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 25,
+        "currentCarryingCount": 2,
+        "countAdjustmentFactor": 1,
+        "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 28.8,
+        "finalAllowableAmpacityA": 25,
+        "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+        "requiredContinuousA": 20,
+        "requiredContinuousBasis": "branch continuous = 16A op × 1.25 (NEC 690.8(A))",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#12 AWG",
+        "baseTableAmpacityA": 30,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 25,
+        "currentCarryingCount": 2,
+        "countAdjustmentFactor": 1,
+        "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 28.8,
+        "finalAllowableAmpacityA": 25,
+        "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+        "requiredContinuousA": 18.174999999999997,
+        "requiredContinuousBasis": "branch continuous = 14.54A op × 1.25 (NEC 690.8(A))",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+      },
+      {
+        "sectionId": "BRANCH_RUN",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#12 AWG",
+        "baseTableAmpacityA": 30,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 25,
+        "currentCarryingCount": 2,
+        "countAdjustmentFactor": 1,
+        "countAdjustmentBasis": "free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 28.8,
+        "finalAllowableAmpacityA": 25,
+        "finalAllowableBasis": "min(corrected 28.80 A [90 °C base], 25 A [75 °C terminal, NEC 110.14(C)]) = 25.00 A",
+        "requiredContinuousA": 18.174999999999997,
+        "requiredContinuousBasis": "branch continuous = 14.54A op × 1.25 (NEC 690.8(A))",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (free-air branch, 690.31(C))"
+      },
+      {
+        "sectionId": "BRANCH_HOMERUN_RUN",
+        "fillApplicable": true,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#10 AWG",
+        "baseTableAmpacityA": 40,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 35,
+        "currentCarryingCount": 6,
+        "countAdjustmentFactor": 0.8,
+        "countAdjustmentBasis": "6 CCC → 0.80 (NEC 310.15(C)(1))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 30.72,
+        "finalAllowableAmpacityA": 30.72,
+        "finalAllowableBasis": "min(corrected 30.72 A [90 °C base], 35 A [75 °C terminal, NEC 110.14(C)]) = 30.72 A",
+        "requiredContinuousA": 20,
+        "requiredContinuousBasis": "each #10 carries one branch; governing = max branch continuous (20A-OCPD branch, ×1.25 basis)",
+        "ocpdA": 20,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      },
+      {
+        "sectionId": "COMBINER_TO_DISCO_RUN",
+        "fillApplicable": true,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#6 AWG",
+        "baseTableAmpacityA": 75,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 65,
+        "currentCarryingCount": 4,
+        "countAdjustmentFactor": 0.8,
+        "countAdjustmentBasis": "4 CCC → 0.80 (NEC 310.15(C)(1))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 57.6,
+        "finalAllowableAmpacityA": 57.6,
+        "finalAllowableBasis": "min(corrected 57.60 A [90 °C base], 65 A [75 °C terminal, NEC 110.14(C)]) = 57.60 A",
+        "requiredContinuousA": 56.34895833333333,
+        "requiredContinuousBasis": "feeder continuous = PV output × 1.25 (NEC 690.8(A))",
+        "ocpdA": 60,
+        "state": "PASS",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      },
+      {
+        "sectionId": "DISCO_TO_METER_RUN",
+        "fillApplicable": true,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#6 AWG",
+        "baseTableAmpacityA": 75,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 65,
+        "currentCarryingCount": 4,
+        "countAdjustmentFactor": 0.8,
+        "countAdjustmentBasis": "4 CCC → 0.80 (NEC 310.15(C)(1))",
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": 0.96,
+        "ambientCorrectionBasis": "NEC 310.15(B)(1) → 0.96",
+        "correctedAmpacityA": 57.6,
+        "finalAllowableAmpacityA": 57.6,
+        "finalAllowableBasis": "min(corrected 57.60 A [90 °C base], 65 A [75 °C terminal, NEC 110.14(C)]) = 57.60 A",
+        "requiredContinuousA": null,
+        "requiredContinuousBasis": "segment continuous current",
+        "ocpdA": 60,
+        "state": "PENDING",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      },
+      {
+        "sectionId": "svc-tap-conductors",
+        "fillApplicable": false,
+        "present": true,
+        "conductorMaterial": "Cu",
+        "insulation": "THWN-2",
+        "insulationRatingC": 90,
+        "conductorSize": "#6 AWG",
+        "baseTableAmpacityA": 75,
+        "baseTableTempC": 90,
+        "terminalTempLimitC": 75,
+        "terminalTableAmpacityA": 65,
+        "currentCarryingCount": null,
+        "countAdjustmentFactor": null,
+        "countAdjustmentBasis": null,
+        "ambientTempC": null,
+        "rooftopAdderC": null,
+        "effectiveAmbientTempC": null,
+        "ambientCorrectionFactor": null,
+        "ambientCorrectionBasis": null,
+        "correctedAmpacityA": null,
+        "finalAllowableAmpacityA": null,
+        "finalAllowableBasis": null,
+        "requiredContinuousA": null,
+        "requiredContinuousBasis": "supply-side tap — sizing per service authority (PENDING)",
+        "ocpdA": null,
+        "state": "PENDING",
+        "necReferences": [
+          "NEC 310.16",
+          "NEC 310.15(B)(1)",
+          "NEC 310.15(C)(1)",
+          "NEC 110.14(C)",
+          "NEC 690.8(B)"
+        ],
+        "provenance": "computed-system NEC tables (shared raceway CCC adjustment)"
+      }
+    ],
+    "openAirBranchGrounding": {
+      "present": true,
+      "required": true,
+      "groundingMethod": "separate-conductor",
+      "conductorMaterial": "Cu",
+      "conductorSize": "#12 AWG",
+      "segmentIds": [
+        "BRANCH_RUN"
+      ],
+      "branchIds": [
+        "br-1",
+        "br-2",
+        "br-3"
+      ],
+      "pathBasis": "Σ per-branch BranchCablePath (same designed-installed geometry as the Q-Cable trunk)",
+      "designedInstalledFt": 166.5,
+      "lengthProvenance": "geometry-derived",
+      "wasteFactor": 1.15,
+      "bomFootageFt": 192,
+      "sourceAuthority": "Enphase IQ Q-Cable Q-12-10-240 = 2-conductor assembly (line+neutral), NO integrated EGC → separate #12 AWG Cu EGC required",
+      "codeBasis": "NEC 250.122 / 690.43(C)",
+      "equipmentCompatibility": "open-air branch EGC parallels the ENPHASE Q CABLE (TC-ER) trunk (TC-ER, free-air 690.31(C))",
+      "verificationState": "cad-derived (length follows branch trunk geometry) — field-verify",
+      "provenance": "groundingObjects[purpose=branch-egc] × 3 branches; length Σ BranchCablePath designed-installed"
+    },
+    "connectorTopology": {
+      "branchCount": 3,
+      "occupiedDrops": 31,
+      "perBranch": [
+        {
+          "branchId": "br-1",
+          "branchLabel": "B1",
+          "dropCount": 11,
+          "cableEndObjectId": "B1-END"
+        },
+        {
+          "branchId": "br-2",
+          "branchLabel": "B2",
+          "dropCount": 10,
+          "cableEndObjectId": "B2-END"
+        },
+        {
+          "branchId": "br-3",
+          "branchLabel": "B3",
+          "dropCount": 10,
+          "cableEndObjectId": "B3-END"
+        }
+      ]
+    },
+    "legend": {
+      "openAirWiringMethod": {
+        "assemblyId": "QCABLE-ASSEMBLY",
+        "wiringMethodLabel": "ENPHASE Q CABLE (TC-ER)",
+        "sku": "Q-12-10-240",
+        "conductorCount": 2,
+        "insulationListing": "THHN/THWN-2 conductors; UL 9703 (cable assemblies) / UL 3003 (raw cable); permitted in free air per NEC 690.31(C)"
+      },
+      "staleLiteralPresent": false,
+      "hasInConduitSegment": true,
+      "hasDcInConduitSegment": false
+    }
+  }
+}

@@ -1,15 +1,16 @@
 {
-  "generatedAt": "2026-07-24T00:12:59.638Z",
+  "generatedAt": "2026-07-26T00:15:56.567Z",
   "wave": "W4",
   "mode": "original",
   "evidenceRole": "IMMUTABLE W4 acceptance evidence from the frozen braidon-original-audit-fixture — proves AHJ/code/project/document authority + cross-sheet agreement + zero authority bypass on the exact originally-audited design.",
   "supersedes": null,
-  "snapshotId": "PDS-B7FBCEEDBD28",
-  "digest": "b7fbceedbd28c213ade871affbdb3fae690759e7a2db66c048f04d35d2bb8b20",
+  "snapshotId": "PDS-CD0F6377533F",
+  "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
   "schemaVersion": "1.0.0",
   "project": "BRAIDON (GreenLancer feedback-session planset)",
-  "sheetCount": 19,
+  "sheetCount": 21,
   "sheetIds": [
+    "PV-0",
     "RS-1",
     "PV-1",
     "PV-1B",
@@ -28,6 +29,7 @@
     "DS-1",
     "DS-2",
     "DS-3",
+    "CERT",
     "PE-1"
   ],
   "fixtureGeometryDisclaimer": "The frozen braidon-original-audit-fixture roof-plane VERTICES and edge TYPES are DETERMINISTIC TEST-FIXTURE geometry, reconstructed as the axis-aligned bounding box (padded ~6 ft) of each plane's recovered member-panel lat/lngs with nominal [eave, rake, ridge, rake] edges. They were NOT recovered from the original historical W1 snapshot (which did not persist them) and DO NOT prove the exact historical roof geometry. Recovered module POSITIONS (lat/lng) are unaltered; if exact surveyed roof edges are ever recovered they supersede these bounding boxes. (Live-mode evidence reads the current DB design and carries no such reconstruction.)",
@@ -90,7 +92,7 @@
           "NEC 2020"
         ],
         "agree": true,
-        "printedCount": 21
+        "printedCount": 23
       },
       "ibc": {
         "label": "IBC PENDING",
@@ -98,7 +100,7 @@
           "IBC PENDING"
         ],
         "agree": true,
-        "printedCount": 20
+        "printedCount": 22
       },
       "irc": {
         "label": "IRC PENDING",
@@ -106,7 +108,7 @@
           "IRC PENDING"
         ],
         "agree": true,
-        "printedCount": 20
+        "printedCount": 22
       },
       "ifc": {
         "label": "IFC PENDING",
@@ -114,7 +116,7 @@
           "IFC PENDING"
         ],
         "agree": true,
-        "printedCount": 20
+        "printedCount": 22
       },
       "asce": {
         "label": "ASCE 7-22",
@@ -122,7 +124,7 @@
           "ASCE 7-22"
         ],
         "agree": true,
-        "printedCount": 20
+        "printedCount": 22
       }
     },
     "zeroCodeEditionLiteralsInRenderers": true,
@@ -162,13 +164,13 @@
       "authorityGapDomains": [
         "electrical",
         "structural",
-        "code",
-        "document"
+        "document",
+        "code"
       ],
       "reviewCoversCurrentDigest": false,
       "reviewStale": false,
       "reviewedDigest": null,
-      "reason": "authority gaps span [electrical, structural, code, document] — full engineering review required"
+      "reason": "authority gaps span [electrical, structural, document, code] — full engineering review required"
     },
     "issuedForPermitGate": {
       "pass": false,
@@ -206,7 +208,7 @@
         {
           "id": "engineer-review-current-digest",
           "satisfied": false,
-          "detail": "no approved review covering the current digest"
+          "detail": "review invalidated by a snapshot_digest_invalidations ledger entry"
         },
         {
           "id": "signature-seal",
@@ -231,6 +233,14 @@
       "authority": "Madison County Building & Zoning",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "Madison County Building & Zoning"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "Madison County Building & Zoning"
+        },
+        {
           "sheet": "RS-1",
           "value": "Madison County Building & Zoning"
         },
@@ -303,11 +313,11 @@
           "value": "Madison County Building & Zoning"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "Madison County Building & Zoning"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "Madison County Building & Zoning"
         },
         {
@@ -332,6 +342,14 @@
       "authority": "Ameren Illinois",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "Ameren Illinois"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "Ameren Illinois"
+        },
+        {
           "sheet": "RS-1",
           "value": "Ameren Illinois"
         },
@@ -404,7 +422,7 @@
           "value": "Ameren Illinois"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "Ameren Illinois"
         },
         {
@@ -423,6 +441,14 @@
       "authority": "NEC 2020",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "NEC 2020"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "NEC 2020"
+        },
+        {
           "sheet": "RS-1",
           "value": "NEC 2020"
         },
@@ -499,7 +525,7 @@
           "value": "NEC 2020"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "NEC 2020"
         },
         {
@@ -519,6 +545,14 @@
       "authority": "IBC PENDING",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "IBC PENDING"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "IBC PENDING"
+        },
+        {
           "sheet": "RS-1",
           "value": "IBC PENDING"
         },
@@ -591,7 +625,7 @@
           "value": "IBC PENDING"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "IBC PENDING"
         },
         {
@@ -611,6 +645,14 @@
       "authority": "IRC PENDING",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "IRC PENDING"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "IRC PENDING"
+        },
+        {
           "sheet": "RS-1",
           "value": "IRC PENDING"
         },
@@ -683,7 +725,7 @@
           "value": "IRC PENDING"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "IRC PENDING"
         },
         {
@@ -703,6 +745,14 @@
       "authority": "IFC PENDING",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "IFC PENDING"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "IFC PENDING"
+        },
+        {
           "sheet": "RS-1",
           "value": "IFC PENDING"
         },
@@ -775,7 +825,7 @@
           "value": "IFC PENDING"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "IFC PENDING"
         },
         {
@@ -795,6 +845,14 @@
       "authority": "ASCE 7-22",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "ASCE 7-22"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "ASCE 7-22"
+        },
+        {
           "sheet": "RS-1",
           "value": "ASCE 7-22"
         },
@@ -867,7 +925,7 @@
           "value": "ASCE 7-22"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "ASCE 7-22"
         },
         {
@@ -885,15 +943,30 @@
     {
       "quantity": "authority.system-type",
       "authority": "ROOF MOUNT",
-      "printedInstances": [],
-      "distinctPrinted": [],
-      "agree": null,
+      "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "ROOF MOUNT"
+        }
+      ],
+      "distinctPrinted": [
+        "ROOF MOUNT"
+      ],
+      "agree": true,
       "blocking": true
     },
     {
       "quantity": "authority.module-model",
       "authority": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W",
       "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
+        },
         {
           "sheet": "RS-1",
           "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
@@ -967,7 +1040,7 @@
           "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "Q CELLS Q.PEAK DUO BLK ML-G10+ 400W"
         },
         {
@@ -986,6 +1059,14 @@
       "authority": "Enphase IQ8A",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "Enphase IQ8A"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "Enphase IQ8A"
+        },
+        {
           "sheet": "RS-1",
           "value": "Enphase IQ8A"
         },
@@ -1058,7 +1139,7 @@
           "value": "Enphase IQ8A"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "Enphase IQ8A"
         },
         {
@@ -1076,6 +1157,10 @@
       "quantity": "authority.racking-assembly",
       "authority": "RT-MINI",
       "printedInstances": [
+        {
+          "sheet": "PV-0",
+          "value": "RT-MINI"
+        },
         {
           "sheet": "RS-1",
           "value": "RT-MINI"
@@ -1101,10 +1186,6 @@
           "value": "RT-MINI"
         },
         {
-          "sheet": "PV-4B",
-          "value": "RT-MINI"
-        },
-        {
           "sheet": "SCHED-3",
           "value": "RT-MINI"
         },
@@ -1114,6 +1195,10 @@
         },
         {
           "sheet": "DS-3",
+          "value": "RT-MINI"
+        },
+        {
+          "sheet": "CERT",
           "value": "RT-MINI"
         },
         {
@@ -1133,6 +1218,14 @@
       "authority": "PENDING ENGINEERING REVIEW",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
+          "sheet": "PV-0",
+          "value": "PENDING ENGINEERING REVIEW"
+        },
+        {
           "sheet": "RS-1",
           "value": "PENDING ENGINEERING REVIEW"
         },
@@ -1205,7 +1298,7 @@
           "value": "PENDING ENGINEERING REVIEW"
         },
         {
-          "sheet": "DS-3",
+          "sheet": "CERT",
           "value": "PENDING ENGINEERING REVIEW"
         },
         {
@@ -1221,95 +1314,99 @@
     },
     {
       "quantity": "authority.snapshot-id",
-      "authority": "PDS-B7FBCEEDBD28",
+      "authority": "PDS-CD0F6377533F",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "PDS-CD0F6377533F"
+        },
+        {
           "sheet": "RS-1",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-1",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-1B",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-3",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-4C",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-4C.1",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "E-1",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-4A",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-4B",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-5",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PV-6",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "SCHED",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "SCHED-2",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "SCHED-3",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "APP-A",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "DS-1",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "DS-2",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "DS-3",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
-          "sheet": "DS-3",
-          "value": "PDS-B7FBCEEDBD28"
+          "sheet": "CERT",
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "PE-1",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         },
         {
           "sheet": "E-1(SLD stamp)",
-          "value": "PDS-B7FBCEEDBD28"
+          "value": "PDS-CD0F6377533F"
         }
       ],
       "distinctPrinted": [
-        "PDS-B7FBCEEDBD28"
+        "PDS-CD0F6377533F"
       ],
       "agree": true,
       "blocking": true,
@@ -1317,95 +1414,99 @@
     },
     {
       "quantity": "authority.digest",
-      "authority": "b7fbceedbd28c213ade8… (full b7fbceedbd28…)",
+      "authority": "cd0f6377533f404ff20e… (full cd0f6377533f…)",
       "printedInstances": [
         {
+          "sheet": "PV-0",
+          "value": "cd0f6377533f404ff20e"
+        },
+        {
           "sheet": "RS-1",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-1",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-1B",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-3",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-4C",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-4C.1",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "E-1",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-4A",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-4B",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-5",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PV-6",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "SCHED",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "SCHED-2",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "SCHED-3",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "APP-A",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "DS-1",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "DS-2",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "DS-3",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
-          "sheet": "DS-3",
-          "value": "b7fbceedbd28c213ade8"
+          "sheet": "CERT",
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "PE-1",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         },
         {
           "sheet": "E-1(SLD stamp)",
-          "value": "b7fbceedbd28c213ade8"
+          "value": "cd0f6377533f404ff20e"
         }
       ],
       "distinctPrinted": [
-        "b7fbceedbd28c213ade8"
+        "cd0f6377533f404ff20e"
       ],
       "agree": true,
       "blocking": true,
@@ -1417,16 +1518,17 @@
       "printedInstances": [
         {
           "sheet": "ALL",
-          "value": "19 rendered"
+          "value": "21 rendered"
         }
       ],
       "distinctPrinted": [
-        "rendered 19",
+        "rendered 21",
         "manifest 21"
       ],
-      "agree": false,
+      "agree": true,
       "blocking": true,
       "renderedIds": [
+        "PV-0",
         "RS-1",
         "PV-1",
         "PV-1B",
@@ -1445,6 +1547,7 @@
         "DS-1",
         "DS-2",
         "DS-3",
+        "CERT",
         "PE-1"
       ],
       "manifestIds": [
@@ -1536,7 +1639,7 @@
     "idCoverageOk": true,
     "coordinateParityOk": true,
     "maxDrawnVsTransformDeltaSheetUnits": 0,
-    "structuralObjectsPlaced": 115,
+    "structuralObjectsPlaced": 146,
     "source": "docs/evidence/braidon-original-w3.planset-evidence.json"
   },
   "failureClasses": [
@@ -1652,8 +1755,8 @@
     "mode": "original",
     "expected": [
       "ROUTE-LENGTH-ESTIMATE",
-      "STRUCTURAL-FRAMING-UNVERIFIED",
-      "WIND-SNOW-AUTHORITY-UNRESOLVED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
@@ -1663,9 +1766,11 @@
       "ROUTE-LENGTH-ESTIMATE",
       "CONDUIT-FILL-PENDING",
       "TAP-CONDUCTOR-LENGTH-PENDING",
-      "STRUCTURAL-FRAMING-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
       "PENDING-RACKING-ASSEMBLY-SELECTION",
-      "WIND-SNOW-AUTHORITY-UNRESOLVED",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
@@ -1782,29 +1887,27 @@
   },
   "summary": {
     "truthRows": 15,
-    "agree": 13,
-    "coverageOnly": 1,
-    "disagree": [
-      "authority.sheet-index"
-    ],
-    "blockingDisagree": [
-      "authority.sheet-index"
-    ],
+    "agree": 15,
+    "coverageOnly": 0,
+    "disagree": [],
+    "blockingDisagree": [],
     "codeEditionsIdentical": true,
     "zeroCodeLiterals": true,
     "reachableBypasses": 0,
     "issueState": "PENDING ENGINEERING REVIEW",
     "issueStateOk": true,
     "issueStateForbidden": false,
-    "renderedEqualsManifest": false,
+    "renderedEqualsManifest": true,
     "missingExpectedBlockers": [],
     "honestBlockers": [
       "ROUTE-LENGTH-ESTIMATE",
       "CONDUIT-FILL-PENDING",
       "TAP-CONDUCTOR-LENGTH-PENDING",
-      "STRUCTURAL-FRAMING-UNVERIFIED",
+      "FRAMING-AUTHORITY-UNVERIFIED",
       "PENDING-RACKING-ASSEMBLY-SELECTION",
-      "WIND-SNOW-AUTHORITY-UNRESOLVED",
+      "FASTENER-ASSEMBLY-UNVERIFIED",
+      "EQUIPMENT-DOCUMENT-APPLICABILITY",
+      "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
       "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",

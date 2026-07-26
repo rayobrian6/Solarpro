@@ -1,0 +1,41 @@
+{
+  "section": "BAR gate 12 — report == rendered (zero mismatches)",
+  "method": "Each canonical value the report claims is looked up in the RENDERED HTML of the same package: snapshot id + digest on every sheet, the RS-1 blocking count, the cover banner total, the environmental values + verification state, the exported ampacity factors + final allowable, the open-air EGC footage (≥2 sheets), the occupied-drop count, and the fastener orderability state.",
+  "byMode": [
+    {
+      "mode": "original",
+      "snapshotId": "PDS-CD0F6377533F",
+      "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
+      "sheetCount": 21,
+      "source": "frozen tests/fixtures/braidon-original-audit-fixture (zero mutable DB input)",
+      "mismatches": [],
+      "mismatchCount": 0,
+      "gate12": {
+        "ok": true,
+        "detail": "0 mismatch(es)"
+      },
+      "pageFit": {
+        "ok": true,
+        "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0"
+      }
+    },
+    {
+      "mode": "live",
+      "snapshotId": "PDS-8910EFAC2AB8",
+      "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
+      "sheetCount": 21,
+      "source": "live Neon design 4030b664-bebe-433b-a11c-cda05ead2f7d (BRAIDON M PILLA — Solar TEST), regenerated through resolveSnapshotAuthorityInputs + generatePermitHTML",
+      "mismatches": [],
+      "mismatchCount": 0,
+      "gate12": {
+        "ok": true,
+        "detail": "0 mismatch(es)"
+      },
+      "pageFit": {
+        "ok": true,
+        "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0"
+      }
+    }
+  ],
+  "boundary": "No fabricated source, grounding authority, fastener SKU or manufacturer evidence. Every state below is the state the code actually produced; honest PENDING/UNVERIFIED states are recorded as such, not resolved."
+}

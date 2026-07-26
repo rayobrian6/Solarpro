@@ -1100,9 +1100,14 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             // §14 — canonical spacing authority (design vs maximum-verified).
             const _spc = projectStructuralFromInput(input).spacingAuthority;
             const _fastenerDisp = _fa.present ? escapeH(_fa.line) : 'PENDING VERIFIED FASTENER ASSEMBLY';
-            const _embedDisp = _fa.embedmentIn != null
-              ? `Min. ${_fa.embedmentIn}" thread embedment into ${escapeH(_fa.substrate ?? 'rafter')}`
-              : 'Per verified racking assembly';
+            // §6 (BAR) — no fastener dimension (embedment/diameter/length) may render
+            // while the assembly is NON-ORDERABLE (unverified); the observed geometry
+            // is withheld until a verified fastener assembly is archived.
+            const _embedDisp = _fa.nonOrderable
+              ? 'PENDING VERIFIED FASTENER ASSEMBLY'
+              : _fa.embedmentIn != null
+                ? `Min. ${_fa.embedmentIn}" thread embedment into ${escapeH(_fa.substrate ?? 'rafter')}`
+                : 'Per verified racking assembly';
             return `
           <div class="section-title">Racking System</div>
           <table class="info-table" data-app-a-source="racking-assembly" data-rail-state="${_railState}">

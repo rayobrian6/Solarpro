@@ -589,6 +589,32 @@ function getConduitDerating(conductorCount: number): number {
   return 0.35;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// §4 AMPACITY SURFACE (BAR closeout 2026-07-25) — EXPOSE the existing NEC table
+// lookups + derating factors so the ONE canonical AmpacityAdjustmentResult
+// projection (lib/permit/snapshot/electricalProjection.ts) assembles the full
+// itemized chain from THESE functions instead of re-engineering the tables.
+// No logic is duplicated: each accessor delegates to the module-private table /
+// factor the wire-sizer already uses, so E-1's ampacity evidence and the sizer
+// can never disagree. "Expose, don't re-engine."
+// ═══════════════════════════════════════════════════════════════════════════
+/** NEC 310.16, 75 °C column (Cu, THWN-2 terminal-limited). null ⇒ gauge not in table. */
+export function ampacityTable75C(gauge: string): number | null {
+  return AMPACITY_TABLE_75C[gauge] ?? null;
+}
+/** NEC 310.16, 90 °C column (Cu) — the base for adjustment/correction before the 75 °C terminal cap. */
+export function ampacityTable90C(gauge: string): number | null {
+  return AMPACITY_TABLE_90C[gauge] ?? null;
+}
+/** NEC 310.15(B)(1) — ambient temperature correction factor (90 °C column). */
+export function ambientCorrectionFactor(ambientC: number): number {
+  return getTempDerating(ambientC);
+}
+/** NEC 310.15(C)(1) — conductor-count adjustment factor (>3 CCC in a raceway). */
+export function conductorCountAdjustmentFactor(currentCarryingCount: number): number {
+  return getConduitDerating(currentCarryingCount);
+}
+
 // NEC 240.6 — Standard OCPD sizes. P0-5c: delegates to
 // lib/electrical/stdSizes.ts (the old local copy stopped at 400 A and
 // CLAMPED anything above to 400 A — an undersized OCPD).

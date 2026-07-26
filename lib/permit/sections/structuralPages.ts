@@ -14,7 +14,8 @@ import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { analyzeFenceWind } from '@/lib/structural/fenceWindEngine';
 import {
   projectStructuralFromInput, fmt, fmtStr, findCheck, checkResultLabel,
-  checkThresholdLabel, projectFastenerAssembly, type StructuralProjection,
+  checkThresholdLabel, projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL,
+  type StructuralProjection,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
@@ -773,6 +774,13 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   // DESIGN spacing + PENDING STRUCTURAL VERIFICATION (never 48" as an allowable).
   const _spc      = _proj.spacingAuthority;
   const _spcVerified = _spc.verificationState === 'verified';
+  // §2 (BAR) — every wind/snow design value on PV-4C carries the ENVIRONMENTAL
+  // LOAD AUTHORITY's basis + verification state inline (gate 2). Rendered as a
+  // compact tag in the value cell (no added rows — PV-4C is page-fit critical);
+  // the full "SOURCE: … — NOT VERIFIED" line prints on the page conclusion below
+  // and on PE-1's Site Loading Parameters.
+  const _envTag      = _proj.environmentalStateTag;
+  const _envTagColor = _proj.environmentalUnverified ? '#b45309' : '#000';
 
   // ── PV-4C is split into TWO physical sheets (W9/§15 page-fit): the combined
   // wind/snow/framing/attachment analysis + dead-load + reaction schedule ran
@@ -796,8 +804,8 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <div class="struct-card">
           <div class="sct">Wind Analysis — ${asce} §26/27</div>
           <table class="calc-table">
-            <tr><td>Design Wind Speed (Vult)</td><td class="cv">${windSpeed} mph</td></tr>
-            <tr><td>Exposure Category</td><td class="cv">Cat. ${exposure}</td></tr>
+            <tr><td>Design Wind Speed (Vult)</td><td class="cv">${windSpeed} mph <span data-env-source="pv-4c-wind" style="font-size:5.4px;font-weight:bold;color:${_envTagColor};">[${escapeH(_envTag)}]</span></td></tr>
+            <tr><td>Exposure Category</td><td class="cv">Cat. ${exposure}${_proj.riskCategory ? ` &middot; RISK ${escapeH(String(_proj.riskCategory))}` : ''}</td></tr>
             <tr><td>Velocity Pressure (qz)</td><td class="cv">${velPressure} psf</td></tr>
             <tr><td>Net Uplift Pressure</td><td class="cv">${upliftPsf} psf</td></tr>
             <tr><td>Uplift per Attachment</td><td class="cv" style="font-weight:bold;">${upliftAtt} lbs</td></tr>
@@ -808,7 +816,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         <div class="struct-card">
           <div class="sct">Snow Analysis — ${asce} §7</div>
           <table class="calc-table">
-            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf</td></tr>
+            <tr><td>Ground Snow Load (pg)</td><td class="cv">${groundSnow} psf <span data-env-source="pv-4c-snow" style="font-size:5.4px;font-weight:bold;color:${_envTagColor};">[${escapeH(_envTag)}]</span></td></tr>
             <tr><td>Roof Snow Load (ps)</td><td class="cv">${roofSnow} psf</td></tr>
             <tr><td>Snow per Attachment</td><td class="cv" style="font-weight:bold;">${snowAtt} lbs</td></tr>
           </table>
@@ -885,7 +893,10 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
 
       <!-- §8 Attachment-ID Reaction Schedule + reconciliation (canonical objects) -->
       ${renderReactionSchedule(_proj)}
-      <div style="padding:3px 6px;margin-top:var(--xs);font-size:7.5px;line-height:1.35;border:var(--border);background:#f4f4f4;">
+      <!-- page-fit: this continuation strip is the LAST block on PV-4C, so its box
+           model is the sheet's fit margin. Tightened (BAR) after the §2 environmental
+           provenance tags + the restored 20 psf snow row pushed the sheet 6px over. -->
+      <div style="padding:2px 5px;margin-top:1px;font-size:7.2px;line-height:1.22;border:var(--border);background:#f4f4f4;">
         <strong>CONTINUED ON PV-4C.1:</strong> the roof-attachment standard detail, the governing ASD load combination (${asce} §2.4),
         the structural interpretation and the roof structural PAGE CONCLUSION continue on sheet <strong>PV-4C.1</strong>.
       </div>
@@ -939,14 +950,14 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             <line x1="150" y1="92" x2="150" y2="184" stroke="#6b7280" stroke-width="2.4"/>
             <g stroke="#3b4250" stroke-width="0.5"><line x1="146" y1="152" x2="154" y2="152"/><line x1="146" y1="158" x2="154" y2="158"/><line x1="146" y1="164" x2="154" y2="164"/><line x1="146" y1="170" x2="154" y2="170"/><line x1="146" y1="176" x2="154" y2="176"/></g>
             <text x="160" y="130" font-size="6.5" fill="#1a2230">FASTENER</text>
-            <text x="160" y="138" font-size="6.5" fill="#1a2230">${lagDia}" DIA</text>
+            <text x="160" y="138" font-size="6.5" fill="#1a2230">${_fa.nonOrderable ? 'PENDING' : lagDia + '&quot; DIA'}</text>
             <!-- embedment dimension -->
             <line x1="163" y1="134" x2="212" y2="134" stroke="#5b6472" stroke-width="0.5"/>
             <line x1="163" y1="184" x2="212" y2="184" stroke="#5b6472" stroke-width="0.5"/>
             <line x1="207" y1="134" x2="207" y2="184" stroke="#334155" stroke-width="0.9"/>
             <polygon points="204,139 210,139 207,134" fill="#334155"/>
             <polygon points="204,179 210,179 207,184" fill="#334155"/>
-            <text x="214" y="160" font-size="7" fill="#334155" font-weight="bold">${lagEmbed}"</text>
+            <text x="214" y="160" font-size="7" fill="#334155" font-weight="bold">${_fa.nonOrderable ? 'PENDING' : lagEmbed + '&quot;'}</text>
             <text x="214" y="168" font-size="5.6" fill="#5b6472">MIN EMBED</text>
             <!-- uplift arrow -->
             <line x1="248" y1="38" x2="248" y2="20" stroke="#b23b2e" stroke-width="1.8"/>
@@ -956,7 +967,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         </div>
         <div style="font-size:var(--f-sm);line-height:1.7;">
           <div style="font-weight:900;font-size:9px;margin-bottom:5px;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:3px;">ROOF ATTACHMENT REQUIREMENTS</div>
-          <div style="margin-bottom:3px;">1. Fastener: ${escapeH(_faType)}, ${lagDia}" diameter, <strong>${lagEmbed}" minimum embedment into ${escapeH(_fa.substrate ?? 'rafter')}</strong> (${escapeH(_fa.pilotRuleLabel)}).</div>
+          <div style="margin-bottom:3px;">1. Fastener: ${_fa.nonOrderable
+            ? `<strong style="color:#b45309;">${escapeH(FASTENER_NON_ORDERABLE_LABEL)}</strong> — manufacturer / diameter / length / embedment withheld until a verified fastener assembly is archived.`
+            : `${escapeH(_faType)}, ${lagDia}" diameter, <strong>${lagEmbed}" minimum embedment into ${escapeH(_fa.substrate ?? 'rafter')}</strong> (${escapeH(_fa.pilotRuleLabel)}).`}</div>
           <div style="margin-bottom:3px;font-size:6.8px;color:${_fa.verification === 'verified' ? '#333' : '#b45309'};"><strong>FASTENER ASSEMBLY:</strong> ${escapeH(_fa.line)} — <strong>${escapeH(_fa.certLabel)}</strong>.</div>
           <div style="margin-bottom:3px;">2. Flashing: Aluminum or stainless steel base flashing installed under existing roofing material per manufacturer requirements.</div>
           <div style="margin-bottom:3px;">3. Sealant: Polyurethane or silicone roofing sealant at all roof penetrations per manufacturer requirements.</div>
@@ -992,7 +1005,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       ${structural ? `<div style="padding:3px 6px;font-size:7.5px;line-height:1.35;border:var(--border);border-top:none;background:#fafafa;">
         <strong>STRUCTURAL ANALYSIS INTERPRETATION — ROOF MOUNT:</strong>
         Wind analysis per ${asce} §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
-        design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
+        design wind speed of ${windSpeed} mph (Exposure Category ${exposure}) &mdash; <span data-env-source="pv-4c-conclusion" style="font-weight:bold;color:${_envTagColor};">${escapeH(_proj.environmentalSourceLine)}</span>${_proj.environmentalUnverified ? ' (preliminary design criteria; a verified climate-hazard source is required before permit submission &mdash; ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED, see RS-1)' : ''}.
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ${asce} §7).` : 'Snow loading is not a controlling factor at this location.'}
         ${_reviewRequired
           ? `<strong style="color:#b91c1c;">ROOF FRAMING UNVERIFIED — the rafter/truss capacity is computed from code defaults and is NOT engineering authority. A licensed structural review of the existing framing is required before permit submission; no framing pass is certified on this sheet.</strong>`
@@ -1362,14 +1375,20 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
   // PV-3 / APP-A / PE-1). Prior to this the roof case rendered no attachment line.
   const _faS = projectFastenerAssembly(input);
   if (!_faS.present) return '';
+  // §6 (BAR) — while the fastener assembly is NON-ORDERABLE (not verified), the
+  // row shows the calculated quantity as a DESIGN QUANTITY only and reveals NO
+  // manufacturer/SKU/diameter/length/coating/embedment (the observed geometry is
+  // retained in the projection for auto-regeneration on verification). The exact
+  // orderable row re-emits verbatim once FastenerAssembly.verification === 'verified'.
+  const _faNon = _faS.nonOrderable;
   let rhtml = '<div class="section-title">Roof Attachment Hardware</div>';
   rhtml += '<table class="equip-table">';
   rhtml += '<thead><tr><th>Item</th><th>Fastener Assembly</th><th style="text-align:right">Qty/Mount</th><th>Embedment</th><th>Verification</th></tr></thead>';
   rhtml += '<tbody>';
   rhtml += '<tr><td class="fw7">Structural Fastener</td>'
-        + `<td data-sched-field="fastener">${escapeH(_faS.line)}</td>`
-        + `<td class="tr">${_faS.qtyPerMount ?? '—'}</td>`
-        + `<td>${_faS.embedmentIn != null ? _faS.embedmentIn + '" min' : '—'}</td>`
+        + `<td data-sched-field="fastener" data-fastener-orderable="${_faNon ? 'false' : 'true'}">${escapeH(_faS.line)}</td>`
+        + `<td class="tr">${_faNon ? (_faS.qtyPerMount != null ? _faS.qtyPerMount + ' <span style="color:#b45309;font-size:6px;">(DESIGN — NON-ORDERABLE)</span>' : 'DESIGN QTY') : (_faS.qtyPerMount ?? '—')}</td>`
+        + `<td>${_faNon ? 'PENDING VERIF.' : (_faS.embedmentIn != null ? _faS.embedmentIn + '" min' : '—')}</td>`
         + `<td style="font-weight:bold;color:${_faS.verification === 'verified' ? '#000' : '#b45309'};">${escapeH(_faS.certLabel)}</td></tr>`;
   rhtml += '</tbody></table>';
   return rhtml;
@@ -1495,7 +1514,13 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
       html += '<td>' + (item.manufacturer || '—') + '</td>';
       html += '<td style="font-size:8px;">' + (item.model || '—') + descExtra + reqBadge + '</td>';
       html += '<td class="mono f-lg">' + (item.partNumber || '—') + '</td>';
-      html += '<td class="tr fw7">' + item.quantity + '</td>';
+      // §6 (BAR) — a NON-ORDERABLE row states its DESIGN-QUANTITY status on the
+      // quantity cell itself and is machine-tagged, so the quantity can never be
+      // read as an authoritative procurement total.
+      html += (item as { nonOrderable?: boolean }).nonOrderable
+        ? '<td class="tr fw7" data-bom-orderable="false" style="color:#b45309;">' + item.quantity
+          + ' <span style="font-size:6px;font-weight:900;white-space:nowrap;">(DESIGN QTY — NOT ORDERABLE)</span></td>'
+        : '<td class="tr fw7">' + item.quantity + '</td>';
       html += '<td>' + item.unit + '</td>';
       html += '<td class="mono f-lg" style="font-size:7px;color:#2255aa;">' + (item.necReference || '—') + '</td>';
       html += '<td style="font-size:7px;color:#666;">' + (item.derivedFrom || '—') + '</td>';
@@ -1528,6 +1553,17 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   html += 'All quantities are derived from CAD geometry and equipment registry — no manual estimates. ';
   html += 'Structural items are computed from array layout per the governing structural code editions (see cover sheet GOVERNING CODES). ';
   html += 'Electrical items are sized per NEC 690.8, 705.12, 310.15 and equipment registry rules.';
+  // §6 (BAR) — the procurement-total boundary is stated explicitly: rows carrying
+  // a DESIGN QUANTITY are excluded from the authoritative procurement totals.
+  const _nonOrderableRows = bomItems.filter(i => (i as { nonOrderable?: boolean }).nonOrderable === true);
+  if (_nonOrderableRows.length) {
+    html += ' <span style="color:#b45309;font-weight:bold;">'
+      + _nonOrderableRows.length + ' line item' + (_nonOrderableRows.length === 1 ? '' : 's')
+      + ' carr' + (_nonOrderableRows.length === 1 ? 'ies' : 'y')
+      + ' a DESIGN QUANTITY ONLY and are EXCLUDED from the authoritative procurement totals '
+      + 'pending verified authority (see RS-1): '
+      + _nonOrderableRows.map(i => escapeH(String(i.category).replace(/_/g, ' '))).join(', ') + '.</span>';
+  }
   html += '</div>';
 
   return html;
@@ -1571,6 +1607,16 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
   // ASSEMBLY (manufacturer + model/SKU), never a generic "#12 AWG THWN-2 + EGC".
   // peekSnapshot (non-throwing) so standalone unit renders fall back to the callout.
   const _schedSnap = peekSnapshot(input);
+  // §3 (BAR) — the SCHED compliance conclusion + the wire-sizing "VERIFIED" badge
+  // are DERIVED from the permit-readiness registry, never hardcoded. While ANY
+  // blocking release blocker is active the sheet renders a DESIGN REVIEW PACKAGE /
+  // COMPLIANCE-NOT-YET-ESTABLISHED conclusion and suppresses positive/PASS/VERIFIED
+  // language (gate 3). Positive language only when zero blocking items remain.
+  const _schedBlocking = (_schedSnap?.permitReadiness?.registry ?? [])
+    .filter(r => r.severity === 'blocking' && !r.resolved);
+  const _schedHasBlockers = _schedSnap
+    ? (_schedBlocking.length > 0 || _schedSnap.permitReadiness?.ready === false)
+    : false;
   const _schedAsm = projectListedCableAssembly(_schedSnap);
   const _schedBranchConductorCell = (fallback: string): string =>
     _schedAsm.present ? _schedAsm.conductorCell : fallback;
@@ -1822,7 +1868,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           (3) conductor ampacity (derated for temperature per NEC 310.15(B)(1) and conduit fill) exceeds the maximum circuit current.
           All PV source circuits use USE-2/THWN-2 rated at 90\u00b0C to maximize available ampacity under ${isRoof(cad.systemType) ? 'rooftop temperature' : 'outdoor'} conditions.
         </span>
-        <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>
+        ${_schedHasBlockers
+          ? `<span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#b45309;color:#fff;">DESIGN REVIEW — NOT VERIFIED</span>`
+          : `<span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>`}
       </div>`}
 
       ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid })}
@@ -1831,13 +1879,15 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       <!-- System-Specific Hardware Schedule -->
          ${renderHardwareSchedule(input, cad)}
 
-      <div style="padding:3px 6px;margin-top:var(--xs);font-size:var(--f-sm);line-height:1.4;border:2px solid #000;background:#fff;">
+      <div style="padding:2px 6px;margin-top:2px;font-size:var(--f-sm);line-height:1.25;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — EQUIPMENT SCHEDULE:</strong>
         ${_schedAuth.isHybrid
           ? `This hybrid system utilizes ${system.totalPanels} modules across ${_schedAuth.subSystems.length} sub-systems (see the per-sub module tables above)`
           : `This system utilizes ${system.totalPanels} × ${system.inverters?.[0]?.strings?.[0]?.panelManufacturer || ''} ${system.inverters?.[0]?.strings?.[0]?.panelModel || ''} modules
         rated at ${system.inverters?.[0]?.strings?.[0]?.panelWatts || '—'}W each`} for a total DC capacity of ${system.totalDcKw?.toFixed(2) || '—'} kW.
-        All equipment is UL-listed; wire sizing verified per NEC 690.8 with derating; equipment complies with NEC ${_cpEq.nec ?? 'PENDING'} and UL 1741 / 61730 / 2703.
+        ${_schedHasBlockers
+          ? `<strong style="color:#b45309;">DESIGN REVIEW PACKAGE &mdash; COMPLIANCE NOT YET ESTABLISHED. SEE RS-1 FOR ACTIVE RELEASE BLOCKERS (${_schedBlocking.length} OPEN).</strong> Equipment ratings and wire sizing shown are the design basis and are NOT a certified compliance conclusion while release blockers remain open.`
+          : `All equipment is UL-listed; wire sizing verified per NEC 690.8 with derating; equipment complies with NEC ${_cpEq.nec ?? 'PENDING'} and UL 1741 / 61730 / 2703.`}
       </div>
     </div>
   </div>`;

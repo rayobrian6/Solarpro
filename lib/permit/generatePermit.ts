@@ -1056,6 +1056,10 @@ export function generatePermitHTML(
       // (operator selection + verified lib/documents record). Empty today ⇒
       // QCABLE-PROCUREMENT-INSUFFICIENT stays firing when the design is short.
       cableExtensionSolutions: snapshotAuthority?.cableExtensionSolutions ?? [],
+      // BAR §2 — async-resolved VERIFIED climate-hazard source (ASCE 7 Hazard-Tool
+      // report / AHJ climate ordinance extract). null ⇒ operator-entered wind/snow
+      // stay OBSERVATION/OVERRIDE ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires.
+      environmentalSource: snapshotAuthority?.environmentalSource ?? null,
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);
@@ -2176,7 +2180,14 @@ export function generatePermitHTML(
   .cv0-key { width: 110px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
 
   /* ── SLD page ───────────────────────────────────────────────────────────── */
-  .sld-page { padding: var(--xl); height: 11in; }
+  /* .sld-page replaces .page's padding wholesale, which USED to be harmless when the
+     sheet held only the centred SLD svg. E-1 now also carries the physical
+     conductor/raceway schedule, the shared-raceway ampacity chain and the open-air
+     grounding note, and those ran the full 17in — sliding 1.7in UNDER the title-block
+     strip, where the COMPLIANCE column became unreadable. Reserve the same right
+     strip .page does. The diagram is object-fit contain, so it simply scales to the
+     narrower drawing area instead of hiding behind the title block. */
+  .sld-page { padding: var(--xl) calc(var(--xl) + 1.72in) var(--xl) var(--xl); height: 11in; }
   .sld-page svg { max-width: 100%; max-height: calc(11in - 0.9in); object-fit: contain; }
 
   /* ── Two-column layout helper (legacy) ──────────────────────────────────── */

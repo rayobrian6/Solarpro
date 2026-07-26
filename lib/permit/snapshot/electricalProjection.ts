@@ -12,6 +12,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitDesignSnapshot, RouteSegmentRecord } from './types';
 import { evaluateCompliance, type ComplianceResult } from './complianceState';
+import {
+  ampacityTable75C, ampacityTable90C, ambientCorrectionFactor, conductorCountAdjustmentFactor,
+} from '@/lib/computed-system';
 
 export interface CanonicalFeederProjection {
   /** the canonical feeder route segment (undefined ⇒ segment authority absent). */
@@ -321,6 +324,97 @@ export function projectListedCableAssembly(snap: PermitDesignSnapshot | null | u
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// §5 (BAR closeout 2026-07-25) — THE canonical OPEN-AIR BRANCH GROUNDING
+// authority. The listed Enphase Q Cable (Q-12-10-240) is a TWO-conductor
+// assembly (line + neutral) with NO integrated equipment grounding conductor
+// (trunkCable.ts) — therefore a SEPARATE #10 Cu EGC is REQUIRED, run in the open
+// air alongside the branch trunk (build.ts groundingObjects purpose='branch-egc',
+// NEC 250.122). E-1 already asserts "1×#10 GRN EGC OPEN AIR"; this projection is
+// the single authority that (a) states the method = separate-conductor, (b)
+// derives the length from the SAME BranchCablePath geometry as the trunk, and (c)
+// feeds the BOM the open-air branch-EGC footage the package was missing. Result
+// is exactly ONE: (B) separate EGC required.
+// ═══════════════════════════════════════════════════════════════════════════
+export interface OpenAirBranchGroundingAuthority {
+  present: boolean;
+  required: boolean;
+  /** exactly ONE modeled result — (B) separate conductor for the Q-Cable branch. */
+  groundingMethod: 'separate-conductor' | 'integrated-listed' | 'none-required' | 'pending';
+  conductorMaterial: string | null;   // 'Cu'
+  conductorSize: string | null;        // '#10 AWG'
+  /** the branch objects the open-air EGC parallels (branch ids / segment id). */
+  segmentIds: string[];
+  branchIds: string[];
+  pathBasis: string;
+  /** Σ geometric designed-installed cable path (ft) — SAME geometry as the trunk. */
+  designedInstalledFt: number | null;
+  lengthProvenance: 'geometry-derived' | 'estimated' | null;
+  wasteFactor: number;
+  /** Σ designed-installed × waste — the BOM procurement footage for the open-air EGC. */
+  bomFootageFt: number | null;
+  /** the manufacturer authority that makes a separate EGC necessary. */
+  sourceAuthority: string;
+  codeBasis: string;                   // 'NEC 250.122 / 690.43(C)'
+  equipmentCompatibility: string;
+  verificationState: string;
+  provenance: string;
+}
+
+export function projectOpenAirBranchGrounding(snap: PermitDesignSnapshot | null | undefined): OpenAirBranchGroundingAuthority {
+  const empty: OpenAirBranchGroundingAuthority = {
+    present: false, required: false, groundingMethod: 'pending',
+    conductorMaterial: null, conductorSize: null, segmentIds: [], branchIds: [],
+    pathBasis: 'branch cable paths', designedInstalledFt: null, lengthProvenance: null,
+    wasteFactor: 1.15, bomFootageFt: null,
+    sourceAuthority: 'PENDING', codeBasis: 'NEC 250.122 / 690.43(C)',
+    equipmentCompatibility: 'PENDING', verificationState: 'pending', provenance: 'no snapshot',
+  };
+  const elec = snap?.electrical;
+  if (!elec || elec.topology !== 'MICRO') return empty;
+  const branchGnd = (elec.groundingObjects ?? []).filter(g => g.purpose === 'branch-egc');
+  if (branchGnd.length === 0) return empty;
+
+  const asm = elec.listedCableAssembly ?? null;
+  const paths = elec.branchCablePaths ?? [];
+  const branches = elec.branches ?? [];
+  // The separate-EGC necessity: the listed assembly carries NO integrated EGC
+  // (2 conductors = L+N). Confirm from the assembly conductor count when present.
+  const asmConductors = asm?.conductorCount ?? null;
+  const size = branchGnd[0].conductorSize ?? null;
+  const material = branchGnd[0].conductorMaterial ?? 'Cu';
+  const totalDesigned = paths.reduce((s, p) => s + (p.designedInstalledLengthFt ?? 0), 0);
+  const geom = paths.length > 0 && paths.every(p => p.lengthProvenance === 'geometry-derived');
+  const designedFt = totalDesigned > 0 ? Math.round(totalDesigned * 10) / 10 : null;
+  const waste = 1.15;
+  const bomFt = designedFt != null ? Math.ceil(designedFt * waste) : null;
+  const segIds = paths.length ? paths.map(p => p.branchId) : branches.map((b, i) => b.branchId ?? `br-${i + 1}`);
+
+  return {
+    present: true,
+    required: branchGnd.some(g => g.required),
+    groundingMethod: 'separate-conductor',
+    conductorMaterial: material,
+    conductorSize: size,
+    segmentIds: ['BRANCH_RUN'],
+    branchIds: segIds,
+    pathBasis: 'Σ per-branch BranchCablePath (same designed-installed geometry as the Q-Cable trunk)',
+    designedInstalledFt: designedFt,
+    lengthProvenance: paths.length ? (geom ? 'geometry-derived' : 'estimated') : null,
+    wasteFactor: waste,
+    bomFootageFt: bomFt,
+    sourceAuthority: asm
+      ? `${asm.manufacturer} ${asm.ecosystem}${asm.sku ? ` ${asm.sku}` : ''} = ${asmConductors ?? '2'}-conductor assembly (line+neutral), NO integrated EGC → separate ${size ?? '#10'} ${material} EGC required`
+      : `listed AC trunk cable = 2-conductor (line+neutral), NO integrated EGC → separate ${size ?? '#10'} ${material} EGC required`,
+    codeBasis: `${branchGnd[0].codeBasis} / 690.43(C)`,
+    equipmentCompatibility: asm
+      ? `open-air branch EGC parallels the ${asm.wiringMethodLabel} trunk (TC-ER, free-air 690.31(C))`
+      : 'open-air branch EGC parallels the AC trunk (free-air 690.31(C))',
+    verificationState: 'cad-derived (length follows branch trunk geometry) — field-verify',
+    provenance: `groundingObjects[purpose=branch-egc] × ${branchGnd.length} branches; length Σ BranchCablePath designed-installed`,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // §3/§4 (closeout 2026-07-23) — THE canonical projection of the SHARED branch
 // home-run raceway (the jbox→combiner conduit that carries all N branches
 // bundled). E-1's SEGMENT_2A conduit label and PV-4B's home-run row read THIS,
@@ -518,6 +612,185 @@ export function branchLayoutCaption(snap: PermitDesignSnapshot | null | undefine
 // CABLE (TC-ER)'), inventing no THWN translations.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// §4 (BAR closeout 2026-07-25) — THE canonical AmpacityAdjustmentResult. E-1's
+// old bare "derate 0.96" hid the fact that the shared 6-CCC home-run raceway
+// carries TWO independent adjustments (the 0.80 conductor-count factor AND the
+// 0.96 ambient factor) plus a 75 °C terminal cap. This object itemizes EVERY
+// factor from computed-system's own NEC tables (ampacityTable90C/75C,
+// conductorCountAdjustmentFactor, ambientCorrectionFactor) — never a lone
+// multiplied scalar. E-1 / PV-4A / PV-4B / evidence render THIS. Any missing
+// input ⇒ state 'PENDING', never a synthesized PASS (gate 5).
+// ═══════════════════════════════════════════════════════════════════════════
+export interface AmpacityAdjustmentResult {
+  present: boolean;
+  conductorMaterial: string | null;      // 'Cu'
+  insulation: string | null;             // 'THWN-2'
+  insulationRatingC: number;             // 90 (conductor insulation temp rating)
+  conductorSize: string | null;          // '#10 AWG'
+  /** NEC 310.16 90 °C base ampacity (adjustment/correction base). */
+  baseTableAmpacityA: number | null;
+  baseTableTempC: number;                // 90
+  /** NEC 110.14(C) terminal temperature limitation. */
+  terminalTempLimitC: number;            // 75
+  /** NEC 310.16 75 °C ampacity — the terminal-temperature ceiling. */
+  terminalTableAmpacityA: number | null;
+  /** current-carrying conductor count in the raceway (free air ⇒ ≤3 ⇒ no adjustment). */
+  currentCarryingCount: number | null;
+  /** NEC 310.15(C)(1) conductor-count adjustment factor (6 CCC → 0.80). */
+  countAdjustmentFactor: number | null;
+  countAdjustmentBasis: string | null;
+  ambientTempC: number | null;
+  rooftopAdderC: number | null;
+  effectiveAmbientTempC: number | null;
+  /** NEC 310.15(B)(1) ambient correction factor (30–35 °C → 0.96). */
+  ambientCorrectionFactor: number | null;
+  ambientCorrectionBasis: string | null;
+  /** base90 × countAdj × ambientCorr (before the terminal cap). */
+  correctedAmpacityA: number | null;
+  /** min(corrected, 75 °C terminal) — the code ampacity of record. */
+  finalAllowableAmpacityA: number | null;
+  finalAllowableBasis: string | null;
+  /** the continuous load the conductor must carry (per raceway / per conductor). */
+  requiredContinuousA: number | null;
+  requiredContinuousBasis: string | null;
+  ocpdA: number | null;
+  /** ampacity-specific tri-state (independent of the section's route-length state). */
+  state: 'PASS' | 'FAIL' | 'PENDING';
+  necReferences: string[];
+  provenance: string;
+}
+
+/** The empty PENDING AmpacityAdjustmentResult (gate 5 — a hole is never PASS). */
+function _pendingAmpacity(reason: string): AmpacityAdjustmentResult {
+  return {
+    present: false, conductorMaterial: null, insulation: null, insulationRatingC: 90,
+    conductorSize: null, baseTableAmpacityA: null, baseTableTempC: 90, terminalTempLimitC: 75,
+    terminalTableAmpacityA: null, currentCarryingCount: null, countAdjustmentFactor: null,
+    countAdjustmentBasis: null, ambientTempC: null, rooftopAdderC: null, effectiveAmbientTempC: null,
+    ambientCorrectionFactor: null, ambientCorrectionBasis: null, correctedAmpacityA: null,
+    finalAllowableAmpacityA: null, finalAllowableBasis: null, requiredContinuousA: null,
+    requiredContinuousBasis: null, ocpdA: null, state: 'PENDING',
+    necReferences: ['NEC 310.16', 'NEC 310.15(B)(1)', 'NEC 310.15(C)(1)', 'NEC 110.14(C)'],
+    provenance: reason,
+  };
+}
+
+export interface AmpacityInput {
+  conductorGauge: string | null;
+  insulation: string | null;
+  conductorMaterial?: string | null;
+  /** current-carrying conductor count in the raceway (undefined/≤3 ⇒ no count adjustment). */
+  currentCarryingCount: number | null;
+  /** true ⇒ free-air installation (NEC 690.31(C)) — 310.15(C)(1) fill adjustment N/A. */
+  freeAir: boolean;
+  ambientTempC: number | null;
+  rooftopAdderC?: number | null;
+  /** the canonical ambient factor the sizer already resolved (segment.tempDeratingFactor);
+   *  used verbatim so the itemized chain equals the sizer's number, never a re-derivation. */
+  tempDeratingFactor?: number | null;
+  /** the continuous load this conductor set must carry. */
+  requiredContinuousA: number | null;
+  requiredContinuousBasis: string;
+  ocpdA?: number | null;
+}
+
+/** Assemble the canonical AmpacityAdjustmentResult from computed-system's own NEC
+ *  table accessors. Every factor is itemized; any missing input ⇒ PENDING. Pure. */
+export function projectAmpacityAdjustment(inp: AmpacityInput): AmpacityAdjustmentResult {
+  const gauge = inp.conductorGauge;
+  if (!gauge) return _pendingAmpacity('conductor gauge not resolved');
+  const base90 = ampacityTable90C(gauge);
+  const term75 = ampacityTable75C(gauge);
+  if (base90 == null || term75 == null) return _pendingAmpacity(`ampacity table has no entry for ${gauge}`);
+
+  const ccc = inp.currentCarryingCount;
+  const countAdj = inp.freeAir
+    ? 1.0
+    : (ccc != null ? conductorCountAdjustmentFactor(ccc) : null);
+  const countAdjBasis = inp.freeAir
+    ? 'free air — NEC 310.15(C)(1) conduit-fill adjustment N/A (NEC 690.31(C))'
+    : (ccc != null ? `${ccc} CCC → ${countAdj?.toFixed(2)} (NEC 310.15(C)(1))` : null);
+
+  const rooftopAdder = inp.rooftopAdderC ?? 0;
+  const effAmbient = inp.ambientTempC != null ? inp.ambientTempC : null;
+  // Prefer the sizer's already-resolved factor so the itemized chain equals the
+  // number the wire-sizer used; else derive from the effective ambient.
+  const ambientCF = inp.tempDeratingFactor != null
+    ? inp.tempDeratingFactor
+    : (effAmbient != null ? ambientCorrectionFactor(effAmbient) : null);
+  // NOTE: the basis strings deliberately avoid the "@ NN °C" form — that shape is
+  // reserved for DESIGN-LOW temperature annotations (NEC 690.7) elsewhere in the
+  // package, and a conductor RATING/ambient printed that way reads as a second
+  // design temperature (the W5 §4 singular-thermal-basis gate).
+  const ambientBasis = ambientCF == null ? null
+    : (effAmbient != null
+        ? `NEC 310.15(B)(1) at ${effAmbient} °C ambient${rooftopAdder ? ` (incl. ${rooftopAdder} °C rooftop adder, NEC 310.15(B)(2))` : ''} → ${ambientCF.toFixed(2)}`
+        : `NEC 310.15(B)(1) → ${ambientCF.toFixed(2)}`);
+
+  const corrected = (countAdj != null && ambientCF != null)
+    ? Math.round(base90 * countAdj * ambientCF * 100) / 100
+    : null;
+  const finalAllowable = corrected != null ? Math.min(corrected, term75) : null;
+  const finalBasis = corrected != null
+    ? `min(corrected ${corrected.toFixed(2)} A [90 °C base], ${term75} A [75 °C terminal, NEC 110.14(C)]) = ${finalAllowable?.toFixed(2)} A`
+    : null;
+
+  const req = inp.requiredContinuousA;
+  let state: AmpacityAdjustmentResult['state'];
+  if (countAdj == null || ambientCF == null || finalAllowable == null || req == null) {
+    state = 'PENDING';
+  } else {
+    state = finalAllowable >= req ? 'PASS' : 'FAIL';
+  }
+
+  return {
+    present: true,
+    conductorMaterial: inp.conductorMaterial ?? 'Cu',
+    insulation: inp.insulation ?? 'THWN-2',
+    insulationRatingC: 90,
+    conductorSize: gauge,
+    baseTableAmpacityA: base90,
+    baseTableTempC: 90,
+    terminalTempLimitC: 75,
+    terminalTableAmpacityA: term75,
+    currentCarryingCount: inp.freeAir ? (ccc ?? null) : ccc,
+    countAdjustmentFactor: countAdj,
+    countAdjustmentBasis: countAdjBasis,
+    ambientTempC: inp.ambientTempC,
+    rooftopAdderC: rooftopAdder || null,
+    effectiveAmbientTempC: effAmbient,
+    ambientCorrectionFactor: ambientCF,
+    ambientCorrectionBasis: ambientBasis,
+    correctedAmpacityA: corrected,
+    finalAllowableAmpacityA: finalAllowable,
+    finalAllowableBasis: finalBasis,
+    requiredContinuousA: req,
+    requiredContinuousBasis: inp.requiredContinuousBasis,
+    ocpdA: inp.ocpdA ?? null,
+    state,
+    necReferences: ['NEC 310.16', 'NEC 310.15(B)(1)', 'NEC 310.15(C)(1)', 'NEC 110.14(C)', 'NEC 690.8(B)'],
+    provenance: inp.freeAir
+      ? 'computed-system NEC tables (free-air branch, 690.31(C))'
+      : 'computed-system NEC tables (shared raceway CCC adjustment)',
+  };
+}
+
+/** §4 — a compact multi-line human string of the full ampacity chain for a table
+ *  cell. Replaces the bare "derate 0.96". PENDING ⇒ an explicit PENDING line. */
+export function ampacityChainLines(a: AmpacityAdjustmentResult | null): string[] {
+  if (!a || !a.present) return ['ampacity PENDING'];
+  const f = (n: number | null, d = 2) => n == null ? '—' : n.toFixed(d);
+  const lines: string[] = [];
+  // "NN °C col." / "amb NN °C" — never the "@ NN °C" design-low-temp shape.
+  lines.push(`base ${f(a.baseTableAmpacityA, 0)}A (${a.baseTableTempC}°C col.)`);
+  if (a.countAdjustmentFactor != null) lines.push(`×${f(a.countAdjustmentFactor)} (${a.currentCarryingCount ?? '≤3'} CCC)`);
+  if (a.ambientCorrectionFactor != null) lines.push(`×${f(a.ambientCorrectionFactor)} amb${a.effectiveAmbientTempC != null ? ` ${a.effectiveAmbientTempC}°C` : ''}`);
+  if (a.finalAllowableAmpacityA != null) lines.push(`= ${f(a.finalAllowableAmpacityA)}A allow (75°C cap ${f(a.terminalTableAmpacityA, 0)}A)`);
+  if (a.requiredContinuousA != null) lines.push(`req ${f(a.requiredContinuousA)}A cont · ${a.state}`);
+  return lines;
+}
+
 export interface E1PhysicalSection {
   /** the CANONICAL section id (segmentId or serviceTopology objectId) — gate 1. */
   sectionId: string;
@@ -561,6 +834,9 @@ export interface E1PhysicalSection {
   deratingBasis: string | null;
   voltageDropPct: number | null;
   vdLimitPct: number;
+  /** §4 — the FULL itemized ampacity chain for this section (replaces the bare
+   *  0.96). Every in-conduit and free-air section carries one; PENDING on a hole. */
+  ampacity: AmpacityAdjustmentResult | null;
   compliance: ComplianceResult;
 }
 
@@ -647,6 +923,20 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: 'free-air (no raceway fill adjustment)',
       voltageDropPct: vd,
       vdLimitPct: 2,
+      // §4 — free-air branch ampacity chain (Q-Cable conductor gauge, 690.31(C));
+      // the CCC conduit-fill adjustment is N/A in free air.
+      ampacity: projectAmpacityAdjustment({
+        conductorGauge: _asmProj.assembly?.conductorGauge ?? branchSeg?.conductorGauge ?? null,
+        insulation: branchSeg?.insulation ?? 'TC-ER (Q-Cable)',
+        currentCarryingCount: num(branchSeg?.conductorCount) ?? 2,
+        freeAir: true,
+        ambientTempC: num(branchSeg?.ambientTempC),
+        rooftopAdderC: num(branchSeg?.rooftopAdderC),
+        tempDeratingFactor: num(branchSeg?.tempDeratingFactor),
+        requiredContinuousA: num(b.continuousA),
+        requiredContinuousBasis: `branch continuous = ${num(b.currentA) ?? '—'}A op × 1.25 (NEC 690.8(A))`,
+        ocpdA: num(b.ocpdA),
+      }),
       compliance,
     });
   });
@@ -661,6 +951,10 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
     const vd = num(hrSeg?.voltageDropPct);
     const opA = branches.reduce((s, b) => s + (Number.isFinite(b.currentA) ? b.currentA : 0), 0);
     const contA = branches.reduce((s, b) => s + (Number.isFinite(b.continuousA) ? b.continuousA : 0), 0);
+    // §4 — each #10 home-run conductor carries ONE branch; the governing
+    // per-conductor continuous is the MAX single-branch continuous (not the Σ).
+    const maxBranchContA = branches.reduce((m, b) => Number.isFinite(b.continuousA) && b.continuousA > m ? b.continuousA : m, 0);
+    const maxBranchOcpdA = branches.reduce((m, b) => Number.isFinite(b.ocpdA) && b.ocpdA > m ? b.ocpdA : m, 0);
     const compliance = evaluateCompliance({
       requiredValues: [
         { label: 'home-run conductor size', value: hr.conductorGauge },
@@ -702,6 +996,21 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: null,
       voltageDropPct: vd,
       vdLimitPct: 2,
+      // §4 — THE shared 6-CCC ampacity chain (the row that used to print a lone
+      // "0.96"): base 90 °C × 310.15(C)(1) count-adjustment (6 CCC → 0.80) ×
+      // 310.15(B)(1) ambient, capped at the 75 °C terminal ampacity (110.14(C)).
+      ampacity: projectAmpacityAdjustment({
+        conductorGauge: hr.conductorGauge,
+        insulation: hrSeg?.insulation ?? 'THWN-2',
+        currentCarryingCount: hr.currentCarryingCount,
+        freeAir: false,
+        ambientTempC: num(hrSeg?.ambientTempC),
+        rooftopAdderC: num(hrSeg?.rooftopAdderC),
+        tempDeratingFactor: num(hrSeg?.tempDeratingFactor),
+        requiredContinuousA: maxBranchContA > 0 ? Math.round(maxBranchContA * 100) / 100 : null,
+        requiredContinuousBasis: `each #10 carries one branch; governing = max branch continuous (${maxBranchOcpdA || 20}A-OCPD branch, ×1.25 basis)`,
+        ocpdA: maxBranchOcpdA || null,
+      }),
       compliance,
     });
   }
@@ -761,6 +1070,21 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: rw?.deratingBasis ?? null,
       voltageDropPct: vd,
       vdLimitPct: 3,
+      // §4 — feeder / downstream service run ampacity chain.
+      ampacity: projectAmpacityAdjustment({
+        conductorGauge: seg.conductorGauge,
+        insulation: seg.insulation ?? 'THWN-2',
+        currentCarryingCount: num(rw?.currentCarryingCount) ?? num(seg.conductorCount),
+        freeAir: (seg.raceway ?? '') === 'FREE_AIR',
+        ambientTempC: num(seg.ambientTempC),
+        rooftopAdderC: num(seg.rooftopAdderC),
+        tempDeratingFactor: num(seg.tempDeratingFactor),
+        requiredContinuousA: segId === 'COMBINER_TO_DISCO_RUN' ? feed.continuousA : num(seg.continuousCurrentA),
+        requiredContinuousBasis: segId === 'COMBINER_TO_DISCO_RUN'
+          ? 'feeder continuous = PV output × 1.25 (NEC 690.8(A))'
+          : 'segment continuous current',
+        ocpdA: num(seg.ocpdA),
+      }),
       compliance,
     });
   };
@@ -810,6 +1134,17 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       deratingBasis: null,
       voltageDropPct: null,
       vdLimitPct: 3,
+      // §4 — tap conductors: length/current unmeasured on a live design ⇒ PENDING.
+      ampacity: projectAmpacityAdjustment({
+        conductorGauge: tap.conductorSpec?.match(/#\d+(?:\/0)?\s*AWG/i)?.[0] ?? null,
+        insulation: 'THWN-2',
+        currentCarryingCount: null,
+        freeAir: false,
+        ambientTempC: null,
+        requiredContinuousA: null,
+        requiredContinuousBasis: 'supply-side tap — sizing per service authority (PENDING)',
+        ocpdA: num(tap.ocpdRatingA),
+      }),
       compliance,
     });
   }

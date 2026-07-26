@@ -128,6 +128,20 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     justification: '',
   },
 
+  // §2 (BAR, 2026-07-25) — ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED (successor to
+  // WIND-SNOW-AUTHORITY-UNRESOLVED, subsuming BOTH the null/code-minimum-default
+  // and the operator-entered-without-provenance cases). Unverified wind/snow/
+  // exposure/risk directly drive the structural demand (attachment uplift, rail /
+  // framing loads → safety), cannot show the ASCE 7 wind/snow criteria satisfied
+  // (code), the PE stamp depends on verified design criteria (engineering), and an
+  // AHJ will not accept design loads presented as verified without an archived
+  // climate-hazard source (permit acceptance). So it is BLOCKING. (Fail-closed
+  // would already block it; the explicit entry documents the impact.)
+  'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
   // ── LEGITIMATELY ADVISORY (impact touches no axis; justification required) ────
   // The microinverter's electrical parameters are already taken from the canonical
   // equipment-db record the engine itself uses; only the archived manufacturer PDF

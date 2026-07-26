@@ -248,7 +248,15 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
     const noB64 = html.replace(/data:image[^"')]+/g, '');
     // isolate the E-1 SVG (between the sheet title and the physical schedule).
     const svg = noB64.slice(noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM'), noB64.indexOf('E-1 PHYSICAL CONDUCTOR'));
-    expect(svg).not.toContain('#12');
+    // The defect this gate protects against is a fictitious #12 PHASE conductor
+    // (the legacy wireGaugeForOcpd(20A) result) on the branch / shared home-run.
+    // BAR §5 (2026-07-25): a #12 EGC is now legitimately printed on the branch
+    // segments — NEC 250.122 on the 20 A BRANCH OCPD is #12, and that is the SAME
+    // gauge the canonical branch-egc grounding object and the BOM open-air EGC row
+    // carry (gate 7). So the assertion is narrowed to its real invariant: no #12
+    // may appear as a current-carrying THWN conductor.
+    expect(svg).not.toMatch(/\d*#12\s*(AWG\s*)?THWN/);
+    expect(svg).not.toMatch(/#12\s*AWG\s*THWN-2/);
     const ccc = snap.electrical.physicalRaceways!.find(r => /BRANCH-HOMERUN/.test(r.physicalRacewayId))!.currentCarryingCount;
     expect(svg).toContain(`${ccc}#10 THWN-2`);
   });

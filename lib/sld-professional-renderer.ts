@@ -303,6 +303,22 @@ export interface SLDProfessionalInput {
   // THWN-2' (e.g. 6#10) — never the legacy OCPD-derived #12.
   homerunCurrentCarryingCount?: number;
   homerunConductorGauge?:  string;
+  /** §8 (BAR closeout 2026-07-25) — the LISTED wiring-method identity for the
+   *  OPEN-AIR branch section actually drawn on the sheet (micro ⇒ the Q-Cable
+   *  assembly, e.g. 'ENPHASE Q CABLE (TC-ER)'). The legend derives its open-air
+   *  entry from THIS instead of the hardcoded 'PV Wire/THWN-2' literal; when
+   *  absent (a non-micro sheet with real open-air PV-wire), the legend keeps the
+   *  generic PV-Wire label. Semantic gate 11: legend == displayed segment method. */
+  openAirBranchWiringLabel?: string;
+  /** §5 (BAR closeout 2026-07-25) — the BRANCH EGC gauge from the canonical
+   *  `branch-egc` grounding object (NEC 250.122 on the 20 A BRANCH OCPD, e.g.
+   *  #12), NOT the feeder EGC. The open-air Q-Cable segment used to print the
+   *  feeder's #10 while the grounding object and the BOM footage row carried #12
+   *  — a separate-EGC assertion the quantities did not match (gate 7). */
+  branchEgcGauge?:         string;
+  /** §5 — the EGC carried in the SHARED jbox→combiner home-run raceway (that
+   *  segment's own egcGauge), so SEGMENT_2A cites its own conductor, not the feeder's. */
+  homerunEgcGauge?:        string;
   branchOcpdAmps?:         number;
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
   runs?:                   RunSegment[];
@@ -1739,6 +1755,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ?? '#10 AWG';
   // Strip '#' and ' AWG' for inline display (e.g. '#10 AWG' → '10')
   const egcNum = resolvedEgcGauge.replace('#', '').replace(' AWG', '').trim();
+  // §5 (BAR closeout 2026-07-25) — the BRANCH-side segments cite their OWN EGC
+  // (NEC 250.122 on the BRANCH OCPD), never the feeder's. Without this the
+  // open-air Q-Cable segment printed the feeder's #10 while the canonical
+  // branch-egc grounding object and the BOM open-air EGC footage row were #12 —
+  // a separate-EGC assertion whose quantity no surface could match (gate 7).
+  const _gaugeNumOf = (g?: string | null): string | null =>
+    g ? g.replace('#', '').replace(' AWG', '').trim() : null;
+  const branchEgcNum  = _gaugeNumOf(input.branchEgcGauge)  ?? egcNum;
+  const homerunEgcNum = _gaugeNumOf(input.homerunEgcGauge) ?? branchEgcNum;
 
   const intercon     = String(input.interconnection ?? '').toLowerCase();
   const isLoadSide   = intercon.includes('load');
@@ -1930,7 +1955,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   {
     const run = isMicro ? roofRun : dcStringRun;
     const fb = isMicro
-      ? [`ENPHASE Q CABLE (TC-ER)`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31(C)']
+      // §8 — the open-air branch identity is the LISTED assembly the legend names
+      // (one source); §5 — its EGC is the BRANCH EGC, not the feeder's.
+      ? [input.openAirBranchWiringLabel ?? 'ENPHASE Q CABLE (TC-ER)', `1×#${branchEgcNum} GRN EGC`, 'OPEN AIR — NEC 690.31(C)']
       : [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
     const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);
@@ -1987,7 +2014,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
         : (input.branchIsOpenAir
             ? 'OPEN AIR — NEC 690.31(C)'
             : `IN ${input.branchConduitSize ?? '3/4"'} ${input.branchConduitType ?? 'EMT'}`);
-      const fb = [_brWireTxt, `1×#${egcNum} GRN EGC`, _brCondLine];
+      // §5 — SEGMENT_2A cites the SHARED HOME-RUN raceway's own EGC.
+      const fb = [_brWireTxt, `1×#${homerunEgcNum} GRN EGC`, _brCondLine];
       const {lines, cnt} = runLines(run, fb);
       const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
       console.log('[WIRE RUN CREATED] SEGMENT_2A_JBOX_TO_COMBINER: AC branch');
@@ -2546,9 +2574,18 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── LEGEND ────────────────────────────────────────────────────────────────
   // Legend expanded with battery/generator/ATS entries
+  // §8 (BAR closeout 2026-07-25) — the OPEN-AIR legend entry derives from the
+  // wiring-method ACTUALLY drawn on this sheet, not a hardcoded literal. A micro
+  // sheet's open-air section is the listed Q-Cable assembly (SEGMENT 1), so the
+  // legend names it; the generic 'PV Wire/THWN-2' label is used ONLY when a real
+  // open-air PV-wire method exists (a string/optimizer DC run). Gate 11: legend
+  // entries == displayed segment wiring methods.
+  const _openAirLabel = isMicro
+    ? `Open Air — ${input.openAirBranchWiringLabel ?? 'AC Trunk Cable (TC-ER)'} AC Branch (NEC 690.31(C))`
+    : 'Open Air — PV Wire/THWN-2 (NEC 690.31)';
   const legEntries: {dash: string; stroke: string; label: string}[] = [
     {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
-    {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
+    {dash:'10,5',stroke:GRN,       label:_openAirLabel},
     {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
     // §8 closeout — the DC-conductor-in-conduit legend entry renders ONLY when a
     // canonical DC-in-conduit segment exists. A pure 1:1 micro job has no field
@@ -2854,7 +2891,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ? input.microBranches.map(b => ({
           id: `BR-${b.branchIndex}`,
           from: `${b.deviceCount}× MICRO`, to: 'AC COMBINER',
-          conductors: b.conductorCallout ?? `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${egcNum} GRN`,
+          conductors: b.conductorCallout ?? `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${branchEgcNum} GRN`,
           conduit: 'OPEN AIR',
           fill: 0,
           amp: Math.round((b.branchCurrentA * 1.25) * 10) / 10,
@@ -2862,7 +2899,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
           vdrop: 0, len: 0, pass: true,
         }))
       : [{ id: 'BR-1', from: 'AC BRANCHES', to: 'AC COMBINER',
-          conductors: `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${egcNum} GRN`,
+          conductors: `${input.branchWireGauge ?? '#10 AWG'} THWN-2 + 1×#${branchEgcNum} GRN`,
           conduit: 'OPEN AIR', fill: 0,
           amp: input.branchOcpdAmps ? Math.round(input.branchOcpdAmps * 0.8 * 10) / 10 : 0,
           ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true }];
@@ -2871,7 +2908,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // branch rows above — never one merged multi-method branch string.
     const _homerunRow: SR[] = input.homerunConduitType ? [{
       id: 'BR-HR', from: 'ROOF J-BOX', to: 'AC COMBINER',
-      conductors: `${(input.homerunSharedCircuits ?? 1)}×[${input.branchWireGauge ?? '#10 AWG'}] THWN-2 + 1×#${egcNum} GRN`,
+      conductors: `${(input.homerunSharedCircuits ?? 1)}×[${input.branchWireGauge ?? '#10 AWG'}] THWN-2 + 1×#${homerunEgcNum} GRN`,
       conduit: `${input.homerunConduitType}${input.homerunConduitSize ? ' ' + input.homerunConduitSize : ''}`,
       fill: 0, amp: 0, ocpd: input.branchOcpdAmps ?? 20, vdrop: 0, len: 0, pass: true,
     }] : [];
@@ -3833,14 +3870,21 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   }
 
   // ── LEGEND ────────────────────────────────────────────────────────────────
+  // §8 (BAR closeout 2026-07-25) — the multi-lane open-air legend entries derive
+  // from the lane wiring-methods actually drawn: a micro lane draws the listed
+  // Q-Cable assembly open-air; a string/optimizer lane draws open-air PV wire.
+  // Only the entries whose method exists on the sheet appear (gate 11).
+  const _hasMicroLane = lanes.some(b => laneTopology(b) === 'MICRO');
+  const _hasNonMicroLane = lanes.some(b => laneTopology(b) !== 'MICRO');
   const legEntries: {dash: string; stroke: string; label: string}[] = [
     {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
-    {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
+    ...(_hasMicroLane ? [{dash:'10,5', stroke:GRN, label:`Open Air — ${input.openAirBranchWiringLabel ?? 'AC Trunk Cable (TC-ER)'} AC Branch (NEC 690.31(C))`}] : []),
+    ...(_hasNonMicroLane ? [{dash:'10,5', stroke:GRN, label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'}] : []),
     {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
     // §8 closeout — DC-in-conduit legend renders only when a lane actually has DC
     // conductors in conduit (a string/optimizer lane). All-micro multi-lane sets
     // carry no field DC conductor; suppress the entry rather than imply strings.
-    ...(lanes.some(b => laneTopology(b) !== 'MICRO')
+    ...(_hasNonMicroLane
       ? [{dash:'4,2', stroke:BLK, label:'DC Conductor in Conduit (USE-2/PV Wire)'}] : []),
     ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
   ];

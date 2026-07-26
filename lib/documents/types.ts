@@ -23,6 +23,12 @@ export const DOCUMENT_CLASSES = [
   'truss_design_drawing',
   'manufacturer_structural_calc',
   'stamped_structural_analysis',
+  // BAR §2 (2026-07-25) — the ONLY document class that can construct a VERIFIED
+  // EnvironmentalLoadAuthority (design wind speed / exposure / risk category /
+  // ground snow load): an archived ASCE 7 Hazard-Tool report, an AHJ climate
+  // ordinance/table, or an equivalent authoritative climate-hazard dataset
+  // extract. An operator-typed wind/snow number is NOT one of these.
+  'climate_hazard_dataset',
 ] as const;
 export type DocumentClass = (typeof DOCUMENT_CLASSES)[number];
 
@@ -74,6 +80,30 @@ export interface ExtractedEngineeringClaims {
      *  A roof-covering / flashing report sets this false. */
     hasFramingCapacityClaim?: boolean;
   };
+  /** BAR §2 environmental (climate-hazard) claims — required to construct a
+   *  VERIFIED EnvironmentalLoadAuthority. Every field is the archived source's
+   *  OWN statement; nothing here may be back-filled from an operator entry. */
+  environmental?: {
+    /** e.g. 'ASCE 7 Hazard Tool', 'AHJ climate ordinance table' */
+    dataset?: string | null;
+    /** the exact project/building/jurisdiction the extract was pulled for. */
+    projectApplicability?: string | null;
+    windSpeedMph?: number | null;
+    groundSnowPsf?: number | null;
+    exposureCategory?: string | null;
+    riskCategory?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    addressUsed?: string | null;
+    /** when the hazard lookup was performed. */
+    lookupTimestampIso?: string | null;
+    /** an EXPLICIT currency review — no automatic staleness rule exists for an
+     *  archived climate-hazard extract, so verification requires this. */
+    currencyConfirmedAtIso?: string | null;
+    coversWindSpeed?: boolean;
+    coversSnowLoad?: boolean;
+    coversExposureRisk?: boolean;
+  };
 }
 
 /** A single registry document record (canonical, versioned). */
@@ -118,6 +148,9 @@ export interface DocumentResolverCriteria {
   requireStructuralCapacity?: boolean;
   /** When set, require framing-capacity claims (framing-authority gate path). */
   requireFramingCapacity?: boolean;
+  /** BAR §2 — when set, require climate-hazard (environmental) claims covering
+   *  wind + snow + exposure/risk with an explicit currency review. */
+  requireEnvironmentalHazard?: boolean;
   /** the exact project/building applicability the framing document must cover. */
   projectApplicabilityKey?: string | null;
 }

@@ -75,9 +75,36 @@ describe('§12 (Gate 12) — one fastener assembly, identical projection across 
     expect(sched).toBeTruthy();
     expect(appA).toBe(pe1);
     expect(pe1).toBe(sched);
-    // and it is the projected line (identity, not a generic literal)
-    expect(appA).toContain('5/16');
-    expect(appA).toContain('structural wood screw');
+    // BAR §6 (2026-07-25): while the assembly is UNVERIFIED it is NON-ORDERABLE, so
+    // the ONE shared line is the design-quantity label and NO manufacturer / SKU /
+    // diameter / length / coating / capacity may be displayed. The observed geometry
+    // (5/16", structural wood screw, 2.5" embedment) stays in the FastenerAssembly
+    // object — asserted by the projection test above — and auto-regenerates the full
+    // descriptive line once verification === 'verified'.
+    expect(appA).toBe('DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY');
+    expect(appA).not.toContain('5/16');
+    expect(appA).not.toContain('structural wood screw');
+  });
+
+  it('BAR §6 — a synthetic VERIFIED assembly auto-regenerates the full orderable row', () => {
+    // the ONLY gate on the descriptive line is `verification === 'verified'`, so a
+    // verified assembly re-emits the exact manufacturer/dimension line from the SAME
+    // retained fields (no separate code path, nothing re-derived).
+    expect(fa.verification).toBe('unverified');
+    expect(fa.nonOrderable).toBe(true);
+    const verifiedLine = [
+      [fa.manufacturer, fa.model].filter(Boolean).join(' ') || fa.fastenerType || 'Structural fastener',
+      fa.diameterLabel ? `${fa.diameterLabel}" dia` : null,
+      fa.lengthIn != null ? `× ${fa.lengthIn}"` : null,
+      fa.fastenerType,
+      fa.qtyPerMount != null ? `${fa.qtyPerMount}/mount` : null,
+      fa.embedmentIn != null ? `${fa.embedmentIn}" min embedment` : null,
+      fa.pilotRuleLabel,
+      fa.substrate ? `substrate: ${fa.substrate}` : null,
+    ].filter(Boolean).join(' · ');
+    expect(verifiedLine).toContain('5/16');
+    expect(verifiedLine).toContain('structural wood screw');
+    expect(verifiedLine).toContain('2.5" min embedment');
   });
 
   it('PE-1 prints PENDING VERIFIED FASTENER ASSEMBLY and drops generic lag/stainless text', () => {

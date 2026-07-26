@@ -113,9 +113,13 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
     return `
     <tr>
       <td style="text-align:center;">${sevBadge(r.severity)}</td>
-      <td class="mono" style="font-weight:900;font-size:${RS_FONT.code};white-space:nowrap;">${escapeH(r.code)}</td>
-      <td style="font-size:${RS_FONT.issue};line-height:1.3;">${escapeH(r.explanation)}${justification}${payloadBlock(r)}</td>
-      <td style="font-size:${RS_FONT.resolution};line-height:1.3;color:#1e3a5f;">${escapeH(r.resolutionAction)}</td>
+      <!-- The CODE cell lives in a table-layout:fixed column, so nowrap made a long
+           code overrun into the ISSUE column instead of widening its own cell (worst
+           case ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED, 39 chars). Wrap inside the
+           cell — codes break naturally at their hyphens and stay legible. -->
+      <td class="mono" style="font-weight:900;font-size:${RS_FONT.code};white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.15;">${escapeH(r.code)}</td>
+      <td style="font-size:${RS_FONT.issue};line-height:1.22;">${escapeH(r.explanation)}${justification}${payloadBlock(r)}</td>
+      <td style="font-size:${RS_FONT.resolution};line-height:1.22;color:#1e3a5f;">${escapeH(r.resolutionAction)}</td>
       <td style="font-size:${RS_FONT.sheets};line-height:1.25;color:#555;">${escapeH(r.affectedSheets.join(', ') || '—')}</td>
     </tr>`;
   };
@@ -124,14 +128,16 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
     const rows = (byDomain.get(domain) ?? []);
     if (!rows.length) return '';
     return `
-      <div style="margin-top:5px;">
-        <div style="background:#111;color:#fff;font-weight:900;font-size:${RS_FONT.domainHdr};letter-spacing:0.7px;padding:2px 6px;">
+      <div style="margin-top:2px;">
+        <div style="background:#111;color:#fff;font-weight:900;font-size:${RS_FONT.domainHdr};letter-spacing:0.7px;padding:1px 6px;">
           ${DOMAIN_LABEL[domain] ?? domain.toUpperCase()} &mdash; ${rows.length} ${rows.length === 1 ? 'BLOCKER' : 'BLOCKERS'}
         </div>
         <table class="equip-table" style="width:100%;table-layout:fixed;">
           <thead><tr>
-            <th style="width:52px;">STATUS</th>
-            <th style="width:150px;text-align:left;">CODE</th>
+            <!-- 52px was narrower than the severity badge itself, so the badge bled
+                 over the first character of the CODE cell. 66px clears BLOCKING/ADVISORY. -->
+            <th style="width:66px;">STATUS</th>
+            <th style="width:168px;text-align:left;">CODE</th>
             <th style="text-align:left;">ISSUE (AUTHORITY GAP)</th>
             <th style="width:33%;text-align:left;">RESOLUTION ACTION</th>
             <th style="width:64px;text-align:left;">SHEETS</th>
@@ -157,15 +163,14 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
     <div class="page-content">
 
       <!-- STATUS SUMMARY STRIP -->
-      <div style="display:flex;gap:8px;align-items:stretch;margin-top:2px;">
-        <div style="flex:2 1 auto;border:2px solid ${ready ? '#166534' : '#b91c1c'};background:${ready ? '#f0fdf4' : '#fef2f2'};padding:6px 12px;">
+      <div style="display:flex;gap:8px;align-items:stretch;margin-top:1px;">
+        <div style="flex:2 1 auto;border:2px solid ${ready ? '#166534' : '#b91c1c'};background:${ready ? '#f0fdf4' : '#fef2f2'};padding:3px 10px;">
           <div style="font-weight:900;font-size:13px;letter-spacing:0.6px;color:${ready ? '#166534' : '#b91c1c'};">
             ${ready ? 'CLEARED FOR ISSUE &mdash; NO OPEN BLOCKERS' : 'NOT FOR PERMIT SUBMISSION &mdash; ' + blockingCount + ' OPEN RELEASE BLOCKER' + (blockingCount === 1 ? '' : 'S')}
           </div>
-          <div style="font-size:7.5px;color:${ready ? '#166534' : '#7f1d1d'};margin-top:2px;line-height:1.35;">
-            This sheet enumerates EVERY active release blocker carried on the validated design snapshot. It is the authoritative
-            reconciliation status: a blocker listed here is unresolved in the current package regardless of any sheet that renders a
-            passing value. Derived issue state: <strong>${escapeH(issueStatus)}</strong>.
+          <div style="font-size:7.5px;color:${ready ? '#166534' : '#7f1d1d'};margin-top:1px;line-height:1.25;">
+            EVERY active release blocker on the validated design snapshot. A blocker listed here is unresolved in the current package
+            regardless of any sheet that renders a passing value. Derived issue state: <strong>${escapeH(issueStatus)}</strong>.
           </div>
         </div>
         <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:4px;justify-content:center;">
@@ -182,11 +187,11 @@ export function pageReviewStatus(input: PermitInput, cad: CADModel, pageNum: num
 
       ${registry.length ? bodyDomains : emptyState}
 
-      <div style="margin-top:6px;padding:3px 6px;font-size:6.3px;color:#555;line-height:1.35;border:var(--border);">
+      <div style="margin-top:3px;padding:2px 6px;font-size:6.3px;color:#555;line-height:1.25;border:var(--border);">
         Source: <span class="mono">permitReadiness.registry</span> on snapshot <span class="mono">${escapeH(snap?.meta.snapshotId ?? '—')}</span>.
         BLOCKING = prevents permit-ready / issue; ADVISORY = surfaced, not gating (each advisory carries a written justification).
-        Equipment-identity conflicts require OPERATOR reconciliation (never auto-resolved). Full per-attachment / per-segment machine-readable
-        data is retained in the canonical object model (structural + electrical authority) referenced on PV-4B / PV-4C / E-1 / SCHED.
+        Equipment-identity conflicts require OPERATOR reconciliation (never auto-resolved). Full machine-readable per-attachment /
+        per-segment data is retained in the canonical object model referenced on PV-4B / PV-4C / E-1 / SCHED.
       </div>
 
     </div>

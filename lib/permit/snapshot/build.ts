@@ -30,6 +30,7 @@ import { hybridSheetSections, SUB_LABEL } from '../sections/subSystemSheets';
 import { buildStructuralAuthority, type StructuralRunsBundle } from './structuralAuthority';
 import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } from './framingAuthority';
+import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { utilityDisplayName } from '../utils/helpers';   // §15(b) — human utility name, never a slug
@@ -88,6 +89,11 @@ export function buildPermitDesignSnapshot(
      *  Empty/undefined ⇒ no solution ⇒ QCABLE-PROCUREMENT-INSUFFICIENT stays firing
      *  when the design is short (the honest live outcome today). */
     cableExtensionSolutions?: CableExtensionSolution[] | null;
+    /** §2 (BAR) — VERIFIED climate-hazard source (ASCE 7 Hazard-Tool report / AHJ
+     *  climate ordinance) resolved by the caller through lib/documents. null ⇒ no
+     *  archived source ⇒ operator-entered wind/snow stay UNVERIFIED ⇒
+     *  ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires (the honest live outcome). */
+    environmentalSource?: EnvironmentalLoadSourceEvidence | null;
   },
 ): PermitDesignSnapshot {
   const { project, system, compliance } = input;
@@ -666,8 +672,14 @@ export function buildPermitDesignSnapshot(
   const structRuns = ((input as unknown as { _structuralRuns?: StructuralRunsBundle })._structuralRuns) ?? null;
   const roofSInput = structRuns?.inputs?.roof ?? (structRuns ? Object.values(structRuns.inputs)[0] : undefined) ?? null;
   const isRoofSystem = !!structRuns?.byKey?.roof || (cad as any)?.systemType === 'roof';
-  const windAuthoritative = proj.ahjWindSpeedMph != null;
-  const snowAuthoritative = proj.ahjGroundSnowPsf != null;
+  // §2 (BAR) — a VALUE being present is NOT authority. proj.ahjWindSpeedMph /
+  // ahjGroundSnowPsf being non-null means the operator/AHJ TYPED a value (an
+  // OBSERVATION/OVERRIDE), NOT that a verified climate-hazard source exists. The
+  // ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED blocker fires from the authority's
+  // verification state (unverified unless an archived, currency-reviewed source is
+  // threaded in via opts.environmentalSource), never from mere presence.
+  const windValuePresent = proj.ahjWindSpeedMph != null;
+  const snowValuePresent = proj.ahjGroundSnowPsf != null;
   // §6 — fence wind engine input (solar_fence systems). Sourced from canonical
   // structure + cad.fence geometry — the SAME inputs the former inline renderer
   // math used, now feeding the relocated engine → snapshot check.
@@ -701,11 +713,19 @@ export function buildPermitDesignSnapshot(
       rafterSpecies: proj.rafterSpecies ?? null,
       rafterSpan: proj.rafterSpan ?? null,
     },
-    windAuthoritative, snowAuthoritative,
+    windValuePresent, snowValuePresent,
     windSpeedMph: (struct?.wind as any)?.windSpeed ?? proj.windSpeedMph ?? null,
     exposure: (struct?.wind as any)?.exposureCategory ?? proj.windExposure ?? null,
     snowPsf: (struct?.snow as any)?.groundSnowLoad ?? proj.ahjGroundSnowPsf ?? null,
     riskCategory: proj.riskCategory ?? null,
+    // §2 (BAR) — the verified climate-hazard source (async-resolved by the caller
+    // through lib/documents). null on live ⇒ operator-entered values stay
+    // UNVERIFIED ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires.
+    environmentalSource: opts?.environmentalSource ?? null,
+    environmentalCoordinates: (proj.lat != null || proj.lng != null)
+      ? { lat: proj.lat ?? null, lng: proj.lng ?? null } : null,
+    environmentalAddressUsed: proj.address ?? null,
+    environmentalCapturedAtIso: (input as any).generatedAtIso ?? proj.date ?? null,
     meanRoofHeightFt: roofSInput?.meanRoofHeight ?? null,
     asceEdition: `ASCE ${necFromRecord ? '7-22' : '7-22'}`,
     asceSource: necFromRecord ? 'ahj-record' : 'pending-w4-ahj-authority',
@@ -910,6 +930,11 @@ export function buildPermitDesignSnapshot(
       'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
       'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.serviceTopology[svc-tap-conductors].constraints', sheets: ['PV-4B', 'PV-6', 'E-1'], resolution: 'Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).' },
       'QCABLE-PROCUREMENT-INSUFFICIENT': { severity: 'blocking', authorityPath: 'electrical.procurementSufficiency', sheets: ['PV-4B', 'SCHED', 'E-1', 'RS-1'], resolution: 'Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. "Jumpers required" by assertion does NOT clear this.' },
+      // §2 (BAR) — the environmental-load authority gate. Subsumes the retired
+      // WIND-SNOW-AUTHORITY-UNRESOLVED (null / code-minimum-default case) AND the
+      // operator-entered-without-provenance case. Cleared ONLY by a verified,
+      // archived, currency-reviewed climate-hazard source covering this project.
+      'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'structural.env.environmentalLoadAuthority', sheets: ['PV-0', 'PV-4C', 'PE-1', 'RS-1'], resolution: 'Resolve the design wind speed, exposure category, risk category and ground snow load from an ARCHIVED climate-hazard source for this exact site (ASCE 7 Hazard-Tool report or the AHJ climate/design-criteria ordinance): archive the document through the document registry (hash + verified state), record its dataset, version/date, the coordinates/address looked up, and the lookup timestamp, and confirm its CURRENCY (no automatic staleness rule exists — verification requires a recorded currency review). Operator-entered values are an OBSERVATION/OVERRIDE and can never clear this; a code-minimum default is preliminary only.' },
       'CODE-AUTHORITY-INCOMPLETE': { severity: 'blocking', authorityPath: 'codeAuthority.editions', sheets: ['PV-0', 'CERT', 'PE-1'], resolution: 'Archive + verify the AHJ adoption ordinance (W4-D); no edition inference.' },
       'PROJECT-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'projectAuthority', sheets: ['PV-0', 'CERT'], resolution: 'Verify address / APN / municipal boundary / AHJ / fire authority via the document registry (no postal inference).' },
       'PROJECT-NAME-NONPRODUCTION': { severity: 'blocking', authorityPath: 'project.projectName', sheets: ['PV-0'], resolution: 'Replace the non-production ("TEST") project name with the real project identity before issue.' },

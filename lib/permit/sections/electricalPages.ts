@@ -10,11 +10,11 @@ import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, 
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
 import { microBranchCount, planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA } from '../utils/branching';
-import { getSnapshot } from '../snapshot/read';
+import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // §3 SEGMENT AUTHORITY (post-campaign correction 07-22): every feeder raceway
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
-import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, type E1PhysicalSection } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, ampacityChainLines, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
@@ -144,29 +144,40 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
       + `<td style="font-size:6.5px">${s(x.cableType)}<br/><span class="mono">${condLine}</span>`
         + `<br/><span style="color:#666">${s(x.bonding)}</span></td>`
       + `<td style="font-size:6.5px">${x.physicalRacewayId ? `<span class="mono fw7">${x.physicalRacewayId}</span><br/>` : ''}${raceway}`
-        + `<br/><span style="color:#666">${x.fillApplicable ? (x.fillPct != null ? `fill ${x.fillPct.toFixed(1)}%` : 'fill PENDING') : 'open air'}`
-        + `${x.deratingFactor != null ? ` · derate ${x.deratingFactor.toFixed(2)}` : ''}</span></td>`
+        + `<br/><span style="color:#666">${x.fillApplicable ? (x.fillPct != null ? `fill ${x.fillPct.toFixed(1)}%` : 'fill PENDING') : 'open air'}</span>`
+        // §4 — the FULL itemized ampacity chain (base × count-adj × ambient →
+        // 75 °C-capped allowable vs required continuous), replacing the bare 0.96.
+        + `${x.ampacity && x.ampacity.present
+            ? `<br/><span class="mono" style="color:#333;font-size:5.5px">${ampacityChainLines(x.ampacity).join('<br/>')}</span>`
+            : `${x.deratingFactor != null ? `<br/><span style="color:#666">derate ${x.deratingFactor.toFixed(2)}</span>` : ''}`}</td>`
       + `<td class="tr" style="font-size:6.5px">${n(x.operatingCurrentA, 1, 'A')} op<br/>${n(x.continuousCurrentA, 1, 'A')} cont<br/>${x.ocpdA != null ? `${x.ocpdA}A OCPD` : '—'}</td>`
       + `<td class="tr" style="font-size:6.5px">${x.lengthFt != null ? `${x.lengthFt} ft` : 'PENDING'}`
         + `${x.lengthLabel ? `<br/><span style="color:#333">${x.lengthLabel}</span>` : ''}`
         + `${x.lengthObjectId ? `<br/><span class="mono" style="color:#888;font-size:5.5px">${x.lengthObjectId}</span>` : ''}`
         + `<br/><span style="color:#666">${s(x.verificationStatus)}</span></td>`
       + `<td class="tr" style="font-size:6.5px">${x.voltageDropPct != null ? `${x.voltageDropPct.toFixed(2)}%` : '—'}<br/><span style="color:#666">≤${x.vdLimitPct}%</span></td>`
-      + `<td class="center" style="font-size:6.5px">${complianceBadge(x.compliance)}</td>`
+      + `<td class="center" style="font-size:6.5px;overflow-wrap:anywhere;">${complianceBadge(x.compliance)}</td>`
       + `</tr>`;
   }).join('');
   return `
     <div style="margin:6px 12px 10px;">
       <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">E-1 PHYSICAL CONDUCTOR / RACEWAY SCHEDULE — CANONICAL SECTION OBJECTS (NEC 690.8 / 310.15 / 705.11)</div>
-      <table class="equip-table" style="width:100%;">
-        <thead><tr>
-          <th style="width:20%">Section / From → To</th>
-          <th style="width:16%">Cable · Conductors · Bonding</th>
-          <th style="width:16%">Physical Raceway · Fill · Derate</th>
-          <th style="width:12%">Currents</th>
-          <th style="width:12%">Length (quantity · source) · Verify</th>
-          <th style="width:9%">V-Drop</th>
-          <th style="width:15%">Compliance</th>
+      <!-- table-layout:fixed — without it the declared column widths are only hints:
+           the long itemized ampacity chain (§4) grew column 3, the auto layout took the
+           space out of the last column, and the COMPLIANCE badge (PENDING — REVIEW REQ'D)
+           overflowed its cell and was clipped at the sheet edge. The widths below sum to
+           100%, so fixed layout renders exactly the intended geometry. -->
+      <table class="equip-table" style="width:100%;table-layout:fixed;">
+        <!-- .equip-table th is white-space:nowrap globally, which under fixed layout let
+             the LENGTH header overrun the V-DROP header. These headers wrap instead. -->
+        <thead><tr style="white-space:normal;">
+          <th style="width:20%;white-space:normal;">Section / From → To</th>
+          <th style="width:16%;white-space:normal;">Cable · Conductors · Bonding</th>
+          <th style="width:16%;white-space:normal;">Physical Raceway · Fill · Derate</th>
+          <th style="width:12%;white-space:normal;">Currents</th>
+          <th style="width:12%;white-space:normal;">Length (quantity · source) · Verify</th>
+          <th style="width:9%;white-space:normal;">V-Drop</th>
+          <th style="width:15%;white-space:normal;">Compliance</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -182,6 +193,108 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         segment id. These are DIFFERENT quantities from the BOM Q-Cable <em>procurement</em> footage (Σ drops × pitch ×
         waste, drop-count basis) — one quantity per label, never conflated.
       </div>
+    </div>
+    ${renderAmpacityEvidenceBlock(sections)}`;
+}
+
+// §4 (BAR closeout 2026-07-25) — the CANONICAL shared-raceway ampacity EVIDENCE
+// block. Itemizes EVERY factor of the six-CCC home-run ampacity adjustment
+// (conductor material/insulation/size, 90 °C base, 110.14(C) 75 °C terminal cap,
+// CCC count + 310.15(C)(1) count-adjustment, ambient + 310.15(B)(1) correction,
+// optional rooftop adder, corrected + final allowable, required continuous,
+// NEC refs, pass/fail/pending). Rendered identically on E-1 AND PV-4B (single
+// source), so no sheet prints a lone unexplained "0.96". Returns '' when no
+// in-conduit shared section is present.
+export function renderAmpacityEvidenceBlock(
+  sections: E1PhysicalSection[],
+  heading = 'SHARED-RACEWAY AMPACITY ADJUSTMENT — NEC 310.15 / 110.14(C) (EVERY FACTOR)',
+  compact = false,
+): string {
+  const hr = sections.find(s => s.sectionId === 'BRANCH_HOMERUN_RUN' && s.ampacity?.present)?.ampacity
+    ?? sections.find(s => s.fillApplicable && s.ampacity?.present)?.ampacity
+    ?? null;
+  if (!hr || !hr.present) return '';
+  const A = (n: number | null, d = 2) => n == null ? 'PENDING' : `${n.toFixed(d)} A`;
+  const F = (n: number | null) => n == null ? 'PENDING' : n.toFixed(2);
+  const stateColor = hr.state === 'PASS' ? '#1b7a1b' : hr.state === 'FAIL' ? '#b00' : '#946200';
+  const row = (k: string, v: string) =>
+    `<tr><td style="padding:1.5px 6px;color:#555;white-space:nowrap">${k}</td><td style="padding:1.5px 6px" class="mono">${v}</td></tr>`;
+  // COMPACT (PV-4A / PV-4B page-fit, gate 13): the SAME canonical object and the
+  // SAME every-factor content as E-1's table, rendered as one dense inline block
+  // instead of an 11-row table. Same numbers, same NEC refs, same verdict — the
+  // "identical" requirement is on the VALUES/factors, not the layout.
+  if (compact) {
+    return `
+      <div style="margin:3px 12px 6px;padding:2px 6px;font-size:6.5px;line-height:1.2;border:var(--border);background:#f4f4f8;">
+        <strong>${heading}</strong> —
+        conductor ${hr.conductorMaterial ?? '—'} ${hr.conductorSize ?? '—'} ${hr.insulation ?? '—'} (ins. ${hr.insulationRatingC} °C) ·
+        base <span class="mono">${A(hr.baseTableAmpacityA, 0)}</span> (${hr.baseTableTempC} °C col., 310.16) ·
+        CCC <span class="mono">${hr.currentCarryingCount ?? 'PENDING'}</span> → count-adj <span class="mono">×${F(hr.countAdjustmentFactor)}</span> (310.15(C)(1)) ·
+        ambient ${hr.effectiveAmbientTempC != null ? `${hr.effectiveAmbientTempC} °C` : 'PENDING'}${hr.rooftopAdderC ? ` (incl. +${hr.rooftopAdderC} °C rooftop adder, 310.15(B)(2))` : ''} → corr <span class="mono">×${F(hr.ambientCorrectionFactor)}</span> (310.15(B)(1)) ·
+        corrected <span class="mono">${A(hr.correctedAmpacityA)}</span> ·
+        terminal cap ${hr.terminalTempLimitC} °C = <span class="mono">${A(hr.terminalTableAmpacityA, 0)}</span> (110.14(C)) ·
+        <strong>FINAL ALLOWABLE <span class="mono">${A(hr.finalAllowableAmpacityA)}</span></strong> vs required continuous <span class="mono">${A(hr.requiredContinuousA)}</span>${hr.ocpdA ? ` (branch OCPD ${hr.ocpdA} A)` : ''} ⇒
+        <span style="color:${stateColor};font-weight:900">${hr.state}</span>.
+        Two independent adjustments (count AND ambient) — never a lone derate; same <span class="mono">AmpacityAdjustmentResult</span> object E-1 and the evidence JSON project.
+      </div>`;
+  }
+  return `
+    <div style="margin:6px 12px 10px;">
+      <div style="background:#1a1a1a;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.6px;padding:3px 6px;">${heading}</div>
+      <table class="equip-table" style="width:100%;font-size:7px;border-top:none;">
+        <tbody>
+          ${row('Conductor', `${hr.conductorMaterial ?? '—'} ${hr.conductorSize ?? '—'} ${hr.insulation ?? '—'} (insulation rated ${hr.insulationRatingC} °C)`)}
+          ${row('Base table ampacity (NEC 310.16)', `${A(hr.baseTableAmpacityA, 0)} — ${hr.baseTableTempC} °C column`)}
+          ${row('Terminal temp limit (NEC 110.14(C))', `${hr.terminalTempLimitC} °C → 75 °C table = ${A(hr.terminalTableAmpacityA, 0)}`)}
+          ${row('Current-carrying conductors (CCC)', `${hr.currentCarryingCount ?? 'PENDING'}`)}
+          ${row('Count-adjustment factor (NEC 310.15(C)(1))', `× ${F(hr.countAdjustmentFactor)}${hr.countAdjustmentBasis ? ` — ${hr.countAdjustmentBasis}` : ''}`)}
+          ${row('Ambient correction (NEC 310.15(B)(1))', `× ${F(hr.ambientCorrectionFactor)}${hr.ambientCorrectionBasis ? ` — ${hr.ambientCorrectionBasis}` : ''}`)}
+          ${hr.rooftopAdderC ? row('Rooftop temperature adder (NEC 310.15(B)(2))', `+ ${hr.rooftopAdderC} °C ambient`) : ''}
+          ${row('Corrected ampacity', `${A(hr.baseTableAmpacityA, 0)} × ${F(hr.countAdjustmentFactor)} × ${F(hr.ambientCorrectionFactor)} = ${A(hr.correctedAmpacityA)}`)}
+          ${row('FINAL ALLOWABLE', `<strong>${A(hr.finalAllowableAmpacityA)}</strong>${hr.finalAllowableBasis ? ` — ${hr.finalAllowableBasis}` : ''}`)}
+          ${row('Required continuous', `${A(hr.requiredContinuousA)}${hr.requiredContinuousBasis ? ` — ${hr.requiredContinuousBasis}` : ''}${hr.ocpdA ? ` · branch OCPD ${hr.ocpdA} A` : ''}`)}
+          ${row('Result', `<span style="color:${stateColor};font-weight:900">${hr.state}</span> · ${hr.necReferences.join(' · ')}`)}
+        </tbody>
+      </table>
+      <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:6.5px;color:#555;background:#fafafa;">
+        The six-CCC shared home-run carries TWO independent adjustments — the ${hr.currentCarryingCount ?? '—'}-conductor count factor
+        (NEC 310.15(C)(1)) AND the ambient factor (NEC 310.15(B)(1)) — applied to the 90 °C base, then capped at the 75 °C terminal
+        ampacity (NEC 110.14(C)). This is the canonical <span class="mono">AmpacityAdjustmentResult</span>; PV-4B and the evidence JSON
+        project the same object — never a lone unexplained derate.
+      </div>
+    </div>`;
+}
+
+// §5 (BAR closeout 2026-07-25) — the OPEN-AIR BRANCH GROUNDING note. E-1 asserts
+// "1×#10 GRN EGC OPEN AIR"; this states the canonical authority (separate EGC
+// required because the Q-Cable is a 2-conductor assembly with no integrated EGC)
+// AND prints the BOM footage the package now carries, so the separate-EGC
+// language and the ordered quantity always match (gate 7). Returns '' for
+// non-micro / no branch-EGC.
+export function renderOpenAirBranchGroundingNote(
+  snap: import('../snapshot/types').PermitDesignSnapshot | null | undefined,
+  compact = false,
+): string {
+  const g = projectOpenAirBranchGrounding(snap);
+  if (!g.present || g.groundingMethod !== 'separate-conductor') return '';
+  // Same authority + the SAME quantity on every sheet; compact drops only the
+  // prose (page-fit, gate 13) — never a field.
+  if (compact) {
+    return `
+      <div style="margin:2px 12px 5px;padding:2px 6px;font-size:6.5px;line-height:1.18;border:var(--border);background:#eef7ee;">
+        <strong>OPEN-AIR BRANCH GROUNDING (§5, NEC 250.122 / 690.43(C)):</strong> SEPARATE EGC REQUIRED —
+        ${g.conductorSize ?? '#10'} ${g.conductorMaterial ?? 'Cu'} open-air, parallels the Q-Cable trunk (${g.branchIds.join(', ') || 'each branch'});
+        Q-Cable = 2-conductor assembly, NO integrated EGC. <strong>BOM qty</strong> <span class="mono">${g.bomFootageFt ?? 'PENDING'} ft</span>
+        = designed-installed <span class="mono">${g.designedInstalledFt ?? '—'} ft</span> × ${g.wasteFactor} waste (${g.lengthProvenance ?? 'pending'}).
+      </div>`;
+  }
+  return `
+    <div style="margin:4px 12px 8px;padding:3px 6px;font-size:6.5px;line-height:1.2;border:var(--border);background:#eef7ee;">
+      <strong>OPEN-AIR BRANCH GROUNDING (§5 — NEC 250.122 / 690.43(C)):</strong>
+      Method = <strong>SEPARATE EQUIPMENT GROUNDING CONDUCTOR</strong> (${g.conductorSize ?? '#10'} ${g.conductorMaterial ?? 'Cu'}). ${g.sourceAuthority}.
+      Route = ${g.pathBasis}; open-air EGC parallels the Q-Cable trunk on ${g.branchIds.join(', ') || 'each branch'}.
+      <strong>Quantity (matches BOM):</strong> <span class="mono">${g.bomFootageFt ?? 'PENDING'} ft</span>
+      (designed-installed <span class="mono">${g.designedInstalledFt ?? '—'} ft</span> × ${g.wasteFactor} waste). ${g.verificationState}.
     </div>`;
 }
 
@@ -462,6 +575,10 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           : '';
         return `${_ratingTable}${_bosNote}`;
       })()}
+      ${/* §4 (BAR closeout 2026-07-25) — PV-4A carries the SAME canonical
+           AmpacityAdjustmentResult as E-1 and PV-4B (every factor itemized), so
+           the three sheets can never disagree and none prints a lone derate. */
+        renderAmpacityEvidenceBlock(projectE1PhysicalSchedule(_snapA), 'SHARED-RACEWAY AMPACITY ADJUSTMENT — NEC 310.15 / 110.14(C) (EVERY FACTOR; SAME OBJECT AS E-1 / PV-4B)', true)}
 
       <div class="section-title">Interconnection Summary — ${_ic.isSupplySide ? 'NEC 705.11 (Supply-Side Tap)' : 'NEC 705.12 (Load-Side)'}</div>
       <table class="info-table">
@@ -735,6 +852,15 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const _ps = _snap?.electrical?.procurementSufficiency ?? null;
         const _short = !!_ps?.insufficient;
         const _procTxt = _ps?.procurementLengthFt ?? _asmB.totalProcurementFt ?? '—';
+        // §5 — the open-air branch GROUNDING authority rides INSIDE this same
+        // assembly note (no extra box — PV-4B page-fit, gate 13). The Q-Cable is a
+        // 2-conductor assembly with NO integrated EGC ⇒ a SEPARATE open-air EGC is
+        // required; the footage stated here is the SAME quantity the BOM orders and
+        // E-1 / PV-1B print (gate 7).
+        const _gndB = projectOpenAirBranchGrounding(_snap);
+        const _gndInline = (_gndB.present && _gndB.groundingMethod === 'separate-conductor')
+          ? ` <strong>GROUNDING (§5, NEC 250.122/690.43(C)):</strong> ${a.conductorCount ?? 2}-conductor assembly, NO integrated EGC ⇒ <strong>SEPARATE ${_gndB.conductorSize ?? '#10'} ${_gndB.conductorMaterial ?? 'Cu'} EGC REQUIRED</strong>, run open-air with each branch trunk (${_gndB.branchIds.join(', ') || 'all branches'}); <em>BOM qty</em> <span class="mono">${_gndB.bomFootageFt ?? 'PENDING'}ft</span> = designed-installed <span class="mono">${_gndB.designedInstalledFt ?? '—'}ft</span> × ${_gndB.wasteFactor} waste (${_gndB.lengthProvenance ?? 'pending'}) — same route geometry as the trunk.`
+          : '';
         const _insuffBlock = _short
           ? ` <strong style="color:#b00">⚠ PROCUREMENT INSUFFICIENCY (QCABLE-PROCUREMENT-INSUFFICIENT — BLOCKING): designed ${_ps!.totalDesignedInstalledFt} ft + allowance ${_ps!.requiredServiceLoopAllowanceFt} ft (${_ps!.allowanceProvenance}) &gt; procurement ${_ps!.procurementLengthFt} ft by <span class="mono">${_ps!.deficitFt} ft</span>. Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE CABLE QUANTITY only — NON-ORDERABLE / PENDING SOLUTION (verified listed extension required; "jumpers required" does NOT clear this). Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. See RS-1.</strong>`
           : '';
@@ -744,7 +870,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         return `
       <div style="padding:1px 6px;font-size:6.5px;line-height:1.18;border:var(--border);border-top:none;background:#eef4fa;">
         <strong>LISTED AC TRUNK CABLE ASSEMBLY (${a.assemblyId}, §6/§7/§10):</strong>
-        ${a.manufacturer} ${a.ecosystem} <span class="mono">${a.sku ?? 'PENDING'}</span>${a.conductorCount && a.conductorGauge ? ` · ${a.conductorCount}×${a.conductorGauge}` : ''} · ${a.connectorSpacingFt != null ? a.connectorSpacingFt + 'ft O.C.' : ''} · ${a.maxBranchCurrentA != null ? a.maxBranchCurrentA + 'A branch (TC-ER, 690.31(C))' : ''}. <strong>Lengths (one quantity per label):</strong> ${_asmB.totalDrops ?? '—'} drops (BOM/PV-1B invariant) · <em>cable path (geometry)</em> <span class="mono">${_asmB.totalDesignedInstalledFt != null ? _asmB.totalDesignedInstalledFt.toFixed(1) : '—'}ft</span> (Σ BranchCablePath designed-installed; per-branch in Length col) · <em>procurement (base cable qty)</em> <span class="mono">${_procTxt}ft</span> (Σ drops×${a.connectorSpacingFt ?? '—'}ft pitch×waste — drop-count basis, not designed×waste); distinct quantities per BranchCablePath object.${_insuffBlock}
+        ${a.manufacturer} ${a.ecosystem} <span class="mono">${a.sku ?? 'PENDING'}</span>${a.conductorCount && a.conductorGauge ? ` · ${a.conductorCount}×${a.conductorGauge}` : ''} · ${a.connectorSpacingFt != null ? a.connectorSpacingFt + 'ft O.C.' : ''} · ${a.maxBranchCurrentA != null ? a.maxBranchCurrentA + 'A branch (TC-ER, 690.31(C))' : ''}. <strong>Lengths (one quantity per label):</strong> ${_asmB.totalDrops ?? '—'} drops (BOM/PV-1B invariant) · <em>cable path (geometry)</em> <span class="mono">${_asmB.totalDesignedInstalledFt != null ? _asmB.totalDesignedInstalledFt.toFixed(1) : '—'}ft</span> (Σ BranchCablePath designed-installed; per-branch in Length col) · <em>procurement (base cable qty)</em> <span class="mono">${_procTxt}ft</span> (Σ drops×${a.connectorSpacingFt ?? '—'}ft pitch×waste — drop-count basis, not designed×waste); distinct quantities per BranchCablePath object.${_insuffBlock}${_gndInline}
       </div>`;
       })()}
       ${(_feed.raceway || _feed.tradeSizeIn) ? `
@@ -789,11 +915,15 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
            matrix) removed — they duplicated code-book content, pushed the
            project-specific LOAD CALC off the fixed sheet (silent clipping),
            and PV-4A's methodology table already cites the sections. */''}
-      ${(_isRoof || (_auth.isHybrid && _auth.subSystems.some(s => s.key === 'roof'))) ? `
-      <div style="padding:2px 6px;font-size:7px;line-height:1.35;border:var(--border);background:#fafafa;">
-        <strong>TEMPERATURE DERATING NOTE${_auth.isHybrid ? ' — ROOF SUB-SYSTEM' : ''}:</strong>
-        Roof-surface conduit conductors carry the rooftop temperature adder (NEC 310.15(B)(3)(c)); selections account for the worst-case condition. USE-2/THWN-2 (90°C) specified to maximize ampacity retention.
-      </div>` : ''}
+      ${/* §4 (BAR closeout 2026-07-25) — the generic "TEMPERATURE DERATING NOTE"
+           prose that used to sit here is RETIRED: it asserted a rooftop adder and
+           "worst-case" derating with NO numbers, which is precisely the
+           unexplained-derate defect §4 forbids. It is replaced by the CANONICAL
+           AmpacityAdjustmentResult — the SAME object E-1 and PV-4A project, with
+           every factor (90 °C base, CCC count-adjustment, ambient correction,
+           rooftop adder where applicable, corrected, 75 °C terminal cap, final
+           allowable vs required continuous, verdict). */
+        renderAmpacityEvidenceBlock(projectE1PhysicalSchedule(_snap), `SHARED-RACEWAY AMPACITY ADJUSTMENT${_auth.isHybrid ? ' — ROOF SUB-SYSTEM' : ''} — NEC 310.15 / 110.14(C) (EVERY FACTOR; SAME OBJECT AS E-1 / PV-4A)`, true)}
       ${(_auth.isHybrid ? _auth.subSystems.some(s => s.key === 'fence') : _isFence) ? `
       <div class="section-title">Fence Array Wiring Notes — NEC 690, ${_cpCS.tag('asce')} §29</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);background:#fafafa;">
@@ -1037,11 +1167,21 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         </div>
       </div>
 
-      <div style="padding:3px 6px;margin-top:var(--xs);font-size:var(--f-sm);line-height:1.4;border:2px solid #000;background:#fff;">
+      <div style="padding:2px 6px;margin-top:2px;font-size:var(--f-sm);line-height:1.25;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — CONDUCTOR & CONDUIT SCHEDULE:</strong>
         Conductors sized per NEC 690.8 (Isc × 1.25), OCPD per NEC 690.9, temperature/fill derating per NEC 310.15.
         ${_feed.voltageDropPct != null && _feed.voltageDropPct <= 3 ? 'AC feeder voltage drop is within NEC recommended limits.' : 'Voltage drop requires review.'}
-        All conductors are sized appropriately for the calculated load conditions of this ${system.totalDcKw?.toFixed(2) || '—'} kW DC system.
+        ${(() => {
+          // §3 (BAR) — the retired sentence ("All conductors are sized appropriately
+          // for the calculated load conditions") was a GLOBAL compliance claim
+          // rendered while conduit-fill / tap-length blockers were open. The
+          // conclusion now derives from the canonical registry.
+          const _n = ((peekSnapshot(input)?.permitReadiness?.registry ?? [])
+            .filter(r => !r.resolved && r.severity === 'blocking')).length;
+          return _n > 0
+            ? `<strong style="color:#b45309;">DESIGN BASIS ONLY &mdash; NOT A CERTIFIED SIZING CONCLUSION while ${_n} release blocker${_n === 1 ? '' : 's'} remain open (see RS-1).</strong>`
+            : `Conductor sizing for this ${system.totalDcKw?.toFixed(2) || '—'} kW DC system is complete with no open release blockers.`;
+        })()}
       </div>
     </div>
   </div>`;
@@ -1166,7 +1306,8 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
   // raceway with its full CCC inventory, feeder, tap conductors) so the diagram's
   // graphic labels are backed by a machine-checkable schedule (gate 1/2/3). Empty
   // for non-micro topologies (the per-sub source zone covers those).
-  const _e1Schedule = renderE1PhysicalSchedule(projectE1PhysicalSchedule(getSnapshot(input)));
+  const _e1Sections = projectE1PhysicalSchedule(getSnapshot(input));
+  const _e1Schedule = renderE1PhysicalSchedule(_e1Sections);
 
   return `
   <div class="page sld-page">
@@ -1174,8 +1315,61 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     ${_sldStamp}
     ${sldBodyHtml}
     ${_e1Schedule}
+    ${renderOpenAirBranchGroundingNote(getSnapshot(input))}
     ${_sldSubZone}
+    ${/* the machine-readable evidence stamp goes LAST so its JSON payload never
+         lands inside the diagram/schedule text ranges harnesses slice on. */
+      renderBarElectricalEvidenceStamp(getSnapshot(input), _e1Sections)}
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BAR §4/§5/§7/§8 EVIDENCE EXPORT (closeout 2026-07-25) — the canonical
+// electrical authority objects emitted as a MACHINE-EXTRACTABLE stamp on E-1, so
+// the evidence harness reads the SAME objects the sheets render instead of
+// re-deriving them (a second derivation is exactly the drift class this campaign
+// kills). Hidden from print; JSON-escaped into a data attribute.
+//   §4 ampacityAdjustments — one full AmpacityAdjustmentResult per section
+//   §5 openAirBranchGrounding — the ONE grounding result + route + BOM footage
+//   §8 openAirWiringMethod — the listed wiring-method identity the legend uses
+// ═══════════════════════════════════════════════════════════════════════════
+export function renderBarElectricalEvidenceStamp(
+  snap: import('../snapshot/types').PermitDesignSnapshot | null | undefined,
+  sections: E1PhysicalSection[],
+): string {
+  if (!snap) return '';
+  const asm = projectListedCableAssembly(snap);
+  const payload = {
+    snapshotId: snap.meta?.snapshotId ?? null,
+    // §4 — every section's FULL itemized chain (never a lone scalar).
+    ampacityAdjustments: sections
+      .filter(s => s.ampacity != null)
+      .map(s => ({ sectionId: s.sectionId, fillApplicable: s.fillApplicable, ...s.ampacity })),
+    // §5 — the ONE grounding result, its route objects and its BOM quantity.
+    openAirBranchGrounding: projectOpenAirBranchGrounding(snap),
+    // §8 — the wiring-method identity the legend must name (topology-derived).
+    openAirWiringMethod: asm.present
+      ? {
+          assemblyId: asm.assembly!.assemblyId,
+          wiringMethodLabel: asm.assembly!.wiringMethodLabel,
+          sku: asm.assembly!.sku,
+          conductorCount: asm.assembly!.conductorCount,
+          insulationListing: asm.assembly!.insulationListing,
+        }
+      : null,
+    // §7 — the occupied-drop topology the cap/terminator quantities derive from.
+    connectorTopology: {
+      branchCount: (snap.electrical?.branches ?? []).length,
+      occupiedDrops: asm.totalDrops,
+      perBranch: asm.branchPaths.map(p => ({
+        branchId: p.branchId, branchLabel: p.branchLabel,
+        dropCount: p.dropCount, cableEndObjectId: `${p.branchLabel}-END`,
+      })),
+    },
+  };
+  const json = JSON.stringify(payload)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return `<div class="bar-electrical-evidence" data-bar-wse="${json}" style="display:none"></div>`;
 }
 
 

@@ -7,6 +7,7 @@
 // The EP successor to planset-evidence-co.mjs. It regenerates NOTHING: it reads
 // the REAL rendered permit package HTML + its PermitDesignSnapshot and runs the
 // 21 PERMANENT EP GATES from docs/ELECTRICAL-PROCUREMENT-CLOSEOUT-DIRECTIVE.md
+// (+ gate 22: the BAR WS-E electrical-authority harness, CHAINED in both modes)
 // ("Permanent regression gates (rendered output)") against the RENDERED output
 // (+ the snapshot authority it must equal). Gate 19 invokes the TRUE geometry
 // page-fit validator (scripts/planset-pagefit.mjs — incl. internal-clip scan).
@@ -82,7 +83,11 @@ const e1SvgStart = noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM');
 const e1SvgEnd = noB64.indexOf('E-1 PHYSICAL CONDUCTOR');
 const e1Svg = (e1SvgStart >= 0 && e1SvgEnd > e1SvgStart) ? noB64.slice(e1SvgStart, e1SvgEnd) : '';
 const g2_svgToken = hrCcc != null && e1Svg.includes(`${hrCcc}#10 THWN-2`);
-const g2_svgNo12 = e1Svg.length > 0 && !e1Svg.includes('#12');
+// The original defect was the shared HOME-RUN bundle printing #12 instead of N#10.
+// BAR §5 legitimately introduced a `1×#12 GRN EGC` label (the BRANCH EGC gauge, which
+// really is #12 at 20 A and differs from the #10 feeder EGC), so this check is scoped
+// to the CCC-bundle form it was written for instead of banning the token package-wide.
+const g2_svgNo12 = e1Svg.length > 0 && !/\d+#12\s*THWN-2/.test(e1Svg);
 // every raceway's CCC = conductorCount − 1 (single shared EGC excluded)
 const g2_invEach = rws.every(r => r.currentCarryingCount != null && r.conductorCount != null
   && r.currentCarryingCount === r.conductorCount - 1);
@@ -93,10 +98,18 @@ gate(2, 'e1-conductor-count-equals-raceway-inventory',
 // ═══ GATE 3 — no E-1 section prints PASS while length/fill/tap is pending. ════
 const e1SchedStart = html.indexOf('E-1 PHYSICAL CONDUCTOR / RACEWAY SCHEDULE');
 const e1Sched = e1SchedStart >= 0 ? html.slice(e1SchedStart, e1SchedStart + 4000) : '';
-const g3_noPass = e1Sched.length > 0 && !/\bPASS\b/.test(e1Sched);
+// BAR §4 added the itemized AmpacityAdjustmentResult to each section, and that object
+// carries its OWN verdict ("req 20.00A cont · PASS") — a specific ampacity calculation
+// that genuinely passes and that BAR gates 4/5 REQUIRE to be shown. This gate is about
+// the SECTION verdict (no section may claim PASS while its length / fill / tap authority
+// is pending), so the ampacity chain's own verdict is excluded before the scan.
+const e1SchedNoAmpacity = e1Sched.replace(/req\s*[\d.]+A\s*cont\s*·\s*(PASS|FAIL|PENDING)/g, 'req … cont · <ampacity>');
+const g3_noPass = e1Sched.length > 0 && !/\bPASS\b/.test(e1SchedNoAmpacity);
 const g3_pendingShown = /PENDING|REVIEW/.test(e1Sched);
 gate(3, 'e1-no-pass-with-pending', g3_noPass && g3_pendingShown,
-  `e1SchedFound=${e1Sched.length > 0} noPASS=${g3_noPass} pendingShown=${g3_pendingShown} passCount=${(e1Sched.match(/\bPASS\b/g) || []).length}`, null);
+  `e1SchedFound=${e1Sched.length > 0} noSectionPASS=${g3_noPass} pendingShown=${g3_pendingShown} `
+  + `sectionPassCount=${(e1SchedNoAmpacity.match(/\bPASS\b/g) || []).length} `
+  + `ampacityVerdicts=${(e1Sched.match(/cont\s*·\s*(PASS|FAIL|PENDING)/g) || []).length}`, null);
 
 // ═══ GATE 4 — no live EMT literal without an EMT raceway object. ══════════════
 const g4_emtHits = (noB64.match(/\bEMT\b/g) || []).length;
@@ -309,11 +322,35 @@ gate(21, 'qcable-procurement-sufficiency',
   + `allowanceHonest=${g21_allowanceHonest} modeOk=${g21_modeOk}`,
   _ps ? { insufficient: _ps.insufficient, deficitFt: _ps.deficitFt, verificationStatus: _ps.verificationStatus } : null);
 
+// ═══ GATE 22 — BAR WS-E electrical gates, CHAINED (fail-closed). ══════════════
+// docs/BLOCKER-AUTHORITY-RECONCILIATION-DIRECTIVE.md §4/§5/§7/§8 (permanent gates
+// 4, 5, 6, 7, 9, 10, 11) run in the SAME invocation flow as the EP closeout, in
+// BOTH modes, against the SAME html + snapshot. The chained harness owns those
+// gates (one implementation, no re-derivation here); a non-zero exit fails EP.
+const _wseOut = outPath.replace(/(\.json)?$/, '') + '.bar-wse.json';
+const _wse = spawnSync(process.execPath,
+  [path.resolve(repoRoot, 'scripts/planset-evidence-bar-wse.mjs'), htmlPath, snapPath, _wseOut],
+  { encoding: 'utf8' });
+const _wseLine = (((_wse.stdout || '').match(/\[bar-wse\][^\n]*/g) || []).pop() || '').trim()
+  || (_wse.stderr || '').trim().slice(0, 200);
+let _wseReport = null;
+try { _wseReport = JSON.parse(fs.readFileSync(_wseOut, 'utf8')); } catch { _wseReport = null; }
+gate(22, 'bar-wse-electrical-authority-chained', _wse.status === 0,
+  `bar-wse exit=${_wse.status} · ${_wseLine || 'no output'}`,
+  _wseReport ? {
+    out: path.relative(repoRoot, _wseOut).replace(/\\/g, '/'),
+    gatesRun: _wseReport.gatesRun, gatesFailed: _wseReport.gatesFailed,
+    failures: (_wseReport.results || []).filter(r => !r.pass).map(r => `gate ${r.gate}: ${r.name}`),
+  } : null);
+if (_wse.status !== 0) {
+  for (const line of String(_wse.stdout || '').split('\n').filter(l => /FAIL/.test(l))) console.log(`[ep-evidence:${MODE}] chained ${line.trim()}`);
+}
+
 // ═══ assemble + emit ════════════════════════════════════════════════════════
 const failed = gates.filter(g => !g.ok);
 const report = {
   generatedAt: new Date().toISOString(),
-  harness: 'planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates)',
+  harness: 'planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates + chained BAR WS-E)',
   mode: MODE,
   htmlPath: path.relative(repoRoot, htmlPath).replace(/\\/g, '/'),
   snapshotId: meta.snapshotId, digest: meta.digest,

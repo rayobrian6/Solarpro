@@ -78,12 +78,29 @@ describe('W4 §2 — certification gate (no affirmative cert without an approved
     'confirmed adequate',
     'is adequate to support',
     'are adequate to support',
+    // BAR §3 / gate 3 (2026-07-25) — the SCHED global-compliance conclusion. No
+    // package-wide PASS / compliance / VERIFIED claim may render while blocking
+    // release blockers are active; SCHED's conclusion is registry-derived.
+    'All equipment is UL-listed',
+    'wire sizing verified per NEC 690.8 with derating',
   ];
 
   it('NONE of the affirmative certification phrases render while review is pending', () => {
     for (const phrase of AFFIRMATIVE) {
       expect(html.includes(phrase), `affirmative phrase leaked: "${phrase}"`).toBe(false);
     }
+  });
+
+  it('BAR §3 / gate 3 — no global compliance claim while blocking items exist; SCHED states the honest state', () => {
+    const { html: h, snap } = generate(auditInput());
+    const blocking = snap.permitReadiness.registry.filter(r => r.severity === 'blocking' && !r.resolved);
+    expect(blocking.length).toBeGreaterThan(0);
+    // the hardcoded PASS sentence and the wire-sizing VERIFIED badge are both gone
+    expect(h).not.toMatch(/equipment complies with NEC\s*\d{4}\s*and UL 1741/i);
+    expect(h).not.toContain('>VERIFIED</span>');
+    // and SCHED states the registry-derived conclusion instead
+    expect(h).toContain('COMPLIANCE NOT YET ESTABLISHED');
+    expect(h).toContain('SEE RS-1 FOR ACTIVE RELEASE BLOCKERS');
   });
 
   it('CERT and PE-1 render the PENDING ENGINEERING REVIEW template', () => {

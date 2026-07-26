@@ -41,7 +41,9 @@ const snapshotPermitValid = (() => {
     && !!pr && pr.ready === true && Array.isArray(pr.blockers) && pr.blockers.length === 0;
 })();
 
-const pages = html.split(/<div class="page"[ >]/).slice(1);
+// EVERY sheet wrapper, whatever modifier classes it carries (`page sld-page`,
+// `page landscape`, …). The old exact-class form dropped later-added sheets.
+const pages = html.split(/<div class="page(?=[ "])/).slice(1);
 const sheetIdOf = (p) => (p.match(/tb-sheet-id">\s*([^<]+?)\s*</) ?? [])[1] ?? '?';
 const sheetIds = pages.map(sheetIdOf);
 
@@ -175,7 +177,8 @@ const bannerPresent = html.includes('PENDING STRUCTURAL ENGINEERING REVIEW') && 
 const blockerCodes = (snap.permitReadiness.blockers || []).map(b => b.code);
 const STRUCTURAL_BLOCKER_CODES = new Set([
   'FRAMING-AUTHORITY-UNVERIFIED', 'ATTACHMENT-CAPACITY-SOURCE-MISSING', 'FASTENER-CONFIG-MISSING',
-  'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED', 'WIND-SNOW-AUTHORITY-UNRESOLVED', 'REACTIONS-UNTRACEABLE',
+  'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED', 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',
+  'WIND-SNOW-AUTHORITY-UNRESOLVED', 'REACTIONS-UNTRACEABLE',
   'RAIL-QUANTITY-UNTRACEABLE', 'STRUCTURAL-UTILIZATION-EXCEEDED', 'SITE-GEOMETRY-MISSING',
   'MODULE-DIMENSIONS-UNVERIFIED', 'STRUCTURAL-BOM-RECONCILIATION-FAILED',
 ]);
@@ -237,20 +240,31 @@ const coordinateAuthority = (() => {
   const manifests = [...html.matchAll(/<!--PLACEMENT-MANIFEST:(\{.*?\})-->/g)].map(m => { try { return JSON.parse(m[1]); } catch { return null; } }).filter(Boolean);
   let maxDelta = 0, entryCount = 0, omitted = 0, rederived = 0;
   const kindsSeen = new Set();
+  const perManifestMissing = new Set();   // candidate omissions, resolved against the union below
+  const placedAnywhere = new Set();       // every objectId placed by ANY manifest
   for (const man of manifests) {
     const dt = dtById.get(man.transformId);
     const seen = new Set();
+    const manifestKinds = new Set(man.entries.map(e => e.kind));
     for (const e of man.entries) {
-      entryCount++; kindsSeen.add(e.kind); seen.add(e.objectId);
+      entryCount++; kindsSeen.add(e.kind); seen.add(e.objectId); placedAnywhere.add(e.objectId);
       const c = canonPt.get(e.objectId);
       if (c && Math.hypot(c.x - e.canonicalXY.x, c.y - e.canonicalXY.y) > 0.01) rederived++;
       if (dt && c) { const exp = ap(man.viewport, ap(dt.matrix, e.canonicalXY)); maxDelta = Math.max(maxDelta, Math.hypot(exp.x - e.sheetXY.x, exp.y - e.sheetXY.y)); }
     }
     for (const [id] of canonPt) {
       const kind = id.startsWith('mi-') ? 'module' : id.startsWith('splice-') ? 'splice' : id.startsWith('att-') ? 'attachment' : 'rail';
-      if (kindsSeen.has(kind) && kind !== 'module' && !seen.has(id)) omitted++;
+      // Per-manifest omission is only meaningful for the kinds THIS manifest draws.
+      // (Union across manifests below — a rail drawn on the structural sheet is not
+      // "omitted" because the roof-plan manifest does not repeat it.)
+      if (manifestKinds.has(kind) && kind !== 'module' && !seen.has(id)) perManifestMissing.add(id);
     }
   }
+  // V30 = no canonical object omitted from the DRAWING as a whole: an object counts as
+  // omitted only when NO manifest placed it. Before this, a second placement manifest
+  // (added when the structural sheet started emitting its own) made every rail/attachment
+  // drawn on only one sheet look omitted from the other → a false parity failure.
+  for (const id of perManifestMissing) if (!placedAnywhere.has(id)) omitted++;
   return {
     canonicalCoordinateSystem: snap.geometry.coordinateSystem,
     unifiedFrame: frames.length === 1 && frames[0] === (snap.geometry.coordinateSystem || {}).id,
@@ -408,7 +422,7 @@ const rackingProvenanceFail = rackingGapNotPromoted.length > 0;
 
 // ── W3.1 §5 — expected honest blockers must be PRESENT (asserted) ─────────────
 const EXPECTED_ORIGINAL_BLOCKERS = [
-  'ROUTE-LENGTH-ESTIMATE', 'FRAMING-AUTHORITY-UNVERIFIED', 'WIND-SNOW-AUTHORITY-UNRESOLVED',
+  'ROUTE-LENGTH-ESTIMATE', 'FRAMING-AUTHORITY-UNVERIFIED', 'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED',
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED', 'RACKING-CAPACITY-APPLICABILITY-GAP', 'ENGINEERING-REVIEW-PENDING',
 ];
 const missingExpectedBlockers = MODE === 'original'

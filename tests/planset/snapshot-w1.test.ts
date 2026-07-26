@@ -181,6 +181,12 @@ export function baseSnapshot(): PermitDesignSnapshot {
              groundSnowPsf: 20, roofSnowPsf: 14, buildingHeightFt: 15, componentCladdingZones: [],
              upliftPressurePsf: null, downforcePressurePsf: null,
              codeAuthority: { asceEdition: 'ASCE 7-22', source: 'pending-w4-ahj-authority' },
+             environmentalLoadAuthority: {
+               ultimateWindSpeedMph: 115, windSpeedBasis: 'operator-entered', riskCategory: 'II', exposureCategory: 'C',
+               groundSnowLoadPsf: 20, snowLoadBasis: 'operator-entered', snowLoadSource: null,
+               coordinates: null, addressUsed: null, sourceDocumentId: null, sourceDataset: null,
+               sourceVersionOrDate: null, lookupTimestampIso: null, operatorOverrides: ['ultimateWindSpeedMph', 'groundSnowLoadPsf'],
+               verificationStatus: 'unverified', projectOrAhj: null, evidenceRef: null, provenance: { source: 'test' } },
              provenance: { source: 'test' } },
       engine: { moduleDeadLoadLbs: null, rackingDeadLoadLbs: null, addedDeadLoadPsf: null,
                 distributedRoofLoadPsf: null, totalRailLoadLbsPerFt: null, governingUtilization: 0.4,
