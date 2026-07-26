@@ -14,8 +14,10 @@
 // Gates enforced (exit NON-ZERO on any failure):
 //    4  six-CCC ampacity shows EVERY factor (never a lone multiplied derate)
 //    5  missing ampacity input ⇒ PENDING, never PASS
-//    6  grounding method explicit — exactly ONE modeled result
-//    7  separate-EGC language requires a matching route + BOM quantity
+//    6  grounding outcome is ONE of three, document-backed for A/B (never a
+//       conductor-count inference), resolved for the EXACT selected SKUs
+//    7  every surface renders THAT outcome; PENDING is fail-closed (non-orderable
+//       candidate quantity, no separate-EGC/no-EGC assertion, blocker shown)
 //    9  sealing caps == actual unused connector objects (topology, not branchCount)
 //   10  terminators == required cable-end objects
 //   11  legend entries == displayed segment wiring methods
@@ -147,44 +149,104 @@ const holesPending = amps.filter(a =>
 check(5, 'every incomplete ampacity result is PENDING', holesPending.length === 0,
   holesPending.map(a => a.sectionId).join(', '));
 
-// ═══ §5 / gates 6-7 — grounding authority + BOM quantity ═══════════════════
+// ═══ GROUNDING AUTHORITY (gates 6-7) — OUTCOME-CONSISTENCY, not a fixed result ═
+// Corrected 2026-07-25 (Ray's ruling): the grounding gates no longer require
+// "result B + matching quantities". They require that the ONE canonical outcome
+// (A / B / C) is document-backed and that EVERY surface renders THAT outcome, with
+// C (pending) fail-closed: no separate-EGC assertion, no no-EGC assertion, no PASS,
+// and the candidate quantity marked non-orderable.
 const g = ev.openAirBranchGrounding || {};
+const OUTCOMES = ['NO_SEPARATE_EGC_REQUIRED', 'SEPARATE_EGC_REQUIRED', 'PENDING_MANUFACTURER_AUTHORITY'];
 if (isMicro) {
-  check(6, 'exactly ONE grounding method is modeled and it is explicit',
-    ['separate-conductor', 'integrated-listed', 'none-required'].includes(g.groundingMethod),
-    `groundingMethod=${g.groundingMethod}`);
-  check(6, 'the grounding result carries its manufacturer + code basis',
-    !!g.sourceAuthority && !!g.codeBasis && /250\.122/.test(String(g.codeBasis)),
-    `${g.codeBasis}`);
+  const auth = g.authority || null;
+  check(6, 'the grounding authority resolves to exactly ONE of the three legal outcomes',
+    OUTCOMES.includes(g.outcome), `outcome=${g.outcome}`);
+  // Resolution specificity: A/B require BOTH exact SKUs on the record. A missing
+  // SKU is a real gap — it can only ever produce PENDING, never a method.
+  const skusExact = !!auth && !!auth.selectedMicroinverterSku && !!auth.selectedCableAssemblySku;
+  check(6, 'the outcome is SKU-specific (exact micro + cable SKU, or PENDING because a SKU is unknown)',
+    !!auth && (skusExact || g.outcome === 'PENDING_MANUFACTURER_AUTHORITY'),
+    `micro=${auth?.selectedMicroinverterSku} cable=${auth?.selectedCableAssemblySku} outcome=${g.outcome}`);
+  // THE STRUCTURAL RULE: A or B is legal ONLY with a verified, exactly-applicable
+  // document. Conductor count can never have produced the outcome.
+  const docBacked = !!auth
+    && auth.applicabilityVerification?.verdict === 'applicable'
+    && !!auth.documentId && !!auth.documentHash && !!auth.documentSectionOrPage;
+  check(6, 'outcome A/B is asserted ONLY with a verified, exactly-applicable document',
+    g.outcome === 'PENDING_MANUFACTURER_AUTHORITY' ? !docBacked || true : docBacked,
+    `outcome=${g.outcome} docBacked=${docBacked} doc=${auth?.documentId ?? 'none'}`);
+  check(6, 'the cable conductor count is recorded as NON-DETERMINATIVE',
+    !!auth && auth.conductorCountIsNonDeterminative === true,
+    `conductorCount=${auth?.cableConductorCount} nonDeterminative=${auth?.conductorCountIsNonDeterminative}`);
+  check(6, 'the result carries its authority + NEC basis',
+    !!g.sourceAuthority && !!g.codeBasis, `${g.codeBasis}`);
+  // no sheet may claim the trunk assembly grounds the branch by itself
+  check(6, 'no sheet claims the Q-Cable provides integrated equipment grounding',
+    !/Q.?Cable[^.]{0,80}integrated (equipment )?grounding/i.test(noB64));
 
   const assertsSeparate = /SEPARATE\s+(EQUIPMENT GROUNDING CONDUCTOR|EGC)/i.test(noB64)
     || /SEPARATE\s+#?\d+[^.]{0,40}EGC/i.test(noB64);
-  if (g.groundingMethod === 'separate-conductor' || assertsSeparate) {
-    // gate 7 — the language requires a matching ROUTE ...
+  const assertsNoEgc = /no (separate |additional )?EGC (is )?required/i.test(noB64);
+
+  if (g.outcome === 'PENDING_MANUFACTURER_AUTHORITY') {
+    // ── FAIL CLOSED ────────────────────────────────────────────────────────
+    check(7, 'the pending outcome renders the PENDING MANUFACTURER AUTHORITY label',
+      noB64.includes('GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY'),
+      `label occurrences=${(noB64.match(/GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY/g) || []).length}`);
+    check(7, 'NO sheet asserts a separate/additional EGC requirement while pending',
+      !assertsSeparate, assertsSeparate ? 'a separate-EGC assertion is rendered' : 'none');
+    check(7, 'NO sheet asserts that no EGC is required while pending',
+      !assertsNoEgc, assertsNoEgc ? 'a no-EGC assertion is rendered' : 'none');
+    check(7, 'the blocking QCABLE-GROUNDING-AUTHORITY-UNVERIFIED code is shown',
+      noB64.includes('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED'));
+    check(7, 'the candidate EGC quantity is a NON-ORDERABLE design quantity',
+      g.bomRowState === 'design-quantity-non-orderable' && g.nonOrderable === true
+      && noB64.includes('NON-ORDERABLE / PENDING MANUFACTURER GROUNDING AUTHORITY'),
+      `bomRowState=${g.bomRowState} labelRendered=${noB64.includes('NON-ORDERABLE / PENDING MANUFACTURER GROUNDING AUTHORITY')}`);
+    check(7, 'no PASS / VERIFIED grounding claim is rendered for this section',
+      !/grounding[^.<]{0,60}✓\s*PASS/i.test(noB64)
+    // case-SENSITIVE: a claim token 'VERIFIED', never the lowercase prose
+    // 'no verified document' nor the blocker code '…-UNVERIFIED'.
+    && !/GROUNDING(?![-A-Z])[^.<]{0,60}(?<![A-Za-z-])VERIFIED/.test(noB64));
+    // the racking / module-frame bonding requirement is INDEPENDENT and preserved
+    check(7, 'module-frame / racking bonding remains an independent, stated requirement',
+      !!auth?.rackingModuleBondingRequirement?.required
+      && auth.rackingModuleBondingRequirement.independentOfCableGrounding === true);
+  } else if (g.outcome === 'SEPARATE_EGC_REQUIRED') {
     check(7, 'the separate EGC has an enumerated route (segment + branch objects)',
       Array.isArray(g.branchIds) && g.branchIds.length === (el.branches || []).length
       && Array.isArray(g.segmentIds) && g.segmentIds.length > 0,
       `branches=${(g.branchIds || []).length}/${(el.branches || []).length} segments=${(g.segmentIds || []).join(',')}`);
-    // ... derived from the SAME cable-path geometry as the trunk ...
     const paths = el.branchCablePaths || [];
     const sumDesigned = Math.round(paths.reduce((s, p) => s + (p.designedInstalledLengthFt || 0), 0) * 10) / 10;
     check(7, 'the EGC length equals Σ BranchCablePath designed-installed (trunk geometry)',
       g.designedInstalledFt != null && Math.abs(g.designedInstalledFt - sumDesigned) <= 0.11,
       `egc=${g.designedInstalledFt} Σpaths=${sumDesigned}`);
-    // ... AND a BOM quantity.
     const expectedBom = g.designedInstalledFt != null
       ? Math.ceil(g.designedInstalledFt * g.wasteFactor) : null;
     check(7, 'the BOM footage = designed-installed × documented waste',
       g.bomFootageFt != null && g.bomFootageFt === expectedBom,
       `bom=${g.bomFootageFt} expected=${expectedBom} waste=${g.wasteFactor}`);
-    // the rendered sheets state that SAME quantity (report == rendered)
     const qtyHits = (noB64.match(new RegExp(`${g.bomFootageFt}\\s*ft`, 'g')) || []).length;
-    check(7, 'the sheets asserting a separate EGC print the SAME footage', qtyHits >= 2,
+    check(7, 'the sheets asserting an additional EGC print the SAME footage', qtyHits >= 2,
       `${g.bomFootageFt} ft appears ${qtyHits}×`);
-    // no sheet may claim the trunk assembly grounds the branch
-    check(6, 'no sheet claims the Q-Cable provides integrated equipment grounding',
-      !/Q.?Cable[^.]{0,80}integrated (equipment )?grounding/i.test(noB64));
+    check(7, 'the required EGC is ORDERABLE (not a design quantity)',
+      g.bomRowState === 'orderable' && g.nonOrderable !== true, `bomRowState=${g.bomRowState}`);
+  } else {
+    // (A) — no additional conductor in this section.
+    check(7, 'outcome A renders NO separate-EGC requirement for this section', !assertsSeparate);
+    check(7, 'outcome A emits NO open-air EGC BOM row', g.bomRowState === 'no-row',
+      `bomRowState=${g.bomRowState}`);
+    check(7, 'outcome A retains the independent module-frame / racking bonding requirement',
+      !!auth?.rackingModuleBondingRequirement?.required
+      && auth.rackingModuleBondingRequirement.hardwareRetained === true);
   }
+  // §5 SEPARATION — five distinct domains, and only the open-air one is governed.
+  const graph = el.groundingDomainGraph || [];
+  check(7, 'the five grounding domains are separated and only the open-air one is governed by this resolver',
+    graph.length === 5 && graph.filter(d => d.governedByOpenAirGroundingResolver).length === 1
+    && graph.some(d => d.domain === 'home-run-raceway-egc' && d.required === true),
+    `domains=${graph.map(d => d.domain).join(',')}`);
 }
 
 // ═══ §7 / gates 9-10 — caps + terminators from topology ════════════════════
@@ -247,8 +309,10 @@ const out = {
     // §4 shared-raceway ampacity artifact (the directive deliverable)
     sharedRacewayAmpacity: hrEv ?? null,
     ampacityBySection: amps,
-    // §5 Q-Cable grounding authority report
+    // Q-Cable grounding authority report (three-outcome, document-based)
     openAirBranchGrounding: ev.openAirBranchGrounding ?? null,
+    groundingOutcome: (ev.openAirBranchGrounding || {}).outcome ?? null,
+    groundingDomainGraph: el.groundingDomainGraph ?? null,
     // §7 connector / cap / terminator topology
     connectorTopology: ev.connectorTopology ?? null,
     // §8 legend reconciliation

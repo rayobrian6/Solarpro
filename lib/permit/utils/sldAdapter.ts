@@ -18,7 +18,7 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 import type { ComputedSystem, RunSegment } from '@/lib/computed-system';
 import { getDesignTemps } from './designTemps';
 import { peekSnapshot } from '../snapshot/read';
-import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectListedCableAssembly } from '../snapshot/electricalProjection';
+import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectListedCableAssembly, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 
 /** Resolve a panel's Voc temp coefficient (%/°C) from the equipment DB by
  *  model string — the SAME records the equipment pages read. Undefined when
@@ -246,6 +246,18 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // FEEDER EGC (#10), so E-1 asserted a separate open-air EGC in a gauge no
     // grounding object or BOM row carried (gate 7).
     branchEgcGauge:          _snapBranchEgc ?? undefined,
+    // GROUNDING AUTHORITY (2026-07-25) — SEGMENT-1's open-air grounding line is the
+    // OUTCOME of the document-based grounding authority, not an unconditional EGC
+    // assertion. PENDING (the live state) prints a pending label; the E-1 note and
+    // RS-1 carry the full authority + the blocker.
+    openAirBranchEgcLabel: (() => {
+      if (!isMicro) return undefined;
+      const _g = projectOpenAirBranchGrounding(peekSnapshot(input));
+      if (!_g.present) return undefined;
+      if (_g.outcome === 'PENDING_MANUFACTURER_AUTHORITY') return 'EGC: PENDING MFR AUTHORITY';
+      if (_g.outcome === 'NO_SEPARATE_EGC_REQUIRED') return "NO ADD'L EGC — LISTED METHOD";
+      return `1×${(_g.conductorSize ?? '#12 AWG').replace(' AWG', '')} GRN EGC`;
+    })(),
     homerunEgcGauge:         (_snapHomerun.present ? (_snapHomerun.egcGauge ?? undefined) : undefined)
                                ?? _snapBranchEgc ?? undefined,
     acOCPD,

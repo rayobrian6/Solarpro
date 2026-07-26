@@ -1414,8 +1414,12 @@ export const SCHED_BOM_ROWS_FIRST = 10;
 
 /** Max BOM rows PER continuation sheet (SCHED-2, SCHED-3, …). All-table pages,
  *  so a page holds more rows than the primary sheet. Chosen so a full
- *  continuation page + its summary block never overflows the fixed 11in page. */
-export const SCHED_BOM_ROWS_CONT = 22;
+ *  continuation page + its summary block never overflows the fixed 11in page.
+ *  22 → 21 (2026-07-25): a row whose description carries an authority state
+ *  (non-orderable design quantity, pending manufacturer authority) wraps to
+ *  several lines, and a full 22-row page then clipped by ~30px. 21 leaves the
+ *  headroom those multi-line rows need (page-fit gate 13). */
+export const SCHED_BOM_ROWS_CONT = 21;
 
 /** Number of SCHED continuation sheets required for a BOM of this size (0 when
  *  it fits on the primary SCHED sheet). Single source shared by the manifest
@@ -1632,6 +1636,14 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
     ? `<div style="padding:1px 4px;font-size:7px;line-height:1.25;border:var(--border);border-top:none;background:#fdecec;">
         <strong>AC TRUNK CABLE (BOM):</strong> base cable quantity <span class="mono">${_schedPS.procurementLengthFt ?? '—'} ft</span> = CURRENT BASE CABLE QUANTITY &mdash; <strong style="color:#b00">PROCUREMENT INSUFFICIENCY: short of the ${_schedPS.totalDesignedInstalledFt} ft designed-installed path by ${_schedPS.deficitFt} ft. NON-ORDERABLE / PENDING SOLUTION</strong> (verified listed cable-extension required; QCABLE-PROCUREMENT-INSUFFICIENT, see RS-1).</div>`
     : '';
+  // GROUNDING AUTHORITY (2026-07-25) — SCHED renders the open-air branch grounding
+  // OUTCOME through the BOM ROW ITSELF (the schedule's procurement surface): while
+  // the outcome is PENDING the candidate EGC row carries the non-orderable design-
+  // quantity label, the pending NEC basis and the blocker code, and the BOM summary
+  // excludes it from the authoritative procurement totals. No extra note block is
+  // emitted here — SCHED is the densest sheet in the set and an added block pushes
+  // the page conclusion past the printable box (page-fit gate 13). The full
+  // authority prose lives on E-1 / PV-4B / PV-1B / RS-1.
   // 75°C ampacity display keyed to conductor size (NEC 310.16).
   const _schedAmpacity = (gauge: string): string => ({
     '#12 AWG': '25A (#12)', '#10 AWG': '35A (#10)', '#8 AWG': '50A (#8)',

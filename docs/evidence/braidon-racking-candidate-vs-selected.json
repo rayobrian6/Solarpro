@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T20:36:50.723Z",
+  "generatedAt": "2026-07-26T16:21:30.073Z",
   "artifact": "braidon-racking-candidate-vs-selected",
   "section": "§11 racking confirmed-base vs assembly-dependent vs unselected",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-69A79CD87335",
-  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+  "snapshotId": "PDS-D307252768B7",
+  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
   "purpose": "The racking BOM separates CONFIRMED mount-base equipment (orderable, real SKU) from ASSEMBLY-DEPENDENT components (rails, splices, clamps, T-bolts, L-feet, bonding) that cannot be specified until the rail assembly is pinned. While railSku is null those rows render PENDING RACKING ASSEMBLY SELECTION, are non-orderable, and are excluded from procurement totals. Candidates live in the operator UI, never as an orderable permit BOM line.",
   "railSelected": false,
   "confirmedBase": {

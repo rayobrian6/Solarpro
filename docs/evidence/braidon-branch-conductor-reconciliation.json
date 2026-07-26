@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T20:35:03.204Z",
+  "generatedAt": "2026-07-26T16:21:29.968Z",
   "artifact": "braidon-branch-conductor-reconciliation",
   "section": "§5 branch wire quantities vs BOM (CO-B, object-derived)",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-69A79CD87335",
-  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+  "snapshotId": "PDS-D307252768B7",
+  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
   "purpose": "THWN field conductors are derived from IN-CONDUIT route segments only: Hot = conductorsPerCircuit × sharedCircuitCount × oneWayFt × waste. EGC = one shared green per raceway (NEC 250.122(C)). The open-air Q-Cable branch trunk is billed as trunk_cable drops, never as THWN. No merged \"AC wiring\" branch+feeder+EGC row.",
   "topology": "MICRO",
   "waste": 1.15,

@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T22:02:30.843Z",
+  "generatedAt": "2026-07-26T16:21:29.968Z",
   "artifact": "braidon-qcable-assembly-reconciliation",
   "section": "§6/§7/§10 listed cable assembly + geometric length reconciliation",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-69A79CD87335",
-  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+  "snapshotId": "PDS-D307252768B7",
+  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
   "purpose": "The micro AC branch trunk is a LISTED cable assembly (never generic THWN); its length is geometry-derived per branch (never the plane-width heuristic). Drops (1/micro) are the reconciling invariant across PV-1B geometry, PV-4B, SCHED and the BOM; procurement footage = Σ drops×pitch×waste; designed-installed = Σ geometric path.",
   "listedCableAssembly": {
     "assemblyId": "QCABLE-ASSEMBLY",

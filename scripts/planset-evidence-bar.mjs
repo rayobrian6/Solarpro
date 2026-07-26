@@ -185,7 +185,7 @@ for (const n of [4, 5, 6, 7, 9, 10, 11]) {
   const fails = rs.filter(r => !r.pass);
   const NAMES = {
     4: 'six-ccc-ampacity-full-chain', 5: 'missing-ampacity-input-is-pending',
-    6: 'grounding-method-explicit', 7: 'separate-egc-route-and-bom-quantity',
+    6: 'grounding-outcome-document-backed', 7: 'grounding-outcome-consistent-across-surfaces',
     9: 'caps-equal-unused-connector-objects', 10: 'terminators-equal-cable-end-objects',
     11: 'legend-equals-segment-wiring-methods',
   };
@@ -272,11 +272,30 @@ if (wseArt?.sharedRacewayAmpacity) {
   rcheck('ampacityFinalAllowable', a.finalAllowableAmpacityA,
     new RegExp(`${Number(a.finalAllowableAmpacityA).toFixed(2).replace('.', '\\.')}|${Math.round(a.finalAllowableAmpacityA)}`).test(noB64));
 }
-if (wseArt?.openAirBranchGrounding?.bomFootageFt != null) {
-  const q = wseArt.openAirBranchGrounding.bomFootageFt;
-  rcheck('openAirEgcFootage', q, (noB64.match(new RegExp(`${q}\\s*ft`, 'g')) ?? []).length >= 2);
-  rcheck('groundingMethod', wseArt.openAirBranchGrounding.groundingMethod,
-    wseArt.openAirBranchGrounding.groundingMethod !== 'pending');
+// GROUNDING (corrected 2026-07-25) — report == rendered on the OUTCOME, not on a
+// fixed "result B". A PENDING outcome must render its pending label + the blocker
+// and must NOT render either grounding assertion; only outcome B pins a quantity.
+if (wseArt?.openAirBranchGrounding?.outcome) {
+  const gr = wseArt.openAirBranchGrounding;
+  rcheck('groundingOutcome', gr.outcome,
+    ['NO_SEPARATE_EGC_REQUIRED', 'SEPARATE_EGC_REQUIRED', 'PENDING_MANUFACTURER_AUTHORITY'].includes(gr.outcome));
+  if (gr.outcome === 'PENDING_MANUFACTURER_AUTHORITY') {
+    rcheck('groundingPendingRendered', 'GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY',
+      noB64.includes('GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY')
+      && noB64.includes('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED'));
+    rcheck('groundingNoAssertionWhilePending', 'no separate-EGC / no-EGC assertion',
+      !/SEPARATE\s+(EQUIPMENT GROUNDING CONDUCTOR|EGC)/i.test(noB64)
+      && !/SEPARATE\s+#?\d+[^.]{0,40}EGC/i.test(noB64)
+      && !/no (separate |additional )?EGC (is )?required/i.test(noB64));
+    rcheck('groundingCandidateNonOrderable', 'design-quantity-non-orderable',
+      gr.bomRowState === 'design-quantity-non-orderable'
+      && noB64.includes('NON-ORDERABLE / PENDING MANUFACTURER GROUNDING AUTHORITY'));
+  } else if (gr.outcome === 'SEPARATE_EGC_REQUIRED' && gr.bomFootageFt != null) {
+    rcheck('openAirEgcFootage', gr.bomFootageFt,
+      (noB64.match(new RegExp(`${gr.bomFootageFt}\\s*ft`, 'g')) ?? []).length >= 2);
+  } else if (gr.outcome === 'NO_SEPARATE_EGC_REQUIRED') {
+    rcheck('groundingNoRow', 'no-row', gr.bomRowState === 'no-row');
+  }
 }
 if (wseArt?.connectorTopology?.occupiedDrops != null) {
   rcheck('occupiedDrops', wseArt.connectorTopology.occupiedDrops,

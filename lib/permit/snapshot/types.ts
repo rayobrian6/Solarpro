@@ -20,6 +20,11 @@ import type { CodeAuthorityRecord } from './codeAuthority';
 export type { CodeAuthorityRecord, CodeEdition, CodeEditionKind, CodeVerificationStatus } from './codeAuthority';
 import type { ProjectAuthorityRecord } from './projectAuthority';
 export type { ProjectAuthorityRecord, ProjectIssueState } from './projectAuthority';
+import type { GroundingAuthorityResult, GroundingDomainNode } from './groundingAuthority';
+export type {
+  GroundingAuthorityResult, GroundingDomainNode, GroundingOutcome,
+  GroundingDocumentEvidence, GroundingApplicabilityVerification,
+} from './groundingAuthority';
 
 export const SNAPSHOT_SCHEMA_VERSION = '1.0.0';
 
@@ -1042,6 +1047,19 @@ export interface PermitDesignSnapshot {
      *  `insufficient` and unresolved, the build emits the BLOCKING
      *  QCABLE-PROCUREMENT-INSUFFICIENT registry entry. Null for non-micro. */
     procurementSufficiency?: ProcurementSufficiency | null;
+    /** GROUNDING AUTHORITY CORRECTION (2026-07-25): THE canonical, DOCUMENT-BASED
+     *  three-outcome grounding authority for the OPEN-AIR microinverter branch /
+     *  listed-cable-assembly section ONLY. Conductor count can never select an
+     *  outcome; without a verified, exactly-applicable manufacturer document the
+     *  outcome is PENDING_MANUFACTURER_AUTHORITY and the BLOCKING
+     *  QCABLE-GROUNDING-AUTHORITY-UNVERIFIED registry entry fires. Null for
+     *  non-micro / no modeled open-air branch grounding. */
+    openAirGroundingAuthority?: GroundingAuthorityResult | null;
+    /** §5 SEPARATION: the five DISTINCT grounding/bonding domains as explicit
+     *  objects (open-air branch cable section, in-raceway home-run EGC, racking /
+     *  module-frame bonding, GEC, service bonding). The open-air grounding outcome
+     *  governs exactly ONE of them — no domain inherits another's result. */
+    groundingDomainGraph?: GroundingDomainNode[];
     /** §5 (07-22): canonical service-interconnection objects (tap point, tap
      *  conductors, fused OCPD, utility disconnect, meter, service disconnect) —
      *  each with its OWN honest length + attached code rules. Supply-side designs

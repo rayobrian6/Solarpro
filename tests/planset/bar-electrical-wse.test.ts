@@ -5,8 +5,8 @@
 // Permanent gates covered here:
 //   4  — six-CCC ampacity shows EVERY factor (never a lone multiplied derate)
 //   5  — missing ampacity inputs ⇒ PENDING, never PASS
-//   6  — grounding method explicit (exactly ONE modeled result)
-//   7  — separate-EGC language requires a matching route + BOM quantity
+//   6  — grounding outcome is ONE of three and document-backed (never inferred)
+//   7  — every surface renders THAT outcome; PENDING is fail-closed
 //   9  — sealing caps == actual unused connector objects (topology, not branchCount)
 //  10  — terminators == required cable-end objects
 //  11  — legend entries == displayed segment wiring methods
@@ -185,95 +185,99 @@ describe('§4 — AmpacityAdjustmentResult: every factor, never a lone derate (g
   });
 });
 
-// ── §5 / gates 6-7 — grounding authority + matching BOM quantity ─────────────
-describe('§5 — open-air branch grounding: ONE explicit result + matching BOM footage (gates 6, 7)', () => {
-  it('gate 6 — the modeled result is exactly (B) separate-conductor, from the 2-conductor assembly authority', () => {
+// ── gates 6-7 — grounding authority: OUTCOME-CONSISTENCY across surfaces ─────
+// CORRECTED 2026-07-25 (Ray's ruling). These gates no longer assert "result B".
+// They assert that the ONE canonical outcome is document-backed (never inferred
+// from the conductor count) and that every surface renders THAT outcome. The full
+// three-outcome matrix lives in tests/planset/qcable-grounding-authority.test.ts.
+describe('grounding — ONE document-based outcome, rendered consistently (gates 6, 7)', () => {
+  it('gate 6 — the live outcome is PENDING_MANUFACTURER_AUTHORITY (no applicable document in-repo)', () => {
     const { snap } = gen();
     const g = projectOpenAirBranchGrounding(snap);
     expect(g.present).toBe(true);
-    expect(g.groundingMethod).toBe('separate-conductor');   // exactly ONE result
-    expect(g.required).toBe(true);
-    expect(g.conductorSize).toBeTruthy();
-    expect(g.conductorMaterial).toBe('Cu');
-    expect(g.codeBasis).toMatch(/250\.122/);
-    // the authority names the 2-conductor / no-integrated-EGC basis (not a guess)
-    expect(g.sourceAuthority).toMatch(/NO integrated EGC/i);
+    expect(g.outcome).toBe('PENDING_MANUFACTURER_AUTHORITY');
+    expect(g.groundingMethod).toBe('pending');
+    // "required" is NULL while pending — a pending method is NOT "not required".
+    expect(g.required).toBeNull();
+    expect(g.renderLabel).toBe('GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY');
+    // the authority is resolved against the EXACT selected SKUs (a null SKU is a
+    // real gap that can only ever produce PENDING — never a family-label match).
+    expect(g.authority!).toHaveProperty('selectedMicroinverterSku');
+    expect(g.authority!.selectedCableAssemblySku).toBe('Q-12-10-240');
+    expect(g.authority!.applicabilityVerification.verdict).not.toBe('applicable');
+    // the conductor count is recorded and explicitly non-determinative
+    expect(g.authority!.conductorCountIsNonDeterminative).toBe(true);
     const asm = projectListedCableAssembly(snap);
     if (asm.present) expect(asm.assembly!.conductorCount).toBe(2);
   });
 
-  it('gate 7 — the EGC length derives from the SAME BranchCablePath geometry as the trunk', () => {
+  it('gate 7 — the candidate EGC keeps the trunk geometry + waste, but as a DESIGN quantity', () => {
     const { snap } = gen();
     const g = projectOpenAirBranchGrounding(snap);
     const asm = projectListedCableAssembly(snap);
-    // Σ designed-installed equals the trunk projection's Σ designed-installed
     expect(g.designedInstalledFt).toBe(asm.totalDesignedInstalledFt);
     expect(g.lengthProvenance).toBe(asm.lengthProvenance);
     expect(g.pathBasis).toMatch(/BranchCablePath/);
-    // BOM footage = designed-installed × waste (documented, not invented)
     expect(g.bomFootageFt).toBe(Math.ceil(g.designedInstalledFt! * g.wasteFactor));
-    // one branch id per canonical branch — the route is enumerated, not asserted
     expect(g.branchIds.length).toBe(snap.electrical.branches.length);
+    // …and it is NOT orderable while the authority is pending
+    expect(g.bomRowState).toBe('design-quantity-non-orderable');
+    expect(g.nonOrderable).toBe(true);
   });
 
-  it('gate 7 — the BOM carries the open-air branch EGC footage the sheets assert', () => {
+  it('gate 7 — the BOM carries the candidate footage, flagged NON-ORDERABLE', () => {
     const { snap, input } = gen();
     const cad = generateCADLayout(input) as any;
     const bom = generateBOMForPermit(input, cad);
     const g = projectOpenAirBranchGrounding(snap);
     const row = bom.find(i => i.partNumber?.startsWith('GRN-OPENAIR-'));
-    expect(row, 'open-air branch EGC BOM row must exist').toBeTruthy();
-    // QUANTITY MATCHES the projected authority exactly (gate 7)
+    expect(row, 'candidate open-air EGC row must exist as a design quantity').toBeTruthy();
     expect(row!.quantity).toBe(g.bomFootageFt);
     expect(row!.unit).toBe('ft');
-    expect(row!.necReference).toMatch(/250\.122/);
-    // labeled with the branch segment ids + the design-vs-procurement taxonomy
-    for (const id of g.branchIds) expect(row!.description).toContain(id);
+    expect(row!.nonOrderable).toBe(true);
     expect(row!.description).toMatch(/designed-installed/);
-    expect(row!.description).toMatch(/procurement/);
-    // it is NOT merged into the in-raceway green-EGC rows (distinct line)
+    for (const id of g.branchIds) expect(row!.description).toContain(id);
     const inRaceway = bom.filter(i => /Green EGC/i.test(i.model) && !/open-air/i.test(i.model));
     expect(inRaceway.length).toBeGreaterThan(0);
     expect(inRaceway.every(i => i.partNumber !== row!.partNumber)).toBe(true);
   });
 
-  it('gate 7 (rendered) — separate-EGC language on PV-1B / E-1 / PV-4B all state the SAME quantity', () => {
-    const { html, snap } = gen();
+  it('gate 7 (rendered) — no sheet asserts EITHER grounding method while pending', () => {
+    const { html } = gen();
     const noB64 = html.replace(/data:image[^"')]+/g, '');
-    const g = projectOpenAirBranchGrounding(snap);
-    // the separate-EGC assertion appears
-    expect(noB64).toMatch(/SEPARATE\s+(EQUIPMENT GROUNDING CONDUCTOR|#?\d+.*EGC|EGC)/i);
-    // and every sheet that asserts it prints the SAME BOM footage
-    const qty = String(g.bomFootageFt);
-    const occurrences = (noB64.match(new RegExp(`${qty}\\s*ft`, 'g')) ?? []).length;
-    expect(occurrences).toBeGreaterThanOrEqual(2);
-    // PV-1B (branch layout) carries the branch-EGC callout
-    expect(noB64).toMatch(/NEC 250\.122 Branch EGC/);
-    // no sheet asserts an integrated/listed grounding method for the Q-Cable
+    expect(noB64).not.toMatch(/SEPARATE\s+(EQUIPMENT GROUNDING CONDUCTOR|#?\d+.*EGC|EGC)/i);
+    expect(noB64).not.toMatch(/no (separate |additional )?EGC (is )?required/i);
+    // the pending authority IS stated, with its blocker
+    expect(noB64).toContain('GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY');
+    expect(noB64).toContain('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED');
+    // PV-1B carries the open-air grounding callout (pending form)
+    expect(noB64).toMatch(/Open-Air Branch Grounding/);
+    // no sheet asserts an integrated/listed grounding method for the Q-Cable either
     expect(noB64).not.toMatch(/Q.?Cable[^.]{0,80}integrated (equipment )?grounding/i);
   });
 
-  it('gate 7 — the E-1 SVG branch EGC gauge is the BRANCH grounding object, NOT the feeder EGC', () => {
+  it('gate 7 — the E-1 open-air segment prints the PENDING grounding line, and the home-run its OWN EGC', () => {
     const { html, snap } = gen();
     const noB64 = html.replace(/data:image[^"')]+/g, '');
     const branchEgc = snap.electrical.groundingObjects.find(g => g.purpose === 'branch-egc')!.conductorSize!;
     const feederEgc = snap.electrical.groundingObjects.find(g => g.purpose === 'feeder-egc')!.conductorSize!;
-    // On this design the two DIFFER (#12 branch @20A vs #10 feeder @60A) — the
-    // regression was the branch segment printing the feeder's gauge.
     expect(branchEgc).not.toBe(feederEgc);
+    // the OPEN-AIR section no longer asserts a conductor — it states the pending authority
+    expect(noB64).toContain('EGC: PENDING MFR AUTHORITY');
+    // the in-raceway home-run EGC (independent, NEC 250.122 wiring method) is KEPT
     const bn = branchEgc.replace('#', '').replace(' AWG', '').trim();
     const fn = feederEgc.replace('#', '').replace(' AWG', '').trim();
-    // the open-air branch label cites the BRANCH EGC
     expect(noB64).toContain(`1×#${bn} GRN EGC`);
     expect(noB64).not.toContain(`1×#${fn} GRN EGC`);
-    // and it equals the gauge the BOM open-air EGC row orders
+    // the candidate conductor size still traces to the branch grounding object
     const g = projectOpenAirBranchGrounding(snap);
     expect(g.conductorSize).toBe(branchEgc);
   });
 
-  it('a non-micro design produces NO open-air branch EGC authority or BOM row (no phantom footage)', () => {
+  it('a non-micro design produces NO open-air branch grounding authority or BOM row', () => {
     const g = projectOpenAirBranchGrounding({ electrical: { topology: 'STRING' } } as any);
     expect(g.present).toBe(false);
+    expect(g.outcome).toBe('PENDING_MANUFACTURER_AUTHORITY');
     expect(g.groundingMethod).toBe('pending');
     expect(g.bomFootageFt).toBeNull();
   });
@@ -381,14 +385,17 @@ describe('BAR evidence export — canonical objects are machine-extractable from
     const { html, snap } = gen();
     const ev = readStamp(html);
     const g = projectOpenAirBranchGrounding(snap);
-    expect(ev.openAirBranchGrounding.groundingMethod).toBe('separate-conductor');
+    expect(ev.openAirBranchGrounding.outcome).toBe(g.outcome);
+    expect(ev.openAirBranchGrounding.groundingMethod).toBe(g.groundingMethod);
+    expect(ev.openAirBranchGrounding.bomRowState).toBe(g.bomRowState);
     expect(ev.openAirBranchGrounding.bomFootageFt).toBe(g.bomFootageFt);
     expect(ev.openAirBranchGrounding.designedInstalledFt).toBe(g.designedInstalledFt);
     // §7 — occupied drops + one cable-end object per branch (the cap/terminator basis)
     expect(ev.connectorTopology.occupiedDrops).toBe(projectListedCableAssembly(snap).totalDrops);
     expect(ev.connectorTopology.perBranch.length).toBe(snap.electrical.branches.length);
     for (const b of ev.connectorTopology.perBranch) expect(b.cableEndObjectId).toMatch(/-END$/);
-    // §8 — the legend identity (2-conductor listed assembly, no integrated EGC)
+    // §8 — the legend identity (the listed 2-conductor assembly; the conductor
+    // count is construction data only — it decides no grounding method)
     expect(ev.openAirWiringMethod.conductorCount).toBe(2);
     expect(ev.openAirWiringMethod.wiringMethodLabel).toBeTruthy();
   });

@@ -75,6 +75,7 @@ const KNOWN_BLOCKER_DOMAIN: Record<string, BlockerDomain> = {
   'CONDUIT-FILL-PENDING': 'electrical',
   'TAP-CONDUCTOR-LENGTH-PENDING': 'electrical',
   'QCABLE-PROCUREMENT-INSUFFICIENT': 'electrical',   // §Q — procurement deficit gate
+  'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': 'electrical',  // grounding-authority gate (2026-07-25)
   'PROJECT-NAME-NONPRODUCTION': 'document',
   'DESIGNER-OF-RECORD-MISSING': 'document',
   'MODULE-EXACT-DATASHEET-PENDING': 'document',

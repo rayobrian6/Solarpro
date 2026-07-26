@@ -28,6 +28,7 @@ import { microBranchCount, balancedBranchSizes, planMicroBranches } from '../uti
 // requires the matching route + BOM quantity). Read-only projection.
 import { peekSnapshot } from '../snapshot/read';
 import { projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
+import { GROUNDING_PENDING_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -503,16 +504,25 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const _fsCovEarly = arrayCoverageFrac(totalPanels, _fsPanelDims.L, _fsPanelDims.W, _fsRoofFt2Early, _fsMeanPitch);
   const _fsInEarly = resolveFireSetbackIn(project.ahjRidgeSetbackIn as number | undefined, _fsCovEarly);
 
-  // \u00a75 \u2014 the canonical open-air branch grounding authority (same object E-1 /
-  // PV-4B print). On a micro design the listed Q-Cable is a 2-conductor assembly
-  // with NO integrated EGC \u21d2 a SEPARATE open-air EGC is required; PV-1B states
-  // the method AND the BOM footage so the three sheets never disagree (gate 7).
+  // The canonical open-air branch grounding authority (the SAME object E-1 / PV-4B
+  // print). Corrected 2026-07-25: the METHOD comes from the document-based
+  // three-outcome resolver, never from the cable conductor count. Under the live
+  // PENDING outcome PV-1B states the pending authority \u2014 it does not assert an EGC.
   const _agGnd = projectOpenAirBranchGrounding(peekSnapshot(input));
-  const _agGndCallout = (_isMicro && _agGnd.present && _agGnd.groundingMethod === 'separate-conductor')
-    ? [{ n: 5, label: 'NEC 250.122 Branch EGC',
-         sub: `SEPARATE ${_agGnd.conductorSize ?? '#10'} ${_agGnd.conductorMaterial ?? 'Cu'} EGC open-air with each branch trunk `
-            + `(Q-Cable = 2-cond., no integrated EGC) \u2014 ${_agGnd.bomFootageFt ?? 'PENDING'} ft (BOM); see E-1 / PV-4B` }]
-    : [];
+  const _agGndCallout = (!_isMicro || !_agGnd.present) ? []
+    : _agGnd.outcome === 'PENDING_MANUFACTURER_AUTHORITY'
+      ? [{ n: 5, label: 'Open-Air Branch Grounding',
+           sub: `${GROUNDING_PENDING_LABEL} \u2014 method NOT ESTABLISHED for the selected `
+              + `${_agGnd.authority?.selectedMicroinverterSku ?? 'micro'} + ${_agGnd.authority?.selectedCableAssemblySku ?? 'cable'}; `
+              + `candidate ${_agGnd.conductorSize ?? '\u2014'} ${_agGnd.bomFootageFt ?? '\u2014'} ft = DESIGN QTY, NOT ORDERABLE `
+              + `(${GROUNDING_AUTHORITY_BLOCKER_CODE}; see RS-1 / E-1 / PV-4B)` }]
+      : _agGnd.outcome === 'NO_SEPARATE_EGC_REQUIRED'
+        ? [{ n: 5, label: 'Open-Air Branch Grounding',
+             sub: `LISTED METHOD per ${_agGnd.authority?.documentId ?? 'the verified manufacturer document'} \u2014 no additional `
+                + `grounding conductor in the open-air branch section; module/racking bonding still required (see E-1 / PV-4B)` }]
+        : [{ n: 5, label: 'NEC 250.122 Branch EGC',
+             sub: `ADDITIONAL ${_agGnd.conductorSize ?? '#12'} ${_agGnd.conductorMaterial ?? 'Cu'} EGC open-air with each branch trunk `
+                + `per ${_agGnd.authority?.documentId ?? 'the verified manufacturer document'} \u2014 ${_agGnd.bomFootageFt ?? 'PENDING'} ft (BOM); see E-1 / PV-4B` }];
 
   // Callout notes for data zone
   const agCalloutRows = [

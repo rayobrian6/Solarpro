@@ -1075,6 +1075,39 @@ export function generatePermitHTML(
     console.log(`[SNAPSHOT] ${snapshot.meta.snapshotId} schema ${snapshot.meta.schemaVersion} digest ${snapshot.meta.digest.slice(0, 16)}… — ${violations.length} finding(s), 0 blocking`);
   }
 
+  // ── BOM pass 2 — snapshot-aware (2026-07-25, grounding-authority correction) ─
+  // generateBOMForPermit PROJECTS canonical snapshot authorities through
+  // peekSnapshot (the open-air grounding authority, the fastener assembly, the
+  // canonical feeder). Pass 1 above runs BEFORE the snapshot exists because the
+  // snapshot's sheet index needs the BOM row count for SCHED pagination — so every
+  // snapshot-derived row was silently DROPPED from the rendered package (the
+  // open-air branch EGC row never reached SCHED even though E-1/PV-4B stated it).
+  // Re-running the BOM here, with the snapshot attached, is the fixed point: the
+  // snapshot-derived rows depend on the snapshot, never on the sheet index, so a
+  // third pass would be identical. If the second pass were to change the SCHED page
+  // count the manifest inside the frozen snapshot would disagree with the rendered
+  // pages, so that condition is asserted loudly rather than silently accepted.
+  try {
+    const _bomBefore = input.bom ?? [];
+    const _schedPagesBefore = schedContPageCount(_bomBefore);
+    const _bomAfter = generateBOMForPermit(input, cad);
+    if (_bomAfter.length > 0) {
+      const _schedPagesAfter = schedContPageCount(_bomAfter);
+      if (_schedPagesAfter !== _schedPagesBefore) {
+        console.error('[generatePermitHTML] BOM pass 2 changed the SCHED continuation page count '
+          + `(${_schedPagesBefore} → ${_schedPagesAfter}) — the snapshot sheet index would disagree with the `
+          + 'rendered pages. Keeping pass-1 pagination; investigate the snapshot-derived BOM rows.');
+      }
+      input.bom = _bomAfter;
+      input.decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
+        bomItems: input.bom,
+        decisionBundle: decisionProvenance,
+      });
+    }
+  } catch (bomErr2: unknown) {
+    console.warn('[generatePermitHTML] snapshot-aware BOM pass failed (non-critical):', (bomErr2 as Error)?.message ?? bomErr2);
+  }
+
   const engineeringStateRegistry = buildEngineeringStateRegistry({
     registryId: `${provenanceDocumentId}.engineering-state`,
     generatedAt: input.surveyEvidence?.source.normalizedAt,

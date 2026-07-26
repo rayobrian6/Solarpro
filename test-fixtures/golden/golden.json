@@ -181,6 +181,7 @@
       "mpptAllocation",
       "mpptChannels",
       "ocpdPerString",
+      "openAirBranchEgcLabel",
       "openAirBranchWiringLabel",
       "panelBusRating",
       "panelIsc",

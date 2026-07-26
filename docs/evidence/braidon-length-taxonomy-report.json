@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-24T20:36:50.723Z",
+  "generatedAt": "2026-07-26T16:21:30.073Z",
   "artifact": "braidon-length-taxonomy-report",
   "section": "§10 design vs calc vs procurement length taxonomy",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-69A79CD87335",
-  "digest": "69a79cd873358ae6158484029e4d13f2fc3e108943e5669118268d2de8b0fd77",
+  "snapshotId": "PDS-D307252768B7",
+  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
   "purpose": "Every printed length identifies its meaning: geometricDesignLength (route-drawing), calculationLength (VD/fill sheets), procurementLength (BOM), with waste factor, provenance and verification state, keyed to a segment id. No sheet mixes an unlabeled number. The contested Q-Cable branch carries the full taxonomy; the remaining runs carry oneWayFt + lengthSource (single design length, labeled at the cell).",
   "segments": [
     {

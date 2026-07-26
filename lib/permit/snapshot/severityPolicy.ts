@@ -128,6 +128,23 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     justification: '',
   },
 
+  // GROUNDING AUTHORITY (2026-07-25) — QCABLE-GROUNDING-AUTHORITY-UNVERIFIED. The
+  // equipment grounding / bonding method for the OPEN-AIR microinverter branch
+  // (listed cable assembly) section is not established by a verified,
+  // exactly-applicable manufacturer document. An unestablished equipment-grounding
+  // path is a fault-clearing / touch-safety question (safety); NEC 110.3(B) cannot
+  // be shown satisfied and neither 250.122 nor 690.43(C) may be concluded (code);
+  // whether an EGC is ordered at all — and the racking/bonding hardware that
+  // accompanies it — depends on the outcome (procurement); no PE stamps a grounding
+  // method that no document supports (engineering approval); and an AHJ rejects a
+  // package whose grounding method is asserted without the manufacturer instruction
+  // (permit acceptance). All five axes ⇒ BLOCKING. Conductor count, a family
+  // document or an engineering opinion can never clear it.
+  'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
   // §2 (BAR, 2026-07-25) — ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED (successor to
   // WIND-SNOW-AUTHORITY-UNRESOLVED, subsuming BOTH the null/code-minimum-default
   // and the operator-entered-without-provenance cases). Unverified wind/snow/

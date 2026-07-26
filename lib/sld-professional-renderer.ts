@@ -316,6 +316,12 @@ export interface SLDProfessionalInput {
    *  feeder's #10 while the grounding object and the BOM footage row carried #12
    *  — a separate-EGC assertion the quantities did not match (gate 7). */
   branchEgcGauge?:         string;
+  /** GROUNDING AUTHORITY (2026-07-25) — the SEGMENT-1 open-air grounding line as
+   *  decided by the document-based three-outcome grounding authority:
+   *  '1×#12 GRN EGC' (B), 'NO ADD'L EGC — LISTED METHOD' (A), or
+   *  'EGC: PENDING MFR AUTHORITY' (C, the fail-closed live state). When absent the
+   *  renderer keeps the legacy per-gauge label (non-micro / standalone routes). */
+  openAirBranchEgcLabel?:  string;
   /** §5 — the EGC carried in the SHARED jbox→combiner home-run raceway (that
    *  segment's own egcGauge), so SEGMENT_2A cites its own conductor, not the feeder's. */
   homerunEgcGauge?:        string;
@@ -1957,7 +1963,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const fb = isMicro
       // §8 — the open-air branch identity is the LISTED assembly the legend names
       // (one source); §5 — its EGC is the BRANCH EGC, not the feeder's.
-      ? [input.openAirBranchWiringLabel ?? 'ENPHASE Q CABLE (TC-ER)', `1×#${branchEgcNum} GRN EGC`, 'OPEN AIR — NEC 690.31(C)']
+      ? [input.openAirBranchWiringLabel ?? 'ENPHASE Q CABLE (TC-ER)',
+         // the grounding line is the OUTCOME of the document-based grounding
+         // authority (fail-closed PENDING when no applicable document exists) —
+         // never an unconditional EGC assertion.
+         input.openAirBranchEgcLabel ?? `1×#${branchEgcNum} GRN EGC`,
+         'OPEN AIR — NEC 690.31(C)']
       : [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
     const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);

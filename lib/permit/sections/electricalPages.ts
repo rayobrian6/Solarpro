@@ -15,6 +15,7 @@ import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
 import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, ampacityChainLines, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
+import { GROUNDING_PENDING_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
@@ -265,34 +266,59 @@ export function renderAmpacityEvidenceBlock(
     </div>`;
 }
 
-// §5 (BAR closeout 2026-07-25) — the OPEN-AIR BRANCH GROUNDING note. E-1 asserts
-// "1×#10 GRN EGC OPEN AIR"; this states the canonical authority (separate EGC
-// required because the Q-Cable is a 2-conductor assembly with no integrated EGC)
-// AND prints the BOM footage the package now carries, so the separate-EGC
-// language and the ordered quantity always match (gate 7). Returns '' for
-// non-micro / no branch-EGC.
+// OPEN-AIR BRANCH GROUNDING note — the DOCUMENT-BASED three-outcome authority
+// (corrected 2026-07-25). It renders the SAME canonical result on every surface:
+//   A  no additional conductor in this section (with the citation + the retained
+//      module/racking bonding requirement)
+//   B  an additional NEC 250.122 conductor (with the citation + the BOM quantity)
+//   C  GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY — fail-closed. No method
+//      is asserted either way, no PASS, and the candidate quantity is labelled a
+//      PROPOSED / DESIGN QUANTITY.
+// Returns '' only for non-micro / no branch-EGC objects.
 export function renderOpenAirBranchGroundingNote(
   snap: import('../snapshot/types').PermitDesignSnapshot | null | undefined,
   compact = false,
 ): string {
   const g = projectOpenAirBranchGrounding(snap);
-  if (!g.present || g.groundingMethod !== 'separate-conductor') return '';
-  // Same authority + the SAME quantity on every sheet; compact drops only the
-  // prose (page-fit, gate 13) — never a field.
-  if (compact) {
-    return `
-      <div style="margin:2px 12px 5px;padding:2px 6px;font-size:6.5px;line-height:1.18;border:var(--border);background:#eef7ee;">
-        <strong>OPEN-AIR BRANCH GROUNDING (§5, NEC 250.122 / 690.43(C)):</strong> SEPARATE EGC REQUIRED —
-        ${g.conductorSize ?? '#10'} ${g.conductorMaterial ?? 'Cu'} open-air, parallels the Q-Cable trunk (${g.branchIds.join(', ') || 'each branch'});
-        Q-Cable = 2-conductor assembly, NO integrated EGC. <strong>BOM qty</strong> <span class="mono">${g.bomFootageFt ?? 'PENDING'} ft</span>
-        = designed-installed <span class="mono">${g.designedInstalledFt ?? '—'} ft</span> × ${g.wasteFactor} waste (${g.lengthProvenance ?? 'pending'}).
+  if (!g.present) return '';
+  const a = g.authority;
+  const bg = g.outcome === 'PENDING_MANUFACTURER_AUTHORITY' ? '#fdf4e7' : '#eef7ee';
+  const pad = compact ? '2px 6px' : '3px 6px';
+  const mar = compact ? '2px 12px 5px' : '4px 12px 8px';
+  const head = `<div style="margin:${mar};padding:${pad};font-size:6.5px;line-height:${compact ? '1.18' : '1.2'};border:var(--border);background:${bg};">`;
+
+  if (g.outcome === 'PENDING_MANUFACTURER_AUTHORITY') {
+    const why = (a?.applicabilityVerification.failures ?? []).slice(0, 2).join('; ');
+    return `${head}
+        <strong style="color:#b45309;">OPEN-AIR BRANCH GROUNDING — ${GROUNDING_PENDING_LABEL} (${GROUNDING_AUTHORITY_BLOCKER_CODE}, BLOCKING):</strong>
+        The equipment grounding / bonding method for the open-air microinverter branch (listed cable assembly) section of the exact selected
+        <span class="mono">${a?.selectedMicroinverterSku ?? 'microinverter'}</span> + <span class="mono">${a?.selectedCableAssemblySku ?? 'cable assembly'}</span>
+        is <strong>NOT ESTABLISHED</strong>. ${why || 'No applicable manufacturer document is archived.'}
+        Neither outcome may be asserted for this section. ${a?.necBasis ?? 'NEC 110.3(B).'}
+        Cable conductor construction (<span class="mono">${a?.cableConductorCount ?? '—'}-conductor${a?.cableConductorConstruction ? `, ${a.cableConductorConstruction}` : ''}</span>)
+        is recorded and is <strong>NOT determinative</strong> of the method.
+        Candidate conductor <span class="mono">${g.conductorSize ?? '—'} ${g.conductorMaterial ?? 'Cu'}</span>,
+        <span class="mono">${g.bomFootageFt ?? '—'} ft</span> = <strong>${GROUNDING_NON_ORDERABLE_LABEL}</strong>
+        (excluded from procurement totals). Module-frame / racking bonding is a DISTINCT requirement and remains required
+        (${a?.rackingModuleBondingRequirement.codeBasis ?? 'NEC 690.43'}). See RS-1.
       </div>`;
   }
-  return `
-    <div style="margin:4px 12px 8px;padding:3px 6px;font-size:6.5px;line-height:1.2;border:var(--border);background:#eef7ee;">
-      <strong>OPEN-AIR BRANCH GROUNDING (§5 — NEC 250.122 / 690.43(C)):</strong>
-      Method = <strong>SEPARATE EQUIPMENT GROUNDING CONDUCTOR</strong> (${g.conductorSize ?? '#10'} ${g.conductorMaterial ?? 'Cu'}). ${g.sourceAuthority}.
-      Route = ${g.pathBasis}; open-air EGC parallels the Q-Cable trunk on ${g.branchIds.join(', ') || 'each branch'}.
+
+  if (g.outcome === 'NO_SEPARATE_EGC_REQUIRED') {
+    return `${head}
+        <strong>OPEN-AIR BRANCH GROUNDING — LISTED METHOD (no additional conductor in this section):</strong>
+        ${a?.explanation ?? ''} <strong>Authority:</strong> ${g.sourceAuthority}. ${a?.necBasis ?? ''}
+        Module-frame / racking bonding remains required on its own authority (${a?.rackingModuleBondingRequirement.codeBasis ?? 'NEC 690.43'})
+        and its hardware is retained in the BOM. No open-air branch grounding conductor is ordered for this section.
+      </div>`;
+  }
+
+  // (B) — an additional EGC, established by the cited document.
+  return `${head}
+      <strong>OPEN-AIR BRANCH GROUNDING — ADDITIONAL EQUIPMENT GROUNDING CONDUCTOR REQUIRED
+      (${g.conductorSize ?? '#12'} ${g.conductorMaterial ?? 'Cu'}):</strong>
+      <strong>Authority:</strong> ${g.sourceAuthority}. ${a?.necBasis ?? ''}
+      Route = ${g.pathBasis} on ${g.branchIds.join(', ') || 'each branch'}.
       <strong>Quantity (matches BOM):</strong> <span class="mono">${g.bomFootageFt ?? 'PENDING'} ft</span>
       (designed-installed <span class="mono">${g.designedInstalledFt ?? '—'} ft</span> × ${g.wasteFactor} waste). ${g.verificationState}.
     </div>`;
@@ -445,7 +471,11 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
       + `<td class="mono f-lg">${r.code}</td>`
       + `<td style="font-size:8px">${r.explanation}`
       + `<br/><span style="color:#555">Authority: <span class="mono">${r.authorityPath}</span> · Sheets: ${seg}</span>`
-      + `<br/><span style="color:#555">Resolve: ${r.resolutionAction}</span></td></tr>`;
+      // PV-4A is a DENSE calc sheet: a very long resolution string pushes the
+      // page past its printable box (the summary bar collapses and clips). The
+      // resolution is capped here with an explicit pointer; RS-1 renders the FULL
+      // canonical resolutionAction, so no authority text is lost.
+      + `<br/><span style="color:#555">Resolve: ${r.resolutionAction.length > 200 ? `${r.resolutionAction.slice(0, 200).replace(/\s+\S*$/, '')}… (full resolution on RS-1)` : r.resolutionAction}</span></td></tr>`;
   };
   const _elecSummaryCard = `
       <div class="rules-summary">
@@ -852,15 +882,19 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const _ps = _snap?.electrical?.procurementSufficiency ?? null;
         const _short = !!_ps?.insufficient;
         const _procTxt = _ps?.procurementLengthFt ?? _asmB.totalProcurementFt ?? '—';
-        // §5 — the open-air branch GROUNDING authority rides INSIDE this same
-        // assembly note (no extra box — PV-4B page-fit, gate 13). The Q-Cable is a
-        // 2-conductor assembly with NO integrated EGC ⇒ a SEPARATE open-air EGC is
-        // required; the footage stated here is the SAME quantity the BOM orders and
-        // E-1 / PV-1B print (gate 7).
+        // The open-air branch GROUNDING authority rides INSIDE this same assembly
+        // note (no extra box — PV-4B page-fit, gate 13). The METHOD comes from the
+        // document-based three-outcome resolver — NEVER from the conductor count,
+        // which is recorded here only as non-determinative construction data. Under
+        // the live PENDING outcome the sheet asserts no method at all.
         const _gndB = projectOpenAirBranchGrounding(_snap);
-        const _gndInline = (_gndB.present && _gndB.groundingMethod === 'separate-conductor')
-          ? ` <strong>GROUNDING (§5, NEC 250.122/690.43(C)):</strong> ${a.conductorCount ?? 2}-conductor assembly, NO integrated EGC ⇒ <strong>SEPARATE ${_gndB.conductorSize ?? '#10'} ${_gndB.conductorMaterial ?? 'Cu'} EGC REQUIRED</strong>, run open-air with each branch trunk (${_gndB.branchIds.join(', ') || 'all branches'}); <em>BOM qty</em> <span class="mono">${_gndB.bomFootageFt ?? 'PENDING'}ft</span> = designed-installed <span class="mono">${_gndB.designedInstalledFt ?? '—'}ft</span> × ${_gndB.wasteFactor} waste (${_gndB.lengthProvenance ?? 'pending'}) — same route geometry as the trunk.`
-          : '';
+        const _gndA = _gndB.authority;
+        const _gndInline = !_gndB.present ? ''
+          : _gndB.outcome === 'PENDING_MANUFACTURER_AUTHORITY'
+            ? ` <strong style="color:#b45309">${GROUNDING_PENDING_LABEL} (${GROUNDING_AUTHORITY_BLOCKER_CODE} — BLOCKING):</strong> the equipment grounding / bonding method for this open-air section of the exact selected <span class="mono">${_gndA?.selectedMicroinverterSku ?? 'micro'}</span> + <span class="mono">${_gndA?.selectedCableAssemblySku ?? 'cable'}</span> is NOT ESTABLISHED by any verified, exactly-applicable manufacturer document; the ${a.conductorCount ?? 2}-conductor construction is recorded and is NOT determinative. Candidate <span class="mono">${_gndB.conductorSize ?? '—'} ${_gndB.conductorMaterial ?? 'Cu'} ${_gndB.bomFootageFt ?? '—'}ft</span> = ${GROUNDING_NON_ORDERABLE_LABEL} (excluded from procurement totals). Module/racking bonding is a distinct, still-required item. See RS-1.`
+            : _gndB.outcome === 'NO_SEPARATE_EGC_REQUIRED'
+              ? ` <strong>GROUNDING (LISTED METHOD):</strong> ${_gndB.sourceAuthority} — no additional grounding conductor is installed in this open-air section; module/racking bonding remains required on its own authority (${_gndA?.rackingModuleBondingRequirement.codeBasis ?? 'NEC 690.43'}).`
+              : ` <strong>GROUNDING (${_gndA?.documentId ?? 'verified document'}, NEC 250.122/690.43(C)):</strong> an ADDITIONAL <strong>${_gndB.conductorSize ?? '#12'} ${_gndB.conductorMaterial ?? 'Cu'} EGC</strong> is required by the cited manufacturer instruction, run open-air with each branch trunk (${_gndB.branchIds.join(', ') || 'all branches'}); <em>BOM qty</em> <span class="mono">${_gndB.bomFootageFt ?? 'PENDING'}ft</span> = designed-installed <span class="mono">${_gndB.designedInstalledFt ?? '—'}ft</span> × ${_gndB.wasteFactor} waste (${_gndB.lengthProvenance ?? 'pending'}) — same route geometry as the trunk.`;
         const _insuffBlock = _short
           ? ` <strong style="color:#b00">⚠ PROCUREMENT INSUFFICIENCY (QCABLE-PROCUREMENT-INSUFFICIENT — BLOCKING): designed ${_ps!.totalDesignedInstalledFt} ft + allowance ${_ps!.requiredServiceLoopAllowanceFt} ft (${_ps!.allowanceProvenance}) &gt; procurement ${_ps!.procurementLengthFt} ft by <span class="mono">${_ps!.deficitFt} ft</span>. Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE CABLE QUANTITY only — NON-ORDERABLE / PENDING SOLUTION (verified listed extension required; "jumpers required" does NOT clear this). Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. See RS-1.</strong>`
           : '';

@@ -56,6 +56,7 @@ import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { buildComputedRunsForPermit } from './computedRuns';
 import { peekSnapshot } from '../snapshot/read';
 import { projectCanonicalFeeder, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
+import { GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL } from '../snapshot/structuralProjection';
 
 // ── PermitBOMItem ────────────────────────────────────────────
@@ -820,38 +821,58 @@ export function generateBOMForPermit(
     log.push(`[bomForPermit] shared AC combiner panel: ${_sharedPanel.model} (${_sharedPanel.busbarA}A busbar, ${_acCollection!.perSource.length} sources)`);
   }
 
-  // ── 5d. Open-air branch EGC (§5) — the footage the package was MISSING ────
-  // The listed Q-Cable is a 2-conductor assembly (line+neutral) with NO
-  // integrated EGC, so a SEPARATE #10 Cu EGC runs open-air alongside each branch
-  // trunk (build groundingObjects purpose='branch-egc', NEC 250.122). The V4
-  // conductor emitter EXCLUDES open-air sections, so this footage never got
-  // billed — E-1 asserted an open-air EGC the BOM never quantified. Emit it here
-  // from the canonical grounding authority, length = Σ branch cable-path
-  // designed-installed × waste (the SAME geometry as the trunk), labeled with the
-  // branch segment ids + the design-vs-procurement taxonomy.
+  // ── 5d. Open-air branch EGC — OUTCOME-DRIVEN (corrected 2026-07-25) ───────
+  // The row is decided by the DOCUMENT-BASED grounding authority, never by the
+  // cable's conductor count:
+  //   A NO_SEPARATE_EGC_REQUIRED       ⇒ NO ROW at all (nothing is ordered for this
+  //                                      section; module/racking bonding hardware is
+  //                                      emitted elsewhere and is untouched)
+  //   B SEPARATE_EGC_REQUIRED          ⇒ ORDERABLE row, NEC 250.122 size, length from
+  //                                      the branch cable-path geometry, with the
+  //                                      manufacturer document cited
+  //   C PENDING_MANUFACTURER_AUTHORITY ⇒ the calculated quantity is RETAINED as a
+  //                                      PROPOSED / DESIGN QUANTITY, marked
+  //                                      NON-ORDERABLE and EXCLUDED from the
+  //                                      authoritative procurement totals (the same
+  //                                      pattern as the unverified fastener row)
   const _oaGnd = projectOpenAirBranchGrounding(peekSnapshot(input));
-  if (_oaGnd.present && _oaGnd.groundingMethod === 'separate-conductor' && _oaGnd.bomFootageFt != null) {
-    const _gnGauge = (_oaGnd.conductorSize ?? '#10 AWG');
+  if (_oaGnd.present && _oaGnd.bomRowState !== 'no-row' && _oaGnd.bomFootageFt != null) {
+    const _gnGauge = (_oaGnd.conductorSize ?? '#12 AWG');
     const _gn = _gnGauge.replace('#', '').replace(' AWG', '').trim();
+    const _pending = _oaGnd.bomRowState === 'design-quantity-non-orderable';
+    const _ga = _oaGnd.authority;
     merged.push({
       stageId: 'ac',
       stageLabel: STAGE_LABELS['ac'],
       category: 'wire',
-      manufacturer: 'Southwire',
-      model: `${_gnGauge} ${_oaGnd.conductorMaterial ?? 'Cu'} Green EGC — open-air branch (Q-Cable)`,
+      manufacturer: _pending ? '—' : 'Southwire',
+      model: _pending
+        ? `${_gnGauge} ${_oaGnd.conductorMaterial ?? 'Cu'} Green EGC — open-air branch — ${GROUNDING_NON_ORDERABLE_LABEL}`
+        : `${_gnGauge} ${_oaGnd.conductorMaterial ?? 'Cu'} Green EGC — open-air branch (listed cable assembly section)`,
       partNumber: `GRN-OPENAIR-${_gn}`,
       quantity: _oaGnd.bomFootageFt,
       unit: 'ft',
-      description:
-        `Open-air branch equipment grounding conductor (${_oaGnd.branchIds.join(', ') || 'branches'}) — ${_oaGnd.sourceAuthority}. ` +
-        `procurement ${_oaGnd.bomFootageFt} ft = designed-installed ${_oaGnd.designedInstalledFt ?? '—'} ft (Σ BranchCablePath geometry) × ${_oaGnd.wasteFactor} waste; ` +
-        `parallels the open-air Q-Cable trunk (${_oaGnd.equipmentCompatibility}).`,
-      necReference: _oaGnd.codeBasis,
-      derivedFrom: `open-air branch grounding authority (${_oaGnd.provenance})`,
-      formula: `Σ designed-installed ${_oaGnd.designedInstalledFt ?? '—'} ft × ${_oaGnd.wasteFactor}`,
+      nonOrderable: _pending ? true : undefined,
+      description: _pending
+        ? `PROPOSED / DESIGN QUANTITY ONLY — NOT ORDERABLE, EXCLUDED from procurement totals. The grounding method for `
+          + `the open-air branch section of the selected ${_ga?.selectedMicroinverterSku ?? 'micro'} + `
+          + `${_ga?.selectedCableAssemblySku ?? 'cable'} is NOT ESTABLISHED (${GROUNDING_AUTHORITY_BLOCKER_CODE}, RS-1); the `
+          + `${_ga?.cableConductorCount ?? '—'}-conductor construction is NOT determinative. Qty retained: designed-installed `
+          + `${_oaGnd.designedInstalledFt ?? '—'} ft (Σ BranchCablePath, ${_oaGnd.branchIds.join(', ') || 'branches'}) × ${_oaGnd.wasteFactor} waste. `
+          + `Module/racking bonding is a distinct, unaffected requirement.`
+        : `Open-air branch equipment grounding conductor (${_oaGnd.branchIds.join(', ') || 'branches'}) — required by ${_oaGnd.sourceAuthority}. `
+          + `procurement ${_oaGnd.bomFootageFt} ft = designed-installed ${_oaGnd.designedInstalledFt ?? '—'} ft (Σ BranchCablePath geometry) × ${_oaGnd.wasteFactor} waste; `
+          + `runs open-air with the branch trunk (${_oaGnd.equipmentCompatibility}).`,
+      necReference: _pending ? 'NEC 110.3(B) — PENDING' : 'NEC 250.122 / 690.43(C)',
+      derivedFrom: `open-air grounding authority (outcome=${_oaGnd.outcome})`,
+      formula: _pending
+        ? `Σ designed-installed ${_oaGnd.designedInstalledFt ?? '—'} ft × ${_oaGnd.wasteFactor} (PROPOSED / DESIGN QUANTITY)`
+        : `Σ designed-installed ${_oaGnd.designedInstalledFt ?? '—'} ft × ${_oaGnd.wasteFactor}`,
       required: true,
     });
-    log.push(`[bomForPermit] open-air branch EGC: ${_gnGauge} ${_oaGnd.bomFootageFt} ft (${_oaGnd.branchIds.length} branches, designed ${_oaGnd.designedInstalledFt} ft)`);
+    log.push(`[bomForPermit] open-air branch EGC row: ${_gnGauge} ${_oaGnd.bomFootageFt} ft — outcome=${_oaGnd.outcome} state=${_oaGnd.bomRowState}`);
+  } else if (_oaGnd.present && _oaGnd.bomRowState === 'no-row') {
+    log.push(`[bomForPermit] open-air branch EGC row OMITTED — outcome=${_oaGnd.outcome} (listed method requires no additional conductor in this section; module/racking bonding hardware retained)`);
   }
 
   // ── 5e. §6 (BAR) — unverified fasteners are NON-ORDERABLE ────────────────

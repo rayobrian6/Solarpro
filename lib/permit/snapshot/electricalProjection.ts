@@ -324,21 +324,38 @@ export function projectListedCableAssembly(snap: PermitDesignSnapshot | null | u
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// §5 (BAR closeout 2026-07-25) — THE canonical OPEN-AIR BRANCH GROUNDING
-// authority. The listed Enphase Q Cable (Q-12-10-240) is a TWO-conductor
-// assembly (line + neutral) with NO integrated equipment grounding conductor
-// (trunkCable.ts) — therefore a SEPARATE #10 Cu EGC is REQUIRED, run in the open
-// air alongside the branch trunk (build.ts groundingObjects purpose='branch-egc',
-// NEC 250.122). E-1 already asserts "1×#10 GRN EGC OPEN AIR"; this projection is
-// the single authority that (a) states the method = separate-conductor, (b)
-// derives the length from the SAME BranchCablePath geometry as the trunk, and (c)
-// feeds the BOM the open-air branch-EGC footage the package was missing. Result
-// is exactly ONE: (B) separate EGC required.
+// OPEN-AIR BRANCH GROUNDING — THE PROJECTION of the canonical, DOCUMENT-BASED
+// grounding authority (electrical.openAirGroundingAuthority, groundingAuthority.ts).
+//
+// CORRECTED 2026-07-25 (Ray's ruling). This projection previously CONCLUDED
+// "separate EGC required" from `conductorCount === 2`. Conductor count alone is
+// not manufacturer or code authority: a listed two-conductor assembly serving a
+// double-insulated (Class II) microinverter system may intentionally require no
+// additional grounding conductor. The outcome now comes from the resolver, which
+// can only reach outcome A or B from a VERIFIED, EXACTLY-APPLICABLE manufacturer
+// document for the selected micro SKU + cable SKU + module + mounting/bonding
+// system + jurisdiction. No document ⇒ PENDING_MANUFACTURER_AUTHORITY (fail-closed).
+//
+// This projection derives NOTHING about the method — it reads the snapshot's one
+// authority object and exposes it (plus the route/quantity taxonomy) to the seven
+// surfaces. It applies ONLY to the open-air branch section (§5 separation).
 // ═══════════════════════════════════════════════════════════════════════════
 export interface OpenAirBranchGroundingAuthority {
   present: boolean;
-  required: boolean;
-  /** exactly ONE modeled result — (B) separate conductor for the Q-Cable branch. */
+  /** true only under (B); false under (A); NULL under (C) — a PENDING method is
+   *  NOT "not required". Never render this as a boolean claim on its own. */
+  required: boolean | null;
+  /** the canonical three-outcome result (the truth every surface reads). */
+  outcome: import('./groundingAuthority').GroundingOutcome;
+  /** the full authority record (document, applicability, NEC basis, separation). */
+  authority: import('./groundingAuthority').GroundingAuthorityResult | null;
+  /** the ONE label every sheet prints for this section. */
+  renderLabel: string;
+  /** BOM behaviour driven by the outcome: A no row, B orderable, C design-quantity. */
+  bomRowState: 'no-row' | 'orderable' | 'design-quantity-non-orderable';
+  nonOrderable: boolean;
+  /** back-compat method mapping — A ⇒ integrated-listed, B ⇒ separate-conductor,
+   *  C ⇒ pending. Derived from `outcome`; never independently decided. */
   groundingMethod: 'separate-conductor' | 'integrated-listed' | 'none-required' | 'pending';
   conductorMaterial: string | null;   // 'Cu'
   conductorSize: string | null;        // '#10 AWG'
@@ -352,9 +369,10 @@ export interface OpenAirBranchGroundingAuthority {
   wasteFactor: number;
   /** Σ designed-installed × waste — the BOM procurement footage for the open-air EGC. */
   bomFootageFt: number | null;
-  /** the manufacturer authority that makes a separate EGC necessary. */
+  /** the DOCUMENT authority for the method (never a conductor-count inference).
+   *  Under (C) this states the fail-closed pending condition. */
   sourceAuthority: string;
-  codeBasis: string;                   // 'NEC 250.122 / 690.43(C)'
+  codeBasis: string;
   equipmentCompatibility: string;
   verificationState: string;
   provenance: string;
@@ -362,55 +380,68 @@ export interface OpenAirBranchGroundingAuthority {
 
 export function projectOpenAirBranchGrounding(snap: PermitDesignSnapshot | null | undefined): OpenAirBranchGroundingAuthority {
   const empty: OpenAirBranchGroundingAuthority = {
-    present: false, required: false, groundingMethod: 'pending',
+    present: false, required: null, outcome: 'PENDING_MANUFACTURER_AUTHORITY', authority: null,
+    renderLabel: 'GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY',
+    bomRowState: 'no-row', nonOrderable: false, groundingMethod: 'pending',
     conductorMaterial: null, conductorSize: null, segmentIds: [], branchIds: [],
     pathBasis: 'branch cable paths', designedInstalledFt: null, lengthProvenance: null,
     wasteFactor: 1.15, bomFootageFt: null,
-    sourceAuthority: 'PENDING', codeBasis: 'NEC 250.122 / 690.43(C)',
-    equipmentCompatibility: 'PENDING', verificationState: 'pending', provenance: 'no snapshot',
+    sourceAuthority: 'PENDING — no applicable manufacturer document',
+    codeBasis: 'NEC 110.3(B)',
+    equipmentCompatibility: 'PENDING', verificationState: 'pending', provenance: 'no snapshot / non-micro',
   };
   const elec = snap?.electrical;
   if (!elec || elec.topology !== 'MICRO') return empty;
   const branchGnd = (elec.groundingObjects ?? []).filter(g => g.purpose === 'branch-egc');
   if (branchGnd.length === 0) return empty;
 
+  // THE authority object built by the snapshot. If it is absent (a legacy/partial
+  // snapshot), we FAIL CLOSED to pending — we never re-derive a method here.
+  const auth = elec.openAirGroundingAuthority ?? null;
+  if (!auth) {
+    return { ...empty, present: true, provenance: 'no openAirGroundingAuthority on this snapshot — fail-closed pending' };
+  }
+
   const asm = elec.listedCableAssembly ?? null;
-  const paths = elec.branchCablePaths ?? [];
-  const branches = elec.branches ?? [];
-  // The separate-EGC necessity: the listed assembly carries NO integrated EGC
-  // (2 conductors = L+N). Confirm from the assembly conductor count when present.
-  const asmConductors = asm?.conductorCount ?? null;
-  const size = branchGnd[0].conductorSize ?? null;
-  const material = branchGnd[0].conductorMaterial ?? 'Cu';
-  const totalDesigned = paths.reduce((s, p) => s + (p.designedInstalledLengthFt ?? 0), 0);
-  const geom = paths.length > 0 && paths.every(p => p.lengthProvenance === 'geometry-derived');
-  const designedFt = totalDesigned > 0 ? Math.round(totalDesigned * 10) / 10 : null;
-  const waste = 1.15;
-  const bomFt = designedFt != null ? Math.ceil(designedFt * waste) : null;
-  const segIds = paths.length ? paths.map(p => p.branchId) : branches.map((b, i) => b.branchId ?? `br-${i + 1}`);
+  const outcome = auth.outcome;
+  const groundingMethod: OpenAirBranchGroundingAuthority['groundingMethod'] =
+    outcome === 'SEPARATE_EGC_REQUIRED' ? 'separate-conductor'
+      : outcome === 'NO_SEPARATE_EGC_REQUIRED' ? 'integrated-listed'
+        : 'pending';
 
   return {
     present: true,
-    required: branchGnd.some(g => g.required),
-    groundingMethod: 'separate-conductor',
-    conductorMaterial: material,
-    conductorSize: size,
-    segmentIds: ['BRANCH_RUN'],
-    branchIds: segIds,
-    pathBasis: 'Σ per-branch BranchCablePath (same designed-installed geometry as the Q-Cable trunk)',
-    designedInstalledFt: designedFt,
-    lengthProvenance: paths.length ? (geom ? 'geometry-derived' : 'estimated') : null,
-    wasteFactor: waste,
-    bomFootageFt: bomFt,
-    sourceAuthority: asm
-      ? `${asm.manufacturer} ${asm.ecosystem}${asm.sku ? ` ${asm.sku}` : ''} = ${asmConductors ?? '2'}-conductor assembly (line+neutral), NO integrated EGC → separate ${size ?? '#10'} ${material} EGC required`
-      : `listed AC trunk cable = 2-conductor (line+neutral), NO integrated EGC → separate ${size ?? '#10'} ${material} EGC required`,
-    codeBasis: `${branchGnd[0].codeBasis} / 690.43(C)`,
+    required: outcome === 'SEPARATE_EGC_REQUIRED' ? true
+      : outcome === 'NO_SEPARATE_EGC_REQUIRED' ? false : null,
+    outcome,
+    authority: auth,
+    renderLabel: auth.renderLabel,
+    bomRowState: auth.bomRowState,
+    nonOrderable: auth.bomRowState === 'design-quantity-non-orderable',
+    groundingMethod,
+    conductorMaterial: auth.conductorMaterial,
+    conductorSize: auth.conductorSizeNecDerived,
+    segmentIds: auth.segmentIds,
+    branchIds: auth.branchIds,
+    pathBasis: auth.pathBasis,
+    designedInstalledFt: auth.designedInstalledFt,
+    lengthProvenance: auth.lengthProvenance,
+    wasteFactor: auth.wasteFactor,
+    bomFootageFt: auth.quantityFt,
+    sourceAuthority: outcome === 'PENDING_MANUFACTURER_AUTHORITY'
+      ? `NOT ESTABLISHED — ${auth.applicabilityVerification.failures[0] ?? 'no applicable manufacturer document'}`
+      : `${auth.documentId ?? 'verified document'} ${auth.documentSectionOrPage ?? ''}`.trim()
+        + ` (SHA-256 ${auth.documentHash ? auth.documentHash.slice(0, 12) : '—'}) — applicable to the exact selected `
+        + `${auth.selectedMicroinverterSku ?? 'microinverter'} + ${auth.selectedCableAssemblySku ?? 'cable assembly'}`,
+    codeBasis: auth.necBasis,
     equipmentCompatibility: asm
-      ? `open-air branch EGC parallels the ${asm.wiringMethodLabel} trunk (TC-ER, free-air 690.31(C))`
-      : 'open-air branch EGC parallels the AC trunk (free-air 690.31(C))',
-    verificationState: 'cad-derived (length follows branch trunk geometry) — field-verify',
-    provenance: `groundingObjects[purpose=branch-egc] × ${branchGnd.length} branches; length Σ BranchCablePath designed-installed`,
+      ? `open-air branch section = ${asm.wiringMethodLabel} (TC-ER, free-air 690.31(C))`
+      : 'open-air branch section = listed AC trunk cable (free-air 690.31(C))',
+    verificationState: outcome === 'PENDING_MANUFACTURER_AUTHORITY'
+      ? 'PENDING MANUFACTURER AUTHORITY — fail-closed; no grounding conclusion is drawn for this section'
+      : 'verified manufacturer document (exact-SKU applicability confirmed)',
+    provenance: `electrical.openAirGroundingAuthority (${auth.provenance.source}); `
+      + `groundingObjects[purpose=branch-egc] × ${branchGnd.length} branches`,
   };
 }
 

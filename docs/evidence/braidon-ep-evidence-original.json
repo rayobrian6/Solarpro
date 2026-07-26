@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T00:15:53.515Z",
+  "generatedAt": "2026-07-26T16:21:29.887Z",
   "harness": "planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates + chained BAR WS-E)",
   "mode": "original",
-  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/bar-orig.html",
-  "snapshotId": "PDS-CD0F6377533F",
-  "digest": "cd0f6377533f404ff20ebd80817124c77d60c95699add1cd72d64c8fd64023b1",
+  "htmlPath": "_tmp_braidon_original.html",
+  "snapshotId": "PDS-D307252768B7",
+  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
   "project": "BRAIDON M PILLA — Solar TEST",
   "sheetCount": 21,
   "sheetIds": [
@@ -99,6 +99,7 @@
     "ROUTE-LENGTH-ESTIMATE",
     "CONDUIT-FILL-PENDING",
     "TAP-CONDUCTOR-LENGTH-PENDING",
+    "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
     "FRAMING-AUTHORITY-UNVERIFIED",
     "PENDING-RACKING-ASSEMBLY-SELECTION",
     "FASTENER-ASSEMBLY-UNVERIFIED",
@@ -111,23 +112,23 @@
     "MODULE-EXACT-DATASHEET-PENDING",
     "ENGINEERING-REVIEW-PENDING"
   ],
-  "blockingCount": 14,
+  "blockingCount": 15,
   "evidenceEqualsRendered": {
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-CD0F6377533F",
+        "reportVal": "PDS-D307252768B7",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-CD0F6377533F"
+          "PDS-D307252768B7"
         ]
       },
       {
         "name": "digestPrefix",
-        "reportVal": "cd0f6377533f",
+        "reportVal": "d307252768b7",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "cd0f6377533f404ff20e"
+          "d307252768b751a619ca"
         ]
       },
       {
@@ -158,7 +159,7 @@
       },
       {
         "name": "blockingBlockerCount",
-        "reportVal": "14",
+        "reportVal": "15",
         "matchedInRendered": true,
         "rs1Rendered": null
       },
@@ -205,7 +206,7 @@
       "gate": 5,
       "id": "pv4a-blocker-multiset-equals-rs1-subset",
       "ok": true,
-      "detail": "elecCodes=3 missingOnRendered=none tapExactCode=true",
+      "detail": "elecCodes=4 missingOnRendered=none tapExactCode=true",
       "evidence": {
         "g5_missing": []
       }
@@ -341,10 +342,10 @@
       "gate": 22,
       "id": "bar-wse-electrical-authority-chained",
       "ok": true,
-      "detail": "bar-wse exit=0 · [bar-wse] 33/33 gates passed → docs/evidence/braidon-ep-evidence-original.bar-wse.json",
+      "detail": "bar-wse exit=0 · [bar-wse] 40/40 gates passed → docs/evidence/braidon-ep-evidence-original.bar-wse.json",
       "evidence": {
         "out": "docs/evidence/braidon-ep-evidence-original.bar-wse.json",
-        "gatesRun": 33,
+        "gatesRun": 40,
         "gatesFailed": 0,
         "failures": []
       }

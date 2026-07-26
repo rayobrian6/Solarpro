@@ -46,6 +46,10 @@ import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { collectEquipmentDocumentBlockers } from './equipmentProjection';
 import { classifyBlockerSeverity } from './severityPolicy';
 import { buildProcurementSufficiency, procurementInsufficiencyPayload } from './procurementSufficiency';
+import {
+  resolveOpenAirGroundingAuthority, buildGroundingDomainGraph,
+  GROUNDING_AUTHORITY_BLOCKER_CODE, type GroundingDocumentEvidence,
+} from './groundingAuthority';
 import type { CableExtensionSolution, ProcurementSufficiency } from './types';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 
@@ -94,6 +98,13 @@ export function buildPermitDesignSnapshot(
      *  archived source ⇒ operator-entered wind/snow stay UNVERIFIED ⇒
      *  ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires (the honest live outcome). */
     environmentalSource?: EnvironmentalLoadSourceEvidence | null;
+    /** GROUNDING AUTHORITY (2026-07-25) — the manufacturer document that
+     *  EXPLICITLY states the equipment grounding/bonding method for the open-air
+     *  branch section of the EXACT selected microinverter + cable assembly,
+     *  resolved by the caller through lib/documents. null/undefined ⇒ no such
+     *  document ⇒ the outcome is PENDING_MANUFACTURER_AUTHORITY and
+     *  QCABLE-GROUNDING-AUTHORITY-UNVERIFIED fires (the honest live outcome). */
+    groundingDocumentEvidence?: GroundingDocumentEvidence | null;
   },
 ): PermitDesignSnapshot {
   const { project, system, compliance } = input;
@@ -756,9 +767,15 @@ export function buildPermitDesignSnapshot(
   let listedCableAssembly: import('./types').ListedCableAssembly | null = null;
   let branchCablePaths: import('./types').BranchCablePath[] = [];
   let procurementSufficiency: ProcurementSufficiency | null = null;
+  /** the EXACT selected micro SKU/model the grounding authority must be resolved
+   *  for (never a family label) — hoisted out of the micro block below. */
+  let _selectedMicroSku: string | null = null;
   if (isMicro && branches.length > 0) {
     const _microMfr = eq.inverterManufacturer ?? microInverters[0]?.manufacturer ?? '';
     const _microModel = eq.inverterModel ?? microInverters[0]?.model ?? '';
+    // the EXACT SKU (equipment-db partNumber, e.g. IQ8A-72-2-US) — a model label
+    // ('IQ8A') is a family name and can never carry document applicability.
+    _selectedMicroSku = microInverters[0]?.sku ?? null;
     // dominant module orientation → trunk cable spacing variant (portrait 60/72-cell).
     const _oCount = { portrait: 0, landscape: 0 };
     for (const mi of structAuth.moduleInstances) {
@@ -896,6 +913,76 @@ export function buildPermitDesignSnapshot(
     ifc: _ce.ifc.edition ?? '—', asce: _ce.asce.edition ?? '—',
   };
 
+  // ═══ OPEN-AIR MICRO / Q-CABLE GROUNDING AUTHORITY (2026-07-25) ═════════════
+  // THE document-based, three-outcome resolution. The outcome is selected by
+  // outcomeFromDocument(document, applicability) ALONE — the conductor count and
+  // conductor-construction prose below are RECORDED as non-determinative facts and
+  // are NOT passed to the selector. With no verified, exactly-applicable
+  // manufacturer document archived (the live state), the outcome is
+  // PENDING_MANUFACTURER_AUTHORITY and QCABLE-GROUNDING-AUTHORITY-UNVERIFIED fires.
+  const _branchEgcObjs = groundingObjects.filter(g => g.purpose === 'branch-egc');
+  const _gndPresent = isMicro && _branchEgcObjs.length > 0;
+  const _gndPaths = branchCablePaths;
+  const _gndDesignedFt = _gndPaths.length
+    ? Math.round(_gndPaths.reduce((s, p) => s + (p.designedInstalledLengthFt ?? 0), 0) * 10) / 10
+    : null;
+  const _gndGeom = _gndPaths.length > 0 && _gndPaths.every(p => p.lengthProvenance === 'geometry-derived');
+  const _gndWaste = 1.15;
+  const _gndHomerunRw = (physicalRaceways ?? []).find(r => /BRANCH-HOMERUN/.test(r.physicalRacewayId)) ?? null;
+  const _gndGecObj = groundingObjects.find(g => g.purpose === 'gec') ?? null;
+  const openAirGroundingAuthority = _gndPresent
+    ? resolveOpenAirGroundingAuthority({
+        present: true,
+        selection: {
+          microSku: _selectedMicroSku,
+          cableSku: listedCableAssembly?.sku ?? null,
+          moduleSku: modules[0]?.sku ?? null,
+          mountingBondingSystem: (mountDb as { id?: string; model?: string } | null)?.model
+            ?? (mountDb as { id?: string } | null)?.id ?? null,
+          jurisdiction: codeAuthority.ahjName ?? null,
+        },
+        equipmentFacts: {
+          // RECORDED, NON-DETERMINATIVE (never reaches the outcome selector).
+          cableConductorConstruction: listedCableAssembly?.conductorConstruction ?? null,
+          cableConductorCount: listedCableAssembly?.conductorCount ?? null,
+          equipmentInsulationClassification: null,   // no in-repo document records one
+        },
+        // no grounding document is resolved on a live design today (lib/documents
+        // has no microinverter/cable-assembly installation-manual record) ⇒ PENDING.
+        documentEvidence: opts?.groundingDocumentEvidence ?? null,
+        conductorMaterial: _branchEgcObjs[0]?.conductorMaterial ?? 'Cu',
+        conductorSizeNecDerived: _branchEgcObjs[0]?.conductorSize ?? null,
+        conductorSizingBasis: _branchEgcObjs[0]?.sizingBasis ?? null,
+        branchIds: _gndPaths.length ? _gndPaths.map(p => p.branchId) : branches.map((b, i) => b.branchId ?? `br-${i + 1}`),
+        segmentIds: ['BRANCH_RUN'],
+        pathBasis: 'Σ per-branch BranchCablePath (same designed-installed geometry as the trunk)',
+        designedInstalledFt: _gndDesignedFt,
+        lengthProvenance: _gndPaths.length ? (_gndGeom ? 'geometry-derived' : 'estimated') : null,
+        wasteFactor: _gndWaste,
+        quantityFt: _gndDesignedFt != null ? Math.ceil(_gndDesignedFt * _gndWaste) : null,
+        bondingMethod: mountDb
+          ? `${(mountDb as { manufacturer?: string }).manufacturer ?? ''} ${(mountDb as { model?: string }).model ?? ''}`.trim()
+            + ' listed mounting assembly bonding path (UL 2703) — module frames + racking'
+          : null,
+      })
+    : null;
+  // §5 SEPARATION — the five DISTINCT grounding/bonding domains as objects. No
+  // domain inherits the open-air outcome; each states its own independent basis.
+  const groundingDomainGraph = openAirGroundingAuthority
+    ? buildGroundingDomainGraph({
+        outcome: openAirGroundingAuthority.outcome,
+        openAirLabel: openAirGroundingAuthority.renderLabel,
+        homeRunEgcSize: (routeSegments.find(r => r.segmentId === 'BRANCH_HOMERUN_RUN')?.egcGauge) ?? null,
+        homeRunRacewayLabel: _gndHomerunRw
+          ? `${_gndHomerunRw.racewayType ?? 'raceway'} ${_gndHomerunRw.selectedRacewaySize ?? ''}`.trim()
+          : null,
+        homeRunPresent: !!_gndHomerunRw,
+        bonding: openAirGroundingAuthority.rackingModuleBondingRequirement,
+        gecRequired: _gndGecObj?.required ?? false,
+        gecBasis: _gndGecObj?.codeBasis ?? 'NEC 250.64 / 690.47',
+      })
+    : [];
+
   // §14 — project legal authority is NEVER verified from an official source here
   // (no document-registry / operator verification path is wired into this pure
   // build). Postal inference is not verification, so this stays false and the
@@ -929,6 +1016,9 @@ export function buildPermitDesignSnapshot(
       // set by severityPolicy.ts; these META fields are documentary and kept in sync.
       'CONDUIT-FILL-PENDING': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit.fillPct', sheets: ['PV-4A', 'PV-4B'], resolution: 'Compute conduit fill for the feeder raceway (NEC Ch.9, Table 1) — no zero-error claim while PENDING.' },
       'TAP-CONDUCTOR-LENGTH-PENDING': { severity: 'blocking', authorityPath: 'electrical.serviceTopology[svc-tap-conductors].constraints', sheets: ['PV-4B', 'PV-6', 'E-1'], resolution: 'Field-measure the tap-conductor run and confirm ≤10 ft (NEC 705.11(C)).' },
+      // GROUNDING AUTHORITY (2026-07-25) — the open-air branch grounding method is
+      // not established by any verified, exactly-applicable manufacturer document.
+      'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': { severity: 'blocking', authorityPath: 'electrical.openAirGroundingAuthority', sheets: ['E-1', 'PV-1B', 'PV-4B', 'SCHED', 'RS-1'], resolution: 'Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this.' },
       'QCABLE-PROCUREMENT-INSUFFICIENT': { severity: 'blocking', authorityPath: 'electrical.procurementSufficiency', sheets: ['PV-4B', 'SCHED', 'E-1', 'RS-1'], resolution: 'Procurement: select a VERIFIED listed cable-extension/jumper product (exact SKU + verified manufacturer document via the document registry + IQ8A/Q-Cable compatibility + quantity/location + represented in the drawings/schedules/BOM + recalculated VD/installation), OR an alternate listed cable whose procurement footage envelopes the designed-installed path, OR revise the route/layout to reduce the path. "Jumpers required" by assertion does NOT clear this.' },
       // §2 (BAR) — the environmental-load authority gate. Subsumes the retired
       // WIND-SNOW-AUTHORITY-UNRESOLVED (null / code-minimum-default case) AND the
@@ -1056,6 +1146,43 @@ export function buildPermitDesignSnapshot(
         `Q-Cable procurement ${ps.procurementLengthFt} ft is SHORT of the ${ps.totalDesignedInstalledFt} ft designed-installed path `
           + `(+${ps.requiredServiceLoopAllowanceFt} ft allowance) by ${ps.deficitFt} ft — base cable quantity NON-ORDERABLE / PENDING a VERIFIED listed cable-extension solution.`,
         { payload: procurementInsufficiencyPayload(ps), provenance: { source: 'electrical.procurementSufficiency', ref: ps.assemblyId } });
+    }
+    // GROUNDING AUTHORITY (2026-07-25) — the equipment grounding/bonding method
+    // for the OPEN-AIR branch section is not established by a verified,
+    // exactly-applicable manufacturer document ⇒ FAIL CLOSED. Neither outcome may
+    // be asserted, the candidate EGC quantity is a non-orderable design quantity,
+    // and permit/procurement readiness is blocked. Never cleared by a conductor
+    // count, a family document or an engineering opinion.
+    if (openAirGroundingAuthority?.blocking) {
+      const ga = openAirGroundingAuthority;
+      push(GROUNDING_AUTHORITY_BLOCKER_CODE,
+        `Open-air branch grounding method NOT ESTABLISHED for the selected `
+          + `${ga.selectedMicroinverterSku ?? 'microinverter'} + ${ga.selectedCableAssemblySku ?? 'cable assembly'} `
+          + `(no applicable manufacturer document) — candidate ${ga.quantityFt ?? '—'} ft EGC is a design quantity, non-orderable.`,
+        {
+          payload: {
+            outcome: ga.outcome,
+            selectedMicroinverterSku: ga.selectedMicroinverterSku,
+            selectedCableAssemblySku: ga.selectedCableAssemblySku,
+            selectedModuleSku: ga.selectedModuleSku,
+            selectedMountingBondingSystem: ga.selectedMountingBondingSystem,
+            projectJurisdiction: ga.projectJurisdiction,
+            equipmentInsulationClassification: ga.equipmentInsulationClassification,
+            cableConductorConstruction: ga.cableConductorConstruction,
+            cableConductorCount: ga.cableConductorCount,
+            conductorCountIsNonDeterminative: ga.conductorCountIsNonDeterminative,
+            documentId: ga.documentId,
+            documentHash: ga.documentHash,
+            documentSectionOrPage: ga.documentSectionOrPage,
+            applicabilityVerification: ga.applicabilityVerification,
+            necBasis: ga.necBasis,
+            rackingModuleBondingRequirement: ga.rackingModuleBondingRequirement,
+            candidateQuantityFt: ga.quantityFt,
+            bomRowState: ga.bomRowState,
+            verificationStatus: ga.verificationStatus,
+          },
+          provenance: { source: 'electrical.openAirGroundingAuthority', ref: ga.selectedCableAssemblySku },
+        });
     }
     // §12: W3 canonical structural blockers (framing unverified, missing
     // capacity/fastener source, unsupported mixed assembly, wind/snow
@@ -1340,6 +1467,8 @@ export function buildPermitDesignSnapshot(
       engineOfRecord: 'computeSystem',
       microInverterUnits: microUnits, branches, conductors,
       groundingObjects,
+      openAirGroundingAuthority,
+      groundingDomainGraph,
       routeSegments,
       physicalRaceways,
       listedCableAssembly,
