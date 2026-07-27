@@ -22,6 +22,7 @@ import type {
 import { observedFramingLine, observedSourceLabel } from './framingAuthority';
 import { environmentalSourceLabel, environmentalStateTag } from './environmentalAuthority';
 import { peekSnapshot } from './read';
+import { projectReleaseGates, releasePackageLine, type ReleaseSummary } from './releaseGates';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
 export const EMDASH = '—';
@@ -179,6 +180,15 @@ export interface StructuralBanner {
   blockers: { code: string; message: string }[];
   /** structural-specific subset (framing / capacity / wind-snow / etc.). */
   structuralBlockers: { code: string; message: string }[];
+  /** RGM §4 — the PACKAGE-level release state in GATE semantics. Projected from
+   *  the SAME registry (deriveReleaseGateModel), so a sheet banner can state
+   *  "7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS" instead of the
+   *  "19 blockers" phrasing that presented 19 children of 7 root gates as 19
+   *  independent engineering failures. Null only when there is no snapshot. */
+  releaseSummary: ReleaseSummary | null;
+  /** RGM §4 — the pre-rendered package line (single source; see
+   *  releasePackageLine). Empty string when there is no snapshot. */
+  releasePackageLine: string;
 }
 
 const STRUCTURAL_BLOCKER_CODES = new Set([
@@ -228,12 +238,17 @@ export function structuralBanner(snap: PermitDesignSnapshot | null | undefined):
     : (snap?.permitReadiness?.blockers ?? []);
   const structuralBlockers = blockers.filter(b => STRUCTURAL_BLOCKER_CODES.has(b.code));
   const notReady = snap ? snap.permitReadiness.ready === false : false;
+  // RGM §4 — the gate model is a deterministic projection of the SAME registry
+  // this banner reads; nothing is re-derived and no requirement is filtered out.
+  const release = snap ? projectReleaseGates(snap) : null;
   return {
     show: notReady || structuralBlockers.length > 0,
     line1: BANNER_LINE_1,
     line2: BANNER_LINE_2,
     blockers,
     structuralBlockers,
+    releaseSummary: release ? release.summary : null,
+    releasePackageLine: release ? releasePackageLine(release.summary) : '',
   };
 }
 

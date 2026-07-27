@@ -78,7 +78,11 @@ const FIXTURES: Array<{ name: string; mk: () => any; seq: string[]; roof: boolea
 // (continuations excluded) PLUS the continuations' correct placement — not a
 // hard-coded continuation count that BOM changes would make brittle.
 const SCHED_CONT_RE = /^SCHED-\d+$/;
-const isContinuation = (id: string) => id === 'PV-4C.1' || SCHED_CONT_RE.test(id);
+// RGM §5 — RS-1.n review-status continuations join the same class: the
+// gate-led RS-1 paginates its child requirements onto RS-1.1, RS-1.2, … and the
+// count varies with the registry, exactly as SCHED-n varies with the BOM.
+const RS_CONT_RE = /^RS-1\.\d+$/;
+const isContinuation = (id: string) => id === 'PV-4C.1' || SCHED_CONT_RE.test(id) || RS_CONT_RE.test(id);
 const backbone = (ids: string[]) => ids.filter(id => !isContinuation(id));
 
 for (const { name, mk, seq, roof } of FIXTURES) {
@@ -102,6 +106,13 @@ for (const { name, mk, seq, roof } of FIXTURES) {
       conts.forEach((id, k) => {
         expect(id).toBe('SCHED-' + (k + 2));
         expect(ids.indexOf(id)).toBe(schedAt + 1 + k);
+      });
+      // RGM §5: RS-1.n continuations are contiguous, ordered, right after RS-1
+      const rsConts = ids.filter(id => RS_CONT_RE.test(id));
+      const rsAt = ids.indexOf('RS-1');
+      rsConts.forEach((id, k) => {
+        expect(id).toBe('RS-1.' + (k + 1));
+        expect(ids.indexOf(id)).toBe(rsAt + 1 + k);
       });
     });
 

@@ -21,7 +21,7 @@ import { classifyBlockerSeverity } from '@/lib/permit/snapshot/severityPolicy';
 import { pageConductorSchedule } from '@/lib/permit/sections/electricalPages';
 import { generateBOMForPermit } from '@/lib/permit/utils/bomForPermit';
 import { pageEquipmentSchedule, pageEquipmentScheduleCont } from '@/lib/permit/sections/structuralPages';
-import { pageReviewStatus } from '@/lib/permit/sections/reviewStatus';
+import { renderReviewStatusSheets } from '@/lib/permit/sections/reviewStatus';
 import type {
   BranchCablePath, ListedCableAssembly, CableExtensionSolution, PermitReadinessBlocker,
 } from '@/lib/permit/snapshot/types';
@@ -235,7 +235,7 @@ describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insuff
   const sched = schedPrimary
     + pageEquipmentScheduleCont(input, cad, 21, 30, 0)
     + pageEquipmentScheduleCont(input, cad, 22, 30, 1);
-  const rs1 = pageReviewStatus(input, cad, 25, 30);
+  const rs1 = renderReviewStatusSheets(input, cad);
   const deficitTxt = `${ps.deficitFt} ft`;
 
   it('PV-4B shows PROCUREMENT INSUFFICIENCY, the deficit, and NON-ORDERABLE', () => {
@@ -287,7 +287,7 @@ describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insuff
 // ── TEST 7 — report-equals-rendered: payload deficit + blocker state match. ───
 describe('§Q test 7 — evidence payload deficit + blocker state equal the rendered surfaces', () => {
   const { input, cad, ps, blocker } = buildInsufficientRender();
-  const rs1 = pageReviewStatus(input, cad, 25, 30);
+  const rs1 = renderReviewStatusSheets(input, cad);
   const payload = blocker.payload as Record<string, any>;
 
   it('payload deficit + procurement + designed equal the sufficiency object', () => {

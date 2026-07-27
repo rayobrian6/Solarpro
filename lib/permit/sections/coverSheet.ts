@@ -16,7 +16,7 @@ import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
 import { computePlansetManifest } from '../plansetManifest';
-import { structuralBannerHtml } from '../utils/structuralBanner';
+import { releaseStatusBlockHtml } from '../utils/releaseStatusBlock';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -459,7 +459,13 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
 
     ${titleBlock(input, 'PV-0', 'COVER SHEET', pageNum, totalPages)}
 
-    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
+    <!-- RGM §6 — the cover leads with the RELEASE-STATUS BLOCK (root gates +
+         counts + the pointer to RS-1), NOT the blocker list. The retired banner
+         printed 8 verbatim blocker messages + "+N more active release blockers",
+         which presented 19 children of 7 root gates as 19 independent failures.
+         The PENDING ENGINEERING REVIEW / NOT FOR PERMIT SUBMISSION identity is
+         unchanged and nothing is hidden: every requirement stays on RS-1. -->
+    ${releaseStatusBlockHtml(input, { compact: true })}
 
     <!-- ═══ MAIN BODY: 2fr left | 1fr right ═══ -->
     <div class="page-body" style="grid-template-columns:2fr 1fr;">

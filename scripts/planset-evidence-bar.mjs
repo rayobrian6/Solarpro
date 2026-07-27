@@ -54,11 +54,15 @@ const sheetIdOf = (p) => (p.match(/tb-sheet-id">\s*([^<]+?)\s*</) ?? [])[1] ?? '
 const sheetIds = pages.map(sheetIdOf);
 const stripComments = (p) => p.replace(/<!--[\s\S]*?-->/g, '');
 const pageWhere = (pred) => pages.map(stripComments).filter(pred);
-const rs1 = pageWhere(p => p.includes('permitReadiness.registry') && p.includes('OPEN RELEASE BLOCKER')).pop() ?? '';
-// PV-0's release surface is the struct-review-banner: it lists the active
-// blockers verbatim (capped) plus an explicit "+N more" remainder, so the cover's
-// TOTAL is exact without a second count to drift from.
-const cover = pageWhere(p => p.includes('struct-review-banner')).shift() ?? '';
+// RGM §5: the review-status registry is RS-1 + its RS-1.n continuation sheets
+// (the gate-led sheet paginates), so the RS surface is the UNION of them all.
+const rs1 = pages.map(stripComments).filter((p, i) => /^RS-1/.test(sheetIds[i])).join('\n');
+// RGM §6: PV-0's release surface is the RELEASE-STATUS BLOCK: the gate-semantics
+// headline, the numbered OPEN root gates and the pointer to RS-1. It replaced the
+// verbatim blocker list + "+N more" remainder (which read as N independent
+// failures). Counts are carried on data attributes so the harness reads the
+// rendered NUMBER, never a phrase.
+const cover = pages.map(stripComments).filter((p, i) => sheetIds[i] === 'PV-0').join('\n');
 // PV-4C is split across the calc sheet + PV-4C.1 conclusion — take the union.
 const pv4c = pageWhere(p => p.includes('data-env-source="pv-4c')).join('\n');
 const pe1 = pageWhere(p => p.includes('data-env-source="pe-1"')).pop() ?? '';
@@ -137,23 +141,29 @@ const listCodes = (pr.blockers ?? []).map(b => b.code).sort();
 const rs1Rows = [...rs1.matchAll(/>(BLOCKING|ADVISORY)<\/span>\s*<\/td>\s*<td class="mono"[^>]*>([A-Z0-9-]+)</g)]
   .map(m => ({ severity: m[1] === 'BLOCKING' ? 'blocking' : 'warning', code: m[2] }));
 const rs1Multiset = rs1Rows.map(key).sort();
-const rs1HeaderBlocking = Number((rs1.match(/(\d+)\s+OPEN RELEASE BLOCKER/) ?? [])[1] ?? NaN);
-const rs1SummaryBlocking = Number((rs1.match(/BLOCKING<\/span>\s*<span[^>]*>(\d+)</) ?? [])[1] ?? NaN);
-const rs1SummaryAdvisory = Number((rs1.match(/ADVISORY<\/span>\s*<span[^>]*>(\d+)</) ?? [])[1] ?? NaN);
-// The COVER banner's blocker multiset = the <li> items it prints verbatim, plus
-// the explicit "+N more active release blocker(s)" remainder it points at RS-1 for.
-const coverBanner = cover.slice(cover.indexOf('struct-review-banner'));
-const coverBannerBlock = coverBanner.slice(0, coverBanner.indexOf('</ul>') + 5 || undefined);
-const coverListed = (coverBannerBlock.match(/<li[^>]*>/g) ?? []).length;
-const coverMore = Number((coverBannerBlock.match(/\+\s*(\d+)\s+more active release blocker/) ?? [])[1] ?? 0);
-// the "+N more" <li> is itself one of the listed items — do not double-count it.
-const coverTotal = cover ? (coverMore > 0 ? coverListed - 1 + coverMore : coverListed) : NaN;
+// RGM §4: RS-1's headline states GATE semantics — "<g> OPEN RELEASE GATES /
+// <r> UNRESOLVED REQUIREMENTS". The REQUIREMENT count is the one that must equal
+// the blocking registry count; the GATE count is the number of ROOT gates holding
+// them and is never conflated with it.
+const rs1HeaderBlocking = Number((rs1.match(/(\d+)\s+UNRESOLVED REQUIREMENT/) ?? [])[1] ?? NaN);
+const rs1HeaderGates = Number((rs1.match(/(\d+)\s+OPEN RELEASE GATE/) ?? [])[1] ?? NaN);
+const rs1SummaryBlocking = Number((rs1.match(/data-release-requirement-count="(\d+)"/) ?? [])[1] ?? NaN);
+const rs1SummaryAdvisory = Number((rs1.match(/data-release-advisory-count="(\d+)"/) ?? [])[1] ?? NaN);
+// The COVER states the same two counts (data attributes) and NUMBERS the open
+// gates; RS-1 carries the requirement detail. cover == RS-1 == registry.
+const coverTotal = Number((cover.match(/data-release-requirement-count="(\d+)"/) ?? [])[1] ?? NaN);
+const coverGates = Number((cover.match(/data-release-open-gate-count="(\d+)"/) ?? [])[1] ?? NaN);
+const coverListedGates = (cover.match(/data-release-open-gate="RG-[^"]+"/g) ?? []).length;
 
 const g1_registryEqList = JSON.stringify(listCodes) === JSON.stringify(blockingCodes);
 const g1_renderedEqRegistry = JSON.stringify(rs1Multiset) === JSON.stringify(registryMultiset);
 const g1_headerEq = rs1HeaderBlocking === blockingCodes.length;
 const g1_summaryEq = rs1SummaryBlocking === blockingCodes.length && rs1SummaryAdvisory === advisoryCodes.length;
-const g1_coverEq = registry.length === 0 ? true : coverTotal === registry.length;
+// cover == RS-1: same requirement count, same open-gate count, and the cover
+// LISTS exactly that many root gates (no "+N more" remainder to drift).
+const g1_coverEq = registry.length === 0
+  ? true
+  : (coverTotal === blockingCodes.length && coverGates === rs1HeaderGates && coverListedGates === coverGates);
 // the derived ISSUE-STATE gate must agree that blockers exist
 const g1_issueGate = blockingCodes.length === 0
   ? pr.ready === true
@@ -162,7 +172,7 @@ gate(1, 'blocker-multiset-equality-across-surfaces',
   g1_registryEqList && g1_renderedEqRegistry && g1_headerEq && g1_summaryEq && g1_coverEq && g1_issueGate,
   `registry=${registry.length} (blocking ${blockingCodes.length} / advisory ${advisoryCodes.length}) `
   + `rs1Rows=${rs1Rows.length} rs1Header=${rs1HeaderBlocking} rs1Summary=${rs1SummaryBlocking}/${rs1SummaryAdvisory} `
-  + `coverBanner=${Number.isNaN(coverTotal) ? 'MISSING' : coverTotal} (listed ${coverListed} +${coverMore} more) listEq=${g1_registryEqList} `
+  + `coverRequirements=${Number.isNaN(coverTotal) ? "MISSING" : coverTotal} coverGates=${coverGates} (listed ${coverListedGates}) rs1Gates=${rs1HeaderGates} listEq=${g1_registryEqList} `
   + `renderedEq=${g1_renderedEqRegistry} issueGate=${g1_issueGate} issueState=${pa?.issueState ?? '—'}`,
   {
     blockingCodes, advisoryCodes,
@@ -417,7 +427,8 @@ const report = {
   blockerRegistry: {
     blockingCount: blockingCodes.length, advisoryCount: advisoryCodes.length,
     blockingCodes, advisoryCodes,
-    renderedRs1: rs1Rows, rs1HeaderBlocking, coverBannerTotal: coverTotal, coverListed, coverMore,
+    renderedRs1: rs1Rows, rs1HeaderRequirements: rs1HeaderBlocking, rs1HeaderGates,
+    coverRequirementCount: coverTotal, coverGateCount: coverGates, coverListedGates,
     issueState: pa?.issueState ?? null, ready: pr.ready ?? null,
   },
   environmentalLoadAuthority: ela,

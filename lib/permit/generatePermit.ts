@@ -38,7 +38,7 @@ import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
-import { pageReviewStatus } from './sections/reviewStatus';
+import { pageReviewStatus, reviewStatusContPageCount } from './sections/reviewStatus';
 import { pageArrayPrimary, pageArrayGeometry, pageGroundArrayPlan, pageFencePlan } from './sections/arrayPages';
 import { pageStructuralPrimary, pageStructural, pageStructuralRoofContinuation, roofStructuralHasContinuation, pageEquipmentSchedule, pageEquipmentScheduleCont, schedContPageCount, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
 import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
@@ -1156,6 +1156,10 @@ export function generatePermitHTML(
   // page edge. schedContPageCount MUST mirror computePlansetManifest so page
   // count == sheet index. (W9/§15 multi-page BOM continuation.)
   const _schedContCount = schedContPageCount(input.bom);
+  // RGM §5 — RS-1.n review-status continuation count. Read from the SNAPSHOT's
+  // registry (attached above), which is exactly what computePlansetManifest sees,
+  // so page count == sheet index.
+  const _rsContCount = reviewStatusContPageCount(_permitSnapshot?.permitReadiness?.registry ?? []);
 
   // ── Wave 5B: hybrid per-sub sheet loop ────────────────────────────────
   // A hybrid design gets ONE detail set PER sub-system alongside the primary
@@ -1209,7 +1213,13 @@ export function generatePermitHTML(
   // sheets can never desync pageNum/TOTAL or the cover index again.
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
-    (n, t) => pageReviewStatus(input, cad, n, t),                      // RS-1: Review status — full active-blocker registry (W10)
+    (n, t) => pageReviewStatus(input, cad, n, t),                      // RS-1: Review status — root gate table + child requirements (RGM §5)
+    // RGM §5: RS-1.1 … RS-1.n — formal continuations of the review-status
+    // registry. The count comes from the SAME layout function the sheet manifest
+    // uses (reviewStatusContPageCount over the snapshot registry), so the cover
+    // index and the rendered page set can never disagree.
+    ...Array.from({ length: _rsContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageReviewStatus(input, cad, n, t, ci)),
     // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
     // the roof/array drawing now carries the integrated site context (parcel,
     // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.

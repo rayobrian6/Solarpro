@@ -1356,7 +1356,11 @@ export function buildPermitDesignSnapshot(
     issueDate: proj.date ?? null,
     county: proj.county ?? null,                        // §14 municipal-boundary provenance
     authorityVerified: _projectAuthorityVerified,       // §14 — false (no official-source path)
-    sheetIndex: computePlansetManifest(input, cad),
+    // RGM §5 — the sheet index must include the RS-1.n review-status
+    // continuation sheets, whose count depends on THIS registry. The snapshot is
+    // still being assembled here, so the FINAL registry is handed over
+    // explicitly rather than read back through peekSnapshot.
+    sheetIndex: computePlansetManifest(input, cad, { releaseRegistry: _permitReadiness.registry }),
     governingCodes: {
       schemaVersion: codeAuthority.schemaVersion,
       verificationStatus: codeAuthority.verificationStatus,

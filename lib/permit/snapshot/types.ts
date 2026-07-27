@@ -1202,7 +1202,19 @@ export interface PermitDesignSnapshot {
    *  code/string list — SINGLE-SOURCED from the registry's BLOCKING entries so
    *  the many existing code-string consumers (issue-state derivation, gates,
    *  banners) keep working byte-identically while renderers surface the full
-   *  registry (RS-1 review-status sheet + the union banners). */
+   *  registry (RS-1 review-status sheet + the union banners).
+   *
+   *  RGM §9 (2026-07-26): the HIERARCHICAL RELEASE-GATE MODEL — seven ROOT release
+   *  gates that CONTAIN these individual requirements — is a DETERMINISTIC
+   *  PROJECTION of this registry, NOT a stored field. `releaseGates`,
+   *  `releaseRequirements`, `releaseSummary` and `readinessAxes` are obtained
+   *  through `releaseGates.projectReleaseGates(snapshot)` /
+   *  `projectReleaseGatesFromInput(input)` — the same read-accessor pattern as
+   *  codeAuthorityProjection / structuralProjection / projectIssueStateLanguage.
+   *  Projecting at read keeps `blockers` + `registry` byte-identical and leaves the
+   *  snapshot digest untouched (verified: the frozen Braidon fixture still hashes to
+   *  PDS-09765A24D723), so the gate model implies no DB migration and cannot
+   *  invalidate a digest-bound engineering approval. */
   permitReadiness: {
     ready: boolean;
     blockers: { code: string; message: string }[];

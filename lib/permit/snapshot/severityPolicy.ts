@@ -159,6 +159,198 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     justification: '',
   },
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RGM (2026-07-26) — IMPACT-AXIS COMPLETION. Every code the snapshot build can
+  // emit now carries an EXPLICIT impact declaration, so the five permit-acceptance
+  // axes are complete at their single source and the hierarchical release-gate
+  // model (releaseGates.ts) can DERIVE each requirement's release impact from
+  // here rather than from a per-code list of its own.
+  //
+  // NO SEVERITY OUTCOME CHANGES: every entry below touches ≥1 axis, so each
+  // classifies BLOCKING with an empty justification — byte-identical to the
+  // fail-closed result these codes already produced. The registry (and therefore
+  // the snapshot digest) is unaffected. Advisory reclassification is impossible
+  // here: that still requires an entry whose impact touches NO axis plus a
+  // written justification, and none is added.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── electrical ───────────────────────────────────────────────────────────────
+  // Run lengths that are CAD ESTIMATES: voltage drop cannot be shown satisfied
+  // (code), the ordered conductor/raceway footage derives from them (procurement),
+  // and no PE/AHJ accepts length-dependent results presented as authoritative
+  // (engineering + acceptance). Ampacity/OCPD do not depend on length ⇒ safety
+  // is NOT touched by the estimate itself.
+  'ROUTE-LENGTH-ESTIMATE': {
+    impact: { safety: false, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // No resolved feeder raceway/conduit type: derating + bonding are unknown
+  // (safety), NEC raceway/bonding articles cannot be shown satisfied (code), the
+  // raceway is an ordered item (procurement), and the set is not reviewable.
+  'FEEDER-RACEWAY-AUTHORITY': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // An ambiguous branch raceway model (open-air trunk vs shared home-run) hides
+  // the shared-circuit count and its fill/derating — all five axes.
+  'BRANCH-RACEWAY-AUTHORITY': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // One physical run resolving to two raceway types/sizes is a contradiction the
+  // schedule would print — all five axes.
+  'RACEWAY-SEGMENT-CONFLICT': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
+  // ── equipment identity / documents ───────────────────────────────────────────
+  // Two stored authorities disagree about WHICH module is installed: conductor
+  // sizing + structural inputs follow the module (code + engineering), the ordered
+  // module is the conflict itself (procurement), and the AHJ set would name the
+  // wrong equipment (acceptance). Operator-only reconciliation.
+  'EQUIPMENT-IDENTITY-CONFLICT': {
+    impact: { safety: false, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Module catalog dimensions absent: footprints/layout cannot be built and the
+  // ordered module identity is not pinned.
+  'MODULE-DIMENSIONS-UNVERIFIED': {
+    impact: { safety: false, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
+  // ── code / project identity / professional workflow ──────────────────────────
+  // Adopted editions unknown: no code rule can be shown satisfied against a known
+  // edition, and the PE/AHJ require the governing editions.
+  'CODE-AUTHORITY-INCOMPLETE': {
+    impact: { safety: false, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Project legal authority operator-posted / postally inferred: the AHJ would
+  // reject or question the submitted identity. No engineering value changes.
+  'PROJECT-AUTHORITY-UNVERIFIED': {
+    impact: { safety: false, codeCompliance: false, procurement: false, engineeringApproval: false, permitAcceptance: true },
+    justification: '',
+  },
+  // A non-production ("TEST") identity is an ADMINISTRATIVE hold: nothing
+  // computed is wrong, but the set can never be accepted / issued as shown.
+  'PROJECT-NAME-NONPRODUCTION': {
+    impact: { safety: false, codeCompliance: false, procurement: false, engineeringApproval: false, permitAcceptance: true },
+    justification: '',
+  },
+  // No designer / engineer-of-record: nothing can be stamped or accepted.
+  'DESIGNER-OF-RECORD-MISSING': {
+    impact: { safety: false, codeCompliance: false, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // No approved engineering review covering the CURRENT digest — the stamp is the
+  // missing fact itself; a workflow requirement, not an engineering defect.
+  'ENGINEERING-REVIEW-PENDING': {
+    impact: { safety: false, codeCompliance: false, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
+  // ── structural authority lane ────────────────────────────────────────────────
+  // No verified framing CAPACITY authority: the attachment/framing demand path is
+  // unproven (safety), IBC/IRC cannot be shown satisfied (code), the stamp depends
+  // on it (engineering), and the AHJ requires the basis (acceptance). Nothing
+  // ordered changes ⇒ procurement untouched.
+  'FRAMING-AUTHORITY-UNVERIFIED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  'STRUCTURAL-FRAMING-UNVERIFIED': {   // legacy alias of the above
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Exact rail/splice SKU unpinned ⇒ the ordered assembly is undetermined AND its
+  // span/capacity basis is unverified — all five axes.
+  'PENDING-RACKING-ASSEMBLY-SELECTION': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Capacity source NOT ARCHIVED / not applicable to the exact assembly: the
+  // allowable cannot be verified against a source of record. Capacity is NOT YET
+  // ESTABLISHED — no capacity has been shown to fail. The ordered hardware does
+  // not change ⇒ procurement untouched.
+  'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  'RACKING-CAPACITY-APPLICABILITY-GAP': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // An ultimate-basis value refused as an ASD allowable — the allowable in use is
+  // not traceable to a stamped report.
+  'RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // No published allowable attachment-capacity source resolved at all.
+  'ATTACHMENT-CAPACITY-SOURCE-MISSING': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Fastener model / count / embedment incomplete: the uplift path is unproven and
+  // the ordered fastener is undetermined.
+  'FASTENER-CONFIG-MISSING': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Mixed-manufacturer assembly with no documented compatibility/capacity.
+  'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Mounting topology not DECLARED (product-name inference is prohibited): rails,
+  // attachment pattern, BOM and load path all follow the topology.
+  'MOUNT-TOPOLOGY-UNKNOWN': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Rail-less attachment coordinates not derivable ⇒ mount coordinates and
+  // reactions are not traceable, and the attachment count drives procurement.
+  'DIRECT-MOUNT-GEOMETRY-MISSING': {
+    impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Reactions / rail quantities / BOM that do not reconcile with the canonical
+  // objects: a computed result cannot be presented as authoritative.
+  'REACTIONS-UNTRACEABLE': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  'STRUCTURAL-REACTION-RECONCILIATION-FAILED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  'RAIL-QUANTITY-UNTRACEABLE': {
+    impact: { safety: false, codeCompliance: false, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  'STRUCTURAL-BOM-RECONCILIATION-FAILED': {
+    impact: { safety: false, codeCompliance: false, procurement: true, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // A computed demand EXCEEDS its allowable — a verified engineering deficiency.
+  'STRUCTURAL-UTILIZATION-EXCEEDED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // No canonical roof-plane geometry: nothing structural can be shown at all.
+  'SITE-GEOMETRY-MISSING': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+  // Legacy environmental-load code (subsumed by ENVIRONMENTAL-LOAD-AUTHORITY-
+  // UNVERIFIED); declared so the retired code carries the same impact.
+  'WIND-SNOW-AUTHORITY-UNRESOLVED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
+
   // ── LEGITIMATELY ADVISORY (impact touches no axis; justification required) ────
   // The microinverter's electrical parameters are already taken from the canonical
   // equipment-db record the engine itself uses; only the archived manufacturer PDF

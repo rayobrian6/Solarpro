@@ -28,13 +28,25 @@ export function structuralBannerHtml(
   const _cap = 8;
   const _shown = _all.slice(0, _cap);
   const _more = _all.length - _shown.length;
+  // RGM §4/§6 — the REMAINDER is a PACKAGE-level statement, so it is stated in
+  // GATE semantics: "N more unresolved requirements" (children of root gates),
+  // never "N more active release blockers" (which read as N independent
+  // failures). The requirement rows themselves are unchanged — every active
+  // requirement the old banner enumerated is still enumerated here.
   const reasons = _shown.map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('')
-    + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more active release blocker${_more === 1 ? '' : 's'} — see sheet RS-1 (REVIEW STATUS)</li>` : '');
+    + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more unresolved release requirement${_more === 1 ? '' : 's'} — see sheet RS-1 (REVIEW STATUS)</li>` : '');
   const pad = opts?.compact ? '4px 8px' : '8px 12px';
+  // RGM §4 — the package TOTAL line, single-sourced from the release-gate model
+  // (releasePackageLine on the projection). Rendered above the requirement rows
+  // so a reviewer reads "7 root gates" before the 19 child requirements.
+  const gateLine = b.releasePackageLine
+    ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:#7f1d1d;text-align:center;margin-top:2px;">${esc(b.releasePackageLine)}</div>`
+    : '';
   return `
   <div class="struct-review-banner" style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid #b91c1c;background:#fef2f2;padding:${pad};page-break-inside:avoid;">
     <div style="font-weight:900;font-size:11px;letter-spacing:0.6px;color:#b91c1c;text-align:center;">${esc(b.line1)}</div>
     <div style="font-weight:900;font-size:10px;letter-spacing:0.6px;color:#b91c1c;text-align:center;margin-top:1px;">${esc(b.line2)}</div>
+    ${gateLine}
     ${reasons ? `<ul style="margin:4px 0 0 0;padding-left:16px;font-size:7.5px;color:#7f1d1d;line-height:1.35;">${reasons}</ul>` : ''}
   </div>`;
 }

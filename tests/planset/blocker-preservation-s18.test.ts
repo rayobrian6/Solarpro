@@ -45,8 +45,9 @@ function renderLiveBraidon(): { html: string; snap: PermitDesignSnapshot } {
 }
 
 function rs1Fragment(html: string): string {
+  // RGM §5 — the union of RS-1 + its RS-1.n continuation sheets.
   const parts = html.split('<div class="page">');
-  return parts.find(p => p.includes('permitReadiness.registry') && p.includes('ACTIVE RELEASE BLOCKERS')) ?? '';
+  return parts.filter(p => p.includes('permitReadiness.registry')).join('\n');
 }
 
 describe('§18 — legitimate project blockers are preserved (Braidon state)', () => {

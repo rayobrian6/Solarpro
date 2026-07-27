@@ -196,8 +196,9 @@ function renderLiveLike(): { html: string; snap: PermitDesignSnapshot } {
 }
 
 function rs1Fragment(html: string): string {
+  // RGM §5 — the union of RS-1 + its RS-1.n continuation sheets.
   const parts = html.split('<div class="page">');
-  return parts.find(p => p.includes('permitReadiness.registry') && p.includes('ACTIVE RELEASE BLOCKERS')) ?? '';
+  return parts.filter(p => p.includes('permitReadiness.registry')).join('\n');
 }
 
 describe('§2 — operator entry does NOT clear the blocker (the root fix)', () => {
@@ -242,12 +243,20 @@ describe('§1 — rendered multiset-equality across surfaces', () => {
     for (const c of blockingCodes) expect(frag).toContain(c);
   });
 
-  it('the RS-1 header blocking count equals the registry blocking count', () => {
+  it('the RS-1 header requirement count equals the registry blocking count', () => {
+    // RGM §4 — the header states GATE semantics: "<g> OPEN RELEASE GATES /
+    // <r> UNRESOLVED REQUIREMENTS". The REQUIREMENT count is the one that must
+    // equal the blocking registry count; the GATE count is the number of root
+    // gates holding them and is always <= it (never conflated).
     const frag = rs1Fragment(html);
-    const m = frag.match(/(\d+)\s+OPEN RELEASE BLOCKER/);
-    expect(m).toBeTruthy();
+    const req = frag.match(/(\d+)\s+UNRESOLVED REQUIREMENT/);
+    const gates = frag.match(/(\d+)\s+OPEN RELEASE GATE/);
+    expect(req).toBeTruthy();
+    expect(gates).toBeTruthy();
     const blockingCount = registry.filter(r => r.severity === 'blocking').length;
-    expect(Number(m![1])).toBe(blockingCount);
+    expect(Number(req![1])).toBe(blockingCount);
+    expect(Number(gates![1])).toBeGreaterThan(0);
+    expect(Number(gates![1])).toBeLessThanOrEqual(blockingCount);
   });
 });
 

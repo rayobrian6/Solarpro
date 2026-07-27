@@ -81,16 +81,28 @@ export function certificationGateBanner(input: PermitInput): string {
   // the registry union) — not the structural-else-everything ternary that hid
   // the equipment-identity / code / tap / fill / project-identity blockers.
   const _allReasons = _sp.banner.blockers;
-  const _shownReasons = _allReasons.slice(0, 8);
+  // RGM §4 — the verbatim list is capped at 6 on this sheet (was 8): the
+  // package-level GATE line above now carries the totals, and the CERT page's
+  // fixed box has no room for both. No requirement is lost — the remainder line
+  // states the count and RS-1 prints every requirement in full.
+  const _shownReasons = _allReasons.slice(0, 6);
   const _moreReasons = _allReasons.length - _shownReasons.length;
   const _reasons = _shownReasons
     .map(b => `<li style="margin:0 0 1px 0;">${String(b.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')
-    + (_moreReasons > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_moreReasons} more — see sheet RS-1 (REVIEW STATUS)</li>` : '');
+    // RGM §4 — the remainder is a PACKAGE-level statement ⇒ requirement (child)
+    // semantics with the root-gate total stated on its own line above.
+    + (_moreReasons > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_moreReasons} more unresolved release requirement${_moreReasons === 1 ? '' : 's'} — see sheet RS-1 (REVIEW STATUS)</li>` : '');
   const _hasStructural = _sp.banner.structuralBlockers.length > 0;
+  // RGM §4 — package total in GATE semantics (7 root gates over 19 requirements),
+  // single-sourced from the release-gate model via the structural projection.
+  const _gateLine = _sp.banner.releasePackageLine
+    ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:#7a0000;margin-top:2px;">${String(_sp.banner.releasePackageLine).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
+    : '';
   return `
   <div style="border:3px solid #b00000;background:#fff2f2;margin:10px 14px 6px;padding:8px 12px;text-align:center;">
     <div style="font-weight:900;font-size:13px;letter-spacing:1px;color:#b00000;">PENDING ENGINEERING REVIEW</div>
     ${_hasStructural ? `<div style="font-weight:900;font-size:11px;letter-spacing:0.8px;color:#b00000;">STRUCTURAL ENGINEERING REVIEW REQUIRED</div>` : ''}
+    ${_gateLine}
     <div style="font-weight:800;font-size:10px;letter-spacing:0.8px;color:#b00000;">NOT FOR PERMIT SUBMISSION &mdash; UNSIGNED / UNSEALED</div>
     <div style="font-size:7.5px;color:#7a0000;margin-top:2px;">Certification activates only upon an approved engineering-review record covering this snapshot digest, with engineer identity, license, jurisdiction and seal on file. A design change that alters the snapshot digest invalidates any prior approval.</div>
     ${_reasons ? `<ul style="margin:4px auto 0;padding-left:16px;max-width:520px;text-align:left;font-size:7px;color:#7a0000;line-height:1.35;">${_reasons}</ul>` : ''}

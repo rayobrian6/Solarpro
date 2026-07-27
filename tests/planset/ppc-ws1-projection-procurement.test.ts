@@ -38,7 +38,7 @@ import {
 } from '@/lib/permit/snapshot/groundingAuthority';
 import {
   BLOCKER_PAYLOAD_SCHEMA, blockerPayloadSchema, renderBlockerPayload,
-  pageReviewStatus, type BlockerPayloadSchema,
+  pageReviewStatus, renderReviewStatusSheets, type BlockerPayloadSchema,
 } from '@/lib/permit/sections/reviewStatus';
 import { pageConductorSchedule, pageSingleLineDiagram } from '@/lib/permit/sections/electricalPages';
 import { pageEquipmentSchedule, pageEquipmentScheduleCont } from '@/lib/permit/sections/structuralPages';
@@ -355,7 +355,7 @@ describe('§2 — RS-1 blocker payload components are schema-selected', () => {
   });
 
   it('the GROUNDING blocker renders the grounding payload with Ray’s full field list', () => {
-    const rs1 = pageReviewStatus(PKG.input, PKG.cad, 20, 21);
+    const rs1 = renderReviewStatusSheets(PKG.input, PKG.cad);
     expect(rs1).toContain('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED');
     expect(rs1).toContain('GROUNDING AUTHORITY PAYLOAD:');
     for (const field of [
@@ -368,7 +368,7 @@ describe('§2 — RS-1 blocker payload components are schema-selected', () => {
   });
 
   it('the frozen fixture’s RS-1 shows NO deficit template (the §2 defect is gone)', () => {
-    const rs1 = pageReviewStatus(PKG.input, PKG.cad, 20, 21);
+    const rs1 = renderReviewStatusSheets(PKG.input, PKG.cad);
     const codes = (PKG.snap.permitReadiness.registry ?? []).map(r => r.code);
     expect(codes).not.toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
     // …therefore no DEFICIT PAYLOAD box may exist anywhere on the sheet
@@ -583,7 +583,7 @@ describe('§9 — the insufficient Q-Cable BOM row is itself NON-ORDERABLE', () 
   });
 
   it('§2 non-vacuous — the DEFICIT component now renders, on the RIGHT blocker only', () => {
-    const rs1 = pageReviewStatus(input, cad, 20, 21);
+    const rs1 = renderReviewStatusSheets(input, cad);
     expect(rs1).toContain('DEFICIT PAYLOAD:');
     expect(rs1).toContain(`deficit ${ps.deficitFt} ft`);
     expect(rs1).toContain('Q-12-10-240');

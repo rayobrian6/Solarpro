@@ -74,9 +74,14 @@ const sheetIds = pages.map(sheetIdOf);
 const stripComments = (p) => p.replace(/<!--[\s\S]*?-->/g, '');
 const pageWhere = (pred) => pages.map(stripComments).filter(pred);
 const sheet = (id) => pages.map(stripComments).filter((p, i) => sheetIds[i] === id).join('\n');
-const rs1 = pageWhere(p => p.includes('permitReadiness.registry') && p.includes('OPEN RELEASE BLOCKER')).pop() ?? '';
-const rs1All = pageWhere(p => p.includes('OPEN RELEASE BLOCKER') || p.includes('data-blocker-payload-schema')).join('\n');
-const cover = pageWhere(p => p.includes('struct-review-banner')).shift() ?? '';
+// RGM §5 — the gate-led review-status registry is RS-1 PLUS its RS-1.n
+// continuation sheets; the RS surface is the UNION of them (a requirement that
+// paginated onto a continuation sheet is still rendered).
+const rs1 = pages.map(stripComments).filter((p, i) => /^RS-1/.test(sheetIds[i])).join('\n');
+const rs1All = rs1;
+// RGM §6 — PV-0 carries the RELEASE-STATUS BLOCK (gate headline + numbered open
+// root gates + pointer to RS-1) in place of the verbatim blocker list.
+const cover = pages.map(stripComments).filter((p, i) => sheetIds[i] === 'PV-0').join('\n');
 const pv3 = sheet('PV-3');
 const pv1 = sheet('PV-1');
 const pv4b = sheet('PV-4B');
@@ -550,20 +555,23 @@ const enumeratedExclusions = (noB64.match(/data-procurement-excluded-row="[^"]*"
   const rs1Rows = [...rs1.matchAll(/>(BLOCKING|ADVISORY)<\/span>\s*<\/td>\s*<td class="mono"[^>]*>([A-Z0-9-]+)</g)]
     .map(m => ({ severity: m[1] === 'BLOCKING' ? 'blocking' : 'warning', code: m[2] }));
   const rs1Multiset = rs1Rows.map(key).sort();
-  const rs1Header = Number((rs1.match(/(\d+)\s+OPEN RELEASE BLOCKER/) ?? [])[1] ?? NaN);
-  const rs1SumB = Number((rs1.match(/BLOCKING<\/span>\s*<span[^>]*>(\d+)</) ?? [])[1] ?? NaN);
-  const rs1SumA = Number((rs1.match(/ADVISORY<\/span>\s*<span[^>]*>(\d+)</) ?? [])[1] ?? NaN);
-  const coverBanner = cover.slice(cover.indexOf('struct-review-banner'));
-  const coverBlock = coverBanner.slice(0, coverBanner.indexOf('</ul>') + 5 || undefined);
-  const coverListed = (coverBlock.match(/<li[^>]*>/g) ?? []).length;
-  const coverMore = Number((coverBlock.match(/\+\s*(\d+)\s+more active release blocker/) ?? [])[1] ?? 0);
-  const coverTotal = cover ? (coverMore > 0 ? coverListed - 1 + coverMore : coverListed) : NaN;
+  // RGM §4 — GATE semantics: the REQUIREMENT count must equal the blocking
+  // registry count; the ROOT-GATE count is separate and never conflated with it.
+  const rs1Header = Number((rs1.match(/(\d+)\s+UNRESOLVED REQUIREMENT/) ?? [])[1] ?? NaN);
+  const rs1Gates = Number((rs1.match(/(\d+)\s+OPEN RELEASE GATE/) ?? [])[1] ?? NaN);
+  const rs1SumB = Number((rs1.match(/data-release-requirement-count="(\d+)"/) ?? [])[1] ?? NaN);
+  const rs1SumA = Number((rs1.match(/data-release-advisory-count="(\d+)"/) ?? [])[1] ?? NaN);
+  const coverTotal = Number((cover.match(/data-release-requirement-count="(\d+)"/) ?? [])[1] ?? NaN);
+  const coverGates = Number((cover.match(/data-release-open-gate-count="(\d+)"/) ?? [])[1] ?? NaN);
+  const coverListedGates = (cover.match(/data-release-open-gate="RG-[^"]+"/g) ?? []).length;
   const eq = {
     listEqRegistry: JSON.stringify(listCodes) === JSON.stringify(blockingCodes),
     rs1EqRegistry: JSON.stringify(rs1Multiset) === JSON.stringify(registryMultiset),
     rs1HeaderEq: rs1Header === blockingCodes.length,
     rs1SummaryEq: rs1SumB === blockingCodes.length && rs1SumA === advisoryCodes.length,
-    coverEq: registry.length === 0 ? true : coverTotal === registry.length,
+    coverEq: registry.length === 0
+      ? true
+      : (coverTotal === blockingCodes.length && coverGates === rs1Gates && coverListedGates === coverGates),
     issueGate: hasBlocking
       ? (pr.ready === false && !/CLEARED FOR ISSUE/.test(rs1) && !/ISSUED FOR PERMIT/.test(String(pa?.issueState ?? '')))
       : pr.ready === true,
@@ -571,8 +579,8 @@ const enumeratedExclusions = (noB64.match(/data-procurement-excluded-row="[^"]*"
   gate(15, 'blocker-counts-identical-across-surfaces',
     Object.values(eq).every(Boolean),
     `registry=${registry.length} (blocking ${blockingCodes.length}/advisory ${advisoryCodes.length}) `
-    + `rs1Rows=${rs1Rows.length} rs1Header=${rs1Header} rs1Summary=${rs1SumB}/${rs1SumA} `
-    + `cover=${Number.isNaN(coverTotal) ? 'MISSING' : coverTotal} ${JSON.stringify(eq)}`,
+    + `rs1Rows=${rs1Rows.length} rs1Requirements=${rs1Header} rs1Gates=${rs1Gates} rs1Summary=${rs1SumB}/${rs1SumA} `
+    + `coverRequirements=${Number.isNaN(coverTotal) ? 'MISSING' : coverTotal} coverGates=${coverGates} (listed ${coverListedGates}) ${JSON.stringify(eq)}`,
     { blockingCodes, advisoryCodes, missingFromRs1: registryMultiset.filter(k => !rs1Multiset.includes(k)),
       extraOnRs1: rs1Multiset.filter(k => !registryMultiset.includes(k)) });
 }
@@ -654,8 +662,9 @@ const mismatches = [];
   const digs = projField('digest');
   rcheck('digestPrefix', String(meta.digest || '').slice(0, 12),
     digs.length > 0 && digs.every(v => v && String(meta.digest || '').startsWith(v)), { rendered: digs });
+  // RGM §4 — the rendered count is now the UNRESOLVED REQUIREMENT count.
   rcheck('blockingCount', blockingCodes.length,
-    Number((rs1.match(/(\d+)\s+OPEN RELEASE BLOCKER/) ?? [])[1] ?? NaN) === blockingCodes.length);
+    Number((rs1.match(/(\d+)\s+UNRESOLVED REQUIREMENT/) ?? [])[1] ?? NaN) === blockingCodes.length);
   // grounding — the OUTCOME, not a fixed result
   if (gnd?.outcome) {
     rcheck('groundingOutcome', gnd.outcome,

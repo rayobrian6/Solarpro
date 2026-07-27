@@ -30,6 +30,11 @@ export interface SheetManifestOptions {
   /** W9/§15 — number of SCHED continuation sheets (SCHED-2, SCHED-3, …) a long
    *  BOM paginates onto. Overrides includeSchedCont when > 0. */
   schedContCount?: number;
+  /** RGM §5 — number of RS-1 continuation sheets (RS-1.1, RS-1.2, …) the
+   *  gate-led review-status registry paginates onto. Derived from the SAME
+   *  layout function the page assembly uses (reviewStatusContPageCount), so the
+   *  printed sheet index can never disagree with the rendered page set. */
+  reviewStatusContCount?: number;
   /** W9/§15 page-fit — roof structural calcs spill onto the formal continuation
    *  sheet PV-4C.1 (attachment detail + governing load combination + page
    *  conclusion). Roof, single-system only; the page assembly gates identically. */
@@ -105,7 +110,11 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     // W10 (RP-D): the dedicated review-status registry sheet — every active
     // release blocker, referenced from the cover SHEET INDEX. Always present so
     // the manifest and page assembly stay byte-for-byte in sync (V12/V35).
-    { id: 'RS-1',  title: 'REVIEW STATUS — ACTIVE RELEASE BLOCKERS & RECONCILIATION' },
+    // RGM §5: the sheet leads with the seven-row ROOT-GATE table; the child
+    // requirements group beneath their gate and paginate onto RS-1.n.
+    { id: 'RS-1',  title: 'REVIEW STATUS — RELEASE GATES & REQUIREMENTS' },
+    ...Array.from({ length: Math.max(0, o.reviewStatusContCount ?? 0) },
+      (_unused, i) => ({ id: `RS-1.${i + 1}`, title: 'REVIEW STATUS (CONTINUED) — RELEASE REQUIREMENTS' })),
     { id: 'PV-1',  title: o.pv1Title },
     // Hybrid: one plan/elevation detail sheet PER additional sub-system
     // (real GPS geometry — never overlays only).

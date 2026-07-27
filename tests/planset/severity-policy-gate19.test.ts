@@ -35,8 +35,11 @@ function renderWith(mut?: (fx: any) => void): { html: string; snap: PermitDesign
 
 /** RS-1 review-status page fragment (anchored on its unique footer marker). */
 function rs1Fragment(html: string): string {
+  // RGM §5 — the review-status registry paginates onto RS-1.n continuation
+  // sheets; the fragment is the UNION of every RS sheet (all carry the footer
+  // marker `permitReadiness.registry`, which the cover's index row never does).
   const parts = html.split('<div class="page">');
-  return parts.find(p => p.includes('permitReadiness.registry') && p.includes('ACTIVE RELEASE BLOCKERS')) ?? '';
+  return parts.filter(p => p.includes('permitReadiness.registry')).join('\n');
 }
 
 // ─── 1. the pure severity policy (documented rule + fail-closed) ──────────────

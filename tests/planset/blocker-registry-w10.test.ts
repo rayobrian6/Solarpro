@@ -28,9 +28,12 @@ function renderWith(mut?: (fx: any) => void): { html: string; snap: PermitDesign
  *  Anchored on the RS-1-unique footer marker (`permitReadiness.registry`) so the
  *  cover's SHEET INDEX row (which now lists RS-1 / REVIEW STATUS) never matches. */
 function rs1Fragment(html: string): string {
+  // RGM §5: the review-status registry paginates onto RS-1.n continuation
+  // sheets, so the fragment is the UNION of every RS sheet. Each RS sheet
+  // carries the footer marker `permitReadiness.registry`; the cover's SHEET
+  // INDEX row never does.
   const parts = html.split('<div class="page">');
-  const frag = parts.find(p => p.includes('permitReadiness.registry') && p.includes('ACTIVE RELEASE BLOCKERS'));
-  return frag ?? '';
+  return parts.filter(p => p.includes('permitReadiness.registry')).join('\n');
 }
 
 describe('W10 — permit-readiness registry is canonical + structured', () => {
@@ -81,7 +84,11 @@ describe('W10 gate 14 — no active blocker is absent from the rendered registry
 
   it('the RS-1 review-status sheet exists', () => {
     expect(rs1.length).toBeGreaterThan(0);
-    expect(rs1).toContain('ACTIVE RELEASE BLOCKERS');
+    // RGM §4: the sheet leads with the ROOT-GATE table and states the counts in
+    // gate semantics ('7 OPEN RELEASE GATES / 15 UNRESOLVED REQUIREMENTS'),
+    // replacing the flat 'ACTIVE RELEASE BLOCKERS' heading.
+    expect(rs1).toContain('ROOT RELEASE GATES');
+    expect(rs1).toMatch(/OPEN RELEASE GATE/);
   });
 
   it('every active registry blocker code is rendered on RS-1', () => {
