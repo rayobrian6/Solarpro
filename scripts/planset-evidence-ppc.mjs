@@ -323,7 +323,28 @@ const bomRows = [...noB64.matchAll(/<tr[^>]*>[\s\S]*?<\/tr>/g)].map(m => m[0])
 const procTotal = Number((noB64.match(/data-procurement-total="(\d+)"/) ?? [])[1] ?? NaN);
 const procExcluded = Number((noB64.match(/data-procurement-excluded="(\d+)"/) ?? [])[1] ?? NaN);
 const procPartial = (noB64.match(/data-procurement-partial="(true|false)"/) ?? [])[1] ?? null;
-const enumeratedExclusions = (noB64.match(/data-procurement-excluded-row="[^"]*"/g) ?? []).length;
+// ── ECD §1/§2/§10 SUPERSESSION (2026-07-27) ────────────────────────────────
+// This harness's procurement gates were written against the PPC-era rendered
+// surface: a per-row `data-procurement-excluded-row` enumeration and the prose
+// "ORDERABLE ROWS ONLY: N of M BOM line items". The engine-closure pass RETIRED
+// both — the enumeration because the honest state model produces 37 exclusions
+// (a per-row list clipped the sheet AND duplicated what each row already says in
+// its own cell), and the "N of M" prose because §1 bans every hardcoded
+// N-of-M-class count. The SUBSTANCE of gates 7/13/18 is unchanged and is now
+// read off the state model that replaced them:
+//   • the population is `data-bom-population-total` over EVERY row, table or not
+//   • each row states its ONE state in `data-bom-authority-state`
+//   • the partition is orderable + (every non-VERIFIED_ORDERABLE row) = population
+const populationTotal = Number((noB64.match(/data-bom-population-total="(\d+)"/) ?? [])[1] ?? NaN);
+/** every row in the POPULATION (table rows + the rows scheduled in their own
+ *  tables above), each with its ONE authority state. */
+const populationRows = [...noB64.matchAll(/data-bom-line-id="([^"]*)" data-bom-authority-state="([^"]*)"/g)]
+  .map(m => ({ bomLineId: m[1], state: m[2] }));
+const populationBlocked = populationRows.filter(r => r.state !== 'VERIFIED_ORDERABLE');
+/** ECD replacement for the retired per-row exclusion enumeration: every non-A
+ *  row states its own state ON the row, and the five state counts render. */
+const stateCountsRendered = [...noB64.matchAll(/data-procurement-state-count="([A-Z_]+)">(\d+)/g)]
+  .map(m => ({ state: m[1], count: Number(m[2]) }));
 
 // ═══ GATE 7 — pending racking rows are excluded from the totals ═════════════
 {
@@ -334,7 +355,11 @@ const enumeratedExclusions = (noB64.match(/data-procurement-excluded-row="[^"]*"
     /\bRT-MINI-01\b/.test(r.text) || /\bRoof Tech\b/.test(r.text));
   const railUnpinned = !ra?.railSku || activeCode('PENDING-RACKING-ASSEMBLY-SELECTION');
   const totalsPresent = Number.isFinite(procTotal) && Number.isFinite(procExcluded);
-  const excludedRows = bomRows.filter(r => r.orderable === 'false' || r.quantityState === 'pending');
+  // ECD: count the blocked rows over the POPULATION, not over the rows this one
+  // table paginates. The module row is scheduled in its own table above and is
+  // CANDIDATE_NON_ORDERABLE; counting only `data-bom-orderable` table cells
+  // undercounted the exclusions by exactly that row.
+  const excludedRows = populationBlocked;
   const excludedEq = totalsPresent ? procExcluded === excludedRows.length : false;
   gate(7, 'pending-racking-excluded-from-procurement-totals',
     !railUnpinned
@@ -495,33 +520,39 @@ const enumeratedExclusions = (noB64.match(/data-procurement-excluded-row="[^"]*"
 // ═══ GATE 13 — procurement exports exclude every blocked row ════════════════
 {
   const totalsPresent = Number.isFinite(procTotal) && Number.isFinite(procExcluded);
-  const blockedRows = bomRows.filter(r => r.orderable === 'false' || r.quantityState === 'pending');
+  const blockedRows = populationBlocked;
   // The authoritative total's SCOPE is the FULL BOM (every line the package orders),
   // not the rows this one table paginates — a narrower total would be a second,
-  // quieter total: the exact defect class this pass exists to kill. So the partition
-  // is checked against the full-BOM total the sheet itself states.
-  const stated = flat(noB64).match(/ORDERABLE ROWS ONLY: (\d+) of (\d+) BOM line items/);
-  const statedOrderable = stated ? Number(stated[1]) : NaN;
-  const statedTotal = stated ? Number(stated[2]) : NaN;
-  const consistent = totalsPresent && !!stated
+  // quieter total: the exact defect class this pass exists to kill. ECD replaced
+  // the "N of M BOM line items" prose (a hardcoded N-of-M count, banned by §1)
+  // with `data-bom-population-total` over the same scope; the partition is
+  // checked against THAT.
+  const consistent = totalsPresent && Number.isFinite(populationTotal)
     // the partition is EXACT: orderable + excluded = every BOM line item
-    && procTotal + procExcluded === statedTotal
-    && procTotal === statedOrderable
-    // every row the RENDERED table tags as blocked is inside the excluded count
-    && procExcluded >= blockedRows.length
+    && procTotal + procExcluded === populationTotal
+    // every rendered row carries exactly one state, and they cover the population
+    && populationRows.length === populationTotal
+    && procTotal === populationRows.length - blockedRows.length
+    // every row the RENDERED package tags as blocked is inside the excluded count
+    && procExcluded === blockedRows.length
     // and this table's rows are a subset of the full BOM
-    && bomRows.length <= statedTotal;
-  const enumeratedAll = procExcluded === 0 || enumeratedExclusions === procExcluded;
+    && bomRows.length <= populationTotal;
+  // ECD replacement for the retired per-row exclusion enumeration: every blocked
+  // row states its OWN state on the row, and the five state counts render and sum.
+  const stateSum = stateCountsRendered.reduce((n, s) => n + s.count, 0);
+  const enumeratedAll = procExcluded === 0
+    || (blockedRows.every(r => !!r.state && r.state !== 'VERIFIED_ORDERABLE')
+        && stateCountsRendered.length === 5 && stateSum === populationTotal);
   const statement = procExcluded === 0
-    || (flat(noB64).includes('EXCLUDED from this total AND from every procurement export')
+    || (flat(noB64).includes('EXCLUDED from the authoritative total AND from every procurement export')
         && flat(noB64).includes('NOT an approved procurement release'));
   gate(13, 'procurement-exports-exclude-every-blocked-row',
     consistent && enumeratedAll && statement,
-    `taggedTableRows=${bomRows.length} taggedBlocked=${blockedRows.length} statedFullBom=${statedTotal} `
-    + `renderedOrderableTotal=${procTotal} renderedExcluded=${procExcluded} `
-    + `enumeratedExclusions=${enumeratedExclusions} partitionExact=${consistent} `
-    + `everyExclusionNamed=${enumeratedAll} exportStatement=${statement}`,
-    { blocked: blockedRows.map(r => r.text.slice(0, 120)).slice(0, 20) });
+    `taggedTableRows=${bomRows.length} populationRows=${populationRows.length} blocked=${blockedRows.length} `
+    + `renderedPopulationTotal=${populationTotal} renderedOrderableTotal=${procTotal} renderedExcluded=${procExcluded} `
+    + `stateCounts=${stateCountsRendered.map(s => `${s.state}=${s.count}`).join(' ')} Σ=${stateSum} `
+    + `partitionExact=${consistent} everyBlockedRowStatesItsState=${enumeratedAll} exportStatement=${statement}`,
+    { blocked: blockedRows.slice(0, 20) });
 }
 
 // ═══ GATE 14 — a pending issue state cannot render approved-design language ══
@@ -697,12 +728,15 @@ const mismatches = [];
     }
   }
   // procurement totals — the rendered numbers vs the rendered row tags
-  const blockedRows = bomRows.filter(r => r.orderable === 'false' || r.quantityState === 'pending').length;
-  const stated18 = t.match(/ORDERABLE ROWS ONLY: (\d+) of (\d+) BOM line items/);
+  const blockedRows = populationBlocked.length;
+  // ECD §1: the rendered authoritative total is the state-derived counter tag,
+  // not a "N of M BOM line items" sentence (that sentence class is retired).
+  const orderableStateCount = stateCountsRendered.find(s => s.state === 'VERIFIED_ORDERABLE')?.count ?? NaN;
   rcheck('authoritativeProcurementTotal', procTotal,
-    !!stated18 && Number(stated18[1]) === procTotal, { renderedStatement: stated18 ? stated18[0] : null });
+    orderableStateCount === procTotal, { renderedStateCount: orderableStateCount });
   rcheck('procurementPartitionExact', `${procTotal}+${procExcluded}`,
-    !!stated18 && procTotal + procExcluded === Number(stated18[2]), { statedFullBom: stated18 ? stated18[2] : null });
+    Number.isFinite(populationTotal) && procTotal + procExcluded === populationTotal,
+    { renderedPopulationTotal: populationTotal });
   rcheck('procurementExcludedCoversTaggedRows', blockedRows, procExcluded >= blockedRows, { rendered: procExcluded });
   // issue state
   rcheck('issueStateLanguage', pa?.issueState ?? '—',
@@ -744,7 +778,13 @@ const report = {
   procurementApproval: {
     renderedAuthoritativeTotal: Number.isFinite(procTotal) ? procTotal : null,
     renderedExcluded: Number.isFinite(procExcluded) ? procExcluded : null,
-    renderedPartial: procPartial, enumeratedExclusions,
+    renderedPartial: procPartial,
+    // ECD §1/§10 — the per-row exclusion ENUMERATION is retired; the population,
+    // the per-row states and the five state counts replace it.
+    renderedPopulationTotal: Number.isFinite(populationTotal) ? populationTotal : null,
+    populationRowCount: populationRows.length,
+    blockedRowCount: populationBlocked.length,
+    renderedStateCounts: stateCountsRendered,
     taggedBomRows: bomRows.length,
   },
   pageFit: pageFitReport ? {

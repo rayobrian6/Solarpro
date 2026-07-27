@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:31.768Z",
+  "generatedAt": "2026-07-27T16:47:07.650Z",
   "artifact": "braidon-attachment-reaction-reconciliation",
   "section": "§8 structural reconciliation (post-campaign correction 2026-07-22)",
   "project": "BRAIDON (GreenLancer feedback-session planset)",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "Reconcile the attachment OBJECT count + Σ tributary + Σ reactions back to the applied wind/snow/dead loads over the array footprint. Blocks when the object count and reaction model disagree, or Σ tributary drops below the array footprint (lost load). This is the schedule the audit demanded: 636 ft² / 55.95 psf / 64 attachments must reconcile — not a bare 369 lb/attachment.",
   "reconciliation": {
     "present": true,

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T20:34:38.416Z",
+  "generatedAt": "2026-07-27T16:47:05.539Z",
   "artifact": "braidon-ppc-qcable-orderability",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
@@ -53,14 +53,168 @@
     ],
     "procurementApproval": {
       "totalLineItems": 48,
-      "orderableLineItems": 36,
-      "excludedLineItems": 12,
+      "orderableLineItems": 10,
+      "excludedLineItems": 38,
       "excludedByClass": {
-        "non-orderable-design-quantity": 11,
+        "non-orderable-design-quantity": 37,
         "quantity-pending": 1
       },
       "partial": true,
       "exclusions": [
+        {
+          "category": "solar_panel",
+          "partNumber": "Q.PEAK DUO BLK ML-G10+400",
+          "quantity": 31,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 21,
+          "unit": "ft",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 23,
+          "unit": "ft",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit",
+          "partNumber": "PVC-Sch-80-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 18,
+          "unit": "ft",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 4,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "BUSH-INS-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWBRANCHHOMERUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 4,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "BUSH-INS-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWCOMBINERTODISCORUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-COUP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 1,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-CONN-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 3,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "BUSH-INS-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "conduit_fitting",
+          "partNumber": "PVC-Sch-80-ELL-1-1-4-RWDISCOTOMETERRUN",
+          "quantity": 2,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "connector",
+          "partNumber": "Q-CONN-10M",
+          "quantity": 1,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "connector",
+          "partNumber": "Q-CONN-10F",
+          "quantity": 1,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "connector",
+          "partNumber": "IPLD350-3",
+          "quantity": 3,
+          "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
         {
           "category": "sealing_cap",
           "partNumber": "Q-SEAL-10",
@@ -73,6 +227,34 @@
           "partNumber": "Q-12-10-240",
           "quantity": 31,
           "unit": "ea",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "wire",
+          "partNumber": "THWN2-6",
+          "quantity": 121,
+          "unit": "ft",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "wire",
+          "partNumber": "THWN2-10",
+          "quantity": 125,
+          "unit": "ft",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "wire",
+          "partNumber": "THWN2-GRN-10",
+          "quantity": 41,
+          "unit": "ft",
+          "exclusionClass": "non-orderable-design-quantity"
+        },
+        {
+          "category": "wire",
+          "partNumber": "THWN2-GRN-12",
+          "quantity": 21,
+          "unit": "ft",
           "exclusionClass": "non-orderable-design-quantity"
         },
         {
@@ -149,8 +331,8 @@
     },
     "exportGate": {
       "rule": "a blocked row can never enter an orderable export",
-      "exportedRowCount": 36,
-      "blockedRowCount": 12,
+      "exportedRowCount": 10,
+      "blockedRowCount": 38,
       "anyBlockedRowExported": false
     }
   }

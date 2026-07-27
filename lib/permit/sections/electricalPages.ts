@@ -15,6 +15,7 @@ import { getSnapshot, peekSnapshot } from '../snapshot/read';
 // size, voltage drop, run length + conductor callout PROJECTS from the ONE
 // canonical feeder segment — no sheet re-derives conduit/VD/length/callout.
 import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRaceway, projectRacewayDescriptor, projectE1PhysicalSchedule, projectListedCableAssembly, projectOpenAirBranchGrounding, projectGroundingSegments, ampacityChainLines, type E1PhysicalSection, type AmpacityAdjustmentResult } from '../snapshot/electricalProjection';
+import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
 import { GROUNDING_PENDING_LABEL, GROUNDING_PENDING_BONDING_CELL_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { escapeH } from '../utils/drawing';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
@@ -147,8 +148,15 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
         // PPC §1/§7 — the bonding sub-cell is authority-projected and carries its
         // canonical GroundingSegment id (gate 10: no rendered grounding conductor
         // without one) plus a machine-readable pending/assertion tag.
+        // ECD §6 — the id here is THIS section's OWN physical grounding segment
+        // (gnd-br-1 / gnd-br-2 / gnd-br-3), not one id stamped on every branch.
+        // `data-grounding-authority-group` names the ONE authority result the three
+        // physical segments share (rendered in full on PV-4B), so the row
+        // reconciles to exactly one canonical object without the physical identity
+        // having to double as the authority identity.
         + `<br/><span style="color:${x.bondingPendingAuthority ? '#b45309' : '#666'}"`
-          + `${x.groundingSegmentId ? ` data-grounding-segment-id="${x.groundingSegmentId}"` : ''}`
+          + `${x.groundingSegmentId ? ` data-grounding-segment-id="${x.groundingSegmentId}" data-grounding-identity-kind="physical-segment"` : ''}`
+          + `${x.groundingAuthorityGroupId ? ` data-grounding-authority-group="${x.groundingAuthorityGroupId}"` : ''}`
           + ` data-grounding-pending="${x.bondingPendingAuthority ? 'true' : 'false'}">${s(x.bonding)}`
           + `${x.groundingSegmentId ? `<br/><span class="mono" style="color:#888;font-size:5.5px">${x.groundingSegmentId}</span>` : ''}</span></td>`
       + `<td style="font-size:6.5px">${x.physicalRacewayId ? `<span class="mono fw7">${x.physicalRacewayId}</span><br/>` : ''}${raceway}`
@@ -386,15 +394,28 @@ export function renderGroundingSegmentRows(
     // gate 13). Every field Ray requires is still present and machine-tagged —
     // id, endpoints, size/method, raceway, length + its provenance, NEC basis,
     // authority state — one object per line, nothing borrowed from another row.
+    // ECD §6 — a GROUP-AUTHORITY node is visibly a group-authority row, never a
+    // physical segment row: it names the ONE authority result and the branch scope
+    // it governs, and it is machine-tagged `identity-kind="group-authority"` so no
+    // counter can mistake it for an installed grounding path. Its members' PHYSICAL
+    // ids (gnd-br-1/2/3) render per-branch on E-1.
+    const isGroup = gs.identityKind === 'group-authority';
+    const scopeSuffix = isGroup && gs.branchScope.length
+      ? ` <span style="color:#0f5c30">(${escapeH(gs.branchScope.join('/'))})</span>`
+      : '';
     return `<span data-grounding-segment-id="${escapeH(gs.groundingSegmentId)}"`
+      + ` data-grounding-identity-kind="${escapeH(gs.identityKind)}"`
+      + `${gs.groundingAuthorityGroupId ? ` data-grounding-authority-group="${escapeH(gs.groundingAuthorityGroupId)}"` : ''}`
+      + `${gs.branchScope.length ? ` data-grounding-branch-scope="${escapeH(gs.branchScope.join(','))}"` : ''}`
+      + `${gs.memberGroundingIds.length ? ` data-grounding-member-ids="${escapeH(gs.memberGroundingIds.join(','))}"` : ''}`
       + ` data-grounding-authority-state="${escapeH(gs.authorityState)}"`
       + ` data-grounding-length-source="${escapeH(gs.lengthSource)}"`
       + ` data-grounding-nec-basis="${escapeH(gs.necBasis.split(/[—:]/)[0].trim().slice(0, 60))}"`
       + ` data-grounding-bom-line="${escapeH(gs.bomLineId ?? '')}"`
       + ` data-grounding-installed-asserted="${gs.installedConductorAsserted ? 'true' : 'false'}"`
       + `>`
-      + `<strong>${escapeH(shortLabel[gs.purpose] ?? gs.label)}</strong> `
-      + `<span class="mono" style="color:#0f5c30;">${escapeH(gs.groundingSegmentId)}</span> `
+      + `<strong>${escapeH(shortLabel[gs.purpose] ?? gs.label)}${isGroup ? ' &mdash; GROUP AUTHORITY' : ''}</strong> `
+      + `<span class="mono" style="color:#0f5c30;">${escapeH(gs.groundingSegmentId)}</span>${scopeSuffix} `
       + `[${escapeH(dev(gs.fromDeviceId))}&rarr;${escapeH(dev(gs.toDeviceId))} &middot; `
       + `${conductorCell} &middot; ${escapeH(gs.racewayLabel ?? 'RACEWAY NOT EST.')} &middot; `
       + `${lengthCell}${gs.lengthSource === 'not-established' ? '' : ` ${escapeH(gs.lengthSource)}`}]`
@@ -779,6 +800,8 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
   // elec.acVoltageDrop and elec.conduitFill (each of which was an independent,
   // divergent source: the "1-1/4\" 3/4\" EMT" callout + 1.11%-vs-0.37% conflict).
   const _snap = getSnapshot(input);
+  // ECD §7 — the canonical bonding authority for the grounding/bonding detail.
+  const _bondE = projectRackingBondingAuthority(_snap);
   const _feed = projectCanonicalFeeder(_snap);
   // §5 — canonical service-interconnection objects the supply-side text projects.
   const _svcTopo = _snap.electrical.serviceTopology ?? [];
@@ -1247,7 +1270,10 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               <text x="150" y="34">MODULE 2</text>
               <text x="245" y="34">MODULE N</text>
             </g>
-            <!-- bonding jumpers module frame -> rail, with WEEB clip nodes -->
+            <!-- ECD §7 — SCHEMATIC bond path from module frame to rail. The node
+                 symbols are schematic bond POINTS; the bonding METHOD (integrated
+                 listing vs discrete components) is stated by the canonical bonding
+                 authority below, never implied by this figure. -->
             <g stroke="#127a3e" stroke-width="1.6">
               <line x1="55" y1="48" x2="55" y2="61"/>
               <line x1="150" y1="48" x2="150" y2="61"/>
@@ -1260,7 +1286,12 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             </g>
             <!-- module rail -->
             <rect x="18" y="61" width="264" height="10" fill="#dfe4ec" stroke="#1a2230" stroke-width="1.1"/>
-            <text x="150" y="69" text-anchor="middle" font-size="6.5" fill="#1a2230" font-weight="bold">MODULE RAIL — BONDED (UL 2703)</text>
+            <!-- ECD §7 — this label asserted 'UL 2703' with no authority. It now
+                 states the REQUIREMENT (code) and, on the line below, the METHOD the
+                 canonical bonding authority establishes (PENDING while no verified
+                 exact racking assembly exists). -->
+            <text x="150" y="69" text-anchor="middle" font-size="6.5" fill="#1a2230" font-weight="bold">MODULE RAIL — BONDED PER ${_bondE.requirementCodeBasis}</text>
+            <text x="18" y="79" font-size="5" font-weight="bold" fill="${_bondE.verificationState === 'verified' ? '#0f5c30' : '#b45309'}" data-bonding-result="${_bondE.result}">BONDING METHOD: ${_bondE.methodCompactLabel}</text>
             <!-- EGC rail -> inverter / combiner. PPC §1 — this is the IN-RACEWAY
                  home-run EGC domain and it is labelled with ITS OWN object's gauge.
                  It used to print the FEEDER EGC gauge, collapsing two of the six
@@ -1300,12 +1331,18 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             // named part (e.g. "RT-MINI Bond Clip") is an unselected candidate, NOT
             // an orderable specification, so the note renders PENDING RACKING
             // ASSEMBLY SELECTION rather than the residual RT-MINI part string.
+            // ECD §7 — this note used to name "the racking manufacturer's listed
+            // UL 2703 bonding hardware" as the METHOD (with a PENDING tail), which
+            // still asserts a UL 2703 integrated/hardware method for an unselected
+            // assembly. The METHOD now comes from the canonical bonding authority;
+            // the frames-must-be-bonded REQUIREMENT is unchanged.
             const _ra = _snap.structural.rackingAssembly;
-            const _bond = _ra?.groundingBonding;
-            const _railPending = !_ra?.railSku;
-            return (_bond && !_railPending)
-              ? `${_bond} (listed to UL 2703)`
-              : 'the racking manufacturer’s listed UL 2703 bonding hardware — <strong>PENDING RACKING ASSEMBLY SELECTION</strong> (bonding is assembly-dependent; specified once the rail assembly is confirmed)';
+            const _bondPart = _ra?.groundingBonding;
+            return _bondE.verificationState === 'verified'
+              ? `${_bondE.methodShortLabel}${_bondPart ? ` (${_bondPart})` : ''}`
+              : `the bonding method established by the verified racking assembly &mdash; `
+                + `<strong>${escapeH(_bondE.methodCompactLabel)}</strong> `
+                + '(bonding is assembly-dependent; the method is specified once the exact assembly is verified)';
           })()}.</div>
           ${(() => {
             // ── PPC §1b — notes 2 + 3 are AUTHORITY-GATED and DOMAIN-SCOPED ────
@@ -1352,8 +1389,20 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               : 'Grounding electrode conductor (GEC) connected to the building grounding electrode system per NEC 250.166.';
           })()}</div>
           <div style="margin-bottom:1px;">5. All connections made with listed connectors rated for the conductor material and environment.</div>
-          <div style="margin-bottom:1px;">6. Bonding jumpers installed at all mechanical joints in the racking system per NEC 250.96.</div>
-          <div style="color:#555;font-size:7px;margin-top:3px;font-style:italic;">Detail is typical — verify with racking manufacturer bonding requirements.</div>
+          <div style="margin-bottom:1px;">6. ${(() => {
+            // ECD §7 — a FIFTH site for the same defect: this note prescribed
+            // "Bonding jumpers installed at all mechanical joints" — a specific
+            // METHOD, as an installation instruction, unconditionally, with no
+            // selected bonding component anywhere in the design. The REQUIREMENT
+            // (mechanical joints in the racking system must be bonded, NEC 250.96)
+            // is code and stays; the METHOD projects the canonical authority.
+            return _bondE.verificationState === 'verified'
+              ? `Racking mechanical joints bonded per NEC 250.96 — ${escapeH(_bondE.methodShortLabel)}.`
+              : 'Mechanical joints in the racking system shall be bonded per NEC 250.96. '
+                + `BONDING METHOD: <strong style="color:#b45309;">${escapeH(_bondE.methodCompactLabel)}</strong> `
+                + '&mdash; no bonding component is specified by this drawing.';
+          })()}</div>
+          <div style="color:#555;font-size:7px;margin-top:3px;font-style:italic;">Detail is typical &mdash; the bonding METHOD is established by the canonical racking bonding authority, not by this figure.</div>
         </div>
       </div>
 

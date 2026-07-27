@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T20:34:38.400Z",
+  "generatedAt": "2026-07-27T16:47:05.517Z",
   "artifact": "braidon-ppc-racking-bom-orderability",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
@@ -134,14 +134,14 @@
     ]
   },
   "renderedProof": {
-    "pendingRackingRowOccurrences": 19,
+    "pendingRackingRowOccurrences": 17,
     "rtMini01AsSelectedSkuOccurrences": 0,
     "note": "RT-MINI-01 came from the equipment registry racking LOT line — a separate emitter from the gated assembly rows. Ray's row-family ruling put the mount base in class B too, so the lot line now withholds its manufacturer and SKU; the quantity (1 lot) stays.",
-    "authoritativeProcurementTotal": 37,
-    "excludedLineItems": 11,
+    "authoritativeProcurementTotal": 11,
+    "excludedLineItems": 37,
     "totalLineItems": 48,
     "excludedByClass": {
-      "non-orderable-design-quantity": 10,
+      "non-orderable-design-quantity": 36,
       "quantity-pending": 1
     }
   },

@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:29.968Z",
+  "generatedAt": "2026-07-27T16:47:05.787Z",
   "artifact": "braidon-racking-fastener-state",
   "section": "§10/§12 exact racking + fastener state",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "The exact racking assembly + fastener state. The rail is PENDING SELECTION (railSku null) — DS-4 IronRidge XR100 is OMITTED from the authoritative appendix and never used in calcs/BOM. The ONE canonical fastener assembly is projected identically on APP-A/PE-1/SCHED; it is UNVERIFIED (RT-MINI source not archived) so PE-1 prints PENDING VERIFIED FASTENER ASSEMBLY — no generic lag/stainless fallback.",
   "racking": {
     "mountModel": "RT-MINI",

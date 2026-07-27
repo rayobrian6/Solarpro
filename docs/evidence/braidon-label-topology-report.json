@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:30.073Z",
+  "generatedAt": "2026-07-27T16:47:05.681Z",
   "artifact": "braidon-label-topology-report",
   "section": "§16 PV-5 label applicability is topology-driven",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "On this 705.11 supply-side design, the load-side-only back-fed-breaker placard (NEC 705.12(D)(2)(3)(b)) is marked N/A, never required; the supply-side line-side treatment applies. Label applicability is driven by the canonical interconnection topology, not rendered unconditionally.",
   "interconnectionTopology": "supply-side (705.11)",
   "placards": [
@@ -59,11 +59,6 @@
       "applicability": "YES"
     },
     {
-      "id": "L-11",
-      "code": "NEC 2017 705.12(D)(2)(3)(b)",
-      "applicability": "N/A"
-    },
-    {
       "id": "L-12",
       "code": "NEC 2020 705.10",
       "applicability": "YES"
@@ -75,7 +70,7 @@
     },
     {
       "id": "L-14",
-      "code": "NEC 2020 705.11 / 705.12(A)",
+      "code": "NEC 2020 705.11",
       "applicability": "YES"
     },
     {
@@ -104,11 +99,6 @@
       "applicability": "YES"
     }
   ],
-  "loadSideOnlyBackfedBreaker": {
-    "id": "L-11",
-    "code": "NEC 2017 705.12(D)(2)(3)(b)",
-    "applicability": "N/A",
-    "correctlySuppressed": true
-  },
+  "loadSideOnlyBackfedBreaker": null,
   "noLoadSideOnlyRequiredOnSupplySide": true
 }

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T20:34:38.414Z",
+  "generatedAt": "2026-07-27T16:47:05.537Z",
   "artifact": "braidon-ppc-grounding-segment-bom-reconciliation",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
@@ -12,13 +12,13 @@
   },
   "reconciliation": [
     {
-      "groundingSegmentId": "gnd-br-1",
+      "groundingSegmentId": "gnd-branch-egc-authority",
       "purpose": "branch-egc",
       "method": "pending",
       "conductorSize": null,
       "authorityState": "pending-manufacturer-authority",
       "bomRowState": "design-quantity-non-orderable",
-      "bomLineId": "GRN-OPENAIR-12",
+      "bomLineId": "BOM-WIRE-A2BB72C0",
       "linkKind": "matched-by-authority-label",
       "bomRow": {
         "category": "wire",
@@ -44,7 +44,7 @@
         "partNumber": "THWN2-GRN-10",
         "quantity": 41,
         "unit": "ft",
-        "nonOrderable": false,
+        "nonOrderable": true,
         "quantityState": "established"
       }
     },

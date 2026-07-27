@@ -28,6 +28,10 @@ import type { DesignIntent } from '../designIntent';
 import type { CADModel } from '../../cad/types';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
 import { projectStructural, projectAttachmentInstallationAuthority } from '../../permit/snapshot/structuralProjection';
+// ECD §7 — the canonical BONDING authority (requirement vs method). PV-3's
+// hardware schedule used to hardcode 'UL 2703 INTEGRATED — NEC 690.43' in BOTH
+// the verified AND the assembly-PENDING branch.
+import { projectRackingBondingAuthority } from '../../permit/snapshot/rackingBonding';
 import { getManufacturerAsset, evaluateDocumentApplicability } from '../../manufacturer-assets-db';
 import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { applyAffine, fitAffine, emitPlacementManifestComment } from '../../permit/snapshot/coordinateAuthority';
@@ -2055,11 +2059,18 @@ export function drawRoofStructural(
     return projectAttachmentInstallationAuthority(
       ctx?.snapshot ?? null, _mid ?? null,
       _asset ? { model: _asset.model, docTitle: _asset.docTitle } : null,
-      _appl ? { state: _appl.state, documentProduct: _appl.documentProduct } : null,
+      _appl ? {
+        state: _appl.state,
+        applicabilityVerified: _appl.applicabilityVerified,
+        documentProduct: _appl.documentProduct,
+      } : null,
     );
   })();
   /** true ⇒ the five verified conditions hold and exact instructions may print. */
   const _exactD = _attD.exactInstructionsAllowed;
+  // ECD §7 — the ONE bonding authority PV-3 may state a METHOD from. The
+  // REQUIREMENT (NEC 250.134 / 690.43) is separate and always rendered.
+  const _bondD = projectRackingBondingAuthority(ctx?.snapshot ?? null);
   const attachSp   = _spD.attachmentSpacingIn
     ?? (project as any).resolvedAttachSpacingIn
     ?? project.attachmentSpacing
@@ -2493,7 +2504,11 @@ export function drawRoofStructural(
         ['PILOT HOLE', _attD.fastener.pilotRuleLabel.toUpperCase()],
         ['MATERIAL / COATING', (_attD.fastener.material ?? 'PER MANUFACTURER DOCUMENT').toUpperCase()],
         ['FLASHING', 'PER THE VERIFIED MANUFACTURER DOCUMENT'],
-        ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'],
+        // ECD §7 — PROJECTED, never a literal: the method label the canonical
+        // bonding authority establishes (integrated-listed / separate components /
+        // pending). The REQUIREMENT row below it is code and always prints.
+        ['BONDING METHOD', _bondD.methodCompactLabel],
+        ['BONDING REQUIREMENT', `PER ${_bondD.requirementCodeBasis}`],
       ]
       : [
         ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
@@ -2501,7 +2516,13 @@ export function drawRoofStructural(
         ['INSTALLATION DETAILS', 'NOT ESTABLISHED'],
         ['EMBEDMENT / TORQUE / PILOT', 'WITHHELD — NO VERIFIED SOURCE'],
         ['MATERIAL / COATING', 'WITHHELD — NO VERIFIED SOURCE'],
-        ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'],
+        // ECD §7 — THE defect: this branch (assembly PENDING) asserted
+        // 'UL 2703 INTEGRATED' on the same table that withholds embedment, torque,
+        // pilot and coating for want of a verified source. It now projects the
+        // same authority as the verified branch, which yields
+        // 'BONDING REQUIRED — METHOD PENDING VERIFIED ASSEMBLY' here.
+        ['BONDING METHOD', _bondD.methodCompactLabel],
+        ['BONDING REQUIREMENT', `PER ${_bondD.requirementCodeBasis}`],
       ];
     const rfNotes = _exactD
       ? [

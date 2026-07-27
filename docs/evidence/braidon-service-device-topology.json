@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:29.968Z",
+  "generatedAt": "2026-07-27T16:47:05.787Z",
   "artifact": "braidon-service-device-topology",
   "section": "§9 service-topology physical-order graph",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "The eight-object supply-side service chain in physical order. The fused AC disconnect is ONE listed DUAL-PURPOSE device (tap OCPD + utility-accessible lockable disconnect) — no phantom duplicate device; a separate utility disconnect is emitted only when the project specifies one.",
   "objectCount": 8,
   "dualPurposeDevice": {

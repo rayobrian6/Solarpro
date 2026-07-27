@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:30.073Z",
+  "generatedAt": "2026-07-27T16:47:05.681Z",
   "artifact": "braidon-document-applicability-report",
   "section": "§12 RT-MINI vs RT-MINI II document applicability",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "The selected mount is RT-MINI; the on-file datasheet cites the RT-MINI II Installation Manual — a different product version with no verified alias evidence. Until a version-exact document (or a verified cross-reference) is archived, EQUIPMENT-DOCUMENT-APPLICABILITY fires, DS-3 is marked NON-AUTHORITATIVE, and no RT-MINI II value is used in calcs/BOM. Product-version applicability is never inferred from a naming variance.",
   "selectedMount": "RT-MINI",
   "selectedSku": null,

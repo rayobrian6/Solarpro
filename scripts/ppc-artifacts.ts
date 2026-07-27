@@ -16,6 +16,7 @@ import { braidonOriginalAuditFixture } from '../tests/fixtures/braidon-original-
 import type { SnapshotAuthorityInputs } from '../lib/permit/snapshot/authorityInputs';
 import {
   projectE1PhysicalSchedule, projectGroundingSegments, projectOpenAirBranchGrounding,
+  BRANCH_EGC_AUTHORITY_GROUP_ID,
 } from '../lib/permit/snapshot/electricalProjection';
 import { BLOCKER_PAYLOAD_SCHEMA, blockerPayloadSchema } from '../lib/permit/sections/reviewStatus';
 import {
@@ -160,6 +161,27 @@ const sheetById = (h: string, id: string): string =>
     invariants: {
       everyObjectHasAnId: segs.every(s => !!s.groundingSegmentId),
       idsUnique: new Set(segs.map(s => s.groundingSegmentId)).size === segs.length,
+      // ── ECD §6 — PHYSICAL identity vs GROUP authority ──────────────────────
+      // The grouped branch-EGC node used to be emitted with `gnd-br-1` — a
+      // PHYSICAL segment's id — and that same id was stamped on all three E-1
+      // branch rows, so the package rendered ONE grounding identity for THREE
+      // canonical objects. Physical ids are now unique AND each renders.
+      physicalIdsUnique: (() => {
+        const ph = segs.filter(s => s.identityKind === 'physical-segment').map(s => s.groundingSegmentId);
+        return new Set(ph).size === ph.length;
+      })(),
+      groupAuthorityNotCountedPhysical: !segs
+        .filter(s => s.identityKind === 'physical-segment')
+        .some(s => s.groundingSegmentId === BRANCH_EGC_AUTHORITY_GROUP_ID),
+      groupAuthorityIdIsNotAPhysicalSegmentId: segs
+        .filter(s => s.identityKind === 'group-authority')
+        .every(s => !/^gnd-br-\d$/.test(s.groundingSegmentId)),
+      branchEgcGroupMembers: segs
+        .filter(s => s.identityKind === 'group-authority')
+        .flatMap(s => s.memberGroundingIds),
+      distinctPhysicalBranchIdsRendered: [...new Set(
+        (FX.html.match(/data-grounding-segment-id="(gnd-br-\d)"/g) ?? [])
+          .map(t => (t.match(/="([^"]+)"/) ?? [])[1]))].sort(),
       openAirAssertsNoInstalledConductor: segs
         .filter(s => s.purpose === 'branch-egc')
         .every(s => s.installedConductorAsserted === false && s.conductorSize === null),

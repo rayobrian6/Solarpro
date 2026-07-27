@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-07-26T16:21:31.887Z",
+  "generatedAt": "2026-07-27T16:47:05.907Z",
   "artifact": "braidon-qcable-grounding-authority",
   "section": "Q-CABLE GROUNDING AUTHORITY CORRECTION (2026-07-25) — document-based three-outcome resolution, fail-closed",
   "project": "BRAIDON M PILLA — Solar TEST",
   "basis": "frozen in-repo acceptance fixture (tests/fixtures/braidon-original-audit-fixture.ts) rendered by the real permit engine — deterministic, no DB read",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "ruling": {
     "author": "Ray",
     "statement": "Conductor count alone is NOT manufacturer or code authority. A listed 2-conductor cable assembly serving a double-insulated (Class II) microinverter system may INTENTIONALLY require no separate equipment grounding conductor. The exact selected equipment documents control, and the resolution must be specific to the exact selected microinverter SKU, cable-assembly SKU, module, mounting/bonding system and project jurisdiction.",
@@ -296,7 +296,7 @@
   "renderedVerification": {
     "perSheet": [
       {
-        "sheet": "RS-1",
+        "sheet": "RS-1.2",
         "statesPendingAuthority": false,
         "statesPendingSldLabel": false,
         "statesNonOrderableCandidate": false,
@@ -313,7 +313,7 @@
         "sheet": "E-1",
         "statesPendingAuthority": true,
         "statesPendingSldLabel": true,
-        "statesNonOrderableCandidate": true,
+        "statesNonOrderableCandidate": false,
         "statesBlockerCode": true
       },
       {
@@ -327,20 +327,34 @@
         "sheet": "PV-4B",
         "statesPendingAuthority": true,
         "statesPendingSldLabel": false,
-        "statesNonOrderableCandidate": true,
+        "statesNonOrderableCandidate": false,
         "statesBlockerCode": true
       },
       {
         "sheet": "SCHED-3",
         "statesPendingAuthority": false,
         "statesPendingSldLabel": false,
-        "statesNonOrderableCandidate": true,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "SCHED-4",
+        "statesPendingAuthority": false,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
+        "statesBlockerCode": true
+      },
+      {
+        "sheet": "APP-A",
+        "statesPendingAuthority": false,
+        "statesPendingSldLabel": false,
+        "statesNonOrderableCandidate": false,
         "statesBlockerCode": true
       }
     ],
-    "pendingLabelOccurrences": 6,
-    "nonOrderableLabelOccurrences": 3,
-    "blockerCodeOccurrences": 8,
+    "pendingLabelOccurrences": 10,
+    "nonOrderableLabelOccurrences": 0,
+    "blockerCodeOccurrences": 15,
     "forbiddenClaimsPresent": {
       "separate EGC required (any form)": false,
       "no EGC required (any form)": false,
@@ -457,13 +471,22 @@
         },
         "candidateQuantityFt": 162,
         "bomRowState": "design-quantity-non-orderable",
-        "verificationStatus": "pending-manufacturer-authority"
+        "verificationStatus": "pending-manufacturer-authority",
+        "affectedSegmentIds": [
+          "BRANCH_RUN"
+        ],
+        "affectedBranchIds": [
+          "br-1",
+          "br-2",
+          "br-3"
+        ],
+        "resolutionRequirement": "Archive and verify, through the document registry, the manufacturer installation document that EXPLICITLY states the equipment grounding / bonding method for the open-air branch section of the EXACT selected equipment (microinverter SKU + cable-assembly SKU + module SKU + mounting/bonding system) in this project jurisdiction: record its SHA-256, revision, current status, the exact section/page carrying the statement, and its own declared exact-SKU applicability. A family / series / product-line document (an IQ8 family datasheet, IQ-Commercial QD-Cable guidance, a legacy Engage rule), a conductor-count inference, or an engineering opinion can never clear this."
       },
       "provenance": {
         "source": "electrical.openAirGroundingAuthority",
         "ref": "Q-12-10-240"
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false,
       "resolutionAuditRef": null

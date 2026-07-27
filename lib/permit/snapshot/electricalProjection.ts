@@ -13,6 +13,9 @@
 import type { PermitDesignSnapshot, RouteSegmentRecord, GroundingSegment } from './types';
 import { evaluateCompliance, type ComplianceResult } from './complianceState';
 import { GROUNDING_PENDING_BONDING_CELL_LABEL } from './groundingAuthority';
+// ECD W1-A — the stable, content-derived BOM row identity (same function the
+// BOM stamping pass uses, so a pre-BOM projection can reference a real row id).
+import { bomLineIdFor } from '@/lib/bom/bomLineId';
 import {
   ampacityTable75C, ampacityTable90C, ambientCorrectionFactor, conductorCountAdjustmentFactor,
 } from '@/lib/computed-system';
@@ -473,6 +476,13 @@ const _PURPOSE_LABEL: Record<string, string> = {
   'module-racking-bonding': 'Module-frame + racking bonding (UL 2703)',
 };
 
+/** ECD §6 — the id of the ONE grouped branch-EGC authority node. It is deliberately
+ *  NOT any physical segment's id: `gnd-br-1` used to be used here, which made a
+ *  physical identity double as the grouped-authority identity (and then that one id
+ *  was stamped on all three E-1 branch rows). The grouped node is an AUTHORITY, not
+ *  an installed path — it is never counted as a physical grounding segment. */
+export const BRANCH_EGC_AUTHORITY_GROUP_ID = 'gnd-branch-egc-authority';
+
 export function projectGroundingSegments(
   snap: PermitDesignSnapshot | null | undefined,
 ): GroundingSegment[] {
@@ -491,7 +501,17 @@ export function projectGroundingSegments(
   // canonical model stores one branch-egc record per branch). It is rendered as
   // ONE object naming every branch — not N near-identical rows that would read as
   // N independent authorities.
+  //
+  // ECD §6 — that grouped object is a GROUP-AUTHORITY node and it now carries its
+  // OWN id (BRANCH_EGC_AUTHORITY_GROUP_ID). It used to be emitted with
+  // `g.groundingId` — i.e. the FIRST branch record's PHYSICAL id, `gnd-br-1` — so a
+  // physical segment identity was simultaneously the grouped-authority identity and
+  // (via the E-1 stamp below) the identity of all three physical branch rows. The
+  // three physical identities gnd-br-1/2/3 are preserved and rendered by the E-1
+  // sectioned schedule; this node is the ONE authority they all reference.
   const _branchEgcIds = objs.filter(g => g.purpose === 'branch-egc').map(g => g.groundingId);
+  const _branchEgcScope = objs.filter(g => g.purpose === 'branch-egc')
+    .map(g => (g.associatedEquipment ?? '').replace(/^AC branch\s*/i, '').trim() || g.groundingId);
   let _branchEgcEmitted = false;
   for (const g of objs) {
     if (g.purpose === 'branch-egc') {
@@ -515,10 +535,17 @@ export function projectGroundingSegments(
       const pending = oa.outcome === 'PENDING_MANUFACTURER_AUTHORITY';
       const noRow = oa.outcome === 'NO_SEPARATE_EGC_REQUIRED';
       out.push({
-        groundingSegmentId: g.groundingId,
-        groundingId: g.groundingId,
+        // ECD §6 — the GROUP-AUTHORITY identity (never a physical segment id).
+        groundingSegmentId: BRANCH_EGC_AUTHORITY_GROUP_ID,
+        // null: this node projects THREE canonical records, not one. The members
+        // are enumerated in memberGroundingIds.
+        groundingId: null,
+        identityKind: 'group-authority',
+        groundingAuthorityGroupId: BRANCH_EGC_AUTHORITY_GROUP_ID,
+        branchScope: _branchEgcScope,
+        memberGroundingIds: _branchEgcIds,
         purpose: 'branch-egc',
-        label: _PURPOSE_LABEL['branch-egc'],
+        label: `${_PURPOSE_LABEL['branch-egc']} — GROUP AUTHORITY`,
         fromDeviceId: branches.length ? `${branches.map(b => b.label).join('/')} MICROINVERTERS` : 'ARRAY MICROINVERTERS',
         toDeviceId: 'ROOF J-BOX (branch transition)',
         associatedSegmentId: g.segmentId,
@@ -543,7 +570,16 @@ export function projectGroundingSegments(
         necBasis: oa.codeBasis,
         authorityState: pending ? 'pending-manufacturer-authority' : 'verified',
         installedConductorAsserted: oa.outcome === 'SEPARATE_EGC_REQUIRED',
-        bomLineId: noRow
+        // ECD W1-A — the REAL, stable BOM row id (was the row's part number).
+        // The id is CONTENT-derived, so this pre-BOM projection computes exactly
+        // the value bomForPermit's stamping pass will assign to that row: the
+        // open-air branch EGC is emitted at stage 'ac', category 'wire', unit
+        // 'ft', unstamped sub-system, with this part number.
+        bomLineId: noRow ? null : bomLineIdFor({
+          stageId: 'ac', category: 'wire', unit: 'ft',
+          partNumber: `GRN-OPENAIR-${(oa.conductorSize ?? '#12 AWG').replace('#', '').replace(' AWG', '').trim()}`,
+        }),
+        bomLinePartNumber: noRow
           ? null
           : `GRN-OPENAIR-${(oa.conductorSize ?? '#12 AWG').replace('#', '').replace(' AWG', '').trim()}`,
         bomRowState: oa.bomRowState,
@@ -559,6 +595,12 @@ export function projectGroundingSegments(
     out.push({
       groundingSegmentId: g.groundingId,
       groundingId: g.groundingId,
+      // ECD §6 — a real installed path: its own physical identity, its own
+      // authority (no group governs it).
+      identityKind: 'physical-segment',
+      groundingAuthorityGroupId: null,
+      branchScope: [],
+      memberGroundingIds: [],
       purpose: g.purpose,
       label: _PURPOSE_LABEL[g.purpose] ?? g.purpose,
       fromDeviceId: seg?.from ?? (g.associatedEquipment ?? '—'),
@@ -991,6 +1033,14 @@ export interface E1PhysicalSection {
    *  reconciles to. null ⇒ the section models no grounding object (never a row
    *  that prints a conductor without an id). */
   groundingSegmentId: string | null;
+  /** ECD §6 — the GROUP-AUTHORITY node this section's grounding cell reconciles to,
+   *  when its physical segment is governed by one (the three open-air branch EGCs
+   *  share ONE authority result). null ⇒ the physical segment is its own authority.
+   *  The defect this retires: `groundingSegmentId` was computed ONCE from
+   *  `branchGnd[0].groundingId` and stamped on EVERY branch row, so B1/B2/B3 all
+   *  printed `gnd-br-1`. The physical id is now per-branch and the shared authority
+   *  is named separately, so one id never has to mean both things. */
+  groundingAuthorityGroupId: string | null;
   /** PPC §1 — true ⇒ the grounding authority for this section is PENDING, so the
    *  cell asserts NO installed EGC. Machine-checkable by the rendered gate. */
   bondingPendingAuthority: boolean;
@@ -1061,8 +1111,26 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
   // CANDIDATE size, which is not an installation. Only the authority decides
   // whether anything is installed, so the authority is now the ONLY input here.
   const _oaGnd = projectOpenAirBranchGrounding(snap);
-  const _oaSegmentId = _oaGnd.present
-    ? (branchGnd[0]?.groundingId ?? 'GRN-OPENAIR-BRANCH')
+  // ── ECD §6 ROOT FIX ────────────────────────────────────────────────────────
+  // Each branch section carries ITS OWN physical grounding segment identity. This
+  // was previously ONE id computed from `branchGnd[0]` and stamped on every branch
+  // row inside branches.forEach — so the package rendered `gnd-br-1` three times
+  // and never rendered gnd-br-2 / gnd-br-3 at all (artifact: gnd-br-1 ×8,
+  // gnd-br-2/3 ×0), collapsing three canonical objects into one rendered identity
+  // and making the uniqueness gate vacuous. The ONE shared authority result is
+  // named separately by `groundingAuthorityGroupId`, so a physical id never has to
+  // double as an authority id.
+  const _branchGndById = new Map(branchGnd.map(g => [g.groundingId, g]));
+  const _oaSegmentIdFor = (branchId: string): string | null => {
+    if (!_oaGnd.present) return null;
+    const id = `gnd-${branchId}`;
+    // Fail-closed on identity: only an id that resolves to a canonical
+    // GroundingRecord may be rendered. No synthesized per-branch id.
+    if (_branchGndById.has(id)) return id;
+    return branchGnd.length ? null : 'GRN-OPENAIR-BRANCH';
+  };
+  const _oaGroupId = _oaGnd.present && branchGnd.length
+    ? BRANCH_EGC_AUTHORITY_GROUP_ID
     : null;
   const _branchBondingCell = (b: { ocpdA: number }): string | null => {
     if (!_oaGnd.present) return null;
@@ -1119,7 +1187,9 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       // §1 — authority-projected (see _branchBondingCell above); never the raw
       // groundingObjects[].conductorSize installed-conductor string.
       bonding: _branchBondingCell(b),
-      groundingSegmentId: _oaSegmentId,
+      // ECD §6 — THIS branch's own physical grounding segment (gnd-br-1/2/3).
+      groundingSegmentId: _oaSegmentIdFor(b.branchId),
+      groundingAuthorityGroupId: _oaGroupId,
       bondingPendingAuthority: _oaGnd.outcome === 'PENDING_MANUFACTURER_AUTHORITY',
       physicalRacewayId: null,
       racewayType: 'FREE AIR — NEC 690.31(C)',
@@ -1204,6 +1274,8 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       // outcome) — it never inherits, and never lends, the open-air state.
       bonding: hr.egcGauge ? `${hr.egcGauge} Cu EGC in raceway (NEC 250.122)` : null,
       groundingSegmentId: hr.egcGauge ? 'GRN-HOMERUN-RACEWAY-EGC' : null,
+      // ECD §6 — its own authority; no group governs this raceway EGC.
+      groundingAuthorityGroupId: null,
       bondingPendingAuthority: false,
       physicalRacewayId: hr.physicalRacewayId,
       racewayType: hr.racewayType,
@@ -1280,6 +1352,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       conductorSize: seg.conductorGauge,
       bonding: seg.egcGauge ? `${seg.egcGauge} Cu EGC in raceway (NEC 250.122)` : null,
       groundingSegmentId: seg.egcGauge ? `GRN-${segId}-EGC` : null,
+      groundingAuthorityGroupId: null,
       bondingPendingAuthority: false,
       physicalRacewayId: seg.physicalRacewayId ?? null,
       racewayType: seg.raceway === 'FREE_AIR' ? 'FREE AIR — NEC 690.31(C)' : seg.raceway,
@@ -1346,6 +1419,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       conductorSize: tap.conductorSpec?.match(/#\d+(?:\/0)?\s*AWG/i)?.[0] ?? null,
       bonding: 'EGC with the service conductors (NEC 250.122) — service/enclosure bonding domain',
       groundingSegmentId: 'GRN-SERVICE-BOND',
+      groundingAuthorityGroupId: null,
       bondingPendingAuthority: false,
       physicalRacewayId: null,
       racewayType: 'PER SERVICE ENTRANCE',

@@ -19,6 +19,7 @@ import type {
   StructuralReactionReconciliation, FramingObservation, FramingCapacityAuthority,
   EnvironmentalLoadAuthority,
 } from './types';
+import type { DocumentApplicabilityState } from '@/lib/manufacturer-assets-db';
 import { observedFramingLine, observedSourceLabel } from './framingAuthority';
 import { environmentalSourceLabel, environmentalStateTag } from './environmentalAuthority';
 import { peekSnapshot } from './read';
@@ -507,7 +508,11 @@ export interface AttachmentInstallationAuthority {
   fastener: FastenerAssembly;
   /** manufacturer-document applicability for the cited install document. */
   documentApplicability: {
-    state: 'verified' | 'unverified';
+    /** ECD §8 — the 7-state document verdict (was the binary
+     *  'verified' | 'unverified'). Availability is NOT applicability. */
+    state: DocumentApplicabilityState;
+    /** ECD §8 — the ONE boolean the five install conditions consume. */
+    applicabilityVerified: boolean;
     selectedModel: string | null;
     documentProduct: string | null;
     documentTitle: string | null;
@@ -549,7 +554,11 @@ export function projectAttachmentInstallationAuthority(
   snap: PermitDesignSnapshot | null | undefined,
   mountingSystemId: string | null | undefined,
   asset?: { model: string | null; docTitle: string | null } | null,
-  applicability?: { state: 'verified' | 'unverified'; documentProduct: string | null } | null,
+  applicability?: {
+    state: DocumentApplicabilityState;
+    applicabilityVerified: boolean;
+    documentProduct: string | null;
+  } | null,
 ): AttachmentInstallationAuthority {
   const proj = projectStructural(snap);
   const spacing = proj.spacingAuthority;
@@ -568,6 +577,7 @@ export function projectAttachmentInstallationAuthority(
   const documentApplicability = applicability
     ? {
         state: applicability.state,
+        applicabilityVerified: applicability.applicabilityVerified,
         selectedModel,
         documentProduct: applicability.documentProduct,
         documentTitle: asset?.docTitle ?? null,
@@ -583,7 +593,7 @@ export function projectAttachmentInstallationAuthority(
   const exactSkuSelected = !!ra && ra.mountSku != null && !_railPending;
   // 2 — document applicability. No cited document ⇒ nothing authorizes exact
   //     manufacturer instructions either (fail closed).
-  const documentApplicabilityVerified = documentApplicability?.state === 'verified';
+  const documentApplicabilityVerified = documentApplicability?.applicabilityVerified === true;
   // 3 — archived + hash-bound source document.
   const _srcDoc = ra?.capacityProvenance?.sourceDocument ?? null;
   const documentArchivedHashBound = !!_srcDoc?.archivedInRepo
@@ -601,7 +611,7 @@ export function projectAttachmentInstallationAuthority(
     && selectionBoundToCurrentDigest;
 
   const _docLine = documentApplicability
-    ? (documentApplicability.state === 'verified'
+    ? (documentApplicability.applicabilityVerified
         ? `DOCUMENT APPLICABILITY: VERIFIED FOR SELECTED ${fmtStr(selectedModel).toUpperCase()}`
         : `DOCUMENT APPLICABILITY: ${fmtStr(documentApplicability.documentProduct).toUpperCase()} MANUAL NOT VERIFIED FOR SELECTED ${fmtStr(selectedModel).toUpperCase()}`)
     : 'DOCUMENT APPLICABILITY: NO VERSION-EXACT MANUFACTURER DOCUMENT ON FILE';

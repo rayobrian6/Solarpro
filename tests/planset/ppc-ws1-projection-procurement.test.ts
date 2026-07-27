@@ -629,22 +629,45 @@ describe('§9 — the insufficient Q-Cable BOM row is itself NON-ORDERABLE', () 
     for (const b of blocked) expect(exported).not.toContain(b);
   });
 
-  it('the rendered schedule states the authoritative total AND enumerates the exclusions', () => {
-    const sched = pageEquipmentSchedule(input, cad, 18, 21)
-      + pageEquipmentScheduleCont(input, cad, 19, 21, 0)
-      + pageEquipmentScheduleCont(input, cad, 20, 21, 1);
+  // ECD §10 (2026-07-26) — the per-row EXCLUSION ENUMERATION this test used to
+  // demand is retired, and the assertion is STRENGTHENED rather than weakened.
+  // Why: the fail-closed state model classifies ~38 of 48 rows non-orderable
+  // (22 of them route-estimated), and enumerating every one inline clipped the
+  // sheet — while duplicating what each row now says in its OWN cell. The
+  // replacement proves MORE: every excluded row is individually identified on
+  // the sheet by its STABLE ROW ID and its ONE authority state (machine-
+  // readable), the summary counts are state-derived, and no row disappears.
+  it('the rendered schedule states every row\'s state, the derived counts, and no procurement-ready claim', () => {
+    const sched = pageEquipmentSchedule(input, cad, 18, 24)
+      + pageEquipmentScheduleCont(input, cad, 19, 24, 0)
+      + pageEquipmentScheduleCont(input, cad, 20, 24, 1)
+      + pageEquipmentScheduleCont(input, cad, 21, 24, 2);
     const a = buildProcurementApproval(input.bom as PermitBOMItem[]);
-    expect(sched).toContain('AUTHORITATIVE PROCUREMENT TOTAL');
-    expect(sched).toContain(`data-procurement-total="${a.orderableLineItems}"`);
+    expect(sched).toContain('AUTHORITATIVE PROCUREMENT EXPORT');
+    expect(sched).toContain(`data-procurement-total="${a.verifiedOrderableCount}"`);
     expect(sched).toContain(`data-procurement-excluded="${a.excludedLineItems}"`);
-    expect(sched).toContain('EXCLUDED from this total AND from every procurement export');
-    // every excluded row is NAMED with its part number, qty and class (the retired
-    // sentence listed 2 of the 11 and thereby asserted the rest were included)
-    for (const e of a.exclusions) {
-      expect(sched, `exclusion ${e.category} not enumerated`)
-        .toContain(e.category.replace(/_/g, ' ') + ' [' + e.partNumber + ', ' + e.quantity + ' ' + e.unit + ', ' + e.exclusionClass + ']');
+    expect(sched).toContain(`data-bom-population-total="${a.totalRowCount}"`);
+    expect(sched).toContain('data-procurement-ready="false"');
+    // the five state counts render, all derived from the same approval object
+    expect(sched).toContain(`data-procurement-state-count="VERIFIED_ORDERABLE">${a.verifiedOrderableCount} `);
+    expect(sched).toContain(`data-procurement-state-count="ESTIMATED_FIELD_VERIFY">${a.estimatedFieldVerifyCount} `);
+    expect(sched).toContain(`data-procurement-state-count="CANDIDATE_NON_ORDERABLE">${a.candidateNonOrderableCount} `);
+    expect(sched).toContain(`data-procurement-state-count="QUANTITY_PENDING">${a.quantityPendingCount} `);
+    // EVERY row in the population — including the module row the table does not
+    // list — appears with its stable id and its state; nothing disappears.
+    for (const it of input.bom as PermitBOMItem[]) {
+      expect(sched, `row ${it.partNumber} id missing from the sheet`)
+        .toContain(`data-bom-line-id="${it.bomLineId}"`);
     }
+    for (const e of a.exclusions) {
+      expect(sched, `exclusion ${e.category} has no rendered state`)
+        .toContain(`data-bom-authority-state="${e.authorityState}"`);
+    }
+    expect(sched).toContain('PROCUREMENT READY: NO.');
     expect(sched).toContain('NOT an approved procurement release');
+    // the three retired claims must be GONE
+    expect(sched).not.toContain('no manual estimates');
+    expect(sched).not.toContain('items are required per NEC / manufacturer specification');
   });
 });
 

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T20:34:38.361Z",
+  "generatedAt": "2026-07-27T16:47:05.473Z",
   "artifact": "braidon-ppc-grounding-object-graph",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
@@ -8,10 +8,22 @@
   "canonicalObjectCount": 3,
   "canonicalObjects": [
     {
-      "groundingSegmentId": "gnd-br-1",
-      "groundingId": "gnd-br-1",
+      "groundingSegmentId": "gnd-branch-egc-authority",
+      "groundingId": null,
+      "identityKind": "group-authority",
+      "groundingAuthorityGroupId": "gnd-branch-egc-authority",
+      "branchScope": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "memberGroundingIds": [
+        "gnd-br-1",
+        "gnd-br-2",
+        "gnd-br-3"
+      ],
       "purpose": "branch-egc",
-      "label": "Open-air branch (listed cable assembly) equipment grounding",
+      "label": "Open-air branch (listed cable assembly) equipment grounding — GROUP AUTHORITY",
       "fromDeviceId": "B1/B2/B3 MICROINVERTERS",
       "toDeviceId": "ROOF J-BOX (branch transition)",
       "associatedSegmentId": "BRANCH_RUN",
@@ -31,13 +43,18 @@
       "necBasis": "NEC 110.3(B) — the equipment grounding / bonding method must follow the listing and the manufacturer instructions for the exact installed equipment. That instruction is NOT established here, so NO NEC conclusion (neither a 250.122-sized additional conductor nor a 690.43(C) listed integrated method) may be asserted for this section.",
       "authorityState": "pending-manufacturer-authority",
       "installedConductorAsserted": false,
-      "bomLineId": "GRN-OPENAIR-12",
+      "bomLineId": "BOM-WIRE-A2BB72C0",
+      "bomLinePartNumber": "GRN-OPENAIR-12",
       "bomRowState": "design-quantity-non-orderable",
       "provenance": "electrical.openAirGroundingAuthority + groundingObjects[gnd-br-1, gnd-br-2, gnd-br-3] + QCABLE-ASSEMBLY"
     },
     {
       "groundingSegmentId": "gnd-feeder",
       "groundingId": "gnd-feeder",
+      "identityKind": "physical-segment",
+      "groundingAuthorityGroupId": null,
+      "branchScope": [],
+      "memberGroundingIds": [],
       "purpose": "feeder-egc",
       "label": "Feeder equipment grounding conductor (in raceway)",
       "fromDeviceId": "AC COMBINER",
@@ -64,6 +81,10 @@
     {
       "groundingSegmentId": "gnd-gec",
       "groundingId": "gnd-gec",
+      "identityKind": "physical-segment",
+      "groundingAuthorityGroupId": null,
+      "branchScope": [],
+      "memberGroundingIds": [],
       "purpose": "gec",
       "label": "Grounding electrode conductor (GEC)",
       "fromDeviceId": "Existing service grounding electrode system",
@@ -93,12 +114,15 @@
       "GRN-HOMERUN-RACEWAY-EGC",
       "GRN-SERVICE-BOND",
       "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3",
+      "gnd-branch-egc-authority",
       "gnd-feeder",
       "gnd-gec"
     ],
-    "distinctRenderedIdCount": 7,
+    "distinctRenderedIdCount": 10,
     "canonicalGroundingSegments": [
-      "gnd-br-1",
+      "gnd-branch-egc-authority",
       "gnd-feeder",
       "gnd-gec"
     ],
@@ -111,13 +135,13 @@
       },
       {
         "sectionId": "BRANCH_RUN",
-        "groundingSegmentId": "gnd-br-1",
+        "groundingSegmentId": "gnd-br-2",
         "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
         "pendingAuthority": true
       },
       {
         "sectionId": "BRANCH_RUN",
-        "groundingSegmentId": "gnd-br-1",
+        "groundingSegmentId": "gnd-br-3",
         "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
         "pendingAuthority": true
       },
@@ -150,13 +174,29 @@
       "GRN-COMBINER_TO_DISCO_RUN-EGC",
       "GRN-DISCO_TO_METER_RUN-EGC",
       "GRN-HOMERUN-RACEWAY-EGC",
-      "GRN-SERVICE-BOND"
+      "GRN-SERVICE-BOND",
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3"
     ],
     "note": "the canonical GroundingSegment objects are the electrical.groundingObjects projection; the additional rendered ids are PROJECTED per-raceway / service-bond ids emitted by the E-1 sectioned schedule from routeSegments. Each carries its own raceway, length, NEC basis and BOM derivation, so no row asserts anything it cannot support — but they are not yet first-class GroundingRecords (see knownFollowUp)."
   },
   "invariants": {
     "everyObjectHasAnId": true,
     "idsUnique": true,
+    "physicalIdsUnique": true,
+    "groupAuthorityNotCountedPhysical": true,
+    "groupAuthorityIdIsNotAPhysicalSegmentId": true,
+    "branchEgcGroupMembers": [
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3"
+    ],
+    "distinctPhysicalBranchIdsRendered": [
+      "gnd-br-1",
+      "gnd-br-2",
+      "gnd-br-3"
+    ],
     "openAirAssertsNoInstalledConductor": true,
     "openAirHasNoBorrowedRaceway": true,
     "everyObjectStatesANecBasis": true

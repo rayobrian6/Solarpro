@@ -1,15 +1,17 @@
 {
-  "generatedAt": "2026-07-26T20:39:53.297Z",
+  "generatedAt": "2026-07-27T16:47:48.749Z",
   "harness": "planset-evidence-ppc (projection / procurement authority, 18 permanent gates)",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "mode": "fixture",
-  "htmlPath": "_tmp_ppc_fixture.html",
-  "snapshotId": "PDS-E17B052701C1",
-  "digest": "e17b052701c1e589be1fcdbbe9ee16d373b0fd13f8c21c8e1eda4f12a27a8add",
-  "sheetCount": 21,
+  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/PermitPackage-BRAIDON-ecd.html",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
+  "sheetCount": 24,
   "sheetIds": [
     "PV-0",
     "RS-1",
+    "RS-1.1",
+    "RS-1.2",
     "PV-1",
     "PV-1B",
     "PV-3",
@@ -23,6 +25,7 @@
     "SCHED",
     "SCHED-2",
     "SCHED-3",
+    "SCHED-4",
     "APP-A",
     "DS-1",
     "DS-2",
@@ -70,10 +73,34 @@
     "bomRowState": "design-quantity-non-orderable"
   },
   "procurementApproval": {
-    "renderedAuthoritativeTotal": 37,
-    "renderedExcluded": 11,
+    "renderedAuthoritativeTotal": 11,
+    "renderedExcluded": 37,
     "renderedPartial": "true",
-    "enumeratedExclusions": 11,
+    "renderedPopulationTotal": 48,
+    "populationRowCount": 48,
+    "blockedRowCount": 37,
+    "renderedStateCounts": [
+      {
+        "state": "VERIFIED_ORDERABLE",
+        "count": 11
+      },
+      {
+        "state": "ESTIMATED_FIELD_VERIFY",
+        "count": 22
+      },
+      {
+        "state": "CANDIDATE_NON_ORDERABLE",
+        "count": 14
+      },
+      {
+        "state": "QUANTITY_PENDING",
+        "count": 1
+      },
+      {
+        "state": "EXCLUDED_NOT_APPLICABLE",
+        "count": 0
+      }
+    ],
     "taggedBomRows": 47
   },
   "pageFit": {
@@ -81,7 +108,7 @@
       "vertical",
       "horizontal"
     ],
-    "sheets": 21,
+    "sheets": 24,
     "clipped": 0,
     "internalClipped": 0,
     "clippedHorizontal": 0,
@@ -128,7 +155,7 @@
       "gate": 3,
       "id": "blocker-detail-matches-canonical-payload-schema",
       "ok": true,
-      "detail": "renderedRows=15 registry=15 declaredCodes=36 undeclared=none wrong=none deficitBoxes=0 (expected 0) emptyTemplate=false schemasRendered=qcable-grounding-authority",
+      "detail": "renderedRows=15 registry=15 declaredCodes=38 undeclared=none wrong=none deficitBoxes=0 (expected 0) emptyTemplate=false schemasRendered=qcable-grounding-authority",
       "evidence": {
         "expected": {
           "QCABLE-PROCUREMENT-INSUFFICIENT": "qcable-procurement-deficit",
@@ -166,9 +193,39 @@
           "PROJECT-AUTHORITY-UNVERIFIED": "generic",
           "PROJECT-NAME-NONPRODUCTION": "generic",
           "DESIGNER-OF-RECORD-MISSING": "generic",
-          "ENGINEERING-REVIEW-PENDING": "generic"
+          "ENGINEERING-REVIEW-PENDING": "generic",
+          "WIND-SNOW-AUTHORITY-UNRESOLVED": "generic",
+          "STRUCTURAL-FRAMING-UNVERIFIED": "generic"
         },
         "rows": [
+          {
+            "code": "CODE-AUTHORITY-INCOMPLETE",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "PROJECT-AUTHORITY-UNVERIFIED",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "MODULE-EXACT-DATASHEET-PENDING",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
           {
             "code": "FRAMING-AUTHORITY-UNVERIFIED",
             "schema": null,
@@ -191,13 +248,6 @@
             "hasGenericBox": false
           },
           {
-            "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
-            "schema": null,
-            "hasDeficitBox": false,
-            "hasGroundingBox": false,
-            "hasGenericBox": false
-          },
-          {
             "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
             "schema": null,
             "hasDeficitBox": false,
@@ -206,6 +256,13 @@
           },
           {
             "code": "RACKING-CAPACITY-APPLICABILITY-GAP",
+            "schema": null,
+            "hasDeficitBox": false,
+            "hasGroundingBox": false,
+            "hasGenericBox": false
+          },
+          {
+            "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
             "schema": null,
             "hasDeficitBox": false,
             "hasGroundingBox": false,
@@ -237,34 +294,6 @@
             "schema": "qcable-grounding-authority",
             "hasDeficitBox": false,
             "hasGroundingBox": true,
-            "hasGenericBox": false
-          },
-          {
-            "code": "CODE-AUTHORITY-INCOMPLETE",
-            "schema": null,
-            "hasDeficitBox": false,
-            "hasGroundingBox": false,
-            "hasGenericBox": false
-          },
-          {
-            "code": "EQUIPMENT-DOCUMENT-APPLICABILITY",
-            "schema": null,
-            "hasDeficitBox": false,
-            "hasGroundingBox": false,
-            "hasGenericBox": false
-          },
-          {
-            "code": "PROJECT-AUTHORITY-UNVERIFIED",
-            "schema": null,
-            "hasDeficitBox": false,
-            "hasGroundingBox": false,
-            "hasGenericBox": false
-          },
-          {
-            "code": "MODULE-EXACT-DATASHEET-PENDING",
-            "schema": null,
-            "hasDeficitBox": false,
-            "hasGroundingBox": false,
             "hasGenericBox": false
           },
           {
@@ -303,7 +332,7 @@
       "gate": 6,
       "id": "unverified-rtmini-ii-cannot-authorize",
       "ok": true,
-      "detail": "documentApplicabilityBlocker=true mentions=17 unqualified=0 applicabilityLine=true referenceDetailBanner=true",
+      "detail": "documentApplicabilityBlocker=true mentions=14 unqualified=0 applicabilityLine=true referenceDetailBanner=true",
       "evidence": {
         "unqualified": []
       }
@@ -312,7 +341,7 @@
       "gate": 7,
       "id": "pending-racking-excluded-from-procurement-totals",
       "ok": true,
-      "detail": "railUnpinned=true pendingRackingRows=8 orderableAmongThem=0 mfrOrSkuLeaks=0 authoritativeTotal=37 excluded=11 taggedExcludedRows=11 partial=true",
+      "detail": "railUnpinned=true pendingRackingRows=8 orderableAmongThem=0 mfrOrSkuLeaks=0 authoritativeTotal=11 excluded=37 taggedExcludedRows=37 partial=true",
       "evidence": {
         "skuLeaks": [],
         "pendingRackingCategories": 8
@@ -340,15 +369,18 @@
       "gate": 10,
       "id": "every-grounding-row-carries-a-grounding-segment-id",
       "ok": true,
-      "detail": "taggedIds=11 distinct=7 emptyIds=0 groundingSubjectRows=1 untagged=0 legacyProjectLevelRow=false canonicalBlockRendered=true classProbeFired=true",
+      "detail": "taggedIds=11 distinct=10 emptyIds=0 groundingSubjectRows=1 untagged=0 legacyProjectLevelRow=false canonicalBlockRendered=true classProbeFired=true",
       "evidence": {
         "ids": [
           "gnd-br-1",
+          "gnd-br-2",
+          "gnd-br-3",
           "GRN-HOMERUN-RACEWAY-EGC",
           "GRN-COMBINER_TO_DISCO_RUN-EGC",
           "GRN-DISCO_TO_METER_RUN-EGC",
           "GRN-SERVICE-BOND",
           "gnd-feeder",
+          "gnd-branch-egc-authority",
           "gnd-gec"
         ],
         "untagged": [],
@@ -392,20 +424,89 @@
       "gate": 13,
       "id": "procurement-exports-exclude-every-blocked-row",
       "ok": true,
-      "detail": "taggedTableRows=47 taggedBlocked=11 statedFullBom=48 renderedOrderableTotal=37 renderedExcluded=11 enumeratedExclusions=11 partitionExact=true everyExclusionNamed=true exportStatement=true",
+      "detail": "taggedTableRows=47 populationRows=48 blocked=37 renderedPopulationTotal=48 renderedOrderableTotal=11 renderedExcluded=37 stateCounts=VERIFIED_ORDERABLE=11 ESTIMATED_FIELD_VERIFY=22 CANDIDATE_NON_ORDERABLE=14 QUANTITY_PENDING=1 EXCLUDED_NOT_APPLICABLE=0 Σ=48 partitionExact=true everyBlockedRowStatesItsState=true exportStatement=true",
       "evidence": {
         "blocked": [
-          " 27 Stage 4 — AC Wiring sealing cap Enphase Q Cable Sealing Cap (unused connector) Q Cable Sealing Cap (unused connector",
-          " 34 Stage 4 — AC Wiring wire — #12 AWG Cu Green EGC — open-air branch — CANDIDATE DESIGN QUANTITY — NON-ORDERABLE / NOT ",
-          " 35 Stage 5 — Structural end clamp — End clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — ",
-          " 36 Stage 5 — Structural grounding — Module-frame bonding (UL 2703) — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ",
-          " 37 Stage 5 — Structural l foot — L-foot / mount-to-rail adapter — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASS",
-          " 38 Stage 5 — Structural lag bolt — Roof attachment fastener — DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTEN",
-          " 39 Stage 5 — Structural mid clamp — Mid clamp — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — ",
-          " 40 Stage 5 — Structural mount hardware — Rail T-bolt / mount-to-rail bolt — DESIGN QUANTITY — NON-ORDERABLE / PENDING R",
-          " 41 Stage 5 — Structural racking — RT-MINI Flush Mount RT-MINI Flush Mount — rail-based mount — DESIGN QUANTITY — NON-OR",
-          " 42 Stage 5 — Structural rail — Rail — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — assembly-d",
-          " 43 Stage 5 — Structural splice — Rail splice — DESIGN QUANTITY — NON-ORDERABLE / PENDING RACKING ASSEMBLY SELECTION — a"
+          {
+            "bomLineId": "BOM-CONDUIT-53ECBDFB",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-50EF884E",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-5DD72106",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-93035ECF",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-CB9521E6",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4BFE7670",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-C2CE8B2F",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-0386B98D",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4FCAE76A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-543CCC59",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-FA9244EF",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-3DC6898A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-C3781B2C",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4885951A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-B94C6F27",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-4739A6D1",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-5493777A",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONDUIT-FITTIN-A712AA50",
+            "state": "ESTIMATED_FIELD_VERIFY"
+          },
+          {
+            "bomLineId": "BOM-CONNECTOR-F3079FAD",
+            "state": "CANDIDATE_NON_ORDERABLE"
+          },
+          {
+            "bomLineId": "BOM-CONNECTOR-25827044",
+            "state": "CANDIDATE_NON_ORDERABLE"
+          }
         ]
       }
     },
@@ -422,7 +523,7 @@
       "gate": 15,
       "id": "blocker-counts-identical-across-surfaces",
       "ok": true,
-      "detail": "registry=15 (blocking 15/advisory 0) rs1Rows=15 rs1Header=15 rs1Summary=15/0 cover=15 {\"listEqRegistry\":true,\"rs1EqRegistry\":true,\"rs1HeaderEq\":true,\"rs1SummaryEq\":true,\"coverEq\":true,\"issueGate\":true}",
+      "detail": "registry=15 (blocking 15/advisory 0) rs1Rows=15 rs1Requirements=15 rs1Gates=7 rs1Summary=15/0 coverRequirements=15 coverGates=7 (listed 7) {\"listEqRegistry\":true,\"rs1EqRegistry\":true,\"rs1HeaderEq\":true,\"rs1SummaryEq\":true,\"coverEq\":true,\"issueGate\":true}",
       "evidence": {
         "blockingCodes": [
           "CODE-AUTHORITY-INCOMPLETE",
@@ -450,13 +551,15 @@
       "gate": 16,
       "id": "snapshot-identity-identical-across-sheets",
       "ok": true,
-      "detail": "sheets=21 withStamp=21 idMismatch=0 digestMismatch=0 manifest=21 manifestEqPages=true snapshot=PDS-E17B052701C1",
+      "detail": "sheets=24 withStamp=24 idMismatch=0 digestMismatch=0 manifest=24 manifestEqPages=true snapshot=PDS-76C0C5B56CEF",
       "evidence": {
         "idMismatch": [],
         "digestMismatch": [],
         "sheetIds": [
           "PV-0",
           "RS-1",
+          "RS-1.1",
+          "RS-1.2",
           "PV-1",
           "PV-1B",
           "PV-3",
@@ -470,6 +573,7 @@
           "SCHED",
           "SCHED-2",
           "SCHED-3",
+          "SCHED-4",
           "APP-A",
           "DS-1",
           "DS-2",
@@ -483,10 +587,10 @@
       "gate": 17,
       "id": "page-fit-detects-horizontal-and-vertical-clipping",
       "ok": true,
-      "detail": "pagefit exit=0 axes=vertical+horizontal sheets=21 clippedV=0 internalV=0 clippedH=0 internalH=0 horizontalDetectionProbeFired=true",
+      "detail": "pagefit exit=0 axes=vertical+horizontal sheets=24 clippedV=0 internalV=0 clippedH=0 internalH=0 horizontalDetectionProbeFired=true",
       "evidence": {
         "pageFit": {
-          "sheets": 21,
+          "sheets": 24,
           "clipped": 0,
           "internalClipped": 0,
           "clippedHorizontal": 0,
@@ -501,6 +605,16 @@
             },
             {
               "sheetId": "RS-1",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "RS-1.1",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "RS-1.2",
               "belowByIn": -0.19,
               "rightByIn": 0
             },
@@ -566,6 +680,11 @@
             },
             {
               "sheetId": "SCHED-3",
+              "belowByIn": -0.19,
+              "rightByIn": 0
+            },
+            {
+              "sheetId": "SCHED-4",
               "belowByIn": -0.19,
               "rightByIn": 0
             },

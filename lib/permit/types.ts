@@ -461,6 +461,22 @@ export interface PermitInput {
     /** what the quantity cell prints while pending, e.g. '0 MODELED / FIELD
      *  QUANTITY PENDING'. */
     quantityStateLabel?: string;
+    // ── ECD §1/§2 (2026-07-26) — STABLE ROW IDENTITY + THE ONE PROCUREMENT
+    // STATE, declared on this carrier too (RackingBOMRow → BOMLineItemV4 →
+    // PermitBOMItem → PermitInput['bom'] — the audit rule is that an authority
+    // state crossing a type boundary must be DECLARED on every carrier, which
+    // is exactly what procurementClass failed to do).
+    /** content-derived stable row id — lib/bom/bomLineId.ts. */
+    bomLineId?: string;
+    /** THE per-row procurement authority record (bom-types-v4). Absent ⇒ the
+     *  row is unclassified and every consumer treats that fail-closed. */
+    procurement?: import('@/lib/bom-types-v4').ProcurementAuthorityRecord;
+    /** producer-declared facts the classifier consumes. */
+    quantitySource?: import('@/lib/bom-types-v4').BomQuantitySource;
+    affectedRouteIds?: string[];
+    affectedEquipmentIds?: string[];
+    authorityStateHint?: import('@/lib/bom-types-v4').ProcurementAuthorityState;
+    authorityStateHintReason?: string;
     // Legacy compat
     ulListing?: string;
   }>;

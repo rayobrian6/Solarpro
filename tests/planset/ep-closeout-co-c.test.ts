@@ -8,26 +8,39 @@ import { SEVERITY_POLICY, classifyBlockerSeverity, validateSeverityPolicy } from
 import { runStructuralCalcV4 } from '@/lib/structural-engine-v4';
 
 // ── §12 — product-version document applicability ─────────────────────────────
+// ECD §8 — the binary `state: 'verified' | 'unverified'` was widened to the SEVEN
+// document states (ARCHIVED / APPLICABLE / VERIFIED / AUTHORITATIVE / SUPERSEDED /
+// NOT_APPLICABLE / PENDING_APPLICABILITY) because "held on file" is not
+// "applicable to the selected product". The APPLICABILITY LOGIC these gates assert
+// is unchanged: `applicabilityVerified` is bit-for-bit the old `state ===
+// 'verified'`, so each expectation below is restated against it plus the exact new
+// state it now resolves to.
 describe('§12 document applicability (product-version gate)', () => {
   const rtMiniAsset = getManufacturerAsset('rooftech-mini', 'racking_detail');
   const xrAsset = getManufacturerAsset('ironridge-xr100', 'racking_detail');
 
   it('RT-MINI mount vs RT-MINI II manual ⇒ UNVERIFIED (version conflation)', () => {
     const a = evaluateDocumentApplicability('RT-MINI', rtMiniAsset);
-    expect(a.state).toBe('unverified');
+    expect(a.applicabilityVerified).toBe(false);
+    expect(a.state).toBe('PENDING_APPLICABILITY');
     expect(a.documentProduct).toMatch(/RT-MINI II/i);
   });
 
   it('IronRidge XR100 mount vs XR Flush Mount manual ⇒ VERIFIED (mere naming variance, not a version mismatch)', () => {
     const a = evaluateDocumentApplicability('IronRidge XR100', xrAsset);
-    expect(a.state).toBe('verified');
+    expect(a.applicabilityVerified).toBe(true);
+    expect(a.state).toBe('APPLICABLE');
   });
 
   it('a verified alias evidence record clears the version mismatch (never fabricated)', () => {
     const a = evaluateDocumentApplicability('RT-MINI', rtMiniAsset, {
       selectedModel: 'RT-MINI', documentProduct: 'RT-MINI II', verified: true, evidenceRef: 'doc-registry:rt-alias-1',
     });
-    expect(a.state).toBe('verified');
+    expect(a.applicabilityVerified).toBe(true);
+    // a VERIFIED alias evidence record is the 'VERIFIED' state (stronger than the
+    // identity-match 'APPLICABLE'), and still NOT authoritative (no archived hash).
+    expect(a.state).toBe('VERIFIED');
+    expect(a.authoritative).toBe(false);
     expect(a.crossReferenceEvidence).toBe('doc-registry:rt-alias-1');
   });
 
@@ -35,7 +48,8 @@ describe('§12 document applicability (product-version gate)', () => {
     const a = evaluateDocumentApplicability('RT-MINI', rtMiniAsset, {
       selectedModel: 'RT-MINI', documentProduct: 'RT-MINI II', verified: false, evidenceRef: 'note',
     });
-    expect(a.state).toBe('unverified');
+    expect(a.applicabilityVerified).toBe(false);
+    expect(a.state).toBe('PENDING_APPLICABILITY');
   });
 });
 

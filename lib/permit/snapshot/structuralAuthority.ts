@@ -881,7 +881,8 @@ function collectBlockers(
   if (ctx.mountSystem) {
     const _asset = getManufacturerAsset(ctx.mountSystem.id, 'racking_detail');
     const _appl = evaluateDocumentApplicability(ctx.mountSystem.model, _asset, null);
-    if (_asset && _appl.state === 'unverified') {
+    // ECD §8 — fires on the 7-state verdict: applicability NOT established.
+    if (_asset && !_appl.applicabilityVerified) {
       b.push({ code: 'EQUIPMENT-DOCUMENT-APPLICABILITY',
         message: `Manufacturer document applicability UNVERIFIED — cited ${_appl.documentProduct ?? 'document'} covers a different `
           + `product version than the selected mount ${ctx.mountSystem.model}; no verified alias evidence. Provide the version-exact document.` });

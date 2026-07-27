@@ -4,6 +4,7 @@ import { roofProject } from '../../test-fixtures/roofProject';
 import { validatePermitDesignSnapshot, blockingViolations } from '@/lib/permit/snapshot/validate';
 import { computeSnapshotDigest, snapshotIdFromDigest, canonicalJson, deepFreeze } from '@/lib/permit/snapshot/digest';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
+import { buildRackingBondingAuthority } from '@/lib/permit/snapshot/rackingBonding';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
@@ -176,7 +177,11 @@ export function baseSnapshot(): PermitDesignSnapshot {
       railTotalFt: null, railCount: null, spliceCount: null,
       loads: { windSpeedMph: 115, exposure: 'C', snowPsf: 20, source: 'structural-engine-v4' },
       governing: { utilization: 0.4, safetyFactor: 2.1, passes: true },
-      rackingAssembly: null, rails: [], attachments: [], checks: [],
+      rackingAssembly: null,
+      // ECD §7 — the bonding authority is a REQUIRED canonical record; with no
+      // racking assembly it is the fail-closed PENDING outcome.
+      rackingBonding: buildRackingBondingAuthority({ assembly: null }),
+      rails: [], attachments: [], checks: [],
       env: { ultimateWindSpeedMph: 115, windSpeedSource: 'test', exposureCategory: 'C', riskCategory: 'II',
              groundSnowPsf: 20, roofSnowPsf: 14, buildingHeightFt: 15, componentCladdingZones: [],
              upliftPressurePsf: null, downforcePressurePsf: null,

@@ -141,7 +141,9 @@ function datasheetPage(input: PermitInput, sheetId: string, entry: DatasheetEntr
   // §12 — product-version applicability. When the on-file document covers a
   // different product version than the selected mount and no verified alias
   // evidence exists, DS-3 is NON-AUTHORITATIVE (label-not-omit).
-  const _applUnverified = !!entry.docApplicability && entry.docApplicability.state === 'unverified';
+  // ECD §8 — the applicability verdict is a 7-state document state; the banner
+  // fires whenever applicability is NOT established (never on availability).
+  const _applUnverified = !!entry.docApplicability && !entry.docApplicability.applicabilityVerified;
   const _applBanner = _applUnverified ? `
       <div data-ds-state="document-applicability-unverified" style="border:2px solid #b00;background:#fff5f5;color:#b00;font-weight:700;font-size:8.5px;padding:5px 8px;margin-bottom:6px;line-height:1.4;">
         DOCUMENT APPLICABILITY UNVERIFIED &mdash; ${escapeH(String(entry.docApplicability!.documentProduct ?? a.docTitle ?? (a.brand + ' ' + a.model)))} manual, selected mount ${escapeH(String(entry.docApplicability!.selectedModel ?? a.model))}.

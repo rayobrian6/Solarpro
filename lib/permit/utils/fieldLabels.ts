@@ -115,13 +115,36 @@ const REQUIRED_WHEN: Record<string, (c: Ctx) => boolean> = {
 // design a load-side 705.12 clause is wrong authority and must not print; on a
 // load-side (705.12) design the supply-side 705.11 clause must not print. 705.10
 // (grouped power-source directory) and everything else is general (both sides).
-//   • 705.11 / 705.12(A)  → supply-side (705.12(A) was the 2017 supply-side ref)
-//   • 705.12(B..)/705.12/705.13 → load-side
+//   • 705.11                            → supply-side
+//   • 705.12 (ANY subdivision) / 705.13 → load-side
+//
+// ── ECD §9 (Ray's ruling, 2026-07-26) — the 705.12(A) SPECIAL CASE IS DELETED ──
+// This function used to carry `if (/705\.12\(A\)/) return 'supply'` because in the
+// NEC **2017** cycle 705.12(A) was the supply-side subdivision. The consequence was
+// that filterSectionByTopology KEPT both halves of the placard dataset's
+// "705.11 / 705.12(A)" on a supply-side design, and resolveRef printed
+// `NEC 2020 705.11 / 705.12(A)` on PV-5 — a citation stamped with the 2020 edition,
+// in which 705.12 is the LOAD-SIDE article. A 2020-stamped 705.12(A) is a
+// wrong-edition AND wrong-side citation regardless of what the number meant in 2017.
+//
+// Ray's ruling is stronger than "scope the case to 2017": THE CITATION ITSELF MUST
+// NOT RENDER ON A SUPPLY-SIDE LABEL. Note the distinction that preserves — even if a
+// code cycle genuinely used a 705.12 subdivision to DEFINE the supply-side
+// classification, the field LABEL still does not cite it. The label's job is to tell
+// a first responder / inspector what the connection IS under the AHJ's CURRENTLY
+// ADOPTED cycle, and that cycle's supply-side citation is 705.11; a superseded
+// numbering is a code-history fact, not label content.
+//
+// So 705.12(A) now falls through to the general 705.12 rule (load-side) and is
+// dropped on supply-side designs. This is HALF of a two-site fix — the dataset entry
+// no longer carries it either (lib/data/placards/field-placards-research.json, the
+// NEC-2020 `line-side-tap-warning` codeRef) — so it cannot be reintroduced through
+// either path.
 function necSectionSide(part: string): 'supply' | 'load' | 'general' {
   const s = part.trim();
   if (/705\.11\b/.test(s)) return 'supply';
-  if (/705\.12\(A\)/.test(s)) return 'supply';
   if (/705\.13\b/.test(s)) return 'load';
+  // EVERY 705.12 subdivision — INCLUDING (A) — is load-side for labelling.
   if (/705\.12/.test(s)) return 'load';
   return 'general';
 }

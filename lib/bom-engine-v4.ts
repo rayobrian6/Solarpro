@@ -30,7 +30,10 @@ import { racewayNecArticle, type RunSegment } from './computed-system';
 import type { RackingBOM } from './structural-engine-v4';
 import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 // MASTER TASK: deriveStructuralBOM removed from V4 — now called in API route merge layer
-import type { BOMLineItemV4, BOMStageId, BOMSystemType } from './bom-types-v4';
+import type {
+  BOMLineItemV4, BOMStageId, BOMSystemType,
+  BomQuantitySource, ProcurementAuthorityState,
+} from './bom-types-v4';
 // Wave 2c (docs/ARCHITECTURE-per-subsystem-equipment.md §1.7): per-sub-system
 // equipment map — Stages 1–3 run PER SUB, Stage 4 (service AC) runs ONCE.
 import type { SubSystemKey, SubSystemEquipment } from './system/subSystemEquipment';
@@ -328,6 +331,11 @@ interface DerivedRaceway {
   sharedCircuitCount: number;
   lengthFt: number;           // Σ member run one-way lengths × waste (whole ft)
   segmentIds: string[];
+  /** ECD §3 — member segments that carry NO one-way length. A missing length is
+   *  an UNKNOWN, never a default: the old `?? 30` fabricated 30 ft of conduit
+   *  inside a length-authority chain. Non-empty ⇒ every row derived from this
+   *  raceway is QUANTITY_PENDING, not an estimate and not orderable. */
+  lengthUnknownSegmentIds: string[];
 }
 
 /** Group in-conduit runs into their physical raceways. Open-air (Q-Cable /
@@ -348,17 +356,25 @@ function derivePhysicalRacewaysFromRuns(runs: RunSegment[]): DerivedRaceway[] {
     const size = String(r.physicalRaceway?.selectedRacewaySize ?? r.conduitSize ?? '3/4')
       .trim().replace(/"$/, '');
     const shared = r.physicalRaceway?.sharedCircuitCount ?? r.sharedCircuitCount ?? 1;
-    const lenFt = Math.ceil((r.onewayLengthFt ?? 30) * _WASTE);
+    // ECD §3 — NO FABRICATED LENGTH. `?? 30` used to substitute 30 ft for an
+    // absent one-way length inside a length-AUTHORITY chain; an unknown length
+    // now contributes NOTHING and is recorded, so the derived rows classify
+    // QUANTITY_PENDING instead of printing an invented footage.
+    const _oneWay = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+      ? r.onewayLengthFt : null;
+    const lenFt = _oneWay == null ? 0 : Math.ceil(_oneWay * _WASTE);
     const ex = byId.get(rid);
     if (ex) {
       ex.lengthFt += lenFt;
       if (!ex.segmentIds.includes(String(r.id))) ex.segmentIds.push(String(r.id));
+      if (_oneWay == null && !ex.lengthUnknownSegmentIds.includes(String(r.id))) ex.lengthUnknownSegmentIds.push(String(r.id));
       ex.sharedCircuitCount = Math.max(ex.sharedCircuitCount, shared);
     } else {
       byId.set(rid, {
         physicalRacewayId: rid, racewayType: type, sizeIn: size,
         necArticle: art.article, supportArticle: art.supportArticle,
         sharedCircuitCount: shared, lengthFt: lenFt, segmentIds: [String(r.id)],
+        lengthUnknownSegmentIds: _oneWay == null ? [String(r.id)] : [],
       });
       order.push(rid);
     }
@@ -383,50 +399,71 @@ function emitRacewayConduitBom(rw: DerivedRaceway): BOMLineItemV4[] {
     ? ` — shared home-run (${rw.sharedCircuitCount} branch circuits, conduit counted once)`
     : '';
 
+  // ── ECD §3 (W1-D) — EVERY row this emitter produces is ROUTE-DERIVED. The
+  // conduit footage is Σ unresolved route-segment length; the couplings, straps
+  // and expansion fitting are functions OF that footage; the connectors,
+  // bushings and sweeps exist per raceway END / per rough-in allowance, which
+  // only the routed geometry establishes. Declared as a FACT here (the V4 engine
+  // is pre-snapshot and cannot know whether ROUTE-LENGTH-ESTIMATE is open);
+  // classifyProcurementAuthority is the single consumer that turns the fact plus
+  // the open requirement into ESTIMATED_FIELD_VERIFY. If any member segment
+  // carries no length at all, the quantity is UNKNOWN, not an estimate.
+  const _routeTag = {
+    quantitySource: (rw.lengthUnknownSegmentIds.length ? 'unknown' : 'route-derived') as BomQuantitySource,
+    affectedRouteIds: [rw.physicalRacewayId, ...rw.segmentIds],
+  };
+
   // Conduit material — per raceway (kills the project-level "all runs" roll-up)
   out.push(addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
     `${typeTag}-${sizeTag}-${idTag}`,
     `${size}" ${type} conduit — ${rw.physicalRacewayId} [${src}]${sharedNote}`,
-    ft, 'ft', necConduit, `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, `[${src}] × ${_WASTE}`, true));
+    ft, 'ft', necConduit, `${rw.physicalRacewayId}: Σ segment length × ${_WASTE}`, `[${src}] × ${_WASTE}`, true,
+    undefined, undefined, undefined, undefined, _routeTag));
 
   // Couplings — join 10-ft sticks
   const coupQty = Math.max(1, Math.ceil(ft / 10) - 1);
   out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} Coupling`,
     `${typeTag}-COUP-${sizeTag}-${idTag}`,
     `${size}" ${type} coupling — ${rw.physicalRacewayId} (joins conduit sticks)`,
-    coupQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)-1`, `ceil(${ft}/10)-1`, true));
+    coupQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)-1`, `ceil(${ft}/10)-1`, true,
+    undefined, undefined, undefined, undefined, _routeTag));
 
   // Terminal connectors — both raceway ends
   out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} Connector`,
     `${typeTag}-CONN-${sizeTag}-${idTag}`,
     `${size}" ${type} terminal connector — ${rw.physicalRacewayId} (both raceway ends per NEC 300.15)`,
-    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true));
+    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true,
+    undefined, undefined, undefined, undefined, _routeTag));
 
   // Straps / supports — ≤10 ft + within 3 ft of each box (raceway-type support rule)
   const strapQty = Math.max(2, Math.ceil(ft / 10) + 1);
   out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} One-Hole Strap`,
     `${typeTag}-STRAP-${sizeTag}-${idTag}`,
     `${size}" ${type} one-hole strap — ${rw.physicalRacewayId} support per ${necSupport} (≤10 ft + within 3 ft of boxes)`,
-    strapQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)+1`, `ceil(${ft}/10)+1`, true));
+    strapQty, 'ea', necSupport, `${rw.physicalRacewayId}: ceil(${ft}/10)+1`, `ceil(${ft}/10)+1`, true,
+    undefined, undefined, undefined, undefined, _routeTag));
 
   // Insulated throat bushings — both ends
   out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" Insulated Bushing`,
     `BUSH-INS-${sizeTag}-${idTag}`,
     `${size}" insulated throat bushing — ${rw.physicalRacewayId} (protects conductors at each raceway end per NEC 300.15)`,
-    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true));
+    2, 'ea', 'NEC 300.15', `${rw.physicalRacewayId}: both terminations`, '2', true,
+    undefined, undefined, undefined, undefined, _routeTag));
 
   // Bends / sweeps — rough-in allowance (exact count pending field routing)
   out.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${size}" ${type} 90° Sweep`,
     `${typeTag}-ELL-${sizeTag}-${idTag}`,
     `${size}" ${type} 90° sweep/elbow — ${rw.physicalRacewayId} (rough-in allowance; exact bend count pending field routing)`,
-    2, 'ea', necSupport, `${rw.physicalRacewayId}: rough-in allowance`, '2', true));
+    2, 'ea', necSupport, `${rw.physicalRacewayId}: rough-in allowance`, '2', true,
+    undefined, undefined, undefined, undefined, _routeTag));
 
   // PVC expansion fitting — NEC 352.44 thermal, applicable on longer exposed PVC runs
   if (/PVC/i.test(type) && ft >= 25) {
     out.push(addItem('ac', 'conduit_fitting', 'Carlon', `${size}" PVC Expansion Fitting`,
       `PVC-EXP-${sizeTag}-${idTag}`,
       `${size}" PVC expansion coupling — ${rw.physicalRacewayId} (NEC 352.44 thermal expansion, exposed run ≥ 25 ft)`,
-      1, 'ea', 'NEC 352.44', `${rw.physicalRacewayId}: PVC exposed run ≥ 25 ft`, '1', true));
+      1, 'ea', 'NEC 352.44', `${rw.physicalRacewayId}: PVC exposed run ≥ 25 ft`, '1', true,
+      undefined, undefined, undefined, undefined, _routeTag));
   }
   return out;
 }
@@ -460,8 +497,8 @@ interface BranchWireReconciliation {
  *  SEPARATE rows (green EGC ≠ black hot) so a #10 branch hot is never merged
  *  with a #10 feeder EGC into one undifferentiated "AC wiring" line. */
 function emitAcConductorBom(runs: RunSegment[]): { items: BOMLineItemV4[]; evidence: BranchWireReconciliation } {
-  const hotMap = new Map<string, { ft: number; segs: string[] }>();
-  const egcMap = new Map<string, { ft: number; segs: string[] }>();
+  const hotMap = new Map<string, { ft: number; segs: string[]; unknown: string[] }>();
+  const egcMap = new Map<string, { ft: number; segs: string[]; unknown: string[] }>();
   const calc: BranchWireCalcRow[] = [];
   const openAir: string[] = [];
 
@@ -474,16 +511,27 @@ function emitAcConductorBom(runs: RunSegment[]): { items: BOMLineItemV4[]; evide
     const egcGauge = r.egcGauge ?? '#10 AWG';
     const perCircuit = r.conductorCount ?? 2;
     const shared = r.sharedCircuitCount ?? r.physicalRaceway?.sharedCircuitCount ?? 1;
-    const lenOneWay = r.onewayLengthFt ?? 30;
+    // ECD §3 — NO FABRICATED LENGTH (was `?? 30`). An unresolved one-way length
+    // contributes 0 ft and is RECORDED, so the gauge's row classifies
+    // QUANTITY_PENDING rather than shipping an invented conductor footage.
+    const _len = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+      ? r.onewayLengthFt : null;
+    const lenOneWay = _len ?? 0;
     const hotConductors = perCircuit * shared;
     const hotFt = Math.ceil(lenOneWay * hotConductors * _WASTE);
     const egcFt = Math.ceil(lenOneWay * 1 * _WASTE);
     const h = hotMap.get(gauge);
-    if (h) { h.ft += hotFt; if (!h.segs.includes(String(r.id))) h.segs.push(String(r.id)); }
-    else hotMap.set(gauge, { ft: hotFt, segs: [String(r.id)] });
+    if (h) {
+      h.ft += hotFt;
+      if (!h.segs.includes(String(r.id))) h.segs.push(String(r.id));
+      if (_len == null && !h.unknown.includes(String(r.id))) h.unknown.push(String(r.id));
+    } else hotMap.set(gauge, { ft: hotFt, segs: [String(r.id)], unknown: _len == null ? [String(r.id)] : [] });
     const e = egcMap.get(egcGauge);
-    if (e) { e.ft += egcFt; if (!e.segs.includes(String(r.id))) e.segs.push(String(r.id)); }
-    else egcMap.set(egcGauge, { ft: egcFt, segs: [String(r.id)] });
+    if (e) {
+      e.ft += egcFt;
+      if (!e.segs.includes(String(r.id))) e.segs.push(String(r.id));
+      if (_len == null && !e.unknown.includes(String(r.id))) e.unknown.push(String(r.id));
+    } else egcMap.set(egcGauge, { ft: egcFt, segs: [String(r.id)], unknown: _len == null ? [String(r.id)] : [] });
     calc.push({
       segmentId: String(r.id), physicalRacewayId: r.physicalRacewayId ?? null,
       gauge, egcGauge, conductorsPerCircuit: perCircuit, sharedCircuitCount: shared,
@@ -493,17 +541,24 @@ function emitAcConductorBom(runs: RunSegment[]): { items: BOMLineItemV4[]; evide
 
   const gaugeNum = (g: string) => parseInt(g.replace('#', '').replace(' AWG', '')) || 99;
   const items: BOMLineItemV4[] = [];
-  for (const [gauge, { ft, segs }] of [...hotMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
+  // ECD §3 — AC field conductor footage is Σ UNRESOLVED ROUTE LENGTH: declared
+  // route-derived at source so the classifier (never a description regex) can
+  // reclassify it while ROUTE-LENGTH-ESTIMATE is open.
+  for (const [gauge, { ft, segs, unknown }] of [...hotMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
     const gn = gauge.replace('#', '').replace(' AWG', '');
     items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`, `THWN2-${gn}`,
       `${gauge} THWN-2 — AC circuit conductors (${segs.join(', ')})`,
-      ft, 'ft', 'NEC 310.15', `Σ length × conductorsPerCircuit × sharedCircuitCount × ${_WASTE}`, `[${segs.join(', ')}]`, true));
+      ft, 'ft', 'NEC 310.15', `Σ length × conductorsPerCircuit × sharedCircuitCount × ${_WASTE}`, `[${segs.join(', ')}]`, true,
+      undefined, undefined, undefined, undefined,
+      { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: segs }));
   }
-  for (const [gauge, { ft, segs }] of [...egcMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
+  for (const [gauge, { ft, segs, unknown }] of [...egcMap.entries()].sort((a, b) => gaugeNum(a[0]) - gaugeNum(b[0]))) {
     const gn = gauge.replace('#', '').replace(' AWG', '');
     items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2 Green EGC`, `THWN2-GRN-${gn}`,
       `${gauge} green THWN-2 equipment grounding conductor — one per raceway, NEC 250.122(C) (${segs.join(', ')})`,
-      ft, 'ft', 'NEC 250.122', `Σ length × 1 × ${_WASTE} (one shared EGC per raceway)`, `[${segs.join(', ')}]`, true));
+      ft, 'ft', 'NEC 250.122', `Σ length × 1 × ${_WASTE} (one shared EGC per raceway)`, `[${segs.join(', ')}]`, true,
+      undefined, undefined, undefined, undefined,
+      { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: segs }));
   }
 
   const evidence: BranchWireReconciliation = {
@@ -515,6 +570,36 @@ function emitAcConductorBom(runs: RunSegment[]): { items: BOMLineItemV4[]; evide
   };
   return { items, evidence };
 }
+
+// ─── ECD §5 (W1-F) — the supply-side tap connector row, at BOTH emitters ─────
+// The row used to carry its own caveat as prose inside the description string
+// ("Verify lug range against actual service conductor size") while being counted
+// as an authoritative orderable line. The caveat is now an AUTHORITY:
+// electrical.supplySideTapConnection (lib/permit/snapshot/supplySideTap.ts)
+// records what the existing service conductors are — honestly null, because they
+// have not been surveyed — and the classifier turns that into the row's state
+// and its rendered CANDIDATE label. The description here states only the
+// PHYSICAL FACT of what the connector is for; it makes no verification claim and
+// issues no instruction. Both emitters (legacy whole-system :~1660 and per-sub
+// :~2910) share these constants so the string cannot diverge again.
+const SUPPLY_SIDE_TAP_CONNECTOR_DESCRIPTION =
+  'Insulated multi-tap connector for the supply-side tap of the service-entrance conductors '
+  + '(1 per conductor: L1/L2/N).';
+
+const SUPPLY_SIDE_TAP_CONNECTOR_HINT: {
+  authorityStateHint: ProcurementAuthorityState;
+  authorityStateHintReason: string;
+  quantitySource: BomQuantitySource;
+} = {
+  authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+  authorityStateHintReason:
+    'CANDIDATE CONNECTOR — the existing service-entrance conductor has not been surveyed, so the '
+    + "connector's listed conductor range cannot be verified against it. Not a selected product; "
+    + 'excluded from the authoritative procurement total and from every export.',
+  // 1 per ungrounded/grounded conductor is a code-established per-installation
+  // constant — the quantity is not in question; the CONNECTOR SELECTION is.
+  quantitySource: 'per-installation-constant',
+};
 
 // ─── ID Generator ─────────────────────────────────────────────────────────────
 
@@ -878,12 +963,36 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         quantity: plan.dropCount, derivedFrom: 'trunkCable resolver (drops)', formula: `${trunkDeviceCount} drops ≈ ${plan.approxFeet} ft`, necReference: 'NEC 690.31' });
 
       if (plan.splicePairs > 0) {
+        // ── ECD §4 (W1-E) — the field-wireable trunk connectors are a CANDIDATE,
+        // never a selected product. No CableExtensionSolution is selected for
+        // this design, so nothing establishes that THESE connectors are the
+        // listed field-splice method for the selected cable assembly. They were
+        // previously emitted with no state at all ⇒ counted ORDERABLE and shipped
+        // inside the procurement export. The rendered `derivedFrom` also carried
+        // INSTALLATION INTENT ("rows use continuous cable + service loop
+        // (cheapest)") — an installation decision the design has not made. Both
+        // are corrected here: the derivation states the COUNT BASIS only, and the
+        // state hint makes the row non-orderable until a verified, selected
+        // CableExtensionSolution names its bomLineId (see the promotion contract
+        // in lib/permit/utils/bomForPermit.ts).
+        const _connCount = `${plan.splicePairs} splice pair(s) — count basis: ${plan.splicePairs} required trunk jump(s)`;
+        const _connHint = {
+          authorityStateHint: 'CANDIDATE_NON_ORDERABLE' as ProcurementAuthorityState,
+          authorityStateHintReason:
+            'CANDIDATE FIELD-SPLICE CONNECTOR — NOT A SELECTED PRODUCT. No verified CableExtensionSolution '
+            + 'selects a field-wireable connector solution for the selected cable assembly, so this connector is '
+            + 'not established as the listed splice method. Design quantity only; excluded from the authoritative '
+            + 'procurement total and from every export. It does NOT resolve any cable-length deficit.',
+          quantitySource: 'topology-derived' as BomQuantitySource,
+        };
         items.push(addItem('ac', 'connector', system.brand, system.connectors.male.description,
-          system.connectors.male.sku, `${system.connectors.male.description} — trunk jump (${plan.spliceBasis})`,
-          plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
+          system.connectors.male.sku, `${system.connectors.male.description} — trunk jump`,
+          plan.splicePairs, 'ea', 'NEC 690.31', _connCount, `${plan.splicePairs}`, false,
+          undefined, undefined, undefined, undefined, _connHint));
         items.push(addItem('ac', 'connector', system.brand, system.connectors.female.description,
-          system.connectors.female.sku, `${system.connectors.female.description} — trunk jump (${plan.spliceBasis})`,
-          plan.splicePairs, 'ea', 'NEC 690.31', plan.spliceBasis, `${plan.splicePairs}`, false));
+          system.connectors.female.sku, `${system.connectors.female.description} — trunk jump`,
+          plan.splicePairs, 'ea', 'NEC 690.31', _connCount, `${plan.splicePairs}`, false,
+          undefined, undefined, undefined, undefined, _connHint));
         log.push({ stageId: 'ac', category: 'connector', item: 'Field-wireable splice (M/F pair)',
           quantity: plan.splicePairs, derivedFrom: plan.spliceBasis, formula: `${plan.splicePairs}`, necReference: 'NEC 690.31' });
       }
@@ -1261,45 +1370,42 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // ── Group DC runs by wire gauge → one line item per gauge (micro only, matches calcBOMFromSegments) ──
     // Key insight: EGC can be a DIFFERENT gauge than DC conductors
     if (isMicro && dcFieldRuns.length > 0) {
-      const dcGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
+      const dcGaugeMap = new Map<string, { qty: number; runIds: string[]; unknown: string[] }>();
 
       for (const r of dcFieldRuns) {
         const gauge: string = r.wireGauge ?? '#10 AWG';
         const egcGauge: string = r.egcGauge ?? '#10 AWG';
         const conductors: number = r.conductorCount ?? 2;
-        const length: number = r.onewayLengthFt ?? 30;
-        
-        // Add DC conductor quantity (gauge = wireGauge)
-        const dcQty = Math.ceil(length * conductors * 1.15);
-        const dcExisting = dcGaugeMap.get(gauge);
-        if (dcExisting) {
-          dcExisting.qty += dcQty;
-          dcExisting.runIds.push(r.id);
-        } else {
-          dcGaugeMap.set(gauge, { qty: dcQty, runIds: [r.id] });
-        }
-        
-        // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
-        const egcQty = Math.ceil(length * 1 * 1.15);
-        const egcExisting = dcGaugeMap.get(egcGauge);
-        if (egcExisting) {
-          egcExisting.qty += egcQty;
-          if (!egcExisting.runIds.includes(r.id)) {
-            egcExisting.runIds.push(r.id);
+        // ECD §3 — NO FABRICATED LENGTH (was `?? 30`): an unresolved run length
+        // contributes 0 ft and is recorded so the row classifies QUANTITY_PENDING.
+        const _len = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+          ? r.onewayLengthFt : null;
+        const length: number = _len ?? 0;
+        const _mark = (k: string, add: number) => {
+          const ex = dcGaugeMap.get(k);
+          if (ex) {
+            ex.qty += add;
+            if (!ex.runIds.includes(r.id)) ex.runIds.push(r.id);
+            if (_len == null && !ex.unknown.includes(r.id)) ex.unknown.push(r.id);
+          } else {
+            dcGaugeMap.set(k, { qty: add, runIds: [r.id], unknown: _len == null ? [r.id] : [] });
           }
-        } else {
-          dcGaugeMap.set(egcGauge, { qty: egcQty, runIds: [r.id] });
-        }
+        };
+        // DC conductor quantity (gauge = wireGauge) + EGC (may differ).
+        _mark(gauge, Math.ceil(length * conductors * 1.15));
+        _mark(egcGauge, Math.ceil(length * 1 * 1.15));
       }
-      
-      for (const [gauge, { qty, runIds }] of dcGaugeMap.entries()) {
+
+      for (const [gauge, { qty, runIds, unknown }] of dcGaugeMap.entries()) {
         const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
         items.push(addItem('dc', 'wire', 'Southwire', `${gauge} USE-2/THWN-2`,
           `USE2-${gaugeNum}`,
           `${gauge} USE-2 — DC roof wiring (open-air, panels to microinverters)`,
           qty, 'ft', 'NEC 690.31',
           'Sum(length x conductors x 1.15)',
-          `${gauge} DC runs x 1.15`, true));
+          `${gauge} DC runs x 1.15`, true,
+          undefined, undefined, undefined, undefined,
+          { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: runIds.map(String) }));
         log.push({ stageId: 'dc', category: 'wire', item: `${gauge} USE-2`,
           quantity: qty, derivedFrom: runIds.join(', '),
           formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 690.31' });
@@ -1578,8 +1684,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // connectors on the service-entrance conductors — L1 + L2 + N = 3.
     items.push(addItem('ac', 'connector', 'NSI Polaris',
       'Insulated Multi-Tap Connector (350 kcmil–#6)',
-      'IPLD350-3', 'Polaris-style insulated tap connector — supply-side tap of service-entrance conductor (1 per conductor: L1/L2/N). Verify lug range against actual service conductor size.',
-      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true));
+      'IPLD350-3', SUPPLY_SIDE_TAP_CONNECTOR_DESCRIPTION,
+      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true,
+      undefined, undefined, undefined, undefined, SUPPLY_SIDE_TAP_CONNECTOR_HINT));
     log.push({ stageId: 'ac', category: 'connector', item: 'Polaris Insulated Multi-Tap',
       quantity: 3, derivedFrom: 'supply-side tap (L1/L2/N)', formula: '3', necReference: 'NEC 705.11(C)' });
     complianceNotes.push(
@@ -1960,15 +2067,15 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       'Wire nuts / Wago levers, assorted', 1, '1 assortment per job');
     if (isSupplySideTap) {
       ts('connector', 'NSI Polaris', 'Insulated Multi-Tap Connector (spare)', 'IPLD350-3',
-        'Spare Polaris tap (drop/strip mistakes are one-way)', 1, 'supply-side: 1 spare');
+        'Spare CANDIDATE Polaris tap (connector selection not verified — see the supply-side tap connection authority)', 1, 'supply-side: 1 spare');
     }
 
     // Micro trunk spares — cut ends and damaged drops are field realities.
     if (isMicro && _tsTrunkSections > 0) {
       ts('connector', 'Enphase', 'Q Field-Wireable Connector, Male (spare)', 'Q-CONN-10M',
-        'Spare trunk field splice, male', 1, 'micro: 1 spare');
+        'Spare CANDIDATE trunk field splice, male (no verified cable-extension solution selects this connector)', 1, 'micro: 1 spare');
       ts('connector', 'Enphase', 'Q Field-Wireable Connector, Female (spare)', 'Q-CONN-10F',
-        'Spare trunk field splice, female', 1, 'micro: 1 spare');
+        'Spare CANDIDATE trunk field splice, female (no verified cable-extension solution selects this connector)', 1, 'micro: 1 spare');
       ts('sealing_cap', 'Enphase', 'Q Cable Sealing Cap (spares)', 'Q-SEAL-10',
         'Spare sealing caps for unused/opened drops', Math.max(2, _tsTrunkSections), 'max(2, 1 per branch)');
       ts('terminator', 'Enphase', 'Q Cable Terminator (spare)', 'Q-TERM-10',
@@ -2623,15 +2730,16 @@ function generateBOMV4PerSubSystem(
 
     // DC runs — grouped per (owning sub, gauge); stamped when the sub is known.
     if (dcBomRuns.length > 0) {
-      const dcGaugeMap = new Map<string, { sub: SubSystemKey | undefined; gauge: string; qty: number; runIds: string[] }>();
-      const addDc = (sub: SubSystemKey | undefined, gauge: string, qty: number, runId: string) => {
+      const dcGaugeMap = new Map<string, { sub: SubSystemKey | undefined; gauge: string; qty: number; runIds: string[]; unknown: string[] }>();
+      const addDc = (sub: SubSystemKey | undefined, gauge: string, qty: number, runId: string, lengthUnknown: boolean) => {
         const k = `${sub ?? ''}|${gauge}`;
         const existing = dcGaugeMap.get(k);
         if (existing) {
           existing.qty += qty;
           if (!existing.runIds.includes(runId)) existing.runIds.push(runId);
+          if (lengthUnknown && !existing.unknown.includes(runId)) existing.unknown.push(runId);
         } else {
-          dcGaugeMap.set(k, { sub, gauge, qty, runIds: [runId] });
+          dcGaugeMap.set(k, { sub, gauge, qty, runIds: [runId], unknown: lengthUnknown ? [runId] : [] });
         }
       };
       for (const r of dcBomRuns) {
@@ -2639,16 +2747,21 @@ function generateBOMV4PerSubSystem(
         const gauge: string = r.wireGauge ?? '#10 AWG';
         const egcGauge: string = r.egcGauge ?? '#10 AWG';
         const conductors: number = r.conductorCount ?? 2;
-        const length: number = r.onewayLengthFt ?? 30;
-        addDc(sub, gauge, Math.ceil(length * conductors * 1.15), String(r.id));
-        addDc(sub, egcGauge, Math.ceil(length * 1 * 1.15), String(r.id));
+        // ECD §3 — NO FABRICATED LENGTH (was `?? 30`).
+        const _len = typeof r.onewayLengthFt === 'number' && Number.isFinite(r.onewayLengthFt)
+          ? r.onewayLengthFt : null;
+        const length: number = _len ?? 0;
+        addDc(sub, gauge, Math.ceil(length * conductors * 1.15), String(r.id), _len == null);
+        addDc(sub, egcGauge, Math.ceil(length * 1 * 1.15), String(r.id), _len == null);
       }
-      for (const { sub, gauge, qty, runIds } of dcGaugeMap.values()) {
+      for (const { sub, gauge, qty, runIds, unknown } of dcGaugeMap.values()) {
         const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
         push(sub, addItem('dc', 'wire', 'Southwire', `${gauge} USE-2/THWN-2`,
           `USE2-${gaugeNum}`,
           `${gauge} USE-2 — DC wiring (${runIds.join(', ')})${sub ? ` — ${sub} sub-system` : ''}`,
-          qty, 'ft', 'NEC 690.31', 'Sum(length x conductors x 1.15)', `${gauge} DC runs x 1.15`, true));
+          qty, 'ft', 'NEC 690.31', 'Sum(length x conductors x 1.15)', `${gauge} DC runs x 1.15`, true,
+          undefined, undefined, undefined, undefined,
+          { quantitySource: unknown.length ? 'unknown' : 'route-derived', affectedRouteIds: runIds }));
         log.push({ stageId: 'dc', category: 'wire', item: `${gauge} USE-2${sub ? ` (${sub})` : ''}`,
           quantity: qty, derivedFrom: runIds.join(', '), formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 690.31' });
       }
@@ -2828,8 +2941,9 @@ function generateBOMV4PerSubSystem(
   } else if (isSupplySideTap) {
     push(undefined, addItem('ac', 'connector', 'NSI Polaris',
       'Insulated Multi-Tap Connector (350 kcmil–#6)', 'IPLD350-3',
-      'Polaris-style insulated tap connector — supply-side tap of service-entrance conductor (1 per conductor: L1/L2/N). Verify lug range against actual service conductor size.',
-      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true));
+      SUPPLY_SIDE_TAP_CONNECTOR_DESCRIPTION,
+      3, 'ea', 'NEC 705.11(C)', 'perSystem (supply-side tap)', 'L1+L2+N = 3', true,
+      undefined, undefined, undefined, undefined, SUPPLY_SIDE_TAP_CONNECTOR_HINT));
     complianceNotes.push(
       'NEC 705.11: Supply-side tap — no backfed breaker in load center. ' +
       'Connection is utility-side (before main breaker) via insulated multi-tap connectors; ' +
@@ -3033,7 +3147,7 @@ function generateBOMV4PerSubSystem(
       'Wire nuts / Wago levers, assorted', 1, '1 assortment per job');
     if (isSupplySideTap) {
       ts(undefined, 'connector', 'NSI Polaris', 'Insulated Multi-Tap Connector (spare)', 'IPLD350-3',
-        'Spare Polaris tap (drop/strip mistakes are one-way)', 1, 'supply-side: 1 spare');
+        'Spare CANDIDATE Polaris tap (connector selection not verified — see the supply-side tap connection authority)', 1, 'supply-side: 1 spare');
     }
 
     // Micro trunk spares — one set PER PRESENT BRAND GROUP, using THAT brand's
@@ -3044,9 +3158,9 @@ function generateBOMV4PerSubSystem(
       const stamp: BOMSystemType | undefined = group.length === 1 ? group[0].key : undefined;
       const branches = group.reduce((n, s) => n + (s.trunkPlan?.branchCount ?? 0), 0);
       ts(stamp, 'connector', sys.brand, `${sys.connectors.male.description} (spare)`, sys.connectors.male.sku,
-        'Spare trunk field splice, male', 1, `${sys.brand} micro: 1 spare`);
+        'Spare CANDIDATE trunk field splice, male (no verified cable-extension solution selects this connector)', 1, `${sys.brand} micro: 1 spare`);
       ts(stamp, 'connector', sys.brand, `${sys.connectors.female.description} (spare)`, sys.connectors.female.sku,
-        'Spare trunk field splice, female', 1, `${sys.brand} micro: 1 spare`);
+        'Spare CANDIDATE trunk field splice, female (no verified cable-extension solution selects this connector)', 1, `${sys.brand} micro: 1 spare`);
       if (sys.connectors.sealingCap) {
         ts(stamp, 'sealing_cap', sys.brand, `${sys.connectors.sealingCap.description} (spares)`, sys.connectors.sealingCap.sku,
           'Spare sealing caps for unused/opened drops', Math.max(2, branches), 'max(2, 1 per branch)');
@@ -3144,12 +3258,21 @@ function addItem(
    *  Conditionally spread so legacy lines stay byte-identical when serialized. */
   subSystem?: BOMSystemType,
   /** PPC §5/§8/§9 — procurement orderability / quantity state. Conditionally
-   *  spread: a row that passes nothing here serializes exactly as before. */
+   *  spread: a row that passes nothing here serializes exactly as before.
+   *  ECD W1-B/W1-D/W1-E/W1-F extends it with the PRODUCER-side procurement
+   *  facts (quantity source, affected route/equipment ids, and an explicit
+   *  state hint where the producer itself knows the row is not a selected,
+   *  verified product). The classifier in bomForPermit is the sole consumer. */
   orderability?: {
     nonOrderable?: boolean;
     nonOrderableReason?: string;
     quantityState?: 'established' | 'pending';
     quantityStateLabel?: string;
+    quantitySource?: BomQuantitySource;
+    affectedRouteIds?: string[];
+    affectedEquipmentIds?: string[];
+    authorityStateHint?: ProcurementAuthorityState;
+    authorityStateHintReason?: string;
   },
 ): BOMLineItemV4 {
   return {
@@ -3175,6 +3298,11 @@ function addItem(
     ...(orderability?.nonOrderableReason !== undefined ? { nonOrderableReason: orderability.nonOrderableReason } : {}),
     ...(orderability?.quantityState !== undefined ? { quantityState: orderability.quantityState } : {}),
     ...(orderability?.quantityStateLabel !== undefined ? { quantityStateLabel: orderability.quantityStateLabel } : {}),
+    ...(orderability?.quantitySource !== undefined ? { quantitySource: orderability.quantitySource } : {}),
+    ...(orderability?.affectedRouteIds !== undefined ? { affectedRouteIds: orderability.affectedRouteIds } : {}),
+    ...(orderability?.affectedEquipmentIds !== undefined ? { affectedEquipmentIds: orderability.affectedEquipmentIds } : {}),
+    ...(orderability?.authorityStateHint !== undefined ? { authorityStateHint: orderability.authorityStateHint } : {}),
+    ...(orderability?.authorityStateHintReason !== undefined ? { authorityStateHintReason: orderability.authorityStateHintReason } : {}),
   };
 }
 

@@ -1,17 +1,19 @@
 {
-  "generatedAt": "2026-07-26T00:15:55.627Z",
+  "generatedAt": "2026-07-27T16:47:57.494Z",
   "wave": "W3.1",
   "mode": "live",
   "evidenceRole": "CURRENT live database design (88-module hybrid) — supersedes docs/evidence/braidon-w3.planset-evidence.json.",
   "supersedes": null,
-  "snapshotId": "PDS-8910EFAC2AB8",
-  "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "schemaVersion": "1.0.0",
   "project": "BRAIDON (GreenLancer feedback-session planset)",
-  "sheetCount": 21,
+  "sheetCount": 24,
   "sheetIds": [
     "PV-0",
     "RS-1",
+    "RS-1.1",
+    "RS-1.2",
     "PV-1",
     "PV-1B",
     "PV-3",
@@ -25,6 +27,7 @@
     "SCHED",
     "SCHED-2",
     "SCHED-3",
+    "SCHED-4",
     "APP-A",
     "DS-1",
     "DS-2",
@@ -39,7 +42,7 @@
       "w31Status": "corrected",
       "mustCorrect": true,
       "provingCheck": "V23 structural.env.ultimateWindSpeedMph === structural.loads.windSpeedMph",
-      "result": "env 110 == loads 110 mph (single-sourced)",
+      "result": "env 115 == loads 115 mph (single-sourced)",
       "ok": true
     },
     {
@@ -48,7 +51,7 @@
       "w31Status": "corrected",
       "mustCorrect": true,
       "provingCheck": "attachment SF + allowable capacity are structural-engine-v4 owned (attachment.provenance)",
-      "result": "SF 1.625, allowable 600 lb from engine",
+      "result": "SF 1.384, allowable 600 lb from engine",
       "ok": true
     },
     {
@@ -57,7 +60,7 @@
       "w31Status": "corrected",
       "mustCorrect": true,
       "provingCheck": "attachmentSpacingIn derives from canonical rail objects (rails[0].spanConfigIn), not a literal",
-      "result": "attachmentSpacingIn 48\" from 8 rail objects",
+      "result": "attachmentSpacingIn 48\" from 4 rail objects",
       "ok": true
     },
     {
@@ -90,10 +93,10 @@
     {
       "defect": "equipment-identity REC-vs-Qcells",
       "w1w2Symptom": "subSystems.roof.panelId (REC 405W) diverged from the fleet module (Qcells 400W)",
-      "w31Status": "blocking-carried (production unresolved)",
+      "w31Status": "not-present",
       "mustCorrect": false,
       "provingCheck": "permitReadiness.blockers EQUIPMENT-IDENTITY-CONFLICT",
-      "result": "EQUIPMENT-IDENTITY-CONFLICT present and blocking (operator reconciliation required)",
+      "result": "not fired on this live design",
       "ok": true
     }
   ],
@@ -154,10 +157,9 @@
     "expected": "(live: honest blockers vary with design state)",
     "present": [
       "ROUTE-LENGTH-ESTIMATE",
-      "EQUIPMENT-IDENTITY-CONFLICT",
       "CONDUIT-FILL-PENDING",
       "TAP-CONDUCTOR-LENGTH-PENDING",
-      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
       "FRAMING-AUTHORITY-UNVERIFIED",
       "PENDING-RACKING-ASSEMBLY-SELECTION",
       "FASTENER-ASSEMBLY-UNVERIFIED",
@@ -167,8 +169,6 @@
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
       "PROJECT-AUTHORITY-UNVERIFIED",
-      "PROJECT-NAME-NONPRODUCTION",
-      "DESIGNER-OF-RECORD-MISSING",
       "MODULE-EXACT-DATASHEET-PENDING",
       "ENGINEERING-REVIEW-PENDING"
     ],
@@ -303,13 +303,13 @@
   "objectCounts": {
     "moduleInstances": 31,
     "roofPlaneObjects": 2,
-    "rails": 8,
+    "rails": 4,
     "attachments": 64,
     "moduleCount": 31,
-    "railCount": 8,
+    "railCount": 4,
     "attachmentCount": 64,
-    "spliceCount": 8,
-    "railTotalFt": 223.67
+    "spliceCount": 16,
+    "railTotalFt": 228.9
   },
   "coordinateAuthority": {
     "canonicalCoordinateSystem": {
@@ -345,11 +345,11 @@
       }
     ],
     "renderParity": {
-      "renderedObjectIds": 142,
+      "renderedObjectIds": 146,
       "orphanRenderedIds": [],
       "idCoverageOk": true,
       "placementManifests": 2,
-      "structuralObjectsPlaced": 142,
+      "structuralObjectsPlaced": 146,
       "objectKindsPlacedFromCanonical": [
         "module",
         "rail",
@@ -367,8 +367,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -14.909,
-        "y": 8.203
+        "x": -27.375,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -381,8 +381,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -10.909,
-        "y": 8.203
+        "x": -23.375,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -395,8 +395,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -6.909,
-        "y": 8.203
+        "x": -19.375,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -409,8 +409,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -2.909,
-        "y": 8.203
+        "x": -15.375,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -423,8 +423,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 1.091,
-        "y": 8.203
+        "x": -11.375,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -437,8 +437,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 5.091,
-        "y": 8.203
+        "x": -7.375,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -451,8 +451,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 9.091,
-        "y": 8.203
+        "x": -3.375,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -465,8 +465,120 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 13.091,
-        "y": 8.203
+        "x": 0.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-9",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 4.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-10",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 8.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-11",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 12.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-12",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 16.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-13",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 20.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-14",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 24.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-15",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 28.625,
+        "y": 5.036
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-1-16",
+      "railId": "rail-1",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 32.625,
+        "y": 5.036
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -479,8 +591,8 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -14.909,
-        "y": 13.703
+        "x": -27.375,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -493,8 +605,8 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -10.909,
-        "y": 13.703
+        "x": -23.375,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -507,8 +619,8 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -6.909,
-        "y": 13.703
+        "x": -19.375,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -521,8 +633,8 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -2.909,
-        "y": 13.703
+        "x": -15.375,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -535,8 +647,8 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 1.091,
-        "y": 13.703
+        "x": -11.375,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -549,8 +661,8 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 5.091,
-        "y": 13.703
+        "x": -7.375,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -563,8 +675,8 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 9.091,
-        "y": 13.703
+        "x": -3.375,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -577,8 +689,120 @@
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": 13.091,
-        "y": 13.703
+        "x": 0.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-9",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 4.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-10",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 8.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-11",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 12.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-12",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 16.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-13",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 20.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-14",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 24.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-15",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 28.625,
+        "y": 10.945
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-2-16",
+      "railId": "rail-2",
+      "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
+      "xy": {
+        "x": 32.625,
+        "y": 10.945
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -591,8 +815,8 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": -8.972
+        "x": -32.8,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -605,8 +829,8 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": -4.972
+        "x": -28.8,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -619,8 +843,8 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": -0.972
+        "x": -24.8,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -633,8 +857,8 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": 3.028
+        "x": -20.8,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -647,8 +871,8 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": 7.028
+        "x": -16.8,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -661,8 +885,8 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": 11.028
+        "x": -12.8,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -675,8 +899,8 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": 15.028
+        "x": -8.8,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -689,8 +913,120 @@
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 8.91,
-        "y": 19.028
+        "x": -4.8,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-9",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": -0.8,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-10",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": 3.2,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-11",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": 7.2,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-12",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": 11.2,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-13",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": 15.2,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-14",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": 19.2,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-15",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": 23.2,
+        "y": -11.477
+      },
+      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
+      "fastenerCount": 2,
+      "coordinateSystemId": "CS-SITE-PLAN-FT",
+      "transformId": "DT-SITE",
+      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
+    },
+    {
+      "attachmentId": "att-rail-3-16",
+      "railId": "rail-3",
+      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
+      "xy": {
+        "x": 27.2,
+        "y": -11.477
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -703,8 +1039,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": -8.972
+        "x": -32.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -717,8 +1053,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": -4.972
+        "x": -28.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -731,8 +1067,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": -0.972
+        "x": -24.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -745,8 +1081,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": 3.028
+        "x": -20.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -759,8 +1095,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": 7.028
+        "x": -16.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -773,8 +1109,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": 11.028
+        "x": -12.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -787,8 +1123,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": 15.028
+        "x": -8.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -801,8 +1137,8 @@
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 3.409,
-        "y": 19.028
+        "x": -4.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -811,12 +1147,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-1",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-9",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": -14.64,
-        "y": -9.712
+        "x": -0.8,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -825,12 +1161,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-2",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-10",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": -10.64,
-        "y": -9.712
+        "x": 3.2,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -839,12 +1175,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-3",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-11",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": -6.64,
-        "y": -9.712
+        "x": 7.2,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -853,12 +1189,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-4",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-12",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": -2.64,
-        "y": -9.712
+        "x": 11.2,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -867,12 +1203,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-5",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-13",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 1.36,
-        "y": -9.712
+        "x": 15.2,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -881,12 +1217,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-6",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-14",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 5.36,
-        "y": -9.712
+        "x": 19.2,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -895,12 +1231,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-7",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-15",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 9.36,
-        "y": -9.712
+        "x": 23.2,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -909,348 +1245,12 @@
       "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
     },
     {
-      "attachmentId": "att-rail-5-8",
-      "railId": "rail-5",
+      "attachmentId": "att-rail-4-16",
+      "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
       "xy": {
-        "x": 13.36,
-        "y": -9.712
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-1",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -14.64,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-2",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -10.64,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-3",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -6.64,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-4",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -2.64,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-5",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 1.36,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-6",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 5.36,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-7",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 9.36,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-6-8",
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 13.36,
-        "y": -4.212
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-1",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -19.269,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-2",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -15.269,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-3",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -11.269,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-4",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -7.269,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-5",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -3.269,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-6",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 0.731,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-7",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 4.731,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-7-8",
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 8.731,
-        "y": -13.058
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-1",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -19.269,
-        "y": -7.558
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-2",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -15.269,
-        "y": -7.558
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-3",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -11.269,
-        "y": -7.558
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-4",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -7.269,
-        "y": -7.558
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-5",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": -3.269,
-        "y": -7.558
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-6",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 0.731,
-        "y": -7.558
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-7",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 4.731,
-        "y": -7.558
-      },
-      "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
-      "fastenerCount": 2,
-      "coordinateSystemId": "CS-SITE-PLAN-FT",
-      "transformId": "DT-SITE",
-      "coordinateFrame": "canonical CS-SITE-PLAN-FT — co-located with module footprints (W3.1 §2: unified frame; no abstract V4 grid split)"
-    },
-    {
-      "attachmentId": "att-rail-8-8",
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "xy": {
-        "x": 8.731,
-        "y": -7.558
+        "x": 27.2,
+        "y": -5.569
       },
       "fastener": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
@@ -1263,125 +1263,77 @@
     {
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
-      "physicalLengthIn": 335.5,
+      "physicalLengthIn": 686.7,
       "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 8,
-      "attachments": 8,
+      "stockSections": 5,
+      "spliceCount": 4,
+      "supportedModules": 16,
+      "attachments": 16,
       "utilization": null,
       "spanLimitIn": null
     },
     {
       "railId": "rail-2",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
-      "physicalLengthIn": 335.5,
+      "physicalLengthIn": 686.7,
       "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 8,
-      "attachments": 8,
+      "stockSections": 5,
+      "spliceCount": 4,
+      "supportedModules": 16,
+      "attachments": 16,
       "utilization": null,
       "spanLimitIn": null
     },
     {
       "railId": "rail-3",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "physicalLengthIn": 335.5,
+      "physicalLengthIn": 686.7,
       "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 8,
-      "attachments": 8,
+      "stockSections": 5,
+      "spliceCount": 4,
+      "supportedModules": 15,
+      "attachments": 16,
       "utilization": null,
       "spanLimitIn": null
     },
     {
       "railId": "rail-4",
       "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "physicalLengthIn": 335.5,
+      "physicalLengthIn": 686.7,
       "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 8,
-      "attachments": 8,
-      "utilization": null,
-      "spanLimitIn": null
-    },
-    {
-      "railId": "rail-5",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "physicalLengthIn": 335.5,
-      "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 8,
-      "attachments": 8,
-      "utilization": null,
-      "spanLimitIn": null
-    },
-    {
-      "railId": "rail-6",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "physicalLengthIn": 335.5,
-      "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 8,
-      "attachments": 8,
-      "utilization": null,
-      "spanLimitIn": null
-    },
-    {
-      "railId": "rail-7",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "physicalLengthIn": 335.5,
-      "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 7,
-      "attachments": 8,
-      "utilization": null,
-      "spanLimitIn": null
-    },
-    {
-      "railId": "rail-8",
-      "roofPlaneId": "aa72d4e3-2a53-48de-9fde-88acb2a8e01a",
-      "physicalLengthIn": 335.5,
-      "stockLengthIn": 168,
-      "stockSections": 2,
-      "spliceCount": 1,
-      "supportedModules": 7,
-      "attachments": 8,
+      "stockSections": 5,
+      "spliceCount": 4,
+      "supportedModules": 15,
+      "attachments": 16,
       "utilization": null,
       "spanLimitIn": null
     }
   ],
   "loadReactionCapacity": {
     "env": {
-      "ultimateWindSpeedMph": 110,
-      "windSpeedSource": "OPERATOR-ENTERED — NOT VERIFIED (observation/override; no archived climate-hazard source)",
+      "ultimateWindSpeedMph": 115,
+      "windSpeedSource": "code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority",
       "exposureCategory": "C",
       "riskCategory": null,
-      "groundSnowPsf": 20,
-      "roofSnowPsf": 13.422,
+      "groundSnowPsf": 0,
+      "roofSnowPsf": 0,
       "buildingHeightFt": 15,
       "componentCladdingZones": [
         "corner"
       ],
-      "upliftPressurePsf": 55.95,
-      "downforcePressurePsf": 55.95,
+      "upliftPressurePsf": 61.152,
+      "downforcePressurePsf": 61.152,
       "codeAuthority": {
         "asceEdition": "ASCE 7-22",
         "source": "pending-w4-ahj-authority"
       },
       "environmentalLoadAuthority": {
-        "ultimateWindSpeedMph": 110,
-        "windSpeedBasis": "operator-entered",
+        "ultimateWindSpeedMph": 115,
+        "windSpeedBasis": "code-minimum-default",
         "riskCategory": null,
         "exposureCategory": "C",
-        "groundSnowLoadPsf": 20,
-        "snowLoadBasis": "operator-entered",
+        "groundSnowLoadPsf": 0,
+        "snowLoadBasis": "code-minimum-default",
         "snowLoadSource": null,
         "coordinates": {
           "lat": 38.7061678,
@@ -1392,13 +1344,9 @@
         "sourceDataset": null,
         "sourceVersionOrDate": null,
         "lookupTimestampIso": null,
-        "operatorOverrides": [
-          "ultimateWindSpeedMph",
-          "groundSnowLoadPsf",
-          "exposureCategory"
-        ],
+        "operatorOverrides": [],
         "verificationStatus": "unverified",
-        "projectOrAhj": "City of Granite City Building & Zoning",
+        "projectOrAhj": null,
         "evidenceRef": null,
         "provenance": {
           "source": "environmental-load authority gate (BAR §2)",
@@ -1414,23 +1362,23 @@
       {
         "checkId": "chk-attachment-uplift",
         "limitState": "attachment-uplift",
-        "demand": 369.273,
+        "demand": 433.571,
         "capacity": 600,
-        "dcRatio": 0.615,
-        "safetyFactor": 1.625,
+        "dcRatio": 0.723,
+        "safetyFactor": 1.384,
         "requiredThreshold": 1,
         "thresholdKind": "min-safety-factor",
         "passes": true,
         "governingSource": "structural-engine-v4 calcMountLayout + attachmentCapacity (ASD, Ω-normalized allowable)",
         "loadBasis": {
           "designMethod": "ASD",
-          "windPressureBasis": "ASCE 7-22 §26/29 C&C, GOVERNING corner (Zone 3) applied uniformly — conservative screening envelope; net uplift 55.95 psf",
+          "windPressureBasis": "ASCE 7-22 §26/29 C&C, GOVERNING corner (Zone 3) applied uniformly — conservative screening envelope; net uplift 61.152 psf",
           "loadCombination": "0.6D + 0.6W (uplift)",
-          "zonePressurePsf": 55.95,
-          "tributaryAreaFt2": 11,
-          "reactionLbs": 369.273,
+          "zonePressurePsf": 61.152,
+          "tributaryAreaFt2": 11.817,
+          "reactionLbs": 433.571,
           "capacityBasis": "ASD allowable (Ω-normalized; ultimate refused per attachmentCapacity)",
-          "adjustments": "0.6 ASD wind factor on demand; per-mount tributary 11 ft²",
+          "adjustments": "0.6 ASD wind factor on demand; per-mount tributary 11.817 ft²",
           "tributaryModel": "uniform CONSERVATIVE SCREENING ENVELOPE — full interior tributary charged at every mount (end mounts included)"
         },
         "provenance": {
@@ -1454,12 +1402,12 @@
       }
     ],
     "engine": {
-      "moduleDeadLoadLbs": 1550,
+      "moduleDeadLoadLbs": 1367.1,
       "rackingDeadLoadLbs": 124,
-      "addedDeadLoadPsf": 2.642,
-      "distributedRoofLoadPsf": 31.065,
-      "totalRailLoadLbsPerFt": 85.428,
-      "governingUtilization": 0.615,
+      "addedDeadLoadPsf": 2.153,
+      "distributedRoofLoadPsf": 17.153,
+      "totalRailLoadLbsPerFt": 50.673,
+      "governingUtilization": 0.723,
       "governingLimitState": "attachment-uplift",
       "passes": null,
       "engineeringReviewRequired": true,
@@ -1475,8 +1423,8 @@
       "railId": "rail-1",
       "roofPlaneId": "7ca114b6-3980-46b9-9642-57c4f9447c0c",
       "xy": {
-        "x": -14.909,
-        "y": 8.203
+        "x": -27.375,
+        "y": 5.036
       },
       "roofZone": "corner",
       "substrateMember": "unverified-framing",
@@ -1484,19 +1432,19 @@
       "fastenerModel": "5/16\" (8mm/M8) structural wood screw, ~3.5\" (90mm) — 2 per pad, no pilot hole",
       "fastenerCount": 2,
       "embedmentIn": 2.5,
-      "tributaryAreaFt2": 11,
-      "upliftReactionLbs": 369.273,
-      "downwardReactionLbs": 176.711,
-      "deadReactionLbs": 29.066,
-      "snowReactionLbs": 147.645,
+      "tributaryAreaFt2": 11.817,
+      "upliftReactionLbs": 433.571,
+      "downwardReactionLbs": 25.444,
+      "deadReactionLbs": 25.444,
+      "snowReactionLbs": 0,
       "lateralReactionLbs": null,
       "allowableCapacityLbs": 600,
       "adjustmentFactors": {
         "omegaUltimateToAllowable": 1
       },
-      "utilization": 0.615,
-      "safetyFactor": 1.625,
-      "zonePressurePsf": 55.95,
+      "utilization": 0.723,
+      "safetyFactor": 1.384,
+      "zonePressurePsf": 61.152,
       "loadBasis": "ASD",
       "zoneModel": "CONSERVATIVE SCREENING ENVELOPE — governing corner (Zone 3) C&C pressure + full interior tributary applied uniformly (not an exact per-position classification)",
       "coord": {
@@ -1517,8 +1465,8 @@
       }
     },
     "governing": {
-      "utilization": 0.615,
-      "safetyFactor": 1.624814868494387,
+      "utilization": 0.723,
+      "safetyFactor": 1.3838571901419954,
       "passes": null
     }
   },
@@ -1550,36 +1498,36 @@
       },
       {
         "name": "rails-vs-rail-geometry",
-        "expected": 16,
-        "actual": 16,
+        "expected": 20,
+        "actual": 20,
         "ok": true,
         "basis": "Σ ceil(rail.len÷stock)"
       },
       {
         "name": "splices-vs-rail-segmentation",
-        "expected": 8,
-        "actual": 8,
+        "expected": 16,
+        "actual": 16,
         "ok": true,
         "basis": "Σ rail.spliceCount"
       },
       {
         "name": "midclamps-vs-module-adjacency",
-        "expected": 54,
-        "actual": 54,
+        "expected": 58,
+        "actual": 58,
         "ok": true,
         "basis": "Σ (modules_on_rail−1)"
       },
       {
         "name": "endclamps-vs-rail-ends",
-        "expected": 16,
-        "actual": 16,
+        "expected": 8,
+        "actual": 8,
         "ok": true,
         "basis": "2 × rails"
       },
       {
         "name": "rails-vs-v4-calcRackingBOM",
-        "expected": 16,
-        "actual": 16,
+        "expected": 20,
+        "actual": 20,
         "ok": true,
         "basis": "V4 calcRackingBOM.rails"
       },
@@ -1592,22 +1540,22 @@
       },
       {
         "name": "splices-vs-v4-calcRackingBOM",
-        "expected": 8,
-        "actual": 8,
+        "expected": 16,
+        "actual": 16,
         "ok": true,
         "basis": "V4 calcRackingBOM.railSplices"
       },
       {
         "name": "midclamps-vs-v4-calcRackingBOM",
-        "expected": 56,
-        "actual": 54,
+        "expected": 60,
+        "actual": 58,
         "ok": true,
         "basis": "V4 uniform-grid clamp count is a rectangular approximation; ragged real array → object adjacency (§10) is authority.midClamps"
       },
       {
         "name": "endclamps-vs-v4-calcRackingBOM",
-        "expected": 16,
-        "actual": 16,
+        "expected": 8,
+        "actual": 8,
         "ok": true,
         "basis": "V4 uniform-grid clamp count is a rectangular approximation; ragged real array → object adjacency (§10) is authority.endClamps"
       },
@@ -1650,18 +1598,18 @@
     "rows": [
       {
         "key": "rails",
-        "qty": 16,
+        "qty": 20,
         "unit": "ea",
         "aggregation": "rails:total-length÷stock",
-        "objectCount": 8,
-        "derivedFrom": "Σ ceil(rail.physicalLengthIn ÷ rail.stockLengthIn) over 8 canonical rail objects"
+        "objectCount": 4,
+        "derivedFrom": "Σ ceil(rail.physicalLengthIn ÷ rail.stockLengthIn) over 4 canonical rail objects"
       },
       {
         "key": "railSplices",
-        "qty": 8,
+        "qty": 16,
         "unit": "ea",
-        "sourceObjectIds": 8,
-        "derivedFrom": "Σ rail.spliceCount over 8 rail objects (stock segmentation)"
+        "sourceObjectIds": 4,
+        "derivedFrom": "Σ rail.spliceCount over 4 rail objects (stock segmentation)"
       },
       {
         "key": "mounts",
@@ -1687,17 +1635,17 @@
       },
       {
         "key": "midClamps",
-        "qty": 54,
+        "qty": 58,
         "unit": "ea",
-        "sourceObjectIds": 8,
+        "sourceObjectIds": 4,
         "derivedFrom": "Σ (modules_on_rail − 1) over rails = module adjacency (moduleInstances=31)"
       },
       {
         "key": "endClamps",
-        "qty": 16,
+        "qty": 8,
         "unit": "ea",
-        "sourceObjectIds": 8,
-        "derivedFrom": "2 end clamps per rail supporting modules (8 rails)"
+        "sourceObjectIds": 4,
+        "derivedFrom": "2 end clamps per rail supporting modules (4 rails)"
       },
       {
         "key": "bondingClips",
@@ -1757,7 +1705,7 @@
   "carryForwardElectricalBlockers": {
     "ROUTE-LENGTH-ESTIMATE": true,
     "FEEDER-RACEWAY-AUTHORITY": false,
-    "EQUIPMENT-IDENTITY-CONFLICT": true
+    "EQUIPMENT-IDENTITY-CONFLICT": false
   },
   "permitReadiness": {
     "ready": false,
@@ -1765,10 +1713,6 @@
       {
         "code": "ROUTE-LENGTH-ESTIMATE",
         "message": "Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status"
-      },
-      {
-        "code": "EQUIPMENT-IDENTITY-CONFLICT",
-        "message": "subSystems.roof.panelId='rec-alpha-pure-405' (REC Group Alpha Pure-R 405W) vs fleet module 'Q.PEAK DUO BLK ML-G10+ 400W' — operator reconciliation required (migration 110 territory)"
       },
       {
         "code": "CONDUIT-FILL-PENDING",
@@ -1779,8 +1723,8 @@
         "message": "Supply-side tap-conductor length is not measured — NEC 705.11(C) ≤10-ft rule is PENDING (never a compliant claim without a length)"
       },
       {
-        "code": "QCABLE-PROCUREMENT-INSUFFICIENT",
-        "message": "Q-Cable procurement 152 ft is SHORT of the 166.5 ft designed-installed path (+0 ft allowance) by 14.5 ft — base cable quantity NON-ORDERABLE / PENDING a VERIFIED listed cable-extension solution."
+        "code": "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "message": "Open-air branch grounding method NOT ESTABLISHED for the selected IQ8A-72-2-US + Q-12-10-240 (no applicable manufacturer document) — candidate 162 ft EGC is a design quantity, non-orderable."
       },
       {
         "code": "FRAMING-AUTHORITY-UNVERIFIED",
@@ -1800,7 +1744,7 @@
       },
       {
         "code": "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
-        "message": "Environmental load authority UNVERIFIED — wind operator-entered, snow operator-entered, exposure/risk carry no archived climate-hazard source; values are PRELIMINARY design criteria, not verified."
+        "message": "Environmental load authority UNVERIFIED — wind code-minimum default, snow code-minimum default, exposure/risk carry no archived climate-hazard source; values are PRELIMINARY design criteria, not verified."
       },
       {
         "code": "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
@@ -1817,14 +1761,6 @@
       {
         "code": "PROJECT-AUTHORITY-UNVERIFIED",
         "message": "Project legal authority (address, APN, municipal boundary, AHJ and fire authority) is operator-posted / postally inferred and not verified from an official source — county/city/AHJ must not be assumed from postal code alone. Verify via the document registry before permit-ready."
-      },
-      {
-        "code": "PROJECT-NAME-NONPRODUCTION",
-        "message": "Project name \"BRAIDON M PILLA — Solar TEST\" contains \"TEST\" — a non-production identity can never reach an ISSUED/production state"
-      },
-      {
-        "code": "DESIGNER-OF-RECORD-MISSING",
-        "message": "No designer / engineer-of-record is assigned — required before a production/issued set"
       },
       {
         "code": "MODULE-EXACT-DATASHEET-PENDING",
@@ -1857,6 +1793,14 @@
         },
         {
           "sheet": "RS-1",
+          "value": 31
+        },
+        {
+          "sheet": "RS-1.1",
+          "value": 31
+        },
+        {
+          "sheet": "RS-1.2",
           "value": 31
         },
         {
@@ -1928,6 +1872,10 @@
           "value": 31
         },
         {
+          "sheet": "SCHED-4",
+          "value": 31
+        },
+        {
           "sheet": "APP-A",
           "value": 31
         },
@@ -1996,39 +1944,39 @@
     },
     {
       "quantity": "structural.env.windSpeedMph",
-      "authority": "110",
+      "authority": "115",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": 110
+          "value": 115
         },
         {
           "sheet": "PV-3",
-          "value": 110
+          "value": 115
         },
         {
           "sheet": "PV-3",
-          "value": 110
+          "value": 115
         },
         {
           "sheet": "PV-3",
-          "value": 110
+          "value": 115
         },
         {
           "sheet": "PV-4C",
-          "value": 110
+          "value": 115
         },
         {
           "sheet": "PV-4C.1",
-          "value": 110
+          "value": 115
         },
         {
           "sheet": "PE-1",
-          "value": 110
+          "value": 115
         }
       ],
       "distinctPrinted": [
-        "110"
+        "115"
       ],
       "agree": true,
       "blocking": true
@@ -2050,23 +1998,23 @@
     },
     {
       "quantity": "structural.env.groundSnowPsf",
-      "authority": "20",
+      "authority": "0",
       "printedInstances": [
         {
           "sheet": "PV-0",
-          "value": 20
+          "value": 0
         },
         {
           "sheet": "PV-4C",
-          "value": 20
+          "value": 0
         },
         {
           "sheet": "PE-1",
-          "value": 20
+          "value": 0
         }
       ],
       "distinctPrinted": [
-        "20"
+        "0"
       ],
       "agree": true,
       "blocking": true
@@ -2081,16 +2029,16 @@
     },
     {
       "quantity": "structural.railCount",
-      "authority": "8",
+      "authority": "4",
       "printedInstances": [],
       "distinctPrinted": [],
       "agree": null,
       "blocking": false,
-      "note": "canonical rail objects = 8; BOM rail stock sections = 16 (§10 object-derived)"
+      "note": "canonical rail objects = 4; BOM rail stock sections = 20 (§10 object-derived)"
     },
     {
       "quantity": "structural.railTotalFt",
-      "authority": "223.67",
+      "authority": "228.9",
       "printedInstances": [],
       "distinctPrinted": [],
       "agree": null,
@@ -2116,19 +2064,19 @@
     },
     {
       "quantity": "structural.upliftReactionLbs",
-      "authority": "369",
+      "authority": "434",
       "printedInstances": [
         {
           "sheet": "PV-4C",
-          "value": 369
+          "value": 434
         },
         {
           "sheet": "PE-1",
-          "value": 369
+          "value": 434
         }
       ],
       "distinctPrinted": [
-        "369"
+        "434"
       ],
       "agree": true,
       "blocking": true
@@ -2143,7 +2091,7 @@
     },
     {
       "quantity": "structural.attachmentSafetyFactor",
-      "authority": "1.63",
+      "authority": "1.38",
       "printedInstances": [],
       "distinctPrinted": [],
       "agree": null,
@@ -2175,10 +2123,9 @@
     "bannerRendered": true,
     "honestBlockers": [
       "ROUTE-LENGTH-ESTIMATE",
-      "EQUIPMENT-IDENTITY-CONFLICT",
       "CONDUIT-FILL-PENDING",
       "TAP-CONDUCTOR-LENGTH-PENDING",
-      "QCABLE-PROCUREMENT-INSUFFICIENT",
+      "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
       "FRAMING-AUTHORITY-UNVERIFIED",
       "PENDING-RACKING-ASSEMBLY-SELECTION",
       "FASTENER-ASSEMBLY-UNVERIFIED",
@@ -2188,8 +2135,6 @@
       "RACKING-CAPACITY-APPLICABILITY-GAP",
       "CODE-AUTHORITY-INCOMPLETE",
       "PROJECT-AUTHORITY-UNVERIFIED",
-      "PROJECT-NAME-NONPRODUCTION",
-      "DESIGNER-OF-RECORD-MISSING",
       "MODULE-EXACT-DATASHEET-PENDING",
       "ENGINEERING-REVIEW-PENDING"
     ]

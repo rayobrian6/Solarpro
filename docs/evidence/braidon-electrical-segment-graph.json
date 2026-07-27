@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:29.968Z",
+  "generatedAt": "2026-07-27T16:47:05.787Z",
   "artifact": "braidon-electrical-segment-graph",
   "section": "§3/§4 sectioned branch route + raceway authority",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "Each branch route section is modelled separately: the open-air Q-Cable trunk (FREE_AIR, NONE conduit) is DISTINCT from the shared jbox→combiner conduit home-run (physicalRacewayId, sharedCircuitCount, minimumCodeRacewaySize). No sheet describes a multi-method branch with one merged string.",
   "segments": [
     {

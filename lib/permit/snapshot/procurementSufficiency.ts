@@ -180,7 +180,14 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
       allowanceNote: 'No manufacturer/design Q-Cable service-loop or transition allowance is recorded in-repo; allowance = 0. A manufacturer-documented allowance would RAISE this threshold.',
       thresholdFt: null, deficitFt: 0, insufficient: false, affectedBranchIds: [],
       resolutionOptions: resolutionOptions(null), manufacturerDocumentAuthority: null,
-      verificationStatus: 'sufficient', solutions: [], clearedBySolutionId: null, clearance: null,
+      // ECD §4 (W1-E) — the supplied solutions are CARRIED even when there is no
+      // deficit to clear. A CableExtensionSolution is also the only thing that
+      // can PROMOTE a candidate field-splice connector BOM row (see
+      // evaluateCableExtensionPromotion), and that question is independent of
+      // whether the cable length is short — dropping them here made the
+      // promotion path unreachable on a sufficient design.
+      verificationStatus: 'sufficient', solutions: args.solutions ?? [],
+      clearedBySolutionId: null, clearance: null,
       provenance,
     };
   }

@@ -27,7 +27,7 @@ import { buildConductorAuthority, type SubSystemConductorAuthority } from '../ut
 import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, evaluateDocumentApplicability, DOCUMENT_APPLICABILITY_CHIP } from '@/lib/manufacturer-assets-db';
 import {
   extractStructuralInputFromCAD,
   deriveStructuralBOM,
@@ -83,8 +83,8 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
       `ATTACHMENT PER ${rackAsset.brand.toUpperCase()} ${rackAsset.model.toUpperCase()} MANUFACTURER DOCUMENTATION ON FILE: `
         + `${src}${rackAsset.pageRef ? ' — ' + rackAsset.pageRef : ''}`
         + `${rackAsset.imageUrl ? '. REPRODUCED FULL-PAGE IN THE DATASHEET APPENDIX (DS SERIES).' : '. FIELD-VERIFY AGAINST CURRENT REVISION.'}`
-        + (_appl.state === 'unverified'
-            ? ` DOCUMENT APPLICABILITY UNVERIFIED — the on-file ${_appl.documentProduct ?? 'document'} covers a different product version than the selected mount ${(_mountSys?.model ?? rackAsset.model)}; NOT AUTHORITATIVE until a version-exact document or verified alias evidence is provided (EQUIPMENT-DOCUMENT-APPLICABILITY).`
+        + (!_appl.applicabilityVerified
+            ? ` DOCUMENT APPLICABILITY ${DOCUMENT_APPLICABILITY_CHIP[_appl.state]} — the on-file ${_appl.documentProduct ?? 'document'} covers a different product version than the selected mount ${(_mountSys?.model ?? rackAsset.model)}; NOT AUTHORITATIVE until a version-exact document or verified alias evidence is provided (EQUIPMENT-DOCUMENT-APPLICABILITY).`
             : ''),
     ];
   }
@@ -1429,8 +1429,18 @@ export const SCHED_BOM_ROWS_FIRST = 10;
  *  22 → 21 (2026-07-25): a row whose description carries an authority state
  *  (non-orderable design quantity, pending manufacturer authority) wraps to
  *  several lines, and a full 22-row page then clipped by ~30px. 21 leaves the
- *  headroom those multi-line rows need (page-fit gate 13). */
-export const SCHED_BOM_ROWS_CONT = 21;
+ *  headroom those multi-line rows need (page-fit gate 13).
+ *  21 → 14 (ECD W1-C, 2026-07-26): the ECD §2/§3 state model gives the
+ *  route-estimated rows a SECOND line in the quantity cell ("EST — FIELD
+ *  VERIFY"), which they had no representation for before. A full 21-row
+ *  continuation page then clipped by 108px (≈3 rows); measured with the real
+ *  package, 18 still clipped 39px and 16 still clipped 29px (row HEIGHT varies
+ *  far more than row count — the structural rows carry multi-line authority
+ *  prose). 15 is the first clean value; 14 is used so WS-2's PV-4B/SCHED
+ *  authority wording has headroom too. Consequence: a 47-row schedule
+ *  paginates onto three continuation sheets (SCHED-2/3/4) instead of two —
+ *  pagination, not content loss. */
+export const SCHED_BOM_ROWS_CONT = 14;
 
 /** Number of SCHED continuation sheets required for a BOM of this size (0 when
  *  it fits on the primary SCHED sheet). Single source shared by the manifest
@@ -1521,7 +1531,17 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
       const descExtra = item.description && item.description !== item.model
         ? '<br/><span style="color:#555;font-size:7px;">' + item.description + '</span>'
         : '';
-      html += '<tr style="' + bg + '">';
+      // ECD §1/§2 — every rendered row carries its STABLE ROW ID and its ONE
+      // authority state as machine-readable attributes, so the row-ID multiset
+      // gate (rendered == evidence == export) is measurable on the artifact.
+      const _pa = (item as PermitBOMItem).procurement;
+      html += '<tr style="' + bg + '"'
+        + ' data-bom-line-id="' + escapeH((item as PermitBOMItem).bomLineId ?? '') + '"'
+        + ' data-bom-authority-state="' + escapeH(_pa?.authorityState ?? 'UNCLASSIFIED') + '"'
+        + ' data-bom-quantity-source="' + escapeH(_pa?.quantitySource ?? '') + '"'
+        + (_pa?.blockingRequirementCodes?.length
+          ? ' data-bom-blocking-requirements="' + escapeH(_pa.blockingRequirementCodes.join(' ')) + '"' : '')
+        + '>';
       html += '<td class="mono f-lg" style="color:#888;text-align:center">' + rowNum + '</td>';
       html += '<td style="font-size:7.5px;color:#555">' + (item.stageLabel || stageLabel) + '</td>';
       if (bySub) html += '<td style="font-size:7.5px;font-weight:700;">' + bomSubLabel(item.subSystem) + '</td>';
@@ -1537,17 +1557,34 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
       // the cell printed a certain `0`. The two states are distinct (non-orderable =
       // authority unverified; quantity-pending = the count is unknown) and both are
       // now read from DECLARED fields — no `as { nonOrderable?: boolean }` cast.
-      html += item.nonOrderable
-        ? '<td class="tr fw7" data-bom-orderable="false" data-bom-quantity-state="'
-          + (item.quantityState ?? 'established') + '" style="color:#b45309;">' + item.quantity
-          + ' <span style="font-size:6px;font-weight:900;white-space:nowrap;">(DESIGN QTY — NOT ORDERABLE)</span></td>'
-        : item.quantityState === 'pending'
-          // no nowrap — this cell is ~5% wide; the label MUST wrap inside it
-          ? '<td class="tr fw7" data-bom-orderable="false" data-bom-quantity-state="pending" style="color:#b45309;">'
-            + '<span style="font-size:6px;font-weight:900;line-height:1.15;">'
-            + escapeH(item.quantityStateLabel ?? (item.quantity + ' MODELED / FIELD QUANTITY PENDING'))
-            + '</span></td>'
-          : '<td class="tr fw7" data-bom-orderable="true" data-bom-quantity-state="established">' + item.quantity + '</td>';
+      // ECD §2/§3 — the cell prints the row's ONE authority state. Before, two
+      // booleans produced two labels and everything else printed a bare number
+      // that read as an approved order quantity; a route-estimated footage had
+      // no representation at all. The state drives the label, the colour and the
+      // machine tags, so no cell can disagree with the counter. `data-bom-
+      // orderable` is retained (harnesses/tests read it) as a PROJECTION.
+      const _st = _pa?.authorityState
+        ?? (item.nonOrderable ? 'CANDIDATE_NON_ORDERABLE'
+          : item.quantityState === 'pending' ? 'QUANTITY_PENDING' : 'UNCLASSIFIED');
+      const _stTag = ' data-bom-orderable="' + (_st === 'VERIFIED_ORDERABLE' ? 'true' : 'false') + '"'
+        + ' data-bom-quantity-state="' + (item.quantityState ?? 'established') + '"';
+      html += _st === 'VERIFIED_ORDERABLE'
+        ? '<td class="tr fw7"' + _stTag + '>' + item.quantity + '</td>'
+        : _st === 'ESTIMATED_FIELD_VERIFY'
+          // Keep the design quantity VISIBLE (it is the budgeting number) and
+          // label it. No nowrap — the cell is ~5% wide.
+          ? '<td class="tr fw7"' + _stTag + ' style="color:#1d4ed8;">' + item.quantity
+            + '<br/><span style="font-size:6px;font-weight:900;line-height:1.1;">EST — FIELD VERIFY</span></td>'
+          : _st === 'QUANTITY_PENDING'
+            ? '<td class="tr fw7"' + _stTag + ' style="color:#b45309;">'
+              + '<span style="font-size:6px;font-weight:900;line-height:1.15;">'
+              + escapeH(item.quantityStateLabel ?? (item.quantity + ' MODELED / FIELD QUANTITY PENDING'))
+              + '</span></td>'
+            : _st === 'EXCLUDED_NOT_APPLICABLE'
+              ? '<td class="tr fw7"' + _stTag + ' style="color:#6b7280;">' + item.quantity
+                + '<br/><span style="font-size:6px;font-weight:900;line-height:1.1;">NOT APPLICABLE</span></td>'
+              : '<td class="tr fw7"' + _stTag + ' style="color:#b45309;">' + item.quantity
+                + ' <span style="font-size:6px;font-weight:900;white-space:nowrap;">(DESIGN QTY — NOT ORDERABLE)</span></td>';
       html += '<td>' + item.unit + '</td>';
       html += '<td class="mono f-lg" style="font-size:7px;color:#2255aa;">' + (item.necReference || '—') + '</td>';
       html += '<td style="font-size:7px;color:#666;">' + (item.derivedFrom || '—') + '</td>';
@@ -1576,33 +1613,68 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   // "authoritative procurement total" that silently omitted them would be a second,
   // narrower total — the exact class of defect this pass exists to kill.
   const _proc = buildProcurementApproval(bom as PermitBOMItem[]);
-  html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-  html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">TOTAL LINE ITEMS (THIS SCHEDULE, ALL ROWS INCLUDING PENDING)</td>';
-  html += '<td class="tr">' + flat.length + '</td>';
-  html += '<td colspan="3"></td>';
+  // ECD §1 (W1-C) — ONE COUNTER, ONE SCOPE. The rows this table does not show
+  // (modules / inverters, scheduled in their own tables above) are named with
+  // their STABLE ROW IDs so the rendered id multiset still equals the counted
+  // population — the previous sheet printed "36 of 48" beneath 47 rendered rows
+  // with nothing reconciling the difference.
+  const _elsewhere = (bom ?? []).filter(i => BOM_SKIP_CATEGORIES.has(i.category)) as PermitBOMItem[];
+  html += '<tr style="background:#000;color:#fff;font-weight:bold;"'
+    + ' data-bom-population-total="' + _proc.totalRowCount + '"'
+    + ' data-bom-rows-shown-here="' + flat.length + '"'
+    + ' data-bom-rows-scheduled-above="' + _elsewhere.length + '">';
+  html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">'
+    + 'BOM POPULATION &mdash; ALL ROWS, ALL STATES (' + flat.length + ' shown here'
+    + (_elsewhere.length
+      ? ' + ' + _elsewhere.length + ' scheduled above: '
+        + _elsewhere.map(r => escapeH(r.category.replace(/_/g, ' '))).join(', ')
+      : '')
+    + ')</td>';
+  html += '<td class="tr">' + _proc.totalRowCount + '</td>';
+  html += '<td colspan="3" style="font-size:6.5px;font-weight:400;">'
+    + _elsewhere.map(r => '<span data-bom-line-id="' + escapeH(r.bomLineId ?? '')
+      + '" data-bom-authority-state="' + escapeH(r.procurement?.authorityState ?? 'UNCLASSIFIED') + '">'
+      + escapeH(r.bomLineId ?? '—') + '</span>').join(' ')
+    + '</td>';
   html += '</tr>';
   html += '<tr style="background:' + (_proc.partial ? '#7c2d12' : '#166534') + ';color:#fff;font-weight:bold;"'
-    + ' data-procurement-total="' + _proc.orderableLineItems + '"'
+    + ' data-procurement-total="' + _proc.verifiedOrderableCount + '"'
     + ' data-procurement-excluded="' + _proc.excludedLineItems + '"'
-    + ' data-procurement-partial="' + (_proc.partial ? 'true' : 'false') + '">';
+    + ' data-procurement-partial="' + (_proc.partial ? 'true' : 'false') + '"'
+    + ' data-procurement-ready="' + (_proc.procurementReady ? 'true' : 'false') + '">';
   html += '<td colspan="' + (bySub ? 7 : 6) + '" style="text-align:right;padding-right:8px;">'
-    + 'AUTHORITATIVE PROCUREMENT TOTAL &mdash; ORDERABLE ROWS ONLY (FULL BOM)</td>';
-  html += '<td class="tr">' + _proc.orderableLineItems + '</td>';
+    + 'AUTHORITATIVE PROCUREMENT EXPORT &mdash; VERIFIED ORDERABLE ROWS ONLY (FULL BOM)</td>';
+  html += '<td class="tr">' + _proc.verifiedOrderableCount + '</td>';
   html += '<td colspan="3" style="font-size:7px;">'
     + (_proc.partial
-      ? _proc.excludedLineItems + ' row' + (_proc.excludedLineItems === 1 ? '' : 's') + ' EXCLUDED'
+      ? _proc.excludedLineItems + ' of ' + _proc.totalRowCount + ' rows NOT ORDERABLE'
       : 'no exclusions')
     + '</td>';
   html += '</tr>';
   html += '</tbody></table>';
 
-  const requiredCount = bomItems.filter(i => i.required !== false).length;
   const stageCount = Object.keys(grouped).length;
   html += '<div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">';
   html += '<strong>BILL OF MATERIALS SUMMARY:</strong> ';
-  html += 'This system BOM contains ' + flat.length + ' line items across ' + stageCount + ' stages. ';
-  html += requiredCount + ' items are required per NEC / manufacturer specification. ';
-  html += 'All quantities are derived from CAD geometry and equipment registry — no manual estimates. ';
+  // ECD §1/§10 — every count here is now the SAME approval object the table
+  // totals and the exports read. RETIRED, and why:
+  //   • "This system BOM contains {flat.length} line items"  — a RENDERER-LOCAL
+  //     count of the slice this table happens to show, printed beside a
+  //     full-BOM procurement total. Replaced by _proc.totalRowCount + the
+  //     shown/scheduled-above split stated on the population row above.
+  //   • "{N} items are required per NEC / manufacturer specification" — an
+  //     ORTHOGONAL axis (required-vs-optional) that read as a procurement
+  //     claim. Required-ness is already on each row's OPT badge; it is not a
+  //     statement about what may be ordered, so it is not restated here.
+  //   • "All quantities are derived from CAD geometry and equipment registry —
+  //     no manual estimates." — FALSE: this design carries route-estimated
+  //     rows whose own descriptions say "rough-in allowance; exact bend count
+  //     pending field routing". The quantity BASIS is now stated per row
+  //     (data-bom-quantity-source) and per state in the block below.
+  html += 'This BOM population is ' + _proc.totalRowCount + ' rows across ' + stageCount + ' stages'
+    + (_elsewhere.length ? ' (' + flat.length + ' listed in this table; '
+      + _elsewhere.length + ' scheduled in the equipment tables above)' : '') + '. ';
+  html += 'Each row states its own quantity BASIS and procurement state; the counts below are derived from those states. ';
   html += 'Structural items are computed from array layout per the governing structural code editions (see cover sheet GOVERNING CODES). ';
   // PPC §6 — the hardcoded `705.12` here is a LOAD-SIDE-only article and this
   // summary has no topology in scope; conductor sizing does not depend on the
@@ -1616,28 +1688,54 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   // excluded rows (the old prose filtered on `nonOrderable` alone and named only
   // `wire, lag bolt` while 7 pending racking rows plus the pending-quantity cap row
   // were also excluded — the sentence itself asserted they were included).
+  // ── ECD §10 — THE PROCUREMENT AUTHORITY SUMMARY ───────────────────────────
+  // Every number is derived from the row states; nothing is enumerated twice.
+  // The previous block enumerated every excluded row inline — at 12 exclusions
+  // it already needed 6.3px to fit, and the honest state model produces ~37, so
+  // a per-row enumeration here would clip the sheet AND duplicate what each row
+  // already says in its own cell. Instead: the five state counts, the affected
+  // categories per non-orderable state, and the OPEN procurement-impact
+  // requirement codes — each row's own reason stays on the row, and the full
+  // machine-readable list is in the evidence artifact.
   if (_proc.partial) {
-    // ONE dense block (SCHED is the densest sheet in the set — an 11-line bullet
-    // list pushed the page conclusion past the printable box, gate 13). Every
-    // excluded row is still NAMED with its part number, quantity and exclusion
-    // class; each row's own full reason prints on the row itself, above.
-    // 6.3px/1.15 (was 7px/1.3) — SCHED is the densest sheet in the set and the
-    // exclusion enumeration grows with the excluded-row count (a procurement-
-    // insufficient design adds a 12th). At 7px it pushed the page conclusion 25px
-    // past the printable box (gate 17). No content is dropped.
-    html += '<div style="margin-top:1px;font-size:6.3px;color:#7c2d12;line-height:1.15;">';
-    html += '<strong>AUTHORITATIVE PROCUREMENT TOTAL &mdash; ORDERABLE ROWS ONLY: '
-      + _proc.orderableLineItems + ' of ' + _proc.totalLineItems + ' BOM line items. '
-      + _proc.excludedLineItems + ' EXCLUDED from this total AND from every procurement export</strong> ('
-      + _proc.excludedCountByClass['non-orderable-design-quantity'] + ' DESIGN/CANDIDATE quantity, '
-      + _proc.excludedCountByClass['quantity-pending'] + ' QUANTITY NOT ESTABLISHED &mdash; each row states its own reason above; see RS-1): ';
-    html += _proc.exclusions.map(e =>
-      '<span data-procurement-excluded-row="' + escapeH(e.exclusionClass) + '">'
-      + escapeH(e.category.replace(/_/g, ' ')) + ' [' + escapeH(e.partNumber) + ', '
-      + e.quantity + ' ' + escapeH(e.unit) + ', ' + escapeH(e.exclusionClass) + ']</span>').join(' &middot; ');
-    html += '. <strong>This package is NOT an approved procurement release.</strong></div>';
+    const _cats = (state: string): string => {
+      const seen: string[] = [];
+      for (const e of _proc.exclusions) {
+        if (e.authorityState !== state) continue;
+        const c = e.category.replace(/_/g, ' ');
+        if (!seen.includes(c)) seen.push(c);
+      }
+      return seen.join(', ');
+    };
+    html += '<div style="margin-top:1px;font-size:6.3px;color:#7c2d12;line-height:1.15;"'
+      + ' data-procurement-summary="state-derived">';
+    html += '<strong>PROCUREMENT AUTHORITY SUMMARY &mdash; ' + _proc.totalRowCount + ' BOM ROWS:</strong> ';
+    html += '<span data-procurement-state-count="VERIFIED_ORDERABLE">' + _proc.verifiedOrderableCount
+      + ' VERIFIED ORDERABLE</span> &middot; ';
+    html += '<span data-procurement-state-count="ESTIMATED_FIELD_VERIFY">' + _proc.estimatedFieldVerifyCount
+      + ' ESTIMATED &mdash; FIELD VERIFY' + (_proc.estimatedFieldVerifyCount ? ' (' + escapeH(_cats('ESTIMATED_FIELD_VERIFY')) + ')' : '')
+      + '</span> &middot; ';
+    html += '<span data-procurement-state-count="CANDIDATE_NON_ORDERABLE">' + _proc.candidateNonOrderableCount
+      + ' CANDIDATE &mdash; NOT SELECTED' + (_proc.candidateNonOrderableCount ? ' (' + escapeH(_cats('CANDIDATE_NON_ORDERABLE')) + ')' : '')
+      + '</span> &middot; ';
+    html += '<span data-procurement-state-count="QUANTITY_PENDING">' + _proc.quantityPendingCount
+      + ' QUANTITY NOT ESTABLISHED' + (_proc.quantityPendingCount ? ' (' + escapeH(_cats('QUANTITY_PENDING')) + ')' : '')
+      + '</span> &middot; ';
+    html += '<span data-procurement-state-count="EXCLUDED_NOT_APPLICABLE">' + _proc.excludedCount
+      + ' NOT APPLICABLE</span>. ';
+    html += '<strong>AUTHORITATIVE PROCUREMENT EXPORT: ' + _proc.authoritativeExportCount
+      + ' row' + (_proc.authoritativeExportCount === 1 ? '' : 's') + '</strong> &mdash; every other row is EXCLUDED '
+      + 'from the authoritative total AND from every procurement export; each row states its own state and reason above. ';
+    if (_proc.openProcurementRequirementCodes.length) {
+      html += 'OPEN PROCUREMENT-IMPACT REQUIREMENTS (see RS-1): '
+        + _proc.openProcurementRequirementCodes.map(c =>
+          '<span data-procurement-open-requirement="' + escapeH(c) + '">' + escapeH(c) + '</span>').join(' &middot; ')
+        + '. ';
+    }
+    html += '<strong>PROCUREMENT READY: NO.</strong> This package is NOT an approved procurement release.</div>';
   } else {
-    html += ' <span style="font-weight:bold;">' + escapeH(_proc.statement) + '</span>';
+    html += ' <span style="font-weight:bold;" data-procurement-summary="state-derived">'
+      + escapeH(_proc.statement) + '</span>';
   }
   html += '</div>';
 

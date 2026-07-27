@@ -1,0 +1,81 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.144Z",
+  "artifact": "racking bonding authority report — requirement vs method",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §7 (deliverable 8)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "before": {
+    "citation": "docs/ECD-ROOT-CAUSE-MAP.md §7",
+    "literal": "lib/drafting/templates/roof.ts — the PV-3 FASTENER & HARDWARE SCHEDULE hwRows array: ['BONDING', 'UL 2703 INTEGRATED — NEC 690.43'], present in BOTH the verified-assembly branch AND the assembly-pending branch",
+    "companionLiterals": [
+      "lib/drafting/sheetComposition.ts — PV-3 callout ⑦ { label: 'BONDING JUMPER', sub: 'NEC 690.43' }",
+      "lib/permit/sections/electricalPages.ts — SVG detail text 'MODULE RAIL — BONDED (UL 2703)'",
+      "lib/permit/sections/compliancePages.ts — the APP-A 'UL Listing' row printed 'UL 2703' unless mount.ul2703Listed === false (a FAIL-OPEN default)"
+    ],
+    "contradiction": "the same table printed FASTENER ASSEMBLY: PENDING VERIFIED SELECTION, INSTALLATION DETAILS: NOT ESTABLISHED, EMBEDMENT / TORQUE / PILOT: WITHHELD — NO VERIFIED SOURCE — and then asserted BONDING: UL 2703 INTEGRATED."
+  },
+  "after": {
+    "record": "RackingBondingAuthority (lib/permit/snapshot/rackingBonding.ts), stored at structural.rackingBonding",
+    "outcomes": [
+      "INTEGRATED_LISTED_BONDING_VERIFIED",
+      "SEPARATE_BONDING_COMPONENTS_VERIFIED",
+      "METHOD_PENDING_ASSEMBLY_SELECTION"
+    ],
+    "authority": {
+      "bondingRequired": true,
+      "requirementCodeBasis": "NEC 250.134 / 690.43",
+      "result": "METHOD_PENDING_ASSEMBLY_SELECTION",
+      "bondingMethod": null,
+      "selectedAssemblyId": null,
+      "selectedBondingComponents": [],
+      "ul2703ListingSource": null,
+      "manufacturerDocument": "Roof Tech RT-MINI II Installation Manual (Jun 2025)",
+      "documentApplicabilityState": "PENDING_APPLICABILITY",
+      "documentApplicable": false,
+      "compatibleModuleFrame": null,
+      "compatibleRailOrMount": null,
+      "verificationState": "pending",
+      "bomLineIds": [],
+      "methodLabel": "BONDING REQUIRED / METHOD PENDING VERIFIED RACKING ASSEMBLY",
+      "methodShortLabel": "BONDING REQUIRED — METHOD PENDING VERIFIED ASSEMBLY",
+      "methodCompactLabel": "PENDING VERIFIED RACKING ASSEMBLY",
+      "requirementLabel": "BONDING REQUIRED — BOND MODULE FRAMES AND RACKING PER NEC 250.134 / 690.43",
+      "reasons": [
+        "Mount SKU is not pinned on the canonical racking assembly.",
+        "Rail SKU is not pinned on the canonical racking assembly.",
+        "Racking-assembly verification state is not `verified`.",
+        "The cited manufacturer document is not APPLICABLE to the selected products."
+      ],
+      "provenance": {
+        "source": "ECD §7 buildRackingBondingAuthority (structural.rackingAssembly + document applicability)",
+        "ref": "assembly-rooftech-mini"
+      }
+    },
+    "consumedBy": [
+      "lib/drafting/templates/roof.ts — PV-3 hardware schedule BONDING row (both branches)",
+      "lib/drafting/sheetComposition.ts — PV-3 callout ⑦",
+      "lib/permit/sections/electricalPages.ts — the grounding/bonding SVG detail",
+      "lib/permit/sections/compliancePages.ts — APP-A Bonding Method + Bonding Requirement rows",
+      "lib/permit/sections/structuralPages.ts — the PV-3 authority block",
+      "lib/permit/snapshot/build.ts — the canonical record construction"
+    ],
+    "requirementPreserved": {
+      "bondingRequired": true,
+      "requirementCodeBasis": "NEC 250.134 / 690.43",
+      "requirementLabel": "BONDING REQUIRED — BOND MODULE FRAMES AND RACKING PER NEC 250.134 / 690.43",
+      "note": "the general NEC 250.134 / 690.43 bonding REQUIREMENT is code and is never gated by the method"
+    },
+    "methodPending": {
+      "result": "METHOD_PENDING_ASSEMBLY_SELECTION",
+      "methodLabel": "BONDING REQUIRED / METHOD PENDING VERIFIED RACKING ASSEMBLY",
+      "methodShortLabel": "BONDING REQUIRED — METHOD PENDING VERIFIED ASSEMBLY",
+      "methodCompactLabel": "PENDING VERIFIED RACKING ASSEMBLY",
+      "reasons": [
+        "Mount SKU is not pinned on the canonical racking assembly.",
+        "Rail SKU is not pinned on the canonical racking assembly.",
+        "Racking-assembly verification state is not `verified`.",
+        "The cited manufacturer document is not APPLICABLE to the selected products."
+      ]
+    }
+  }
+}

@@ -38,6 +38,7 @@ import {
   type AttachmentInstallationAuthority,
 } from '../permit/snapshot/structuralProjection';
 import { getManufacturerAsset, evaluateDocumentApplicability } from '../manufacturer-assets-db';
+import { projectRackingBondingAuthority } from '../permit/snapshot/rackingBonding';
 
 // §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
 // conduit description routes through the CANONICAL physical-raceway projection —
@@ -480,7 +481,11 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   const attachment = projectAttachmentInstallationAuthority(
     _snapRoof, _mountIdRoof,
     _rackAsset ? { model: _rackAsset.model, docTitle: _rackAsset.docTitle } : null,
-    _applRoof ? { state: _applRoof.state, documentProduct: _applRoof.documentProduct } : null,
+    _applRoof ? {
+      state: _applRoof.state,
+      applicabilityVerified: _applRoof.applicabilityVerified,
+      documentProduct: _applRoof.documentProduct,
+    } : null,
   );
   const _mountName = ((input?.project as any)?._canonical?.mountSystem as string)
     || (p?.mountingSystem as string)
@@ -745,6 +750,10 @@ function roofComposition(
   // fastener dimension / embedment / torque / pilot / coating / sealant string may
   // be composed. The observed geometry stays in `_att.fastener` for regeneration.
   const _exact = _att.exactInstructionsAllowed;
+  // ECD §7 — the canonical BONDING authority the PV-3 callouts project. Callout ⑦
+  // used to name a 'BONDING JUMPER' (a METHOD) with no authority behind it.
+  const _bond = projectRackingBondingAuthority(
+    (input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null);
   const _fa = _att.fastener;
   const _lagRow = _exact
     ? `${_fa.diameterLabel ?? '—'}" DIA × ${_fa.lengthIn ?? '—'}" ${(_fa.fastenerType ?? '').toUpperCase()}`.trim()
@@ -830,7 +839,12 @@ function roofComposition(
             : 'flashing / sealant instructions pending verified document applicability' },
         { n: 5, label: `${_frameLabel} ${d.rafterSize}`, sub: `@ ${d.rafterSpacing}" O.C.` },
         { n: 6, label: /PENDING/.test(d.conduitType) ? 'CONDUIT' : d.conduitType + ' CONDUIT', sub: /PENDING/.test(d.conduitType) ? 'raceway authority pending — see conductor schedule' : 'see conductor schedule' },
-        { n: 7, label: 'BONDING JUMPER', sub: 'NEC 690.43' },
+        // ECD §7 — callout ⑦ used to name a 'BONDING JUMPER' — a specific METHOD
+        // (discrete jumper hardware) — with no authority and no selected component,
+        // in the same array whose siblings ③④ correctly degrade to pending. It now
+        // projects the canonical bonding authority: the REQUIREMENT is the label,
+        // the METHOD is whatever the authority establishes.
+        { n: 7, label: 'BONDING', sub: `${_bond.methodShortLabel.toLowerCase()} · ${_bond.requirementCodeBasis}` },
       ];
 
   // PPC §3 — the ONE canonical spacing line, printed verbatim on PV-1 AND PV-3,

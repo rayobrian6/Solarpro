@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-07-26T16:21:30.188Z",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "generatedAt": "2026-07-27T16:47:06.019Z",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "engineVersion": "47420",
-  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-D307252768B7 (digest d307252768b751a6…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-76C0C5B56CEF (digest 76c0c5b56cef89d4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
   "role": "W10 — canonical PermitReadinessBlocker registry (every active release blocker). RS-1 renders ALL of these; the harness gate 14 proves none is omitted.",
   "ready": false,
   "activeCount": 15,
@@ -27,7 +27,7 @@
         "source": "snapshot build (permitReadiness)",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -46,7 +46,7 @@
         "source": "snapshot build (permitReadiness)",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -66,7 +66,7 @@
         "source": "snapshot build (permitReadiness)",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -88,7 +88,7 @@
         "source": "electrical.openAirGroundingAuthority",
         "ref": "Q-12-10-240"
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -109,7 +109,7 @@
         "source": "structuralAuthority",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -130,7 +130,7 @@
         "source": "structuralAuthority",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -151,7 +151,7 @@
         "source": "structuralAuthority",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -167,7 +167,7 @@
         "source": "structuralAuthority",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -188,7 +188,7 @@
         "source": "structuralAuthority",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -209,7 +209,7 @@
         "source": "rackingAssembly.structuralAuthorityGaps",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -230,7 +230,7 @@
         "source": "rackingAssembly.structuralAuthorityGaps",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -250,7 +250,7 @@
         "source": "snapshot build (permitReadiness)",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -269,7 +269,7 @@
         "source": "snapshot build (permitReadiness)",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -287,7 +287,7 @@
         "source": "equipmentProjection",
         "ref": "qcells-peak-duo-400"
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     },
@@ -306,7 +306,7 @@
         "source": "snapshot build (permitReadiness)",
         "ref": null
       },
-      "createdAtIso": "7/26/2026",
+      "createdAtIso": "7/27/2026",
       "createdVersion": "47420",
       "resolved": false
     }

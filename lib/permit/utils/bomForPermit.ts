@@ -29,6 +29,15 @@ import {
   type BOMLineItemV4,
 } from '@/lib/bom-engine-v4';
 import {
+  PROCUREMENT_AUTHORITY_STATES,
+  PROCUREMENT_AUTHORITY_STATE_LABEL,
+  type BomQuantitySource,
+  type ProcurementAuthorityRecord,
+  type ProcurementAuthorityState,
+  type ProcurementVerificationStatus,
+} from '@/lib/bom-types-v4';
+import { stampBomLineIds, auditBomLineIds, isPartNumberPlaceholder, type BomLineIdAudit } from '@/lib/bom/bomLineId';
+import {
   deriveStructuralBOM,
   extractStructuralInputFromCAD,
   type BOMSystemType,
@@ -57,6 +66,10 @@ import { buildComputedRunsForPermit } from './computedRuns';
 import { peekSnapshot } from '../snapshot/read';
 import { projectCanonicalFeeder, projectOpenAirBranchGrounding } from '../snapshot/electricalProjection';
 import { GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
+// ECD W1-B/W1-E/W1-F — the classifier's authority inputs.
+import type { PermitDesignSnapshot, SupplySideTapConnectionAuthority, CableExtensionSolution } from '../snapshot/types';
+import { severityImpactForCode } from '../snapshot/releaseGates';
+import { supplySideTapReason } from '../snapshot/supplySideTap';
 import { projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL } from '../snapshot/structuralProjection';
 
 // ── PermitBOMItem ────────────────────────────────────────────
@@ -100,6 +113,32 @@ export interface PermitBOMItem {
   /** Wave 5B passthrough of the Wave-2c per-sub stamp ('roof'|'ground'|'fence')
    *  — SCHED groups stage rows by sub WHERE STAMPED (hybrid only). */
   subSystem?: string;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ECD §1/§2 (W1-A/W1-B) — STABLE IDENTITY + THE ONE PROCUREMENT STATE.
+  //
+  // `bomLineId` is the content-derived row identity (lib/bom/bomLineId.ts) that
+  // makes the §1 row-ID multiset gate (rendered == evidence == export)
+  // implementable at all. `procurement` is the ONE authority record; every
+  // count, label, export decision and evidence entry reads it.
+  //
+  // `nonOrderable` / `quantityState` above are now PROJECTIONS of
+  // `procurement.authorityState`, written by the classifier so that every
+  // existing reader keeps working unchanged. They are no longer independent
+  // inputs — producers declare FACTS (below) and the classifier decides.
+  // ══════════════════════════════════════════════════════════════════════════
+  bomLineId?: string;
+  /** THE per-row procurement authority. Attached by the single classifier at
+   *  the end of generateBOMForPermit. Absent ⇒ the row has not been classified;
+   *  every consumer treats that FAIL-CLOSED (not orderable, not exportable). */
+  procurement?: ProcurementAuthorityRecord;
+  // ── producer-declared facts the classifier consumes (see bom-types-v4) ────
+  quantitySource?: BomQuantitySource;
+  affectedRouteIds?: string[];
+  affectedEquipmentIds?: string[];
+  authorityStateHint?: ProcurementAuthorityState;
+  authorityStateHintReason?: string;
+
   // Legacy compat
   ulListing?: string;
 }
@@ -191,6 +230,15 @@ function v4ToPermit(item: BOMLineItemV4): PermitBOMItem {
     nonOrderableReason: item.nonOrderableReason,
     quantityState:      item.quantityState,
     quantityStateLabel: item.quantityStateLabel,
+    // ECD W1-B/W1-D — the PRODUCER-declared procurement facts cross the last
+    // type boundary too. Dropping them here is exactly the class of loss the
+    // audit found for procurementClass (declared on the snapshot row, never
+    // present on any rendered row).
+    quantitySource:           item.quantitySource,
+    affectedRouteIds:         item.affectedRouteIds,
+    affectedEquipmentIds:     item.affectedEquipmentIds,
+    authorityStateHint:       item.authorityStateHint,
+    authorityStateHintReason: item.authorityStateHintReason,
   };
 }
 
@@ -970,6 +1018,57 @@ export function generateBOMForPermit(
     }
   }
 
+  // ── 5g. ECD §5 (W1-F) — the SUPPLY-SIDE TAP CONNECTOR row states its
+  // CANDIDATE status from the AUTHORITY, not from prose baked into the engine.
+  // bom-engine-v4 is a PRE-snapshot engine, so (exactly as 5e/5f) the seam is
+  // this post-pass: it reads electrical.supplySideTapConnection and stamps the
+  // ONE mandated label plus the enumerated unresolved facts onto the row. The
+  // SKU and quantity stay VISIBLE — the connector is a real candidate product
+  // and 3 (L1/L2/N) is a real code-established count; what is NOT established
+  // is that this connector fits the existing service conductor.
+  const _tapAuth = peekSnapshot(input)?.electrical?.supplySideTapConnection ?? null;
+  if (_tapAuth && _tapAuth.verificationStatus !== 'verified') {
+    for (const it of merged) {
+      if (it.category !== 'connector') continue;
+      if (String(it.partNumber).toUpperCase() !== String(_tapAuth.connectorSku ?? '').toUpperCase()) continue;
+      it.model = `${it.model} — ${_tapAuth.candidateLabel}`;
+      it.nonOrderableReason = supplySideTapReason(_tapAuth);
+      it.description =
+        `${_tapAuth.candidateLabel}. ${it.description ?? ''} `
+        + `EXISTING SERVICE CONDUCTOR: ${_tapAuth.existingServiceConductorSize ?? 'NOT SURVEYED'}`
+        + `${_tapAuth.existingServiceConductorMaterial ? ` ${_tapAuth.existingServiceConductorMaterial}` : ''}`
+        + ` · CONNECTOR LISTED RANGE: ${_tapAuth.listedConductorRange ?? '—'}`
+        + ` · LUG-RANGE COMPATIBILITY: ${_tapAuth.lugRangeCompatibility == null ? 'NOT EVALUABLE' : _tapAuth.lugRangeCompatibility ? 'VERIFIED' : 'FAILS'}. `
+        + `Unresolved: ${_tapAuth.unresolvedFacts.join('; ')}. Design quantity only — EXCLUDED from the `
+        + `authoritative procurement total and from every export; retained on the design-review schedule.`;
+      it.derivedFrom = `supply-side tap connection authority (verification=${_tapAuth.verificationStatus}) — candidate connector, non-orderable`;
+      it.authorityStateHint = 'CANDIDATE_NON_ORDERABLE';
+      it.authorityStateHintReason = supplySideTapReason(_tapAuth);
+      log.push(`[bomForPermit] ECD §5 tap connector ${it.partNumber} CANDIDATE: ${_tapAuth.unresolvedFacts.length} unresolved fact(s)`);
+    }
+  } else if (_tapAuth) {
+    // ── the SAME authority, VERIFIED — the rule must be two-way ─────────────
+    // bom-engine-v4 stamps SUPPLY_SIDE_TAP_CONNECTOR_HINT (a CANDIDATE hint)
+    // UNCONDITIONALLY on this row, because it is a PRE-snapshot engine and has no
+    // authority to consult. With no counterpart here, a VERIFIED tap authority
+    // could never promote the row: the hint alone would hold it at CANDIDATE
+    // forever — a one-way gate, and §5's "until verified" would have no `after`.
+    // The authority is the only thing that decides, in BOTH directions; the row
+    // still has to clear TAP-CONDUCTOR-LENGTH-PENDING and every other open
+    // procurement requirement through the classifier's normal path.
+    for (const it of merged) {
+      if (it.category !== 'connector') continue;
+      if (String(it.partNumber).toUpperCase() !== String(_tapAuth.connectorSku ?? '').toUpperCase()) continue;
+      it.authorityStateHint = undefined;
+      it.authorityStateHintReason = undefined;
+      it.nonOrderable = undefined;
+      it.nonOrderableReason = undefined;
+      it.derivedFrom = 'supply-side tap connection authority (verification=verified) — listed connector '
+        + 'verified against the surveyed existing service conductor';
+      log.push(`[bomForPermit] ECD §5 tap connector ${it.partNumber} authority VERIFIED — candidate hint cleared`);
+    }
+  }
+
   // ── 6. Sort by stageId ordinal ───────────────────────────
   const STAGE_ORDER: Record<string, number> = {
     array: 1, dc: 2, inverter: 3, ac: 4, structural: 5, monitoring: 6, labels: 7,
@@ -980,6 +1079,23 @@ export function generateBOMForPermit(
     if (sa !== sb) return sa - sb;
     return (a.category || '').localeCompare(b.category || '');
   });
+
+  // ── 7. ECD W1-A + W1-B — THE SINGLE IDENTITY + CLASSIFICATION PASS ───────
+  // Runs LAST, over the FINAL row collection, so it covers every row including
+  // the two that used to reach the package with no id at all (the integrated
+  // combiner appended in 5b and the open-air branch EGC appended in 5d) and
+  // every row whose state the post-passes above just set. One pass, one owner:
+  // nothing downstream may write a row state, and nothing downstream may derive
+  // orderability from anything except the record this pass attaches.
+  const _idAudit = stampBomLineIds(merged);
+  const _procCtx = buildProcurementClassificationContext(input);
+  applyProcurementAuthority(merged, _procCtx);
+  log.push(
+    `[bomForPermit] ECD W1-A row identity: ${_idAudit.total} rows / ${_idAudit.unique} unique bomLineIds, `
+    + `${_idAudit.duplicateIds.length} duplicates, ${_idAudit.hashCollisions.length} hash collisions, `
+    + `${_idAudit.missingIds} missing`,
+  );
+  log.push(`[bomForPermit] ECD W1-B states: ${JSON.stringify(countProcurementStates(merged))}`);
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[bomForPermit] log:', log.join('\n'));
@@ -1020,71 +1136,566 @@ export function summarizeBOM(items: PermitBOMItem[]): BOMSummary {
     hasElectrical,
   };
 }
+
 // ═══════════════════════════════════════════════════════════════════════════
-// PPC §5/§9 — THE AUTHORITATIVE PROCUREMENT TOTAL / ORDERABLE EXPORT SUBSET
+// ECD §1/§2/§3/§4/§5/§10 (W1-B…W1-F) — THE ONE PROCUREMENT AUTHORITY MODEL.
 //
-// This object did not exist. The package asserted "EXCLUDED from the authoritative
-// procurement totals" in PROSE only: SCHED emitted `TOTAL LINE ITEMS = flat.length`
-// (which COUNTS the pending rows) plus a sentence that enumerated only the two rows
-// tagged by the hand-written post-passes — thereby actively telling the reader that
-// the seven pending racking rows WERE included. There was no orderable subset and
-// no procurement-export path filtering on orderability anywhere in lib/.
+// ── WHAT THIS REPLACES ─────────────────────────────────────────────────────
+// THREE partially-overlapping mechanisms on two sides of a type boundary:
+//   1. `PermitBOMItem.nonOrderable`   — a boolean set by four authorities.
+//   2. `PermitBOMItem.quantityState`  — two-valued, one user (the sealing cap).
+//   3. `StructuralBomRow.procurementClass` A/B/C/D — richer than both, and it
+//      NEVER crossed into PermitBOMItem: the column was empty on all 48 rows.
+// …plus a FAIL-OPEN default that the previous version of this comment block
+// stated outright — "an unflagged row is a verified row". That one sentence is
+// what silently counted the module row, 22 route-estimated rows, both Q-Cable
+// field-splice connectors and the Polaris tap connector inside the
+// "authoritative procurement total".
 //
-// So §5's "authoritative procurement total excludes every pending row" and §9's
-// "procurement-export gate" required BUILDING this, not correcting a total.
+// ── THE MODEL ──────────────────────────────────────────────────────────────
+// Producers declare FACTS (`quantitySource`, `affectedRouteIds`,
+// `authorityStateHint`, and the authority-set `nonOrderable`/`quantityState`
+// pre-passes above). `classifyProcurementAuthority` is the ONE function that
+// turns those facts plus the snapshot's OPEN release requirements into exactly
+// one `ProcurementAuthorityState` per row. `nonOrderable` and `quantityState`
+// are then rewritten as PROJECTIONS of that state, so every existing reader
+// keeps working and no reader can disagree with the classifier.
 //
-//   EXCLUSION RULE (fail-closed, both axes):
-//     • nonOrderable === true              ⇒ excluded (design/candidate quantity)
-//     • quantityState === 'pending'        ⇒ excluded (quantity not established)
-//   A row is orderable ONLY when neither holds. Anything unknown stays orderable
-//   only because it carries NO pending/non-orderable authority state at all — the
-//   flags are set BY the authorities, so an unflagged row is a verified row.
-//
-// `orderableProcurementExport()` is the ONE export gate: a blocked row can never
-// enter an orderable export, because the export is DERIVED from this subset.
+// ── FAIL-CLOSED ────────────────────────────────────────────────────────────
+// VERIFIED_ORDERABLE is REACHED, never defaulted to. A row gets it only by
+// satisfying an EXPLICIT per-category rule (exact product identity + a declared
+// quantity basis + no OPEN procurement-impacting requirement affecting it). A
+// row in an unknown category, or with a placeholder part number, or with no
+// attached record at all, is NOT orderable.
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Why a row is excluded from procurement approval. */
+// ── (a) WHICH OPEN REQUIREMENTS CAN BLOCK A PROCUREMENT ROW ─────────────────
+// A release requirement blocks a BOM row only when ALL THREE hold:
+//   1. it is OPEN (in permitReadiness.registry and not resolved),
+//   2. its DECLARED release impact includes the PROCUREMENT axis
+//      (severityPolicy → `impact.procurement` — the same declaration RS-1's
+//      readiness axes derive from; no second opinion is invented here),
+//   3. it AFFECTS this row per the explicit map below.
+// A code with `procurement: false` (CONDUIT-FILL-PENDING, FRAMING-AUTHORITY-
+// UNVERIFIED, CODE-AUTHORITY-INCOMPLETE, ENGINEERING-REVIEW-PENDING …) can
+// never make a row non-orderable — that is what the axis declaration MEANS.
+
+const RACKING_ASSEMBLY_CATEGORIES = new Set([
+  'rail', 'splice', 'l_foot', 'mid_clamp', 'end_clamp', 'mount_hardware', 'grounding', 'racking', 'flashing',
+]);
+const MODULE_CATEGORIES = new Set(['solar_panel', 'panels', 'module']);
+const EQUIPMENT_IDENTITY_CATEGORIES = new Set([
+  'solar_panel', 'panels', 'module',
+  'microinverter', 'string_inverter', 'hybrid_inverter', 'inverter', 'inverters', 'optimizer',
+  'battery',
+]);
+
+/** Which rows a procurement-impacting requirement code affects. Explicit and
+ *  enumerated: no description regexes, no "everything is blocked" fallback. */
+const REQUIREMENT_ROW_SCOPE: Record<string, (row: PermitBOMItem) => boolean> = {
+  // RG-5 already declares this verbatim: "the procurement conductor / raceway
+  // FOOTAGE (length-dependent results only)". The consumer is right here.
+  'ROUTE-LENGTH-ESTIMATE': r => r.quantitySource === 'route-derived',
+  // the open-air branch EGC section only (its own authority already flags it).
+  'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': r => r.category === 'wire' && String(r.partNumber).startsWith('GRN-OPENAIR'),
+  // every assembly-dependent racking row + the mount-base lot line.
+  'PENDING-RACKING-ASSEMBLY-SELECTION': r => RACKING_ASSEMBLY_CATEGORIES.has(r.category),
+  // the roof-attachment fastener row.
+  'FASTENER-ASSEMBLY-UNVERIFIED': r => r.category === 'lag_bolt',
+  // the exact-wattage module datasheet is absent; severityPolicy declares this
+  // procurement-impacting (it fixes the ordered module SKU), so the module row
+  // is NOT verified-orderable while it is open. Microinverters are unaffected.
+  'MODULE-EXACT-DATASHEET-PENDING': r => MODULE_CATEGORIES.has(r.category),
+  // the ordered trunk-cable base quantity is short of the installed path, and
+  // the field-splice connectors are the unselected candidate resolution.
+  'QCABLE-PROCUREMENT-INSUFFICIENT': r => r.category === 'trunk_cable'
+    || (r.category === 'connector' && /^Q-CONN-/i.test(String(r.partNumber))),
+  // operator-entered identity conflict between the design record and the
+  // selected equipment — it invalidates the ORDERED identity of those rows.
+  // (Standing rule: EQUIPMENT-IDENTITY-CONFLICT is operator-only. It is absent
+  // from the frozen fixture and present on the live project record.)
+  'EQUIPMENT-IDENTITY-CONFLICT': r => EQUIPMENT_IDENTITY_CATEGORIES.has(r.category),
+  // the tap-conductor length is unmeasured; the tap connector row is the
+  // procurement line that depends on the tap connection being established.
+  'TAP-CONDUCTOR-LENGTH-PENDING': r => r.category === 'connector' && /^IPLD/i.test(String(r.partNumber)),
+};
+
+// ── (b) PER-CATEGORY CLASSIFICATION RULES ───────────────────────────────────
+// The DECLARED quantity basis for every category the permit BOM can emit. A
+// category NOT in this table has no rule, and a row without a rule can never be
+// VERIFIED_ORDERABLE (fail-closed). A producer-declared `quantitySource` always
+// wins — the table is the baseline for rows whose producer declared nothing.
+const CATEGORY_QUANTITY_BASIS: Record<string, BomQuantitySource> = {
+  // ── exact equipment identity, quantity = a canonical COUNT ───────────────
+  solar_panel:      'count-derived',   // = the canonical module count
+  panels:           'count-derived',
+  microinverter:    'count-derived',   // = 1 per module (canonical pairing)
+  string_inverter:  'count-derived',
+  hybrid_inverter:  'count-derived',
+  inverter:         'count-derived',
+  inverters:        'count-derived',
+  optimizer:        'count-derived',
+  battery:          'count-derived',
+  generator:        'count-derived',
+  ats:              'count-derived',
+  backup_interface: 'count-derived',
+  combiner:         'count-derived',   // integrated-BOS resolver: 1 per brand group
+  gateway:          'count-derived',
+  monitoring:       'count-derived',
+  meter:            'count-derived',
+  // ── code/topology-established per-installation devices ───────────────────
+  disconnect:       'per-installation-constant',
+  breaker:          'per-installation-constant',
+  fuse:             'per-installation-constant',
+  rapid_shutdown:   'per-installation-constant',
+  junction_box:     'per-installation-constant',
+  label:            'per-installation-constant',
+  connector:        'per-installation-constant',
+  consumable:       'per-installation-constant',
+  // ── AC-branch topology objects (drops / branch ends) ─────────────────────
+  trunk_cable:      'topology-derived',
+  terminator:       'topology-derived',
+  sealing_cap:      'topology-derived',
+  // ── unresolved route geometry (ECD §3) ───────────────────────────────────
+  wire:             'route-derived',
+  conduit:          'route-derived',
+  conduit_fitting:  'route-derived',
+  conduit_body:     'route-derived',
+  // ── canonical array/structural geometry ──────────────────────────────────
+  rail:             'geometry-derived',
+  splice:           'geometry-derived',
+  l_foot:           'geometry-derived',
+  lag_bolt:         'geometry-derived',
+  mount_hardware:   'geometry-derived',
+  mid_clamp:        'geometry-derived',
+  end_clamp:        'geometry-derived',
+  flashing:         'geometry-derived',
+  grounding:        'geometry-derived',
+  racking:          'geometry-derived',
+};
+
+/** Categories with an explicit rule. A row outside this set cannot be
+ *  VERIFIED_ORDERABLE even with a part number — no rule says what "verified"
+ *  would mean for it. */
+const CLASSIFIABLE_CATEGORIES = new Set(Object.keys(CATEGORY_QUANTITY_BASIS));
+
+// ── (c) THE CLASSIFICATION CONTEXT ──────────────────────────────────────────
+
+export interface ProcurementClassificationContext {
+  /** OPEN requirement codes that DECLARE a procurement-axis impact. */
+  openProcurementRequirementCodes: string[];
+  /** every OPEN requirement code (evidence/provenance, not blocking). */
+  openRequirementCodes: string[];
+  /** resolution action per code, from the registry (rendered verbatim). */
+  resolutionByCode: Record<string, string>;
+  /** ECD §4 — cable-extension solutions available to PROMOTE connector rows. */
+  cableExtensionSolutions: readonly CableExtensionSolution[];
+  /** ECD §5 — the supply-side tap connection authority (null when N/A). */
+  supplySideTap: SupplySideTapConnectionAuthority | null;
+  snapshotId: string | null;
+  snapshotDigest: string | null;
+}
+
+export function buildProcurementClassificationContextFromSnapshot(
+  snap: Readonly<PermitDesignSnapshot> | null,
+): ProcurementClassificationContext {
+  const registry = (snap?.permitReadiness?.registry ?? []).filter(b => !b.resolved);
+  const openRequirementCodes = registry.map(b => b.code);
+  const resolutionByCode: Record<string, string> = {};
+  for (const b of registry) resolutionByCode[b.code] = b.resolutionAction;
+  return {
+    openRequirementCodes,
+    openProcurementRequirementCodes: openRequirementCodes.filter(c => severityImpactForCode(c).procurement),
+    resolutionByCode,
+    cableExtensionSolutions: snap?.electrical?.procurementSufficiency?.solutions ?? [],
+    supplySideTap: snap?.electrical?.supplySideTapConnection ?? null,
+    snapshotId: snap?.meta?.snapshotId ?? null,
+    snapshotDigest: snap?.meta?.digest ?? null,
+  };
+}
+
+/** Build the context from the validated snapshot. FAIL-CLOSED on absence: with
+ *  no snapshot no blocker is invented, but no row is promoted either — the
+ *  category rules still have to be satisfied. */
+export function buildProcurementClassificationContext(input: PermitInput): ProcurementClassificationContext {
+  return buildProcurementClassificationContextFromSnapshot(peekSnapshot(input));
+}
+
+/** The empty context — for pure callers classifying without a snapshot. */
+export const EMPTY_PROCUREMENT_CONTEXT: ProcurementClassificationContext = {
+  openProcurementRequirementCodes: [], openRequirementCodes: [], resolutionByCode: {},
+  cableExtensionSolutions: [], supplySideTap: null, snapshotId: null, snapshotDigest: null,
+};
+
+// ── (d) ECD §4 — THE CableExtensionSolution PROMOTION CONTRACT ──────────────
+// Clearing the LENGTH DEFICIT and PROMOTING a connector row are different
+// questions. `evaluateCableExtensionClearance` (procurementSufficiency.ts)
+// answers the first. This answers the second, and it is strictly stronger: the
+// solution must additionally be SELECTED by an operator, be itself VERIFIED,
+// and NAME the exact bomLineId it supplies. No solution ⇒ no promotion — which
+// is the live state today (`cableExtensionSolutions` is always empty).
+
+export interface CableExtensionPromotion {
+  promoted: boolean;
+  solutionId: string | null;
+  missing: string[];
+}
+
+export function evaluateCableExtensionPromotion(
+  bomLineId: string,
+  solutions: readonly CableExtensionSolution[],
+): CableExtensionPromotion {
+  if (!solutions.length) {
+    return { promoted: false, solutionId: null, missing: ['no CableExtensionSolution exists for this design'] };
+  }
+  const candidates = solutions.filter(s => (s.bomLineIds ?? []).includes(bomLineId));
+  if (!candidates.length) {
+    return { promoted: false, solutionId: null, missing: [`no CableExtensionSolution names BOM line ${bomLineId}`] };
+  }
+  for (const s of candidates) {
+    const missing: string[] = [];
+    if (s.selected !== true) missing.push('solution is not SELECTED');
+    if (s.verificationState !== 'verified') missing.push(`solution verificationState is '${s.verificationState ?? 'unset'}', not 'verified'`);
+    if (!s.selectedSku) missing.push('no exact listed product SKU is selected');
+    if (s.compatibilityVerified !== true) missing.push('compatibility with the selected system is not verified');
+    if (!s.manufacturerDocument) missing.push('no verified manufacturer document');
+    if (s.representedInBom !== true) missing.push('solution is not represented in the BOM');
+    if (!missing.length) return { promoted: true, solutionId: s.solutionId, missing: [] };
+  }
+  return {
+    promoted: false,
+    solutionId: candidates[0].solutionId,
+    missing: ['the naming CableExtensionSolution does not satisfy the promotion contract'],
+  };
+}
+
+// ── (e) THE CLASSIFIER ──────────────────────────────────────────────────────
+
+const WITHHELD_IDENTITY = 'IDENTITY WITHHELD — NO VERIFIED SELECTION';
+
+function itemIdentityOf(row: PermitBOMItem): string {
+  const parts = [row.manufacturer, row.model, row.partNumber]
+    .map(v => (v ?? '').trim())
+    .filter(v => v.length > 0 && v !== '—');
+  return parts.length ? parts.join(' | ') : WITHHELD_IDENTITY;
+}
+
+/** THE classifier. Pure: (row, context) → exactly one authority record. */
+export function classifyProcurementAuthority(
+  row: PermitBOMItem,
+  ctx: ProcurementClassificationContext,
+): ProcurementAuthorityRecord {
+  const bomLineId = row.bomLineId ?? '(unstamped)';
+  // A PRODUCER-declared 'unknown' (an absent route length) is a QUANTITY
+  // question. An UNMAPPED CATEGORY is an IDENTITY/rule question — those must
+  // not be conflated, or a row in an unknown category would be reported as
+  // "quantity not established" when the real defect is that no classification
+  // rule exists for it.
+  const declaredSource = row.quantitySource;
+  const quantitySource: BomQuantitySource =
+    declaredSource ?? CATEGORY_QUANTITY_BASIS[row.category] ?? 'unknown';
+
+  // Which OPEN, procurement-impacting requirements affect THIS row.
+  const blockingRequirementCodes = ctx.openProcurementRequirementCodes
+    .filter(code => REQUIREMENT_ROW_SCOPE[code]?.(row) === true);
+
+  const evidenceReferences: string[] = [];
+  if (ctx.snapshotId) evidenceReferences.push(`snapshot:${ctx.snapshotId}`);
+  for (const c of blockingRequirementCodes) evidenceReferences.push(`requirement:${c}`);
+
+  const base = {
+    bomLineId,
+    itemIdentity: itemIdentityOf(row),
+    quantity: Number.isFinite(row.quantity) ? row.quantity : 0,
+    quantityUnit: row.unit || 'ea',
+    quantitySource,
+    blockingRequirementCodes,
+    affectedRouteIds: row.affectedRouteIds ?? [],
+    affectedEquipmentIds: row.affectedEquipmentIds ?? [],
+    evidenceReferences,
+    snapshotId: ctx.snapshotId,
+    snapshotDigest: ctx.snapshotDigest,
+    // ECD §2 — what the PRODUCER declared, recorded so a second classification
+    // pass can be handed the producer view instead of this pass's projections.
+    producerNonOrderable: row.nonOrderable === true,
+    producerQuantityState: row.quantityState ?? null,
+  };
+  const make = (
+    authorityState: ProcurementAuthorityState,
+    verificationStatus: ProcurementVerificationStatus,
+    authoritySource: string,
+    resolutionAction: string,
+  ): ProcurementAuthorityRecord => ({
+    ...base,
+    authorityState,
+    orderable: authorityState === 'VERIFIED_ORDERABLE',
+    exportable: authorityState === 'VERIFIED_ORDERABLE',
+    verificationStatus,
+    authoritySource,
+    resolutionAction,
+  });
+  const codeResolution = (codes: string[], fallback: string): string =>
+    codes.map(c => ctx.resolutionByCode[c]).filter(Boolean).join(' ') || fallback;
+
+  // 1. QUANTITY NOT ESTABLISHED beats everything: a count that is unknown may
+  //    never render as a certain number, whatever else is true of the row.
+  if (row.quantityState === 'pending') {
+    return make('QUANTITY_PENDING', 'pending-measurement',
+      'quantity-state authority (the modeled count is not the established field quantity)',
+      row.quantityStateLabel ?? 'Establish the field quantity, then re-derive the row.');
+  }
+  // 2. The producer could not establish the quantity at all — an absent route
+  //    length that used to be silently replaced by a fabricated 30 ft default.
+  if (declaredSource === 'unknown') {
+    return make('QUANTITY_PENDING', 'pending-measurement',
+      'producer declared the quantity basis UNKNOWN — no length/count authority exists for this row '
+      + '(no value is substituted in its place)',
+      'Establish the missing run length / count on the canonical route objects, then re-derive.');
+  }
+  // 3. A producer-declared state hint (candidate connectors: Q-CONN field
+  //    splices, the Polaris tap connector). A hint may only LOWER a row.
+  if (row.authorityStateHint && row.authorityStateHint !== 'VERIFIED_ORDERABLE') {
+    // ECD §4 — the ONE escape hatch: a verified, SELECTED CableExtensionSolution
+    // that names this exact bomLineId promotes the row.
+    if (row.category === 'connector' && /^Q-CONN-/i.test(String(row.partNumber))) {
+      const promo = evaluateCableExtensionPromotion(bomLineId, ctx.cableExtensionSolutions);
+      if (promo.promoted) {
+        return make('VERIFIED_ORDERABLE', 'verified',
+          `CableExtensionSolution ${promo.solutionId} (selected + verified + names this BOM line)`,
+          'None — the connector is supplied by a verified selected cable-extension solution.');
+      }
+      return make('CANDIDATE_NON_ORDERABLE', 'unverified',
+        `${row.authorityStateHintReason ?? 'candidate product'} PROMOTION CONTRACT: ${promo.missing.join('; ')}`,
+        codeResolution(blockingRequirementCodes,
+          'Select a listed cable-extension / field-splice solution, archive its verified manufacturer document, '
+          + 'and bind it to this BOM line.'));
+    }
+    return make(row.authorityStateHint,
+      row.authorityStateHint === 'QUANTITY_PENDING' ? 'pending-measurement' : 'unverified',
+      row.authorityStateHintReason ?? 'producer-declared candidate (not a selected, verified product)',
+      codeResolution(blockingRequirementCodes,
+        'Establish the missing authority for this product, then re-derive the row.'));
+  }
+  // 4. An AUTHORITY already ruled the row non-orderable (fastener assembly,
+  //    racking assembly, open-air grounding, Q-Cable procurement sufficiency).
+  if (row.nonOrderable === true) {
+    return make('CANDIDATE_NON_ORDERABLE', 'pending-authority',
+      row.nonOrderableReason ?? 'DESIGN QUANTITY ONLY — pending verified authority (see RS-1)',
+      codeResolution(blockingRequirementCodes, 'Verify the governing authority (see RS-1), then re-derive the row.'));
+  }
+  // 5. Nothing to procure.
+  if (!(base.quantity > 0)) {
+    return make('EXCLUDED_NOT_APPLICABLE', 'not-applicable',
+      'zero quantity — the row is not applicable to this design',
+      'None — nothing is ordered for this line.');
+  }
+  // 6. An OPEN, procurement-impacting requirement affects the row.
+  if (blockingRequirementCodes.length) {
+    // ECD §3 — the ROUTE case is an ESTIMATE, not a candidate: the product IS
+    // selected and the design quantity IS meaningful for budgeting; only the
+    // routed length is unresolved. It stays visible, labeled FIELD VERIFY, and
+    // out of the authoritative total and every export.
+    const routeOnly = blockingRequirementCodes.every(c => c === 'ROUTE-LENGTH-ESTIMATE');
+    if (routeOnly && quantitySource === 'route-derived') {
+      return make('ESTIMATED_FIELD_VERIFY', 'pending-measurement',
+        'ROUTE-LENGTH-ESTIMATE (RG-5) is OPEN — this quantity is Σ CAD-derived route length, neither '
+        + 'routed nor field-measured; budgeting quantity only',
+        codeResolution(blockingRequirementCodes,
+          'Route or field-measure the runs, record them on the canonical route objects, then re-derive.'));
+    }
+    return make('CANDIDATE_NON_ORDERABLE', 'pending-authority',
+      `OPEN procurement-impacting requirement(s): ${blockingRequirementCodes.join(', ')}`,
+      codeResolution(blockingRequirementCodes, 'Resolve the listed requirement(s) — see RS-1.'));
+  }
+  // 7. FAIL-CLOSED identity + rule checks — the ONLY path to VERIFIED_ORDERABLE.
+  //    (A route-derived row with NO open route requirement reaches here: the
+  //    routes are verified, so it is orderable. Unreachable while RG-5 is open,
+  //    kept so the model is not a one-way gate.)
+  if (!CLASSIFIABLE_CATEGORIES.has(row.category)) {
+    return make('CANDIDATE_NON_ORDERABLE', 'unverified',
+      `no procurement classification rule exists for category '${row.category}' — fail-closed`,
+      'Add an explicit classification rule for this category before it can be ordered.');
+  }
+  if (isPartNumberPlaceholder(row.partNumber)) {
+    return make('CANDIDATE_NON_ORDERABLE', 'unverified',
+      'no exact part number — the row names no selected product',
+      'Select the exact product and record its part number.');
+  }
+  return make('VERIFIED_ORDERABLE', 'verified',
+    `exact product identity + ${quantitySource} quantity + no OPEN procurement-impacting requirement affects this row`,
+    'None — the row is orderable.');
+}
+
+/**
+ * ECD §2 — the PRODUCER VIEW of a row.
+ *
+ * `nonOrderable` / `quantityState` are producer inputs to the classifier AND the
+ * back-compat projections the classifier writes back. Handing an already-
+ * classified row straight back to `classifyProcurementAuthority` therefore fed
+ * this pass's own output in as a producer fact: rule 4 (`row.nonOrderable ===
+ * true` ⇒ CANDIDATE_NON_ORDERABLE) fired on every ESTIMATED_FIELD_VERIFY and
+ * QUANTITY_PENDING row, so re-classification silently collapsed 22 estimated
+ * rows into candidates. The classifier is documented as idempotent; this makes
+ * it so, by restoring the producer's declared values from the record.
+ *
+ * Callers that re-classify (the classifier is pure, so tests, probes and any
+ * what-if evaluation do) MUST classify this view, never the mutated row.
+ */
+export function producerViewOf(row: PermitBOMItem): PermitBOMItem {
+  const rec = row.procurement;
+  if (!rec) return row;
+  return {
+    ...row,
+    nonOrderable: rec.producerNonOrderable === true ? true : undefined,
+    quantityState: rec.producerQuantityState ?? undefined,
+  };
+}
+
+/** Run the classifier over the FINAL row collection and write the record plus
+ *  its back-compat projections. Idempotent — see `producerViewOf`. THE only
+ *  writer of row state. */
+export function applyProcurementAuthority(
+  rows: PermitBOMItem[],
+  ctx: ProcurementClassificationContext,
+): void {
+  for (const row of rows) {
+    const rec = classifyProcurementAuthority(producerViewOf(row), ctx);
+    row.procurement = rec;
+    // ── back-compat PROJECTIONS (no renderer had to change to keep working) ──
+    // Any state other than VERIFIED_ORDERABLE is excluded from the authoritative
+    // total, which is exactly what `nonOrderable` has always meant to its
+    // readers; QUANTITY_PENDING additionally sets the pending quantity state so
+    // the cell can never print a bare number.
+    if (rec.authorityState === 'VERIFIED_ORDERABLE') {
+      row.nonOrderable = undefined;
+      row.quantityState = row.quantityState ?? 'established';
+    } else if (rec.authorityState === 'QUANTITY_PENDING') {
+      row.quantityState = 'pending';
+      row.quantityStateLabel = row.quantityStateLabel ?? `${row.quantity} MODELED / FIELD QUANTITY PENDING`;
+      row.nonOrderable = true;
+      row.nonOrderableReason = row.nonOrderableReason ?? rec.authoritySource;
+    } else {
+      row.nonOrderable = true;
+      row.nonOrderableReason = row.nonOrderableReason ?? rec.authoritySource;
+    }
+  }
+}
+
+/** Fail-closed accessor. A row that was never run through the classifier
+ *  against a real snapshot has NOT been checked against any open requirement,
+ *  so it can never be reported VERIFIED_ORDERABLE — it is classified on its
+ *  row-local facts and any resulting A is DOWNGRADED, with the reason stated.
+ *  Nothing is assumed verified because nobody looked at it. */
+export function procurementAuthorityOf(row: PermitBOMItem): ProcurementAuthorityRecord {
+  if (row.procurement) return row.procurement;
+  const rec = classifyProcurementAuthority(row, EMPTY_PROCUREMENT_CONTEXT);
+  if (rec.authorityState !== 'VERIFIED_ORDERABLE') return rec;
+  return {
+    ...rec,
+    authorityState: 'CANDIDATE_NON_ORDERABLE',
+    orderable: false,
+    exportable: false,
+    verificationStatus: 'unverified',
+    authoritySource:
+      'row was never classified against a snapshot authority — no open-requirement check has been '
+      + 'performed for it, so it cannot be reported orderable (fail-closed)',
+    resolutionAction: 'Classify the row through generateBOMForPermit / applyProcurementAuthority.',
+  };
+}
+
+/** State histogram over any row collection. */
+export function countProcurementStates(
+  rows: readonly PermitBOMItem[],
+): Record<ProcurementAuthorityState, number> {
+  const counts = Object.fromEntries(
+    PROCUREMENT_AUTHORITY_STATES.map(s => [s, 0]),
+  ) as Record<ProcurementAuthorityState, number>;
+  for (const r of rows) counts[procurementAuthorityOf(r).authorityState]++;
+  return counts;
+}
+
+/** The ONE rendered label per state (re-exported so renderers never re-word). */
+export { PROCUREMENT_AUTHORITY_STATE_LABEL, PROCUREMENT_AUTHORITY_STATES };
+export type { ProcurementAuthorityState, ProcurementAuthorityRecord, BomQuantitySource };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ECD §1/§10 — THE ONE COUNTER OVER THE ONE POPULATION.
+//
+// POPULATION DECISION (ECD §1, W1-C): the canonical population is the FULL BOM
+// — every line the package orders, modules and inverters included. Before this,
+// `buildProcurementApproval` counted the full 48 rows while the table it printed
+// under counted the 47 that survive BOM_SKIP_CATEGORIES, so the sheet printed
+// "36 of 48" three inches below 47 rendered rows. BOM_SKIP_CATEGORIES is now a
+// DISPLAY-SECTION concern only: those rows are scheduled in the module /
+// inverter tables above the BOM table, and the SCHED table names them and their
+// row ids, so the rendered id multiset still equals the population.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Why a row is excluded (legacy two-class view, kept so existing consumers and
+ *  tests keep working — DERIVED from authorityState, never set independently). */
 export type ProcurementExclusionClass =
-  /** DESIGN / CANDIDATE quantity — authority unverified (racking assembly,
-   *  fastener assembly, open-air grounding, insufficient Q-Cable). */
   | 'non-orderable-design-quantity'
-  /** the quantity itself is not established (sealing caps: field quantity). */
   | 'quantity-pending';
 
 export interface ProcurementExclusion {
+  bomLineId: string;
   category: string;
   model: string;
   partNumber: string;
   quantity: number;
   unit: string;
+  /** the ECD state (the authority); `exclusionClass` is its legacy projection. */
+  authorityState: ProcurementAuthorityState;
   exclusionClass: ProcurementExclusionClass;
   reason: string;
 }
 
 export interface ProcurementApproval {
-  /** every BOM line, orderable or not (the SCHED "TOTAL LINE ITEMS" count). */
+  // ── ECD §1 canonical count fields ─────────────────────────────────────────
+  totalRowCount: number;
+  verifiedOrderableCount: number;
+  estimatedFieldVerifyCount: number;
+  candidateNonOrderableCount: number;
+  quantityPendingCount: number;
+  excludedCount: number;
+  /** the count that may enter an authoritative procurement export. */
+  authoritativeExportCount: number;
+  /** ECD §12 gate 3 — the five state counts sum to totalRowCount. */
+  countsReconcile: boolean;
+  /** every row id in the population, and the export subset — the §1 multiset. */
+  allRowIds: string[];
+  orderableRowIds: string[];
+  /** ECD §10 — false while ANY row is not VERIFIED_ORDERABLE. */
+  procurementReady: boolean;
+  /** OPEN, procurement-impacting requirement codes across the population. */
+  openProcurementRequirementCodes: string[];
+
+  // ── legacy field names (SCHED, ppc-artifacts and tests read them) ────────
+  /** === totalRowCount. */
   totalLineItems: number;
-  /** the AUTHORITATIVE procurement total: the count of orderable lines ONLY. */
+  /** === verifiedOrderableCount. */
   orderableLineItems: number;
+  /** === total − verifiedOrderable (every non-A state). */
   excludedLineItems: number;
-  /** Σ quantity of the orderable subset, per unit — never mixes ft with ea. */
   orderableQuantityByUnit: Record<string, number>;
-  /** THE only export-eligible rows. */
   orderableRows: PermitBOMItem[];
-  /** every excluded row, with its class + reason (rendered, never implied). */
   exclusions: ProcurementExclusion[];
   excludedCountByClass: Record<ProcurementExclusionClass, number>;
-  /** true ⇒ at least one row is excluded, so the total is a SUBSET and the
-   *  procurement package cannot be approved as-is. */
   partial: boolean;
-  /** the sentence the schedule renders — states the total AND what is excluded. */
   statement: string;
+
+  // ── ECD §1 identity audit over the population ────────────────────────────
+  rowIdAudit: BomLineIdAudit;
+  /** per-state row ids (evidence artifacts + the anti-vacuity probes). */
+  rowIdsByState: Record<ProcurementAuthorityState, string[]>;
 }
 
-/** Is this row eligible for the authoritative procurement total / an export? */
+/** Is this row eligible for the authoritative procurement total / an export?
+ *  ECD §2: FAIL-CLOSED — exactly one state qualifies, and an unclassified row
+ *  never does. (Before: `!nonOrderable && quantityState !== 'pending'`, i.e.
+ *  "an unflagged row is a verified row".) */
 export function isOrderableForProcurement(item: PermitBOMItem): boolean {
-  return item.nonOrderable !== true && item.quantityState !== 'pending';
+  return procurementAuthorityOf(item).authorityState === 'VERIFIED_ORDERABLE';
 }
 
 /** Build THE authoritative procurement approval object (pure). */
@@ -1096,47 +1707,80 @@ export function buildProcurementApproval(items: PermitBOMItem[]): ProcurementApp
     'quantity-pending': 0,
   };
   const orderableQuantityByUnit: Record<string, number> = {};
+  const counts = Object.fromEntries(
+    PROCUREMENT_AUTHORITY_STATES.map(s => [s, 0]),
+  ) as Record<ProcurementAuthorityState, number>;
+  const rowIdsByState = Object.fromEntries(
+    PROCUREMENT_AUTHORITY_STATES.map(s => [s, [] as string[]]),
+  ) as Record<ProcurementAuthorityState, string[]>;
+  const allRowIds: string[] = [];
+  const openCodes = new Set<string>();
 
   for (const it of items) {
-    if (isOrderableForProcurement(it)) {
+    const rec = procurementAuthorityOf(it);
+    const id = rec.bomLineId;
+    allRowIds.push(id);
+    counts[rec.authorityState]++;
+    rowIdsByState[rec.authorityState].push(id);
+    for (const c of rec.blockingRequirementCodes) openCodes.add(c);
+
+    if (rec.authorityState === 'VERIFIED_ORDERABLE') {
       orderableRows.push(it);
       const u = it.unit || 'ea';
       orderableQuantityByUnit[u] = (orderableQuantityByUnit[u] ?? 0) + (Number.isFinite(it.quantity) ? it.quantity : 0);
       continue;
     }
-    const cls: ProcurementExclusionClass = it.nonOrderable === true
-      ? 'non-orderable-design-quantity'
-      : 'quantity-pending';
+    const cls: ProcurementExclusionClass = rec.authorityState === 'QUANTITY_PENDING'
+      ? 'quantity-pending'
+      : 'non-orderable-design-quantity';
     excludedCountByClass[cls]++;
     exclusions.push({
+      bomLineId: id,
       category: it.category,
       model: it.model,
       partNumber: it.partNumber,
       quantity: it.quantity,
       unit: it.unit,
+      authorityState: rec.authorityState,
       exclusionClass: cls,
-      reason: it.nonOrderableReason
-        ?? (cls === 'quantity-pending'
-          ? (it.quantityStateLabel ?? 'QUANTITY PENDING — the modeled count is not the established field quantity')
-          : 'DESIGN QUANTITY ONLY — pending verified authority (see RS-1)'),
+      reason: it.nonOrderableReason ?? rec.authoritySource,
     });
   }
 
+  const totalRowCount = items.length;
+  const verifiedOrderableCount = counts.VERIFIED_ORDERABLE;
+  const stateSum = PROCUREMENT_AUTHORITY_STATES.reduce((n, s) => n + counts[s], 0);
   const partial = exclusions.length > 0;
+
+  // ECD §10 — the summary sentence is DERIVED from the row states. It never says
+  // "all required", "no manual estimates", "complete procurement package" or
+  // "authoritative total" unless the states prove it.
   const statement = partial
-    ? `AUTHORITATIVE PROCUREMENT TOTAL: ${orderableRows.length} of ${items.length} line items are ORDERABLE. `
-      + `${exclusions.length} line item${exclusions.length === 1 ? ' is' : 's are'} EXCLUDED from this total and from every `
-      + `procurement export — ${excludedCountByClass['non-orderable-design-quantity']} DESIGN/CANDIDATE quantit`
-      + `${excludedCountByClass['non-orderable-design-quantity'] === 1 ? 'y' : 'ies'} (authority unverified) and `
-      + `${excludedCountByClass['quantity-pending']} with a QUANTITY NOT ESTABLISHED. `
-      + `Excluded: ${exclusions.map(e => `${e.category.replace(/_/g, ' ')} (${e.exclusionClass})`).join('; ')}. `
-      + `This package is NOT an approved procurement release.`
-    : `AUTHORITATIVE PROCUREMENT TOTAL: all ${items.length} line items are ORDERABLE — no row carries a design-only `
-      + `quantity or an unestablished quantity.`;
+    ? `PROCUREMENT AUTHORITY SUMMARY — ${totalRowCount} BOM rows: `
+      + `${verifiedOrderableCount} VERIFIED ORDERABLE · ${counts.ESTIMATED_FIELD_VERIFY} ESTIMATED (FIELD VERIFY) · `
+      + `${counts.CANDIDATE_NON_ORDERABLE} CANDIDATE (NOT SELECTED) · ${counts.QUANTITY_PENDING} QUANTITY NOT ESTABLISHED · `
+      + `${counts.EXCLUDED_NOT_APPLICABLE} NOT APPLICABLE. AUTHORITATIVE PROCUREMENT EXPORT: `
+      + `${verifiedOrderableCount} row${verifiedOrderableCount === 1 ? '' : 's'} — every other row is excluded from `
+      + `the total AND from every export. PROCUREMENT READY: NO.`
+    : `PROCUREMENT AUTHORITY SUMMARY — all ${totalRowCount} BOM rows are VERIFIED ORDERABLE. `
+      + `AUTHORITATIVE PROCUREMENT EXPORT: ${totalRowCount} rows. PROCUREMENT READY: YES.`;
 
   return {
-    totalLineItems: items.length,
-    orderableLineItems: orderableRows.length,
+    totalRowCount,
+    verifiedOrderableCount,
+    estimatedFieldVerifyCount: counts.ESTIMATED_FIELD_VERIFY,
+    candidateNonOrderableCount: counts.CANDIDATE_NON_ORDERABLE,
+    quantityPendingCount: counts.QUANTITY_PENDING,
+    excludedCount: counts.EXCLUDED_NOT_APPLICABLE,
+    authoritativeExportCount: verifiedOrderableCount,
+    countsReconcile: stateSum === totalRowCount,
+    allRowIds,
+    orderableRowIds: rowIdsByState.VERIFIED_ORDERABLE.slice(),
+    procurementReady: !partial,
+    openProcurementRequirementCodes: [...openCodes].sort(),
+
+    totalLineItems: totalRowCount,
+    orderableLineItems: verifiedOrderableCount,
     excludedLineItems: exclusions.length,
     orderableQuantityByUnit,
     orderableRows,
@@ -1144,15 +1788,24 @@ export function buildProcurementApproval(items: PermitBOMItem[]): ProcurementApp
     excludedCountByClass,
     partial,
     statement,
+
+    rowIdAudit: auditBomLineIds(items),
+    rowIdsByState,
   };
 }
 
 /**
- * THE procurement-export gate (gate 13). Any orderable export — purchase order,
- * CSV, distributor cart — MUST be derived from this function. A blocked row cannot
- * enter it: the subset is computed from the same fail-closed predicate the rendered
- * authoritative total uses, so the export and the sheet can never disagree.
+ * THE procurement-export gate (ECD §12 gates 18/19). Any orderable export —
+ * purchase order, CSV, distributor cart, evidence artifact — MUST be derived
+ * from this function. A row that is not VERIFIED_ORDERABLE cannot enter it.
  */
 export function orderableProcurementExport(items: PermitBOMItem[]): PermitBOMItem[] {
   return buildProcurementApproval(items).orderableRows;
+}
+
+/** The companion artifact ECD §12 gate 19 needs: every NON-orderable row, with
+ *  its state and reason, so "visible in review but never in an order export" is
+ *  provable rather than asserted. */
+export function nonOrderableProcurementExport(items: PermitBOMItem[]): ProcurementExclusion[] {
+  return buildProcurementApproval(items).exclusions;
 }

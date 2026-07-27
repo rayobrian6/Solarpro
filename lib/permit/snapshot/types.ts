@@ -140,8 +140,31 @@ export interface GroundingRecord {
 export interface GroundingSegment {
   /** stable canonical id — gate 10: no rendered grounding row without one. */
   groundingSegmentId: string;
-  /** the canonical GroundingRecord this projects (null for domain-only nodes). */
+  /** the canonical GroundingRecord this projects (null for domain-only nodes AND
+   *  for a GROUP-AUTHORITY node, which projects N records, not one). */
   groundingId: string | null;
+  /** ECD §6 — IDENTITY KIND. A 'physical-segment' node IS one installed grounding
+   *  path and its `groundingSegmentId` is a PHYSICAL segment identity (unique
+   *  across the package, gate 11). A 'group-authority' node is the ONE authority
+   *  result governing several physical segments; it carries its OWN id, is never
+   *  counted as a physical segment, and renders visibly as a group-authority row.
+   *  The defect this retires: the grouped branch-EGC authority was given
+   *  `gnd-br-1` — a PHYSICAL segment's identity — which simultaneously appeared on
+   *  all three E-1 branch rows, so the package rendered ONE grounding identity for
+   *  three canonical objects (gnd-br-1 ×8, gnd-br-2/3 ×0). */
+  identityKind: 'physical-segment' | 'group-authority';
+  /** ECD §6 — the group-authority node this row reconciles to. On the group node
+   *  itself this equals its own `groundingSegmentId`; on a physical segment
+   *  governed by a group it points AT the group; null when the segment is its own
+   *  authority. Every rendered grounding row reconciles to exactly one canonical
+   *  object through (groundingId | groundingAuthorityGroupId). */
+  groundingAuthorityGroupId: string | null;
+  /** ECD §6 — on a group node: the branch labels the ONE authority result covers
+   *  (e.g. ['B1','B2','B3']). Empty on physical segments. */
+  branchScope: string[];
+  /** ECD §6 — on a group node: the canonical GroundingRecord ids it groups
+   *  (gnd-br-1/2/3). Empty on physical segments. */
+  memberGroundingIds: string[];
   /** which of the SIX distinct grounding objects this is (Ray §1: kept separate). */
   purpose: GroundingRecord['purpose'] | 'module-racking-bonding';
   /** human label for the schedule row. */
@@ -174,8 +197,17 @@ export interface GroundingSegment {
   authorityState: 'verified' | 'pending-manufacturer-authority' | 'nec-derived' | 'not-required';
   /** true ⇒ the object exists but NO installed conductor may be asserted. */
   installedConductorAsserted: boolean;
-  /** the BOM line (partNumber) this segment derives, or null when it orders nothing. */
+  /** ECD W1-A — the STABLE BOM ROW ID (lib/bom/bomLineId.ts) this segment
+   *  derives, or null when it orders nothing. This used to hold the row's PART
+   *  NUMBER ('GRN-OPENAIR-12') because no stable row id existed; part numbers
+   *  are not unique in general (three PVC-conduit rows share a family), so a
+   *  "BOM line" pointer keyed on one could not be reconciled. The id is
+   *  content-derived, so the pre-BOM projection can compute the SAME value the
+   *  BOM stamping pass will produce. `bomLinePartNumber` keeps the old value
+   *  for readers that want the human-facing part. */
   bomLineId: string | null;
+  /** the part number the segment's BOM row carries (human-facing; not an id). */
+  bomLinePartNumber?: string | null;
   bomRowState: 'no-row' | 'orderable' | 'design-quantity-non-orderable';
   provenance: string;
 }
@@ -436,6 +468,28 @@ export interface CableExtensionSolution {
   vdInstallationRecalculated: boolean;
   note: string | null;
   provenance: Provenance;
+
+  // ── ECD §4 (W1-E) — the fields the PROMOTION contract needs on top of the
+  // deficit-CLEARANCE contract above. A solution may clear the length deficit
+  // and still not be the authority that turns a specific connector BOM row from
+  // CANDIDATE_NON_ORDERABLE into VERIFIED_ORDERABLE: promotion additionally
+  // requires the operator to have SELECTED it and the solution to name the exact
+  // BOM line ids it supplies. All optional/additive so an existing solution
+  // object (and the empty live array) serializes unchanged. Absent ⇒ NO
+  // promotion — fail-closed, which is the honest live outcome today.
+  /** the operator SELECTED this solution (a candidate is not a selection). */
+  selected?: boolean;
+  /** the extension product's manufacturer (exact, never inferred from a name). */
+  manufacturer?: string | null;
+  /** canonical cable-segment / branch-cable-path ids the solution is placed on. */
+  cableSegmentIds?: string[];
+  /** the project/system applicability boundary the solution is verified for. */
+  applicability?: string | null;
+  /** the solution record's own verification state ('verified' promotes). */
+  verificationState?: 'verified' | 'unverified' | 'pending-document' | 'candidate';
+  /** the EXACT BOM line ids (lib/bom/bomLineId.ts) this solution supplies. Only
+   *  a row named here can ever be promoted by it. */
+  bomLineIds?: string[];
 }
 
 /** One of the enumerated resolution options for the deficit, each honestly marked
@@ -1114,6 +1168,12 @@ export interface PermitDesignSnapshot {
      *  QCABLE-GROUNDING-AUTHORITY-UNVERIFIED registry entry fires. Null for
      *  non-micro / no modeled open-air branch grounding. */
     openAirGroundingAuthority?: GroundingAuthorityResult | null;
+    /** ECD §5 (W1-F, 2026-07-26): THE supply-side tap CONNECTION authority. The
+     *  Polaris IPLD350-3 rows carried their own caveat as prose ("Verify lug
+     *  range against actual service conductor size") with no object behind it,
+     *  while being counted as orderable. This record holds the facts that caveat
+     *  is about — honestly null while unknown. Null for non-supply-side designs. */
+    supplySideTapConnection?: SupplySideTapConnectionAuthority | null;
     /** §5 SEPARATION: the five DISTINCT grounding/bonding domains as explicit
      *  objects (open-air branch cable section, in-raceway home-run EGC, racking /
      *  module-frame bonding, GEC, service bonding). The open-air grounding outcome
@@ -1146,6 +1206,10 @@ export interface PermitDesignSnapshot {
     governing: { utilization: number | null; safetyFactor: number | null; passes: boolean | null };
     // ── W3 canonical structural authority (§4–§9) ──────────────────────────
     rackingAssembly: RackingAssemblyRecord | null;
+    /** ECD §7 — the canonical bonding REQUIREMENT-vs-METHOD authority. Every
+     *  sheet that says anything about bonding projects THIS (see
+     *  lib/permit/snapshot/rackingBonding.ts). */
+    rackingBonding: RackingBondingAuthority;
     rails: RailObject[];
     attachments: AttachmentObject[];
     env: StructuralEnv;
@@ -1266,6 +1330,163 @@ export interface PermitReadinessBlocker {
   /** audit reference for the resolution (null until resolved). */
   resolutionAuditRef: string | null;
 }
+
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║ ECD WS-1 ADDITIVE TYPES REGION — BEGIN (procurement authority, 07-26)     ║
+// ║ Owned by WS-1 (BOM/procurement). WS-2's authority types go in the WS-2    ║
+// ║ region immediately below this one — do not interleave.                    ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+
+/** ECD §5 — the tap-connection facts a supply-side connector row's orderability
+ *  actually depends on. Every field is HONESTLY NULL while unknown: the existing
+ *  service-entrance conductors have not been surveyed on this project, so the
+ *  connector cannot be a verified selection and the row cannot be orderable.
+ *  Nothing here is ever inferred from a product name or a service ampacity. */
+export interface SupplySideTapConnectionAuthority {
+  /** the design's interconnection method this record belongs to. */
+  interconnectionMethod: string;
+  // ── the EXISTING service conductors the connector must land on ────────────
+  existingServiceConductorMaterial: 'Cu' | 'Al' | null;
+  /** e.g. '4/0 AWG', '350 kcmil'. null ⇒ NOT SURVEYED. */
+  existingServiceConductorSize: string | null;
+  existingServiceConductorInsulation: string | null;
+  /** how many ungrounded + grounded conductors the tap lands on (L1/L2/N = 3). */
+  existingServiceConductorCount: number | null;
+  /** how the sizes above were established ('field-survey' | 'utility-record' |
+   *  … ). null ⇒ nothing established them. */
+  existingServiceConductorSource: string | null;
+  // ── the TAP conductors leaving the connector ──────────────────────────────
+  tapConductorMaterial: 'Cu' | 'Al' | null;
+  tapConductorSize: string | null;
+  /** NEC 705.11(C) ≤10 ft verification — the measured length, null while
+   *  TAP-CONDUCTOR-LENGTH-PENDING is open. */
+  tapConductorLengthFt: number | null;
+  tapConductorLengthAuthority: string | null;
+  // ── the CANDIDATE connector product ───────────────────────────────────────
+  connectorManufacturer: string | null;
+  connectorSku: string | null;
+  /** the connector's LISTED conductor range, verbatim from its listing. */
+  listedConductorRange: string | null;
+  /** number of ports/taps the connector provides. */
+  connectorPorts: number | null;
+  /** does the listed range cover the EXISTING service conductor? null ⇒ cannot
+   *  be evaluated because the existing conductor is unknown. NEVER default true. */
+  lugRangeCompatibility: boolean | null;
+  enclosureCompatibility: boolean | null;
+  installationSpaceVerified: boolean | null;
+  connectionMethod: string | null;
+  /** the manufacturer document / listing evidence backing the above. */
+  manufacturerDocumentId: string | null;
+  listingEvidence: string | null;
+  // ── the resulting verification state ──────────────────────────────────────
+  verificationStatus: 'verified' | 'unverified';
+  /** every fact that is missing, enumerated (rendered, never summarized away). */
+  unresolvedFacts: string[];
+  /** the ONE rendered label for the connector row while unverified. */
+  candidateLabel: string;
+  provenance: Provenance;
+}
+
+/** ECD §5 — the ONE rendered label for an unverified supply-side tap connector.
+ *  Every sheet/row/export reads this constant; no renderer may re-word it. */
+export const SUPPLY_SIDE_TAP_CANDIDATE_LABEL =
+  'CANDIDATE CONNECTOR — VERIFY EXISTING SERVICE CONDUCTOR AND LUG COMPATIBILITY';
+
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║ ECD WS-1 ADDITIVE TYPES REGION — END                                      ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║ ECD WS-2 ADDITIVE TYPES REGION — BEGIN (reserved: RackingBondingAuthority,║
+// ║ widened DocumentApplicability). WS-2 appends here.                        ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+
+/** ECD §7 — the three possible BONDING-METHOD outcomes.
+ *
+ *  INTEGRATED_LISTED_BONDING_VERIFIED   the exact selected assembly is listed to
+ *                                       UL 2703 with INTEGRATED bonding, and the
+ *                                       listing covers the selected module frame
+ *                                       + rail/mount. Only then may a sheet say
+ *                                       "UL 2703 INTEGRATED".
+ *  SEPARATE_BONDING_COMPONENTS_VERIFIED bonding is achieved by SELECTED, verified
+ *                                       separate components (WEEB / jumper / lug).
+ *                                       Only then may a sheet name a jumper.
+ *  METHOD_PENDING_ASSEMBLY_SELECTION    the bonding REQUIREMENT stands, but no
+ *                                       verified exact assembly establishes the
+ *                                       METHOD. Nothing about the method renders.
+ */
+export type RackingBondingResult =
+  | 'INTEGRATED_LISTED_BONDING_VERIFIED'
+  | 'SEPARATE_BONDING_COMPONENTS_VERIFIED'
+  | 'METHOD_PENDING_ASSEMBLY_SELECTION';
+
+/** ECD §7 — the canonical RACKING BONDING authority.
+ *
+ *  The defect this retires: PV-3's FASTENER & HARDWARE SCHEDULE printed the
+ *  renderer-local literal `['BONDING', 'UL 2703 INTEGRATED — NEC 690.43']` in
+ *  BOTH the verified-assembly branch AND the assembly-PENDING branch — on the same
+ *  table that says FASTENER ASSEMBLY: PENDING VERIFIED SELECTION and
+ *  EMBEDMENT / TORQUE / PILOT: WITHHELD — NO VERIFIED SOURCE. Three companion
+ *  literals said the same thing elsewhere (a "BONDING JUMPER" callout, a
+ *  "MODULE RAIL — BONDED (UL 2703)" SVG label, and an APP-A "UL 2703" listing
+ *  row that fail-OPEN defaulted to UL 2703 unless a flag said otherwise). None of
+ *  them consulted any authority.
+ *
+ *  The REQUIREMENT (bond module frames + racking per NEC 250.134 / 690.43) is
+ *  code, is always true for a metal racking system, and is preserved verbatim.
+ *  What is gated is the METHOD: the specific listing/components that satisfy it.
+ *
+ *  Every field is an honest null while pending — nothing here is inferred from a
+ *  product NAME (the standing rule), and no bonding component is invented. */
+export interface RackingBondingAuthority {
+  /** the bonding REQUIREMENT (NEC) — independent of the method. */
+  bondingRequired: boolean;
+  /** the code basis of the REQUIREMENT (always stated, never gated). */
+  requirementCodeBasis: string;
+  /** the resolved method outcome. */
+  result: RackingBondingResult;
+  /** 'integrated-listed' | 'separate-components' | null while pending. */
+  bondingMethod: 'integrated-listed' | 'separate-components' | null;
+  /** the exact assembly the method is established FOR (null ⇒ none selected). */
+  selectedAssemblyId: string | null;
+  /** the exact bonding components selected + verified (empty while pending). */
+  selectedBondingComponents: string[];
+  /** the UL 2703 listing source that establishes INTEGRATED bonding, or null.
+   *  A product's marketing claim is not a listing source. */
+  ul2703ListingSource: string | null;
+  /** the manufacturer document the method is read from (null ⇒ none applicable). */
+  manufacturerDocument: string | null;
+  /** ECD §8 document state of that manufacturer document (null ⇒ no document). */
+  documentApplicabilityState: string | null;
+  /** whether that document is APPLICABLE to the selected products. */
+  documentApplicable: boolean;
+  /** the module frame the listing is verified against (null ⇒ not established). */
+  compatibleModuleFrame: string | null;
+  /** the rail / mount the listing is verified against (null ⇒ not established). */
+  compatibleRailOrMount: string | null;
+  /** honest tri-state verification of the METHOD. */
+  verificationState: 'verified' | 'pending' | 'unverified';
+  /** the BOM rows that carry the bonding material, when any are orderable. */
+  bomLineIds: string[];
+  /** the ONE line every sheet prints for the METHOD (never a literal). */
+  methodLabel: string;
+  /** short form for dense schedules. */
+  methodShortLabel: string;
+  /** the shortest form (in-drawing SVG labels, ≤32 chars) — same meaning. */
+  methodCompactLabel: string;
+  /** the ONE line every sheet prints for the REQUIREMENT. */
+  requirementLabel: string;
+  /** why the result is what it is (the reasons, in order). */
+  reasons: string[];
+  provenance: Provenance;
+}
+
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║ ECD WS-2 ADDITIVE TYPES REGION — END                                      ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+// NOTE (ECD §8): the WIDENED `DocumentApplicability` (7 document states) lives
+// with its evaluator in `lib/manufacturer-assets-db.ts` — the module that owns
+// the asset library and the applicability logic — rather than being split from
+// it here. See DOCUMENT_APPLICABILITY_STATES there.
 
 export interface SnapshotViolation {
   invariant: string;                // 'V5a'

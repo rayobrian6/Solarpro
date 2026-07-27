@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T20:34:38.362Z",
+  "generatedAt": "2026-07-27T16:47:05.474Z",
   "artifact": "braidon-ppc-blocker-schema-reconciliation",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
@@ -10,7 +10,7 @@
   },
   "after": {
     "mechanism": "BLOCKER_PAYLOAD_SCHEMA[code] → component; unknown codes fail safe to generic",
-    "declaredCodeCount": 36,
+    "declaredCodeCount": 38,
     "mapping": [
       {
         "code": "ATTACHMENT-CAPACITY-SOURCE-MISSING",
@@ -145,6 +145,10 @@
         "schema": "generic"
       },
       {
+        "code": "STRUCTURAL-FRAMING-UNVERIFIED",
+        "schema": "generic"
+      },
+      {
         "code": "STRUCTURAL-REACTION-RECONCILIATION-FAILED",
         "schema": "generic"
       },
@@ -154,6 +158,10 @@
       },
       {
         "code": "TAP-CONDUCTOR-LENGTH-PENDING",
+        "schema": "generic"
+      },
+      {
+        "code": "WIND-SNOW-AUTHORITY-UNRESOLVED",
         "schema": "generic"
       }
     ],

@@ -1,15 +1,17 @@
 {
-  "generatedAt": "2026-07-26T00:15:55.277Z",
+  "generatedAt": "2026-07-27T16:47:55.749Z",
   "harness": "planset-evidence-ep (electrical/procurement closeout rendered-truth, 21 permanent gates + chained BAR WS-E)",
-  "mode": "live",
-  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/bar-live.html",
-  "snapshotId": "PDS-8910EFAC2AB8",
-  "digest": "8910efac2ab8468628a5e5cfac5f6119981d1ca59eca5bffcacc714d375ac6d1",
+  "mode": "original",
+  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/PermitPackage-BRAIDON-ecd.html",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "sheetCount": 21,
+  "sheetCount": 24,
   "sheetIds": [
     "PV-0",
     "RS-1",
+    "RS-1.1",
+    "RS-1.2",
     "PV-1",
     "PV-1B",
     "PV-3",
@@ -23,6 +25,7 @@
     "SCHED",
     "SCHED-2",
     "SCHED-3",
+    "SCHED-4",
     "APP-A",
     "DS-1",
     "DS-2",
@@ -33,6 +36,8 @@
   "manifestIds": [
     "PV-0",
     "RS-1",
+    "RS-1.1",
+    "RS-1.2",
     "PV-1",
     "PV-1B",
     "PV-3",
@@ -46,6 +51,7 @@
     "SCHED",
     "SCHED-2",
     "SCHED-3",
+    "SCHED-4",
     "APP-A",
     "DS-1",
     "DS-2",
@@ -97,10 +103,9 @@
   },
   "activeBlockers": [
     "ROUTE-LENGTH-ESTIMATE",
-    "EQUIPMENT-IDENTITY-CONFLICT",
     "CONDUIT-FILL-PENDING",
     "TAP-CONDUCTOR-LENGTH-PENDING",
-    "QCABLE-PROCUREMENT-INSUFFICIENT",
+    "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
     "FRAMING-AUTHORITY-UNVERIFIED",
     "PENDING-RACKING-ASSEMBLY-SELECTION",
     "FASTENER-ASSEMBLY-UNVERIFIED",
@@ -110,28 +115,26 @@
     "RACKING-CAPACITY-APPLICABILITY-GAP",
     "CODE-AUTHORITY-INCOMPLETE",
     "PROJECT-AUTHORITY-UNVERIFIED",
-    "PROJECT-NAME-NONPRODUCTION",
-    "DESIGNER-OF-RECORD-MISSING",
     "MODULE-EXACT-DATASHEET-PENDING",
     "ENGINEERING-REVIEW-PENDING"
   ],
-  "blockingCount": 18,
+  "blockingCount": 15,
   "evidenceEqualsRendered": {
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-8910EFAC2AB8",
+        "reportVal": "PDS-76C0C5B56CEF",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-8910EFAC2AB8"
+          "PDS-76C0C5B56CEF"
         ]
       },
       {
         "name": "digestPrefix",
-        "reportVal": "8910efac2ab8",
+        "reportVal": "76c0c5b56cef",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "8910efac2ab8468628a5"
+          "76c0c5b56cef89d4bb9d"
         ]
       },
       {
@@ -151,18 +154,18 @@
       },
       {
         "name": "qcableProcurementInsufficient",
-        "reportVal": "true",
+        "reportVal": "false",
         "matchedInRendered": true,
-        "rs1BlockerPresent": true
+        "rs1BlockerPresent": false
       },
       {
         "name": "qcableDeficitFt",
-        "reportVal": "14.5",
+        "reportVal": "0",
         "matchedInRendered": true
       },
       {
         "name": "blockingBlockerCount",
-        "reportVal": "18",
+        "reportVal": "15",
         "matchedInRendered": true,
         "rs1Rendered": null
       },
@@ -250,8 +253,8 @@
       "ok": true,
       "detail": "taxonomyFields=true designLabel=true procLabel=true",
       "evidence": {
-        "geo": 166.5,
-        "calc": 64,
+        "geo": 140.5,
+        "calc": 58,
         "proc": 152,
         "prov": "geometry-derived"
       }
@@ -297,7 +300,7 @@
       "gate": 16,
       "id": "no-load-side-only-labels-on-supply-side",
       "ok": true,
-      "detail": "supplySide=true backfedBreakerApplicability=N/A",
+      "detail": "supplySide=true loadSideOnlyClauseCited=false backfedRowMarkedNA=true backfedBreakerApplicability=null",
       "evidence": null
     },
     {
@@ -320,7 +323,7 @@
       "gate": 19,
       "id": "geometry-page-fit-incl-internal-clips",
       "ok": true,
-      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0",
+      "detail": "pagefit exit=0 · [pagefit] sheets=24 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
       "evidence": null
     },
     {
@@ -334,21 +337,21 @@
       "gate": 21,
       "id": "qcable-procurement-sufficiency",
       "ok": true,
-      "detail": "mode=live present=true insufficient=true blocker=true designed=166.5 proc=152 deficit=14.5 consistent=true renderedWhenShort=true allowanceHonest=true modeOk=true",
+      "detail": "mode=original present=true insufficient=false blocker=false designed=140.5 proc=152 deficit=0 consistent=true renderedWhenShort=true allowanceHonest=true modeOk=true",
       "evidence": {
-        "insufficient": true,
-        "deficitFt": 14.5,
-        "verificationStatus": "insufficient-unresolved"
+        "insufficient": false,
+        "deficitFt": 0,
+        "verificationStatus": "sufficient"
       }
     },
     {
       "gate": 22,
       "id": "bar-wse-electrical-authority-chained",
       "ok": true,
-      "detail": "bar-wse exit=0 · [bar-wse] 33/33 gates passed → docs/evidence/braidon-ep-evidence-live.bar-wse.json",
+      "detail": "bar-wse exit=0 · [bar-wse] 40/40 gates passed → docs/evidence/braidon-ep-evidence-live.bar-wse.json",
       "evidence": {
         "out": "docs/evidence/braidon-ep-evidence-live.bar-wse.json",
-        "gatesRun": 33,
+        "gatesRun": 40,
         "gatesFailed": 0,
         "failures": []
       }

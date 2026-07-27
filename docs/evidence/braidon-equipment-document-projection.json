@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-07-26T16:21:30.188Z",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "generatedAt": "2026-07-27T16:47:06.019Z",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "engineVersion": "47420",
-  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-D307252768B7 (digest d307252768b751a6…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
+  "disclaimer": "Live-mode artifact from the REPAIRED snapshot PDS-76C0C5B56CEF (digest 76c0c5b56cef89d4…). NOT historical: it describes the current live Braidon design, not the originally-delivered PDS-310… package. Digests differ across regens because inputs drift (wind/Nearmap/module resolution), not because the engine is nondeterministic.",
   "role": "W5 — APP-A projects ONLY from versioned verified equipment/document records; each displayed value carries equipment record ID + exact SKU + document record ID + verification state.",
   "appAFieldCount": 14,
   "everyFieldProvenanceComplete": true,

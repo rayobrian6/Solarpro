@@ -1,0 +1,467 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.141Z",
+  "artifact": "route-dependency map — every row whose quantity depends on unresolved route geometry",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §3 (deliverable 4)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "requirement": {
+    "code": "ROUTE-LENGTH-ESTIMATE",
+    "open": true,
+    "gateId": "RG-5",
+    "findingType": null,
+    "affectsDeclaration": "Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status",
+    "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority).",
+    "declarationSource": "lib/permit/snapshot/releaseGates.ts — the RG-5 `affects` string already declared the procurement conductor/raceway FOOTAGE dependency; nothing on the BOM side consumed it."
+  },
+  "mechanism": {
+    "before": "no ESTIMATED_FIELD_VERIFY state existed; route-derived footage was emitted with required=true, no nonOrderable, no quantityState — i.e. counted in the authoritative orderable total, including six 90° sweep rows whose own description reads \"rough-in allowance; exact bend count pending field routing\".",
+    "after": "the EMITTERS tag the rows at source with quantitySource='route-derived' + affectedRouteIds; the ONE classifier maps (route-derived ∧ only ROUTE-LENGTH-ESTIMATE open) → ESTIMATED_FIELD_VERIFY. The design quantity stays VISIBLE and labelled \"EST — FIELD VERIFY\"; it is excluded from the authoritative total and from every export.",
+    "fabricatedDefaultRetired": "the `r.onewayLengthFt ?? 30` fabricated 30 ft substitution (4 sites in lib/bom-engine-v4.ts) is dead; an absent route length now yields QUANTITY_PENDING."
+  },
+  "routeDerivedRows": [
+    {
+      "bomLineId": "BOM-CONDUIT-53ECBDFB",
+      "category": "conduit",
+      "partNumber": "PVC-Sch-80-1-1-4-RWBRANCHHOMERUN",
+      "quantity": 21,
+      "unit": "ft",
+      "description": "1-1/4\" PVC Sch 80 conduit — RW-BRANCH-HOMERUN [BRANCH_HOMERUN_RUN] — shared home-run (3 branch circuits, conduit counted once)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-BRANCH-HOMERUN",
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-50EF884E",
+      "category": "conduit",
+      "partNumber": "PVC-Sch-80-1-1-4-RWCOMBINERTODISCORUN",
+      "quantity": 23,
+      "unit": "ft",
+      "description": "1-1/4\" PVC Sch 80 conduit — RW-COMBINER_TO_DISCO_RUN [COMBINER_TO_DISCO_RUN]",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-COMBINER_TO_DISCO_RUN",
+        "COMBINER_TO_DISCO_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-5DD72106",
+      "category": "conduit",
+      "partNumber": "PVC-Sch-80-1-1-4-RWDISCOTOMETERRUN",
+      "quantity": 18,
+      "unit": "ft",
+      "description": "1-1/4\" PVC Sch 80 conduit — RW-DISCO_TO_METER_RUN [DISCO_TO_METER_RUN]",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-DISCO_TO_METER_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-93035ECF",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-COUP-1-1-4-RWBRANCHHOMERUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 coupling — RW-BRANCH-HOMERUN (joins conduit sticks)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-BRANCH-HOMERUN",
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-CB9521E6",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-CONN-1-1-4-RWBRANCHHOMERUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 terminal connector — RW-BRANCH-HOMERUN (both raceway ends per NEC 300.15)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-BRANCH-HOMERUN",
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-4BFE7670",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWBRANCHHOMERUN",
+      "quantity": 4,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 one-hole strap — RW-BRANCH-HOMERUN support per NEC 352.30 (≤10 ft + within 3 ft of boxes)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-BRANCH-HOMERUN",
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-C2CE8B2F",
+      "category": "conduit_fitting",
+      "partNumber": "BUSH-INS-1-1-4-RWBRANCHHOMERUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" insulated throat bushing — RW-BRANCH-HOMERUN (protects conductors at each raceway end per NEC 300.15)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-BRANCH-HOMERUN",
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-0386B98D",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-ELL-1-1-4-RWBRANCHHOMERUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 90° sweep/elbow — RW-BRANCH-HOMERUN (rough-in allowance; exact bend count pending field routing)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-BRANCH-HOMERUN",
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-4FCAE76A",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-COUP-1-1-4-RWCOMBINERTODISCORUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 coupling — RW-COMBINER_TO_DISCO_RUN (joins conduit sticks)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-COMBINER_TO_DISCO_RUN",
+        "COMBINER_TO_DISCO_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-543CCC59",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-CONN-1-1-4-RWCOMBINERTODISCORUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 terminal connector — RW-COMBINER_TO_DISCO_RUN (both raceway ends per NEC 300.15)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-COMBINER_TO_DISCO_RUN",
+        "COMBINER_TO_DISCO_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-FA9244EF",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWCOMBINERTODISCORUN",
+      "quantity": 4,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 one-hole strap — RW-COMBINER_TO_DISCO_RUN support per NEC 352.30 (≤10 ft + within 3 ft of boxes)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-COMBINER_TO_DISCO_RUN",
+        "COMBINER_TO_DISCO_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-3DC6898A",
+      "category": "conduit_fitting",
+      "partNumber": "BUSH-INS-1-1-4-RWCOMBINERTODISCORUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" insulated throat bushing — RW-COMBINER_TO_DISCO_RUN (protects conductors at each raceway end per NEC 300.15)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-COMBINER_TO_DISCO_RUN",
+        "COMBINER_TO_DISCO_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-C3781B2C",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-ELL-1-1-4-RWCOMBINERTODISCORUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 90° sweep/elbow — RW-COMBINER_TO_DISCO_RUN (rough-in allowance; exact bend count pending field routing)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-COMBINER_TO_DISCO_RUN",
+        "COMBINER_TO_DISCO_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-4885951A",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-COUP-1-1-4-RWDISCOTOMETERRUN",
+      "quantity": 1,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 coupling — RW-DISCO_TO_METER_RUN (joins conduit sticks)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-DISCO_TO_METER_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-B94C6F27",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-CONN-1-1-4-RWDISCOTOMETERRUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 terminal connector — RW-DISCO_TO_METER_RUN (both raceway ends per NEC 300.15)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-DISCO_TO_METER_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-4739A6D1",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-STRAP-1-1-4-RWDISCOTOMETERRUN",
+      "quantity": 3,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 one-hole strap — RW-DISCO_TO_METER_RUN support per NEC 352.30 (≤10 ft + within 3 ft of boxes)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-DISCO_TO_METER_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-5493777A",
+      "category": "conduit_fitting",
+      "partNumber": "BUSH-INS-1-1-4-RWDISCOTOMETERRUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" insulated throat bushing — RW-DISCO_TO_METER_RUN (protects conductors at each raceway end per NEC 300.15)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-DISCO_TO_METER_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-CONDUIT-FITTIN-A712AA50",
+      "category": "conduit_fitting",
+      "partNumber": "PVC-Sch-80-ELL-1-1-4-RWDISCOTOMETERRUN",
+      "quantity": 2,
+      "unit": "ea",
+      "description": "1-1/4\" PVC Sch 80 90° sweep/elbow — RW-DISCO_TO_METER_RUN (rough-in allowance; exact bend count pending field routing)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "RW-DISCO_TO_METER_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-WIRE-76BA4CB6",
+      "category": "wire",
+      "partNumber": "THWN2-6",
+      "quantity": 121,
+      "unit": "ft",
+      "description": "#6 AWG THWN-2 — AC circuit conductors (COMBINER_TO_DISCO_RUN, DISCO_TO_METER_RUN)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "COMBINER_TO_DISCO_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-WIRE-63C1988D",
+      "category": "wire",
+      "partNumber": "THWN2-10",
+      "quantity": 125,
+      "unit": "ft",
+      "description": "#10 AWG THWN-2 — AC circuit conductors (BRANCH_HOMERUN_RUN)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-WIRE-39F4F285",
+      "category": "wire",
+      "partNumber": "THWN2-GRN-10",
+      "quantity": 41,
+      "unit": "ft",
+      "description": "#10 AWG green THWN-2 equipment grounding conductor — one per raceway, NEC 250.122(C) (COMBINER_TO_DISCO_RUN, DISCO_TO_METER_RUN)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "COMBINER_TO_DISCO_RUN",
+        "DISCO_TO_METER_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-WIRE-9DD6602F",
+      "category": "wire",
+      "partNumber": "THWN2-GRN-12",
+      "quantity": 21,
+      "unit": "ft",
+      "description": "#12 AWG green THWN-2 equipment grounding conductor — one per raceway, NEC 250.122(C) (BRANCH_HOMERUN_RUN)",
+      "authorityState": "ESTIMATED_FIELD_VERIFY",
+      "blockingRequirementCodes": [
+        "ROUTE-LENGTH-ESTIMATE"
+      ],
+      "affectedRouteIds": [
+        "BRANCH_HOMERUN_RUN"
+      ],
+      "resolutionAction": "Provide CAD-routed geometry or field-measured run lengths (no estimate as authority)."
+    },
+    {
+      "bomLineId": "BOM-WIRE-A2BB72C0",
+      "category": "wire",
+      "partNumber": "GRN-OPENAIR-12",
+      "quantity": 162,
+      "unit": "ft",
+      "description": "PROPOSED / DESIGN QUANTITY ONLY — NOT ORDERABLE, EXCLUDED from procurement totals. The grounding method for the open-air branch section of the selected IQ8A-72-2-US + Q-12-10-240 is NOT ESTABLISHED (QCABLE-GROUNDING-AUTHORITY-UNVERIFIED, RS-1); the 2-conductor construction is NOT determinative. Qty retained: designed-installed 140.5 ft (Σ BranchCablePath, br-1, br-2, br-3) × 1.15 waste. Module/racking bonding is a distinct, unaffected requirement.",
+      "authorityState": "CANDIDATE_NON_ORDERABLE",
+      "blockingRequirementCodes": [
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+      ],
+      "affectedRouteIds": [],
+      "resolutionAction": "Archive + verify (document registry) the manufacturer installation document that EXPLICITLY states the grounding/bonding method for the open-air branch section of the EXACT selected equipment (micro + cable + module + mount SKUs, this jurisdiction), with SHA-256, revision, current status and exact section/page. A family/series/product-line document or a conductor-count inference can never clear this."
+    }
+  ],
+  "counts": {
+    "routeDerivedRows": 23,
+    "estimatedFieldVerify": 22,
+    "heldByAStrongerAuthority": [
+      {
+        "bomLineId": "BOM-WIRE-A2BB72C0",
+        "partNumber": "GRN-OPENAIR-12",
+        "governingCodes": [
+          "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+        ]
+      }
+    ],
+    "verifiedOrderable": 0
+  },
+  "canonicalRouteObjects": [
+    {
+      "segmentId": "ROOF_RUN",
+      "from": "PV ARRAY",
+      "to": "MICROINVERTERS",
+      "lengthFt": null,
+      "lengthAuthority": null
+    },
+    {
+      "segmentId": "BRANCH_RUN",
+      "from": "MICROINVERTERS",
+      "to": "AC COMBINER",
+      "lengthFt": null,
+      "lengthAuthority": null
+    },
+    {
+      "segmentId": "BRANCH_HOMERUN_RUN",
+      "from": "ROOF JUNCTION BOX",
+      "to": "AC COMBINER",
+      "lengthFt": null,
+      "lengthAuthority": null
+    },
+    {
+      "segmentId": "COMBINER_TO_DISCO_RUN",
+      "from": "AC COMBINER",
+      "to": "AC DISCONNECT",
+      "lengthFt": null,
+      "lengthAuthority": null
+    },
+    {
+      "segmentId": "DISCO_TO_METER_RUN",
+      "from": "AC DISCONNECT",
+      "to": "MAIN SERVICE PANEL",
+      "lengthFt": null,
+      "lengthAuthority": null
+    },
+    {
+      "segmentId": "MSP_TO_UTILITY_RUN",
+      "from": "MAIN SERVICE PANEL",
+      "to": "UTILITY METER",
+      "lengthFt": null,
+      "lengthAuthority": null
+    }
+  ]
+}

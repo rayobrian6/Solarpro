@@ -21,8 +21,15 @@ import type { CanonicalSysType } from '../types';
 import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
-import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
-import { getSnapshot } from '../snapshot/read';
+import {
+  getManufacturerAsset, evaluateDocumentApplicability, DOCUMENT_APPLICABILITY_CHIP,
+  type DocumentApplicability, type DocumentApplicabilityState,
+} from '@/lib/manufacturer-assets-db';
+import { getSnapshot, peekSnapshot } from '../snapshot/read';
+// ECD §8 — APP-A's closing conclusion is DERIVED from the release-gate registry.
+import { projectEquipmentListingConclusion } from '../snapshot/equipmentListingConclusion';
+// ECD §7 — the canonical bonding authority (the APP-A UL-listing row).
+import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
 import { projectStructuralFromInput, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 // PPC §10 — PV-5's rated-value basis line comes from THE issue-state language
@@ -417,7 +424,12 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
     const _row = (lbl: typeof labels[number], idx: number) =>
       `<tr style="${!lbl.required ? 'opacity:0.45;' : ''}background:${idx % 2 === 0 ? '#fff' : '#f5f5f5'};">` +
       `<td class="fw9 mono" style="font-size:6.8px;">${lbl.id}</td>` +
-      `<td style="font-family:monospace;font-size:6.4px;">${lbl.necRef}</td>` +
+      // ECD §9 / gate 16 — the placard CODE-REF cell is machine-tagged with the
+      // label's own topology classification, so the package-wide topology/citation
+      // gate can assert directly that no supply-side label carries a load-side-only
+      // citation (it previously had no tagged cell to read and the PV-5 placard
+      // schedule was outside the gate's reach).
+      `<td style="font-family:monospace;font-size:6.4px;" data-label-nec-ref="${escapeH(lbl.necRef)}" data-label-side="${escapeH(lbl.interconnectSide)}" data-label-required="${lbl.required ? 'true' : 'false'}">${lbl.necRef}</td>` +
       `<td style="text-align:center;font-weight:900;font-family:monospace;font-size:6.6px;">${lbl.required ? (SUPERSEDED.has(lbl.refId) ? 'YES*' : 'YES') : 'N/A'}</td>` +
       `<td style="font-size:6.6px;">${lbl.placement}</td>` +
       `</tr>`;
@@ -1086,6 +1098,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             // language ("PENDING RACKING ASSEMBLY SELECTION …") when the rail SKU is
             // unpinned, so APP-A stays in lockstep with the structural sheets.
             const _ra = _spSpec.rackingAssembly;
+            // ECD §7 — the canonical bonding authority (requirement vs method).
+            const _bondA = projectRackingBondingAuthority(peekSnapshot(input));
             const _railPinned = !!(_ra && _ra.railSku);
             const _railState = _ra
               ? (_railPinned ? 'verified' : 'pending')
@@ -1139,7 +1153,13 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             ${_isRoof ? `<tr><td class="il">Attachment</td><td class="iv">${_mSel?.mount?.model || 'Per PV-3 attachment detail'}</td></tr>` : ''}
             ${_isRoof ? `<tr><td class="il">Fastener</td><td class="iv" data-app-a-field="fastener">${_fastenerDisp}</td></tr>` : ''}
             ${_isRoof ? `<tr><td class="il">Embedment</td><td class="iv">${escapeH(_embedDisp)}</td></tr>` : _isFence ? '<tr><td class="il">Post Type</td><td class="iv">Steel Pipe / HSS</td></tr>' : '<tr><td class="il">Pile Type</td><td class="iv">Driven Pile / Helical Pier</td></tr>'}
-            <tr><td class="il">UL Listing</td><td class="iv">${_mSel?.mount?.ul2703Listed === false ? 'See manufacturer listing' : 'UL 2703'}${_mSel?.mount?.iccEsReport ? ` / ${_mSel.mount.iccEsReport}` : ''}</td></tr>
+            <!-- ECD §7 — this row printed 'UL 2703' unless a flag explicitly said
+                 ul2703Listed === false: a FAIL-OPEN default that asserted a listing
+                 for any mount whose record simply says nothing. The bonding METHOD
+                 now projects the canonical bonding authority; the ICC-ES report
+                 reference (a real record field) still prints when present. -->
+            <tr><td class="il">Bonding Method</td><td class="iv" data-app-a-bonding-result="${escapeH(_bondA.result)}" style="color:${_bondA.verificationState === 'verified' ? '#0a5c23' : '#8a3f04'};font-weight:700;">${escapeH(_bondA.methodCompactLabel)}${_mSel?.mount?.iccEsReport ? ` <span style="color:#333;font-weight:400;">/ ${escapeH(String(_mSel.mount.iccEsReport))}</span>` : ''}</td></tr>
+            <tr><td class="il">Bonding Requirement</td><td class="iv">${escapeH(_bondA.requirementLabel)}</td></tr>
             <tr><td class="il">Wind Rating</td><td class="iv">Per ${cp.asceLabel} (see PV-4C)</td></tr>
           </table>`;
           })()}
@@ -1149,6 +1169,8 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             // Resolve the actual sourced manufacturer datasheet/detail per selected
             // equipment id, and cite the real document (title · page · source). Falls
             // back to a generic "see manufacturer website" line when none on file.
+            // ECD §8 — the registry-derived listing conclusion (never a literal).
+            const _listing = projectEquipmentListingConclusion(peekSnapshot(input));
             const _fuzz = <T extends { model: string; id: string }>(list: T[], model?: string): T | undefined => {
               const m = (model || '').toLowerCase().trim(); if (!m) return undefined;
               return list.find(e => e.model.toLowerCase() === m)
@@ -1160,38 +1182,77 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               ?? _fuzz(MICROINVERTERS, _inv0?.model)?.id;
             const _batId = _fuzz(BATTERIES, (project._canonical as { battery?: { model?: string } })?.battery?.model
               || (project as { batteryModel?: string }).batteryModel)?.id;
-            // PPC §4 / gate 6 — "on file" is a document-AVAILABILITY statement, but a
-            // ✓ beside "Racking: Roof Tech RT-MINI — Roof Tech RT-MINI II Installation
-            // Manual" presents that manual as the APPLICABLE authority for the
-            // SELECTED mount, which EQUIPMENT-DOCUMENT-APPLICABILITY says it is not.
-            // Availability and applicability are two different facts; the row now
-            // states both, from the same accessor PV-3 / APP-A / PE-1 already use.
-            const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>, selectedModel?: string | null): string => {
+            // ── ECD §8 — DOCUMENT STATE CHIPS (was: a green scrape tick) ─────────
+            // Three separate facts used to be collapsed into one green '✓ on file':
+            //   1 the document EXISTS / is retained  (availability)
+            //   2 the source_url was fetched + confirmed  (a SCRAPE flag —
+            //     ManufacturerAsset.verified; it has no relationship to either of
+            //     the other two, and it is what drove the tick)
+            //   3 the document is APPLICABLE to the SELECTED product, and whether it
+            //     is AUTHORITATIVE for engineering values  (the only thing a
+            //     reviewer cares about)
+            // The ✓ is gone. Each row now renders the canonical DOCUMENT STATE chips
+            // from evaluateDocumentApplicability — and applicability is evaluated for
+            // ALL FIVE rows, not only Racking (the other four were structurally
+            // incapable of showing a state because `selectedModel` was never passed).
+            // ARCHIVED renders as a NEUTRAL availability chip: archived ≠ applicable.
+            const _chipStyle = (st: DocumentApplicabilityState): string =>
+              st === 'AUTHORITATIVE' || st === 'VERIFIED' || st === 'APPLICABLE'
+                ? 'background:#e8f5ec;border:1px solid #0a7a2f;color:#0a5c23;'
+                : st === 'ARCHIVED'
+                  // NEUTRAL — availability only. Never a positive applicability mark.
+                  ? 'background:#f2f2f2;border:1px solid #777;color:#333;'
+                  : st === 'PENDING_APPLICABILITY'
+                    ? 'background:#fdf3e3;border:1px solid #b45309;color:#8a3f04;'
+                    : 'background:#fdecea;border:1px solid #b00;color:#8a0000;';
+            const _chips = (appl: DocumentApplicability): string => appl.states.map(st =>
+              `<span data-ds-doc-state="${escapeH(st)}" style="${_chipStyle(st)}`
+              + `font-weight:700;padding:0 3px;border-radius:2px;font-size:7.5px;white-space:nowrap;">`
+              + `${escapeH(DOCUMENT_APPLICABILITY_CHIP[st])}</span>`).join(' ');
+            const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>, selectedModel: string | null): string => {
               if (!a || (!a.sourceUrl && !a.imageUrl)) return '';
               const host = a.sourceUrl ? (() => { try { return new URL(a.sourceUrl!).hostname.replace(/^www\./, ''); } catch { return ''; } })() : '';
               const bits = [a.docTitle, a.pageRef, host].filter(Boolean).join(' · ');
-              const mark = a.verified ? '✓ on file' : 'on file';
-              const _appl = selectedModel !== undefined
-                ? evaluateDocumentApplicability(selectedModel ?? a.model, a, null) : null;
-              const _applTag = _appl && _appl.state !== 'verified'
+              // ECD §8 — evaluated for EVERY row. `selectedModel` falls back to the
+              // asset's own model, which is the identity the asset was keyed by.
+              const _appl = evaluateDocumentApplicability(selectedModel ?? a.model, a, null);
+              const _applTag = !_appl.applicabilityVerified
                 ? ` <span data-ds-applicability="${escapeH(_appl.state)}" style="color:#b45309;font-weight:700;">`
-                  + `— APPLICABILITY ${escapeH(_appl.state.toUpperCase())}: the document covers `
+                  + `— the document covers `
                   + `${escapeH(_appl.documentProduct ?? 'a different product version')}, NOT VERIFIED for the selected `
                   + `${escapeH(String(selectedModel ?? a.model))} — NOT AUTHORITATIVE for installation requirements</span>`
                 : '';
-              return `<li><strong>${label}:</strong> ${a.brand} ${a.model} — ${bits || 'manufacturer datasheet'} <span style="color:#0a7a2f;font-weight:700;">(${mark})</span>${_applTag}</li>`;
+              // The authority statement is explicit on EVERY row: nothing in the asset
+              // library is archived + content-hash bound, so no row may read as the
+              // citable authority for an engineering value.
+              const _authTag = _appl.authoritative
+                ? ''
+                : ` <span data-ds-authoritative="false" style="color:#555;">— not authoritative for engineering values</span>`;
+              return `<li><strong>${label}:</strong> ${a.brand} ${a.model} — ${bits || 'manufacturer datasheet'} `
+                + `${_chips(_appl)}${_applTag}${_authTag}</li>`;
             };
             const rows = [
-              _cite('Module', getManufacturerAsset(_dbPanel?.id, 'module_spec')),
-              _cite('Inverter', getManufacturerAsset(_invId, 'inverter_spec') || getManufacturerAsset(_invId, 'microinverter_spec') || getManufacturerAsset(_invId, 'optimizer_spec')),
-              _cite('Battery', getManufacturerAsset(_batId, 'battery_spec')),
+              _cite('Module', getManufacturerAsset(_dbPanel?.id, 'module_spec'), _dbPanel?.model ?? null),
+              // The SELECTED identity is the DESIGN's inverter model — never a
+              // renderer-local equipment-db fuzzy find. `_dbMicro` is used only
+              // for its `.id` (the citation key + presence gating); reading a
+              // scalar off it here would originate a product SELECTION inside a
+              // verified-document surface, which the standing rule forbids
+              // (planset-evidence-rp gate 18, "no-renderer-local-product-selection").
+              _cite('Inverter', getManufacturerAsset(_invId, 'inverter_spec') || getManufacturerAsset(_invId, 'microinverter_spec') || getManufacturerAsset(_invId, 'optimizer_spec'),
+                _inv0?.model ?? null),
+              _cite('Battery', getManufacturerAsset(_batId, 'battery_spec'),
+                ((project._canonical as { battery?: { model?: string } })?.battery?.model
+                  || (project as { batteryModel?: string }).batteryModel) ?? null),
               _cite('Racking', getManufacturerAsset(project.mountingSystemId, 'racking_detail'),
                 getMountingSystemById(project.mountingSystemId ?? '')?.model ?? null),
               // Brand-integrated AC combiner / gateway ("the brains") — datasheet
               // required for plan review; cited by device name (no image on file).
+              // NO document is on file, so it carries no positive mark at all.
               (() => {
                 const _d = buildIntegratedEquipment(input, cad).brains;
-                return _d ? `<li><strong>AC Combiner / Gateway:</strong> ${_d.brand} ${_d.model} — integrated ${_d.roleSummary.toLowerCase()} · manufacturer datasheet <span style="color:#555;font-weight:700;">(upon request)</span></li>` : '';
+                return _d ? `<li><strong>AC Combiner / Gateway:</strong> ${_d.brand} ${_d.model} — integrated ${_d.roleSummary.toLowerCase()} · manufacturer datasheet `
+                  + `<span data-ds-doc-state="PENDING_APPLICABILITY" style="background:#fdf3e3;border:1px solid #b45309;color:#8a3f04;font-weight:700;padding:0 3px;border-radius:2px;font-size:7.5px;white-space:nowrap;">NO DOCUMENT ON FILE</span></li>` : '';
               })(),
             ].filter(Boolean);
             const fallback = `• <strong>Module:</strong> ${modMfr} — see manufacturer website<br>• <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>`;
@@ -1201,7 +1262,16 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             The following manufacturer specification sheets / installation details are on file for this project and available upon AHJ request:
             ${rows.length ? `<ul style="margin:3px 0 4px 0;padding-left:16px;">${rows.join('')}</ul>` : `<br>${fallback}`}
             <strong>Racking structural calculations — SEE PV-4C.</strong><br>
-            All equipment is CEC Listed, UL Listed, and approved for grid interconnection.
+            <!-- ECD §8 / gate 14 — this line was the bare literal "All equipment is
+                 CEC Listed, UL Listed, and approved for grid interconnection.": a
+                 blanket approval, with no registry read, on a package carrying open
+                 equipment-identity, document-applicability, racking-selection and
+                 capacity-document requirements. It is now DERIVED from the canonical
+                 release-gate registry and can only turn positive when that scope is
+                 clear. The document-state chips above carry the per-document truth. -->
+            <span data-app-a-listing-conclusion="${escapeH(_listing.established ? 'ESTABLISHED' : 'NOT_ESTABLISHED')}" data-app-a-listing-open-codes="${escapeH(_listing.openCodes.join(','))}" style="font-weight:700;color:${_listing.established ? '#0a5c23' : '#8a3f04'};">${escapeH(_listing.sentence)}</span>${_listing.openCodes.length
+              ? `<br><span style="font-size:7.5px;color:#555;">Open requirements in this scope: <span class="mono">${escapeH(_listing.openCodes.join(' · '))}</span>${_listing.openAdvisoryCodes.length ? ` (advisory: <span class="mono">${escapeH(_listing.openAdvisoryCodes.join(' · '))}</span>)` : ''}</span>`
+              : ''}
           </div>`;
           })()}
         </div>

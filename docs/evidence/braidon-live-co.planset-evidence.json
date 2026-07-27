@@ -1,15 +1,17 @@
 {
-  "generatedAt": "2026-07-24T20:39:46.689Z",
+  "generatedAt": "2026-07-27T16:47:57.399Z",
   "harness": "planset-evidence-co (final closeout rendered-truth, 20 permanent gates)",
   "mode": "live",
-  "htmlPath": "../../AppData/Local/Temp/_ep_live.html",
-  "snapshotId": "PDS-36AF18EB13AA",
-  "digest": "36af18eb13aa222ec9eda00e9b82ab726b7b63f1c9b54126534190478d212846",
+  "htmlPath": "../../AppData/Local/Temp/claude/C--Users-Ray-Solarpro-Claude/abc83935-37f8-4ff5-8978-4ba2c1156198/scratchpad/PermitPackage-BRAIDON-ecd.html",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "sheetCount": 21,
+  "sheetCount": 24,
   "sheetIds": [
     "PV-0",
     "RS-1",
+    "RS-1.1",
+    "RS-1.2",
     "PV-1",
     "PV-1B",
     "PV-3",
@@ -23,6 +25,7 @@
     "SCHED",
     "SCHED-2",
     "SCHED-3",
+    "SCHED-4",
     "APP-A",
     "DS-1",
     "DS-2",
@@ -33,6 +36,8 @@
   "manifestIds": [
     "PV-0",
     "RS-1",
+    "RS-1.1",
+    "RS-1.2",
     "PV-1",
     "PV-1B",
     "PV-3",
@@ -46,6 +51,7 @@
     "SCHED",
     "SCHED-2",
     "SCHED-3",
+    "SCHED-4",
     "APP-A",
     "DS-1",
     "DS-2",
@@ -121,20 +127,18 @@
   ],
   "activeBlockers": [
     "ROUTE-LENGTH-ESTIMATE",
-    "EQUIPMENT-IDENTITY-CONFLICT",
     "CONDUIT-FILL-PENDING",
     "TAP-CONDUCTOR-LENGTH-PENDING",
+    "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
     "FRAMING-AUTHORITY-UNVERIFIED",
     "PENDING-RACKING-ASSEMBLY-SELECTION",
     "FASTENER-ASSEMBLY-UNVERIFIED",
     "EQUIPMENT-DOCUMENT-APPLICABILITY",
-    "WIND-SNOW-AUTHORITY-UNRESOLVED",
+    "ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED",
     "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
     "RACKING-CAPACITY-APPLICABILITY-GAP",
     "CODE-AUTHORITY-INCOMPLETE",
     "PROJECT-AUTHORITY-UNVERIFIED",
-    "PROJECT-NAME-NONPRODUCTION",
-    "DESIGNER-OF-RECORD-MISSING",
     "MODULE-EXACT-DATASHEET-PENDING",
     "ENGINEERING-REVIEW-PENDING"
   ],
@@ -142,19 +146,19 @@
     "reconciled": [
       {
         "name": "snapshotId",
-        "reportVal": "PDS-36AF18EB13AA",
+        "reportVal": "PDS-76C0C5B56CEF",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "PDS-36AF18EB13AA"
+          "PDS-76C0C5B56CEF"
         ],
-        "sld": "PDS-36AF18EB13AA"
+        "sld": "PDS-76C0C5B56CEF"
       },
       {
         "name": "digestPrefix",
-        "reportVal": "36af18eb13aa",
+        "reportVal": "76c0c5b56cef",
         "matchedInRendered": true,
         "titleBlockValues": [
-          "36af18eb13aa222ec9ed"
+          "76c0c5b56cef89d4bb9d"
         ]
       },
       {
@@ -187,7 +191,7 @@
       },
       {
         "name": "blockingBlockerCount",
-        "reportVal": "17",
+        "reportVal": "15",
         "matchedInRendered": true,
         "rs1Rendered": null
       }
@@ -348,27 +352,27 @@
       "id": "screening-envelope-labeled",
       "ok": true,
       "detail": "conservativeEnvelope=true corner=true asd=true ratio=true noExactClaim=true",
-      "evidence": "1.106×"
+      "evidence": "1.188×"
     },
     {
       "gate": 15,
       "id": "geometry-page-fit",
       "ok": true,
-      "detail": "pagefit exit=0 · [pagefit] sheets=21 clipped=0 internal-clipped=0 missing-title-block=0",
+      "detail": "pagefit exit=0 · [pagefit] sheets=24 clipped=0 internal-clipped=0 clipped-h=0 internal-clipped-h=0 missing-title-block=0",
       "evidence": null
     },
     {
       "gate": 16,
       "id": "page-count-equals-manifest",
       "ok": true,
-      "detail": "rendered=21 manifest=21 equal=true",
+      "detail": "rendered=24 manifest=24 equal=true",
       "evidence": null
     },
     {
       "gate": 17,
       "id": "continuations-have-title-block-and-manifest",
       "ok": true,
-      "detail": "continuations=PV-4C.1,SCHED-2,SCHED-3 issues=0",
+      "detail": "continuations=RS-1.1,RS-1.2,PV-4C.1,SCHED-2,SCHED-3,SCHED-4 issues=0",
       "evidence": []
     },
     {
@@ -382,7 +386,7 @@
       "gate": 19,
       "id": "severity-policy-compliant",
       "ok": true,
-      "detail": "promotedNotBlocking=0 activeWarnings=0 blockingCount=17",
+      "detail": "promotedNotBlocking=0 activeWarnings=0 blockingCount=15",
       "evidence": {
         "notBlocking": [],
         "anyWarning": []

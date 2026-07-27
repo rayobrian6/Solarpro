@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T20:34:38.359Z",
+  "generatedAt": "2026-07-27T16:47:05.471Z",
   "artifact": "braidon-ppc-e1-grounding-rows-before-after",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
@@ -32,14 +32,14 @@
       "sectionLabel": "AC BRANCH B2 — Q-CABLE TRUNK (OPEN AIR)",
       "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
       "bondingPendingAuthority": true,
-      "groundingSegmentId": "gnd-br-1"
+      "groundingSegmentId": "gnd-br-2"
     },
     {
       "sectionId": "BRANCH_RUN",
       "sectionLabel": "AC BRANCH B3 — Q-CABLE TRUNK (OPEN AIR)",
       "bonding": "OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY / INSTALLED OPEN-AIR EGC: NOT ASSERTED",
       "bondingPendingAuthority": true,
-      "groundingSegmentId": "gnd-br-1"
+      "groundingSegmentId": "gnd-br-3"
     }
   ],
   "inRacewayRowsUnchangedAndSeparate": [

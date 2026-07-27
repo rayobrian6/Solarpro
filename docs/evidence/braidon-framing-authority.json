@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:29.968Z",
+  "generatedAt": "2026-07-27T16:47:05.787Z",
   "artifact": "braidon-framing-authority",
   "section": "framing-authority gate — observation vs capacity authority",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "Ray's ruling: operator-entered / field-observed data establishes OBSERVED geometry ONLY and can NEVER independently prove framing CAPACITY. Verification requires a FramingCapacityAuthority: a verified + archived project-applicable document (truss design drawing / manufacturer structural calc / stamped analysis) resolved through lib/documents, OR a licensed-engineer review bound to the current snapshot digest. A generic BCSI table / operator-entered dimensions / assumed grade inform PRELIMINARY modeling only. When unverified the sheet prints EXISTING FRAMING CAPACITY NOT VERIFIED / PROJECT-SPECIFIC STRUCTURAL REVIEW REQUIRED and the FRAMING-AUTHORITY-UNVERIFIED blocker fires — INCLUDING on the live Braidon row whose operator-entered framing fields are complete.",
   "engineeringReviewRequired": true,
   "reviewReasons": [

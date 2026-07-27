@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-07-26T16:21:29.968Z",
+  "generatedAt": "2026-07-27T16:47:05.787Z",
   "artifact": "braidon-cross-sheet-truth-matrix",
   "section": "18-section closeout outcomes (canonical → all sheets)",
   "project": "BRAIDON M PILLA — Solar TEST",
-  "snapshotId": "PDS-D307252768B7",
-  "digest": "d307252768b751a619ca95dc45852ca233465022e633dde0a35a840496fccdd0",
+  "snapshotId": "PDS-76C0C5B56CEF",
+  "digest": "76c0c5b56cef89d4bb9d73d0fd1aac1a5204193c3c50045bdd416beb60eeed84",
   "purpose": "One canonical value per fact, projected identically across every sheet that shows it.",
   "matrix": {
     "feeder conduit (E-1/PV-4A/PV-4B/SCHED/BOM)": "PVC Sch 80 1-1/4\"",
@@ -23,6 +23,6 @@
     "issue state": "PENDING ENGINEERING REVIEW",
     "active blockers": 15,
     "blocking blockers": 15,
-    "sheet count == manifest": 21
+    "sheet count == manifest": 24
   }
 }

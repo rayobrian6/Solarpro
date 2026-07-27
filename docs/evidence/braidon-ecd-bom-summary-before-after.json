@@ -1,0 +1,44 @@
+{
+  "generatedAt": "2026-07-27T16:47:03.149Z",
+  "artifact": "before/after BOM summary block",
+  "directive": "docs/ENGINE-CLOSURE-DIRECTIVE.md §10 (deliverable 11)",
+  "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
+  "baselineSource": "dev @ 8cf77c8e (pre-ECD), as MEASURED and recorded in docs/ECD-ROOT-CAUSE-MAP.md",
+  "before": {
+    "citation": "docs/ECD-ROOT-CAUSE-MAP.md §10 (emitter block structuralPages.ts:1599-1613)",
+    "renderedClaims": [
+      "This system BOM contains 47 line items across 5 stages",
+      "44 items are required per NEC / manufacturer specification",
+      "All quantities are derived from CAD geometry and equipment registry — no manual estimates."
+    ],
+    "whyFalse": "contradicted by 21 route-estimated rows, 12 excluded rows, and 6 rows whose own description reads \"rough-in allowance; exact bend count pending field routing\"."
+  },
+  "after": {
+    "block": "PROCUREMENT AUTHORITY SUMMARY (data-procurement-summary=\"state-derived\")",
+    "statement": "PROCUREMENT AUTHORITY SUMMARY — 48 BOM rows: 11 VERIFIED ORDERABLE · 22 ESTIMATED (FIELD VERIFY) · 14 CANDIDATE (NOT SELECTED) · 1 QUANTITY NOT ESTABLISHED · 0 NOT APPLICABLE. AUTHORITATIVE PROCUREMENT EXPORT: 11 rows — every other row is excluded from the total AND from every export. PROCUREMENT READY: NO.",
+    "renderedFields": {
+      "totalRowCount": 48,
+      "VERIFIED_ORDERABLE": 11,
+      "ESTIMATED_FIELD_VERIFY": 22,
+      "CANDIDATE_NON_ORDERABLE": 14,
+      "QUANTITY_PENDING": 1,
+      "EXCLUDED_NOT_APPLICABLE": 0,
+      "authoritativeExportCount": 11,
+      "procurementReady": false,
+      "openProcurementRequirementCodes": [
+        "FASTENER-ASSEMBLY-UNVERIFIED",
+        "MODULE-EXACT-DATASHEET-PENDING",
+        "PENDING-RACKING-ASSEMBLY-SELECTION",
+        "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+        "ROUTE-LENGTH-ESTIMATE"
+      ]
+    },
+    "bannedPhrasesAbsent": [
+      "all required",
+      "no manual estimates",
+      "complete procurement package",
+      "authoritative total (unqualified)"
+    ],
+    "note": "every number is read from the SAME ProcurementApproval object the table totals and both export artifacts read. Each row states its own state and reason on the row; the summary never enumerates the excluded rows inline (37 of them would clip the sheet and duplicate the rows)."
+  }
+}

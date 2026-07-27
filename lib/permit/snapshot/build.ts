@@ -41,11 +41,15 @@ import { resolveTrunkCablePlan } from '@/lib/equipment/trunkCable';
 import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, getPanelById } from '@/lib/equipment-db';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
+// ECD §7 (WS-2) — racking BONDING authority (requirement vs method).
+import { buildRackingBondingAuthority } from './rackingBonding';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
 import { collectEquipmentDocumentBlockers } from './equipmentProjection';
 import { classifyBlockerSeverity } from './severityPolicy';
 import { buildProcurementSufficiency, procurementInsufficiencyPayload, type QCableServiceLoopAllowance } from './procurementSufficiency';
+// ECD §5 (W1-F) — supply-side tap CONNECTION authority (honest nulls).
+import { buildSupplySideTapConnectionAuthority } from './supplySideTap';
 import {
   resolveOpenAirGroundingAuthority, buildGroundingDomainGraph,
   GROUNDING_AUTHORITY_BLOCKER_CODE, type GroundingDocumentEvidence,
@@ -1490,6 +1494,12 @@ export function buildPermitDesignSnapshot(
       listedCableAssembly,
       branchCablePaths,
       procurementSufficiency,
+      // ECD §5 (W1-F) — the tap-CONNECTION authority. Null for load-side designs.
+      supplySideTapConnection: buildSupplySideTapConnectionAuthority({
+        interconnectionMethod: String(proj.interconnectionMethod ?? 'LOAD_SIDE'),
+        serviceTopology,
+        project: proj as Record<string, unknown>,
+      }),
       serviceTopology,
       feeder: {
         conductorId: feederConductorId,
@@ -1537,6 +1547,35 @@ export function buildPermitDesignSnapshot(
       },
       // ── W3 canonical structural authority ──────────────────────────────
       rackingAssembly: structAuth.rackingAssembly,
+      // ╔═══════════════════════════════════════════════════════════════════╗
+      // ║ ECD §7 (WS-2) RACKING BONDING AUTHORITY — its own region.         ║
+      // ╚═══════════════════════════════════════════════════════════════════╝
+      // The bonding REQUIREMENT (NEC 250.134 / 690.43) is code and always
+      // rendered; the bonding METHOD is gated on the exact verified assembly.
+      // Four renderer-local literals used to assert "UL 2703 INTEGRATED" /
+      // "BONDING JUMPER" with no authority at all — including inside the
+      // assembly-PENDING branch of PV-3's own hardware schedule. This is the ONE
+      // object all four now project. Built from the ALREADY-COMPUTED racking
+      // assembly + the cited document's ECD §8 applicability state; every field
+      // is an honest null while the method is pending.
+      rackingBonding: buildRackingBondingAuthority({
+        assembly: structAuth.rackingAssembly,
+        documentApplicability: mountAsset
+          ? (() => {
+              const _a = evaluateDocumentApplicability(
+                mountDb?.model ?? mountAsset.model, mountAsset, null);
+              return {
+                state: _a.state,
+                applicabilityVerified: _a.applicabilityVerified,
+                documentTitle: mountAsset.docTitle ?? null,
+              };
+            })()
+          : null,
+        moduleFrame: modules[0]?.model ?? null,
+        // No bonding BOM row is orderable while the assembly is unselected (the
+        // racking lot is class-B non-orderable) — so nothing is claimed here.
+        orderableBondingBomLineIds: [],
+      }),
       rails: structAuth.rails,
       attachments: structAuth.attachments,
       env: structAuth.env,

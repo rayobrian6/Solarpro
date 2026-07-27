@@ -106,7 +106,7 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
     expect(fa.verification).not.toBe('verified');
     const att = projectAttachmentInstallationAuthority(PKG.snap, 'rooftech-mini',
       { model: 'RT-MINI', docTitle: 'Roof Tech RT-MINI II Installation Manual (Jun 2025)' },
-      { state: 'unverified', documentProduct: 'RT-MINI II' });
+      { state: 'PENDING_APPLICABILITY', applicabilityVerified: false, documentProduct: 'RT-MINI II' });
     expect(att.exactInstructionsAllowed).toBe(false);
     // none of the five conditions may be silently assumed true
     expect(att.conditions.exactSkuSelected).toBe(false);
@@ -166,7 +166,7 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
     s.permitReadiness.blockers = [];
     const att = projectAttachmentInstallationAuthority(s as PermitDesignSnapshot, 'rooftech-mini',
       { model: 'RT-MINI', docTitle: 'Roof Tech RT-MINI Installation Manual' },
-      { state: 'verified', documentProduct: 'RT-MINI' });
+      { state: 'APPLICABLE', applicabilityVerified: true, documentProduct: 'RT-MINI' });
     expect(att.conditions).toEqual({
       exactSkuSelected: true,
       documentApplicabilityVerified: true,

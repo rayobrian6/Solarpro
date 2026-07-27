@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-26T20:34:38.415Z",
+  "generatedAt": "2026-07-27T16:47:05.538Z",
   "artifact": "braidon-ppc-cap-terminator-topology",
   "directive": "docs/PROJECTION-PROCUREMENT-CORRECTIVE-DIRECTIVE.md",
   "source": "tests/fixtures/braidon-original-audit-fixture (frozen; zero mutable DB rows)",
