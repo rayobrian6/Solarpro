@@ -25,6 +25,9 @@ import { environmentalSourceLabel, environmentalStateTag } from './environmental
 import { peekSnapshot } from './read';
 import { projectDocumentAuthority } from './documentAuthority';
 import { projectReleaseGates, releasePackageLine, type ReleaseSummary } from './releaseGates';
+// TAC WS-17 — ONE definition of "does this requirement gate this sheet?", shared
+// with the show/hide gate so a banner's presence and its contents always agree.
+import { requirementAffectsSheet } from '../plansetProfile';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
 export const EMDASH = '—';
@@ -173,15 +176,27 @@ export function projectSpacingAuthorityFromInput(input: PermitInput): SpacingAut
   return projectSpacingAuthority(projectStructuralFromInput(input));
 }
 
+/** TAC WS-17 — one active release requirement as a banner row: the message a
+ *  sheet prints plus the sheets whose CONTENT the requirement gates. */
+export interface BannerRequirement {
+  code: string;
+  message: string;
+  /** snapshot affectedSheets; empty ⇒ package-wide, not any one sheet's */
+  sheets: readonly string[];
+}
+
 export interface StructuralBanner {
   /** true ⇒ the planset must visibly print the PENDING / NOT-FOR-SUBMISSION lines. */
   show: boolean;
   line1: string;   // 'PENDING STRUCTURAL ENGINEERING REVIEW'
   line2: string;   // 'NOT FOR PERMIT SUBMISSION'
-  /** the permit-readiness blocker codes/messages driving the banner. */
-  blockers: { code: string; message: string }[];
+  /** the permit-readiness blocker codes/messages driving the banner.
+   *  TAC WS-17 — each carries the sheets its authority is projected onto, so a
+   *  sheet banner can enumerate ITS OWN requirements instead of the whole
+   *  package union. An EMPTY list means package-wide (cover's release status). */
+  blockers: BannerRequirement[];
   /** structural-specific subset (framing / capacity / wind-snow / etc.). */
-  structuralBlockers: { code: string; message: string }[];
+  structuralBlockers: BannerRequirement[];
   /** RGM §4 — the PACKAGE-level release state in GATE semantics. Projected from
    *  the SAME registry (deriveReleaseGateModel), so a sheet banner can state
    *  "7 OPEN RELEASE GATES / 19 UNRESOLVED REQUIREMENTS" instead of the
@@ -235,9 +250,14 @@ export const BANNER_LINE_2 = 'NOT FOR PERMIT SUBMISSION';
  *  when a snapshot predates the registry. */
 export function structuralBanner(snap: PermitDesignSnapshot | null | undefined): StructuralBanner {
   const registry = snap?.permitReadiness?.registry;
-  const blockers = (registry && registry.length)
-    ? registry.filter(r => !r.resolved).map(r => ({ code: r.code, message: r.explanation }))
-    : (snap?.permitReadiness?.blockers ?? []);
+  // TAC WS-17 — affectedSheets travels WITH the requirement so a sheet banner can
+  // print the requirements gating its own content. A pre-registry snapshot has no
+  // per-sheet attribution: those rows are package-wide (empty sheets list) and the
+  // per-sheet filter falls back to showing everything (see bannerRequirementsForSheet).
+  const blockers: BannerRequirement[] = (registry && registry.length)
+    ? registry.filter(r => !r.resolved)
+      .map(r => ({ code: r.code, message: r.explanation, sheets: r.affectedSheets ?? [] }))
+    : (snap?.permitReadiness?.blockers ?? []).map(b => ({ ...b, sheets: [] as readonly string[] }));
   const structuralBlockers = blockers.filter(b => STRUCTURAL_BLOCKER_CODES.has(b.code));
   const notReady = snap ? snap.permitReadiness.ready === false : false;
   // RGM §4 — the gate model is a deterministic projection of the SAME registry
@@ -252,6 +272,35 @@ export function structuralBanner(snap: PermitDesignSnapshot | null | undefined):
     releaseSummary: release ? release.summary : null,
     releasePackageLine: release ? releasePackageLine(release.summary) : '',
   };
+}
+
+/**
+ * TAC WS-17 — the requirements a GIVEN sheet's banner must enumerate.
+ *
+ * The banner used to print `b.blockers` — the whole registry union — on every
+ * gated sheet, capped at 8. The audited package therefore repeated one identical
+ * eight-item list on PV-1, PV-1B, PV-3 and PV-4C: a site plan told the reviewer
+ * about Q-Cable procurement footage, and an attachment detail told them about
+ * unmeasured tap conductors. The sheet id was consulted only to decide SHOW or
+ * HIDE, never to decide WHAT.
+ *
+ * A sheet now enumerates the requirements whose authority is projected onto IT
+ * (registry affectedSheets, hybrid detail sheets inheriting their base sheet),
+ * and states the count of the remaining package-wide ones. Nothing is hidden:
+ * the totals are on the cover's release-status block and every requirement is
+ * listed in full in the review record / RS-1.
+ */
+export function bannerRequirementsForSheet(
+  b: StructuralBanner,
+  sheetId: string | null | undefined,
+): { own: BannerRequirement[]; otherCount: number } {
+  // No sheet identity (standalone banner render) ⇒ never suppress anything.
+  if (!sheetId) return { own: b.blockers, otherCount: 0 };
+  const own = b.blockers.filter(r => r.sheets.length > 0 && requirementAffectsSheet(r.sheets, sheetId));
+  // A pre-registry snapshot has no attribution at all: showing nothing would be
+  // a silent loss, so fall back to the full list exactly as before.
+  if (!b.blockers.some(r => r.sheets.length > 0)) return { own: b.blockers, otherCount: 0 };
+  return { own, otherCount: b.blockers.length - own.length };
 }
 
 /** Build the structural projection from a snapshot (null-safe). */

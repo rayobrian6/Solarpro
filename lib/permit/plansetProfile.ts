@@ -147,8 +147,33 @@ export function sheetIsDirectlyGated(
   const snap = peekSnapshot(input ?? undefined);
   const registry: readonly PermitReadinessBlocker[] = snap?.permitReadiness?.registry ?? [];
   if (!registry.length) return false;
-  // hybrid detail sheets (PV-3G / PE-1F …) inherit their base sheet's gating.
-  const base = sheetId.replace(/^(PV-\d+[A-Z]?(?:\.\d+)?|PE-1|E-1|SCHED|CERT|APP-A|RS-1)[GFR]?$/, '$1');
-  return registry.some(r => !r.resolved
-    && (r.affectedSheets ?? []).some(s => s === sheetId || s === base));
+  return registry.some(r => !r.resolved && requirementAffectsSheet(r.affectedSheets, sheetId));
+}
+
+/** Hybrid detail sheets (PV-3G / PE-1F …) inherit their BASE sheet's gating: a
+ *  requirement recorded against PV-3 gates PV-3G too. ONE definition (TAC WS-17)
+ *  — the show/hide gate and the per-sheet requirement FILTER must agree, or a
+ *  sheet keeps a banner whose contents it then filters to nothing. */
+export function baseSheetId(sheetId: string): string {
+  // The hybrid suffix is REQUIRED in this pattern, not optional. With `[GFR]?`
+  // (the pre-WS-17 form) the alternation `PV-\d+[A-Z]?` swallowed the suffix
+  // itself — baseSheetId('PV-3G') returned 'PV-3G', so hybrid detail sheets never
+  // actually inherited their base sheet's gating despite the comment saying they
+  // did. Requiring the suffix forces the regex to backtrack and split correctly
+  // ('PV-3G' → 'PV-3', 'PV-1BF' → 'PV-1B', 'PE-1G' → 'PE-1'), while a
+  // non-suffixed id simply fails to match and is returned unchanged. No base
+  // sheet id ends in G, F or R, so the split is unambiguous.
+  return sheetId.replace(/^(PV-\d+[A-Z]?(?:\.\d+)?|PE-1|E-1|SCHED|CERT|APP-A|RS-1)[GFR]$/, '$1');
+}
+
+/** Is a requirement's authority projected ONTO this sheet? An empty/absent
+ *  affectedSheets list means the requirement is PACKAGE-WIDE — it belongs to the
+ *  cover's release status, not to any one sheet's banner. */
+export function requirementAffectsSheet(
+  affectedSheets: readonly string[] | null | undefined,
+  sheetId: string | null | undefined,
+): boolean {
+  if (!sheetId) return true;                     // unknown sheet ⇒ never suppress
+  const base = baseSheetId(sheetId);
+  return (affectedSheets ?? []).some(s => s === sheetId || s === base);
 }

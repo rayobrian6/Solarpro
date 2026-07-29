@@ -8,7 +8,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitDesignSnapshot } from '../snapshot/types';
 import type { PermitInput } from '../types';
-import { structuralBanner, type StructuralBanner } from '../snapshot/structuralProjection';
+import { structuralBanner, bannerRequirementsForSheet, type StructuralBanner } from '../snapshot/structuralProjection';
 import { resolvePlansetProfile, isCompactProfile, sheetIsDirectlyGated } from '../plansetProfile';
 // TAC WS-18 — one cross-sheet reference resolver over the ACTIVE sheet index.
 import { sheetRef } from './sheetRef';
@@ -34,11 +34,17 @@ export function structuralBannerHtml(
   // (post-AAC: both compact profiles — permit AND design-review — share the
   // stated-once-on-the-cover discipline; the full profile keeps every banner.)
   if (opts?.input && isCompactProfile(resolvePlansetProfile(opts.input)) && !sheetIsDirectlyGated(opts.input, opts.sheetId)) return '';
-  // W10 (RP-D): render the UNION of every active blocker (b.blockers already IS
-  // the union from the registry) — NEVER the structural-else-everything ternary
-  // that hid the equipment-identity / code / tap / fill / identity blockers.
-  // Cap the compact banner and point at RS-1 for the full registry.
-  const _all = b.blockers;
+  // W10 (RP-D): render every active blocker from the registry union — NEVER the
+  // structural-else-everything ternary that hid the equipment-identity / code /
+  // tap / fill / identity blockers.
+  // TAC WS-17: ...but a sheet enumerates the requirements gating ITS OWN content,
+  // not the package union. The union printed identically on PV-1 / PV-1B / PV-3 /
+  // PV-4C, so a site plan lectured the reviewer about Q-Cable footage and an
+  // attachment detail about unmeasured tap conductors. The remaining
+  // package-wide requirements are stated as a count with a pointer, and the
+  // cover's release-status block still carries the package totals.
+  const _perSheet = bannerRequirementsForSheet(b, opts?.sheetId);
+  const _all = _perSheet.own;
   const _cap = 8;
   const _shown = _all.slice(0, _cap);
   const _more = _all.length - _shown.length;
@@ -57,8 +63,25 @@ export function structuralBannerHtml(
   const _rs = sheetRef(opts?.input ?? null, 'review-status');
   const _permit = !_rs.present;
   const _registryRef = _rs.present ? `see sheet ${_rs.sheetId} (REVIEW STATUS)` : _rs.see;
-  const reasons = _shown.map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('')
-    + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more unresolved release requirement${_more === 1 ? '' : 's'} — ${_registryRef}</li>` : '');
+  // TAC WS-17 — the remainder line distinguishes the two kinds of "more": rows
+  // this sheet's own list was capped at, and requirements that gate OTHER sheets'
+  // content. Both are counted; neither is silently dropped.
+  const _otherSheets = _perSheet.otherCount;
+  const _remainder = _more + _otherSheets;
+  const _italic = 'margin:0 0 1px 0;font-style:italic;';
+  const reasons = _shown.length
+    ? _shown.map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('')
+      + (_remainder > 0
+        ? `<li style="${_italic}">+ ${_remainder} more unresolved release requirement${_remainder === 1 ? '' : 's'}`
+          + `${_otherSheets > 0 ? ' elsewhere in this package' : ''} — ${_registryRef}</li>`
+        : '')
+    // A sheet whose OWN content carries no open requirement still shows the
+    // package state (line1/line2 + the gate line) — it just says so plainly
+    // rather than repeating another sheet's requirement list.
+    : (_remainder > 0
+      ? `<li style="${_italic}">No unresolved requirement is projected onto this sheet's own content; `
+        + `${_remainder} unresolved release requirement${_remainder === 1 ? '' : 's'} elsewhere in this package block release — ${_registryRef}</li>`
+      : '');
   const pad = opts?.compact ? '4px 8px' : '8px 12px';
   // RGM §4 — the package TOTAL line, single-sourced from the release-gate model
   // (releasePackageLine on the projection). Rendered above the requirement rows

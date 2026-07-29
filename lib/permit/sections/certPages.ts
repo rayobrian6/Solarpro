@@ -26,7 +26,7 @@ import type { SubSystemKey } from '../utils/subSystems';
 export interface PELetterOpts { sheetId?: string; subKey?: SubSystemKey; }
 import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { projectStructuralFromInput, fmt, fmtStr, findCheck, projectFastenerAssembly } from '../snapshot/structuralProjection';
+import { projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, findCheck, projectFastenerAssembly } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import {
   projectProjectAuthorityFromInput, projectIssueStateLanguageFromInput,
@@ -61,23 +61,32 @@ function deviationReference(input: PermitInput): string {
   return projectIssueStateLanguageFromInput(input).deviationReferenceLabel;
 }
 
-export function certificationGateBanner(input: PermitInput): string {
+export function certificationGateBanner(input: PermitInput, sheetId?: string | null): string {
   if (certificationApproved(input)) return '';
   // Section 12 -- surface the CANONICAL structural blockers from permitReadiness
   // so the existing gate states WHY (framing unverified, capacity source
   // missing, ...) rather than a generic pending line. One gate, wired to the
   // snapshot.
   const _sp = projectStructuralFromInput(input);
-  // W10 (RP-D): enumerate the UNION of every active blocker (banner.blockers is
-  // the registry union) — not the structural-else-everything ternary that hid
-  // the equipment-identity / code / tap / fill / project-identity blockers.
-  const _allReasons = _sp.banner.blockers;
+  // W10 (RP-D): enumerate every active blocker from the registry union -- not the
+  // structural-else-everything ternary that hid the equipment-identity / code /
+  // tap / fill / project-identity blockers.
+  // TAC WS-17: ...scoped to THIS certification sheet. PE-1 was printing Q-Cable
+  // procurement footage, unmeasured tap conductors and route-geometry estimates
+  // in its own gate box -- none of which is projected onto a structural letter.
+  // A sheet enumerates the requirements gating its own content and COUNTS the
+  // rest; the package totals are on the gate line directly above.
+  const _perSheet = bannerRequirementsForSheet(_sp.banner, sheetId ?? null);
+  const _allReasons = _perSheet.own;
   // RGM §4 — the verbatim list is capped at 6 on this sheet (was 8): the
   // package-level GATE line above now carries the totals, and the CERT page's
   // fixed box has no room for both. No requirement is lost — the remainder line
   // states the count and RS-1 prints every requirement in full.
   const _shownReasons = _allReasons.slice(0, 6);
   const _moreReasons = _allReasons.length - _shownReasons.length;
+  // TAC WS-17 -- the remainder counts BOTH the rows this sheet's list was capped
+  // at and the requirements gating other sheets. Nothing is silently dropped.
+  const _remainderReasons = _moreReasons + _perSheet.otherCount;
   // AAC WS-9 — PER-BULLET LENGTH CAP. The box is a FIXED-height element on a
   // fixed page; a requirement message is not. As automation clears the short
   // requirements the six survivors get LONGER (they are the ones carrying real
@@ -93,7 +102,13 @@ export function certificationGateBanner(input: PermitInput): string {
     .map(b => `<li style="margin:0 0 1px 0;">${_capReason(String(b.message)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')
     // RGM §4 — the remainder is a PACKAGE-level statement ⇒ requirement (child)
     // semantics with the root-gate total stated on its own line above.
-    + (_moreReasons > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_moreReasons} more unresolved release requirement${_moreReasons === 1 ? '' : 's'} — see sheet RS-1 (REVIEW STATUS)</li>` : '');
+    + (_remainderReasons > 0
+      ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_remainderReasons} more unresolved release requirement${_remainderReasons === 1 ? '' : 's'}`
+        + `${_perSheet.otherCount > 0 ? ' elsewhere in this package' : ''} — see sheet RS-1 (REVIEW STATUS)</li>`
+      : '')
+    + (!_shownReasons.length && _remainderReasons > 0
+      ? `<li style="margin:0 0 1px 0;font-style:italic;">No unresolved requirement is projected onto this sheet's own content.</li>`
+      : '');
   const _hasStructural = _sp.banner.structuralBlockers.length > 0;
   // RGM §4 — package total in GATE semantics (7 root gates over 19 requirements),
   // single-sourced from the release-gate model via the structural projection.
@@ -143,7 +158,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
   return `
   <div class="page cert-compact">
     ${titleBlock(input, 'CERT', 'ENGINEER CERTIFICATION', pageNum, totalPages)}
-    ${certificationGateBanner(input)}
+    ${certificationGateBanner(input, 'CERT')}
     <div class="page-content">
       <div class="cert-header">ENGINEER OF RECORD CERTIFICATION</div>
       <div class="cert-subject">
@@ -398,7 +413,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PE-1', peLetterSheetTitle(input), pageNum, totalPages)}
-    ${certificationGateBanner(input)}
+    ${certificationGateBanner(input, opts?.sheetId ?? 'PE-1')}
     <div class="page-content">
 
       <div class="bb-hvy pb-xs mb-sm">
@@ -507,7 +522,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PE-1', peLetterSheetTitle(input), pageNum, totalPages)}
-    ${certificationGateBanner(input)}
+    ${certificationGateBanner(input, opts?.sheetId ?? 'PE-1')}
     <div class="page-content">
 
       <div class="bb-hvy pb-xs mb-sm">
@@ -677,7 +692,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PE-1', peLetterSheetTitle(input), pageNum, totalPages)}
-    ${certificationGateBanner(input)}
+    ${certificationGateBanner(input, opts?.sheetId ?? 'PE-1')}
     <div class="page-content pe-letter">
 
       <div class="bb-hvy pb-xs mb-sm" style="display:flex;justify-content:space-between;align-items:flex-end;">
