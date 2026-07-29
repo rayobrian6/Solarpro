@@ -115,16 +115,22 @@ export const maxDuration = 60;            // 60s — aerial API calls can take 1
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * AAC WS-10 — pin the planset output profile on the input the artifact is built
- * from. The PERMIT ARTIFACT defaults to the compact 'permit' profile; a caller
- * that wants the full internal package asks for it explicitly (body field or
- * `?plansetProfile=full`). This is a COMPOSITION choice only — the snapshot,
- * the release registry and the BOM are built identically either way.
+ * AAC WS-10 + post-AAC profile contract — pin the planset output profile on the
+ * input the artifact is built from. The PERMIT ARTIFACT defaults to
+ * 'design-review' (the compact set ending on PE-1 as the final engineer-review
+ * sheet, explicitly marked NOT FOR PERMIT SUBMISSION). Callers select any
+ * profile explicitly (body field or `?plansetProfile=full|permit|design-review`);
+ * a 'permit' (PERMIT_SUBMISSION) request while the engineering review is
+ * pending renders as an explicitly-marked NON-SUBMITTABLE PREVIEW — the system
+ * never silently emits a permit-submission package for an unreviewed snapshot.
+ * This is a COMPOSITION choice only — the snapshot, the release registry and
+ * the BOM are built identically under every profile.
  */
 function applyPlansetProfile(input: PermitInput, req: NextRequest): void {
   const carrier = input as unknown as { plansetProfile?: PlansetProfile };
   const fromQuery = req.nextUrl?.searchParams?.get('plansetProfile');
-  const requested = carrier.plansetProfile ?? (fromQuery === 'full' || fromQuery === 'permit' ? fromQuery : undefined);
+  const requested = carrier.plansetProfile
+    ?? (fromQuery === 'full' || fromQuery === 'permit' || fromQuery === 'design-review' ? fromQuery : undefined);
   carrier.plansetProfile = requested ?? PERMIT_ARTIFACT_PROFILE;
 }
 
@@ -285,6 +291,15 @@ export async function GET(req: NextRequest) {
           // stale approval still fails closed; this only lets a CURRENT one be
           // seen at all.
           attachPriorSnapshotDigest(savedInput);
+          // Post-AAC profile contract — GET/POST parity for the OUTPUT PROFILE
+          // too: a stored input with no profile used to fall back to the engine
+          // default ('full'), so a self-healed preview could silently be a
+          // different package than the POST artifact. Pin the same artifact
+          // default; a profile stored on the input (an explicit caller choice)
+          // is respected.
+          if (!(savedInput as unknown as { plansetProfile?: string }).plansetProfile) {
+            (savedInput as unknown as { plansetProfile?: string }).plansetProfile = PERMIT_ARTIFACT_PROFILE;
+          }
           const selfHealAuthority = await resolveSnapshotAuthorityInputs(savedInput);
           const freshHtml = generatePermitHTML(savedInput, undefined, selfHealAuthority);
           console.log(`[permit/GET] Self-heal: regenerated v${savedVerNum || 0} -> v${PLANSET_ENGINE_VERSION} from permit_input.json`
@@ -773,18 +788,27 @@ export async function POST(req: NextRequest) {
               const _hadSdc  = project.seismicCategory != null && String(project.seismicCategory) !== '';
               if (!_hadWind && ar.windSpeedMph != null) body.project.ahjWindSpeedMph = ar.windSpeedMph;
               if (!_hadSnow && ar.groundSnowLoadPsf != null) body.project.ahjGroundSnowPsf = ar.groundSnowLoadPsf;
-              if (!_hadSdc && ar.seismicDesignCategory) project.seismicCategory = ar.seismicDesignCategory;
+              // Post-AAC seismic repair: the SDC table fill is DEAD. The curated
+              // row's category is unprovenanced (Braidon: table 'B' vs the verified
+              // USGS/ASCE retrieval 'D'), and unlike wind/snow the seismic
+              // fill-if-empty had NO retrieval override wired downstream — the 'B'
+              // seeded here printed on the cover as if resolved. The canonical
+              // seismic result now comes from resolveSeismicAuthority (retrieval
+              // record or the verified archived climate-hazard document) in
+              // generatePermit; with no authority the sheets print PENDING, never
+              // a substituted table value.
               (body.project as Record<string, unknown>).environmentalValueProvenance = {
                 windSpeedMph: _hadWind ? 'operator-entered'
                   : body.project.ahjWindSpeedMph != null ? 'unprovenanced-table' : 'absent',
                 groundSnowPsf: _hadSnow ? 'operator-entered'
                   : body.project.ahjGroundSnowPsf != null ? 'unprovenanced-table' : 'absent',
-                seismicDesignCategory: _hadSdc ? 'operator-entered'
-                  : project.seismicCategory ? 'unprovenanced-table' : 'absent',
-                basis: 'Wind / ground snow / SDC are SITE properties of a coordinate, not AHJ policy. The curated '
+                seismicDesignCategory: _hadSdc ? 'operator-entered' : 'absent',
+                basis: 'Wind / ground snow are SITE properties of a coordinate, not AHJ policy. The curated '
                   + 'ahj-national table has no adoption ordinance, no effective date and no hash, so it fills these '
-                  + 'only when the project carries nothing, and never overwrites an operator value. The authority is '
-                  + 'the ASCE 7 hazard retrieval (environmental-load-authority@v1).',
+                  + 'only when the project carries nothing, and never overwrites an operator value. The SDC table '
+                  + 'fill is retired entirely (post-AAC seismic repair) — the canonical seismic result comes from '
+                  + 'resolveSeismicAuthority (retrieval record or verified archived climate-hazard document) or '
+                  + 'prints PENDING. The authority is the ASCE 7 hazard retrieval (environmental-load-authority@v1).',
                 tableOffered: {
                   windSpeedMph: ar.windSpeedMph ?? null,
                   groundSnowLoadPsf: ar.groundSnowLoadPsf ?? null,

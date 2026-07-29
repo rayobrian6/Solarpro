@@ -64,11 +64,14 @@ const LEGACY_SEQ_ONE_DS = LEGACY_SEQ.filter(id => id !== 'DS-2' && id !== 'DS-3'
 // Ground: no datasheet images resolve for the fixture's equipment at all.
 const LEGACY_SEQ_NO_DS = LEGACY_SEQ.filter(id => !id.startsWith('DS-'));
 
-const FIXTURES: Array<{ name: string; mk: () => any; seq: string[]; roof: boolean }> = [
-  { name: 'roof micro',  mk: () => clone(roofProject),   seq: LEGACY_SEQ,        roof: true },
-  { name: 'roof string', mk: roofStringProject,          seq: LEGACY_SEQ,        roof: true },
-  { name: 'pure fence',  mk: () => clone(fenceProject),  seq: LEGACY_SEQ_ONE_DS, roof: false },
-  { name: 'pure ground', mk: () => clone(groundProject), seq: LEGACY_SEQ_NO_DS,  roof: false },
+// `micro` — post-AAC E-1 repair: micro topologies grow the PV-4B.1 physical
+// section schedule sheet (continuation class, right after PV-4B); string /
+// optimizer topologies do not.
+const FIXTURES: Array<{ name: string; mk: () => any; seq: string[]; roof: boolean; micro: boolean }> = [
+  { name: 'roof micro',  mk: () => clone(roofProject),   seq: LEGACY_SEQ,        roof: true,  micro: true },
+  { name: 'roof string', mk: roofStringProject,          seq: LEGACY_SEQ,        roof: true,  micro: false },
+  { name: 'pure fence',  mk: () => clone(fenceProject),  seq: LEGACY_SEQ_ONE_DS, roof: false, micro: true },
+  { name: 'pure ground', mk: () => clone(groundProject), seq: LEGACY_SEQ_NO_DS,  roof: false, micro: false },
 ];
 
 // W9/§15 formal continuation sheets (do not belong to the discipline backbone):
@@ -82,10 +85,12 @@ const SCHED_CONT_RE = /^SCHED-\d+$/;
 // gate-led RS-1 paginates its child requirements onto RS-1.1, RS-1.2, … and the
 // count varies with the registry, exactly as SCHED-n varies with the BOM.
 const RS_CONT_RE = /^RS-1\.\d+$/;
-const isContinuation = (id: string) => id === 'PV-4C.1' || SCHED_CONT_RE.test(id) || RS_CONT_RE.test(id);
+// PV-4B.1 — post-AAC E-1 repair: the canonical physical section schedule sheet
+// (micro topologies), continuation class of the PV-4B conductor family.
+const isContinuation = (id: string) => id === 'PV-4C.1' || id === 'PV-4B.1' || SCHED_CONT_RE.test(id) || RS_CONT_RE.test(id);
 const backbone = (ids: string[]) => ids.filter(id => !isContinuation(id));
 
-for (const { name, mk, seq, roof } of FIXTURES) {
+for (const { name, mk, seq, roof, micro } of FIXTURES) {
   describe(`wave 6 sweep — ${name}`, () => {
     const input = mk();
     const html = generatePermitHTML(input);
@@ -100,6 +105,9 @@ for (const { name, mk, seq, roof } of FIXTURES) {
       // PV-4C.1 appears iff roof, immediately after PV-4C
       expect(ids.includes('PV-4C.1')).toBe(roof);
       if (roof) expect(ids.indexOf('PV-4C.1')).toBe(ids.indexOf('PV-4C') + 1);
+      // PV-4B.1 appears iff micro topology, immediately after PV-4B (post-AAC)
+      expect(ids.includes('PV-4B.1')).toBe(micro);
+      if (micro) expect(ids.indexOf('PV-4B.1')).toBe(ids.indexOf('PV-4B') + 1);
       // SCHED continuations are contiguous, ordered, right after SCHED
       const conts = ids.filter(id => SCHED_CONT_RE.test(id));
       const schedAt = ids.indexOf('SCHED');

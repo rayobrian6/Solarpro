@@ -2102,7 +2102,7 @@ export function drawRoofStructural(
         _attD.fastener.lengthIn != null ? `× ${_attD.fastener.lengthIn}"` : null,
         (_attD.fastener.fastenerType ?? '').toUpperCase() || null,
       ].filter(Boolean).join(' ')
-    : 'FASTENER ASSEMBLY: PENDING VERIFIED SELECTION';
+    : `FASTENER ASSEMBLY: ${_attD.fastenerStateLabel}`;
   const roofType   = (project.roofType          || 'SHINGLE').toUpperCase();
   // W3 §2 — exact catalog module dims from the snapshot (no generic 66×40).
   const panelLenIn = _spD.moduleHeightIn ?? project.panelLengthIn ?? 0;
@@ -2520,7 +2520,7 @@ export function drawRoofStructural(
       ]
       : [
         ['ATTACHMENT', `${mountSys}${isRaillessD ? ' — RAIL-LESS' : ''}`],
-        ['FASTENER ASSEMBLY', 'PENDING VERIFIED SELECTION'],
+        ['FASTENER ASSEMBLY', _attD.fastenerStateLabel],
         ['INSTALLATION DETAILS', 'NOT ESTABLISHED'],
         ['EMBEDMENT / TORQUE / PILOT', 'WITHHELD — NO VERIFIED SOURCE'],
         ['MATERIAL / COATING', 'WITHHELD — NO VERIFIED SOURCE'],
@@ -2596,7 +2596,7 @@ export function drawRoofStructural(
         `FASTENER: ${lagLabelD}.`,
       ]
       : [
-        'FASTENER ASSEMBLY: PENDING VERIFIED SELECTION.',
+        `FASTENER ASSEMBLY: ${_attD.fastenerStateLabel}.`,
         'INSTALLATION DETAILS: NOT ESTABLISHED.',
       ]),
     `${_attD.spacingDesignLine} — ${_attD.spacingStatusLine}.`,

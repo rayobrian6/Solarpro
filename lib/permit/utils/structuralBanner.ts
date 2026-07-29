@@ -9,7 +9,7 @@
 import type { PermitDesignSnapshot } from '../snapshot/types';
 import type { PermitInput } from '../types';
 import { structuralBanner, type StructuralBanner } from '../snapshot/structuralProjection';
-import { isPermitProfile, sheetIsDirectlyGated } from '../plansetProfile';
+import { resolvePlansetProfile, isCompactProfile, sheetIsDirectlyGated } from '../plansetProfile';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -29,7 +29,9 @@ export function structuralBannerHtml(
   // structural gate is open; a sheet with no gated content stops repeating the
   // package status. Nothing is hidden: the requirement is still in the
   // registry, still counted by the gates, and still named on the cover line.
-  if (opts?.input && isPermitProfile(opts.input) && !sheetIsDirectlyGated(opts.input, opts.sheetId)) return '';
+  // (post-AAC: both compact profiles — permit AND design-review — share the
+  // stated-once-on-the-cover discipline; the full profile keeps every banner.)
+  if (opts?.input && isCompactProfile(resolvePlansetProfile(opts.input)) && !sheetIsDirectlyGated(opts.input, opts.sheetId)) return '';
   // W10 (RP-D): render the UNION of every active blocker (b.blockers already IS
   // the union from the registry) — NEVER the structural-else-everything ternary
   // that hid the equipment-identity / code / tap / fill / identity blockers.
@@ -47,7 +49,7 @@ export function structuralBannerHtml(
   // points at the record that DOES hold every requirement (the in-app review
   // record). Same count, same requirements — only the reference is corrected;
   // a dangling "see sheet RS-1" would be a lie about the package.
-  const _permit = !!opts?.input && isPermitProfile(opts.input);
+  const _permit = !!opts?.input && isCompactProfile(resolvePlansetProfile(opts.input));
   const _registryRef = _permit ? 'see the project review record in the application' : 'see sheet RS-1 (REVIEW STATUS)';
   const reasons = _shown.map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('')
     + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more unresolved release requirement${_more === 1 ? '' : 's'} — ${_registryRef}</li>` : '');

@@ -429,10 +429,10 @@ describe('§8 — E-1 legend derives from the wiring methods on the sheet (gate 
   it('gate 11 — legend entries == displayed segment wiring methods (no method advertised that is absent)', () => {
     const { html, snap } = gen();
     const noB64 = html.replace(/data:image[^"')]+/g, '');
-    const svg = noB64.slice(
-      noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM'),
-      noB64.indexOf('E-1 PHYSICAL CONDUCTOR'),
-    );
+    // post-AAC E-1 repair: the schedule no longer follows the diagram on E-1 —
+    // slice to the end of the SLD svg itself.
+    const _svgStart = noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM');
+    const svg = noB64.slice(_svgStart, noB64.indexOf('</svg>', _svgStart) + 6);
     // A pure micro job has NO field DC conductor and NO open-air PV wire.
     expect(svg).not.toContain('DC Conductor in Conduit');
     expect(svg).not.toContain('PV Wire');

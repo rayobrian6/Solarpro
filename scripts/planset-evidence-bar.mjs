@@ -292,17 +292,23 @@ const _rackGaps = ra?.structuralAuthorityGaps ?? [];
 const capacityGated = CAPACITY_GATE_CODES.some(c => registry.some(r => r.code === c))
   || _rackGaps.some(g => g.severity === 'blocking' && CAPACITY_GATE_CODES.includes(g.code));
 const faSource = ra?.datasheetSource ?? ra?.capacitySource ?? null;
+// Post-AAC (WS-8 alignment): `capacityGated` is NO LONGER part of the fastener
+// predicate — the fastener is mount-BASE hardware, verified independent of the
+// rail-capacity document (the same echo WS-8 deleted from the blocker emission;
+// the renderer's projection now matches). capacityGated stays reported as its
+// own fact and still governs the CAPACITY question via the RACKING-CAPACITY-*
+// codes.
 const fa = ra ? {
   fastenerVerification: ra.assemblyVerification?.fastener ?? null,
   overall: ra.assemblyVerification?.overall ?? null,
   screwLagModel: ra.screwLagModel ?? null,
   datasheetSource: faSource,
   capacityGated,
-  verification: (faBlockerActive || capacityGated) ? 'unverified'
+  verification: faBlockerActive ? 'unverified'
     : (ra.assemblyVerification?.fastener === 'verified' && faSource ? 'verified' : 'unverified'),
 } : null;
-// the same three-term predicate the RENDERER uses to decide `nonOrderable`
-const faUnverified = !ra || faBlockerActive || capacityGated
+// the same predicate the RENDERER uses to decide `nonOrderable`
+const faUnverified = !ra || faBlockerActive
   || ra.assemblyVerification?.fastener !== 'verified' || !faSource;
 const NON_ORDERABLE = 'DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY';
 const faFlagged = noB64.includes('data-fastener-orderable="false"');

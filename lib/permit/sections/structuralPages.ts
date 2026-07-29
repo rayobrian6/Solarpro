@@ -18,7 +18,7 @@ import {
   type StructuralProjection,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
-import { isPermitProfile } from '../plansetProfile';
+import { resolvePlansetProfile, isCompactProfile } from '../plansetProfile';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel, necNextStandardOcpd } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
@@ -908,14 +908,18 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             : 'Framing utilization data is not available — verify existing framing capacity per engineering analysis before installation.'}
       </div>
 
-      <!-- §8 Attachment-ID Reaction Schedule + reconciliation (canonical objects) -->
+      <!-- §8 Attachment-ID Reaction Schedule (canonical objects). The §8
+           reconciliation block renders on PV-4C.1 — post-AAC clip repair: it was
+           the last data-dependent stack on this sheet, and one extra live
+           load-case group pushed the continuation strip past the clip box. -->
       ${renderReactionSchedule(_proj)}
       <!-- page-fit: this continuation strip is the LAST block on PV-4C, so its box
            model is the sheet's fit margin. Tightened (BAR) after the §2 environmental
            provenance tags + the restored 20 psf snow row pushed the sheet 6px over. -->
       <div style="padding:1px 5px;margin-top:0;font-size:7px;line-height:1.18;border:var(--border);background:#f4f4f4;">
-        <strong>CONTINUED ON PV-4C.1:</strong> the roof-attachment standard detail, the governing ASD load combination (${asce} §2.4),
-        the structural interpretation and the roof structural PAGE CONCLUSION continue on sheet <strong>PV-4C.1</strong>.
+        <strong>CONTINUED ON PV-4C.1:</strong> the §8 reaction reconciliation (Σ reactions vs applied load), the roof-attachment
+        standard detail, the governing ASD load combination (${asce} §2.4), the structural interpretation and the roof
+        structural PAGE CONCLUSION continue on sheet <strong>PV-4C.1</strong>.
       </div>
     </div>
   </div>`;
@@ -928,6 +932,11 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
     <div class="page-content">
       ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C.1' })}
       <div class="section-title">Roof Structural Calculations (Continued from PV-4C) — ${asce} §26/27 (Roof-Mounted PV)</div>
+
+      <!-- §8 Reaction Reconciliation — continued from the PV-4C reaction schedule
+           (post-AAC clip repair: deterministic placement here, never a data-driven
+           overflow off PV-4C's fixed page). -->
+      ${renderReactionReconciliation(_proj)}
 
       <!-- Standard Detail: Roof Attachment -->
       <div class="section-title">Standard Detail — Roof Attachment (Fastener per Racking Assembly, Typical)</div>
@@ -993,7 +1002,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <div style="margin-bottom:3px;">4. Attachment to structural framing members only — <strong>no attachment to sheathing or decking alone.</strong></div>
           <div style="margin-bottom:3px;">5. Torque: ${_fa.nonOrderable
             ? '<strong style="color:#b45309;">NOT ESTABLISHED</strong> — no verified fastener assembly, so no drive torque may be stated (the diameter-keyed &ldquo;typical&rdquo; values previously printed here were not a manufacturer specification).'
-            : 'Per the verified manufacturer specification for the archived fastener assembly.'}</div>
+            : 'Per the manufacturer’s listed installation instructions for the verified fastener assembly (no numeric torque is stated without a verified applicable document).'}</div>
           <div style="margin-bottom:3px;">6. ${escapeH(_spc.designLabel)} along rail — <strong style="color:${_spcVerified ? '#333' : '#b45309'};">${escapeH(_spc.statusLabel)}</strong>${_spcVerified ? '.' : ' (design value; an allowable-spacing limit requires a verified source and none is archived).'}</div>
           <div style="margin-bottom:3px;">7. Verify roof framing at each attachment point — no attachments at splices or unsupported sheathing.</div>
           <div style="color:#555;font-size:7px;margin-top:5px;font-style:italic;">Detail is typical — verify with mounting system manufacturer installation manual for project-specific requirements.</div>
@@ -1158,7 +1167,46 @@ function renderReactionSchedule(proj: StructuralProjection): string {
     ? `<tr><td colspan="10" style="font-size:6.5px;color:#555;font-style:italic;padding:2px 3px;">+ ${hiddenGroups} additional distinct load-case group${hiddenGroups === 1 ? '' : 's'} (full per-attachment set carried in the canonical structural object model; abbreviated here for page fit).</td></tr>`
     : '';
 
-  // ── Reconciliation footer ──
+  // ── Reconciliation — rendered on PV-4C.1 (renderReactionReconciliation) ──
+  // Post-AAC clip repair: the reconciliation block was the LAST stack on PV-4C
+  // and the live design renders one more distinct load-case group than the
+  // frozen fixture, which pushed the continuation strip 26.4px past the
+  // page-content clip box. The reconciliation belongs with the load-combination
+  // / conclusion material that already continues on PV-4C.1, so it moved there
+  // DETERMINISTICALLY (not conditionally on row counts) — the fit margin on
+  // PV-4C no longer depends on the data-driven group count.
+
+  // §14 — the CONSERVATIVE-ENVELOPE area ratio is a display ratio of two canonical
+  // areas (Σ per-mount tributary ÷ array footprint), stated explicitly so the
+  // screening basis is legible. Never an exact per-position tributary geometry.
+  const _areaRatio = (rr && rr.present && rr.arrayAreaFt2 && rr.tributarySumFt2)
+    ? (rr.tributarySumFt2 / rr.arrayAreaFt2)
+    : null;
+  const _areaRatioStr = _areaRatio != null ? `${_areaRatio.toFixed(3)}×` : '—';
+
+  return `
+      <div class="section-title">Attachment Reaction Schedule — Grouped by Load Case (${'ASCE 7'} §2.4 ASD) — ${atts.length} attachment${atts.length === 1 ? '' : 's'}, ${groups.length} distinct group${groups.length === 1 ? '' : 's'}</div>
+      <table class="equip-table" style="width:100%;">
+        <thead><tr>
+          <th>Attach IDs</th><th style="text-align:right;">Qty</th><th>Zone</th><th style="text-align:right;">Trib (ft²)</th>
+          <th style="text-align:right;">Dead (lb)</th><th style="text-align:right;">Snow (lb)</th>
+          <th style="text-align:right;">Down D+S (lb)</th><th style="text-align:right;">Uplift 0.6W (lb)</th>
+          <th style="text-align:right;">Cap (lb)</th><th style="text-align:right;">SF</th>
+        </tr></thead>
+        <tbody>${bodyRows}${extraNote}</tbody>
+      </table>
+      <div style="padding:2px 6px;font-size:6.5px;color:#555;line-height:1.3;border:var(--border);border-top:none;">
+        Reactions sourced from the canonical attachment objects (structural-engine-v4 mount layout). Uplift = ASD 0.6·W net C&amp;C over the per-mount tributary; Down = Dead + Snow over the same tributary.
+        <strong>CONSERVATIVE SCREENING ENVELOPE:</strong> ALL attachments use the GOVERNING corner (ASCE 7 Zone 3) C&amp;C pressure applied UNIFORMLY, on an <strong>ASD basis</strong> (0.6·W uplift; D+S gravity) — the capacity checks on this sheet declare the SAME ASD load basis. Each mount is charged a FULL interior tributary (end mounts included); the Σ per-mount tributary is <strong>${_areaRatioStr}</strong> the array footprint (Σ tributary ÷ array area = ${rr && rr.present ? `${rr.tributarySumFt2 ?? '—'} ÷ ${rr.arrayAreaFt2 ?? '—'} ft²` : 'per canonical reconciliation'}). This is an intentionally conservative screening basis, NOT an exact per-position zone or tributary geometry &mdash; a design that passes here passes at every position.
+        ${gated ? 'Capacity + SF are gated to PENDING (§9 — allowable source unverified).' : ''}
+        Σ-reaction closure checks continue on <strong>PV-4C.1</strong> (Reaction Reconciliation, §8).
+      </div>`;
+}
+
+/** §8 Reaction Reconciliation — Σ reactions vs applied load × array area.
+ *  Rendered on PV-4C.1 (see the page-fit note in renderReactionSchedule). */
+function renderReactionReconciliation(proj: StructuralProjection): string {
+  const rr = proj.reactionReconciliation;
   const reconRows: string[] = [];
   let footer = '';
   if (rr && rr.present) {
@@ -1196,31 +1244,7 @@ function renderReactionSchedule(proj: StructuralProjection): string {
         ${!rr.ok ? '<strong style="color:#cc0000;"> Reactions do not reconcile with the applied load — see the permit-readiness blocker; the per-attachment reaction is not authoritative.</strong>' : ''}
       </div>`;
   }
-
-  // §14 — the CONSERVATIVE-ENVELOPE area ratio is a display ratio of two canonical
-  // areas (Σ per-mount tributary ÷ array footprint), stated explicitly so the
-  // screening basis is legible. Never an exact per-position tributary geometry.
-  const _areaRatio = (rr && rr.present && rr.arrayAreaFt2 && rr.tributarySumFt2)
-    ? (rr.tributarySumFt2 / rr.arrayAreaFt2)
-    : null;
-  const _areaRatioStr = _areaRatio != null ? `${_areaRatio.toFixed(3)}×` : '—';
-
-  return `
-      <div class="section-title">Attachment Reaction Schedule — Grouped by Load Case (${'ASCE 7'} §2.4 ASD) — ${atts.length} attachment${atts.length === 1 ? '' : 's'}, ${groups.length} distinct group${groups.length === 1 ? '' : 's'}</div>
-      <table class="equip-table" style="width:100%;">
-        <thead><tr>
-          <th>Attach IDs</th><th style="text-align:right;">Qty</th><th>Zone</th><th style="text-align:right;">Trib (ft²)</th>
-          <th style="text-align:right;">Dead (lb)</th><th style="text-align:right;">Snow (lb)</th>
-          <th style="text-align:right;">Down D+S (lb)</th><th style="text-align:right;">Uplift 0.6W (lb)</th>
-          <th style="text-align:right;">Cap (lb)</th><th style="text-align:right;">SF</th>
-        </tr></thead>
-        <tbody>${bodyRows}${extraNote}</tbody>
-      </table>
-      <div style="padding:2px 6px;font-size:6.5px;color:#555;line-height:1.3;border:var(--border);border-top:none;">
-        Reactions sourced from the canonical attachment objects (structural-engine-v4 mount layout). Uplift = ASD 0.6·W net C&amp;C over the per-mount tributary; Down = Dead + Snow over the same tributary.
-        <strong>CONSERVATIVE SCREENING ENVELOPE:</strong> ALL attachments use the GOVERNING corner (ASCE 7 Zone 3) C&amp;C pressure applied UNIFORMLY, on an <strong>ASD basis</strong> (0.6·W uplift; D+S gravity) — the capacity checks on this sheet declare the SAME ASD load basis. Each mount is charged a FULL interior tributary (end mounts included); the Σ per-mount tributary is <strong>${_areaRatioStr}</strong> the array footprint (Σ tributary ÷ array area = ${rr && rr.present ? `${rr.tributarySumFt2 ?? '—'} ÷ ${rr.arrayAreaFt2 ?? '—'} ft²` : 'per canonical reconciliation'}). This is an intentionally conservative screening basis, NOT an exact per-position zone or tributary geometry &mdash; a design that passes here passes at every position.
-        ${gated ? 'Capacity + SF are gated to PENDING (§9 — allowable source unverified).' : ''}
-      </div>${footer}`;
+  return footer;
 }
 
 // ─── DISPATCHER ───────────────────────────────────────────────────────────────
@@ -2170,7 +2194,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       </div>`}
 
       ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid,
-        ...(isPermitProfile(input) ? { continuationLabel: (from: number, to: number) =>
+        ...(isCompactProfile(resolvePlansetProfile(input)) ? { continuationLabel: (from: number, to: number) =>
           `ITEMS ${from}–${to} — FULL PROCUREMENT BILL OF MATERIALS IN THE PROJECT RECORD (SNAPSHOT-BOUND; NOT A PERMIT DOCUMENT)` } : {}) })}
 
 

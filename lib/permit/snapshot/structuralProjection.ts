@@ -443,10 +443,17 @@ export function projectFastenerAssemblyFromSnapshot(
   const sourceDocument = ra?.datasheetSource ?? ra?.capacitySource ?? mount?.iccEsReport ?? null;
 
   const vFast = ra?.assemblyVerification?.fastener;
+  // Post-AAC accounting repair — the `proj.capacityGated` AND here was the same
+  // `_capGated` echo AAC WS-8 deleted from the FASTENER-ASSEMBLY-UNVERIFIED
+  // blocker emission (structuralAuthority §13): the fastener is mount-BASE
+  // hardware, verified independent of the rail-capacity document. Leaving the
+  // echo on this one surface made PV-5's general note print "WITHHELD —
+  // FASTENER-ASSEMBLY-UNVERIFIED (see RS-1)" while the registry (correctly)
+  // carried no such requirement — a rendered reference to a nonexistent
+  // registry row. ONE predicate now, identical to the blocker's.
   const verification: FastenerAssembly['verification'] =
     !present ? 'pending'
-      : (proj.capacityGated ? 'unverified'
-        : (vFast === 'verified' && !!sourceDocument ? 'verified' : 'unverified'));
+      : (vFast === 'verified' && !!sourceDocument ? 'verified' : 'unverified');
 
   // §6 (BAR) — the exact manufacturer/SKU/diameter/length/coating/embedment
   // description prints ONLY when verified. While NON-ORDERABLE the line reveals no
@@ -530,6 +537,11 @@ export interface AttachmentInstallationAuthority {
   rackingAssemblyState: 'verified' | 'pending' | 'unverified';
   /** true ⇒ exact dims/torque/pilot/coating/sealant instructions MAY render. */
   exactInstructionsAllowed: boolean;
+  /** Post-AAC (WS-8 alignment) — the ONE state-derived fastener-assembly status
+   *  label every non-exact surface prints (drafting stack included, per the PPC
+   *  standing rule). While instructions are gated: names the verified element
+   *  honestly instead of contradicting the SCHED/APP-A/PE-1 verified line. */
+  fastenerStateLabel: string;
   /** Ray's exact PENDING block (empty when exactInstructionsAllowed). */
   pendingLines: string[];
   /** the reference-detail banner (null when exactInstructionsAllowed). */
@@ -616,8 +628,17 @@ export function projectAttachmentInstallationAuthority(
         : `DOCUMENT APPLICABILITY: ${fmtStr(documentApplicability.documentProduct).toUpperCase()} MANUAL NOT VERIFIED FOR SELECTED ${fmtStr(selectedModel).toUpperCase()}`)
     : 'DOCUMENT APPLICABILITY: NO VERSION-EXACT MANUFACTURER DOCUMENT ON FILE';
 
+  // Post-AAC (WS-8 alignment): the fastener status line is STATE-DERIVED.
+  // Printing "PENDING VERIFIED SELECTION" while SCHED/APP-A/PE-1 print the
+  // verified fastener line would be a cross-sheet contradiction — when the
+  // fastener ELEMENT is verified but exact instructions stay gated (SKU /
+  // document authority), the label says exactly that. ONE label, consumed by
+  // this block AND the lib/drafting descriptor surfaces.
+  const fastenerStateLabel = fastenerAssemblyVerified
+    ? 'VERIFIED — EXACT INSTALLATION INSTRUCTIONS PENDING DOCUMENT/SKU AUTHORITY'
+    : 'PENDING VERIFIED SELECTION';
   const pendingLines = exactInstructionsAllowed ? [] : [
-    'FASTENER ASSEMBLY: PENDING VERIFIED SELECTION',
+    `FASTENER ASSEMBLY: ${fastenerStateLabel}`,
     'INSTALLATION DETAILS: NOT ESTABLISHED',
     _docLine,
     REFERENCE_DETAIL_BANNER,
@@ -637,7 +658,7 @@ export function projectAttachmentInstallationAuthority(
       fastenerAssemblyVerified, selectionBoundToCurrentDigest,
     },
     mountAssemblyState, rackingAssemblyState,
-    exactInstructionsAllowed, pendingLines,
+    exactInstructionsAllowed, fastenerStateLabel, pendingLines,
     referenceDetailBanner: exactInstructionsAllowed ? null : REFERENCE_DETAIL_BANNER,
     spacingDesignLine: spacing.designLabel,
     spacingStatusLine: spacing.statusLabel,

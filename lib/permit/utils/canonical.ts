@@ -283,7 +283,13 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
     // ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED.)
     groundSnowLoad:   Number(struct?.snow?.groundSnowLoad) || Number(input.project.ahjGroundSnowPsf) || Number(input.project.groundSnowPsf) || 0,
     exposureCategory: struct?.wind?.exposureCategory       || input.project.exposureCategory || 'C',
-    seismicSDC:       struct?.seismic?.sdc              || 'D',
+    // Post-AAC seismic repair: the hardcoded 'D' fallback is DEAD (it disagreed
+    // with the fixtures' 'B' by construction — two invented defaults feeding two
+    // different sheets). The compliance-stage value passes through as INPUT data;
+    // when the canonical seismic authority resolves (resolveSeismicAuthority in
+    // generatePermit) it overwrites this; with neither, the surfaces print the
+    // pending marker instead of a substituted category.
+    seismicSDC:       struct?.seismic?.sdc              || 'PENDING',
     state:            jx?.state                            || '—',
     ahj:              jx?.ahj                              || '—',
   };

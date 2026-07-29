@@ -227,8 +227,10 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
     expect(ids).toContain('svc-tap-conductors');
     // per-branch Q-Cable rows: one per canonical branch, never merged.
     expect(ids.filter(id => id === 'BRANCH_RUN').length).toBe(snap.electrical.branches.length);
-    // the schedule is rendered on E-1 with the canonical section ids visible.
-    expect(html).toContain('E-1 PHYSICAL CONDUCTOR / RACEWAY SCHEDULE');
+    // the schedule renders ONCE, on PV-4B.1 (post-AAC E-1 repair — E-1 is the
+    // dedicated SLD sheet), with the canonical section ids visible.
+    expect(html).toContain('PHYSICAL CONDUCTOR / RACEWAY SCHEDULE — CANONICAL SECTION OBJECTS');
+    expect(html).toContain('CONDUCTOR SCHEDULE — PHYSICAL SECTIONS');
     expect(html).toContain('BRANCH_HOMERUN_RUN');
   });
 
@@ -246,8 +248,10 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
   it('gate 2 (SVG) — the E-1 diagram shared home-run prints N#10, never #12 on the shared run', () => {
     const { html, snap } = gen('SUPPLY_SIDE_TAP');
     const noB64 = html.replace(/data:image[^"')]+/g, '');
-    // isolate the E-1 SVG (between the sheet title and the physical schedule).
-    const svg = noB64.slice(noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM'), noB64.indexOf('E-1 PHYSICAL CONDUCTOR'));
+    // isolate the E-1 SVG (from the sheet title to the end of the SLD svg —
+    // post-AAC repair: the physical schedule no longer follows it on E-1).
+    const _svgStart = noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM');
+    const svg = noB64.slice(_svgStart, noB64.indexOf('</svg>', _svgStart) + 6);
     // The defect this gate protects against is a fictitious #12 PHASE conductor
     // (the legacy wireGaugeForOcpd(20A) result) on the branch / shared home-run.
     // BAR §5 (2026-07-25): a #12 EGC is now legitimately printed on the branch

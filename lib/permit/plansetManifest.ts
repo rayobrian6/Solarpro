@@ -18,6 +18,7 @@ import { peekSnapshot } from './snapshot/read';
 import type { PermitReadinessBlocker } from './snapshot/types';
 import { equipmentDatasheetIndexRows } from './sections/datasheetAppendix';
 import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE } from './sections/subSystemSheets';
+import { hasPhysicalSectionSchedule } from './sections/electricalPages';
 import { pv2Title, pv3Title, type SysType } from './utils/helpers';
 import { getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { resolvePlansetProfile, certificationIsCompleted } from './plansetProfile';
@@ -66,6 +67,11 @@ export function computePlansetManifest(
   // the page assembly via roofStructuralHasContinuation so both agree.
   const includePv4cCont = _tocSubs.length <= 1 && roofStructuralHasContinuation(cad.systemType);
 
+  // Post-AAC E-1 repair — PV-4B.1 (canonical physical section schedule) exists
+  // exactly when the snapshot projects sectioned physical objects (micro
+  // topologies). SAME predicate as the page assembly.
+  const includePv4b1 = hasPhysicalSectionSchedule(input, cad);
+
   return buildSheetManifest({
     pv1Title: pv2Title(_tocPrimaryType as SysType),
     pv3Title: pv3Title(_tocPrimaryType as SysType),
@@ -74,6 +80,7 @@ export function computePlansetManifest(
     schedContCount,
     reviewStatusContCount,
     includePv4cCont,
+    includePv4b1,
     includeValidation: includeInternalValidation,
     includeCadAppendix: includeCADAppendixPreview,
     isMicro: _isMicro,

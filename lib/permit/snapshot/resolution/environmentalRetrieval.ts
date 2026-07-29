@@ -446,6 +446,11 @@ export function toEnvironmentalSourceEvidence(
     coversWindSpeed: coversWind,
     coversSnowLoad: coversSnow,
     coversExposureRisk,
+    coversSeismic: rec.returnedValues.seismicSdc != null,
+    seismicSdc: rec.returnedValues.seismicSdc,
+    seismicSs: rec.returnedValues.seismicSs,
+    seismicS1: rec.returnedValues.seismicS1,
+    seismicSiteClass: rec.queryInputs.siteClass,
     windSpeedMph: rec.governing.windSpeedMph,
     groundSnowPsf: rec.governing.groundSnowLoadPsf,
     exposureCategory: rec.exposure.category,
@@ -478,6 +483,13 @@ export function toRegistryClaims(rec: EnvironmentalRetrievalRecord): Record<stri
     environmental: {
       dataset: rec.sourceDocumentOrTool,
       projectApplicability: rec.applicability,
+      // Post-AAC seismic repair — seismic rides the environmental claim bag too
+      // (the `values` bag remains for already-archived rows; the registry
+      // adapter reads both).
+      seismicSdc: rec.returnedValues.seismicSdc,
+      seismicSs: rec.returnedValues.seismicSs,
+      seismicS1: rec.returnedValues.seismicS1,
+      seismicSiteClass: rec.queryInputs.siteClass,
       windSpeedMph: rec.governing.windSpeedMph,
       groundSnowPsf: rec.governing.groundSnowLoadPsf,
       exposureCategory: rec.exposure.category,

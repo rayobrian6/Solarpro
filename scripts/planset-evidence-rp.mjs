@@ -42,16 +42,20 @@ const decode = (s) => String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<').rep
 const includesI = (re) => re.test(html);
 const has = (lit) => html.includes(lit);
 
-// ── page split (INCLUDES the class="page sld-page" E-1 SLD sheet) ─────────────
-const pages = rawHtml.split(/<div class="page(?: sld-page)?"[ >]/).slice(1);
+// ── page split — every `class="page …"` variant (sld-page, cover-compact,
+// cert-compact, …) but never the page-content / page-draw / page-body inner
+// containers. (Harness staleness fixed post-AAC: the old two-variant split
+// missed the compact cover/cert pages, so gate 13 compared 23 rendered pages
+// against a 25-sheet manifest on every run.) ─────────────────────────────────
+const PAGE_SPLIT_RE = /<div class="page(?: [^"]*)?"[ >]/;
+const pages = rawHtml.split(new RegExp(PAGE_SPLIT_RE.source, 'g')).slice(1);
 const sheetIdOf = (p) => (p.match(/tb-sheet-id">\s*([^<]+?)\s*</) ?? [])[1] ?? '?';
 const sheetIds = pages.map(sheetIdOf);
 
-// RS-1 review-status fragment (anchored on its unique footer marker).
-const rs1 = (() => {
-  const parts = rawHtml.split('<div class="page">');
-  return parts.find(p => p.includes('permitReadiness.registry') && p.includes('ACTIVE RELEASE BLOCKERS')) ?? '';
-})();
+// RS-1 review-status fragment(s) — the gate-led RS-1 plus its RS-1.n
+// continuations (RGM §5 paginated the child requirements, so anchoring on ONE
+// page fragment silently dropped every requirement that renders on RS-1.1+).
+const rs1 = pages.filter(p => /tb-sheet-id">\s*RS-1(\.\d+)?\s*</.test(p)).join('\n');
 
 // canonical feeder (mirrors electricalProjection.projectCanonicalFeeder).
 const F = el.feeder || {};
@@ -129,7 +133,10 @@ gate(1, 'no-wired-in-series-on-micro-branch',
 // The affirmative defect literal was "route field-verified". Honest pending
 // phrasing ("to be field-verified", "field-verify …") is allowed.
 // ═══════════════════════════════════════════════════════════════════════════
-const routeFV = (html.match(/route[^<.]{0,40}field-?verified/gi) || []);
+// (post-AAC staleness fix: the honest NEGATIVE phrasing "… (not field-verified"
+// / "never field-verified" is not an affirmative claim — exclude it.)
+const routeFV = (html.match(/route[^<.]{0,40}field-?verified/gi) || [])
+  .filter(m => !/\b(not|never|un)[ -]?field-?verified/i.test(m) && !/to be field-?verified/i.test(m));
 gate(2, 'no-field-verified-without-record', routeFV.length === 0,
   `affirmative "route … field-verified" occurrences=${routeFV.length}`, routeFV.slice(0, 3));
 
@@ -296,7 +303,9 @@ gate(13, 'no-unnumbered-overflow-pages',
 // GATE 14 — blocker-registry completeness: EVERY active registry blocker is
 // rendered on RS-1.
 // ═══════════════════════════════════════════════════════════════════════════
-const rs1Present = rs1.length > 0 && rs1.includes('ACTIVE RELEASE BLOCKERS');
+// (post-AAC staleness fix: RGM §5 re-led RS-1 with the ROOT-GATE table — the
+// old 'ACTIVE RELEASE BLOCKERS' heading moved; accept either vocabulary.)
+const rs1Present = rs1.length > 0 && (/RELEASE GATES?/i.test(rs1) || rs1.includes('ACTIVE RELEASE BLOCKERS'));
 const missingOnRs1 = registryCodes.filter(c => !rs1.includes(c));
 gate(14, 'every-active-blocker-on-RS-1',
   rs1Present && registryCodes.length > 0 && missingOnRs1.length === 0,

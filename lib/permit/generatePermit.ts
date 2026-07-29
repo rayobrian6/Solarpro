@@ -41,7 +41,7 @@ import { pageCoverSheet } from './sections/coverSheet';
 import { pageReviewStatus, reviewStatusContPageCount } from './sections/reviewStatus';
 import { pageArrayPrimary, pageArrayGeometry, pageGroundArrayPlan, pageFencePlan } from './sections/arrayPages';
 import { pageStructuralPrimary, pageStructural, pageStructuralRoofContinuation, roofStructuralHasContinuation, pageEquipmentSchedule, pageEquipmentScheduleCont, schedContPageCount, pageRoofStructural, pageGroundStructural, pageFenceStructural } from './sections/structuralPages';
-import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
+import { pageNECCompliance, pageConductorSchedule, pageConductorScheduleCont, hasPhysicalSectionSchedule, pageSingleLineDiagram } from './sections/electricalPages';
 import { pageWarningLabels, pageDisconnectDirectory, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter, pagePELetterRoof, pagePELetterGround, pagePELetterFence } from './sections/certPages';
 import {
@@ -50,7 +50,8 @@ import {
   type HybridSectionRef,
 } from './sections/subSystemSheets';
 import { hybridSheetId } from './sheetManifest';
-import { resolvePlansetProfile, certificationIsCompleted } from './plansetProfile';
+import { resolvePlansetProfile, certificationIsCompleted, isCompactProfile } from './plansetProfile';
+import { resolveSeismicAuthority } from './snapshot/environmentalAuthority';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
 import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
@@ -397,10 +398,40 @@ export function generatePermitHTML(
     canonical.site.groundSnowLoad = _authSnow;
     input.project.groundSnowPsf = _authSnow;
   }
-  const _authSdc = snapshotAuthority?.environmentalRetrieval?.returnedValues.seismicSdc ?? null;
-  if (_authSdc && canonical.site.seismicSDC !== _authSdc) {
-    canonical.site.seismicSDC = _authSdc;
-    input.project.seismicCategory = _authSdc;
+  // ── Post-AAC seismic repair — THE canonical resolved seismic result ────────
+  // One resolution (resolveSeismicAuthority): the retrieval record wins, then
+  // the VERIFIED archived climate-hazard document's seismic claims (the
+  // regeneration path — the archived-document deferral produces no retrieval
+  // record, which is exactly how the cover kept printing the stale 'B' while
+  // the closure report said 'D'). When established, EVERY downstream surface
+  // (canonical → structural engine, project.seismicCategory → cover,
+  // compliance.structural.seismic.sdc → CERT/PE-1) is stamped with the SAME
+  // value, and the result rides the input for evidence tagging. When NOT
+  // established nothing is substituted — the sheets print the pending state.
+  {
+    const _envRet = snapshotAuthority?.environmentalRetrieval ?? null;
+    const _seis = resolveSeismicAuthority({
+      retrievalSeismic: _envRet ? {
+        seismicSdc: _envRet.returnedValues.seismicSdc,
+        seismicSs: _envRet.returnedValues.seismicSs,
+        seismicS1: _envRet.returnedValues.seismicS1,
+        siteClass: _envRet.queryInputs.siteClass,
+        sourceHash: _envRet.sourceHash,
+      } : null,
+      sourceEvidence: _envSrc,
+    });
+    (input as unknown as Record<string, unknown>)._seismicAuthority = _seis;
+    if (_seis.established && _seis.sdc) {
+      if (canonical.site.seismicSDC !== _seis.sdc) {
+        console.log('[CANONICAL] Seismic design category from the', _seis.source, 'authority:',
+          canonical.site.seismicSDC, '→', _seis.sdc, `(${_seis.sourceRef})`);
+      }
+      canonical.site.seismicSDC = _seis.sdc;
+      input.project.seismicCategory = _seis.sdc;
+      if (input.compliance?.structural?.seismic) {
+        input.compliance.structural.seismic.sdc = _seis.sdc;
+      }
+    }
   }
 
   // ── Build layout dimensions from CAD (REQUIRED before validation gate) ──────────
@@ -1299,15 +1330,20 @@ export function generatePermitHTML(
   // so page count == sheet index under BOTH profiles.
   const _profile = resolvePlansetProfile(input);
   const _permitProfile = _profile === 'permit';
+  const _designReview = _profile === 'design-review';
+  // Post-AAC profile contract: 'permit' and 'design-review' share the compact
+  // drawing-set composition; they differ only in the certification tail (the
+  // design-review package ENDS on PE-1 in its current pending state).
+  const _compact = isCompactProfile(_profile);
   const _certDone = certificationIsCompleted(input);
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
-    ...(_permitProfile ? [] : [(n: number, t: number) => pageReviewStatus(input, cad, n, t)]),  // RS-1: Review status — root gate table + child requirements (RGM §5)
+    ...(_compact ? [] : [(n: number, t: number) => pageReviewStatus(input, cad, n, t)]),  // RS-1: Review status — root gate table + child requirements (RGM §5)
     // RGM §5: RS-1.1 … RS-1.n — formal continuations of the review-status
     // registry. The count comes from the SAME layout function the sheet manifest
     // uses (reviewStatusContPageCount over the snapshot registry), so the cover
     // index and the rendered page set can never disagree.
-    ...(_permitProfile ? [] : Array.from({ length: _rsContCount }, (_unused, ci) =>
+    ...(_compact ? [] : Array.from({ length: _rsContCount }, (_unused, ci) =>
       (n: number, t: number) => pageReviewStatus(input, cad, n, t, ci))),
     // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
     // the roof/array drawing now carries the integrated site context (parcel,
@@ -1340,35 +1376,57 @@ export function generatePermitHTML(
     (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD — the electrical section's key sheet, first
     (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
     (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
-    // PV-5: Labels (system-aware). WS-10 permit profile: PV-6's plaque composes
+    // PV-4B.1 — the canonical physical section schedule + full ampacity chain +
+    // open-air grounding note (post-AAC E-1 repair: these render ONCE, on the
+    // conductor-schedule family, never under the E-1 diagram). Micro topologies
+    // only — mirrors computePlansetManifest's includePv4b1 exactly.
+    ...(hasPhysicalSectionSchedule(input, cad)
+      ? [(n: number, t: number) => pageConductorScheduleCont(input, cad, n, t)] : []),
+    // PV-5: Labels (system-aware). WS-10 compact profiles: PV-6's plaque composes
     // onto this ONE sheet (see pageWarningLabels `merged`).
-    (n, t) => pageWarningLabels(input, cad, n, t, _permitProfile ? { merged: true } : undefined),
-    ...(_permitProfile ? [] : [(n: number, t: number) => pageDisconnectDirectory(input, cad, n, t)]),  // PV-6: Disconnect directory + emergency placard (system-aware)
+    (n, t) => pageWarningLabels(input, cad, n, t, _compact ? { merged: true } : undefined),
+    ...(_compact ? [] : [(n: number, t: number) => pageDisconnectDirectory(input, cad, n, t)]),  // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
-    ...(_permitProfile ? [] : Array.from({ length: _schedContCount }, (_unused, ci) =>
+    ...(_compact ? [] : Array.from({ length: _schedContCount }, (_unused, ci) =>
       (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci))),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
-    ...(_permitProfile ? [] : [(n: number, t: number) => pageSpecSheetReference(input, cad, n, t)]),   // APP-A (all)
+    ...(_compact ? [] : [(n: number, t: number) => pageSpecSheetReference(input, cad, n, t)]),   // APP-A (all)
     // DS-n (FULL profile): full-page REAL manufacturer datasheets, inline after
-    // APP-A exactly as before. The permit profile emits them at the END as the
+    // APP-A exactly as before. The compact profiles emit them at the END as the
     // manufacturer attachment appendix (below).
-    ...(_permitProfile ? [] : equipmentDatasheetPageFns(input, cad)),
-    // CERT / PE-1 — the certification sheets. WS-10: the permit profile carries
-    // them ONLY when a digest-bound approval covering this snapshot exists; an
-    // unsigned placeholder is an internal status page, not a permit document,
-    // and the requirement it represents stays in the registry either way.
-    ...(_permitProfile && !_certDone ? [] : [
+    ...(_compact ? [] : equipmentDatasheetPageFns(input, cad)),
+    // CERT / PE-1 — the certification sheets. WS-10 + post-AAC profile contract:
+    //   full          — always, in their CURRENT state (unsigned placeholder incl.);
+    //   permit        — ONLY when a digest-bound approval covers this snapshot; an
+    //                   unsigned placeholder must never ride a submission package;
+    //   design-review — NOT here: PE-1 is appended as the FINAL sheet (below).
+    // The requirement the placeholder represents stays in the registry either way.
+    ...((!_compact || (_permitProfile && _certDone)) ? [
       (n: number, t: number) => pageEngineerCert(input, cad, n, t),    // CERT (all)
       (n: number, t: number) => (_w5Hybrid
         ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
         : pagePELetter(input, cad, n, t)),                             // PE-1 (hybrid = primary sub letter, subset params)
       ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))), // PE-1G / PE-1F
-    ]),
-    ...(includeInternalValidation && !_permitProfile ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
-    // ── MANUFACTURER ATTACHMENT APPENDIX (permit profile) ────────────────────
+    ] : []),
+    ...(includeInternalValidation && !_compact ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
+    // ── MANUFACTURER ATTACHMENT APPENDIX (compact profiles) ──────────────────
     // The DS-n manufacturer pages follow the drawing set as an appendix — the
     // manifest tags them section:'appendix' so the cover indexes them under
     // their own heading rather than numbering them as drawing sheets.
-    ...(_permitProfile ? equipmentDatasheetPageFns(input, cad) : []),
+    ...(_compact ? equipmentDatasheetPageFns(input, cad) : []),
+    // ── DESIGN_REVIEW certification tail ─────────────────────────────────────
+    // PE-1 is the FINAL engineer-review sheet of the design-review package — the
+    // set ends on the review document. It renders in its CURRENT state: unsigned,
+    // PENDING ENGINEERING REVIEW, no certification asserted, digest-bound, and
+    // marked NOT FOR PERMIT SUBMISSION. CERT joins only once a digest-bound
+    // approval exists (certPages verifies the digest itself — nothing here can
+    // invent an approval).
+    ...(_designReview ? [
+      ...(_certDone ? [(n: number, t: number) => pageEngineerCert(input, cad, n, t)] : []),
+      (n: number, t: number) => (_w5Hybrid
+        ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
+        : pagePELetter(input, cad, n, t)),
+      ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))),
+    ] : []),
   ];
   const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);
   const pages = pageFns.map((f, i) => f(i + 1, TOTAL));
@@ -2333,15 +2391,23 @@ export function generatePermitHTML(
   .cv0-key { width: 110px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
 
   /* ── SLD page ───────────────────────────────────────────────────────────── */
-  /* .sld-page replaces .page's padding wholesale, which USED to be harmless when the
-     sheet held only the centred SLD svg. E-1 now also carries the physical
-     conductor/raceway schedule, the shared-raceway ampacity chain and the open-air
-     grounding note, and those ran the full 17in — sliding 1.7in UNDER the title-block
-     strip, where the COMPLIANCE column became unreadable. Reserve the same right
-     strip .page does. The diagram is object-fit contain, so it simply scales to the
-     narrower drawing area instead of hiding behind the title block. */
+  /* Post-AAC E-1 repair. E-1 is the dedicated SLD sheet again (the physical
+     schedule / ampacity chain / grounding note render once on PV-4B.1), so the
+     page is a deterministic drawing viewport:
+       - .sld-page keeps .page's flex column and reserves the same 1.72in
+         title-block strip on the right;
+       - .sld-wrap is the drawing box — flex:1 + min-height:0 means it is ALWAYS
+         exactly the remaining page height (never a flex-shrunk strip, never
+         derived from the SVG's own attributes);
+       - the SVG fills the box via width/height:100%; its viewBox +
+         preserveAspectRatio="xMidYMid meet" keep the whole bounding box inside
+         the wrapper with aspect preserved — nothing is cropped or distorted.
+     The old rules sized the SVG by max-height while its WRAPPER stayed
+     flex-shrinkable: siblings grew, the wrapper shrank to ~267px, the ~993px
+     SVG centered inside it and overflow:hidden severed the diagram. */
   .sld-page { padding: var(--xl) calc(var(--xl) + 1.72in) var(--xl) var(--xl); height: 11in; }
-  .sld-page svg { max-width: 100%; max-height: calc(11in - 0.9in); object-fit: contain; }
+  .sld-wrap { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .sld-wrap svg { width: 100%; height: 100%; display: block; }
 
   /* ── Two-column layout helper (legacy) ──────────────────────────────────── */
   .two-col-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-section); width: 100%; overflow: hidden; }

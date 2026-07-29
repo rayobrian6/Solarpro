@@ -85,6 +85,22 @@ const SW_THIN   = 1.0;
 // Change once here — propagates everywhere.
 const LABEL_OFFSET_ABOVE = 8;   // px: wire label sits N px above the line
 const LABEL_OFFSET_BELOW = 11;  // px: wire label sits N px below the line
+
+/** Post-AAC E-1 repair — wrap a legend label at word boundaries so data-driven
+ *  wiring-method names stay inside the fixed legend box (and inside the
+ *  embedded viewBox crop). ~40 chars ≈ the 140px text run at F.tiny. */
+function wrapLegendLabel(label: string, maxChars = 40): string[] {
+  if (label.length <= maxChars) return [label];
+  const words = label.split(' ');
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    if (cur && (cur.length + 1 + w.length) > maxChars) { lines.push(cur); cur = w; }
+    else cur = cur ? `${cur} ${w}` : w;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
 const EQP_LABEL_ABOVE    = 15;  // px: equipment header above top edge
 const EQP_LABEL_BELOW    = 9;   // px: equipment info below bottom edge
 const SW_HAIR   = 0.5;
@@ -189,6 +205,14 @@ export interface SLDProfessionalInput {
    *  right next to the sheet's title block on E-1) and crop the viewBox to
    *  the diagram. Standalone Diagram-tab renders keep the panel. */
   suppressTitleBlock?:     boolean;
+  /** Post-AAC E-1 repair: the in-SVG CONDUIT & CONDUCTOR SCHEDULE band re-derives
+   *  the same canonical physical sections the planset renders as an HTML schedule
+   *  (now on PV-4B.1) — two derivations of one authority is the drift class the
+   *  snapshot campaign kills, and the band forced a 1.15:1 canvas that could not
+   *  fit E-1's landscape drawing box without clipping. When set, the band is not
+   *  emitted and the viewBox is cropped to close below the calc panels. The
+   *  standalone Diagram tab keeps the band (it has no companion schedule sheet). */
+  suppressScheduleBand?:   boolean;
   projectName:             string;
   clientName:              string;
   address:                 string;
@@ -1779,11 +1803,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── SVG root ──────────────────────────────────────────────────────────────
   // Embedded mode crops the viewBox at the title-block column so the diagram
-  // fills the sheet instead of reserving a blank right margin.
+  // fills the sheet instead of reserving a blank right margin. With the schedule
+  // band suppressed the canvas is also cropped VERTICALLY to close just below
+  // the calc panels — the blank band would otherwise force letterboxing that
+  // shrinks the schematic inside E-1's drawing wrapper.
   const effW = input.suppressTitleBlock ? TB_X - 10 : W;
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${H}" viewBox="0 0 ${effW} ${H}" style="background:${WHT};">`);
-  parts.push(rect(0, 0, effW, H, {fill:WHT, stroke:WHT, sw:0}));
-  parts.push(rect(MAR/2, MAR/2, effW-MAR, H-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
+  const effH = input.suppressScheduleBand ? CALC_Y + CALC_H + MAR : H;
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${effW}" height="${effH}" viewBox="0 0 ${effW} ${effH}" preserveAspectRatio="xMidYMid meet" style="background:${WHT};">`);
+  parts.push(rect(0, 0, effW, effH, {fill:WHT, stroke:WHT, sw:0}));
+  parts.push(rect(MAR/2, MAR/2, effW-MAR, effH-MAR, {fill:WHT, stroke:BLK, sw:SW_BORDER}));
 
   // ── Title ─────────────────────────────────────────────────────────────────
   const tcx = (DX + TB_X) / 2;
@@ -2594,6 +2622,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const _openAirLabel = isMicro
     ? `Open Air — ${input.openAirBranchWiringLabel ?? 'AC Trunk Cable (TC-ER)'} AC Branch (NEC 690.31(C))`
     : 'Open Air — PV Wire/THWN-2 (NEC 690.31)';
+  // Post-AAC E-1 repair — long DATA-DRIVEN labels (the listed open-air wiring
+  // method) overflowed the fixed 188px legend box and ran past the embedded
+  // viewBox crop, where the clip harness now (correctly) fails them as cropped
+  // drawing content. Long labels WRAP onto continuation lines inside the box.
   const legEntries: {dash: string; stroke: string; label: string}[] = [
     {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
     {dash:'10,5',stroke:GRN,       label:_openAirLabel},
@@ -2607,15 +2639,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#2E7D32', label:'Generator Output Conductor'}] : []),
     ...((input.generatorKw ?? 0) > 0 ? [{dash:'', stroke:'#E65100', label:'ATS Transfer Conductor'}] : []),
   ];
-  const legH = 16 + legEntries.length * 11;
+  const legRows = legEntries.flatMap(e =>
+    wrapLegendLabel(e.label).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
+  const legH = 16 + legRows.length * 11;
   const legX = SCH_X+SCH_W-195, legY = SCH_Y+SCH_H - legH - 4;
   parts.push(rect(legX, legY, 188, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(legX+4, legY+10, 'LEGEND', {sz:F.sub, bold:true}));
   parts.push(ln(legX, legY+13, legX+188, legY+13, {sw:SW_THIN}));
-  legEntries.forEach((item,i) => {
+  legRows.forEach((item,i) => {
     const ly = legY+19+i*11;
-    parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
-    parts.push(txt(legX+44, ly+3, item.label, {sz:F.tiny}));
+    if (!item.cont) parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
+    parts.push(txt(legX+44, ly+3, item.text, {sz:F.tiny}));
   });
 
   // ── CALCULATION PANELS ────────────────────────────────────────────────────
@@ -2833,6 +2867,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   });
 
   // ── CONDUIT & CONDUCTOR SCHEDULE ──────────────────────────────────────────
+  // Suppressed in embedded planset mode — the canonical physical section
+  // schedule renders ONCE, as the PV-4B.1 HTML schedule (same objects, one
+  // derivation). See suppressScheduleBand on the input type.
+  if (!input.suppressScheduleBand) {
   parts.push(rect(DX, SCHED_Y, DW, SCHED_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(rect(DX, SCHED_Y, DW, 14, {fill:BLK, sw:0}));
   parts.push(txt(DX+6, SCHED_Y+10, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9 TABLE 1', {sz:F.hdr, bold:true, fill:WHT}));
@@ -2958,6 +2996,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       cx3 += cw3;
     });
   });
+  } // end !suppressScheduleBand
 
   // ── TITLE BLOCK ───────────────────────────────────────────────────────────
   // Build badge stays even in embedded mode — invisible deployment telemetry.
@@ -3899,15 +3938,19 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       ? [{dash:'4,2', stroke:BLK, label:'DC Conductor in Conduit (USE-2/PV Wire)'}] : []),
     ...(input.hasBattery ? [{dash:'6,3', stroke:'#1565C0', label:'Battery AC-Coupled Connection'}] : []),
   ];
-  const legH = 16 + legEntries.length * 11;
+  // Post-AAC E-1 repair — long data-driven labels wrap inside the box (see the
+  // single-lane legend note).
+  const legRows = legEntries.flatMap(e =>
+    wrapLegendLabel(e.label).map((text, i) => ({ dash: e.dash, stroke: e.stroke, text, cont: i > 0 })));
+  const legH = 16 + legRows.length * 11;
   const legX = SCH_X+SCH_W-195, legY = SCH_Y+SCH_H - legH - 4;
   parts.push(rect(legX, legY, 188, legH, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(legX+4, legY+10, 'LEGEND', {sz:F.sub, bold:true}));
   parts.push(ln(legX, legY+13, legX+188, legY+13, {sw:SW_THIN}));
-  legEntries.forEach((item,i) => {
+  legRows.forEach((item,i) => {
     const ly = legY+19+i*11;
-    parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
-    parts.push(txt(legX+44, ly+3, item.label, {sz:F.tiny}));
+    if (!item.cont) parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
+    parts.push(txt(legX+44, ly+3, item.text, {sz:F.tiny}));
   });
 
   // ═══ BOTTOM CALC BAND — reference-planset table suite ═════════════════════

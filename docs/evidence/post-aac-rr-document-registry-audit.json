@@ -1,0 +1,838 @@
+{
+  "generatedAt": "2026-07-29T03:28:41.925Z",
+  "readOnly": true,
+  "projects_columns": [
+    {
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "user_id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "name",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "data_json",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "status",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "system_type",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "last_opened_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "deleted_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "notes",
+      "data_type": "text"
+    },
+    {
+      "column_name": "system_size_kw",
+      "data_type": "double precision"
+    },
+    {
+      "column_name": "client_id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "address",
+      "data_type": "text"
+    },
+    {
+      "column_name": "lat",
+      "data_type": "double precision"
+    },
+    {
+      "column_name": "lng",
+      "data_type": "double precision"
+    },
+    {
+      "column_name": "bill_data",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "engineering_seed",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "no_itc",
+      "data_type": "boolean"
+    },
+    {
+      "column_name": "canonical_snapshot",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "project_status",
+      "data_type": "text"
+    },
+    {
+      "column_name": "contract_signed_at",
+      "data_type": "timestamp without time zone"
+    },
+    {
+      "column_name": "install_date",
+      "data_type": "date"
+    },
+    {
+      "column_name": "estimated_completion",
+      "data_type": "date"
+    },
+    {
+      "column_name": "actual_completion",
+      "data_type": "date"
+    },
+    {
+      "column_name": "crew_assigned",
+      "data_type": "text"
+    },
+    {
+      "column_name": "labor_hours",
+      "data_type": "numeric"
+    },
+    {
+      "column_name": "labor_cost",
+      "data_type": "numeric"
+    },
+    {
+      "column_name": "material_cost",
+      "data_type": "numeric"
+    },
+    {
+      "column_name": "contract_value",
+      "data_type": "numeric"
+    },
+    {
+      "column_name": "estimated_margin",
+      "data_type": "numeric"
+    },
+    {
+      "column_name": "survey_external_id",
+      "data_type": "text"
+    },
+    {
+      "column_name": "origin",
+      "data_type": "text"
+    },
+    {
+      "column_name": "survey_category",
+      "data_type": "text"
+    },
+    {
+      "column_name": "survey_meta",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "survey_triage_reason",
+      "data_type": "text"
+    },
+    {
+      "column_name": "engineering_config",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "engineering_updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "homeowner_stage",
+      "data_type": "text"
+    },
+    {
+      "column_name": "control_mode",
+      "data_type": "text"
+    },
+    {
+      "column_name": "system_config_locks",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "monitoring_platform",
+      "data_type": "text"
+    },
+    {
+      "column_name": "monitoring_url",
+      "data_type": "text"
+    },
+    {
+      "column_name": "selected_equipment",
+      "data_type": "jsonb"
+    }
+  ],
+  "braidon_projects": [
+    {
+      "id": "4030b664-bebe-433b-a11c-cda05ead2f7d",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-05-17T19:09:41.782Z",
+      "updated_at": "2026-07-29T00:35:21.458Z",
+      "status": "design",
+      "client_id": "4da01700-4b1c-4c4d-b785-993f9d204cd7"
+    },
+    {
+      "id": "15b7045d-4c81-4891-9d4c-22bfd5e54234",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-05-16T19:08:14.199Z",
+      "updated_at": "2026-05-17T18:45:29.102Z",
+      "status": "proposal",
+      "client_id": "bd8fb7bb-14f1-4156-91bf-a724bc473f3a"
+    },
+    {
+      "id": "6c9abd6d-5219-43a0-9fb8-624c25b7088c",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-04-30T22:35:58.081Z",
+      "updated_at": "2026-05-17T18:45:22.970Z",
+      "status": "proposal",
+      "client_id": "bece8737-658c-4673-8904-66df47b8c4bb"
+    },
+    {
+      "id": "aaba2bf4-fc50-4dbd-a69d-e97a1bef834c",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-04-18T19:44:12.469Z",
+      "updated_at": "2026-04-30T21:51:59.643Z",
+      "status": "proposal",
+      "client_id": "248e7310-23c7-4c64-8101-8ed6189f2a72"
+    },
+    {
+      "id": "3a2e1016-4ca5-4aa0-9a29-d0f549b5ebf8",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-04-03T02:26:12.613Z",
+      "updated_at": "2026-04-17T13:29:43.098Z",
+      "status": "approved",
+      "client_id": "987e0f82-0773-4ef4-8d08-403687c7d6dd"
+    },
+    {
+      "id": "684be481-c6db-4135-9574-f19d37ebeced",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-04-03T02:24:38.874Z",
+      "updated_at": "2026-04-03T02:25:53.871Z",
+      "status": "lead",
+      "client_id": "4d5a2410-5821-4736-83a7-1f23f7e45881"
+    },
+    {
+      "id": "311856bf-9082-423c-8e5f-01e1ac1c3283",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-03-23T18:53:26.674Z",
+      "updated_at": "2026-03-24T21:40:01.213Z",
+      "status": "proposal",
+      "client_id": "31b9dd41-5131-4daf-85b7-ea24c6a0e66c"
+    },
+    {
+      "id": "eb05cf11-d21f-4838-9b64-d67309175e70",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-03-23T23:47:54.525Z",
+      "updated_at": "2026-03-24T21:39:56.284Z",
+      "status": "proposal",
+      "client_id": "1628815d-5dcc-4a8e-bb4a-370981660662"
+    },
+    {
+      "id": "6d865b5a-05bb-4dd9-9528-3033e2efe06b",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-03-22T05:53:47.602Z",
+      "updated_at": "2026-03-23T18:51:41.334Z",
+      "status": "design",
+      "client_id": "17548140-781a-4a02-acec-2c7c59b9bb23"
+    },
+    {
+      "id": "80450c08-9ba5-4aed-8ada-5ba76b6e3a45",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-03-22T01:23:03.606Z",
+      "updated_at": "2026-03-22T13:51:22.098Z",
+      "status": "proposal",
+      "client_id": "7344efe0-df10-452c-b432-0a55bc9d7ed4"
+    },
+    {
+      "id": "afc16e89-fc6d-49e7-9189-c46b024fefb4",
+      "name": "BRAIDON M PILLA — Solar 2026",
+      "created_at": "2026-03-21T23:53:52.661Z",
+      "updated_at": "2026-03-22T13:51:19.891Z",
+      "status": "proposal",
+      "client_id": "c07a5c0e-6b74-4225-a6de-437fea0c2a8e"
+    },
+    {
+      "id": "25f4a17a-b06f-4c61-a9a9-6d81e263646b",
+      "name": "BRAIDON M PILLA — Solar",
+      "created_at": "2026-03-22T00:35:27.724Z",
+      "updated_at": "2026-03-22T00:48:49.786Z",
+      "status": "design",
+      "client_id": "fd6b68e0-400c-4163-aa88-fc84bfdfd78f"
+    },
+    {
+      "id": "8bd20b5e-5169-4174-89f3-5ff297e27f4a",
+      "name": "BRAIDON M PILLA — Solar 2026",
+      "created_at": "2026-03-21T23:56:20.669Z",
+      "updated_at": "2026-03-22T00:05:00.608Z",
+      "status": "proposal",
+      "client_id": "439c1dc0-19b0-48af-b8ec-0e2b52e667f6"
+    },
+    {
+      "id": "e30e29e8-e706-4653-b9ea-c33742ea8deb",
+      "name": "BRAIDON M PILLA — Solar 2026",
+      "created_at": "2026-03-21T23:42:14.331Z",
+      "updated_at": "2026-03-21T23:45:54.685Z",
+      "status": "proposal",
+      "client_id": "6bcf6d0b-1720-4dee-ae05-40e38a505ef8"
+    },
+    {
+      "id": "83cfe268-1436-4b6d-b95f-54bd51ad737e",
+      "name": "BRAIDON M PILLA — Solar 2026",
+      "created_at": "2026-03-21T23:33:49.102Z",
+      "updated_at": "2026-03-21T23:40:15.321Z",
+      "status": "proposal",
+      "client_id": "568d463b-bba1-4f9d-823b-680329b92c97"
+    },
+    {
+      "id": "61a45bca-f457-4c91-9077-735da925c7f8",
+      "name": "BRAIDON M PILLA — Solar 2026",
+      "created_at": "2026-03-21T23:15:58.391Z",
+      "updated_at": "2026-03-21T23:33:22.126Z",
+      "status": "proposal",
+      "client_id": "2a3c6698-b1e3-4ba4-9fb4-dffb30eb87e0"
+    }
+  ],
+  "manufacturer_document_registry": {
+    "exists": true,
+    "columns": [
+      {
+        "column_name": "id",
+        "data_type": "text"
+      },
+      {
+        "column_name": "document_class",
+        "data_type": "text"
+      },
+      {
+        "column_name": "manufacturer_or_issuer",
+        "data_type": "text"
+      },
+      {
+        "column_name": "equipment_id",
+        "data_type": "text"
+      },
+      {
+        "column_name": "equipment_model_applicability",
+        "data_type": "text"
+      },
+      {
+        "column_name": "title",
+        "data_type": "text"
+      },
+      {
+        "column_name": "revision",
+        "data_type": "text"
+      },
+      {
+        "column_name": "document_date",
+        "data_type": "text"
+      },
+      {
+        "column_name": "archived_file_identity",
+        "data_type": "text"
+      },
+      {
+        "column_name": "archived_in_repo",
+        "data_type": "boolean"
+      },
+      {
+        "column_name": "sha256",
+        "data_type": "text"
+      },
+      {
+        "column_name": "source",
+        "data_type": "text"
+      },
+      {
+        "column_name": "jurisdiction_boundary",
+        "data_type": "text"
+      },
+      {
+        "column_name": "applicability_notes",
+        "data_type": "text"
+      },
+      {
+        "column_name": "status",
+        "data_type": "text"
+      },
+      {
+        "column_name": "supersedes_id",
+        "data_type": "text"
+      },
+      {
+        "column_name": "superseded_by_id",
+        "data_type": "text"
+      },
+      {
+        "column_name": "extracted_claims",
+        "data_type": "text"
+      },
+      {
+        "column_name": "verification_state",
+        "data_type": "text"
+      },
+      {
+        "column_name": "reviewer",
+        "data_type": "text"
+      },
+      {
+        "column_name": "verified_by",
+        "data_type": "text"
+      },
+      {
+        "column_name": "verified_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "verification_notes",
+        "data_type": "text"
+      },
+      {
+        "column_name": "created_by",
+        "data_type": "text"
+      },
+      {
+        "column_name": "created_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "updated_at",
+        "data_type": "timestamp with time zone"
+      }
+    ],
+    "rooftech_or_sha_rows": [
+      {
+        "id": "cedb14f7-917a-539b-a68a-f08f08b64d13",
+        "document_class": "climate_hazard_dataset",
+        "manufacturer_or_issuer": "ASCE 7 Hazard Tool datasets (gis.asce.org) + USGS ASCE 7 design maps + USGS 3DEP",
+        "equipment_id": null,
+        "equipment_model_applicability": "City of Granite City Building & Zoning — 3 MELVIN DR, GRANITE CITY, IL, 62040 — lat 38.7061678, lng -90.0461651",
+        "title": "ASCE 7-22 hazard datasets, Risk Category II (700-yr MRI wind) — 3 MELVIN DR, GRANITE CITY, IL, 62040",
+        "revision": "ASCE 7-22",
+        "document_date": "2026-07-28",
+        "archived_file_identity": "snapshot:resolutionAuthority.environmentalRetrieval#cedb14f7917ad39b",
+        "archived_in_repo": true,
+        "sha256": "cedb14f7917ad39b068af08f08b64d135eb84967e222d6c8d81670ed70ee8866",
+        "source": "https://gis.asce.org/arcgis/rest/services/ASCE722/w2022_mri700/ImageServer · https://gis.asce.org/arcgis/rest/services/ASCE722/s2022_RiskCategory2/ImageServer · https://earthquake.usgs.gov/ws/designmaps/asce7-22.json?latitude=38.7061678&longitude=-90.0461651&riskCategory=II&siteClass=D&title=solarpro-permit · https://epqs.nationalmap.gov/v1/json?x=-90.0461651&y=38.7061678&units=Feet&wkid=4326&includeDate=false",
+        "jurisdiction_boundary": "City of Granite City Building & Zoning",
+        "applicability_notes": "City of Granite City Building & Zoning — 3 MELVIN DR, GRANITE CITY, IL, 62040 — lat 38.7061678, lng -90.0461651",
+        "status": "current",
+        "supersedes_id": null,
+        "superseded_by_id": null,
+        "extracted_claims": "{\"values\":{\"windMriYears\":700,\"seismicSdc\":\"D\",\"seismicSs\":0.61,\"seismicS1\":0.18,\"elevationFt\":411.96208680155274,\"siteClass\":\"D\",\"datasets\":[{\"label\":\"basic wind speed V (700-yr MRI, Risk Category II)\",\"value\":107.533,\"unit\":\"mph\",\"sourceUrl\":\"https://gis.asce.org/arcgis/rest/services/ASCE722/w2022_mri700/ImageServer\",\"dataset\":\"ASCE 7-22 basic wind speed raster (w2022_mri700)\"},{\"label\":\"ground snow load pg (Risk Category II)\",\"value\":23.2836,\"unit\":\"psf\",\"sourceUrl\":\"https://gis.asce.org/arcgis/rest/services/ASCE722/s2022_RiskCategory2/ImageServer\",\"dataset\":\"ASCE 7-22 ground snow load raster (s2022_RiskCategory2)\"},{\"label\":\"seismic Ss / S1 / SDS / SD1 / SDC (site class D)\",\"value\":\"D\",\"unit\":\"SDC\",\"sourceUrl\":\"https://earthquake.usgs.gov/ws/designmaps/asce7-22.json?latitude=38.7061678&longitude=-90.0461651&riskCategory=II&siteClass=D&title=solarpro-permit\",\"dataset\":\"USGS ASCE 7-22 design maps web service\"},{\"label\":\"site elevation\",\"value\":411.96208680155274,\"unit\":\"ft\",\"sourceUrl\":\"https://epqs.nationalmap.gov/v1/json?x=-90.0461651&y=38.7061678&units=Feet&wkid=4326&includeDate=false\",\"dataset\":\"USGS 3DEP Elevation Point Query Service\"}],\"riskCategoryBasis\":\"ASCE 7 Table 1.5-1 — Risk Category II is the code's own classification for all buildings and other structures not listed in Risk Categories I, III or IV; this project is not so listed. Overridable.\",\"exposureBasis\":\"ASCE 7 §26.7 surface-roughness / exposure category — a site-terrain determination made by the designer. No hazard dataset (including the ASCE 7 Hazard Tool) publishes it, so it is recorded here as a designer input with its own basis and audited alongside the retrieved values.\",\"currencyBasis\":\"LIVE read of the authoritative hazard services at 2026-07-28T16:41:17.752Z — the source is current at the instant it was read, so the retrieval timestamp IS the currency confirmation (no archived-document staleness gap exists).\",\"proof\":\"live-retrieval\"},\"environmental\":{\"dataset\":\"ASCE 7-22 hazard datasets, Risk Category II (700-yr MRI wind)\",\"projectApplicability\":\"City of Granite City Building & Zoning — 3 MELVIN DR, GRANITE CITY, IL, 62040 — lat 38.7061678, lng -90.0461651\",\"windSpeedMph\":107.533,\"groundSnowPsf\":23.284,\"exposureCategory\":\"C\",\"riskCategory\":\"II\",\"lat\":38.7061678,\"lng\":-90.0461651,\"addressUsed\":\"3 MELVIN DR, GRANITE CITY, IL, 62040\",\"lookupTimestampIso\":\"2026-07-28T16:41:17.752Z\",\"currencyConfirmedAtIso\":\"2026-07-28T16:41:17.752Z\",\"coversWindSpeed\":true,\"coversSnowLoad\":true,\"coversExposureRisk\":true}}",
+        "verification_state": "verified",
+        "reviewer": "environmental-load-authority@v1",
+        "verified_by": null,
+        "verified_at": null,
+        "verification_notes": null,
+        "created_by": "environmental-load-authority@v1",
+        "created_at": "2026-07-28T16:41:26.026Z",
+        "updated_at": "2026-07-28T16:41:26.026Z"
+      },
+      {
+        "id": "doc-rooftech-rtmini-install-manual-2f6035586e94",
+        "document_class": "racking_installation_manual",
+        "manufacturer_or_issuer": "Roof Tech, Inc.",
+        "equipment_id": "rooftech-mini",
+        "equipment_model_applicability": "RT-MINI",
+        "title": "Roof Tech RT-MINI Installation Manual (Jan 2021)",
+        "revision": null,
+        "document_date": "2026-07-28",
+        "archived_file_identity": "https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf",
+        "archived_in_repo": true,
+        "sha256": "2f6035586e948758ff1892f2775a1a6905120750eaf2158f206a2155687486be",
+        "source": "https://design.roof-tech.us/PDF/Installation-Manuals/Installation-Manual-RT-MINI.pdf",
+        "jurisdiction_boundary": "City of Granite City Building & Zoning",
+        "applicability_notes": "The VERSION-EXACT installation manual for the first-generation RT-MINI (33 pp). This is the document that retires EQUIPMENT-DOCUMENT-APPLICABILITY at source: the on-file asset cites the RT-MINI II manual for a selected RT-MINI, and the correct fix is the version-exact document, not a cross-reference alias.",
+        "status": "current",
+        "supersedes_id": null,
+        "superseded_by_id": null,
+        "extracted_claims": null,
+        "verification_state": "unverified",
+        "reviewer": null,
+        "verified_by": null,
+        "verified_at": null,
+        "verification_notes": null,
+        "created_by": "racking-documents@v1",
+        "created_at": "2026-07-28T16:41:29.710Z",
+        "updated_at": "2026-07-28T16:41:29.710Z"
+      },
+      {
+        "id": "doc-rooftech-rtmini2-pe-letter-73a74973091c",
+        "document_class": "structural_pe_letter",
+        "manufacturer_or_issuer": "Roof Tech, Inc. (structural analysis by Starling Madison Lofquist, Inc.)",
+        "equipment_id": "rooftech-mini",
+        "equipment_model_applicability": "RT-MINI II",
+        "title": "Roof Tech RT-Mini II Mount — Structural Analysis (PE-stamped letter, ASCE 7-16)",
+        "revision": "ASCE 7-16",
+        "document_date": "2026-07-28",
+        "archived_file_identity": "https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+        "archived_in_repo": true,
+        "sha256": "73a74973091ca698521398cfaeae7bf516f6b7cffb934b37e0104f17b3535c27",
+        "source": "https://design.roof-tech.us/PDF/Stamped-PE-Letters/RT_MINI_II_7_16/RT_Mini_II_ASCE_7-16_IL.pdf",
+        "jurisdiction_boundary": "City of Granite City Building & Zoning",
+        "applicability_notes": "Per-state, per-ASCE-edition stamped letter. The 7-10 (KY) issue states the 613.2 lb ASD allowable uplift for 15/32\" plywood over a 2x4 DF-L #2 rafter with (2) 90 mm screws that the mount record rounds down to 600 lb, derived with a safety factor of 3.0. It covers RT-Mini II — NOT the first-generation RT-MINI.",
+        "status": "current",
+        "supersedes_id": null,
+        "superseded_by_id": null,
+        "extracted_claims": null,
+        "verification_state": "unverified",
+        "reviewer": null,
+        "verified_by": null,
+        "verified_at": null,
+        "verification_notes": null,
+        "created_by": "racking-documents@v1",
+        "created_at": "2026-07-28T16:41:28.610Z",
+        "updated_at": "2026-07-28T16:41:28.610Z"
+      }
+    ],
+    "climate_hazard_rows": [
+      {
+        "id": "cedb14f7-917a-539b-a68a-f08f08b64d13",
+        "document_class": "climate_hazard_dataset",
+        "manufacturer_or_issuer": "ASCE 7 Hazard Tool datasets (gis.asce.org) + USGS ASCE 7 design maps + USGS 3DEP",
+        "equipment_id": null,
+        "equipment_model_applicability": "City of Granite City Building & Zoning — 3 MELVIN DR, GRANITE CITY, IL, 62040 — lat 38.7061678, lng -90.0461651",
+        "title": "ASCE 7-22 hazard datasets, Risk Category II (700-yr MRI wind) — 3 MELVIN DR, GRANITE CITY, IL, 62040",
+        "revision": "ASCE 7-22",
+        "document_date": "2026-07-28",
+        "archived_file_identity": "snapshot:resolutionAuthority.environmentalRetrieval#cedb14f7917ad39b",
+        "archived_in_repo": true,
+        "sha256": "cedb14f7917ad39b068af08f08b64d135eb84967e222d6c8d81670ed70ee8866",
+        "source": "https://gis.asce.org/arcgis/rest/services/ASCE722/w2022_mri700/ImageServer · https://gis.asce.org/arcgis/rest/services/ASCE722/s2022_RiskCategory2/ImageServer · https://earthquake.usgs.gov/ws/designmaps/asce7-22.json?latitude=38.7061678&longitude=-90.0461651&riskCategory=II&siteClass=D&title=solarpro-permit · https://epqs.nationalmap.gov/v1/json?x=-90.0461651&y=38.7061678&units=Feet&wkid=4326&includeDate=false",
+        "jurisdiction_boundary": "City of Granite City Building & Zoning",
+        "applicability_notes": "City of Granite City Building & Zoning — 3 MELVIN DR, GRANITE CITY, IL, 62040 — lat 38.7061678, lng -90.0461651",
+        "status": "current",
+        "supersedes_id": null,
+        "superseded_by_id": null,
+        "extracted_claims": "{\"values\":{\"windMriYears\":700,\"seismicSdc\":\"D\",\"seismicSs\":0.61,\"seismicS1\":0.18,\"elevationFt\":411.96208680155274,\"siteClass\":\"D\",\"datasets\":[{\"label\":\"basic wind speed V (700-yr MRI, Risk Category II)\",\"value\":107.533,\"unit\":\"mph\",\"sourceUrl\":\"https://gis.asce.org/arcgis/rest/services/ASCE722/w2022_mri700/ImageServer\",\"dataset\":\"ASCE 7-22 basic wind speed raster (w2022_mri700)\"},{\"label\":\"ground snow load pg (Risk Category II)\",\"value\":23.2836,\"unit\":\"psf\",\"sourceUrl\":\"https://gis.asce.org/arcgis/rest/services/ASCE722/s2022_RiskCategory2/ImageServer\",\"dataset\":\"ASCE 7-22 ground snow load raster (s2022_RiskCategory2)\"},{\"label\":\"seismic Ss / S1 / SDS / SD1 / SDC (site class D)\",\"value\":\"D\",\"unit\":\"SDC\",\"sourceUrl\":\"https://earthquake.usgs.gov/ws/designmaps/asce7-22.json?latitude=38.7061678&longitude=-90.0461651&riskCategory=II&siteClass=D&title=solarpro-permit\",\"dataset\":\"USGS ASCE 7-22 design maps web service\"},{\"label\":\"site elevation\",\"value\":411.96208680155274,\"unit\":\"ft\",\"sourceUrl\":\"https://epqs.nationalmap.gov/v1/json?x=-90.0461651&y=38.7061678&units=Feet&wkid=4326&includeDate=false\",\"dataset\":\"USGS 3DEP Elevation Point Query Service\"}],\"riskCategoryBasis\":\"ASCE 7 Table 1.5-1 — Risk Category II is the code's own classification for all buildings and other structures not listed in Risk Categories I, III or IV; this project is not so listed. Overridable.\",\"exposureBasis\":\"ASCE 7 §26.7 surface-roughness / exposure category — a site-terrain determination made by the designer. No hazard dataset (including the ASCE 7 Hazard Tool) publishes it, so it is recorded here as a designer input with its own basis and audited alongside the retrieved values.\",\"currencyBasis\":\"LIVE read of the authoritative hazard services at 2026-07-28T16:41:17.752Z — the source is current at the instant it was read, so the retrieval timestamp IS the currency confirmation (no archived-document staleness gap exists).\",\"proof\":\"live-retrieval\"},\"environmental\":{\"dataset\":\"ASCE 7-22 hazard datasets, Risk Category II (700-yr MRI wind)\",\"projectApplicability\":\"City of Granite City Building & Zoning — 3 MELVIN DR, GRANITE CITY, IL, 62040 — lat 38.7061678, lng -90.0461651\",\"windSpeedMph\":107.533,\"groundSnowPsf\":23.284,\"exposureCategory\":\"C\",\"riskCategory\":\"II\",\"lat\":38.7061678,\"lng\":-90.0461651,\"addressUsed\":\"3 MELVIN DR, GRANITE CITY, IL, 62040\",\"lookupTimestampIso\":\"2026-07-28T16:41:17.752Z\",\"currencyConfirmedAtIso\":\"2026-07-28T16:41:17.752Z\",\"coversWindSpeed\":true,\"coversSnowLoad\":true,\"coversExposureRisk\":true}}",
+        "verification_state": "verified",
+        "reviewer": "environmental-load-authority@v1",
+        "verified_by": null,
+        "verified_at": null,
+        "verification_notes": null,
+        "created_by": "environmental-load-authority@v1",
+        "created_at": "2026-07-28T16:41:26.026Z",
+        "updated_at": "2026-07-28T16:41:26.026Z"
+      }
+    ]
+  },
+  "climate_hazard_seismic_analysis": [
+    {
+      "id": "cedb14f7-917a-539b-a68a-f08f08b64d13",
+      "topLevelKeys": [
+        "values",
+        "environmental"
+      ],
+      "seismicKeysFound": [
+        {
+          "path": "$.values.seismicSdc",
+          "value": "D"
+        },
+        {
+          "path": "$.values.seismicSs",
+          "value": 0.61
+        },
+        {
+          "path": "$.values.seismicS1",
+          "value": 0.18
+        }
+      ],
+      "containsAnySeismicData": true
+    }
+  ],
+  "personnel_roles_exists": true,
+  "engineering_review_records_exists": true,
+  "personnel_roles_rowcount": 0,
+  "engineering_review_records_rowcount": 0,
+  "migrations_table": {
+    "name": "schema_migrations",
+    "columns": [
+      "id",
+      "migration_identifier",
+      "filename",
+      "checksum_sha256",
+      "description",
+      "status",
+      "started_at",
+      "applied_at",
+      "failed_at",
+      "execution_duration_ms",
+      "environment",
+      "applied_by_actor_type",
+      "applied_by_actor_id",
+      "execution_id",
+      "error_code",
+      "error_summary",
+      "rollback_reference",
+      "last_run_id",
+      "created_at"
+    ],
+    "latest": [
+      {
+        "id": 17,
+        "migration_identifier": "116",
+        "filename": "116_engineering_review_records.sql",
+        "checksum_sha256": "23a9eade4d8f85ac93b3b0a5e0a3dbccbf1b9d1e51854fc4efe88770d7618258",
+        "description": "engineering review records",
+        "status": "applied",
+        "started_at": "2026-07-29T00:34:15.582Z",
+        "applied_at": "2026-07-29T00:34:15.682Z",
+        "failed_at": null,
+        "execution_duration_ms": 100,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1785285255582-c2064f32",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 35,
+        "created_at": "2026-07-29T00:34:15.650Z"
+      },
+      {
+        "id": 15,
+        "migration_identifier": "115",
+        "filename": "115_project_personnel_roles.sql",
+        "checksum_sha256": "89abfa80010d700ac31012f885a27ae07217fdcf49d50c6cff9b30069e62a31c",
+        "description": "project personnel roles",
+        "status": "applied",
+        "started_at": "2026-07-29T00:33:37.645Z",
+        "applied_at": "2026-07-29T00:33:37.764Z",
+        "failed_at": null,
+        "execution_duration_ms": 119,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1785285217645-efcec262",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 31,
+        "created_at": "2026-07-29T00:33:37.720Z"
+      },
+      {
+        "id": 13,
+        "migration_identifier": "114",
+        "filename": "114_equipment_reconciliation_audit.sql",
+        "checksum_sha256": "ac90537ccb0f9e9282561559567a98ffbea1d0c0979da6a4a314a2e5b05a69fd",
+        "description": "equipment reconciliation audit",
+        "status": "applied",
+        "started_at": "2026-07-22T04:21:00.229Z",
+        "applied_at": "2026-07-22T04:21:00.351Z",
+        "failed_at": null,
+        "execution_duration_ms": 122,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1784694060229-62d71f5e",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 27,
+        "created_at": "2026-07-22T04:21:00.305Z"
+      },
+      {
+        "id": 11,
+        "migration_identifier": "113",
+        "filename": "113_manufacturer_document_registry.sql",
+        "checksum_sha256": "3a6f37e44858dd9cabcb299073a34b68bfb8cd4513f3ece8c0f90a1fcbb7e826",
+        "description": "manufacturer document registry",
+        "status": "applied",
+        "started_at": "2026-07-22T04:20:27.153Z",
+        "applied_at": "2026-07-22T04:20:27.321Z",
+        "failed_at": null,
+        "execution_duration_ms": 168,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1784694027153-04263821",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 23,
+        "created_at": "2026-07-22T04:20:27.278Z"
+      },
+      {
+        "id": 9,
+        "migration_identifier": "112",
+        "filename": "112_fence_line_reconstruction.sql",
+        "checksum_sha256": "2d2dd8f584cee44295ae26e6565219a51ee120cf16a898293c12c6e084802019",
+        "description": "fence line reconstruction",
+        "status": "applied",
+        "started_at": "2026-07-20T17:06:10.724Z",
+        "applied_at": "2026-07-20T17:06:10.852Z",
+        "failed_at": null,
+        "execution_duration_ms": 128,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1784567170724-eee774d7",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 19,
+        "created_at": "2026-07-20T17:06:10.801Z"
+      },
+      {
+        "id": 7,
+        "migration_identifier": "111",
+        "filename": "111_system_size_nameplate_backfill.sql",
+        "checksum_sha256": "720c6c351d6e73a0e9b059604898fe731f9e4e7247015babf716974fe91efab4",
+        "description": "system size nameplate backfill",
+        "status": "applied",
+        "started_at": "2026-07-20T17:06:10.486Z",
+        "applied_at": "2026-07-20T17:06:10.604Z",
+        "failed_at": null,
+        "execution_duration_ms": 118,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1784567170486-6d10b677",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 15,
+        "created_at": "2026-07-20T17:06:10.569Z"
+      },
+      {
+        "id": 5,
+        "migration_identifier": "110",
+        "filename": "110_stamp_wattage_normalizer.sql",
+        "checksum_sha256": "ce3f749d82f4df1fe42f6b8258897b2f0a9cd620c807a402273fcb281aeeb12e",
+        "description": "stamp wattage normalizer",
+        "status": "applied",
+        "started_at": "2026-07-20T17:06:10.243Z",
+        "applied_at": "2026-07-20T17:06:10.366Z",
+        "failed_at": null,
+        "execution_duration_ms": 123,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1784567170243-8d344f34",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 11,
+        "created_at": "2026-07-20T17:06:10.319Z"
+      },
+      {
+        "id": 3,
+        "migration_identifier": "109",
+        "filename": "109_subsystem_map_inference_backfill.sql",
+        "checksum_sha256": "771a7247b37ee387221ba3a67856a05dda5d1737d459e9af44138f742c35a944",
+        "description": "subsystem map inference backfill",
+        "status": "applied",
+        "started_at": "2026-07-20T17:06:09.948Z",
+        "applied_at": "2026-07-20T17:06:10.107Z",
+        "failed_at": null,
+        "execution_duration_ms": 158,
+        "environment": "production",
+        "applied_by_actor_type": "human",
+        "applied_by_actor_id": "011526da-28fc-4c01-85a0-d52c0f578fdf",
+        "execution_id": "migrate-1784567169948-bc4a9c39",
+        "error_code": null,
+        "error_summary": null,
+        "rollback_reference": null,
+        "last_run_id": 7,
+        "created_at": "2026-07-20T17:06:10.054Z"
+      }
+    ]
+  },
+  "equipment_reconciliation_audit": {
+    "exists": true,
+    "columns": [
+      "id",
+      "project_id",
+      "conflict_field",
+      "subsystem_key",
+      "conflict_sources",
+      "chosen_source",
+      "chosen_value",
+      "previous_values",
+      "reason",
+      "operator_id",
+      "operator_name",
+      "reconciled_at",
+      "status",
+      "invalidation_record",
+      "notes"
+    ],
+    "braidon_counts": [
+      {
+        "project_id": "4030b664-bebe-433b-a11c-cda05ead2f7d",
+        "n": "11"
+      }
+    ],
+    "latest3": [
+      {
+        "id": "ebf0a515-ac8f-4c67-aec2-dfa5cd64a042",
+        "project_id": "4030b664-bebe-433b-a11c-cda05ead2f7d",
+        "conflict_field": "module_model",
+        "subsystem_key": "roof",
+        "conflict_sources": "[{\"source\":\"stored_permit\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"projects.selected_equipment.panelId · tier project/50 · generated via reconciliation at 2026-07-28T23:14:03.489Z\"},{\"source\":\"fleet\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"permit-input#system.inverters[].strings[].panelModel · tier fleet/30 · generated via posted-fleet (undated)\"},{\"source\":\"subsystem_panel_id\",\"value\":\"rec-alpha-pure-405\",\"label\":\"REC Group Alpha Pure-R 405W\",\"provenance\":\"engineering_config.subSystems.roof.panelId · tier subsystem/10 · explicit via engineering at 2026-07-17T16:16:47.549Z\"}]",
+        "chosen_source": "stored_permit",
+        "chosen_value": "{\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\"}",
+        "previous_values": "{\"presented\":[{\"source\":\"fleet\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"permit-input#system.inverters[].strings[].panelModel · tier fleet/30 · generated via posted-fleet (undated)\"},{\"source\":\"subsystem_panel_id\",\"value\":\"rec-alpha-pure-405\",\"label\":\"REC Group Alpha Pure-R 405W\",\"provenance\":\"engineering_config.subSystems.roof.panelId · tier subsystem/10 · explicit via engineering at 2026-07-17T16:16:47.549Z\"}],\"priorCanonical\":{\"key\":\"panelId\",\"value\":\"qcells-peak-duo-400\"},\"realignedMirrors\":[{\"store\":\"engineering_config\",\"path\":\"engineering_config.subSystems.roof.panelId\",\"previousValue\":\"rec-alpha-pure-405\",\"newValue\":\"qcells-peak-duo-400\"},{\"store\":\"selected_equipment\",\"path\":\"projects.selected_equipment.subSystems.roof.panelId\",\"previousValue\":\"rec-alpha-pure-405\",\"newValue\":\"qcells-peak-duo-400\"}]}",
+        "reason": "AAC WS-2 automatic reconciliation: canonical = projects.selected_equipment.panelId = 'qcells-peak-duo-400' (tier project, rank 50, generated via reconciliation at 2026-07-28T23:14:03.489Z); 1 corroborating, 3 superseded, 0 genuinely active",
+        "operator_id": "system-resolver",
+        "operator_name": "AAC canonical-equipment resolver (automatic reconciliation of a superseded record)",
+        "reconciled_at": "2026-07-29T00:04:15.029Z",
+        "status": "applied",
+        "invalidation_record": "[{\"id\":\"e3fd607b-96f6-4711-b376-eed278b77d31\",\"projectId\":\"4030b664-bebe-433b-a11c-cda05ead2f7d\",\"digest\":null,\"snapshotId\":null,\"scope\":\"snapshot\",\"engineeringApprovalRef\":null,\"reason\":\"equipment 'module_model' reconciled to qcells-peak-duo-400 — prior snapshot digest is stale and must be rebuilt/re-validated\",\"invalidatedBy\":\"ebf0a515-ac8f-4c67-aec2-dfa5cd64a042\",\"invalidatedAt\":\"2026-07-29T00:04:15.029Z\"},{\"id\":\"a5859d69-5c10-4496-aa50-d0c9439e17ea\",\"projectId\":\"4030b664-bebe-433b-a11c-cda05ead2f7d\",\"digest\":null,\"snapshotId\":null,\"scope\":\"engineering_approval\",\"engineeringApprovalRef\":null,\"reason\":\"engineer review tied to the old snapshot digest is invalidated until a new review explicitly covers the rebuilt digest\",\"invalidatedBy\":\"ebf0a515-ac8f-4c67-aec2-dfa5cd64a042\",\"invalidatedAt\":\"2026-07-29T00:04:15.029Z\"}]",
+        "notes": null
+      },
+      {
+        "id": "e9d3f84e-feee-4ebe-a200-e2f69f68b92f",
+        "project_id": "4030b664-bebe-433b-a11c-cda05ead2f7d",
+        "conflict_field": "module_model",
+        "subsystem_key": "roof",
+        "conflict_sources": "[{\"source\":\"stored_permit\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"projects.selected_equipment.panelId · tier project/50 · generated via reconciliation at 2026-07-28T16:46:28.335Z\"},{\"source\":\"fleet\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"permit-input#system.inverters[].strings[].panelModel · tier fleet/30 · generated via posted-fleet (undated)\"},{\"source\":\"subsystem_panel_id\",\"value\":\"rec-alpha-pure-405\",\"label\":\"REC Group Alpha Pure-R 405W\",\"provenance\":\"engineering_config.subSystems.roof.panelId · tier subsystem/10 · explicit via engineering at 2026-07-17T16:16:47.549Z\"}]",
+        "chosen_source": "stored_permit",
+        "chosen_value": "{\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\"}",
+        "previous_values": "{\"presented\":[{\"source\":\"fleet\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"permit-input#system.inverters[].strings[].panelModel · tier fleet/30 · generated via posted-fleet (undated)\"},{\"source\":\"subsystem_panel_id\",\"value\":\"rec-alpha-pure-405\",\"label\":\"REC Group Alpha Pure-R 405W\",\"provenance\":\"engineering_config.subSystems.roof.panelId · tier subsystem/10 · explicit via engineering at 2026-07-17T16:16:47.549Z\"}],\"priorCanonical\":{\"key\":\"panelId\",\"value\":\"qcells-peak-duo-400\"}}",
+        "reason": "AAC WS-2 automatic reconciliation: canonical = projects.selected_equipment.panelId = 'qcells-peak-duo-400' (tier project, rank 50, generated via reconciliation at 2026-07-28T16:46:28.335Z); 1 corroborating, 3 superseded, 0 genuinely active",
+        "operator_id": "system-resolver",
+        "operator_name": "AAC canonical-equipment resolver (automatic reconciliation of a superseded record)",
+        "reconciled_at": "2026-07-28T16:46:56.322Z",
+        "status": "applied",
+        "invalidation_record": "[{\"id\":\"e024bdae-693e-4a93-aaec-97365a3443a2\",\"projectId\":\"4030b664-bebe-433b-a11c-cda05ead2f7d\",\"digest\":null,\"snapshotId\":null,\"scope\":\"snapshot\",\"engineeringApprovalRef\":null,\"reason\":\"equipment 'module_model' reconciled to qcells-peak-duo-400 — prior snapshot digest is stale and must be rebuilt/re-validated\",\"invalidatedBy\":\"e9d3f84e-feee-4ebe-a200-e2f69f68b92f\",\"invalidatedAt\":\"2026-07-28T16:46:56.322Z\"},{\"id\":\"41932734-4939-475f-8044-285b91ef6334\",\"projectId\":\"4030b664-bebe-433b-a11c-cda05ead2f7d\",\"digest\":null,\"snapshotId\":null,\"scope\":\"engineering_approval\",\"engineeringApprovalRef\":null,\"reason\":\"engineer review tied to the old snapshot digest is invalidated until a new review explicitly covers the rebuilt digest\",\"invalidatedBy\":\"e9d3f84e-feee-4ebe-a200-e2f69f68b92f\",\"invalidatedAt\":\"2026-07-28T16:46:56.322Z\"}]",
+        "notes": null
+      },
+      {
+        "id": "d324af2f-4594-40d8-af11-f4929e8533bb",
+        "project_id": "4030b664-bebe-433b-a11c-cda05ead2f7d",
+        "conflict_field": "module_model",
+        "subsystem_key": "roof",
+        "conflict_sources": "[{\"source\":\"stored_permit\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"projects.selected_equipment.panelId · tier project/50 · generated via reconciliation at 2026-07-28T16:46:09.454Z\"},{\"source\":\"fleet\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"permit-input#system.inverters[].strings[].panelModel · tier fleet/30 · generated via posted-fleet (undated)\"},{\"source\":\"subsystem_panel_id\",\"value\":\"rec-alpha-pure-405\",\"label\":\"REC Group Alpha Pure-R 405W\",\"provenance\":\"engineering_config.subSystems.roof.panelId · tier subsystem/10 · explicit via engineering at 2026-07-17T16:16:47.549Z\"}]",
+        "chosen_source": "stored_permit",
+        "chosen_value": "{\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\"}",
+        "previous_values": "{\"presented\":[{\"source\":\"fleet\",\"value\":\"qcells-peak-duo-400\",\"label\":\"Q CELLS Q.PEAK DUO BLK ML-G10+ 400W\",\"provenance\":\"permit-input#system.inverters[].strings[].panelModel · tier fleet/30 · generated via posted-fleet (undated)\"},{\"source\":\"subsystem_panel_id\",\"value\":\"rec-alpha-pure-405\",\"label\":\"REC Group Alpha Pure-R 405W\",\"provenance\":\"engineering_config.subSystems.roof.panelId · tier subsystem/10 · explicit via engineering at 2026-07-17T16:16:47.549Z\"}],\"priorCanonical\":{\"key\":\"panelId\",\"value\":\"qcells-peak-duo-400\"}}",
+        "reason": "AAC WS-2 automatic reconciliation: canonical = projects.selected_equipment.panelId = 'qcells-peak-duo-400' (tier project, rank 50, generated via reconciliation at 2026-07-28T16:46:09.454Z); 1 corroborating, 3 superseded, 0 genuinely active",
+        "operator_id": "system-resolver",
+        "operator_name": "AAC canonical-equipment resolver (automatic reconciliation of a superseded record)",
+        "reconciled_at": "2026-07-28T16:46:28.335Z",
+        "status": "applied",
+        "invalidation_record": "[{\"id\":\"2be8914f-ae5f-4671-abc8-40029f032457\",\"projectId\":\"4030b664-bebe-433b-a11c-cda05ead2f7d\",\"digest\":null,\"snapshotId\":null,\"scope\":\"snapshot\",\"engineeringApprovalRef\":null,\"reason\":\"equipment 'module_model' reconciled to qcells-peak-duo-400 — prior snapshot digest is stale and must be rebuilt/re-validated\",\"invalidatedBy\":\"d324af2f-4594-40d8-af11-f4929e8533bb\",\"invalidatedAt\":\"2026-07-28T16:46:28.335Z\"},{\"id\":\"bf3a23cf-1530-44dd-8e8a-a8bdf171811a\",\"projectId\":\"4030b664-bebe-433b-a11c-cda05ead2f7d\",\"digest\":null,\"snapshotId\":null,\"scope\":\"engineering_approval\",\"engineeringApprovalRef\":null,\"reason\":\"engineer review tied to the old snapshot digest is invalidated until a new review explicitly covers the rebuilt digest\",\"invalidatedBy\":\"d324af2f-4594-40d8-af11-f4929e8533bb\",\"invalidatedAt\":\"2026-07-28T16:46:28.335Z\"}]",
+        "notes": null
+      }
+    ]
+  }
+}

@@ -33,6 +33,18 @@ export interface EnvironmentalLoadSourceEvidence {
   coversWindSpeed: boolean;
   coversSnowLoad: boolean;
   coversExposureRisk: boolean;
+  /** Post-AAC seismic repair — the archived climate-hazard dataset MAY also
+   *  carry the USGS seismic results (SDC / Ss / S1 at the queried site class).
+   *  Optional and additive: the nine-condition wind/snow verification gate is
+   *  UNCHANGED (seismic coverage never clears or blocks the environmental
+   *  requirement); these fields only feed resolveSeismicAuthority so the ONE
+   *  canonical seismic result can cite a verified archived source instead of a
+   *  hardcoded default or an unprovenanced table row. */
+  coversSeismic?: boolean;
+  seismicSdc?: string | null;
+  seismicSs?: number | null;
+  seismicS1?: number | null;
+  seismicSiteClass?: string | null;
   windSpeedMph: number | null;
   groundSnowPsf: number | null;
   exposureCategory: string | null;
@@ -142,6 +154,63 @@ export function environmentalSourceVerified(
     // recorded currency review. A source with a date but no currency confirmation
     // is STALE ⇒ unverified.
     && !!e.currencyConfirmedAtIso;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Post-AAC seismic repair — THE canonical resolved seismic result.
+//
+// The B-vs-D contradiction had four independent sources of "the" SDC: the
+// unprovenanced ahj-national table row (route fill — retired), the resolver's
+// dead write to `seismicDesignCategory` (a field nothing read), the hardcoded
+// `|| 'D'` canonical fallback, and the fixtures' compliance `'B'`. This
+// function is now the ONE resolution: a live/fixture retrieval record wins,
+// then a VERIFIED archived climate-hazard document that carries seismic
+// claims. Anything else ⇒ NOT ESTABLISHED (the sheets print PENDING; nothing
+// substitutes 'B' or 'D'). The environmental wind/snow verification gate is
+// unchanged — this is a projection, not a new requirement.
+// ═══════════════════════════════════════════════════════════════════════════
+export interface SeismicAuthorityResult {
+  established: boolean;
+  sdc: string | null;
+  ss: number | null;
+  s1: number | null;
+  siteClass: string | null;
+  /** where the resolved value came from — 'hazard-retrieval' (the live/fixture
+   *  USGS/ASCE run) or 'archived-climate-document' (verified registry doc). */
+  source: 'hazard-retrieval' | 'archived-climate-document' | null;
+  /** the citable evidence ref: retrieval source-hash or registry document id. */
+  sourceRef: string | null;
+  sha256: string | null;
+}
+
+export function resolveSeismicAuthority(args: {
+  retrievalSeismic?: {
+    seismicSdc: string | null; seismicSs: number | null; seismicS1: number | null;
+    siteClass?: string | null; sourceHash?: string | null;
+  } | null;
+  sourceEvidence?: EnvironmentalLoadSourceEvidence | null;
+}): SeismicAuthorityResult {
+  const r = args.retrievalSeismic;
+  if (r?.seismicSdc) {
+    return {
+      established: true, sdc: r.seismicSdc, ss: numOrNull(r.seismicSs), s1: numOrNull(r.seismicS1),
+      siteClass: strOrNull(r.siteClass ?? null), source: 'hazard-retrieval',
+      sourceRef: r.sourceHash ? `env-retrieval:${r.sourceHash.slice(0, 16)}` : 'env-retrieval',
+      sha256: r.sourceHash ?? null,
+    };
+  }
+  const e = args.sourceEvidence;
+  // The archived path demands the SAME custody the wind/snow gate demands —
+  // verified + archived + hashed — plus an actual seismic claim on the document.
+  if (e && e.verificationState === 'verified' && e.archivedInRepo === true && !!e.sha256
+      && e.coversSeismic === true && e.seismicSdc) {
+    return {
+      established: true, sdc: e.seismicSdc, ss: numOrNull(e.seismicSs ?? null), s1: numOrNull(e.seismicS1 ?? null),
+      siteClass: strOrNull(e.seismicSiteClass ?? null), source: 'archived-climate-document',
+      sourceRef: e.documentId, sha256: e.sha256,
+    };
+  }
+  return { established: false, sdc: null, ss: null, s1: null, siteClass: null, source: null, sourceRef: null, sha256: null };
 }
 
 /** Per-field basis: verified source wins; else operator entry is an override; else

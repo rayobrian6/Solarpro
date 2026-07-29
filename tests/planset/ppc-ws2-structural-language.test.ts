@@ -101,22 +101,26 @@ describe('PPC §3 (gate 4) — no unsupported maximum-spacing language', () => {
 describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact instruction', () => {
   const pv3 = () => text(sheetWith(PKG.html, 'ATTACHMENT DETAIL'));
 
-  it('the fastener assembly IS unverified and the document IS inapplicable on this design', () => {
+  it('exact instructions stay GATED — document inapplicable + SKU unpinned (fastener element verified per WS-8)', () => {
     const fa = projectFastenerAssembly(PKG.input);
-    expect(fa.verification).not.toBe('verified');
+    // Post-AAC (WS-8 alignment): the fastener ELEMENT verifies independently of
+    // the rail-capacity document; the instruction gate holds on the OTHER
+    // conditions, which is the §4 invariant this suite protects.
+    expect(fa.verification).toBe('verified');
     const att = projectAttachmentInstallationAuthority(PKG.snap, 'rooftech-mini',
       { model: 'RT-MINI', docTitle: 'Roof Tech RT-MINI II Installation Manual (Jun 2025)' },
       { state: 'PENDING_APPLICABILITY', applicabilityVerified: false, documentProduct: 'RT-MINI II' });
     expect(att.exactInstructionsAllowed).toBe(false);
-    // none of the five conditions may be silently assumed true
+    // the gating conditions may never be silently assumed true
     expect(att.conditions.exactSkuSelected).toBe(false);
     expect(att.conditions.documentApplicabilityVerified).toBe(false);
-    expect(att.conditions.fastenerAssemblyVerified).toBe(false);
+    expect(att.conditions.fastenerAssemblyVerified).toBe(true);
   });
 
-  it('PV-3 renders the exact PENDING block Ray specified', () => {
+  it('PV-3 renders the state-derived PENDING block (instructions gated, fastener state honest)', () => {
     const t = pv3();
-    expect(t).toContain('FASTENER ASSEMBLY: PENDING VERIFIED SELECTION');
+    expect(t).toContain('FASTENER ASSEMBLY: VERIFIED — EXACT INSTALLATION INSTRUCTIONS PENDING DOCUMENT/SKU AUTHORITY');
+    expect(t).not.toContain('FASTENER ASSEMBLY: PENDING VERIFIED SELECTION');
     expect(t).toContain('INSTALLATION DETAILS: NOT ESTABLISHED');
     expect(t).toContain('DOCUMENT APPLICABILITY: RT-MINI II MANUAL NOT VERIFIED FOR SELECTED RT-MINI');
     expect(t).toContain(REFERENCE_DETAIL_BANNER);

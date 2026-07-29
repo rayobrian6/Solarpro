@@ -448,6 +448,14 @@ export function toEnvironmentalLoadSourceEvidence(
   if (!doc) return null;
   const en = doc.extractedClaims?.environmental ?? {};
   const lat = en.lat ?? null, lng = en.lng ?? null;
+  // Post-AAC seismic repair — the archived retrieval writes its seismic results
+  // into the `values` claim bag (toRegistryClaims), not the `environmental` one.
+  // Read both so the verified archived document can source the canonical
+  // seismic result; never invent a value when neither bag carries one.
+  const vals = ((doc.extractedClaims as unknown as { values?: Record<string, unknown> })?.values ?? {}) as {
+    seismicSdc?: string | null; seismicSs?: number | null; seismicS1?: number | null; siteClass?: string | null;
+  };
+  const _seisSdc = (en as { seismicSdc?: string | null }).seismicSdc ?? vals.seismicSdc ?? null;
   return {
     documentId: doc.id,
     dataset: en.dataset ?? doc.manufacturerOrIssuer ?? doc.title ?? null,
@@ -458,6 +466,11 @@ export function toEnvironmentalLoadSourceEvidence(
     coversWindSpeed: en.coversWindSpeed === true,
     coversSnowLoad: en.coversSnowLoad === true,
     coversExposureRisk: en.coversExposureRisk === true,
+    coversSeismic: _seisSdc != null && _seisSdc !== '',
+    seismicSdc: _seisSdc,
+    seismicSs: (en as { seismicSs?: number | null }).seismicSs ?? vals.seismicSs ?? null,
+    seismicS1: (en as { seismicS1?: number | null }).seismicS1 ?? vals.seismicS1 ?? null,
+    seismicSiteClass: (en as { seismicSiteClass?: string | null }).seismicSiteClass ?? vals.siteClass ?? null,
     windSpeedMph: en.windSpeedMph ?? null,
     groundSnowPsf: en.groundSnowPsf ?? null,
     exposureCategory: en.exposureCategory ?? null,

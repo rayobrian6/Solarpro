@@ -689,6 +689,12 @@ export function synthesizeFleetFromSubEquipment(
  */
 export function generateLiveSLD(input: PermitInput, cad?: CADModel | null, opts?: { embedded?: boolean }): string {
   const sldInput = buildSLDInputFromPermit(input, cad);
-  if (opts?.embedded) sldInput.suppressTitleBlock = true;
+  if (opts?.embedded) {
+    sldInput.suppressTitleBlock = true;
+    // E-1 repair (post-AAC): the in-SVG conductor-schedule band re-derived the
+    // canonical physical sections that render once on PV-4B.1 — suppress it and
+    // crop the canvas so the schematic fills E-1's drawing wrapper.
+    sldInput.suppressScheduleBand = true;
+  }
   return renderSLDProfessional(sldInput);
 }

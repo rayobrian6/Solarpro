@@ -61,10 +61,17 @@ export interface SheetManifestOptions {
    *  PV-1B is titled "AC BRANCH CIRCUIT LAYOUT" for micro; string/optimizer keep
    *  the "ARRAY GEOMETRY — STRING LAYOUT" title. Undefined ⇒ string (unchanged). */
   isMicro?: boolean;
-  /** AAC WS-10 — output profile. 'full' (default) is the pre-WS-10 internal
-   *  package, byte-identical. 'permit' is the AHJ submittal: the compact
-   *  drawing set + the manufacturer attachment appendix. */
+  /** AAC WS-10 — output profile. 'full' (default) is the internal package.
+   *  'permit' is the AHJ submittal: the compact drawing set + the manufacturer
+   *  attachment appendix, certification sheets only under a digest-bound
+   *  approval. 'design-review' (post-AAC) is the compact set that ENDS on PE-1
+   *  as the final engineer-review sheet in its current (possibly unsigned,
+   *  pending) state. */
   profile?: PlansetProfile;
+  /** Post-AAC E-1 repair — PV-4B.1 carries the canonical physical section
+   *  schedule + full ampacity chain + open-air grounding note (micro
+   *  topologies). Mirrors hasPhysicalSectionSchedule in the page assembly. */
+  includePv4b1?: boolean;
   /** AAC WS-10 — a digest-bound engineering approval covering THIS snapshot
    *  exists, so the certification sheets carry a real signed release rather
    *  than a placeholder. Only then does the permit profile carry PE-1/CERT. */
@@ -138,8 +145,24 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
   // Nothing here decides truth: every requirement these sheets used to print is
   // still in the snapshot registry, still counted by the release gates, and
   // still stated on the cover's single release-status line.
-  if (o.profile === 'permit') {
+  if (o.profile === 'permit' || o.profile === 'design-review') {
     const cert = o.certificationCompleted === true;
+    const designReview = o.profile === 'design-review';
+    // Certification tail per the post-AAC profile contract:
+    //   permit        — CERT/PE-1 ONLY under a digest-bound approval (before the
+    //                   appendix, like the drawing set they certify);
+    //   design-review — the package ENDS on PE-1 as the final engineer-review
+    //                   sheet (after the appendix), in its current state.
+    const certSheets = [
+      { id: 'CERT', title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
+      { id: 'PE-1', title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE${primaryLabel}` },
+      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE — ${HYBRID_LABEL[sub]}` })),
+    ];
+    const reviewTail = [
+      ...(cert ? [{ id: 'CERT', title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' }] : []),
+      { id: 'PE-1', title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE${primaryLabel}` },
+      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE — ${HYBRID_LABEL[sub]}` })),
+    ];
     return [
       { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
       { id: 'PV-1',  title: o.pv1Title },
@@ -153,13 +176,14 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
       { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
       { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
       { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
+      ...(o.includePv4b1 ? [{ id: 'PV-4B.1', title: 'CONDUCTOR SCHEDULE — PHYSICAL SECTIONS' }] : []),
       { id: 'PV-5',  title: PERMIT_LABELS_SHEET_TITLE },
       { id: 'SCHED', title: 'MAJOR EQUIPMENT SCHEDULE — MODULES, INVERTERS & MOUNTING' },
-      ...(cert ? [{ id: 'CERT', title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' }] : []),
-      ...(cert ? [{ id: 'PE-1', title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE${primaryLabel}` }] : []),
-      ...(cert ? extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE — ${HYBRID_LABEL[sub]}` })) : []),
+      ...(!designReview && cert ? certSheets : []),
       // ── manufacturer attachment appendix (NOT numbered drawing sheets) ────
       ...ds.map(d => ({ ...d, section: 'appendix' as SheetSection })),
+      // ── DESIGN_REVIEW: PE-1 is the FINAL engineer-review sheet ────────────
+      ...(designReview ? reviewTail : []),
     ];
   }
 
@@ -189,6 +213,9 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
     { id: 'PV-4A', title: 'NEC COMPLIANCE — ELECTRICAL CODE ANALYSIS' },
     { id: 'PV-4B', title: 'CONDUCTOR SCHEDULE — WIRE SIZING & VOLTAGE DROP' },
+    // Post-AAC E-1 repair: the canonical physical section schedule sheet
+    // (micro topologies) — mirrors hasPhysicalSectionSchedule in the assembly.
+    ...(o.includePv4b1 ? [{ id: 'PV-4B.1', title: 'CONDUCTOR SCHEDULE — PHYSICAL SECTIONS' }] : []),
     // ── labels ────────────────────────────────────────────────────────────
     { id: 'PV-5',  title: 'WARNING LABELS & PLACARDS — NEC REQUIRED SIGNAGE' },
     { id: 'PV-6',  title: 'DISCONNECT DIRECTORY & EMERGENCY PLACARD — NEC 705.10 / 690.56(B)' },

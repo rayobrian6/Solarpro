@@ -293,8 +293,10 @@ const segs = el.routeSegments || [];
 const hasInConduit = segs.some(r => r.raceway && r.raceway !== 'FREE_AIR');
 const hasDcInConduit = segs.some(r => /^DC_/.test(String(r.segmentId)) && r.raceway && r.raceway !== 'FREE_AIR');
 const e1 = (() => {
+  // post-AAC E-1 repair: the schedule no longer follows the diagram on E-1 —
+  // slice to the end of the SLD svg itself.
   const a = noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM');
-  const b = noB64.indexOf('E-1 PHYSICAL CONDUCTOR');
+  const b = a >= 0 ? noB64.indexOf('</svg>', a) + 6 : -1;
   return a >= 0 && b > a ? noB64.slice(a, b) : noB64;
 })();
 check(11, 'the in-conduit THWN-2 legend entry appears only when such a segment exists',

@@ -284,7 +284,18 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-25T12:00:00Z';
   const html = generatePermitHTML(input);
-  const fa = projectFastenerAssembly(input);
+  // Post-AAC accounting repair (WS-8 alignment): the fixture's fastener ELEMENT
+  // is verified (model + count + embedment + ICC-ES source), and fastener
+  // verification is mount-BASE authority decided independently of the
+  // rail-capacity document — the `capacityGated` echo is dead on this surface
+  // exactly as WS-8 killed it on the blocker emission. §6's invariant (an
+  // UNVERIFIED assembly is non-orderable and dimensionless) is asserted on a
+  // doctored snapshot whose fastener element is honestly unverified.
+  const unv: any = clone(input);
+  unv._snapshot = clone((input as any)._snapshot ?? {});
+  unv._snapshot.structural.rackingAssembly.assemblyVerification =
+    { ...(unv._snapshot.structural.rackingAssembly.assemblyVerification ?? {}), fastener: 'unverified' };
+  const fa = projectFastenerAssembly(unv);
 
   it('the fastener assembly is unverified ⇒ non-orderable, dimensionless line', () => {
     expect(fa.verification).not.toBe('verified');
@@ -292,6 +303,15 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
     expect(fa.line).toBe(FASTENER_NON_ORDERABLE_LABEL);
     // no diameter / length / embedment leaked into the printed line
     expect(fa.line).not.toMatch(/\d+\/\d+|embedment|dia\b/i);
+  });
+
+  it('WS-8 alignment — the fixture\'s VERIFIED element is orderable, independent of capacity gating', () => {
+    const faV = projectFastenerAssembly(input);
+    expect(faV.verification).toBe('verified');
+    expect(faV.nonOrderable).toBe(false);
+    // the rendered package no longer cites FASTENER-ASSEMBLY-UNVERIFIED (the
+    // registry does not carry it) — no sheet may reference a nonexistent row.
+    expect(html).not.toContain('FASTENER-ASSEMBLY-UNVERIFIED (see RS-1)');
   });
 
   it('the observed geometry is retained in the object for regeneration on verification', () => {
@@ -303,8 +323,10 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
     expect(fa.certLabel).toBe('PENDING VERIFIED FASTENER ASSEMBLY');
   });
 
-  it('the rendered Roof Attachment Hardware row is flagged non-orderable', () => {
-    expect(html).toContain('data-fastener-orderable="false"');
-    expect(html).toContain(FASTENER_NON_ORDERABLE_LABEL);
+  it('the rendered Roof Attachment Hardware row reflects the VERIFIED element (WS-8 alignment)', () => {
+    // the fixture's fastener element is verified ⇒ the rendered row is orderable
+    // and the non-orderable label is absent from the fastener row.
+    expect(html).toContain('data-fastener-orderable="true"');
+    expect(html).not.toContain('data-fastener-orderable="false"');
   });
 });

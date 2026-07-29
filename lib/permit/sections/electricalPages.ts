@@ -177,7 +177,7 @@ function renderE1PhysicalSchedule(sections: E1PhysicalSection[]): string {
   }).join('');
   return `
     <div style="margin:6px 12px 10px;">
-      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">E-1 PHYSICAL CONDUCTOR / RACEWAY SCHEDULE — CANONICAL SECTION OBJECTS (NEC 690.8 / 310.15 / 705.11)</div>
+      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">PHYSICAL CONDUCTOR / RACEWAY SCHEDULE — CANONICAL SECTION OBJECTS (NEC 690.8 / 310.15 / 705.11)</div>
       <!-- table-layout:fixed — without it the declared column widths are only hints:
            the long itemized ampacity chain (§4) grew column 3, the auto layout took the
            space out of the last column, and the COMPLIANCE badge (PENDING — REVIEW REQ'D)
@@ -739,7 +739,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
       ${/* §4 (BAR closeout 2026-07-25) — PV-4A carries the SAME canonical
            AmpacityAdjustmentResult as E-1 and PV-4B (every factor itemized), so
            the three sheets can never disagree and none prints a lone derate. */
-        renderAmpacityEvidenceBlock(projectE1PhysicalSchedule(_snapA), 'SHARED-RACEWAY AMPACITY ADJUSTMENT — NEC 310.15 / 110.14(C) (EVERY FACTOR; SAME OBJECT AS E-1 / PV-4B)', true)}
+        renderAmpacityEvidenceBlock(projectE1PhysicalSchedule(_snapA), 'SHARED-RACEWAY AMPACITY ADJUSTMENT — NEC 310.15 / 110.14(C) (EVERY FACTOR; SAME OBJECT AS PV-4B / PV-4B.1)', true)}
 
       <div class="section-title">Interconnection Summary — ${_ic.isSupplySide ? 'NEC 705.11 (Supply-Side Tap)' : 'NEC 705.12 (Load-Side)'}</div>
       <table class="info-table">
@@ -1098,7 +1098,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
            every factor (90 °C base, CCC count-adjustment, ambient correction,
            rooftop adder where applicable, corrected, 75 °C terminal cap, final
            allowable vs required continuous, verdict). */
-        renderAmpacityEvidenceBlock(projectE1PhysicalSchedule(_snap), `SHARED-RACEWAY AMPACITY ADJUSTMENT${_auth.isHybrid ? ' — ROOF SUB-SYSTEM' : ''} — NEC 310.15 / 110.14(C) (EVERY FACTOR; SAME OBJECT AS E-1 / PV-4A)`, true)}
+        renderAmpacityEvidenceBlock(projectE1PhysicalSchedule(_snap), `SHARED-RACEWAY AMPACITY ADJUSTMENT${_auth.isHybrid ? ' — ROOF SUB-SYSTEM' : ''} — NEC 310.15 / 110.14(C) (EVERY FACTOR; SAME OBJECT AS PV-4B.1 / PV-4A)`, true)}
       ${(_auth.isHybrid ? _auth.subSystems.some(s => s.key === 'fence') : _isFence) ? `
       <div class="section-title">Fence Array Wiring Notes — NEC 690, ${_cpCS.tag('asce')} §29</div>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.6;border:var(--border);background:#fafafa;">
@@ -1474,13 +1474,15 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
       } — fail closed (no stored/inline fallback renders on an authority-governed set)`);
     }
     {
-      // Live professional SLD — render full-bleed (same layout as stored SLD)
-      sldBodyHtml = `
-      <div style="padding:0;overflow:hidden;width:100%;margin:0;display:block;text-align:center;">
-        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
-          ${liveSvg}
-        </div>
-      </div>`;
+      // Post-AAC E-1 repair — deterministic drawing viewport. The old wrapper was
+      // a plain block whose height came from nowhere: as flex siblings (schedule,
+      // grounding note) grew, the wrapper flex-shrank to a ~267px strip while the
+      // SVG kept its natural ~993px height, was vertically centered, and the
+      // outer overflow:hidden severed most of the diagram. `.sld-wrap` is the
+      // page's flex:1/min-height:0 drawing box (see the .sld-page CSS): the SVG
+      // fills it via width/height:100% + viewBox + preserveAspectRatio meet — the
+      // whole bounding box always inside the wrapper, aspect preserved, no crop.
+      sldBodyHtml = `<div class="sld-wrap">${liveSvg}</div>`;
     }
   }
 
@@ -1540,25 +1542,63 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     + ` data-sld-schema-version="${_sldMeta?.schemaVersion ?? ''}"`
     + ` data-sld-digest="${(_sldMeta?.digest ?? '').slice(0, 20)}" style="display:none"></div>`;
 
-  // §1 — the sectioned physical conductor/raceway schedule. E-1 renders the
-  // canonical section objects DIRECTLY (Q-Cable branch trunks, shared home-run
-  // raceway with its full CCC inventory, feeder, tap conductors) so the diagram's
-  // graphic labels are backed by a machine-checkable schedule (gate 1/2/3). Empty
-  // for non-micro topologies (the per-sub source zone covers those).
+  // Post-AAC E-1 repair — E-1 is again the DEDICATED single-line-diagram sheet.
+  // The canonical physical section schedule + shared-raceway ampacity chain +
+  // open-air grounding note that used to stack under the diagram (and flex-shrank
+  // it into a clipped strip) now render ONCE on PV-4B.1 (pageConductorScheduleCont).
+  // The canonical sections are still computed here for the hidden machine-readable
+  // evidence stamp — the harness reads the SAME objects the PV-4B.1 sheet renders.
   const _e1Sections = projectE1PhysicalSchedule(getSnapshot(input));
-  const _e1Schedule = renderE1PhysicalSchedule(_e1Sections);
 
   return `
   <div class="page sld-page">
     ${titleBlock(input, 'E-1', 'SINGLE-LINE ELECTRICAL DIAGRAM', pageNum, totalPages)}
     ${_sldStamp}
     ${sldBodyHtml}
-    ${_e1Schedule}
-    ${renderOpenAirBranchGroundingNote(getSnapshot(input))}
     ${_sldSubZone}
     ${/* the machine-readable evidence stamp goes LAST so its JSON payload never
          lands inside the diagram/schedule text ranges harnesses slice on. */
       renderBarElectricalEvidenceStamp(getSnapshot(input), _e1Sections)}
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PV-4B.1 — CONDUCTOR & CONDUIT SCHEDULE, PHYSICAL SECTIONS (post-AAC E-1
+// repair). The canonical section objects (Q-Cable branch trunks, shared home-run
+// raceway with its full CCC inventory, feeder, tap conductors), the full
+// shared-raceway ampacity chain and the open-air branch grounding note render
+// HERE — once, on the conductor/conduit schedule family — instead of stacking
+// under the E-1 diagram. Emitted only when canonical physical sections exist
+// (micro topologies); string/optimizer jobs have no sectioned schedule and no
+// PV-4B.1. Never duplicated on E-1.
+// ═══════════════════════════════════════════════════════════════════════════
+/** The ONE PV-4B.1 predicate, shared verbatim by the sheet manifest (which runs
+ *  DURING snapshot construction, before `_snapshot` attaches — it may not read
+ *  the snapshot) and the page assembly: the sectioned physical schedule exists
+ *  for MICRO topologies (projectE1PhysicalSchedule is empty for string /
+ *  optimizer jobs by construction). Topology resolves through the same accessor
+ *  computePlansetManifest already uses, so the two sides cannot drift. */
+export function hasPhysicalSectionSchedule(input: PermitInput, cad: CADModel): boolean {
+  return topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
+}
+
+export function pageConductorScheduleCont(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+  void cad;
+  const _snap = getSnapshot(input);
+  const _sections = projectE1PhysicalSchedule(_snap);
+  return `
+  <div class="page">
+    ${titleBlock(input, 'PV-4B.1', 'CONDUCTOR SCHEDULE — PHYSICAL SECTIONS', pageNum, totalPages)}
+    <div class="page-content">
+      <div class="section-title">Physical Conductor / Raceway Schedule — Canonical Section Objects (continued from PV-4B)</div>
+      ${_sections.length
+        ? `${renderE1PhysicalSchedule(_sections)}
+      ${renderOpenAirBranchGroundingNote(_snap)}`
+        : `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);background:#fafafa;color:#b45309;">
+        No canonical physical section objects are projected for this system — the sectioned schedule is empty.
+        See PV-4B for the circuit conductor schedule and RS-1 / the project review record for open requirements.
+      </div>`}
+    </div>
   </div>`;
 }
 

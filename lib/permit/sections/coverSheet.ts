@@ -324,6 +324,14 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const windSpeedMph  = _spCover.windSpeedMph ?? project.ahjWindSpeedMph ?? project.windSpeedMph ?? '';
   const windExposure  = _spCover.exposure ?? project.windExposure ?? '';
   const snowPsf       = _spCover.groundSnowPsf ?? project.ahjGroundSnowPsf ?? project.groundSnowPsf ?? '';
+  // Post-AAC seismic repair — the cover prints THE canonical resolved seismic
+  // result (generatePermit stamps project.seismicCategory from
+  // resolveSeismicAuthority: hazard retrieval, else the verified archived
+  // climate-hazard document). The resolution rides the input for the evidence
+  // tag; unresolved ⇒ an explicit PENDING, never a substituted category.
+  const _seisAuth = (input as unknown as {
+    _seismicAuthority?: { established: boolean; source: string | null; sourceRef: string | null };
+  })._seismicAuthority ?? null;
   const seismic       = project.seismicCategory || '';
 
   // FIX v47.295: Roof-specific design criteria only shown for roof systems
@@ -345,7 +353,11 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     infoRow('WIND SPEED',         windSpeedMph ? `${windSpeedMph} MPH` : ''),
     infoRow('WIND EXPOSURE',      windExposure ? `CAT. ${windExposure}` : ''),
     infoRow('GROUND SNOW LOAD',   snowPsf !== '' ? `${snowPsf} PSF` : ''),
-    infoRow('SEISMIC DESIGN CAT.',seismic ? `CAT. ${seismic}` : ''),
+    infoRow('SEISMIC DESIGN CAT.',
+      seismic && seismic !== 'PENDING' ? `CAT. ${seismic}` : 'PENDING — NOT ESTABLISHED'),
+    // machine-readable seismic evidence stamp (infoRow escapes values, so the
+    // tags ride their own hidden row-less element the harness reads).
+    `<tr style="display:none"><td colspan="2"><span data-seismic-sdc="${escapeH(seismic && seismic !== 'PENDING' ? seismic : '')}" data-seismic-source="${escapeH(_seisAuth?.established ? (_seisAuth.source ?? '') : (seismic && seismic !== 'PENDING' ? 'input' : 'none'))}" data-seismic-source-ref="${escapeH(_seisAuth?.established ? (_seisAuth.sourceRef ?? '') : '')}"></span></td></tr>`,
     // Fence-specific design criteria — only on a PURE solar_fence cover, never
     // on a hybrid (the fence params belong on the per-sub PV-1F sheet there).
     (!_coverHybrid && isFence(_coverSysTypeCheck) && cad.fence?.postSpacingM)

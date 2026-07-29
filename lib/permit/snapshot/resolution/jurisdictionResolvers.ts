@@ -631,7 +631,16 @@ export const environmentalAuthorityResolver: RequirementResolver = {
       p.ahjGroundSnowPsf = record.governing.groundSnowLoadPsf; writeBack.push('ahjGroundSnowPsf');
     }
     if (!str(p.riskCategory)) { p.riskCategory = record.governing.riskCategory; writeBack.push('riskCategory'); }
-    if (record.returnedValues.seismicSdc && !str(p.seismicDesignCategory)) {
+    // Post-AAC seismic repair — the old write went to `seismicDesignCategory`,
+    // a field NOTHING in production reads (the cover reads `seismicCategory`),
+    // and was fill-if-empty, so even a matching name would have lost to the
+    // (now retired) table seed. Write the field the sheets actually read,
+    // unconditionally — same overwrite discipline as wind/snow above. The
+    // legacy name is kept in sync for the recorded evidence only.
+    if (record.returnedValues.seismicSdc && p.seismicCategory !== record.returnedValues.seismicSdc) {
+      p.seismicCategory = record.returnedValues.seismicSdc; writeBack.push('seismicCategory');
+    }
+    if (record.returnedValues.seismicSdc && p.seismicDesignCategory !== record.returnedValues.seismicSdc) {
       p.seismicDesignCategory = record.returnedValues.seismicSdc; writeBack.push('seismicDesignCategory');
     }
 

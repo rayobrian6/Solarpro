@@ -26,7 +26,7 @@
 // capacity letter covers RT-MINI II.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { createDocument, findVerifiedDocument } from '@/lib/documents/registry';
+import { createDocument, getDocument, findVerifiedDocument } from '@/lib/documents/registry';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { resolveEngineeringReviewCoverage } from '@/lib/engineeringReview/store';
@@ -43,9 +43,15 @@ import type { RequirementResolver, ResolverContext, ResolverOutcome } from './ty
 
 const REGISTRY_SOURCE = 'manufacturer_document_registry (lib/documents/registry, migration 113)';
 const REVIEW_STORE_SOURCE = 'engineering_review_records (lib/engineeringReview/store, migration 116)';
+// Post-AAC accounting repair — the failure ACTION names the failure class it is
+// for. The blanket "run migration 113" advice was printed for EVERY archival
+// failure, including a 23505 duplicate key (the row already existed from a
+// prior run — that path is now handled as archival success upstream), which
+// sent the operator at the wrong remedy.
 const ARCHIVE_FAILURE_ACTION =
-  'Run migration 113 through the governed console (Admin → System Tools → Migrations); the retrieved document then '
-  + 'archives itself on the next generation.';
+  'If the registry table is missing (42P01): run migration 113 through the governed console '
+  + '(Admin → System Tools → Migrations). Otherwise inspect the recorded failure — the retrieved document '
+  + 're-archives itself on the next generation once the registry accepts writes.';
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
@@ -201,10 +207,25 @@ export const rackingDocumentRetrievalResolver: RequirementResolver = {
         }
 
         // ── ARCHIVAL through the existing registry seam (fail-soft) ──────────
+        // IDEMPOTENT: the document id is CONTENT-DERIVED (sourceId + sha256), so
+        // a re-run over already-archived bytes finds the SAME id. The AAC-7 live
+        // closure hit this as a 23505 duplicate-key "failure" whose operator
+        // action pointed at migration 113 — the row existed; the run before it
+        // had archived it. Already-archived-with-matching-hash IS archival
+        // success, never a failure.
         const doc = res.value;
         const docId = structuralDocumentId(source.sourceId, doc.sha256);
         const title = source.title.replace('{EDN}', ex.edition ?? '').replace(/\s+—\s+$/, '').trim();
-        const archive = await ctx.safeDbRead(
+        const preExisting = await ctx.safeDbRead(
+          `getDocument(${source.documentClass})`,
+          () => getDocument(docId),
+          null,
+        );
+        const _alreadyArchived = preExisting.ok && preExisting.value != null
+          && preExisting.value.sha256 === doc.sha256;
+        const archive = _alreadyArchived
+          ? { ok: true as const, value: preExisting.value!, error: null }
+          : await ctx.safeDbRead(
           `createDocument(${source.documentClass})`,
           () => createDocument({
             id: docId,

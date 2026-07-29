@@ -780,7 +780,7 @@ function roofComposition(
   const _fa = _att.fastener;
   const _lagRow = _exact
     ? `${_fa.diameterLabel ?? '—'}" DIA × ${_fa.lengthIn ?? '—'}" ${(_fa.fastenerType ?? '').toUpperCase()}`.trim()
-    : 'PENDING VERIFIED SELECTION';
+    : _att.fastenerStateLabel;
   const _embedRow = _exact
     ? `${_fa.embedmentIn ?? '—'}" MIN THREAD EMBEDMENT`
     : 'NOT ESTABLISHED';
@@ -856,7 +856,7 @@ function roofComposition(
         // PPC §4 — callout ③ used to print the exact lag spec + embedment.
         { n: 3, label: _baseLabelP3, sub: _exact
             ? `${_lagRow} — ${_embedRow.toLowerCase()}`
-            : 'fastener assembly pending verified selection — installation details not established' },
+            : `fastener assembly ${_att.fastenerStateLabel.toLowerCase()} — installation details not established` },
         { n: 4, label: 'FLASHING', sub: _exact
             ? 'under all penetrations per the verified manufacturer document'
             : 'flashing / sealant instructions pending verified document applicability' },

@@ -25,7 +25,9 @@ import {
 } from '../snapshot/releaseGates';
 import { peekSnapshot } from '../snapshot/read';
 import { escapeH } from './drawing';
-import { isPermitProfile } from '../plansetProfile';
+import {
+  resolvePlansetProfile, isCompactProfile, permitSubmissionPreviewState, PROFILE_DISPLAY_NAMES,
+} from '../plansetProfile';
 
 const FINDING_LABEL: Record<string, string> = {
   TECHNICAL_CONFLICT: 'TECHNICAL CONFLICT',
@@ -55,16 +57,28 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
   // counts, and every open gate is still named. What is dropped is the repeated
   // HIERARCHY explanation — that lesson belongs in the review record, not on
   // every submittal.
-  if (isPermitProfile(input)) {
+  const _profile = resolvePlansetProfile(input);
+  if (isCompactProfile(_profile)) {
     const names = open.map(g => `${escapeH(g.title)} (${g.unresolvedCount})`).join(' &nbsp;·&nbsp; ');
+    // Post-AAC profile contract — the profile distinction is EXPLICIT on the
+    // artifact: the block names the output profile, and a PERMIT_SUBMISSION
+    // package generated while the engineering review is pending is marked a
+    // NON-SUBMITTABLE PREVIEW (never silently emitted as the submittal).
+    const _preview = permitSubmissionPreviewState(input).isPreview;
+    const _profileLine = _preview
+      ? `OUTPUT PROFILE: ${PROFILE_DISPLAY_NAMES[_profile]} &mdash; NON-SUBMITTABLE PREVIEW (ENGINEERING REVIEW PENDING)`
+      : `OUTPUT PROFILE: ${PROFILE_DISPLAY_NAMES[_profile]}${_profile === 'design-review' ? ' &mdash; NOT FOR PERMIT SUBMISSION' : ''}`;
     return `
-  <div class="release-status-block" data-release-status-block="1" data-release-status-profile="permit"
+  <div class="release-status-block" data-release-status-block="1" data-release-status-profile="${_profile}"${_preview ? ' data-permit-submission-preview="1"' : ''}
        style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid #b91c1c;background:#fef2f2;padding:${opts?.compact ? '4px 8px' : '8px 12px'};page-break-inside:avoid;">
     <div data-release-headline="1" style="font-weight:900;font-size:12.5px;letter-spacing:0.6px;color:#b91c1c;text-align:center;">
       RELEASE STATUS &mdash; ${escapeH(releaseHeadline(model.summary))}
     </div>
     <div style="font-weight:900;font-size:10px;letter-spacing:0.6px;color:#b91c1c;text-align:center;margin-top:1px;">
       PENDING ENGINEERING REVIEW &mdash; NOT FOR PERMIT SUBMISSION
+    </div>
+    <div data-release-output-profile="${_profile}" style="font-weight:900;font-size:8.5px;letter-spacing:0.5px;color:#111;text-align:center;margin-top:1px;">
+      ${_profileLine}
     </div>
     <div style="font-size:8px;color:#7f1d1d;text-align:center;line-height:1.3;margin-top:2px;">
       <span data-release-open-gate-count="${model.summary.openGateCount}" style="font-weight:900;">${model.summary.openGateCount}</span> open release gate${model.summary.openGateCount === 1 ? '' : 's'}

@@ -315,8 +315,9 @@ function _pePendingCertStatement(): string {
     <div class="sec-hdr">ENGINEER'S CERTIFICATION STATEMENT &mdash; PENDING REVIEW</div>
     <div class="sec-body">
       <div class="f-xs" style="line-height:1.6;border:2px dashed #b00000;background:#fff7f7;padding:var(--xs);">
-        <strong style="color:#b00000;">PLACEHOLDER &mdash; NO CERTIFICATION ASSERTED.</strong>
-        This letter does not certify structural adequacy at this time. Upon an approved engineering-review record covering this
+        <strong style="color:#b00000;">PLACEHOLDER &mdash; NO CERTIFICATION ASSERTED &mdash; NOT FOR PERMIT SUBMISSION.</strong>
+        This letter does not certify structural adequacy at this time; it is an engineer-review working document (PENDING
+        ENGINEERING REVIEW). Upon an approved engineering-review record covering this
         snapshot digest &mdash; with engineer identity, license, jurisdiction and seal on file &mdash; the engineer of record will
         state a structural certification based on the analysis tabulated on this sheet. The signature and seal areas below are
         unsigned and unsealed and confer no validity until that review is complete. A design change that alters the snapshot

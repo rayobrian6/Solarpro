@@ -258,14 +258,18 @@ function installedOpenAirEgcAssertions(sourceHtml) {
 
 // ═══ GATE 5 — a pending fastener assembly renders no exact instruction ══════
 {
-  // AAC-5 RE-VOCABULARY (see planset-evidence-bar gate 8 / -ep gate 13): after
-  // the WS-8 structural separation FASTENER-ASSEMBLY-UNVERIFIED stops firing on
-  // an assembly whose mount base is verified and whose open question is the
-  // rail-CAPACITY document. The rendered fastener line is still PENDING there
-  // (the projection is capacity-gated), so testing the requirement code alone
-  // made this gate go vacuous exactly when it had something to check. The
-  // predicate is now the RENDERER's own: capacity-gated OR the fastener element
-  // itself unverified.
+  // POST-AAC (WS-8 alignment): the fastener predicate matches the blocker
+  // emission AND the renderer's projection — the fastener ELEMENT verifies
+  // independently of the rail-capacity document (the `capacityGated` echo is
+  // dead on every surface). Two arms:
+  //   (a) element UNVERIFIED — the full BAR-§6 discipline: no identity dims,
+  //       no instructions, the pending line rendered;
+  //   (b) element VERIFIED but exact INSTRUCTIONS still gated (document
+  //       applicability / SKU authority pending) — the identity line may print
+  //       (SCHED/APP-A/PE-1 canonical fastener line), but PV-3 may still not
+  //       compose torque / pilot / coating / sealant / screw-count
+  //       INSTRUCTIONS, must state the state-derived fastener line, and must
+  //       keep the reference-detail banner.
   const _CAPACITY_GATE_CODES = [
     'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
     'RACKING-CAPACITY-APPLICABILITY-GAP',
@@ -274,8 +278,10 @@ function installedOpenAirEgcAssertions(sourceHtml) {
   const _capacityGated = _CAPACITY_GATE_CODES.some(c => activeCode(c))
     || (ra?.structuralAuthorityGaps ?? []).some(g => g.severity === 'blocking' && _CAPACITY_GATE_CODES.includes(g.code));
   const faUnverified = activeCode('FASTENER-ASSEMBLY-UNVERIFIED')
-    || _capacityGated
     || ra?.assemblyVerification?.fastener !== 'verified';
+  const instructionsGated = faUnverified || _capacityGated
+    || activeCode('EQUIPMENT-DOCUMENT-APPLICABILITY')
+    || activeCode('PENDING-RACKING-ASSEMBLY-SELECTION');
   // CLASS scan on the sheets that carry the attachment detail + its schedules.
   const scope = flat(pv3 + '\n' + sheet('PV-4C.1') + '\n' + sheet('APP-A') + '\n' + schedAll);
   const CLASSES = {
@@ -288,15 +294,32 @@ function installedOpenAirEgcAssertions(sourceHtml) {
     sealantProduct: /ALPHASEAL|SEALANT AT EVERY/i,
     screwCount: /\b\d+\s+(screws?|per pad|per mount)\b/i,
   };
-  const leaks = Object.entries(CLASSES).filter(([, re]) => re.test(scope)).map(([k]) => k);
-  const mandated = ['FASTENER ASSEMBLY: PENDING VERIFIED SELECTION',
-    'INSTALLATION DETAILS: NOT ESTABLISHED'].filter(s => !flat(pv3).includes(s));
-  gate(5, 'pending-fastener-renders-no-exact-instruction',
-    !faUnverified ? true : leaks.length === 0 && mandated.length === 0,
-    `fastenerUnverified=${faUnverified} leaks=${leaks.join(',') || 'none'} `
-    + `missingPendingLines=${mandated.join(' | ') || 'none'}`,
-    { leaks, fastenerVerification: ra?.assemblyVerification?.fastener ?? null });
-  if (!faUnverified) vacuous.push('gate 5 (fastener assembly is verified on this input)');
+  const INSTRUCTION_KEYS = ['torque', 'pilot', 'coating', 'sealantProduct'];
+  if (faUnverified) {
+    const leaks = Object.entries(CLASSES).filter(([, re]) => re.test(scope)).map(([k]) => k);
+    const mandated = ['INSTALLATION DETAILS: NOT ESTABLISHED'].filter(s => !flat(pv3).includes(s));
+    const pendingLine = /FASTENER ASSEMBLY: PENDING VERIFIED SELECTION/.test(flat(pv3));
+    gate(5, 'pending-fastener-renders-no-exact-instruction',
+      leaks.length === 0 && mandated.length === 0 && pendingLine,
+      `arm=element-unverified leaks=${leaks.join(',') || 'none'} `
+      + `missingPendingLines=${mandated.join(' | ') || 'none'} pendingLine=${pendingLine}`,
+      { leaks, fastenerVerification: ra?.assemblyVerification?.fastener ?? null });
+  } else if (instructionsGated) {
+    const pv3Flat = flat(pv3);
+    const leaks = Object.entries(CLASSES).filter(([k, re]) => INSTRUCTION_KEYS.includes(k) && re.test(pv3Flat)).map(([k]) => k);
+    const stateLine = /FASTENER ASSEMBLY: VERIFIED — EXACT INSTALLATION INSTRUCTIONS PENDING DOCUMENT\/SKU AUTHORITY/.test(pv3Flat)
+      || /FASTENER ASSEMBLY: VERIFIED &mdash; EXACT INSTALLATION INSTRUCTIONS PENDING DOCUMENT\/SKU AUTHORITY/.test(pv3Flat);
+    const banner = /REFERENCE DETAIL: NON-AUTHORITATIVE/.test(pv3Flat);
+    gate(5, 'pending-fastener-renders-no-exact-instruction',
+      leaks.length === 0 && stateLine && banner,
+      `arm=instructions-gated (element verified) instructionLeaksOnPv3=${leaks.join(',') || 'none'} `
+      + `stateDerivedLine=${stateLine} referenceBanner=${banner}`,
+      { leaks, fastenerVerification: ra?.assemblyVerification?.fastener ?? null });
+  } else {
+    gate(5, 'pending-fastener-renders-no-exact-instruction', true,
+      'arm=fully-verified (exact instructions allowed)', null);
+    vacuous.push('gate 5 (fastener assembly + instruction authority fully verified on this input)');
+  }
 }
 
 // ═══ GATE 6 — an unverified RT-MINI II document cannot authorize ════════════

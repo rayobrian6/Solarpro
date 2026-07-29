@@ -66,8 +66,10 @@ const manifestIds = (pa?.sheetIndex ?? []).map(s => s.id);
 const gates = [];
 const gate = (num, id, ok, detail, evidence) => { gates.push({ gate: num, id, ok: !!ok, detail, evidence: evidence ?? null }); return ok; };
 
-// ═══ GATE 1 — E-1 renders canonical section IDs (no merged branch row). ══════
-const g1_header = html.includes('E-1 PHYSICAL CONDUCTOR / RACEWAY SCHEDULE');
+// ═══ GATE 1 — the canonical sectioned schedule renders (no merged branch row).
+// Post-AAC E-1 repair: the schedule renders ONCE on PV-4B.1 (E-1 is the
+// dedicated SLD sheet again) — same canonical objects, same gate. ═════════════
+const g1_header = html.includes('PHYSICAL CONDUCTOR / RACEWAY SCHEDULE — CANONICAL SECTION OBJECTS');
 const g1_ids = ['BRANCH_RUN', 'BRANCH_HOMERUN_RUN', 'COMBINER_TO_DISCO_RUN', 'svc-tap-conductors'];
 const g1_missing = g1_ids.filter(id => !html.includes(id));
 const g1_snapSecs = !!segs.find(s => s.segmentId === 'BRANCH_RUN') && !!segs.find(s => s.segmentId === 'BRANCH_HOMERUN_RUN');
@@ -79,8 +81,10 @@ const hrRw = rws.find(r => /BRANCH-HOMERUN/.test(r.physicalRacewayId));
 const hrCcc = hrRw?.currentCarryingCount ?? null;
 const g2_cccMath = hrCcc != null && hrCcc === branches.length * 2;
 // the E-1 SVG must print N#10 for the shared home-run, never #12.
+// post-AAC: the schedule no longer follows the diagram on E-1 — slice to the
+// end of the SLD svg itself.
 const e1SvgStart = noB64.indexOf('SINGLE-LINE ELECTRICAL DIAGRAM');
-const e1SvgEnd = noB64.indexOf('E-1 PHYSICAL CONDUCTOR');
+const e1SvgEnd = e1SvgStart >= 0 ? noB64.indexOf('</svg>', e1SvgStart) + 6 : -1;
 const e1Svg = (e1SvgStart >= 0 && e1SvgEnd > e1SvgStart) ? noB64.slice(e1SvgStart, e1SvgEnd) : '';
 const g2_svgToken = hrCcc != null && e1Svg.includes(`${hrCcc}#10 THWN-2`);
 // The original defect was the shared HOME-RUN bundle printing #12 instead of N#10.
@@ -96,7 +100,7 @@ gate(2, 'e1-conductor-count-equals-raceway-inventory',
   `hrCcc=${hrCcc} =2×branches(${branches.length})=${g2_cccMath} svg'${hrCcc}#10'=${g2_svgToken} svgNo#12=${g2_svgNo12} ccc==cnt-1(all)=${g2_invEach}`, null);
 
 // ═══ GATE 3 — no E-1 section prints PASS while length/fill/tap is pending. ════
-const e1SchedStart = html.indexOf('E-1 PHYSICAL CONDUCTOR / RACEWAY SCHEDULE');
+const e1SchedStart = html.indexOf('PHYSICAL CONDUCTOR / RACEWAY SCHEDULE — CANONICAL SECTION OBJECTS');
 const e1Sched = e1SchedStart >= 0 ? html.slice(e1SchedStart, e1SchedStart + 4000) : '';
 // BAR §4 added the itemized AmpacityAdjustmentResult to each section, and that object
 // carries its OWN verdict ("req 20.00A cont · PASS") — a specific ampacity calculation
