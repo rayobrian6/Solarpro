@@ -37,7 +37,10 @@ export interface RetrievedCodeAdoption {
   /** every AHJ the query matched. length > 1 ⇒ overlapping jurisdiction, which
    *  is an OPERATOR_CONFIRMATION, never an engine choice. */
   allMatches: RegistryCodeAdoption[];
-  proof: 'live-retrieval' | 'fixture';
+  /** 'internal-registry' (TAC WS-19) = an evidence-carrying row of SolarPro's
+   *  own Neon ahj_registry — a RETAINED prior retrieval or governed operator
+   *  verification, consulted BEFORE any external registry. */
+  proof: 'live-retrieval' | 'fixture' | 'internal-registry';
   fixtureProvenance?: string | null;
 }
 

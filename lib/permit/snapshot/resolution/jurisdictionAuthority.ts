@@ -89,7 +89,7 @@ export interface ProjectLegalAuthorityRecord {
   retrievedAtIso: string;
   sourceHash: string;
   confidence: number;
-  proof: 'live-retrieval' | 'fixture';
+  proof: 'live-retrieval' | 'fixture' | 'internal-registry';
   fixtureProvenance: string | null;
   /** failures inside the provider chain, kept even on success. */
   chainFailures: string[];
@@ -298,7 +298,7 @@ export interface CodeAdoptionAuthorityRecord {
   retrievedAtIso: string;
   sourcesQueried: string[];
   confidence: number;
-  proof: 'live-retrieval' | 'fixture';
+  proof: 'live-retrieval' | 'fixture' | 'internal-registry';
   fixtureProvenance: string | null;
 }
 
@@ -311,7 +311,7 @@ export interface CodeAdoptionArgs {
   asceEngineBasis: string | null;
   confidence: number;
   resolverId: string;
-  proof: 'live-retrieval' | 'fixture';
+  proof: 'live-retrieval' | 'fixture' | 'internal-registry';
   fixtureProvenance?: string | null;
 }
 

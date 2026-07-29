@@ -101,26 +101,26 @@ describe('PPC §3 (gate 4) — no unsupported maximum-spacing language', () => {
 describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact instruction', () => {
   const pv3 = () => text(sheetWith(PKG.html, 'ATTACHMENT DETAIL'));
 
-  it('exact instructions stay GATED — document inapplicable + SKU unpinned (fastener element verified per WS-8)', () => {
+  it('exact instructions stay GATED — and the fastener itself is honestly UNVERIFIED (TAC WS-4)', () => {
     const fa = projectFastenerAssembly(PKG.input);
-    // Post-AAC (WS-8 alignment): the fastener ELEMENT verifies independently of
-    // the rail-capacity document; the instruction gate holds on the OTHER
-    // conditions, which is the §4 invariant this suite protects.
-    expect(fa.verification).toBe('verified');
+    // TAC WS-4 — the fastener is NOT verified: the only cited source is a
+    // flashing/water-resistance evaluation report and the RT-MINI II document is
+    // not verified applicable to the selected RT-MINI. Every gating condition
+    // that is false must READ false — none may be assumed true.
+    expect(fa.verification).toBe('unverified');
     const att = projectAttachmentInstallationAuthority(PKG.snap, 'rooftech-mini',
       { model: 'RT-MINI', docTitle: 'Roof Tech RT-MINI II Installation Manual (Jun 2025)' },
       { state: 'PENDING_APPLICABILITY', applicabilityVerified: false, documentProduct: 'RT-MINI II' });
     expect(att.exactInstructionsAllowed).toBe(false);
-    // the gating conditions may never be silently assumed true
     expect(att.conditions.exactSkuSelected).toBe(false);
     expect(att.conditions.documentApplicabilityVerified).toBe(false);
-    expect(att.conditions.fastenerAssemblyVerified).toBe(true);
+    expect(att.conditions.fastenerAssemblyVerified).toBe(false);
   });
 
-  it('PV-3 renders the state-derived PENDING block (instructions gated, fastener state honest)', () => {
+  it('PV-3 renders the state-derived PENDING block (fastener + instructions both pending)', () => {
     const t = pv3();
-    expect(t).toContain('FASTENER ASSEMBLY: VERIFIED — EXACT INSTALLATION INSTRUCTIONS PENDING DOCUMENT/SKU AUTHORITY');
-    expect(t).not.toContain('FASTENER ASSEMBLY: PENDING VERIFIED SELECTION');
+    expect(t).toContain('FASTENER ASSEMBLY: PENDING VERIFIED SELECTION');
+    expect(t).not.toContain('FASTENER ASSEMBLY: VERIFIED');
     expect(t).toContain('INSTALLATION DETAILS: NOT ESTABLISHED');
     expect(t).toContain('DOCUMENT APPLICABILITY: RT-MINI II MANUAL NOT VERIFIED FOR SELECTED RT-MINI');
     expect(t).toContain(REFERENCE_DETAIL_BANNER);
@@ -160,7 +160,12 @@ describe('PPC §4 (gates 5/6) — pending fastener assembly renders no exact ins
     ra.railSku = 'XR100-168';
     ra.railModel = 'XR100';
     ra.assemblyVerification = { ...(ra.assemblyVerification ?? {}), fastener: 'verified', overall: 'verified' };
-    ra.datasheetSource = 'ESR-XXXX (archived)';
+    // TAC WS-4 — the cited source must be an INSTALLATION/STRUCTURAL document.
+    // This synthetic previously cited 'ESR-XXXX', a flashing / water-resistance
+    // evaluation report, which the one fastener predicate now (correctly) refuses
+    // as installation authority — so the "all five verified" case needs a real
+    // installation manual, which is what a verified assembly would actually cite.
+    ra.datasheetSource = 'Roof Tech RT-MINI Installation Manual (archived)';
     ra.structuralAuthorityGaps = [];
     ra.capacityProvenance = {
       ...(ra.capacityProvenance ?? {}),
@@ -244,10 +249,14 @@ describe('PPC §5 (gate 7) — pending racking components are non-orderable', ()
       rails: [], attachments: [], moduleInstances: [],
       rackingAssembly: {
         railSku: 'XR100-168', railModel: 'XR100', mountSku: 'RT-MINI-SKU',
-        datasheetSource: 'ESR-archived',
+        datasheetSource: 'Roof Tech RT-MINI Installation Manual (archived)',
         assemblyVerification: { railSku: 'verified', capacitySource: 'verified', spanSource: 'verified', fastener: 'verified', overall: 'verified' },
         structuralAuthorityGaps: [],
       } as never,
+      // TAC WS-4 — the classifier no longer re-derives the fastener verdict; the
+      // ONE predicate's result is passed in by the caller (buildStructuralAuthority
+      // in production). A verified assembly supplies true.
+      fastenerVerified: true,
     });
     for (const r of verified) {
       expect(r.procurementClass, r.key).toBe('A');

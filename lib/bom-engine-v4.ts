@@ -509,6 +509,10 @@ function emitAcConductorBom(runs: RunSegment[]): { items: BOMLineItemV4[]; evide
     if (runHasNoConduit(r)) { openAir.push(String(r.id)); continue; }
     const gauge = r.wireGauge ?? '#10 AWG';
     const egcGauge = r.egcGauge ?? '#10 AWG';
+    // TAC WS-3 — PROCUREMENT reads `conductorCount` (the physical phase+neutral
+    // count), NOT the current-carrying count used for 310.15(C)(1) derating: a
+    // 3-wire single-phase neutral is installed and billed while not being a CCC,
+    // so sourcing this from the derating count would under-order one conductor.
     const perCircuit = r.conductorCount ?? 2;
     const shared = r.sharedCircuitCount ?? r.physicalRaceway?.sharedCircuitCount ?? 1;
     // ECD §3 — NO FABRICATED LENGTH (was `?? 30`). An unresolved one-way length

@@ -50,6 +50,9 @@ import {
 } from './types';
 import { DERIVED_RESOLVER_IDS } from './derived';
 import { createSunspecCodeProvider } from '@/lib/providers/jurisdiction/sunspecCodeProvider';
+import {
+  createInternalAhjRegistryProvider, createCompositeCodeAdoptionProvider,
+} from '@/lib/jurisdictions/internalAhjRegistry';
 import { createCensusPropertyProvider } from '@/lib/providers/property/censusPropertyProvider';
 import { createAsceHazardProvider } from '@/lib/providers/climateHazard/asceHazardProvider';
 import { createHttpDocumentRetrievalProvider } from '@/lib/providers/documentRetrieval/httpDocumentProvider';
@@ -111,7 +114,17 @@ export function defaultAuthorityBundle(): SnapshotAuthorityInputs {
  */
 export function productionProviders(nowIso?: string): RetrievalProviders {
   return {
-    codeAdoption: createSunspecCodeProvider({ nowIso }),
+    // TAC WS-19 — provider PRECEDENCE: SolarPro's own Neon ahj_registry
+    // (retained retrievals + governed operator verifications) answers FIRST;
+    // the external SunSpec/Orange Button registry is the fallback + enrichment
+    // path. AHJ_REGISTRY_TOKEN is no longer the primary prerequisite for
+    // adopted-code authority. Admitted external retrievals are written back to
+    // the internal registry by code-authority@v1 (research once → retain
+    // centrally → reuse for every project).
+    codeAdoption: createCompositeCodeAdoptionProvider([
+      createInternalAhjRegistryProvider({ nowIso }),
+      createSunspecCodeProvider({ nowIso }),
+    ]),
     propertyIdentity: createCensusPropertyProvider({ nowIso }),
     climateHazard: createAsceHazardProvider({ nowIso }),
     documentRetrieval: createHttpDocumentRetrievalProvider({ nowIso }),

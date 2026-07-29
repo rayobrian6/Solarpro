@@ -659,6 +659,11 @@ export interface SharedBranchRacewayProjection {
   selectedRacewaySize: string | null;
   upsizingReason: string | null;
   oneWayFt: number | null;
+  /** TAC WS-8 � the home-run segment's VOLTAGE DROP. The PV-4B row's V-Drop %
+   *  cell had no voltage-drop field to read and printed `fillPct` instead (a
+   *  conduit-fill percentage under a voltage-drop heading). Distinct field, so
+   *  the two percentages can never be interchanged again. */
+  voltageDropPct: number | null;
   /** display: 'PVC Sch 80 1-1/4" — 3 branches shared'. */
   conduitLabel: string | null;
 }
@@ -669,7 +674,7 @@ export function projectSharedBranchRaceway(snap: PermitDesignSnapshot | null | u
     sharedCircuitCount: null, conductorCount: null, currentCarryingCount: null,
     conductorGauge: null, egcGauge: null, fillPct: null,
     minimumCodeRacewaySize: null, selectedRacewaySize: null, upsizingReason: null, oneWayFt: null,
-    conduitLabel: null,
+    voltageDropPct: null, conduitLabel: null,
   };
   const elec = snap?.electrical;
   if (!elec) return empty;
@@ -698,6 +703,7 @@ export function projectSharedBranchRaceway(snap: PermitDesignSnapshot | null | u
     selectedRacewaySize: rw?.selectedRacewaySize ?? tradeSizeIn,
     upsizingReason: rw?.upsizingReason ?? seg?.upsizingReason ?? null,
     oneWayFt: num(seg?.oneWayFt),
+    voltageDropPct: num(seg?.voltageDropPct),
     conduitLabel,
   };
 }
@@ -906,8 +912,13 @@ export interface AmpacityInput {
   freeAir: boolean;
   ambientTempC: number | null;
   rooftopAdderC?: number | null;
+  /** TAC WS-2 — where the design ambient came from (ASHRAE 2% high / AHJ
+   *  override). Printed in the chain so the derate is attributable. */
+  ambientSource?: string | null;
   /** the canonical ambient factor the sizer already resolved (segment.tempDeratingFactor);
-   *  used verbatim so the itemized chain equals the sizer's number, never a re-derivation. */
+   *  used verbatim so the itemized chain equals the sizer's number, never a re-derivation.
+   *  TAC WS-2: it is used ONLY when `ambientTempC` is recorded — a factor with
+   *  no stated temperature cannot establish an ampacity result. */
   tempDeratingFactor?: number | null;
   /** the continuous load this conductor set must carry. */
   requiredContinuousA: number | null;
@@ -933,20 +944,34 @@ export function projectAmpacityAdjustment(inp: AmpacityInput): AmpacityAdjustmen
     : (ccc != null ? `${ccc} CCC → ${countAdj?.toFixed(2)} (NEC 310.15(C)(1))` : null);
 
   const rooftopAdder = inp.rooftopAdderC ?? 0;
-  const effAmbient = inp.ambientTempC != null ? inp.ambientTempC : null;
-  // Prefer the sizer's already-resolved factor so the itemized chain equals the
-  // number the wire-sizer used; else derive from the effective ambient.
-  const ambientCF = inp.tempDeratingFactor != null
-    ? inp.tempDeratingFactor
-    : (effAmbient != null ? ambientCorrectionFactor(effAmbient) : null);
+  // TAC WS-2 — the EFFECTIVE ambient is ambient + any applicable rooftop adder
+  // (it was previously just the ambient, so an adder could never reach the
+  // table lookup).
+  const effAmbient = inp.ambientTempC != null ? inp.ambientTempC + rooftopAdder : null;
+  // TAC WS-2 — FAIL CLOSED ON A SOURCELESS CORRECTION FACTOR. The sizer's
+  // already-resolved factor is preferred so the itemized chain equals the number
+  // the wire-sizer used — but ONLY when the temperature it was derived from is
+  // recorded. A factor with `ambientTempC: null` is an unverifiable derate
+  // (the package printed "× 0.96 (NEC 310.15(B)(1))" beside three null inputs
+  // on a feeder with a 1.25 A margin); it now yields a PENDING chain instead of
+  // a PASS, exactly like any other missing authority input.
+  const ambientCF = effAmbient != null
+    ? (inp.tempDeratingFactor ?? ambientCorrectionFactor(effAmbient))
+    : null;
   // NOTE: the basis strings deliberately avoid the "@ NN °C" form — that shape is
   // reserved for DESIGN-LOW temperature annotations (NEC 690.7) elsewhere in the
   // package, and a conductor RATING/ambient printed that way reads as a second
   // design temperature (the W5 §4 singular-thermal-basis gate).
-  const ambientBasis = ambientCF == null ? null
-    : (effAmbient != null
-        ? `NEC 310.15(B)(1) at ${effAmbient} °C ambient${rooftopAdder ? ` (incl. ${rooftopAdder} °C rooftop adder, NEC 310.15(B)(2))` : ''} → ${ambientCF.toFixed(2)}`
-        : `NEC 310.15(B)(1) → ${ambientCF.toFixed(2)}`);
+  // A basis string without a temperature is no longer reachable (ambientCF is
+  // null whenever the temperature is), so the chain always states what it
+  // derated FROM — including the source of the design ambient.
+  const ambientBasis = ambientCF == null
+    ? (inp.tempDeratingFactor != null
+        ? 'AMBIENT NOT ESTABLISHED — a correction factor cannot be applied without a recorded design ambient temperature (NEC 310.15(B)(1))'
+        : null)
+    : `NEC 310.15(B)(1) at ${effAmbient} °C ambient`
+      + `${rooftopAdder ? ` (${inp.ambientTempC} °C design + ${rooftopAdder} °C rooftop adder)` : ''}`
+      + `${inp.ambientSource ? ` · source: ${inp.ambientSource}` : ''} → ${ambientCF.toFixed(2)}`;
 
   const corrected = (countAdj != null && ambientCF != null)
     ? Math.round(base90 * countAdj * ambientCF * 100) / 100
@@ -1224,6 +1249,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
         freeAir: true,
         ambientTempC: num(branchSeg?.ambientTempC),
         rooftopAdderC: num(branchSeg?.rooftopAdderC),
+        ambientSource: branchSeg?.ambientSource ?? null,
         tempDeratingFactor: num(branchSeg?.tempDeratingFactor),
         requiredContinuousA: num(b.continuousA),
         requiredContinuousBasis: `branch continuous = ${num(b.currentA) ?? '—'}A op × 1.25 (NEC 690.8(A))`,
@@ -1305,6 +1331,7 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
         freeAir: false,
         ambientTempC: num(hrSeg?.ambientTempC),
         rooftopAdderC: num(hrSeg?.rooftopAdderC),
+        ambientSource: hrSeg?.ambientSource ?? null,
         tempDeratingFactor: num(hrSeg?.tempDeratingFactor),
         requiredContinuousA: maxBranchContA > 0 ? Math.round(maxBranchContA * 100) / 100 : null,
         requiredContinuousBasis: `each #10 carries one branch; governing = max branch continuous (${maxBranchOcpdA || 20}A-OCPD branch, ×1.25 basis)`,

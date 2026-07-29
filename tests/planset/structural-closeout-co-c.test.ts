@@ -14,7 +14,9 @@ import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { roofProject } from '../../test-fixtures/roofProject';
 import { classifyMountTopology, getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { projectFastenerAssembly, projectStructuralFromInput } from '@/lib/permit/snapshot/structuralProjection';
+import {
+  projectFastenerAssembly, projectStructuralFromInput, resolveFastenerVerification,
+} from '@/lib/permit/snapshot/structuralProjection';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
@@ -61,13 +63,15 @@ describe('§12 (Gate 12) — one fastener assembly, identical projection across 
     expect(fa.fastenerType).toBe('structural wood screw');
     expect(fa.pilotHoleRequired).toBe(false);
     expect(fa.embedmentIn).toBe(2.5);
-    // Post-AAC (WS-8 alignment): the fastener ELEMENT is verified (model + count
-    // + embedment + ICC-ES source) INDEPENDENT of the rail-capacity document —
-    // the `capacityGated` echo is dead on this surface exactly as WS-8 killed it
-    // on the FASTENER-ASSEMBLY-UNVERIFIED blocker emission. The rail-capacity
-    // question stays with the RACKING-CAPACITY-* codes.
-    expect(fa.verification).toBe('verified');
-    expect(fa.certLabel).toBe('VERIFIED FASTENER ASSEMBLY');
+    // TAC WS-4 — element completeness is NOT verification. The elements are all
+    // present (model + count + embedment), but the only cited source is
+    // ICC-ES ESR-3575 — a FLASHING / water-resistance evaluation report, which
+    // this codebase already refuses as capacity authority and which carries no
+    // fastener-installation authority either; and the RT-MINI II document is not
+    // verified applicable to the selected RT-MINI. So the ONE predicate says
+    // UNVERIFIED, and every sheet says the same thing.
+    expect(fa.verification).toBe('unverified');
+    expect(fa.certLabel).toBe('PENDING VERIFIED FASTENER ASSEMBLY');
   });
 
   it('APP-A, PE-1 and SCHED render the SAME canonical fastener line', () => {
@@ -79,43 +83,52 @@ describe('§12 (Gate 12) — one fastener assembly, identical projection across 
     expect(sched).toBeTruthy();
     expect(appA).toBe(pe1);
     expect(pe1).toBe(sched);
-    // WS-8 alignment: the VERIFIED element renders the full descriptive line —
-    // identically on every sheet (the §12 identity invariant is unchanged).
-    expect(appA).toContain('5/16');
-    expect(appA).toContain('structural wood screw');
+    // TAC WS-4: unverified ⇒ the ONE shared line is the design-quantity label on
+    // every sheet and NO dimension may print (the §12 identity invariant is what
+    // is being tested — that all three sheets say the SAME thing).
+    expect(appA).toBe('DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY');
+    expect(appA).not.toContain('5/16');
+    expect(appA).not.toContain('structural wood screw');
   });
 
-  it('BAR §6 — an UNVERIFIED element is NON-ORDERABLE and dimensionless (invariant intact)', () => {
-    // the ONLY gate on the descriptive line is `verification === 'verified'`:
-    // doctor the snapshot's fastener element to unverified and the same
-    // projection withholds every dimension (nothing else changes).
-    const unv: any = clone(input);
-    unv._snapshot = clone((input as any)._snapshot);
-    unv._snapshot.structural.rackingAssembly.assemblyVerification =
-      { ...(unv._snapshot.structural.rackingAssembly.assemblyVerification ?? {}), fastener: 'unverified' };
-    const faU = projectFastenerAssembly(unv);
-    expect(faU.verification).toBe('unverified');
-    expect(faU.nonOrderable).toBe(true);
-    expect(faU.line).not.toContain('5/16');
-    expect(faU.line).not.toContain('structural wood screw');
-    expect(faU.certLabel).toBe('PENDING VERIFIED FASTENER ASSEMBLY');
-    // the verified fixture regenerates the full line from the SAME retained fields.
-    expect(fa.line).toContain('5/16');
-    expect(fa.line).toContain('structural wood screw');
-    expect(fa.line).toContain('2.5" min embedment');
+  it('TAC WS-4 — the observed geometry is RETAINED for regeneration though withheld from the line', () => {
+    // Unverified ⇒ dimensionless line, but the canonical fields keep the observed
+    // geometry so the exact orderable row regenerates the moment an applicable,
+    // evidence-bearing installation document is verified.
+    expect(fa.nonOrderable).toBe(true);
+    expect(fa.line).not.toContain('5/16');
+    expect(fa.line).not.toContain('structural wood screw');
+    expect(fa.diameterLabel).toBe('5/16');       // retained on the object
+    expect(fa.embedmentIn).toBe(2.5);            // retained on the object
+    // …and the ONE predicate names WHY it is not verified (the flashing report).
+    const v = resolveFastenerVerification({
+      elementsComplete: true,
+      citedSourceDocument: 'ICC-ES ESR-3575',
+      documentApplicabilityVerified: true,
+    });
+    expect(v.verified).toBe(false);
+    expect(v.reason).toMatch(/flashing \/ water-resistance evaluation report/i);
+    // a genuine installation document WITH verified applicability does verify.
+    const ok = resolveFastenerVerification({
+      elementsComplete: true,
+      citedSourceDocument: 'Roof Tech RT-MINI Installation Manual (Jan 2021)',
+      documentApplicabilityVerified: true,
+    });
+    expect(ok.verified).toBe(true);
   });
 
-  it('PE-1 prints VERIFIED FASTENER ASSEMBLY and drops generic lag/stainless text', () => {
-    expect(html).toContain('VERIFIED FASTENER ASSEMBLY');
-    expect(html).not.toContain('PENDING VERIFIED FASTENER ASSEMBLY');
+  it('TAC WS-4 — PE-1 prints the PENDING fastener state and drops generic lag/stainless text', () => {
+    expect(html).toContain('PENDING VERIFIED FASTENER ASSEMBLY');
     // the specific generic triplet §12 named must be gone
     expect(html).not.toContain('Lag bolt w/ flashing');
     expect(html).not.toContain('>Stainless Steel<');
   });
 
-  it('PV-3 cross-section carries the same fastener diameter + embedment tokens', () => {
-    expect(html).toContain('5/16');
-    expect(html).toContain('2.5');
+  it('TAC WS-4/WS-5 — PV-3 withholds exact dims and never states a covering as embedment substrate', () => {
+    // dimensions are gated on the instruction authority (unchanged PPC rule)…
+    expect(html).not.toMatch(/5\/16"?\s*(DIA|diameter)/i);
+    // …and no roof COVERING may appear as a structural embedment target.
+    expect(html).not.toMatch(/embed\w*\s+into\s+[^<]{0,40}(asphalt|shingle|shake)/i);
   });
 });
 

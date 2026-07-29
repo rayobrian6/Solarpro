@@ -21,6 +21,7 @@ import { createDocument } from '@/lib/documents/registry';
 import { retryabilityFor } from '@/lib/providers/types';
 import { normalizeRiskCategory, type AsceEdition } from '@/lib/providers/climateHazard/types';
 import { AHJ_REGISTRY_ENDPOINT, AHJ_REGISTRY_TOKEN_ACTION } from '@/lib/jurisdictions/ahjRegistry';
+import { upsertAhjRegistryRow } from '@/lib/jurisdictions/internalAhjRegistry';
 import type { RequirementResolver, ResolverContext, ResolverOutcome, ResolutionInvalidation } from './types';
 import { buildResolutionAuditRef } from './evidence';
 import {
@@ -280,6 +281,34 @@ export const codeAuthorityResolver: RequirementResolver = {
     });
 
     if (!res.ok) {
+      // TAC WS-19 — RESEARCH ONCE, RETAIN CENTRALLY even on failure: the
+      // central ahj_registry keeps (a) the curated in-code row for this
+      // jurisdiction as 'seeded-unprovenanced' (documenting exactly which code
+      // fields exist and which are missing — it can never clear anything) and
+      // (b) an appended enrichment-attempt entry recording what was tried and
+      // why it failed. Fail-soft: a missing table never blocks the run.
+      const _corr = resolveAhjRecord({
+        ahjRecordId: str(p.ahjRecordId) ?? str(p.ahjId),
+        stateCode: str(p.state), county, city: str(p.city), address: str(p.address),
+      });
+      if (_corr) {
+        await ctx.safeDbRead('ahjRegistry.retainSeed', () => upsertAhjRegistryRow({
+          id: _corr.id,
+          stateCode: _corr.stateCode, county: _corr.county || null, city: _corr.city || null,
+          ahjName: _corr.ahjName, jurisdictionType: _corr.ahjType ?? 'unknown',
+          editions: {
+            nec: _corr.necVersion ?? null, ibc: _corr.ibcVersion ?? null,
+            irc: _corr.ircVersion ?? null, ifc: _corr.ifcVersion ?? null,
+          },
+          provenance: 'seeded-unprovenanced',
+          notes: 'Seeded from lib/jurisdictions/ahj-national.ts (' + (_corr.dataProvenance ?? 'curated')
+            + ') — no ordinance, no effective date, no hash; may never establish an adopted edition.',
+          enrichmentAttempt: {
+            atIso: ctx.nowIso, source: provider.name,
+            outcome: res.failureKind ?? 'FAILED', note: (res.failure ?? '').slice(0, 300),
+          },
+        }), null);
+      }
       const ambiguous = res.failureKind === 'AMBIGUOUS';
       return {
         result: 'FAILED',
@@ -317,6 +346,40 @@ export const codeAuthorityResolver: RequirementResolver = {
       proof: res.value.proof,
       fixtureProvenance: res.value.fixtureProvenance ?? null,
     });
+
+    // TAC WS-19 — RESEARCH ONCE → RETAIN CENTRALLY: an ADMITTED external
+    // retrieval (conflict checks below still gate what the SNAPSHOT accepts) is
+    // persisted to SolarPro's own ahj_registry with its payload hash + source,
+    // so the NEXT project in this jurisdiction resolves from the internal
+    // registry without the external token. Internal-registry answers are not
+    // re-written (they came from this table). Fail-soft.
+    if (res.value.proof === 'live-retrieval') {
+      const adopted = res.value.record;
+      const _slug = (s: string | null | undefined): string =>
+        (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const _rowId = corroborator?.id
+        ?? `${(adopted.stateCode ?? 'xx').toLowerCase()}-${_slug(adopted.county) || 'x'}-${_slug(adopted.city) || _slug(adopted.ahjName) || 'ahj'}`;
+      await ctx.safeDbRead('ahjRegistry.retainRetrieval', () => upsertAhjRegistryRow({
+        id: _rowId,
+        stateCode: adopted.stateCode ?? str(p.state) ?? 'XX',
+        county: adopted.county, city: adopted.city,
+        ahjName: adopted.ahjName, jurisdictionType: adopted.jurisdictionType,
+        externalAhjId: adopted.ahjId ?? adopted.ahjCode ?? null,
+        editions: { ...adopted.editions },
+        rawEditions: adopted.rawEditions as unknown as Record<string, string | null>,
+        localAmendments: record.localAmendments,
+        effectiveDate: adopted.lastUpdatedIso,
+        sourceUrl: adopted.sourceUrl,
+        sourceSha256: record.sourceHash,
+        provenance: 'retrieved',
+        verifiedBy: record.verifiedBy,
+        retrievedAtIso: record.retrievedAtIso,
+        rawPayload: adopted,
+        permitOffice: adopted.permitOffice,
+        engineeringReviewRequirements: adopted.engineeringReviewRequirements,
+        enrichmentAttempt: { atIso: ctx.nowIso, source: provider.name, outcome: 'RETRIEVED' },
+      }), null);
+    }
 
     const refs = [
       `authority:code-adoption#${record.sourceHash.slice(0, 16)}`,

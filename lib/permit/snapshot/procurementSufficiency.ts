@@ -187,6 +187,9 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
       requiredServiceLoopAllowanceFt: 0, allowanceProvenance: 'no-allowance-authority-recorded',
       allowanceNote: 'No manufacturer/design Q-Cable service-loop or transition allowance is recorded in-repo; allowance = 0. A manufacturer-documented allowance would RAISE this threshold.',
       thresholdFt: null, deficitFt: 0, insufficient: false, affectedBranchIds: [],
+      aggregateFootageDeficitFt: 0, topologyConstrainedDeficitFt: 0,
+      nonRedistributableSurplusFt: 0, requiredAdditionalPurchasableLengthFt: 0,
+      deficitBasis: 'none' as const, deficitArithmeticNote: null,
       resolutionOptions: resolutionOptions(null), manufacturerDocumentAuthority: null,
       // ECD §4 (W1-E) — the supplied solutions are CARRIED even when there is no
       // deficit to clear. A CableExtensionSolution is also the only thing that
@@ -202,10 +205,24 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
 
   const pitch = assembly.connectorSpacingFt ?? null;
   const waste = branchPaths[0]?.wasteFactor ?? null;
-  const perBranch = branchPaths.map(p => ({
-    branchId: p.branchId, branchLabel: p.branchLabel, dropCount: p.dropCount,
-    designedInstalledLengthFt: p.designedInstalledLengthFt, procurementLengthFt: p.procurementLengthFt,
-  }));
+  // TAC WS-1 — each branch carries its OWN deficit/surplus. A cable assembly is a
+  // continuous run per branch: footage cannot move between branches, so a surplus
+  // on one branch is NON-REDISTRIBUTABLE and cannot offset another branch's short
+  // fall. Both quantities are recorded per branch so no surface has to (and none
+  // may) infer them from the aggregates.
+  const perBranch = branchPaths.map(p => {
+    const _req = p.designedInstalledLengthFt ?? 0;
+    const _alloc = p.procurementLengthFt ?? 0;
+    const _delta = round1(_req - _alloc);
+    return {
+      branchId: p.branchId, branchLabel: p.branchLabel, dropCount: p.dropCount,
+      designedInstalledLengthFt: p.designedInstalledLengthFt, procurementLengthFt: p.procurementLengthFt,
+      /** > 0 ⇒ this branch is short by this much. */
+      deficitFt: _delta > 0 ? _delta : 0,
+      /** > 0 ⇒ this branch has spare cable that CANNOT serve another branch. */
+      nonRedistributableSurplusFt: _delta < 0 ? round1(-_delta) : 0,
+    };
+  });
   const totalDesigned = round1(branchPaths.reduce((s, p) => s + (p.designedInstalledLengthFt ?? 0), 0));
   const procurement = Math.round(branchPaths.reduce((s, p) => s + (p.procurementLengthFt ?? 0), 0));
   const totalDrops = branchPaths.reduce((s, p) => s + (p.dropCount ?? 0), 0);
@@ -234,11 +251,42 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
     (p.designedInstalledLengthFt ?? 0) > (p.procurementLengthFt ?? 0));
   const aggregateShort = procurement < thresholdFt;
   const rawInsufficient = aggregateShort || shortBranches.length > 0;
-  const perBranchDeficitFt = shortBranches.reduce(
-    (s, p) => s + ((p.designedInstalledLengthFt ?? 0) - (p.procurementLengthFt ?? 0)), 0);
+  // ── TAC WS-1 — TWO DISTINCT DEFICITS, EACH NAMED ────────────────────────────
+  // The governing deficit was `max(aggregate, Σ per-branch)` reported as ONE
+  // number, which downstream prose then narrated with AGGREGATE operands:
+  // "procurement 152 ft is SHORT of the 166.5 ft designed path by 24.2 ft"
+  // — but 166.5 − 152 = 14.5. Both quantities were right; the SENTENCE was
+  // mathematically false because it mixed the aggregate operands with the
+  // topology-constrained result. Each is now its own field with its own basis,
+  // and the governing basis is explicit so no surface can mix them.
+  const aggregateFootageDeficitFt = aggregateShort ? round1(thresholdFt - procurement) : 0;
+  const topologyConstrainedDeficitFt = round1(shortBranches.reduce(
+    (s, p) => s + ((p.designedInstalledLengthFt ?? 0) - (p.procurementLengthFt ?? 0)), 0));
+  /** Spare footage stranded on branches that are NOT short — it can never offset
+   *  a short branch, which is exactly why the topology deficit can exceed the
+   *  aggregate one. */
+  const nonRedistributableSurplusFt = round1(perBranch.reduce(
+    (s, p) => s + (p.nonRedistributableSurplusFt ?? 0), 0));
+  const deficitBasis: 'aggregate-footage' | 'topology-constrained' | 'none' =
+    !rawInsufficient ? 'none'
+      : (topologyConstrainedDeficitFt >= aggregateFootageDeficitFt ? 'topology-constrained' : 'aggregate-footage');
   const deficitFt = rawInsufficient
-    ? round1(Math.max(aggregateShort ? thresholdFt - procurement : 0, perBranchDeficitFt))
+    ? round1(Math.max(aggregateFootageDeficitFt, topologyConstrainedDeficitFt))
     : 0;
+  /** The minimum ADDITIONAL cable that must actually be purchased — the
+   *  governing (topology-aware) figure, because cable bought for one branch
+   *  cannot complete another. */
+  const requiredAdditionalPurchasableLengthFt = deficitFt;
+  const deficitArithmeticNote = !rawInsufficient
+    ? null
+    : `AGGREGATE FOOTAGE: designed ${totalDesigned} ft + allowance ${requiredServiceLoopAllowanceFt} ft `
+      + `− procured ${procurement} ft = ${aggregateFootageDeficitFt} ft. `
+      + `TOPOLOGY-CONSTRAINED (GOVERNING): Σ per-branch shortfall = `
+      + `${shortBranches.map(p => `${p.branchLabel} ${round1((p.designedInstalledLengthFt ?? 0) - (p.procurementLengthFt ?? 0))} ft`).join(' + ') || '0 ft'}`
+      + ` = ${topologyConstrainedDeficitFt} ft`
+      + (nonRedistributableSurplusFt > 0
+        ? `; ${nonRedistributableSurplusFt} ft of surplus on non-short branch(es) is NON-REDISTRIBUTABLE (a cable assembly is a continuous run per branch), which is why the governing deficit exceeds the aggregate subtraction.`
+        : '.');
   const affectedBranchIds = rawInsufficient ? shortBranches.map(p => p.branchId) : [];
   // When no single branch individually exceeds (only the Σ does), name all branches.
   const affected = affectedBranchIds.length ? affectedBranchIds : (rawInsufficient ? branchPaths.map(p => p.branchId) : []);
@@ -286,6 +334,11 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
     procurementDerivation: args.topology ? args.topology.derivation : procurementDerivation,
     requiredServiceLoopAllowanceFt, allowanceProvenance, allowanceNote,
     thresholdFt, deficitFt, insufficient, affectedBranchIds: affected,
+    // TAC WS-1 — the two named deficits + the governing basis + the exact
+    // arithmetic every surface must print instead of composing its own.
+    aggregateFootageDeficitFt, topologyConstrainedDeficitFt,
+    nonRedistributableSurplusFt, requiredAdditionalPurchasableLengthFt,
+    deficitBasis, deficitArithmeticNote,
     resolutionOptions: resolutionOptions(clearingKind),
     manufacturerDocumentAuthority: null,
     verificationStatus, solutions, clearedBySolutionId, clearance,

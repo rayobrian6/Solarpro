@@ -35,6 +35,7 @@ import {
   type StructuralBomRow, type StructuralBomReconciliation,
 } from './structuralBom';
 import { contentRevision } from './digest';
+import { resolveFastenerVerification, type FastenerVerificationResult } from './structuralProjection';
 import { resolveFireSetbackIn, arrayCoverageFrac } from '../utils/fireSetback';
 import { analyzeFenceWind, type FenceWindInput } from '@/lib/structural/fenceWindEngine';
 
@@ -135,6 +136,41 @@ export interface StructuralAuthorityBundle {
 const FT_PER_DEG_LAT = 364000; // ≈ ft per degree latitude
 const PROV = (note?: string): Provenance => ({ source: 'W3 structural authority', note });
 
+/**
+ * TAC WS-4 — the ONE fastener verdict, reachable from both the blocker emission
+ * and the BOM classification (they live in different scopes, so the predicate is
+ * shared as a function rather than a variable). Delegates to
+ * resolveFastenerVerification; this wrapper only supplies the document-
+ * applicability fact for the SELECTED mount.
+ */
+function fastenerVerdictFor(
+  ra: {
+    fastenerElementsComplete?: boolean;
+    screwLagModel?: string | null;
+    screwLagQtyPerMount?: number | null;
+    embedmentRequirementIn?: number | null;
+    datasheetSource?: string | null;
+    capacitySource?: string | null;
+  } | null | undefined,
+  ctx: StructuralAuthorityCtx,
+): FastenerVerificationResult {
+  if (!ra) {
+    return { verified: false, sourceDocument: null, reason: 'no canonical racking assembly is recorded' };
+  }
+  const docApplicable = (() => {
+    if (!ctx.mountSystem) return false;
+    const asset = getManufacturerAsset(ctx.mountSystem.id, 'racking_detail');
+    const facts = ctx.documentRegistryFacts?.[`racking_detail:${ctx.mountSystem.id}`] ?? null;
+    return evaluateDocumentApplicability(ctx.mountSystem.model, asset, null, facts).applicabilityVerified === true;
+  })();
+  return resolveFastenerVerification({
+    elementsComplete: ra.fastenerElementsComplete
+      ?? !!(ra.screwLagModel && ra.screwLagQtyPerMount != null && ra.embedmentRequirementIn != null),
+    citedSourceDocument: ra.datasheetSource ?? ra.capacitySource ?? null,
+    documentApplicabilityVerified: docApplicable,
+  });
+}
+
 export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): StructuralAuthorityBundle {
   const roofRun = ctx.structuralRuns?.byKey['roof']
     ?? (ctx.structuralRuns ? Object.values(ctx.structuralRuns.byKey)[0] : undefined) ?? null;
@@ -217,6 +253,10 @@ export function buildStructuralAuthority(ctx: StructuralAuthorityCtx): Structura
     rails, attachments, moduleInstances, rackingAssembly,
     mountSelfFlashing: ctx.mountSystem?.mount.selfFlashing ?? null,
     mountAttachmentMethod: ctx.mountSystem?.mount.attachmentMethod ?? null,
+    // TAC WS-4 — the ONE fastener verdict; the BOM classifier no longer
+    // re-derives it (that third predicate is what let an unverified assembly
+    // produce an orderable fastener row).
+    fastenerVerified: fastenerVerdictFor(rackingAssembly, ctx).verified,
   };
   const bom = deriveStructuralBom(bomObjects);
   // The V4 calcRackingBOM result (historical producer) is the reconciliation
@@ -905,14 +945,17 @@ function collectBlockers(
       // The predicate is now what the documentation always claimed: the mount's
       // OWN fastener element must be complete AND carry a source document. The
       // capacity-document question stays with the two codes that own it.
-      const _fastenerSource = ra.datasheetSource ?? ra.capacitySource ?? ctx.mountSystem?.iccEsReport ?? null;
-      const _fastenerVerified = ra.assemblyVerification?.fastener === 'verified' && !!_fastenerSource;
-      if (!_fastenerVerified) {
-        const _why = ra.assemblyVerification?.fastener !== 'verified'
-          ? 'the fastener element is incomplete (model / count / embedment not all established on the mount record)'
-          : 'no withdrawal-capacity source document is recorded for the mount base';
+      // TAC WS-4 — THE ONE PREDICATE (resolveFastenerVerification). This block
+      // used to carry its own two-term test while structuralProjection carried a
+      // different one and structuralBom a third — the reason one package could
+      // print "VERIFIED FASTENER ASSEMBLY" and "INSTALLATION DETAILS: NOT
+      // ESTABLISHED" at the same time. A flashing/water-resistance evaluation
+      // report is not fastener authority, and the document must be APPLICABLE to
+      // the selected product version.
+      const _fv = fastenerVerdictFor(ra, ctx);
+      if (!_fv.verified) {
         b.push({ code: 'FASTENER-ASSEMBLY-UNVERIFIED',
-          message: `Roof-attachment fastener assembly UNVERIFIED — ${_why}. Mount-BASE authority, decided independently of `
+          message: `Roof-attachment fastener assembly UNVERIFIED — ${_fv.reason}. Mount-BASE authority, decided independently of `
             + 'the rail selection and of the rail-capacity document.' });
       }
     }

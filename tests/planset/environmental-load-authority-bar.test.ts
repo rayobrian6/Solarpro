@@ -284,18 +284,12 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-25T12:00:00Z';
   const html = generatePermitHTML(input);
-  // Post-AAC accounting repair (WS-8 alignment): the fixture's fastener ELEMENT
-  // is verified (model + count + embedment + ICC-ES source), and fastener
-  // verification is mount-BASE authority decided independently of the
-  // rail-capacity document — the `capacityGated` echo is dead on this surface
-  // exactly as WS-8 killed it on the blocker emission. §6's invariant (an
-  // UNVERIFIED assembly is non-orderable and dimensionless) is asserted on a
-  // doctored snapshot whose fastener element is honestly unverified.
-  const unv: any = clone(input);
-  unv._snapshot = clone((input as any)._snapshot ?? {});
-  unv._snapshot.structural.rackingAssembly.assemblyVerification =
-    { ...(unv._snapshot.structural.rackingAssembly.assemblyVerification ?? {}), fastener: 'unverified' };
-  const fa = projectFastenerAssembly(unv);
+  // TAC WS-4 — the fixture's fastener is honestly UNVERIFIED: its elements are
+  // complete but the only cited source is a flashing/water-resistance evaluation
+  // report (ESR-3575), which carries no fastener-installation authority, and the
+  // on-file RT-MINI II document is not verified applicable to the selected
+  // RT-MINI. §6's invariant therefore applies to the fixture directly.
+  const fa = projectFastenerAssembly(input);
 
   it('the fastener assembly is unverified ⇒ non-orderable, dimensionless line', () => {
     expect(fa.verification).not.toBe('verified');
@@ -305,13 +299,14 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
     expect(fa.line).not.toMatch(/\d+\/\d+|embedment|dia\b/i);
   });
 
-  it('WS-8 alignment — the fixture\'s VERIFIED element is orderable, independent of capacity gating', () => {
-    const faV = projectFastenerAssembly(input);
-    expect(faV.verification).toBe('verified');
-    expect(faV.nonOrderable).toBe(false);
-    // the rendered package no longer cites FASTENER-ASSEMBLY-UNVERIFIED (the
-    // registry does not carry it) — no sheet may reference a nonexistent row.
-    expect(html).not.toContain('FASTENER-ASSEMBLY-UNVERIFIED (see RS-1)');
+  it('TAC WS-4 — element completeness alone never yields "verified"', () => {
+    // The elements ARE all present on the mount record…
+    expect(fa.diameterLabel).toBe('5/16');
+    expect(fa.embedmentIn).toBe(2.5);
+    expect(fa.qtyPerMount).not.toBeNull();
+    // …and the assembly is still UNVERIFIED, because presence is not evidence.
+    expect(fa.verification).not.toBe('verified');
+    expect(fa.nonOrderable).toBe(true);
   });
 
   it('the observed geometry is retained in the object for regeneration on verification', () => {
@@ -323,10 +318,9 @@ describe('§6 — unverified fasteners are NON-ORDERABLE (cannot become orderabl
     expect(fa.certLabel).toBe('PENDING VERIFIED FASTENER ASSEMBLY');
   });
 
-  it('the rendered Roof Attachment Hardware row reflects the VERIFIED element (WS-8 alignment)', () => {
-    // the fixture's fastener element is verified ⇒ the rendered row is orderable
-    // and the non-orderable label is absent from the fastener row.
-    expect(html).toContain('data-fastener-orderable="true"');
-    expect(html).not.toContain('data-fastener-orderable="false"');
+  it('the rendered Roof Attachment Hardware row is flagged NON-ORDERABLE (TAC WS-4)', () => {
+    expect(html).toContain('data-fastener-orderable="false"');
+    expect(html).not.toContain('data-fastener-orderable="true"');
+    expect(html).toContain(FASTENER_NON_ORDERABLE_LABEL);
   });
 });

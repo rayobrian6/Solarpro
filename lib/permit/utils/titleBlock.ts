@@ -38,11 +38,17 @@ function roofAttachmentNote(input: PermitInput): string {
       + `Fasteners per the selected mounting system's listed installation instructions and PV-3 attachment detail; `
       + `use corrosion-resistant hardware throughout.`;
   }
-  const fracIn = (v: number | undefined) =>
-    v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : (v != null ? `${v}` : '');
-  const spec = m.hardware.lagBolt
-    ?? `${fracIn(m.mount.fastenerDiameterIn)}" dia structural fastener`;
-  const embed = m.mount.fastenerEmbedmentIn ? `, minimum ${m.mount.fastenerEmbedmentIn}" embedment into rafter` : '';
+  // TAC WS-4/WS-5 — this note is the LAST surface that read mounting-hardware-db
+  // directly (a diameter + "embedment into rafter" string assembled from raw DB
+  // literals, bypassing both the fastener verdict and the canonical embedment
+  // substrate). It now projects the SAME canonical assembly every other sheet
+  // consumes: dimensions print only when the ONE fastener predicate says
+  // verified, and the substrate is the structural member, never a roof covering.
+  const _fa = projectFastenerAssembly(input);
+  const spec = _fa.line;
+  const embed = _fa.embedmentIn != null && _fa.substrate
+    ? `, minimum ${_fa.embedmentIn}" embedment into ${_fa.substrate}`
+    : '';
   return `Roof attachments shall be installed per manufacturer instructions and attachment detail on sheet PV-3. `
     + `Fastener: ${spec}${embed}. Use corrosion-resistant hardware per the manufacturer's listed installation instructions.`;
 }

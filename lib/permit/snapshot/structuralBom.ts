@@ -92,6 +92,11 @@ export interface StructuralBomObjects {
   /** Mount record signals needed for flashing topology (from equipment.mount). */
   mountSelfFlashing?: boolean | null;
   mountAttachmentMethod?: string | null;
+  /** TAC WS-4 — the ONE fastener verdict, decided by
+   *  projectFastenerAssemblyFromSnapshot and passed in. Absent/false ⇒ the
+   *  fastener row is a DESIGN QUANTITY (class B), never orderable. This module
+   *  must NOT re-derive it. */
+  fastenerVerified?: boolean;
 }
 
 /** Minimal shape of the V4 RackingBOM we reconcile against (avoids importing
@@ -279,15 +284,14 @@ export function classifyStructuralBomRows(
   const railPending = !ra
     || (ra.railSku == null && (ra.railModel == null || /PENDING/i.test(ra.railModel)));
   const mountSkuPending = !ra || ra.mountSku == null;
-  // The fastener is VERIFIED on exactly the condition projectFastenerAssembly uses:
-  // its own element state, an archived source document, and NOT capacity-gated —
-  // so the BOM class can never disagree with the rendered PENDING label.
-  const _capGated = (ra?.structuralAuthorityGaps ?? []).some(g => g.severity === 'blocking'
-    && ['RACKING-CAPACITY-SOURCE-NOT-ARCHIVED', 'RACKING-CAPACITY-APPLICABILITY-GAP',
-        'ATTACHMENT-CAPACITY-SOURCE-MISSING'].includes(g.code));
-  const fastenerVerified = ra?.assemblyVerification?.fastener === 'verified'
-    && !_capGated
-    && !!(ra?.datasheetSource ?? ra?.capacitySource);
+  // TAC WS-4 — the fastener state is NOT re-derived here. This block used to
+  // carry its own three-term predicate (element state + a source document +
+  // NOT capacity-gated) while structuralProjection carried a different one and
+  // rackingAssembly a third; that is exactly how the package printed
+  // "VERIFIED FASTENER ASSEMBLY" and "INSTALLATION DETAILS: NOT ESTABLISHED"
+  // simultaneously. The ONE predicate lives in
+  // projectFastenerAssemblyFromSnapshot; the caller passes its verdict in.
+  const fastenerVerified = o.fastenerVerified === true;
   const assemblyVerified = ra?.assemblyVerification?.overall === 'verified';
 
   return rows.map((r): StructuralBomRow => {

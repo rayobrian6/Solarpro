@@ -23,6 +23,7 @@ import type { DocumentApplicabilityState } from '@/lib/manufacturer-assets-db';
 import { observedFramingLine, observedSourceLabel } from './framingAuthority';
 import { environmentalSourceLabel, environmentalStateTag } from './environmentalAuthority';
 import { peekSnapshot } from './read';
+import { projectDocumentAuthority } from './documentAuthority';
 import { projectReleaseGates, releasePackageLine, type ReleaseSummary } from './releaseGates';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 
@@ -395,6 +396,71 @@ const _fracFast = (v: number | null | undefined): string | null =>
   v == null || !isFinite(v) ? null
     : v === 0.25 ? '1/4' : v === 0.3125 ? '5/16' : v === 0.375 ? '3/8' : v === 0.5 ? '1/2' : String(v);
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TAC WS-4 — THE ONE FASTENER-VERIFICATION PREDICATE.
+//
+// Three modules used to decide this independently (rackingAssembly by field
+// presence, structuralProjection by presence + any source string,
+// structuralBom by presence + source + capacity gating), which is how one
+// package printed "VERIFIED FASTENER ASSEMBLY · 5/16" dia · 2.5" min embedment"
+// on SCHED/APP-A/PE-1 and "FASTENER ASSEMBLY: … INSTALLATION DETAILS: NOT
+// ESTABLISHED" on PV-3. This function is now the only decision; every surface
+// consumes its verdict.
+//
+// WHAT VERIFIES A FASTENER ASSEMBLY:
+//   1. the ELEMENTS are complete on the canonical record (model + count +
+//      embedment), AND
+//   2. a source document exists that is an INSTALLATION/STRUCTURAL class
+//      document — a flashing / water-resistance evaluation report (ESR-nnnn) is
+//      explicitly NOT fastener authority (the same rule rackingAssembly.ts
+//      applies to capacity), AND
+//   3. that document's applicability to the SELECTED product is VERIFIED (an
+//      RT-MINI II manual never verifies an RT-MINI fastener).
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A flashing/water-resistance evaluation report cited alone is not fastener
+ *  authority. Exported for the tests that pin this rule. */
+export function isFlashingOnlyEvaluationReport(s: string | null | undefined): boolean {
+  return !!s && /\bESR-?\d+\b/i.test(s)
+    && !/structural|withdrawal|pull-?out|capacity|installation manual/i.test(s);
+}
+
+export interface FastenerVerificationInput {
+  elementsComplete: boolean;
+  /** the document cited as the fastener's source (datasheet / capacity source). */
+  citedSourceDocument: string | null;
+  /** the decided applicability of the mount's installation document to the
+   *  SELECTED product (from the equipment document authority). */
+  documentApplicabilityVerified: boolean;
+}
+
+export interface FastenerVerificationResult {
+  verified: boolean;
+  /** the document accepted as fastener authority (null when none qualifies). */
+  sourceDocument: string | null;
+  /** why it is not verified — one canonical sentence every surface may print. */
+  reason: string | null;
+}
+
+export function resolveFastenerVerification(i: FastenerVerificationInput): FastenerVerificationResult {
+  const src = isFlashingOnlyEvaluationReport(i.citedSourceDocument) ? null : (i.citedSourceDocument ?? null);
+  if (!i.elementsComplete) {
+    return { verified: false, sourceDocument: src, reason: 'the fastener element is incomplete (model / count / embedment not all established on the mount record)' };
+  }
+  if (!src) {
+    return {
+      verified: false, sourceDocument: null,
+      reason: i.citedSourceDocument
+        ? `the only cited source (${i.citedSourceDocument}) is a flashing / water-resistance evaluation report, which carries no fastener-installation authority`
+        : 'no fastener installation / structural source document is recorded for the mount base',
+    };
+  }
+  if (!i.documentApplicabilityVerified) {
+    return { verified: false, sourceDocument: src, reason: 'the cited installation document is not verified as applicable to the SELECTED product version' };
+  }
+  return { verified: true, sourceDocument: src, reason: null };
+}
+
 /** Project the ONE canonical fastener assembly for a permit input. Read-only —
  *  resolves & labels existing canonical fields, performs no engineering calc. */
 export function projectFastenerAssembly(input: PermitInput): FastenerAssembly {
@@ -413,6 +479,11 @@ export function projectFastenerAssembly(input: PermitInput): FastenerAssembly {
 export function projectFastenerAssemblyFromSnapshot(
   snap: PermitDesignSnapshot | null | undefined,
   mountingSystemId: string | null | undefined,
+  /** TAC WS-4 — an explicitly-supplied document applicability, used INSTEAD of
+   *  re-reading the snapshot's document-authority region. Callers that already
+   *  hold the decided verdict (projectAttachmentInstallationAuthority) pass it so
+   *  one authority object cannot contain two different applicability facts. */
+  applicabilityOverride?: { documentApplicabilityVerified: boolean },
 ): FastenerAssembly {
   const proj = projectStructural(snap);
   const ra = proj.rackingAssembly as (RackingAssemblyRecord & {
@@ -435,25 +506,49 @@ export function projectFastenerAssemblyFromSnapshot(
   const pilotRuleLabel = pilotHoleRequired === false ? 'no pilot hole'
     : pilotHoleRequired === true ? 'pilot hole required'
     : 'pilot rule per manufacturer';
-  const substrate = ra?.installationCondition ?? null;
+  // TAC WS-5 — THE EMBEDMENT SUBSTRATE IS THE STRUCTURAL MEMBER, never the roof
+  // covering. `installationCondition` is the manufacturer's compatible-COVERING
+  // list ('asphalt_shingle, wood_shake'); reading it here is what produced
+  // "2.5" minimum embedment into asphalt_shingle, wood_shake" on PV-4C.1 /
+  // SCHED / APP-A. The canonical embedment target is the attachment object's
+  // substrateMember ('rafter 2x6' / 'truss …' / 'unverified-framing'), which is
+  // exactly what the structural engine drove the withdrawal check against.
+  const _attachSubstrate = (proj.attachments ?? [])
+    .map(a => (a as { substrateMember?: string | null }).substrateMember ?? null)
+    .find(s => !!s && !/^unverified/i.test(s)) ?? null;
+  const substrate = _attachSubstrate;
+  /** display-only compatibility (never an embedment claim). */
+  const compatibleRoofCoverings: string[] = ra?.compatibleRoofCoverings
+    ?? (ra?.installationCondition ? ra.installationCondition.split(',').map(s => s.trim()).filter(Boolean) : []);
   const rafterDeckMethod = ra?.rafterDeckAttachmentMethod ?? m?.attachmentMethod ?? null;
   // Material / head-drive are NOT carried in mounting-hardware-db — honest nulls.
   const material: string | null = null;
   const headDrive: string | null = null;
-  const sourceDocument = ra?.datasheetSource ?? ra?.capacitySource ?? mount?.iccEsReport ?? null;
-
-  const vFast = ra?.assemblyVerification?.fastener;
-  // Post-AAC accounting repair — the `proj.capacityGated` AND here was the same
-  // `_capGated` echo AAC WS-8 deleted from the FASTENER-ASSEMBLY-UNVERIFIED
-  // blocker emission (structuralAuthority §13): the fastener is mount-BASE
-  // hardware, verified independent of the rail-capacity document. Leaving the
-  // echo on this one surface made PV-5's general note print "WITHHELD —
-  // FASTENER-ASSEMBLY-UNVERIFIED (see RS-1)" while the registry (correctly)
-  // carried no such requirement — a rendered reference to a nonexistent
-  // registry row. ONE predicate now, identical to the blocker's.
+  // ── TAC WS-4 — THE ONE FASTENER PREDICATE ──────────────────────────────────
+  // What counts as a fastener SOURCE DOCUMENT. `iccEsReport` (ESR-3575) is a
+  // FLASHING / water-resistance evaluation report — this very file's sibling
+  // (rackingAssembly.ts) refuses it as capacity authority in so many words, yet
+  // it was accepted here, which is how a "VERIFIED FASTENER ASSEMBLY" line with
+  // exact dimensions printed on SCHED / APP-A / PE-1 / PV-4C.1 while PV-3 (the
+  // real instruction authority) printed "INSTALLATION DETAILS: NOT ESTABLISHED"
+  // on the same package. Only an INSTALLATION / STRUCTURAL document class may
+  // establish a fastener assembly, and it must additionally be APPLICABLE to the
+  // selected product (an RT-MINI II manual does not verify an RT-MINI fastener).
+  // the exact-product document applicability decided ONCE by the build's
+  // document authority (the SAME verdict PV-3 / DS-n consume). Absent ⇒ not
+  // established — an RT-MINI II manual never verifies an RT-MINI fastener.
+  const _docEntry = projectDocumentAuthority(snap, 'racking_detail', mountingSystemId ?? null);
+  const _fv = resolveFastenerVerification({
+    elementsComplete: ra?.fastenerElementsComplete
+      ?? !!(ra?.screwLagModel && ra?.screwLagQtyPerMount != null && ra?.embedmentRequirementIn != null),
+    citedSourceDocument: ra?.datasheetSource ?? ra?.capacitySource ?? null,
+    documentApplicabilityVerified: applicabilityOverride
+      ? applicabilityOverride.documentApplicabilityVerified
+      : _docEntry?.applicability?.applicabilityVerified === true,
+  });
+  const sourceDocument = _fv.sourceDocument;
   const verification: FastenerAssembly['verification'] =
-    !present ? 'pending'
-      : (vFast === 'verified' && !!sourceDocument ? 'verified' : 'unverified');
+    !present ? 'pending' : (_fv.verified ? 'verified' : 'unverified');
 
   // §6 (BAR) — the exact manufacturer/SKU/diameter/length/coating/embedment
   // description prints ONLY when verified. While NON-ORDERABLE the line reveals no
@@ -574,7 +669,15 @@ export function projectAttachmentInstallationAuthority(
 ): AttachmentInstallationAuthority {
   const proj = projectStructural(snap);
   const spacing = proj.spacingAuthority;
-  const fastener = projectFastenerAssemblyFromSnapshot(snap, mountingSystemId);
+  // TAC WS-4 — when the CALLER supplies the document applicability explicitly
+  // (the drafting stack does, from the decided document authority), the fastener
+  // verdict must be computed against THAT same fact rather than re-reading the
+  // snapshot region independently: two different applicability inputs inside one
+  // authority object is precisely the split-brain this workstream removes.
+  const fastener = projectFastenerAssemblyFromSnapshot(
+    snap, mountingSystemId,
+    applicability ? { documentApplicabilityVerified: applicability.applicabilityVerified } : undefined,
+  );
   const mount = mountingSystemId ? getMountingSystemById(mountingSystemId) : undefined;
   const ra = proj.rackingAssembly as (RackingAssemblyRecord & {
     assemblyVerification?: {

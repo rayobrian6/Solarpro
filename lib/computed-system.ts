@@ -23,6 +23,7 @@ import {
   SegmentScheduleRow,
   SegmentScheduleInput,
   RacewayType,
+  currentCarryingCountOf,
 } from './segment-schedule';
 
 import { buildSegments } from './segment-builder';
@@ -169,7 +170,13 @@ export interface RunSegment {
   sourceTerminal?: string;    // e.g. 'AC_OUT', 'BAT_AC_OUT', 'GEN_OUT'
   destTerminal?: string;      // e.g. 'BATTERY', 'GEN', 'GRID', 'MSP_BKFD'
   // Electrical
-  conductorCount: number;     // current-carrying conductors
+  /** The PHYSICAL phase+neutral conductors on this run (the EGC is carried
+   *  separately in `egcGauge`). This is what the BOM orders and what conduit
+   *  fill counts. TAC WS-3: it is NOT the current-carrying count — that is
+   *  derived from conductor ROLES by `currentCarryingOf` (NEC 310.15(E)(1)
+   *  excludes a 3-wire single-phase imbalance-only neutral; 310.15(E)(3)
+   *  excludes the EGC) and lands on the raceway as `currentCarryingCount`. */
+  conductorCount: number;
   wireGauge: string;          // e.g. '#10 AWG' — always standard AWG
   conductorMaterial: 'CU' | 'AL';
   insulation: string;         // 'THWN-2' | 'USE-2' | 'PV Wire'
@@ -190,6 +197,16 @@ export interface RunSegment {
   requiredAmpacity: number;   // A — continuous × 1.25 (NEC 690.8)
   effectiveAmpacity: number;  // A — after derating
   tempDeratingFactor: number;
+  /** TAC WS-2 — THE INPUTS the ambient correction factor was computed FROM.
+   *  `tempDeratingFactor` alone is an unverifiable number: the package printed
+   *  "× 0.96 (NEC 310.15(B)(1))" beside `ambientTempC: null`, on a feeder whose
+   *  margin was 1.25 A. The snapshot reads these off the segment (build.ts), so
+   *  they must be emitted here or the ampacity result fails closed. */
+  ambientTempC?: number | null;        // design ambient (ASHRAE 2% high, or AHJ override)
+  ambientSource?: string | null;       // e.g. 'ASHRAE 2% high (IL envelope)'
+  rooftopAdderC?: number | null;       // NEC 310.15(B)(3)(c) adder — ONLY on a pre-2017 adopted edition
+  rooftopAdderBasis?: string | null;   // why the adder does / does not apply (code-edition driven)
+  effectiveAmbientTempC?: number | null; // ambient + rooftop adder — the value the table row was chosen by
   conduitDeratingFactor: number;
   ocpdAmps: number;           // OCPD protecting this segment
   // Voltage drop
@@ -981,6 +998,29 @@ function autoSizeOpenAirWire(
 
 export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const issues: ValidationIssue[] = [];
+  // TAC WS-2 — stamp the design-ambient inputs for every segment this run
+  // emits, so the ampacity correction factor is never an unattributed number.
+  {
+    // Does the ADOPTED edition require a rooftop temperature adder? NEC
+    // 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A) and is absent
+    // from 2020/2023. Only a pre-2017 adopted edition reinstates it. An
+    // unknown edition does NOT invent one (the ampacity chain states the basis).
+    const _nec = String((input as { necEdition?: string | number }).necEdition ?? '').trim();
+    const _necYear = /^\d{4}$/.test(_nec) ? Number(_nec) : null;
+    const _applies = _necYear != null && _necYear < 2017;
+    _ambientStamp = {
+      ambientTempC: Number.isFinite(input.ambientTempC) ? input.ambientTempC : null,
+      ambientSource: (input as { ambientTempSource?: string }).ambientTempSource
+        ?? 'design temperature (ASHRAE 2% high / AHJ override) via getDesignTemps',
+      rooftopAdderC: Number.isFinite(input.rooftopTempAdderC) ? input.rooftopTempAdderC : null,
+      effectiveAmbientTempC: null,   // per-segment (adder applies only where required)
+      rooftopAdderApplies: _applies,
+      rooftopAdderBasis: _applies
+        ? `NEC ${_necYear} 310.15(B)(3)(c) rooftop adder applies to raceways on the roof surface`
+        : `no rooftop adder applied — NEC 310.15(B)(3)(c) was deleted for PV circuits by NEC 2017 690.31(A)`
+          + ` and is absent from the 2020/2023 editions${_necYear ? ` (adopted NEC ${_necYear})` : ' (adopted edition not established)'}`,
+    };
+  }
   // Wave 2a (contract §1.7): default TRUE — legacy callers emit the full
   // service tail exactly as before. computeMultiSystem sets FALSE per sub.
   const emitSharedServiceRuns = input.emitSharedServiceRuns !== false;
@@ -1565,7 +1605,13 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
     // COMBINER_TO_DISCO_RUN: AC combiner to AC disconnect
     // Microinverters produce 120/240V split-phase, requiring neutral for imbalance current per NEC 200.3
-    const microConductorCount = (input.topology === 'micro') ? 3 : 2; // L1 + L2 + N for micro, L1 + L2 for string
+    // L1 + L2 + N for micro (the neutral IS installed and procured), L1 + L2 for
+    // string. TAC WS-3: this stays the PHYSICAL phase+neutral count — the
+    // CURRENT-CARRYING count that NEC 310.15(C)(1) derating consumes is derived
+    // from it by excluding the imbalance-only neutral (see the raceway inventory
+    // and `currentCarryingOf` below). Keeping this physical is what lets the BOM
+    // continue to order all three conductors.
+    const microConductorCount = (input.topology === 'micro') ? 3 : 2;
     const combToDiscoWire = autoSizeWire(
       acOutputCurrentA,
       defaultRunLengths.COMBINER_TO_DISCO_RUN,
@@ -2388,15 +2434,34 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       necArticle: _art.article,
       supportArticle: _art.supportArticle,
       sharedCircuitCount: run.sharedCircuitCount ?? 1,
-      conductorCount: run.conductorCount + (run.neutralRequired ? 1 : 0) + 1, // hots (+N) + EGC
-      currentCarryingCount: run.conductorCount + (run.neutralRequired ? 1 : 0),
+      // ── TAC WS-3 — TWO COUNTS, DERIVED FROM ROLES ─────────────────────────
+      // `run.conductorCount` is the PHYSICAL phase+neutral count and ALREADY
+      // includes the neutral. Two defects lived here:
+      //   • `+ (neutralRequired ? 1 : 0)` double-counted the neutral, so a
+      //     2-hot + neutral + EGC feeder reported 4 conductors for fill; and
+      //   • that same inflated number was used as the CURRENT-CARRYING count,
+      //     applying an 0.80 310.15(C)(1) adjustment NEC does not require and
+      //     leaving the #6 feeder with a 1.25 A margin that would go negative
+      //     on a warmer ambient.
+      // NEC 310.15(E)(1) excludes the neutral of a 3-wire single-phase circuit
+      // carrying only the imbalance current; 310.15(E)(3) excludes the EGC.
+      // PHYSICAL count for fill — UNCHANGED from the pre-TAC formula, so conduit
+      // fill and every BOM conductor quantity are byte-identical.
+      conductorCount: run.conductorCount + (run.neutralRequired ? 1 : 0) + 1,
+      // The DEFECT this workstream fixes: this same inflated physical expression
+      // was ALSO used as the current-carrying count, so a feeder of 2 hots +
+      // neutral + EGC reported 4 CCC and took an 0.80 310.15(C)(1) adjustment the
+      // code does not require (leaving the #6 feeder a 1.25 A margin that would
+      // go negative on a warmer ambient). CCC is now ROLE-derived.
+      currentCarryingCount: currentCarryingOf(run),
       conductorAreaIn2: null,
       minimumCodeRacewaySize: run.conduitSize,
       calculatedFillRacewaySize: run.conduitSize,
       selectedRacewaySize: run.conduitSize,
       fillPct: isFinite(run.conduitFillPct) ? +run.conduitFillPct.toFixed(1) : null,
       upsizingReason: null,
-      deratingBasis: `${run.conductorCount + (run.neutralRequired ? 1 : 0)} current-carrying conductors (NEC 310.15(C)(1))`,
+      deratingBasis: `${run.conductorCount} current-carrying conductors (NEC 310.15(C)(1); a 3-wire single-phase `
+        + `neutral carrying only imbalance current is excluded per NEC 310.15(E)(1))`,
       supportCondition: `${run.conduitType} secured per NEC ${_art.supportArticle}`,
       provenance: `computeSystem ${run.id} (dedicated raceway)`,
     });
@@ -2793,6 +2858,48 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
 // ─── Helper: Make RunSegment ──────────────────────────────────────────────────
 
+/** TAC WS-2 — the ambient inputs every segment is stamped with, set once per
+ *  computeSystem run from the design-temperature authority. Module-scoped so
+ *  makeRunSegment (called from ~20 sites) needs no signature change. */
+let _ambientStamp: {
+  ambientTempC: number | null; ambientSource: string | null;
+  rooftopAdderC: number | null; effectiveAmbientTempC: number | null;
+  /** TAC WS-2 — whether the adopted code edition REQUIRES a rooftop adder.
+   *  NEC 310.15(B)(3)(c) was deleted for PV circuits by NEC 2017 690.31(A) and
+   *  does not exist in the 2020/2023 editions, so this is false unless a
+   *  pre-2017 edition is adopted. Never inferred from geometry alone. */
+  rooftopAdderApplies: boolean;
+  rooftopAdderBasis: string | null;
+} = {
+  ambientTempC: null, ambientSource: null, rooftopAdderC: null, effectiveAmbientTempC: null,
+  rooftopAdderApplies: false, rooftopAdderBasis: null,
+};
+
+/**
+ * TAC WS-3 — THE ONE CURRENT-CARRYING-CONDUCTOR DERIVATION.
+ *
+ * `conductorCount` on a RunSegment is the PHYSICAL phase+neutral count (what the
+ * BOM orders). The count that NEC 310.15(C)(1) derating consumes is derived from
+ * it by ROLE, never asserted:
+ *   • 310.15(E)(3) — the EGC is never current-carrying (it is not in
+ *     `conductorCount` to begin with; the raceway inventory adds it for fill).
+ *   • 310.15(E)(1) — the neutral of a 3-wire circuit from a single-phase 3-wire
+ *     system, carrying only the imbalance current, is NOT current-carrying.
+ * A run whose bundle declares explicit roles is counted from the bundle, so a
+ * genuinely current-carrying grounded conductor is honoured rather than assumed.
+ */
+function currentCarryingOf(run: RunSegment): number {
+  const bundle = run.conductorBundle;
+  if (bundle && bundle.length > 0) {
+    const n = currentCarryingCountOf(bundle);
+    if (n > 0) return n;
+  }
+  // No role-tagged bundle: a required neutral on a single-phase run is the
+  // imbalance-only case (the only neutral topology this engine emits), so it is
+  // excluded. Never drops below 1.
+  return Math.max(1, run.conductorCount - (run.neutralRequired && run.phase === '1Ø' ? 1 : 0));
+}
+
 function makeRunSegment(
   id: RunSegmentId,
   label: string,
@@ -2804,6 +2911,16 @@ function makeRunSegment(
   const ampacityPass = fields.ampacityPass ?? true;
   const voltageDropPass = fields.voltageDropPass ?? true;
   const conduitFillPass = fields.conduitFillPass ?? true;
+  // TAC WS-2 — WHETHER A ROOFTOP ADDER APPLIES IS A CODE QUESTION, NOT A
+  // GUESS. NEC 310.15(B)(3)(c) (the +33 °C rooftop adder) was deleted for PV
+  // circuits by NEC 2017 690.31(A) and does not exist in the 2020/2023
+  // editions. It may only be applied on a pre-2017 adopted edition AND for a
+  // raceway actually on the roof surface. Absent an adopted edition that
+  // requires it, the adder is NOT applied and the reason is recorded — a
+  // silently-added 33 °C would move the correction factor two table rows.
+  const _onRoof = /ROOF|BRANCH_HOMERUN|JBOX/i.test(String(id)) && fields.isOpenAir !== true;
+  const _adder = (_onRoof && _ambientStamp.rooftopAdderApplies) ? _ambientStamp.rooftopAdderC : null;
+  const _amb = _ambientStamp.ambientTempC;
   return {
     id,
     label,
@@ -2813,6 +2930,11 @@ function makeRunSegment(
     systemVoltage: fields.systemVoltage ?? SYSTEM_VOLTAGE_AC,
     phase: fields.phase ?? '1Ø',
     overallPass: ampacityPass && voltageDropPass && conduitFillPass,
+    ambientTempC: _amb,
+    ambientSource: _ambientStamp.ambientSource,
+    rooftopAdderC: _adder,
+    rooftopAdderBasis: _onRoof ? _ambientStamp.rooftopAdderBasis : null,
+    effectiveAmbientTempC: _amb != null ? _amb + (_adder ?? 0) : null,
     ...fields,
   };
 }

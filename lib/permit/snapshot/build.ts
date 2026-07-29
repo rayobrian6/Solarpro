@@ -481,8 +481,13 @@ export function buildPermitDesignSnapshot(
       // so a sheet can never present the OCPD rating as the VD current.
       voltageDropCurrentBasis: 'operating',
       ocpdA: isFinite(r.ocpdAmps) ? r.ocpdAmps : null,
+      // TAC WS-2 — these are now genuinely emitted by computeSystem (they were
+      // read off RunSegment before the segment carried them, so every ampacity
+      // chain in the package derated by a factor with no stated temperature).
       ambientTempC: isFinite(r.ambientTempC) ? r.ambientTempC : null,
       rooftopAdderC: isFinite(r.rooftopAdderC) ? r.rooftopAdderC : null,
+      ambientSource: r.ambientSource ?? null,
+      effectiveAmbientTempC: isFinite(r.effectiveAmbientTempC) ? r.effectiveAmbientTempC : null,
       tempDeratingFactor: isFinite(r.tempDeratingFactor) ? r.tempDeratingFactor : null,
       provenance: { source: 'computeSystem runs (deriveRunLengths cad estimate)' },
     };
@@ -1447,9 +1452,22 @@ export function buildPermitDesignSnapshot(
       const ps = procurementSufficiency;
       // Concise one-line explanation (banner/cover render this); the full per-branch
       // + resolution detail lives in resolutionAction + payload, shown on RS-1.
+      // TAC WS-1 — the sentence states the GOVERNING basis with ITS OWN
+      // operands. It used to read "procurement 152 ft is SHORT of the 166.5 ft
+      // designed path by 24.2 ft", pairing the aggregate operands with the
+      // topology-constrained result: 166.5 − 152 = 14.5, so the printed
+      // arithmetic was false even though both numbers were individually right.
+      const _govTopology = ps.deficitBasis === 'topology-constrained';
       push('QCABLE-PROCUREMENT-INSUFFICIENT',
-        `Q-Cable procurement ${ps.procurementLengthFt} ft is SHORT of the ${ps.totalDesignedInstalledFt} ft designed-installed path `
-          + `(+${ps.requiredServiceLoopAllowanceFt} ft allowance) by ${ps.deficitFt} ft — base cable quantity NON-ORDERABLE / PENDING a VERIFIED listed cable-extension solution.`,
+        _govTopology
+          ? `Q-Cable procurement is SHORT by ${ps.topologyConstrainedDeficitFt} ft on a PER-BRANCH basis `
+            + `(Σ per-branch shortfall; aggregate footage alone is short by only ${ps.aggregateFootageDeficitFt} ft because `
+            + `${ps.nonRedistributableSurplusFt} ft of surplus sits on a branch that cannot supply another) — `
+            + `minimum additional purchasable cable ${ps.requiredAdditionalPurchasableLengthFt} ft. `
+            + `Base cable quantity NON-ORDERABLE / PENDING a VERIFIED listed cable-extension solution.`
+          : `Q-Cable procurement ${ps.procurementLengthFt} ft is SHORT of the ${ps.totalDesignedInstalledFt} ft designed-installed path `
+            + `(+${ps.requiredServiceLoopAllowanceFt} ft allowance) by ${ps.aggregateFootageDeficitFt} ft — `
+            + `base cable quantity NON-ORDERABLE / PENDING a VERIFIED listed cable-extension solution.`,
         { payload: procurementInsufficiencyPayload(ps), provenance: { source: 'electrical.procurementSufficiency', ref: ps.assemblyId } });
     }
     // GROUNDING AUTHORITY (2026-07-25) — the equipment grounding/bonding method

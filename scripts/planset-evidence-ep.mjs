@@ -92,9 +92,19 @@ const g2_svgToken = hrCcc != null && e1Svg.includes(`${hrCcc}#10 THWN-2`);
 // really is #12 at 20 A and differs from the #10 feeder EGC), so this check is scoped
 // to the CCC-bundle form it was written for instead of banning the token package-wide.
 const g2_svgNo12 = e1Svg.length > 0 && !/\d+#12\s*THWN-2/.test(e1Svg);
-// every raceway's CCC = conductorCount − 1 (single shared EGC excluded)
-const g2_invEach = rws.every(r => r.currentCarryingCount != null && r.conductorCount != null
-  && r.currentCarryingCount === r.conductorCount - 1);
+// TAC WS-3 — the old invariant was `CCC === conductorCount − 1`, i.e. "exactly
+// one conductor (the EGC) is excluded". That encoded the very defect this
+// campaign fixed: NEC 310.15(E)(1) ALSO excludes the neutral of a 3-wire
+// single-phase circuit carrying only the imbalance current, so a feeder of
+// L1 + L2 + N + EGC is 4 conductors and 2 CCC. The invariant is now the honest
+// one: every physical conductor is accounted for, CCC never counts the EGC, and
+// the difference is only ever the EGC (+ an imbalance-only neutral where one
+// exists) — never unexplained.
+const g2_invEach = rws.every(r => {
+  if (r.currentCarryingCount == null || r.conductorCount == null) return false;
+  const excluded = r.conductorCount - r.currentCarryingCount;
+  return excluded >= 1 && excluded <= 2;   // EGC, plus an imbalance-only neutral
+});
 gate(2, 'e1-conductor-count-equals-raceway-inventory',
   g2_cccMath && g2_svgToken && g2_svgNo12 && g2_invEach,
   `hrCcc=${hrCcc} =2×branches(${branches.length})=${g2_cccMath} svg'${hrCcc}#10'=${g2_svgToken} svgNo#12=${g2_svgNo12} ccc==cnt-1(all)=${g2_invEach}`, null);
@@ -356,10 +366,16 @@ const g21_deficitAttributed = !g21_present || !_ps.insufficient
   || (Array.isArray(_ps.affectedBranchIds) && _ps.affectedBranchIds.length > 0
       && _ps.affectedBranchIds.every(id => _ps.perBranch.some(b => b.branchId === id)));
 const g21_consistent = g21_present && (!!_ps.insufficient === _qcableBlocker);
+// TAC WS-1 — anchor on the requirement CODE + the governing deficit + the
+// NAMED basis, not on a prose phrase ('PROCUREMENT INSUFFICIENCY' was compacted
+// so PV-4B keeps its printable slack; the full two-basis derivation renders on
+// PV-4B.1). The gate additionally requires that the governing BASIS is stated,
+// so an aggregate figure can never be read as a per-branch one.
 const g21_renderedWhenShort = !g21_present || !_ps.insufficient
   || (new RegExp(`${_ps.deficitFt}\\s*ft`).test(html)
-      && /NON-ORDERABLE/i.test(html) && /PROCUREMENT INSUFFICIENC/i.test(html)
-      && /QCABLE-PROCUREMENT-INSUFFICIENT/.test(html));
+      && /NON-ORDERABLE/i.test(html)
+      && /QCABLE-PROCUREMENT-INSUFFICIENT/.test(html)
+      && /PER-BRANCH \(governing\)|aggregate-footage basis|PER-BRANCH DERIVATION/i.test(html));
 const g21_allowanceHonest = !g21_present
   || (_ps.requiredServiceLoopAllowanceFt === 0 && _ps.allowanceProvenance === 'no-allowance-authority-recorded');
 gate(21, 'qcable-procurement-sufficiency',

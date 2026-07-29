@@ -261,11 +261,18 @@ describe('§Q test 6 — PV-4B, SCHED (BOM), RS-1 show the same deficit + insuff
   const rs1 = renderReviewStatusSheets(input, cad);
   const deficitTxt = `${ps.deficitFt} ft`;
 
-  it('PV-4B shows PROCUREMENT INSUFFICIENCY, the deficit, and NON-ORDERABLE', () => {
-    expect(pv4b).toContain('PROCUREMENT INSUFFICIENCY');
+  it('PV-4B shows the blocker code, the governing deficit, and NON-ORDERABLE', () => {
+    // TAC WS-1 — the requirement CODE is the stable anchor (the surrounding prose
+    // was compacted so PV-4B keeps its printable slack; the full two-basis
+    // derivation moved to PV-4B.1). PV-4B must still state the code, the
+    // governing deficit, the required purchase and the non-orderable state.
     expect(pv4b).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
     expect(pv4b).toContain(deficitTxt);
     expect(pv4b).toContain('NON-ORDERABLE');
+    // the basis is NAMED, so an aggregate figure can never be read as a
+    // per-branch one (or vice versa).
+    expect(pv4b).toMatch(/PER-BRANCH \(governing\)|aggregate-footage/);
+    expect(pv4b).toContain('min. additional purchase');
   });
   // ── UPDATED by the PPC corrective pass (§9), 2026-07-26 ────────────────────
   // The retired assertions targeted a STANDALONE note ('AC TRUNK CABLE (BOM): …

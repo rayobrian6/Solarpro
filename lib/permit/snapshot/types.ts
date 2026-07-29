@@ -301,9 +301,14 @@ export interface RouteSegmentRecord {
   /** which current the voltage-drop formula consumed (states the basis). */
   voltageDropCurrentBasis?: 'operating' | 'continuous' | 'calculated' | null;
   ocpdA: number | null;                // OCPD/breaker RATING — NOT a load current
-  /** W1 — temperature basis for ampacity derate (ambient + rooftop adder). */
+  /** W1 — temperature basis for ampacity derate (ambient + rooftop adder).
+   *  TAC WS-2: `ambientSource` and `effectiveAmbientTempC` make the derate
+   *  ATTRIBUTABLE — the ampacity chain fails closed (PENDING) rather than
+   *  applying a correction factor whose temperature is unrecorded. */
   ambientTempC?: number | null;
   rooftopAdderC?: number | null;
+  ambientSource?: string | null;
+  effectiveAmbientTempC?: number | null;
   tempDeratingFactor: number | null;
   provenance: Provenance;
 }
@@ -767,6 +772,11 @@ export interface ProcurementSufficiency {
   perBranch: {
     branchId: string; branchLabel: string; dropCount: number;
     designedInstalledLengthFt: number | null; procurementLengthFt: number | null;
+    /** TAC WS-1 — this branch's OWN shortfall (>0) … */
+    deficitFt?: number;
+    /** … and its own stranded surplus (>0), which can never serve another
+     *  branch because each branch is one continuous cable assembly. */
+    nonRedistributableSurplusFt?: number;
   }[];
   /** Σ geometric designed-installed cable path (ft) — the installed-length truth. */
   totalDesignedInstalledFt: number | null;
@@ -782,8 +792,25 @@ export interface ProcurementSufficiency {
   allowanceNote: string;
   /** designed-installed + allowance — the sufficiency threshold. */
   thresholdFt: number | null;
-  /** max(0, threshold − procurement). >0 ⇒ short. */
+  /** TAC WS-1 — the GOVERNING deficit = max(aggregate, topology-constrained).
+   *  Read `deficitBasis` to know WHICH, and print `deficitArithmeticNote`
+   *  rather than composing a sentence from the aggregate operands (doing that
+   *  produced "152 short of 166.5 by 24.2", which is arithmetically false). */
   deficitFt: number;
+  /** designed + allowance − procured. The pure footage subtraction. */
+  aggregateFootageDeficitFt: number;
+  /** Σ per-branch shortfalls. Exceeds the aggregate figure whenever a
+   *  non-short branch holds surplus that cannot be moved to a short one. */
+  topologyConstrainedDeficitFt: number;
+  /** Σ surplus stranded on non-short branches (a cable assembly is a
+   *  continuous run per branch, so this can never offset a shortfall). */
+  nonRedistributableSurplusFt: number;
+  /** the minimum ADDITIONAL cable that must actually be purchased. */
+  requiredAdditionalPurchasableLengthFt: number;
+  /** which deficit governs — so no surface mixes the two bases. */
+  deficitBasis: 'aggregate-footage' | 'topology-constrained' | 'none';
+  /** the exact, deterministic arithmetic for BOTH bases, ready to print. */
+  deficitArithmeticNote: string | null;
   /** procurement < designed-installed + allowance. */
   insufficient: boolean;
   affectedBranchIds: string[];
@@ -1044,8 +1071,20 @@ export interface RackingAssemblyRecord {
   midClamp: string | null; endClamp: string | null; splice: string | null;
   groundingBonding: string | null;
   compatibleModuleThicknessInRange: [number, number] | null;
-  installationCondition: string | null;   // roof type / substrate condition
+  /** TAC WS-5 — the manufacturer's COMPATIBLE ROOF COVERING list
+   *  ('asphalt_shingle, wood_shake'). A COVERING compatibility statement, NEVER
+   *  a structural substrate: nothing may render it as the fastener's embedment
+   *  target (the canonical embedment substrate is
+   *  `structural.attachments[].substrateMember`). */
+  installationCondition: string | null;
+  /** the same covering list, structured — display/compatibility only. */
+  compatibleRoofCoverings?: string[];
   rafterDeckAttachmentMethod: string | null;
+  /** TAC WS-4 — the fastener ELEMENTS (model + count + embedment) are all
+   *  present on the mount record. Presence is not verification: an applicable,
+   *  evidence-bearing installation document is additionally required, and that
+   *  decision is made once in projectFastenerAssemblyFromSnapshot. */
+  fastenerElementsComplete?: boolean;
   screwLagModel: string | null; screwLagQtyPerMount: number | null;
   embedmentRequirementIn: number | null;
   pilotHoleRequired: boolean | null;

@@ -19,13 +19,59 @@ import { nextStandardOcpd } from './electrical/stdSizes';
 // ─── Conductor Bundle ────────────────────────────────────────────────────────
 // Represents one or more identical conductors in a raceway
 
+/**
+ * TAC WS-3 — EXPLICIT CONDUCTOR ROLES.
+ *
+ * The current-carrying-conductor count that drives NEC 310.15(C)(1) derating
+ * must be DERIVED FROM ROLES, never asserted as a raw quantity. Before this,
+ * `isCurrentCarrying` was a lone boolean set by hand at each construction site
+ * (with the split-phase neutral marked `true`), and a downstream consumer then
+ * added the neutral a SECOND time — a feeder of 2 hots + 1 neutral + 1 EGC was
+ * counted as 4 CCC, applying an 0.80 adjustment that NEC does not require.
+ *
+ * NEC 310.15(E)(1): the neutral of a 3-wire circuit from a single-phase,
+ * 3-wire system carrying only the imbalance current is NOT a current-carrying
+ * conductor. NEC 310.15(E)(3): an EGC / bonding conductor is never one.
+ */
+export type ConductorRole =
+  | 'LINE'                        // ungrounded (hot) — always current-carrying
+  | 'NEUTRAL_IMBALANCE_ONLY'      // 3-wire single-phase neutral, 310.15(E)(1) ⇒ NOT counted
+  | 'GROUNDED_CURRENT_CARRYING'   // a grounded conductor that DOES carry ⇒ counted
+  | 'EQUIPMENT_GROUNDING'         // EGC — never counted
+  | 'GROUNDING_ELECTRODE'         // GEC — never counted
+  | 'BONDING';                    // bonding jumper — never counted
+
+/** The ONE role→CCC rule. Nothing else may decide whether a conductor counts. */
+export function roleIsCurrentCarrying(role: ConductorRole): boolean {
+  return role === 'LINE' || role === 'GROUNDED_CURRENT_CARRYING';
+}
+
 export interface ConductorBundle {
   qty: number;           // number of conductors of this type
   gauge: string;         // '#10 AWG', '#6 AWG', etc.
   color: 'BLK' | 'RED' | 'WHT' | 'GRN' | 'BLU' | 'GRY';
   insulation: string;    // 'THWN-2' | 'USE-2/PV Wire' | 'XHHW-2'
-  isCurrentCarrying: boolean; // false for EGC/neutral (affects derating)
+  /** TAC WS-3 — the canonical role. `isCurrentCarrying` is now a DERIVATION of
+   *  it (kept for back-compat with existing readers) and must always equal
+   *  `roleIsCurrentCarrying(role)`. */
+  role?: ConductorRole;
+  isCurrentCarrying: boolean; // derived from `role`; false for EGC/imbalance-only neutral
   currentPerConductor: number; // A — for derating calculation
+}
+
+/** Build a bundle with its role as the single source of the CCC flag. */
+export function conductorBundle(
+  b: Omit<ConductorBundle, 'isCurrentCarrying'> & { role: ConductorRole },
+): ConductorBundle {
+  return { ...b, isCurrentCarrying: roleIsCurrentCarrying(b.role) };
+}
+
+/** Σ current-carrying conductors over a bundle set, role-derived. */
+export function currentCarryingCountOf(bundles: readonly ConductorBundle[]): number {
+  return bundles.reduce((n, b) => {
+    const cc = b.role != null ? roleIsCurrentCarrying(b.role) : b.isCurrentCarrying;
+    return n + (cc ? b.qty : 0);
+  }, 0);
 }
 
 // ─── Segment Types ───────────────────────────────────────────────────────────
@@ -386,7 +432,9 @@ function buildSegment(
   const id = `SEG-${String(segId).padStart(2, '0')}`;
 
   const isOpenAir = raceway === 'OPEN_AIR';
-  const totalCurrentCarrying = conductorBundle.filter(c => c.isCurrentCarrying).reduce((s, c) => s + c.qty, 0);
+  // TAC WS-3 — ROLE-DERIVED (falls back to the legacy flag for bundles that do
+  // not yet declare a role, so behaviour is unchanged where roles are absent).
+  const totalCurrentCarrying = currentCarryingCountOf(conductorBundle);
 
   // Conduit sizing
   let conduitSize = 'N/A';
@@ -607,11 +655,16 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     const feederOcpd = nextStandardOCPD(totalCurrentA * 1.25);
     const feederEgcGauge = getEGCGauge(feederOcpd);
 
+    // TAC WS-3 — roles decide the CCC count. The WHT conductor is the neutral of
+    // a 3-wire single-phase circuit carrying only the imbalance current, which
+    // NEC 310.15(E)(1) excludes from the count; it used to be flagged
+    // current-carrying here AND added again downstream (2 hots + neutral + EGC
+    // counted as 4), producing an 0.80 adjustment the code does not require.
     const seg3Bundle: ConductorBundle[] = [
-      { qty: 1, gauge: feederGauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: totalCurrentA },
-      { qty: 1, gauge: feederGauge, color: 'RED', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: totalCurrentA },
-      { qty: 1, gauge: feederGauge, color: 'WHT', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: 0 },  // neutral
-      { qty: 1, gauge: feederEgcGauge, color: 'GRN', insulation: 'THWN-2', isCurrentCarrying: false, currentPerConductor: 0 },
+      conductorBundle({ qty: 1, gauge: feederGauge, color: 'BLK', insulation: 'THWN-2', role: 'LINE', currentPerConductor: totalCurrentA }),
+      conductorBundle({ qty: 1, gauge: feederGauge, color: 'RED', insulation: 'THWN-2', role: 'LINE', currentPerConductor: totalCurrentA }),
+      conductorBundle({ qty: 1, gauge: feederGauge, color: 'WHT', insulation: 'THWN-2', role: 'NEUTRAL_IMBALANCE_ONLY', currentPerConductor: 0 }),
+      conductorBundle({ qty: 1, gauge: feederEgcGauge, color: 'GRN', insulation: 'THWN-2', role: 'EQUIPMENT_GROUNDING', currentPerConductor: 0 }),
     ];
 
     segments.push(buildSegment(

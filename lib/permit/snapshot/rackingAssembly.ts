@@ -553,10 +553,27 @@ export function buildRackingAssembly(
       : (publishedAllowable != null && !asd.refused ? 'verified' : 'pending');
   const _vSpan: 'verified' | 'pending' | 'unverified' =
     rail?.maxSpanIn != null ? 'verified' : 'pending';
-  const _vFastener: 'verified' | 'pending' | 'unverified' =
-    (hw.lagBolt && mount.fastenersPerMount != null && mount.fastenerEmbedmentIn != null) ? 'verified' : 'pending';
+  // TAC WS-4 — FIELD PRESENCE IS NOT VERIFICATION. This used to read 'verified'
+  // whenever three literals existed in mounting-hardware-db (lagBolt +
+  // fastenersPerMount + fastenerEmbedmentIn), which is how SCHED / APP-A / PE-1
+  // printed "VERIFIED FASTENER ASSEMBLY · 5/16" dia · 2.5" min embedment" while
+  // PV-3 — which consults the real 5-condition instruction authority — printed
+  // "INSTALLATION DETAILS: NOT ESTABLISHED" on the same package. The elements
+  // being present is now reported as `fastenerElementsComplete`; VERIFICATION
+  // additionally requires an applicable, evidence-bearing installation
+  // document, decided once in structuralProjection.projectFastenerAssembly*
+  // (which owns the document test). A flashing/water-resistance evaluation
+  // report (ESR-3575) is explicitly NOT fastener authority — the same rule this
+  // file already applies to capacity.
+  const _fastenerElementsComplete =
+    !!(hw.lagBolt && mount.fastenersPerMount != null && mount.fastenerEmbedmentIn != null);
+  // Element completeness alone can never be 'verified' here; the document test
+  // lives in the projection, which is the ONE fastener predicate. The record
+  // therefore reports the honest per-element state, and OVERALL follows it.
+  const _vFastener: 'verified' | 'pending' | 'unverified' = 'pending';
   const _vOverall: 'verified' | 'pending' =
-    (_vRailSku === 'verified' && _vCapacity === 'verified' && _vSpan === 'verified' && _vFastener === 'verified')
+    (_vRailSku === 'verified' && _vCapacity === 'verified' && _vSpan === 'verified'
+      && (_vFastener as string) === 'verified')
       ? 'verified' : 'pending';
 
   const base: Omit<RackingAssemblyRecordExt, 'recordRevision'> = {
@@ -577,8 +594,16 @@ export function buildRackingAssembly(
     groundingBonding: hw.bondingHardware ?? null,
     // Not carried in mounting-hardware-db — honest gap, not fabricated.
     compatibleModuleThicknessInRange: null,
+    // TAC WS-5 — `installationCondition` is the manufacturer's COMPATIBLE ROOF
+    // COVERING list ('asphalt_shingle, wood_shake'), NOT a structural substrate.
+    // It used to be consumed as the fastener's embedment substrate, which is how
+    // the package printed "2.5" minimum embedment into asphalt_shingle,
+    // wood_shake". The covering list keeps its own name; the embedment substrate
+    // is the canonical structural member (attachments[].substrateMember).
     installationCondition,
+    compatibleRoofCoverings: system.compatibleRoofTypes ?? [],
     rafterDeckAttachmentMethod: mount.attachmentMethod ?? null,
+    fastenerElementsComplete: _fastenerElementsComplete,
     screwLagModel: hw.lagBolt ?? null,
     screwLagQtyPerMount: mount.fastenersPerMount ?? null,
     embedmentRequirementIn: mount.fastenerEmbedmentIn ?? null,

@@ -505,11 +505,19 @@ describe('AAC WS-8 · the separated structural requirements', () => {
   })();
   const codes = snap.permitReadiness.registry.map(r => r.code);
 
-  it('FASTENER-ASSEMBLY-UNVERIFIED no longer echoes the capacity document', () => {
-    // the mount base IS verified (lag + count + embedment + ESR) so, with the
-    // `_capGated` echo deleted, this requirement is gone while the capacity
-    // document requirements legitimately remain.
-    expect(codes).not.toContain('FASTENER-ASSEMBLY-UNVERIFIED');
+  it('FASTENER-ASSEMBLY-UNVERIFIED does not echo the capacity document, but does require its OWN evidence', () => {
+    // WS-8's point stands: this requirement is NOT a downstream echo of the
+    // rail-capacity document — it is decided on the mount base's own evidence.
+    // TAC WS-4 sharpened what that evidence must be: the elements being present
+    // is not verification, an ESR flashing report is not installation authority,
+    // and the document must be applicable to the SELECTED product. On this input
+    // none of that holds, so the requirement fires on its OWN basis…
+    expect(codes).toContain('FASTENER-ASSEMBLY-UNVERIFIED');
+    const r = snap.permitReadiness.registry.find(x => x.code === 'FASTENER-ASSEMBLY-UNVERIFIED');
+    // …and says so in the mount-base vocabulary, never the rail-capacity one.
+    expect(r!.explanation).toMatch(/Mount-BASE authority, decided independently of the rail selection/);
+    expect(r!.explanation).toMatch(/flashing \/ water-resistance evaluation report|installation \/ structural source document|not verified as applicable/i);
+    // the capacity-document requirements remain their own, separate codes.
     expect(codes).toContain('RACKING-CAPACITY-SOURCE-NOT-ARCHIVED');
     expect(codes).toContain('RACKING-CAPACITY-APPLICABILITY-GAP');
   });

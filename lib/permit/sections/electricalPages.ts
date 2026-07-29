@@ -922,8 +922,13 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 <td>${_hr.currentCarryingCount ?? '—'}×${_branch.gauge ?? '#10 AWG'} THWN-2 (shared)</td>
                 <td>—</td>
                 <td>—</td>
-                <td>${_hr.fillPct != null ? _hr.fillPct.toFixed(1) + '%' : '—'}</td>
-                <td>${_hr.conduitLabel ?? (_hr.racewayType ?? 'PENDING')}</td>
+                ${/* TAC WS-8 — this cell is the V-DROP % column (see the header).
+                     It printed `_hr.fillPct` (23.4% conduit fill) — a fill value
+                     rendered under a voltage-drop heading, i.e. a unit/semantic
+                     mismatch, not a rounding issue. Voltage drop belongs here;
+                     the fill belongs with the raceway it describes (next cell). */''}
+                <td>${_hr.voltageDropPct != null ? _hr.voltageDropPct.toFixed(2) + '%' : '—'}</td>
+                <td>${_hr.conduitLabel ?? (_hr.racewayType ?? 'PENDING')}${_hr.fillPct != null ? ` — ${_hr.fillPct.toFixed(1)}% fill` : ''}</td>
                 <td>${_hr.oneWayFt != null ? _hr.oneWayFt + ' ft' : '—'}</td>
               </tr>` : '';
               return _auth.microBranches.map((b) => {
@@ -1033,8 +1038,29 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             : _gndB.outcome === 'NO_SEPARATE_EGC_REQUIRED'
               ? ` <strong>GROUNDING (LISTED METHOD):</strong> ${_gndB.sourceAuthority} — no additional grounding conductor is installed in this open-air section; module/racking bonding remains required on its own authority (${_gndA?.rackingModuleBondingRequirement.codeBasis ?? 'NEC 690.43'}).`
               : ` <strong>GROUNDING (${_gndA?.documentId ?? 'verified document'}, NEC 250.122/690.43(C)):</strong> an ADDITIONAL <strong>${_gndB.conductorSize ?? '#12'} ${_gndB.conductorMaterial ?? 'Cu'} EGC</strong> is required by the cited manufacturer instruction, run open-air with each branch trunk (${_gndB.branchIds.join(', ') || 'all branches'}); <em>BOM qty</em> <span class="mono">${_gndB.bomFootageFt ?? 'PENDING'}ft</span> = designed-installed <span class="mono">${_gndB.designedInstalledFt ?? '—'}ft</span> × ${_gndB.wasteFactor} waste (${_gndB.lengthProvenance ?? 'pending'}) — same route geometry as the trunk.`;
+        // TAC WS-1 — print BOTH deficits with their own operands and name the
+        // governing basis + the per-branch arithmetic. The old line paired the
+        // aggregate operands with the governing (per-branch) deficit, so the
+        // subtraction it displayed did not evaluate to the number it printed.
+        // TAC WS-1 — PV-4B states the GOVERNING basis with ITS OWN operands and
+        // the required purchase; the full per-branch derivation renders on
+        // PV-4B.1 (this sheet has zero printable slack — the expanded form
+        // overflowed page-content by 4.6px). The old line paired the aggregate
+        // operands with the per-branch deficit, so the subtraction it displayed
+        // did not evaluate to the number it printed.
+        // TAC WS-1 — PV-4B carries only the STATE + the governing figure + the
+        // required purchase (this sheet has zero printable slack; the expanded
+        // form overflowed page-content). The full per-branch derivation — both
+        // deficits with their own operands — renders on PV-4B.1. The retired line
+        // paired the AGGREGATE operands with the PER-BRANCH deficit, so the
+        // subtraction it displayed did not evaluate to the number it printed.
         const _insuffBlock = _short
-          ? ` <strong style="color:#b00">⚠ PROCUREMENT INSUFFICIENCY (QCABLE-PROCUREMENT-INSUFFICIENT — BLOCKING): designed ${_ps!.totalDesignedInstalledFt} ft + allowance ${_ps!.requiredServiceLoopAllowanceFt} ft (${_ps!.allowanceProvenance}) &gt; procurement ${_ps!.procurementLengthFt} ft by <span class="mono">${_ps!.deficitFt} ft</span>. Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE CABLE QUANTITY only — NON-ORDERABLE / PENDING SOLUTION (verified listed extension required; "jumpers required" does NOT clear this). Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. See RS-1.</strong>`
+          ? ` <strong style="color:#b00">⚠ QCABLE-PROCUREMENT-INSUFFICIENT (BLOCKING):</strong>`
+            + `<span style="color:#b00"> short by <span class="mono">${_ps!.deficitFt} ft</span> on the`
+            + ` ${_ps!.deficitBasis === 'topology-constrained' ? 'PER-BRANCH (governing)' : 'aggregate-footage'} basis;`
+            + ` min. additional purchase <span class="mono">${_ps!.requiredAdditionalPurchasableLengthFt} ft</span>.`
+            + ` Base cable qty <span class="mono">${_procTxt} ft</span> = CURRENT BASE QUANTITY only — NON-ORDERABLE / PENDING a VERIFIED listed extension.`
+            + ` Affected: ${_ps!.affectedBranchIds.join(', ') || '—'}. Full derivation: PV-4B.1.</span>`
           : '';
         // Compact one-line authority + reconciliation note (the per-branch designed
         // lengths already print in the branch rows; the full per-branch math lives on
@@ -1578,6 +1604,63 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
  *  for MICRO topologies (projectE1PhysicalSchedule is empty for string /
  *  optimizer jobs by construction). Topology resolves through the same accessor
  *  computePlansetManifest already uses, so the two sides cannot drift. */
+/**
+ * TAC WS-1 — THE Q-CABLE PROCUREMENT DERIVATION, shown deterministically.
+ *
+ * Both deficits are printed with their OWN operands, per branch, so a reader can
+ * reproduce every number: the aggregate footage subtraction, each branch's
+ * required-vs-allocated arithmetic, the non-redistributable surplus that makes
+ * the topology-constrained figure exceed the aggregate one, and the minimum
+ * additional purchasable length. Renders only when the authority is present.
+ */
+function renderQCableProcurementDerivation(
+  snap: import('../snapshot/types').PermitDesignSnapshot | null | undefined,
+): string {
+  const ps = snap?.electrical?.procurementSufficiency ?? null;
+  if (!ps?.present) return '';
+  const n = (v: number | null | undefined) => v == null ? '—' : String(v);
+  const rows = (ps.perBranch ?? []).map((p, i) => {
+    const req = p.designedInstalledLengthFt;
+    const alloc = p.procurementLengthFt;
+    const def = p.deficitFt ?? 0;
+    const sur = p.nonRedistributableSurplusFt ?? 0;
+    return `<tr style="background:${i % 2 ? '#f7f7f7' : '#fff'}">`
+      + `<td class="fw7 mono">${p.branchLabel}</td>`
+      + `<td class="tr">${p.dropCount}</td>`
+      + `<td class="tr">${n(req)} ft</td>`
+      + `<td class="tr">${n(alloc)} ft</td>`
+      + `<td class="tr fw7" style="color:${def > 0 ? '#b00' : '#333'}">${def > 0 ? `${def} ft SHORT` : '—'}</td>`
+      + `<td class="tr" style="color:${sur > 0 ? '#b45309' : '#333'}">${sur > 0 ? `${sur} ft (non-redistributable)` : '—'}</td>`
+      + `</tr>`;
+  }).join('');
+  return `
+    <div style="margin:6px 12px 10px;">
+      <div style="background:#000;color:#fff;font-weight:900;font-size:8px;letter-spacing:0.8px;padding:3px 6px;">Q-CABLE PROCUREMENT SUFFICIENCY — PER-BRANCH DERIVATION (GOVERNING BASIS: ${String(ps.deficitBasis ?? 'none').toUpperCase()})</div>
+      <table class="equip-table" style="width:100%;table-layout:fixed;">
+        <thead><tr style="white-space:normal;">
+          <th style="width:10%;">Branch</th><th style="width:10%;">Drops</th>
+          <th style="width:20%;">Required installed length (cable path)</th>
+          <th style="width:20%;">Usable allocated cable (drops × pitch × waste)</th>
+          <th style="width:20%;">Branch deficit</th>
+          <th style="width:20%;">Surplus on this branch</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="border:var(--border);border-top:none;padding:3px 6px;font-size:7px;color:#333;background:#fafafa;line-height:1.3;">
+        ${ps.deficitArithmeticNote
+          ? escapeH(ps.deficitArithmeticNote)
+          : 'Procurement is sufficient on both the aggregate-footage and the per-branch basis.'}
+        <br/><strong>Why two figures:</strong> each branch is ONE continuous cable assembly, so footage cannot move
+        between branches. The AGGREGATE FOOTAGE deficit is the pure subtraction (designed + allowance − procured); the
+        TOPOLOGY-CONSTRAINED deficit is Σ of the individual branch shortfalls. When a non-short branch holds surplus,
+        the topology figure is the larger and GOVERNING one — an aggregate total can never demonstrate branch
+        sufficiency. <strong>Minimum additional purchasable length: ${n(ps.requiredAdditionalPurchasableLengthFt)} ft</strong>
+        (a verified listed cable-extension solution, or a documented re-branching of the affected runs, is required —
+        speculative jumpers do not clear this).
+      </div>
+    </div>`;
+}
+
 export function hasPhysicalSectionSchedule(input: PermitInput, cad: CADModel): boolean {
   return topologyToLegacy(getInverterTopology(input, cad)) === 'MICRO';
 }
@@ -1593,6 +1676,7 @@ export function pageConductorScheduleCont(input: PermitInput, cad: CADModel, pag
       <div class="section-title">Physical Conductor / Raceway Schedule — Canonical Section Objects (continued from PV-4B)</div>
       ${_sections.length
         ? `${renderE1PhysicalSchedule(_sections)}
+      ${renderQCableProcurementDerivation(_snap)}
       ${renderOpenAirBranchGroundingNote(_snap)}`
         : `<div style="padding:var(--xs);font-size:var(--f-sm);border:var(--border);background:#fafafa;color:#b45309;">
         No canonical physical section objects are projected for this system — the sectioned schedule is empty.
