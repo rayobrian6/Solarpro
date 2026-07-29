@@ -2397,7 +2397,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         if (run.color === 'ac' && !run.neutralRequired) {
           run.conductorCount = 2; // L1 + L2 only — no neutral per NEC 690.8
         } else {
-          run.conductorCount = seg.totalCurrentCarryingConductors;
+          // TAC WS-3 — `conductorCount` is the PHYSICAL phase+neutral count (it
+          // drives conduit fill and every BOM conductor quantity), so it takes
+          // the schedule's INSTALLED count. It used to take
+          // `totalCurrentCarryingConductors`, which was harmless only while the
+          // neutral was (incorrectly) flagged current-carrying — once roles
+          // excluded the imbalance-only neutral from DERATING, sourcing the
+          // physical count from the derating count silently under-ordered one
+          // conductor per run. Derating reads `currentCarryingCount` instead.
+          run.conductorCount = seg.totalInstalledPhaseNeutralConductors
+            ?? seg.totalCurrentCarryingConductors;
         }
       }
       // isUtilityOwned runs keep their original conductorCount (3 for L1+L2+N service)
@@ -2445,9 +2454,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       //     on a warmer ambient.
       // NEC 310.15(E)(1) excludes the neutral of a 3-wire single-phase circuit
       // carrying only the imbalance current; 310.15(E)(3) excludes the EGC.
-      // PHYSICAL count for fill — UNCHANGED from the pre-TAC formula, so conduit
-      // fill and every BOM conductor quantity are byte-identical.
-      conductorCount: run.conductorCount + (run.neutralRequired ? 1 : 0) + 1,
+      // PHYSICAL count for fill = installed phase+neutral + the EGC.
+      // `run.conductorCount` ALREADY includes the neutral (it is the schedule's
+      // installed phase+neutral count), so the previous
+      // `+ (neutralRequired ? 1 : 0)` counted the neutral TWICE — a 240 V feeder
+      // of L1 + L2 + N + EGC was inventoried as 5 conductors.
+      conductorCount: run.conductorCount + 1,
       // The DEFECT this workstream fixes: this same inflated physical expression
       // was ALSO used as the current-carrying count, so a feeder of 2 hots +
       // neutral + EGC reported 4 CCC and took an 0.80 310.15(C)(1) adjustment the

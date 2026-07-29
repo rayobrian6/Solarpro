@@ -100,6 +100,13 @@ export interface SegmentScheduleRow {
   onewayLengthFt: number;
   // Calculated
   totalCurrentCarryingConductors: number;
+  /** TAC WS-3 — the PHYSICAL phase+neutral conductor count (EGC excluded). Kept
+   *  separate from `totalCurrentCarryingConductors` because the two diverge as
+   *  soon as roles are honoured: NEC 310.15(E)(1) excludes a 3-wire
+   *  single-phase imbalance-only neutral from DERATING, but that neutral is
+   *  still installed, still fills the raceway and still has to be ORDERED.
+   *  Consumers must take procurement/fill from here and derating from above. */
+  totalInstalledPhaseNeutralConductors: number;
   totalConductorAreaIn2: number;
   conduitSize: string;         // '3/4"', '1"', etc. — 'N/A' for OPEN_AIR
   fillPercent: number;         // 0 for OPEN_AIR
@@ -435,6 +442,14 @@ function buildSegment(
   // TAC WS-3 — ROLE-DERIVED (falls back to the legacy flag for bundles that do
   // not yet declare a role, so behaviour is unchanged where roles are absent).
   const totalCurrentCarrying = currentCarryingCountOf(conductorBundle);
+  // TAC WS-3 — physical phase+neutral conductors (everything that is not a
+  // grounding/bonding conductor), for procurement + conduit fill.
+  const totalInstalledPhaseNeutral = conductorBundle.reduce((n, b) => {
+    const isGnd = b.role != null
+      ? (b.role === 'EQUIPMENT_GROUNDING' || b.role === 'GROUNDING_ELECTRODE' || b.role === 'BONDING')
+      : b.color === 'GRN';
+    return n + (isGnd ? 0 : b.qty);
+  }, 0);
 
   // Conduit sizing
   let conduitSize = 'N/A';
@@ -469,6 +484,7 @@ function buildSegment(
     conductorBundle,
     onewayLengthFt,
     totalCurrentCarryingConductors: totalCurrentCarrying,
+    totalInstalledPhaseNeutralConductors: totalInstalledPhaseNeutral,
     totalConductorAreaIn2: totalAreaIn2,
     conduitSize,
     fillPercent,
