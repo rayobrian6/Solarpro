@@ -833,7 +833,10 @@ export const PERMIT_SHEET_INDEX: PermitSheetIndexEntry[] = [
   { id: 'SCHED', title: 'Equipment Schedule',           description: 'Equipment list, model numbers, electrical ratings, quantities, BOM' },
   { id: 'APP-A', title: 'Specification Sheets',         description: 'Module, inverter, and racking cut sheet references with NEC 690.8 calcs' },
   { id: 'CERT',  title: 'Engineering Certification',    description: 'Engineering stamp, certification statement, revision history, document control' },
-  { id: 'PE-1',  title: 'PE Structural Letter',         description: 'Licensed PE review letter with ASCE 7-22 analysis and structural attestation' },
+  // TAC WS-16 — the in-app navigator names the sheet SLOT. It is a licensed-PE
+  // REVIEW sheet; it becomes a letter of compliance only under a digest-bound
+  // approval (see utils/peLetterIdentity — the ONE source for the printed title).
+  { id: 'PE-1',  title: 'PE Structural Review',         description: 'Licensed PE structural review with ASCE 7-22 analysis; issues as a letter of compliance only under an approved, sealed review' },
   { id: 'E-1',   title: 'Single-Line Diagram',          description: 'Complete electrical SLD — IEEE/ANSI symbols, wire gauges, OCP ratings, grounding' },
   { id: 'VAL-1', title: 'Validation Summary',           description: 'Canonical validation summary and engineering readiness checks' },
   { id: 'APP-CAD', title: 'CAD Preview Appendix',       description: 'Preview-only CAD SVG appendix; non-authoritative and not a PV-1/PV-3 replacement' },

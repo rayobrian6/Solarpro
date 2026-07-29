@@ -32,24 +32,15 @@ import {
   projectProjectAuthorityFromInput, projectIssueStateLanguageFromInput,
 } from '../snapshot/projectAuthorityProjection';
 
-/** D-6 (Ray, binding 2026-07-20) / snapshot V13 / W4 correction Section 2:
- *  certification language may activate ONLY when the snapshot carries an
- *  approved engineering-review record covering the CURRENT digest plus complete
- *  engineer identity. Until that exists every CERT/PE sheet renders a DISABLED
- *  pending-review TEMPLATE -- no "I hereby certify", "prepared under my
- *  supervision", "confirmed adequate" or equivalent affirmative conclusion may
- *  appear. This is the single predicate every affirmative block gates on. */
-export function certificationApproved(input: PermitInput): boolean {
-  const s = (input as unknown as {
-    _snapshot?: { meta?: { digest?: string };
-      certification?: { engineeringReviewApproved: false | { reviewedDigest: string }; engineer: unknown } };
-  })._snapshot;
-  const cert = s?.certification;
-  return !!(cert && cert.engineeringReviewApproved
-    && typeof cert.engineeringReviewApproved === 'object'
-    && cert.engineeringReviewApproved.reviewedDigest === s?.meta?.digest
-    && cert.engineer);
-}
+// D-6 / snapshot V13 / W4 Section 2 -- the digest-bound certification predicate
+// now lives with the PE-letter primitives (TAC WS-16) so the sheet manifest and
+// the cover index can derive the sheet's IDENTITY from the same single fact
+// without importing a page module. Re-exported here: every historical caller
+// (and the governance test suite) keeps importing it from certPages.
+import {
+  certificationApproved, peLetterSheetTitle, peLetterHeadingBlock,
+} from '../utils/peLetter';
+export { certificationApproved };
 
 /** The derived issue-state string for revision blocks (Section 1). While the
  *  snapshot is PENDING ENGINEERING REVIEW this is never "ISSUED FOR PERMIT" /
@@ -406,14 +397,14 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
 
   return `
   <div class="page">
-    ${titleBlock(input, opts?.sheetId ?? 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PE-1', peLetterSheetTitle(input), pageNum, totalPages)}
     ${certificationGateBanner(input)}
     <div class="page-content">
 
       <div class="bb-hvy pb-xs mb-sm">
-        <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
-        <div class="f-lg c555 mt-xs">Solar Photovoltaic System &mdash; Solar Fence Array</div>
-        <div class="f-sm muted">Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
+        ${peLetterHeadingBlock(input,
+          'Solar Photovoltaic System &mdash; Solar Fence Array',
+          `Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}`)}
       </div>
 
       <div class="two-col-layout">
@@ -515,14 +506,14 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
 
   return `
   <div class="page">
-    ${titleBlock(input, opts?.sheetId ?? 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PE-1', peLetterSheetTitle(input), pageNum, totalPages)}
     ${certificationGateBanner(input)}
     <div class="page-content">
 
       <div class="bb-hvy pb-xs mb-sm">
-        <div class="f-3xl fw9">LETTER OF STRUCTURAL COMPLIANCE</div>
-        <div class="f-lg c555 mt-xs">Solar Photovoltaic System &mdash; Ground Mount Array</div>
-        <div class="f-sm muted">Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}</div>
+        ${peLetterHeadingBlock(input,
+          'Solar Photovoltaic System &mdash; Ground Mount Array',
+          `Prepared under ${asce} &bull; ${ibcVer} IBC &bull; NEC ${necVer}`)}
       </div>
 
       <div class="two-col-layout">
@@ -685,15 +676,15 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
 
   return `
   <div class="page">
-    ${titleBlock(input, opts?.sheetId ?? 'PE-1', 'PE STRUCTURAL LETTER OF COMPLIANCE', pageNum, totalPages)}
+    ${titleBlock(input, opts?.sheetId ?? 'PE-1', peLetterSheetTitle(input), pageNum, totalPages)}
     ${certificationGateBanner(input)}
     <div class="page-content pe-letter">
 
       <div class="bb-hvy pb-xs mb-sm" style="display:flex;justify-content:space-between;align-items:flex-end;">
         <div>
-          <div class="f-3xl fw9" style="letter-spacing:1px;">LETTER OF STRUCTURAL COMPLIANCE</div>
-          <div class="f-lg c555 mt-xs">Solar Photovoltaic System &mdash; Roof-Mounted Array</div>
-          <div class="f-sm muted">Prepared under ${asce} &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}</div>
+          ${peLetterHeadingBlock(input,
+            'Solar Photovoltaic System &mdash; Roof-Mounted Array',
+            `Prepared under ${asce} &bull; ${ibcVer} IBC &bull; ${ibcVer} IRC &bull; NEC ${necVer}`)}
         </div>
         <div class="f-sm" style="text-align:right;color:#555;line-height:1.6;">
           <div>RE: <strong style="color:#000;">${escapeH(project.address || '—')}</strong></div>

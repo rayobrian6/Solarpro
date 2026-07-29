@@ -224,12 +224,18 @@ describe('§10 — RT-MINI exact racking assembly', () => {
 });
 
 // ── W6/W7/W8 gate tests (this pass) ───────────────────────────────────────────
-/** Slice the PE-1 "Letter of Structural Compliance" body (results table + cert
- *  statement), stopping before the sig block, so we scan only the pending page. */
+/** Slice the PE-1 body (results table + cert statement), stopping before the sig
+ *  block, so we scan only the pending page.
+ *  TAC WS-16 — anchor on the STATE-INDEPENDENT heading stem, not on the letter
+ *  title: while the engineering review is pending the sheet is titled
+ *  "STRUCTURAL ENGINEERING REVIEW", and only a digest-bound approval turns it
+ *  into a "LETTER OF STRUCTURAL COMPLIANCE". These fixtures are pending. */
+const PE1_HEADING_RE = /data-pe-letter-heading="1"/;
 function pe1Slice(html: string): string {
-  const start = html.indexOf('LETTER OF STRUCTURAL COMPLIANCE');
+  const m = PE1_HEADING_RE.exec(html);
+  expect(m).not.toBeNull();
+  const start = (m as RegExpExecArray).index;
   const end = html.indexOf('PROFESSIONAL ENGINEER OF RECORD', start);
-  expect(start).toBeGreaterThan(-1);
   return end > start ? html.slice(start, end) : html.slice(start);
 }
 
@@ -238,7 +244,16 @@ describe('W8 — PE-1 projects the SAME gated state as PV-4C', () => {
   const pe1 = pe1Slice(html);
 
   it('PE-1 is present for a roof RT-MINI project', () => {
-    expect(html).toContain('LETTER OF STRUCTURAL COMPLIANCE');
+    expect(html).toMatch(PE1_HEADING_RE);
+  });
+
+  // TAC WS-16 — while the review is pending the sheet may NOT claim to be a
+  // letter of compliance anywhere: not in the title block, not in the heading.
+  it('PE-1 carries the pending REVIEW identity, never the compliance-letter identity', () => {
+    expect(html).not.toContain('LETTER OF STRUCTURAL COMPLIANCE');
+    expect(html).not.toContain('PE STRUCTURAL LETTER OF COMPLIANCE');
+    expect(html).toContain('STRUCTURAL ENGINEERING REVIEW SHEET — PENDING');
+    expect(pe1).toContain('NOT A LETTER OF COMPLIANCE');
   });
 
   it('no 600 lb allowable / safety factor / PASS on the capacity-gated PE-1 results table', () => {

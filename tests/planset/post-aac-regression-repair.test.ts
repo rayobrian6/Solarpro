@@ -117,8 +117,14 @@ describe('§2 — output profiles: DESIGN_REVIEW / FULL_INTERNAL / PERMIT_SUBMIS
   });
 
   it('DESIGN_REVIEW PE-1 is the unsigned review document: pending language, no certification, digest-bound, marked', () => {
-    const peStart = DR.html.lastIndexOf('PE STRUCTURAL LETTER');
-    const pe = DR.html.slice(peStart);
+    // TAC WS-16 — the last page is anchored by its SHEET ID, not by a title
+    // string: the pending sheet is titled "STRUCTURAL ENGINEERING REVIEW", and
+    // only a digest-bound approval renames it to the compliance letter.
+    const peStart = DR.html.lastIndexOf('tb-sheet-id">PE-1<');
+    expect(peStart).toBeGreaterThan(-1);
+    const pe = DR.html.slice(DR.html.lastIndexOf('<div class="page"', peStart));
+    expect(pe).not.toContain('LETTER OF STRUCTURAL COMPLIANCE');   // pending ⇒ review sheet
+    expect(pe).toContain('STRUCTURAL ENGINEERING REVIEW');
     expect(pe).toContain('NO CERTIFICATION ASSERTED');
     expect(pe).toContain('NOT FOR PERMIT SUBMISSION');
     expect(pe).toContain('PENDING ENGINEERING REVIEW');

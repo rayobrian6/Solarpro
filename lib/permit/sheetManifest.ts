@@ -17,6 +17,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { PlansetProfile } from './plansetProfile';
+// TAC WS-16 — the sheet's printed identity is state-dependent (a compliance
+// letter only under a digest-bound approval). ONE source, shared with the
+// rendering pages.
+import { peLetterManifestTitle } from './utils/peLetterIdentity';
 
 /** AAC WS-10 — a sheet belongs either to the numbered DRAWING set or to the
  *  MANUFACTURER ATTACHMENT appendix that follows it. Absent ⇒ 'drawing' (every
@@ -155,13 +159,13 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     //                   sheet (after the appendix), in its current state.
     const certSheets = [
       { id: 'CERT', title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
-      { id: 'PE-1', title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE${primaryLabel}` },
-      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE — ${HYBRID_LABEL[sub]}` })),
+      { id: 'PE-1', title: peLetterManifestTitle(cert, primaryLabel) },
+      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: peLetterManifestTitle(cert, ` — ${HYBRID_LABEL[sub]}`) })),
     ];
     const reviewTail = [
       ...(cert ? [{ id: 'CERT', title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' }] : []),
-      { id: 'PE-1', title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE${primaryLabel}` },
-      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE — ${HYBRID_LABEL[sub]}` })),
+      { id: 'PE-1', title: peLetterManifestTitle(cert, primaryLabel) },
+      ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: peLetterManifestTitle(cert, ` — ${HYBRID_LABEL[sub]}`) })),
     ];
     return [
       { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
@@ -229,8 +233,8 @@ export function buildSheetManifest(o: SheetManifestOptions): SheetRef[] {
     ...ds,
     // ── certifications ────────────────────────────────────────────────────
     { id: 'CERT',  title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
-    { id: 'PE-1',  title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE${primaryLabel}` },
-    ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: `PE STRUCTURAL LETTER — LETTER OF COMPLIANCE — ${HYBRID_LABEL[sub]}` })),
+    { id: 'PE-1',  title: peLetterManifestTitle(o.certificationCompleted === true, primaryLabel) },
+    ...extras.map(sub => ({ id: hybridSheetId('PE-1', sub), title: peLetterManifestTitle(o.certificationCompleted === true, ` — ${HYBRID_LABEL[sub]}`) })),
     ...(o.includeValidation ? [{ id: 'VAL-1', title: 'VALIDATION SUMMARY — INTERNAL QA (NOT FOR CONSTRUCTION)' }] : []),
     // ── appendix ──────────────────────────────────────────────────────────
     ...(o.includeCadAppendix ? [{ id: 'APP-CAD', title: 'CAD PREVIEW APPENDIX — NON-AUTHORITATIVE' }] : []),

@@ -17,6 +17,9 @@ import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjecti
 import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
 import { computePlansetManifest } from '../plansetManifest';
 import { releaseStatusBlockHtml } from '../utils/releaseStatusBlock';
+// TAC WS-16 — the cover names the PE sheets in prose; the noun is state-derived
+// (a "letter" only under a digest-bound approval), never a literal.
+import { peLetterTitlesFromInput } from '../utils/peLetterIdentity';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -552,7 +555,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
               <strong>NOW DOCUMENTED PER SUB-SYSTEM:</strong> dedicated plan/elevation sheets (${_coverSubRows.slice(1).map(r => `PV-1${r.label === 'GROUND' ? 'G' : r.label === 'FENCE' ? 'F' : 'R'}`).join(', ') || '—'}),
               per-sub circuit layouts (PV-1B set), per-sub NEC &amp; conductor schedules (PV-4A / PV-4B), per-sub structural details
               (${_coverSubRows.slice(1).map(r => `PV-3${r.label === 'GROUND' ? 'G' : 'F'}`).join(', ') || '—'}), per-sub equipment schedule rows (SCHED),
-              and per-sub PE structural letters (PE-1${_coverSubRows.slice(1).map(r => `, PE-1${r.label === 'GROUND' ? 'G' : 'F'}`).join('')}).
+              and per-sub ${peLetterTitlesFromInput(input).noun}s (PE-1${_coverSubRows.slice(1).map(r => `, PE-1${r.label === 'GROUND' ? 'G' : 'F'}`).join('')}).
             </div>
             <div style="margin-top:4px;color:#cc0000;">
               <strong>MISSING BEFORE SUBMISSION (WAVE 6 GATE):</strong>

@@ -124,6 +124,26 @@ describe('W4 §2 — certification gate (no affirmative cert without an approved
     const letter = pagePELetterRoof(input, cad, 1, 1);
     // With an approved review, the affirmative certification statement activates.
     expect(letter).toContain('hereby certify');
+    // TAC WS-16 — and so does the sheet's IDENTITY: title block, heading and the
+    // state stamp all flip to the compliance letter from the SAME predicate.
+    expect(letter).toContain('PE STRUCTURAL LETTER OF COMPLIANCE');
+    expect(letter).toContain('LETTER OF STRUCTURAL COMPLIANCE');
+    expect(letter).toContain('data-pe-letter-state="approved"');
+    expect(letter).not.toContain('NOT A LETTER OF COMPLIANCE');
+    expect(letter).not.toContain('STRUCTURAL ENGINEERING REVIEW SHEET');
+  });
+
+  it('WS-16 — the PENDING sheet never claims the compliance-letter identity', async () => {
+    const input = auditInput();
+    generatePermitHTML(input);
+    const { pagePELetterRoof, certificationApproved } = await import('@/lib/permit/sections/certPages');
+    expect(certificationApproved(input)).toBe(false);
+    const cad = { systemType: 'roof', roof: { planes: [] } } as any;
+    const sheet = pagePELetterRoof(input, cad, 1, 1);
+    expect(sheet).not.toContain('LETTER OF STRUCTURAL COMPLIANCE');
+    expect(sheet).toContain('STRUCTURAL ENGINEERING REVIEW SHEET — PENDING');
+    expect(sheet).toContain('data-pe-letter-state="pending"');
+    expect(sheet).toContain('NOT A LETTER OF COMPLIANCE');
   });
 });
 

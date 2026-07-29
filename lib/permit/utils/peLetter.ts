@@ -6,6 +6,16 @@
 import type { PermitInput } from '../types';
 import { escapeH } from './drawing';
 
+// TAC WS-16 — PE-1 sheet identity (title set + the digest-bound
+// certification predicate) lives in the LEAF module peLetterIdentity so the
+// sheet manifest can resolve titles without importing the drafting engine.
+// Re-exported here: `utils/peLetter` remains the PE-letter facade.
+export {
+  PE_LETTER_TITLES, certificationApproved, peLetterTitles, peLetterTitlesFromInput,
+  peLetterSheetTitle, peLetterManifestTitle, peLetterHeadingBlock,
+} from './peLetterIdentity';
+export type { PELetterTitleSet } from './peLetterIdentity';
+
 // ─── SHARED PE LETTER PRIMITIVES ─────────────────────────────────────────────
 // Signature block and footer are identical across all families — extracted once
 export function _peSigBlock(): string {
