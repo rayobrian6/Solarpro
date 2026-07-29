@@ -477,7 +477,11 @@ export function resolveOpenAirGroundingAuthority(
         : 'The equipment grounding / bonding method for the open-air microinverter branch (cable-assembly) section is NOT ESTABLISHED. '
           + 'No manufacturer document in this repository states the method for the exact selected equipment, so NEITHER outcome may be '
           + 'asserted — not an additional grounding conductor, and not a listed no-additional-conductor method. '
-          + `Any conductor quantity shown for this section is a PROPOSED / DESIGN QUANTITY only (${GROUNDING_AUTHORITY_BLOCKER_CODE}; see RS-1). `
+          // TAC WS-18 — a SNAPSHOT explanation names the requirement CODE, never a
+          // sheet: the same snapshot renders into packages with different sheet
+          // sets, and this string also ships verbatim inside the machine-readable
+          // evidence stamp (where the render-time reference pass cannot reach it).
+          + `Any conductor quantity shown for this section is a PROPOSED / DESIGN QUANTITY only (${GROUNDING_AUTHORITY_BLOCKER_CODE}). `
           + 'This is a fail-closed state, not a finding.';
 
   const conductorModeled = outcome !== 'NO_SEPARATE_EGC_REQUIRED';

@@ -10,6 +10,8 @@ import type { PermitDesignSnapshot } from '../snapshot/types';
 import type { PermitInput } from '../types';
 import { structuralBanner, type StructuralBanner } from '../snapshot/structuralProjection';
 import { resolvePlansetProfile, isCompactProfile, sheetIsDirectlyGated } from '../plansetProfile';
+// TAC WS-18 — one cross-sheet reference resolver over the ACTIVE sheet index.
+import { sheetRef } from './sheetRef';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -49,16 +51,24 @@ export function structuralBannerHtml(
   // points at the record that DOES hold every requirement (the in-app review
   // record). Same count, same requirements — only the reference is corrected;
   // a dangling "see sheet RS-1" would be a lie about the package.
-  const _permit = !!opts?.input && isCompactProfile(resolvePlansetProfile(opts.input));
-  const _registryRef = _permit ? 'see the project review record in the application' : 'see sheet RS-1 (REVIEW STATUS)';
+  // TAC WS-18 — that decision is no longer re-derived from the profile here: it
+  // is the ONE cross-sheet resolver, asked which sheet (if any) this package
+  // holds the release requirements on.
+  const _rs = sheetRef(opts?.input ?? null, 'review-status');
+  const _permit = !_rs.present;
+  const _registryRef = _rs.present ? `see sheet ${_rs.sheetId} (REVIEW STATUS)` : _rs.see;
   const reasons = _shown.map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('')
     + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more unresolved release requirement${_more === 1 ? '' : 's'} — ${_registryRef}</li>` : '');
   const pad = opts?.compact ? '4px 8px' : '8px 12px';
   // RGM §4 — the package TOTAL line, single-sourced from the release-gate model
   // (releasePackageLine on the projection). Rendered above the requirement rows
   // so a reviewer reads "7 root gates" before the 19 child requirements.
+  // TAC WS-18 — the package line is snapshot-baked prose; the render-time
+  // reference pass (normalizeAbsentSheetReferences, applied over the assembled
+  // sheets) degrades its RS-1 pointer when the package omits RS-1. Kept here for
+  // standalone banner renders that never reach the assembly.
   const _packageLine = b.releasePackageLine && _permit
-    ? b.releasePackageLine.replace('SEE RS-1 FOR ALL', 'SEE THE PROJECT REVIEW RECORD FOR ALL')
+    ? b.releasePackageLine.replace('SEE RS-1 FOR ALL', `SEE ${_rs.short.toUpperCase()} FOR ALL`)
     : b.releasePackageLine;
   const gateLine = _packageLine
     ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:#7f1d1d;text-align:center;margin-top:2px;">${esc(_packageLine)}</div>`

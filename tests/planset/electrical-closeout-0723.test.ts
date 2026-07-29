@@ -309,7 +309,11 @@ describe('WS-A §1–§5 — E-1 sectioned schedule, tri-state, PV-4A registry (
   it('§5 — PV-4A branch table is the option-B RATING SUMMARY (no conductor/raceway column, no #12→combiner)', () => {
     const { html } = gen('SUPPLY_SIDE_TAP');
     expect(html).toContain('AC Branch Circuit Rating Summary');
-    // the sectioned physical conductor schedule lives on E-1, referenced from PV-4A.
-    expect(html).toMatch(/Physical conductor, cable-assembly and raceway schedule[\s\S]{0,80}on E-1/);
+    // The sectioned physical conductor schedule is referenced from PV-4A.
+    // TAC WS-18 — the target is RESOLVED against the active sheet index: it has
+    // been PV-4B.1 since the post-AAC E-1 repair, and this footer still sent the
+    // reader to E-1. It must name whichever sheet this package actually carries.
+    expect(html).toMatch(/Physical conductor, cable-assembly and raceway schedule[\s\S]{0,80}on PV-4B(\.1)?/);
+    expect(html).not.toMatch(/Physical conductor, cable-assembly and raceway schedule[\s\S]{0,80}on E-1/);
   });
 });

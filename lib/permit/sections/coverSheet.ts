@@ -484,11 +484,13 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     ${titleBlock(input, 'PV-0', 'COVER SHEET', pageNum, totalPages)}
 
     <!-- RGM §6 — the cover leads with the RELEASE-STATUS BLOCK (root gates +
-         counts + the pointer to RS-1), NOT the blocker list. The retired banner
-         printed 8 verbatim blocker messages + "+N more active release blockers",
-         which presented 19 children of 7 root gates as 19 independent failures.
-         The PENDING ENGINEERING REVIEW / NOT FOR PERMIT SUBMISSION identity is
-         unchanged and nothing is hidden: every requirement stays on RS-1. -->
+         counts + one pointer to the full registry), NOT the blocker list. The
+         retired banner printed 8 verbatim blocker messages + "+N more active
+         release blockers", which presented 19 children of 7 root gates as 19
+         independent failures. The PENDING ENGINEERING REVIEW / NOT FOR PERMIT
+         SUBMISSION identity is unchanged and nothing is hidden: every
+         requirement stays in the release registry, and the pointer resolves to
+         the sheet or record THIS package carries it on (TAC WS-18). -->
     ${releaseStatusBlockHtml(input, { compact: true })}
 
     <!-- ═══ MAIN BODY: 2fr left | 1fr right ═══ -->

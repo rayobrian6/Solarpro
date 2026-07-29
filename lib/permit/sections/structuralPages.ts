@@ -2018,7 +2018,10 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       + ` &middot; ${_routeCellShared} (schedule-level: ONE ${escapeH(BRANCH_RUN_SEGMENT_LABEL)} segment for ${escapeH(_b)}`
       + `${_provUniform ? `; length provenance ${escapeH(String(_provAll[0] ?? 'NOT ESTABLISHED'))} on every branch` : '; per-branch length PROVENANCE below'})`
       + ` &middot; ${_gndCellShared} (ONE authority scoped to ${escapeH(_b)})`
-      + `<span style="color:#555;"> &middot; the &Sigma; Q-Cable deficit is NOT apportioned per branch &middot; blockers: RS-1</span></div>`
+      // TAC WS-18 — "blockers: RS-1" degraded to a bare noun phrase once the
+      // reference pass rewrote the sheet id; state the pointer as a sentence so
+      // it reads correctly whether it resolves to a sheet or to the record.
+      + `<span style="color:#555;"> &middot; the &Sigma; Q-Cable deficit is NOT apportioned per branch &middot; open blockers: see RS-1</span></div>`
       + _lines
       + `</div>`;
   })();

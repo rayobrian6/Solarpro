@@ -21,6 +21,8 @@ import { escapeH } from '../utils/drawing';
 import { complianceBadge, evaluateCompliance } from '../snapshot/complianceState';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
+// TAC WS-18 — reader-facing cross-sheet pointers resolve against the ACTIVE index.
+import { activeSheetIds, sheetRef } from '../utils/sheetRef';
 import { SUB_LABEL } from './subSystemSheets';
 import { getEGCSize } from '@/lib/manufacturer-specs';
 // W4 §2/§11: code editions project from the ONE snapshot codeAuthority record
@@ -448,6 +450,10 @@ function pv4aBranchRatingTable(
   branches: Pv4aRatingBranch[],
   inverterModel?: string | null,
   inverterMfr?: string | null,
+  // TAC WS-18 — the physical section schedule has lived on PV-4B.1 since the
+  // post-AAC E-1 repair; this footer still sent the reader to E-1. The target is
+  // resolved against the ACTIVE sheet index, never named as a literal.
+  input?: PermitInput | null,
 ): string {
   const mfrLimit = microMaxPerBranch(inverterModel, inverterMfr);
   const mfrOcpdLimit = microBranchMaxOcpdA(inverterModel, inverterMfr);
@@ -480,7 +486,7 @@ function pv4aBranchRatingTable(
         <thead><tr><th style="width:8%">Branch</th><th style="width:22%">Devices</th><th style="width:14%">Operating</th><th style="width:16%">× 1.25 Cont.</th><th style="width:12%">Branch OCPD</th><th style="width:16%">Mfr Limit</th><th>Status</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="7" class="center">Branch plan pending module placement — see PV-1B</td></tr>`}</tbody>
       </table>
-      <div style="padding:2px 6px;font-size:7px;color:#555;border:var(--border);border-top:none;background:#fafafa">Physical conductor, cable-assembly and raceway schedule (Enphase Q Cable / shared home-run / feeder) is on E-1 — this table is the branch DEVICE rating summary only.</div>`;
+      <div style="padding:2px 6px;font-size:7px;color:#555;border:var(--border);border-top:none;background:#fafafa">Physical conductor, cable-assembly and raceway schedule (Enphase Q Cable / shared home-run / feeder) is on ${sheetRef(input ?? null, 'physical-section-schedule').short} — this table is the branch DEVICE rating summary only.</div>`;
 }
 
 // ─── (Existing pages reused with minor upgrades) ─────────────────────────────
@@ -580,7 +586,13 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   const _cap = (s: string, n: number): string =>
     s.length > n ? `${s.slice(0, n).replace(/\s+\S*$/, '')}… (full text on RS-1)` : s;
   const _elecRegRow = (r: typeof _elecRegistry[number], sev: 'error' | 'warning') => {
-    const seg = r.affectedSheets.length ? r.affectedSheets.join(', ') : '—';
+    // TAC WS-18 — affectedSheets is a SNAPSHOT fact (where the authority is
+    // projected) and is profile-independent; this is a READER-FACING pointer, so
+    // it lists only sheets THIS package generates. A reader cannot turn to a
+    // sheet that was never issued, and the requirement itself is unchanged.
+    const _active = activeSheetIds(input);
+    const _refSheets = r.affectedSheets.filter(s => _active.includes(s));
+    const seg = _refSheets.length ? _refSheets.join(', ') : '—';
     return `<tr style="background:${statusBg(sev)}">`
       + `<td style="color:${sev === 'error' ? '#cc0000' : '#cc6600'};font-weight:bold">${sev === 'error' ? 'BLOCKING' : 'PENDING'}</td>`
       + `<td class="mono f-lg">${r.code}</td>`
@@ -684,11 +696,12 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
           return _auth.subSystems.map(sub => {
             if (sub.isMicro) {
               // §5 — option B rating summary (no conductor/raceway column). The
-              // sectioned physical schedule for this sub's branches is on E-1.
+              // sectioned physical schedule for this sub's branches is on the
+              // package's physical-schedule sheet (resolved, TAC WS-18).
               return pv4aBranchRatingTable(
                 `AC Branch Circuit Rating Summary — ${subSectionLabel(sub)} — NEC 690.8(A)`,
                 sub.microBranches.map(b => ({ index: b.index, deviceCount: b.deviceCount, branchCurrentA: b.branchCurrentA, continuousA: b.continuousA, ocpdAmps: b.ocpdAmps })),
-                sub.equipment.inverterModel, sub.equipment.inverterManufacturer,
+                sub.equipment.inverterModel, sub.equipment.inverterManufacturer, input,
               );
             }
             const rows = sub.dcStrings.map((s, i) =>
@@ -720,7 +733,7 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
         const _ratingTable = pv4aBranchRatingTable(
           'AC Branch Circuit Rating Summary — NEC 690.8(A)',
           _auth.microBranches.map(b => ({ index: b.index, deviceCount: b.deviceCount, branchCurrentA: b.branchCurrentA, continuousA: b.continuousA, ocpdAmps: b.ocpdAmps })),
-          _pv4aEq.inverterModel, _pv4aEq.inverterManufacturer,
+          _pv4aEq.inverterModel, _pv4aEq.inverterManufacturer, input,
         );
         const _pv4aBos = buildIntegratedEquipment(input, cad);
         const _bosNote = _pv4aBos.brains

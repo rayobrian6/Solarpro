@@ -50,6 +50,8 @@ import {
   type HybridSectionRef,
 } from './sections/subSystemSheets';
 import { hybridSheetId } from './sheetManifest';
+// TAC WS-18 — cross-sheet references resolved against the ACTIVE sheet index.
+import { activeSheetIds, normalizeAbsentSheetReferences, findDanglingSheetReferences } from './utils/sheetRef';
 import { resolvePlansetProfile, certificationIsCompleted, isCompactProfile } from './plansetProfile';
 import { resolveSeismicAuthority } from './snapshot/environmentalAuthority';
 import { pageValidationSummary } from './sections/validationPage';
@@ -1436,6 +1438,32 @@ export function generatePermitHTML(
       pages.push(pageCADAppendixPreview(input, cad, TOTAL, TOTAL));    // APP-CAD: non-authoritative CAD preview appendix
     } catch (appendixErr: unknown) {
       console.warn('[generatePermitHTML] CAD appendix preview omitted (non-critical):', appendixErr instanceof Error ? appendixErr.message : appendixErr);
+    }
+  }
+
+  // ═══ TAC WS-18 — CROSS-SHEET REFERENCES resolved against THIS package ═════
+  // A compact profile drops RS-1(.n): the release registry lives in the project
+  // review record, not in the deliverable. Every prose pointer at a sheet the
+  // package does not contain degrades to that record — once, here, over the
+  // assembled sheets, so a snapshot-baked row reason and a page body cannot
+  // drift. Tags, attributes and comments are untouched (the merge provenance
+  // stamps and title-block sheet ids survive verbatim).
+  const _activeSheetIds = activeSheetIds(input);
+  for (let i = 0; i < pages.length; i++) {
+    pages[i] = normalizeAbsentSheetReferences(pages[i], _activeSheetIds);
+  }
+  {
+    // FAIL CLOSED: anything still pointing at an omitted sheet is a NEW surface
+    // inventing a dangling reference. The package must not ship telling a
+    // reviewer to consult a sheet it does not include.
+    const dangling = findDanglingSheetReferences(pages.join('\n'), _activeSheetIds);
+    if (dangling.length) {
+      throw new SnapshotValidationError(dangling.map(d => ({
+        invariant: 'V36', authorityPath: 'projectAuthority.sheetIndex', offendingValue: d.sheetId,
+        sourceRecord: 'cross-sheet reference', affectedProjections: [d.sheetId],
+        message: `package references sheet ${d.sheetId}, which this profile does not generate: "${d.context}"`,
+        enforcement: 'blocking' as const,
+      })));
     }
   }
 
