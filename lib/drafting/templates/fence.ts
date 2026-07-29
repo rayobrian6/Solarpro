@@ -44,6 +44,8 @@ import {
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
 import { projectStructural } from '../../permit/snapshot/structuralProjection';
+// AAC WS-9 — THE site design-load seam (no wind/snow literal in drafting).
+import { resolveSiteDesignLoads } from '../../permit/snapshot/siteDesignLoads';
 import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 import { getRackingById } from '../../equipment-db';
@@ -522,10 +524,13 @@ export function drawFencePlan(
     // Wind arrow — with the DESIGN VALUE (Ray "next level" item 3: load
     // arrows carry their real ASCE figures at the member they act on).
     const wY = (panTop + grade) / 2;
-    // W3 §7 — single-sourced from the snapshot env (115 = standalone-only guard).
-    const _windMph = projectStructural(ctx?.snapshot).windSpeedMph
-      ?? (engineering as { windSpeedMph?: number }).windSpeedMph
-      ?? (input.project as { ahjWindSpeedMph?: number })?.ahjWindSpeedMph ?? 115;
+    // AAC WS-9 — ONE seam. The literal 115 no longer exists in the drafting
+    // layer; when the value IS the code-minimum guard the seam says so.
+    const _windMph = resolveSiteDesignLoads({
+      snapshot: ctx?.snapshot ?? null,
+      complianceWindMph: (engineering as { windSpeedMph?: number }).windSpeedMph,
+      ahjWindMph: (input.project as { ahjWindSpeedMph?: number })?.ahjWindSpeedMph,
+    }).windSpeedMph;
     els.push(`<line x1="${(rightPost + 44).toFixed(1)}" y1="${wY.toFixed(1)}" x2="${(rightPost + 10).toFixed(1)}" y2="${wY.toFixed(1)}" stroke="#c00" stroke-width="1.6"/>`);
     els.push(drawArrowhead(rightPost + 10, wY, 180, 6, '#c00'));
     els.push(drawText(rightPost + 48, wY - 3, `WIND ${_windMph} MPH Vult`, { anchor: 'start', fontSize: 6.5, fontWeight: 'bold', fill: '#c00' }));
@@ -714,11 +719,16 @@ export function drawFenceElevation(
   const _canonWind     = Number((project as unknown as {
     _canonical?: { site?: { windSpeed?: number } };
   })?._canonical?.site?.windSpeed) || 0;
-  const windSpeedMph   = engineering.windSpeedMph
-    ?? (_canonWind > 0 ? _canonWind : undefined)
-    ?? project?.ahjWindSpeedMph
-    ?? 115;   // same last-resort default as getFenceData — never a private 90
-  const groundSnowPsf  = engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
+  // AAC WS-9 — ONE seam for both values, with an explicit basis. The private
+  // `?? 115` / `?? 0` tails are gone: a guard value now identifies itself.
+  const _siteLoads     = resolveSiteDesignLoads({
+    snapshot: null,
+    complianceWindMph: engineering.windSpeedMph ?? (_canonWind > 0 ? _canonWind : undefined),
+    complianceSnowPsf: engineering.groundSnowPsf,
+    ahjWindMph: project?.ahjWindSpeedMph, ahjSnowPsf: project?.ahjGroundSnowPsf,
+  });
+  const windSpeedMph   = _siteLoads.windSpeedMph;
+  const groundSnowPsf  = _siteLoads.groundSnowPsf;
   // Wave 6.1 (punch 1a): fence-system name from the sub's own equipment —
   // never the raw project-wide mountingSystem scalar (roof racking leak).
   const mountSys       = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
@@ -1207,8 +1217,11 @@ export function drawFenceStructural(
   const totalLengthFt = cadFence ? metersToFt(cadFence.totalLengthM) : (layout.fenceTotalLengthFt ?? 0);
   const totalPanels   = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw          = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;
-  // W3 §7 — single-sourced from the snapshot env (115 = standalone-only guard).
-  const windSpeedMph  = projectStructural(ctx?.snapshot).windSpeedMph ?? engineering.windSpeedMph ?? project?.ahjWindSpeedMph ?? 115;
+  // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
+  const windSpeedMph  = resolveSiteDesignLoads({
+    snapshot: ctx?.snapshot ?? null,
+    complianceWindMph: engineering.windSpeedMph, ahjWindMph: project?.ahjWindSpeedMph,
+  }).windSpeedMph;
   const mountSys      = resolveFenceMountName(project as unknown as Record<string, unknown>).toUpperCase();
   const panelLenIn    = project?.panelLengthIn ?? 66;
   const panelWidIn    = project?.panelWidthIn  ?? 40;

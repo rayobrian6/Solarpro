@@ -6,6 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
+import { PERMIT_LABELS_SHEET_TITLE } from '../sheetManifest';
 import { escapeH } from '../utils/drawing';
 import { interconnectionLabel, hasRealBattery, isSupplySideInterconnection } from '../utils/helpers';
 import { buildConductorAuthority, type SubSystemConductorAuthority } from '../utils/conductorAuthority';
@@ -22,10 +23,12 @@ import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, BATTERIES } from '@/lib/equipment-db';
 import {
-  getManufacturerAsset, evaluateDocumentApplicability, DOCUMENT_APPLICABILITY_CHIP,
+  getManufacturerAsset, DOCUMENT_APPLICABILITY_CHIP,
   type DocumentApplicability, type DocumentApplicabilityState,
 } from '@/lib/manufacturer-assets-db';
 import { getSnapshot, peekSnapshot } from '../snapshot/read';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability } from '../snapshot/documentAuthority';
 // ECD §8 — APP-A's closing conclusion is DERIVED from the release-gate registry.
 import { projectEquipmentListingConclusion } from '../snapshot/equipmentListingConclusion';
 // ECD §7 — the canonical bonding authority (the APP-A UL-listing row).
@@ -37,7 +40,10 @@ import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjecti
 // the package carried open blocking release items and no seal.
 import { projectIssueStateLanguageFromInput } from '../snapshot/projectAuthorityProjection';
 
-export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pageWarningLabels(
+  input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
+  opts?: { merged?: boolean },
+): string {
   const { compliance } = input;
   // W4 §2: NEC edition projects from the snapshot codeAuthority (single source).
   const cp = projectCodeAuthorityFromInput(input);
@@ -327,13 +333,17 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
   }
 
   // 4-across card grid (site-computed rating cards lead, then generic decals).
-  function buildCardGrid(cells: string[]): string {
+  // AAC WS-10 — `perRow` narrows the grid when the label column shares the sheet
+  // with the merged plaque (3 wider cards instead of 4 narrow ones, so the
+  // CAUTION/WARNING signal words never clip horizontally).
+  function buildCardGrid(cells: string[], perRow = 4): string {
     let html = '';
-    for (let i = 0; i < cells.length; i += 4) {
-      const row = cells.slice(i, i + 4);
+    const _w = (100 / perRow).toFixed(4).replace(/\.?0+$/, '');
+    for (let i = 0; i < cells.length; i += perRow) {
+      const row = cells.slice(i, i + perRow);
       html += '<tr>';
-      for (const c of row) html += `<td style="width:25%;padding:5px 6px 13px;vertical-align:top;">${c}</td>`;
-      for (let p = row.length; p < 4; p++) html += '<td style="width:25%;padding:5px 6px 13px;"></td>';
+      for (const c of row) html += `<td style="width:${_w}%;padding:5px 6px 13px;vertical-align:top;">${c}</td>`;
+      for (let p = row.length; p < perRow; p++) html += `<td style="width:${_w}%;padding:5px 6px 13px;"></td>`;
       html += '</tr>';
     }
     return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tbody>${html}</tbody></table>`;
@@ -443,9 +453,30 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
       `<div style="font-size:6.2px;color:#555;margin-top:2px;">* Rendered on this sheet with site-computed ratings (DC/AC disconnect labels) or as the multiple-power-sources placard above.${_betaAssumed ? ' &nbsp;&dagger; Module Voc temperature coefficient unresolved in the equipment DB &mdash; conservative NEC 690.7 &times;1.25 applied; field-verify against the module datasheet.' : ''}</div>`;
   })();
 
+  // ── AAC WS-10 — MERGED PV-5 + PV-6 (the permit profile's ONE labels sheet) ──
+  // The PV-6 body (the permanent plaque = the NEC 705.10 power-source directory
+  // + the 690.56(B) disconnect-location plaque + the rapid-shutdown band + the
+  // placard specification) composes into the middle column. The only block that
+  // LEAVES the set is PV-5's own "MULTIPLE POWER SOURCES" table, because the
+  // plaque beside it IS that directory in its permanent, code-required form —
+  // a duplicate is removed, no requirement is.
+  const _merged = opts?.merged === true;
+  const _pv6Body = _merged
+    ? pageDisconnectDirectory(input, cad, pageNum, totalPages, { bodyOnly: true })
+    : '';
+  const _mergedPlacardRef = `
+          <div class="sec-hdr-dark" style="margin-bottom:4px;">
+            MULTIPLE POWER SOURCES &mdash; PERMANENT PLACARD (NEC 705.10)
+          </div>
+          <div style="border:var(--border);padding:5px 7px;font-size:7.4px;line-height:1.5;">
+            The permanent power-source directory / disconnect-location plaque required by NEC ${necYear} 705.10 and 690.56(B)
+            is the plaque detailed on this sheet (centre column) &mdash; it lists every source, every disconnecting means,
+            its rating and its location, and carries the rapid-shutdown placard. Install per the placard specification.
+          </div>`;
+
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-5', 'WARNING LABELS & REQUIRED PLACARDS', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-5', _merged ? PERMIT_LABELS_SHEET_TITLE : 'WARNING LABELS & REQUIRED PLACARDS', pageNum, totalPages)}
     <div class="page-content">
 
       <div class="note-bar" style="margin-bottom:6px;">
@@ -455,22 +486,25 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
         RATED VALUES ON THIS SHEET ARE ${escapeH(_issueLang.computedFromLabel)} &mdash; DESIGN LOW TEMP ${tMinC}&deg;C (${escapeH(_temps.source).toUpperCase()}).
       </div>
 
-      <div style="display:grid;grid-template-columns:59fr 41fr;gap:10px;align-items:start;">
+      <div style="display:grid;grid-template-columns:${_merged ? '33fr 35fr 32fr' : '59fr 41fr'};gap:10px;align-items:start;">
 
         <!-- LEFT: the label set -->
         <div>
           <div class="sec-hdr-dark" style="margin-bottom:4px;">
             REQUIRED LABELS &mdash; ${ratingCards.length} SITE-COMPUTED + ${gridLabels.length} STANDARD (${requiredLabels.length} OF ${labels.length} DATASET LABELS APPLY)
           </div>
-          ${buildCardGrid(cardCells)}
-        </div>
+          ${buildCardGrid(cardCells, _merged ? 3 : 4)}
+        </div>${_merged ? `
+
+        <!-- CENTRE (merged profile): the permanent plaque — former PV-6 -->
+        <div data-merged-sheet="PV-6">${_pv6Body}</div>` : ''}
 
         <!-- RIGHT: multi-source placard / signage rules / QA tables -->
         <div>
-          <div class="sec-hdr-dark" style="margin-bottom:4px;">
+          ${_merged ? _mergedPlacardRef : `<div class="sec-hdr-dark" style="margin-bottom:4px;">
             MULTIPLE POWER SOURCES &mdash; PERMANENT PLACARD (NEC 705.10)
           </div>
-          ${placardHtml}
+          ${placardHtml}`}
 
           <div class="sec-hdr-dark" style="margin:6px 0 4px;">
             PERMANENT SIGNAGE NOTES
@@ -539,7 +573,10 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
 // interconnection method, rapid-shutdown and battery presence.
 // ═══════════════════════════════════════════════════════════════
 
-export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
+export function pageDisconnectDirectory(
+  input: PermitInput, cad: CADModel, pageNum: number, totalPages: number,
+  opts?: { bodyOnly?: boolean },
+): string {
   const { project, system, compliance } = input;
   // W4 §2: NEC edition + edition-keyed clause selection project from codeAuthority.
   const cp = projectCodeAuthorityFromInput(input);
@@ -725,11 +762,11 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
     `<td style="font-size:8px;">${escapeH(d.loc)}</td>` +
     `</tr>`).join('');
 
-  return `
-  <div class="page">
-    ${titleBlock(input, 'PV-6', 'DISCONNECT DIRECTORY & EMERGENCY PLACARD', pageNum, totalPages)}
-    <div class="page-content">
-
+  // AAC WS-10 — the sheet BODY, extracted so the permit profile can compose it
+  // onto the merged PV-5 labels/directory sheet without a second renderer (one
+  // source: the plaque, the directory rows and the spec table are identical in
+  // both profiles).
+  const _pv6Body = `
       <div class="note-bar" style="margin-bottom:7px;">
         THE PLACARD BELOW SHALL BE PERMANENTLY INSTALLED AT THE MAIN SERVICE DISCONNECT (ENGRAVED PHENOLIC OR UV-STABLE PRINTED ALUMINUM, HIGH-CONTRAST, READABLE AT EYE LEVEL).
         IT SATISFIES THE POWER-SOURCE DIRECTORY (NEC 705.10), THE PV DISCONNECT-LOCATION PLAQUE (NEC 690.56(B)), AND THE RAPID-SHUTDOWN BUILDING PLACARD (${rsdRef}).
@@ -815,7 +852,15 @@ export function pageDisconnectDirectory(input: PermitInput, cad: CADModel, pageN
           <tr><td class="fw7">Code Basis</td><td class="mono" style="font-size:8px;">NEC ${necVerRaw} — 705.10 (power-source directory) · 690.56(B) (PV disconnect-location plaque) · ${rsdRef} (rapid-shutdown building placard)${hasBattery ? ' · 706 / IFC 1207 (ESS)' : ''}</td></tr>
         </tbody>
       </table>
+`;
 
+  if (opts?.bodyOnly) return _pv6Body;
+
+  return `
+  <div class="page">
+    ${titleBlock(input, 'PV-6', 'DISCONNECT DIRECTORY & EMERGENCY PLACARD', pageNum, totalPages)}
+    <div class="page-content">
+${_pv6Body}
     </div>
   </div>`;
 }
@@ -1209,13 +1254,22 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
               `<span data-ds-doc-state="${escapeH(st)}" style="${_chipStyle(st)}`
               + `font-weight:700;padding:0 3px;border-radius:2px;font-size:7.5px;white-space:nowrap;">`
               + `${escapeH(DOCUMENT_APPLICABILITY_CHIP[st])}</span>`).join(' ');
+            const _docRegion = peekSnapshot(input)?.equipmentDocumentAuthority ?? null;
             const _cite = (label: string, a: ReturnType<typeof getManufacturerAsset>, selectedModel: string | null): string => {
               if (!a || (!a.sourceUrl && !a.imageUrl)) return '';
               const host = a.sourceUrl ? (() => { try { return new URL(a.sourceUrl!).hostname.replace(/^www\./, ''); } catch { return ''; } })() : '';
               const bits = [a.docTitle, a.pageRef, host].filter(Boolean).join(' · ');
               // ECD §8 — evaluated for EVERY row. `selectedModel` falls back to the
               // asset's own model, which is the identity the asset was keyed by.
-              const _appl = evaluateDocumentApplicability(selectedModel ?? a.model, a, null);
+              // AAC WS-9 RENDERER PURITY — the verdict is NOT decided here. It is
+              // projected from the frozen snapshot region (or, for a document the
+              // build did not pre-enumerate, decided by the snapshot layer from
+              // the SAME frozen registry facts). The old call passed `null` for
+              // registryFacts, which is exactly why AUTHORITATIVE was unreachable.
+              const _appl = sheetDocumentApplicability({
+                region: _docRegion, category: a.category as string, equipmentId: a.equipmentId,
+                selectedModel: selectedModel ?? a.model, asset: a,
+              });
               const _applTag = !_appl.applicabilityVerified
                 ? ` <span data-ds-applicability="${escapeH(_appl.state)}" style="color:#b45309;font-weight:700;">`
                   + `— the document covers `

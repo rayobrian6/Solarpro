@@ -373,12 +373,17 @@ export function authorizeMigration(params: {
  *     permit is issued.
  *   - 114: equipment_reconciliation_audit + snapshot_digest_invalidations — the
  *     immutable reconciliation-audit tables (W4 §7). Same static gate.
+ *   - 115: personnel_roles + project_personnel_assignments — the AAC WS-6 roles
+ *     of record (designer / preparer / reviewer / engineer of record / approving
+ *     engineer). Same static gate. Until it is run, the designer resolver reports
+ *     a RETRYABLE store-unavailable failure naming this exact step; it never
+ *     substitutes a vendor name.
  * NOTHING else — not any historical migration, not "all pending" — can be run
  * through the targeted path. (The retired 108 Nearmap-index and 109-112
  * data-authority targeted cards were removed 2026-07-21; their identifiers are
  * no longer runnable through this escape hatch.)
  */
-export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['113', '114']);
+export const TARGETED_RECOVERY_ALLOWLIST: ReadonlySet<string> = new Set(['113', '114', '115', '116']);
 
 /** Maximum lifetime of a targeted execution permit (the bounded window). */
 export const MAX_TARGETED_PERMIT_TTL_MS = 5 * 60 * 1000;

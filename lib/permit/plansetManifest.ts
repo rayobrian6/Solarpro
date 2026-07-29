@@ -20,6 +20,7 @@ import { equipmentDatasheetIndexRows } from './sections/datasheetAppendix';
 import { hybridSheetSections, SUB_KEY_TO_CAD_TYPE } from './sections/subSystemSheets';
 import { pv2Title, pv3Title, type SysType } from './utils/helpers';
 import { getInverterTopology, topologyToLegacy } from '@/lib/system';
+import { resolvePlansetProfile, certificationIsCompleted } from './plansetProfile';
 
 /** RGM §5 — the review-status registry the RS-1.n pagination is computed from.
  *  build.ts passes its FINAL registry explicitly (the snapshot does not exist yet
@@ -76,6 +77,11 @@ export function computePlansetManifest(
     includeValidation: includeInternalValidation,
     includeCadAppendix: includeCADAppendixPreview,
     isMicro: _isMicro,
+    // AAC WS-10 — the output profile + the certification-completion fact the
+    // permit profile needs. ONE reader (resolvePlansetProfile) so the manifest,
+    // the page assembly and the cover index can never disagree.
+    profile: resolvePlansetProfile(input),
+    certificationCompleted: certificationIsCompleted(input),
     ...(_tocSubs.length > 1 ? { hybridSubs: _tocSubs } : {}),
   });
 }

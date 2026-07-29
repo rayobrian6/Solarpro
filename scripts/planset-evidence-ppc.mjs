@@ -258,7 +258,23 @@ function installedOpenAirEgcAssertions(sourceHtml) {
 
 // ═══ GATE 5 — a pending fastener assembly renders no exact instruction ══════
 {
+  // AAC-5 RE-VOCABULARY (see planset-evidence-bar gate 8 / -ep gate 13): after
+  // the WS-8 structural separation FASTENER-ASSEMBLY-UNVERIFIED stops firing on
+  // an assembly whose mount base is verified and whose open question is the
+  // rail-CAPACITY document. The rendered fastener line is still PENDING there
+  // (the projection is capacity-gated), so testing the requirement code alone
+  // made this gate go vacuous exactly when it had something to check. The
+  // predicate is now the RENDERER's own: capacity-gated OR the fastener element
+  // itself unverified.
+  const _CAPACITY_GATE_CODES = [
+    'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+    'RACKING-CAPACITY-APPLICABILITY-GAP',
+    'ATTACHMENT-CAPACITY-SOURCE-MISSING',
+  ];
+  const _capacityGated = _CAPACITY_GATE_CODES.some(c => activeCode(c))
+    || (ra?.structuralAuthorityGaps ?? []).some(g => g.severity === 'blocking' && _CAPACITY_GATE_CODES.includes(g.code));
   const faUnverified = activeCode('FASTENER-ASSEMBLY-UNVERIFIED')
+    || _capacityGated
     || ra?.assemblyVerification?.fastener !== 'verified';
   // CLASS scan on the sheets that carry the attachment detail + its schedules.
   const scope = flat(pv3 + '\n' + sheet('PV-4C.1') + '\n' + sheet('APP-A') + '\n' + schedAll);

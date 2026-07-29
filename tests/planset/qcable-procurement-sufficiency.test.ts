@@ -67,27 +67,50 @@ const VERIFIED_SOLUTION = (deficit: number): CableExtensionSolution => ({
   vdInstallationRecalculated: true, note: null, provenance: { source: 'test' },
 });
 
-// ── TEST 1 — fixture: no blocker (designed 140.5 ≤ procurement 152). ──────────
-describe('§Q test 1 — fixture is SUFFICIENT (no blocker) at 140.5 ≤ 152', () => {
+// ── TEST 1 — fixture: the AGGREGATE clears, ONE BRANCH does not. ─────────────
+// AAC WS-5 (2026-07-27) RE-BASED this case. It used to assert the fixture was
+// SUFFICIENT because Σ designed 140.5 ≤ Σ procurement 152. That comparison was
+// AGGREGATE-ONLY, and it hid a real defect: branch B2's ordered 10 drops
+// (49 ft) cannot span its 58.3 ft as-routed path, which includes a 24.4 ft
+// sub-array/roof-plane bridge. The directive's mandated case — "sufficient in
+// aggregate but invalid for one branch topology must FAIL" — is exactly this
+// package, so the gate is now per-branch AND aggregate.
+describe('§Q test 1 — the fixture clears in AGGREGATE but FAILS per branch', () => {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-24T12:00:00Z';
   generatePermitHTML(input);
   const snap = input._snapshot;
   const ps = snap.electrical.procurementSufficiency;
 
-  it('procurementSufficiency present, not insufficient, deficit 0, sufficient status', () => {
+  it('the AGGREGATE still clears — the failure is genuinely per-branch', () => {
     expect(ps.present).toBe(true);
     expect(ps.totalDesignedInstalledFt).toBeLessThanOrEqual(ps.procurementLengthFt);
-    expect(ps.insufficient).toBe(false);
-    expect(ps.deficitFt).toBe(0);
-    expect(ps.verificationStatus).toBe('sufficient');
     // allowance is honestly 0 with recorded provenance (no in-repo allowance rule)
     expect(ps.requiredServiceLoopAllowanceFt).toBe(0);
     expect(ps.allowanceProvenance).toBe('no-allowance-authority-recorded');
   });
-  it('no QCABLE-PROCUREMENT-INSUFFICIENT blocker in the registry', () => {
-    const codes = (snap.permitReadiness.registry ?? []).map((r: any) => r.code);
-    expect(codes).not.toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
+
+  it('a branch whose ordered footage cannot span its own path makes it INSUFFICIENT', () => {
+    const short = ps.perBranch.filter((b: any) => b.designedInstalledLengthFt > b.procurementLengthFt);
+    expect(short.length, 'anti-vacuity: a genuinely short branch must exist').toBeGreaterThan(0);
+    expect(ps.insufficient).toBe(true);
+    expect(ps.deficitFt).toBeGreaterThan(0);
+    expect(ps.verificationStatus).toBe('insufficient-unresolved');
+    expect(ps.affectedBranchIds).toEqual(short.map((b: any) => b.branchId));
+  });
+
+  it('the blocker fires and carries the OPTION EVALUATION, not a bare deficit', () => {
+    const entry = (snap.permitReadiness.registry ?? []).find((r: any) => r.code === 'QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect(entry).toBeTruthy();
+    const ev = (entry!.payload as any).optionEvaluation;
+    expect(ev, 'the payload must carry the evaluated option space').toBeTruthy();
+    expect(ev.options.length).toBeGreaterThan(5);
+    expect(ev.unresolvedReason).toMatch(/bridge|short/i);
+    // every option states its own per-branch and aggregate numbers
+    for (const o of ev.options) {
+      expect(typeof o.aggregateRequiredFt).toBe('number');
+      expect(typeof o.aggregateProvidedFt).toBe('number');
+    }
   });
 });
 

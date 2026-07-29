@@ -367,14 +367,22 @@ describe('§2 — RS-1 blocker payload components are schema-selected', () => {
     expect(rs1).toContain('NON-ORDERABLE');
   });
 
-  it('the frozen fixture’s RS-1 shows NO deficit template (the §2 defect is gone)', () => {
+  // AAC WS-5 (2026-07-27) RE-BASED: the frozen fixture DOES carry a Q-Cable
+  // deficit now (branch B2's ordered drops cannot span its sub-array bridge —
+  // the per-branch failure the aggregate-only gate hid). The §2 rule under test
+  // is unchanged: the deficit box renders ONLY for its own blocker, exactly
+  // once, and reads REAL FIELDS — never the em-dash template or the hardcoded
+  // 'null' literal the §2 defect printed.
+  it('the deficit template renders ONCE, for its own blocker, from real fields', () => {
     const rs1 = renderReviewStatusSheets(PKG.input, PKG.cad);
     const codes = (PKG.snap.permitReadiness.registry ?? []).map(r => r.code);
-    expect(codes).not.toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
-    // …therefore no DEFICIT PAYLOAD box may exist anywhere on the sheet
-    expect(rs1).not.toContain('DEFICIT PAYLOAD');
-    // and the hardcoded literal that read no field at all is gone
+    expect(codes).toContain('QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect((rs1.match(/DEFICIT PAYLOAD:/g) ?? []).length).toBe(1);
+    expect(rs1).toContain('Q-12-10-240');
+    // the hardcoded literal that read no field at all is gone
     expect(rs1).not.toContain('mfr-doc authority null');
+    // and the em-dash template (SKU —, spacing —) never renders for a real deficit
+    expect(rs1).not.toContain('SKU — @ —ft drop');
   });
 });
 
@@ -537,8 +545,17 @@ function insufficientInput() {
     createdAtIso: '2026-07-26T12:00:00Z', createdVersion: 'test', resolved: false,
     resolutionAuditRef: null,
   };
-  snap.permitReadiness.registry = [...(snap.permitReadiness.registry ?? []), blocker];
-  snap.permitReadiness.blockers = [...(snap.permitReadiness.blockers ?? []), { code: blocker.code, message: blocker.explanation }];
+  // AAC WS-5 (2026-07-27): the real build now emits its OWN deficit entry for
+  // this fixture (per-branch check), so the synthetic live-shaped one REPLACES it
+  // — appending produced two registry rows and two rendered payload boxes.
+  snap.permitReadiness.registry = [
+    ...(snap.permitReadiness.registry ?? []).filter((r: PermitReadinessBlocker) => r.code !== blocker.code),
+    blocker,
+  ];
+  snap.permitReadiness.blockers = [
+    ...(snap.permitReadiness.blockers ?? []).filter((b: { code: string }) => b.code !== blocker.code),
+    { code: blocker.code, message: blocker.explanation },
+  ];
   snap.permitReadiness.ready = false;
   input._snapshot = snap;
   // regenerate the BOM against the INSUFFICIENT snapshot so the §9 post-pass runs

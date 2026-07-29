@@ -18,6 +18,7 @@ import {
 
 const SQL_113 = readFileSync(join(process.cwd(), 'lib', 'migrations', '113_manufacturer_document_registry.sql'), 'utf8');
 const SQL_114 = readFileSync(join(process.cwd(), 'lib', 'migrations', '114_equipment_reconciliation_audit.sql'), 'utf8');
+const SQL_115 = readFileSync(join(process.cwd(), 'lib', 'migrations', '115_project_personnel_roles.sql'), 'utf8');
 
 describe('targetedRegistryDeployment — static analysis (pure)', () => {
   it('accepts the real migration 113 (creates manufacturer_document_registry)', () => {
@@ -41,9 +42,20 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     expect(new Set(s.createdTables)).toEqual(new Set(['equipment_reconciliation_audit', 'snapshot_digest_invalidations']));
   });
 
-  it('sequence + spec are exactly 113 then 114', () => {
-    expect(REGISTRY_SEQUENCE).toEqual(['113', '114']);
-    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114']);
+  it('accepts the real migration 115 (creates both personnel tables) — AAC WS-6', () => {
+    const s = analyzeRegistryMigration('115', SQL_115, REGISTRY_DEPLOYMENT['115'].expectedTables);
+    expect(s.ok).toBe(true);
+    expect(s.problems).toEqual([]);
+    expect(s.idempotent).toBe(true);
+    expect(s.nonDestructive).toBe(true);
+    expect(s.tablesMatchExpected).toBe(true);
+    expect(new Set(s.createdTables)).toEqual(new Set(['personnel_roles', 'project_personnel_assignments']));
+    expect(s.forbiddenFound).toEqual([]);
+  });
+
+  it('sequence + spec are exactly 113, 114, 115 then 116', () => {
+    expect(REGISTRY_SEQUENCE).toEqual(['113', '114', '115', '116']);
+    expect(Object.keys(REGISTRY_DEPLOYMENT).sort()).toEqual(['113', '114', '115', '116']);
   });
 
   it('does NOT trip on the word DELETE appearing inside a comment', () => {

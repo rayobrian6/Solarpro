@@ -37,7 +37,11 @@ import {
   projectAttachmentInstallationAuthority,
   type AttachmentInstallationAuthority,
 } from '../permit/snapshot/structuralProjection';
-import { getManufacturerAsset, evaluateDocumentApplicability } from '../manufacturer-assets-db';
+import { getManufacturerAsset } from '../manufacturer-assets-db';
+// AAC WS-9 — THE site design-load seam (no wind/snow literal in drafting).
+import { resolveSiteDesignLoads } from '../permit/snapshot/siteDesignLoads';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability, type EquipmentDocumentAuthority } from '../permit/snapshot/documentAuthority';
 import { projectRackingBondingAuthority } from '../permit/snapshot/rackingBonding';
 
 // §3 (closeout 2026-07-23) — the PV-1/PV-3 conduit-run callout descriptor. Every
@@ -333,8 +337,11 @@ export function getFenceData(cad: CADModel, input?: Record<string, unknown>): {
     postSpacingFt: f?.postSpacingM ? mToFt(f.postSpacingM)  : ((p?.fencePostSpacingFt as number) || 8),
     embedFt:       f?.postEmbedM   ? mToFt(f.postEmbedM)    : ((p?.fencePostEmbedmentFt as number) || 2.5),
     railCount:     f?.railCount    ?? 2,
-    // W3 §7 — single-sourced from the snapshot env (115 is the standalone-only guard).
-    windSpeedMph:  (snapWind(input) ?? ((cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115)),
+    // AAC WS-9 — ONE seam, and it states its own basis. No literal here.
+    windSpeedMph: resolveSiteDesignLoads({
+      snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
+      complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
+    }).windSpeedMph,
   };
 }
 
@@ -390,7 +397,11 @@ export function getGroundData(cad: CADModel, input?: Record<string, unknown>): {
     structureType: 'DRIVEN PYLON — PLP',
     setbackFt:     g?.setbackFt                ?? ((lay?.groundSetbackFt as number) || 5),
     // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
-    windSpeedMph:  (snapWind(input) ?? ((cw?.windSpeed as number)   || (p?.ahjWindSpeedMph as number)   || 115)),
+    // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
+    windSpeedMph: resolveSiteDesignLoads({
+      snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
+      complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
+    }).windSpeedMph,
     snowPsf:       (p?.ahjGroundSnowPsf as number) || 0,
   };
 }
@@ -476,7 +487,15 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   const _mountIdRoof = (p?.mountingSystemId as string) ?? null;
   const _rackAsset = _mountIdRoof ? getManufacturerAsset(_mountIdRoof, 'racking_detail') : null;
   const _applRoof = _rackAsset
-    ? evaluateDocumentApplicability(_mountSel?.model ?? _rackAsset.model, _rackAsset, null)
+    // AAC WS-9 RENDERER PURITY — the drafting stack projects the snapshot's
+    // decided verdict; with no snapshot (standalone preview) the snapshot layer
+    // answers with the honest no-facts evaluation, flagged as such.
+    ? sheetDocumentApplicability({
+        region: (input as { _snapshot?: { equipmentDocumentAuthority?: EquipmentDocumentAuthority } } | undefined)
+          ?._snapshot?.equipmentDocumentAuthority ?? null,
+        category: 'racking_detail', equipmentId: _mountIdRoof,
+        selectedModel: _mountSel?.model ?? _rackAsset.model, asset: _rackAsset,
+      })
     : null;
   const attachment = projectAttachmentInstallationAuthority(
     _snapRoof, _mountIdRoof,
@@ -529,7 +548,11 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
     // (feeder conduit), never the renderer-local `|| 'EMT'` default (gate 4).
     conduitType:   canonicalConduitType((input as { _snapshot?: PermitDesignSnapshot } | undefined)?._snapshot ?? null),
     // W3 §7 — single-sourced from the snapshot env (115 is the standalone guard).
-    windSpeedMph:  (snapWind(input) ?? ((cw?.windSpeed as number) || (p?.ahjWindSpeedMph as number) || 115)),
+    // AAC WS-9 — ONE seam, basis-stated. No literal in the drafting layer.
+    windSpeedMph: resolveSiteDesignLoads({
+      snapshot: (input as { _snapshot?: never } | undefined)?._snapshot ?? null,
+      complianceWindMph: cw?.windSpeed, ahjWindMph: p?.ahjWindSpeedMph,
+    }).windSpeedMph,
     totalPanels:   cad.totalPanels ?? 0,
     dcKw:          (cad.totalDcKw ?? 0).toFixed(2),
   };

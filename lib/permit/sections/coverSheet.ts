@@ -397,11 +397,20 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
       <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;background:#000;color:#fff;white-space:nowrap;">SHEET</td>
       <td class="iv" style="background:#000;color:#fff;">DESCRIPTION</td>
     </tr>`;
-  const _idxHalf = Math.ceil(sheets.length / 2);
+  // AAC WS-10 — the manufacturer ATTACHMENT appendix is indexed under its own
+  // heading, after the numbered drawing set: the DS-n manufacturer pages are
+  // attachments to the submittal, not drawing sheets.
+  const _idxDrawings = sheets.filter(s => s.section !== 'appendix');
+  const _idxAppendix = sheets.filter(s => s.section === 'appendix');
+  const _idxHalf = Math.ceil(_idxDrawings.length / 2);
+  const _apxHdr = `<tr>
+      <td class="il" colspan="2" style="background:#333;color:#fff;font-weight:900;letter-spacing:0.6px;">MANUFACTURER ATTACHMENTS (APPENDIX — NOT DRAWING SHEETS)</td>
+    </tr>`;
   const sheetIndexHtml = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);align-items:start;">
-      <table class="info-table">${_idxHdr}${sheets.slice(0, _idxHalf).map(_idxRow).join('')}</table>
-      <table class="info-table">${_idxHdr}${sheets.slice(_idxHalf).map(_idxRow).join('')}</table>
+      <table class="info-table">${_idxHdr}${_idxDrawings.slice(0, _idxHalf).map(_idxRow).join('')}</table>
+      <table class="info-table">${_idxHdr}${_idxDrawings.slice(_idxHalf).map(_idxRow).join('')}${
+        _idxAppendix.length ? `${_apxHdr}${_idxAppendix.map(_idxRow).join('')}` : ''}</table>
     </div>`;
 
   // ── Right strip: project info ─────────────────────────────────────────────

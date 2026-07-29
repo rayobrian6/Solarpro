@@ -144,7 +144,13 @@ describe('RGM §5 — every requirement renders in full beneath its ONE primary 
 
   it('the per-record payload detail box is still keyed by canonical payload schema', () => {
     expect(rs).toContain('data-blocker-payload-schema="qcable-grounding-authority"');
-    expect(rs).not.toContain('data-blocker-payload-schema="qcable-procurement-deficit"'); // no deficit on the fixture
+    // AAC WS-5 (2026-07-27): the fixture DOES carry a Q-Cable deficit now (branch
+    // B2's ordered drops cannot span its sub-array bridge — the per-branch check
+    // the aggregate-only gate used to hide), so its own schema-keyed component
+    // renders too. The rule under test is that each component is keyed by the
+    // requirement's DECLARED schema, and that a code without one renders none.
+    expect(rs).toContain('data-blocker-payload-schema="qcable-procurement-deficit"');
+    expect(rs).not.toContain('data-blocker-payload-schema="undefined"');
   });
 
   it('the payload-schema table stays in lockstep with the requirement declarations', () => {
@@ -333,15 +339,25 @@ describe('RGM §6 — the cover states RELEASE STATUS in gate semantics', () => 
     expect(Number(n(cover, 'data-release-open-gate-count'))).toBe(MODEL.summary.openGateCount);
   });
 
-  it('NO confirmed-conflict line renders when the package carries none (fixture)', () => {
-    expect(topConfirmedConflict(MODEL)).toBeNull();
-    expect(cover).not.toContain('MOST SEVERE CONFIRMED CONDITION');
+  // AAC WS-5 (2026-07-27): the fixture now carries exactly ONE confirmed
+  // condition (the Q-Cable per-branch procurement deficit), so the line RENDERS
+  // — and it must name that one condition and no other. The original intent (the
+  // cover never fabricates a conflict, and never duplicates the registry) is
+  // preserved by pinning it to the single most-severe confirmed condition.
+  it('the confirmed-condition line names EXACTLY the one confirmed condition', () => {
+    const top = topConfirmedConflict(MODEL);
+    expect(top).toBeTruthy();
+    expect(top!.requirementCode).toBe('QCABLE-PROCUREMENT-INSUFFICIENT');
+    expect(cover).toContain('MOST SEVERE CONFIRMED CONDITION');
+    expect(cover).toContain(top!.requirementCode);
   });
 
-  it('the cover never duplicates the registry (no requirement codes listed there)', () => {
+  it('the cover never duplicates the registry (only the confirmed condition is named)', () => {
     const block = cover.slice(cover.indexOf('data-release-status-block'));
     const end = block.indexOf('SEE RS-1 FOR ALL');
+    const named = topConfirmedConflict(MODEL)?.requirementCode ?? null;
     for (const r of PKG.snap.permitReadiness.registry.filter(x => !x.resolved)) {
+      if (r.code === named) continue;
       expect(block.slice(0, end)).not.toContain(r.code);
     }
   });

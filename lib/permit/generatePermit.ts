@@ -50,6 +50,7 @@ import {
   type HybridSectionRef,
 } from './sections/subSystemSheets';
 import { hybridSheetId } from './sheetManifest';
+import { resolvePlansetProfile, certificationIsCompleted } from './plansetProfile';
 import { pageValidationSummary } from './sections/validationPage';
 import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
 import { equipmentDatasheetPageFns } from './sections/datasheetAppendix';
@@ -365,6 +366,41 @@ export function generatePermitHTML(
       canonical.site.windSpeed = 115;  // ASCE 7-22 code minimum
       console.warn('[CANONICAL] Wind speed defaulted to 115 mph — run Compliance Check for AHJ value');
     }
+  }
+
+  // ── AAC WS-4 — THE AUTHORITY IS THE CALCULATION'S INPUT, NOT JUST ITS LABEL ──
+  // The directive: "Displayed AND calculated values derive from it." Before this,
+  // a retrieved hazard value reached `environmentalLoadAuthority` (the DISPLAY)
+  // while the STRUCTURAL ENGINE kept running on `canonical.site.windSpeed`, which
+  // the compliance stage had already seeded with a code default. The two then
+  // disagreed and V23 caught it — the invariant was right and the wiring was
+  // wrong.
+  //
+  // Applied ONLY when a resolved environmental authority exists, so a run with no
+  // lifecycle (harness / test / GET without a bundle) is byte-identical and the
+  // curated-table path is untouched. The GOVERNING value is used, which is the
+  // retrieval's value, or an operator override, or — while two authorities
+  // disagree — the more conservative of the two.
+  const _envGov = snapshotAuthority?.environmentalRetrieval?.governing ?? null;
+  const _envSrc = snapshotAuthority?.environmentalSource ?? null;
+  const _authWind = _envGov?.windSpeedMph ?? (_envSrc?.windSpeedMph ?? null);
+  const _authSnow = _envGov?.groundSnowLoadPsf ?? (_envSrc?.groundSnowPsf ?? null);
+  if (_authWind != null && Number.isFinite(_authWind) && canonical.site.windSpeed !== _authWind) {
+    console.log('[CANONICAL] Wind speed from the ENVIRONMENTAL LOAD AUTHORITY:',
+      canonical.site.windSpeed, '→', _authWind, 'mph');
+    canonical.site.windSpeed = _authWind;
+    input.project.windSpeedMph = _authWind;
+  }
+  if (_authSnow != null && Number.isFinite(_authSnow) && canonical.site.groundSnowLoad !== _authSnow) {
+    console.log('[CANONICAL] Ground snow from the ENVIRONMENTAL LOAD AUTHORITY:',
+      canonical.site.groundSnowLoad, '→', _authSnow, 'psf');
+    canonical.site.groundSnowLoad = _authSnow;
+    input.project.groundSnowPsf = _authSnow;
+  }
+  const _authSdc = snapshotAuthority?.environmentalRetrieval?.returnedValues.seismicSdc ?? null;
+  if (_authSdc && canonical.site.seismicSDC !== _authSdc) {
+    canonical.site.seismicSDC = _authSdc;
+    input.project.seismicCategory = _authSdc;
   }
 
   // ── Build layout dimensions from CAD (REQUIRED before validation gate) ──────────
@@ -1062,6 +1098,50 @@ export function generatePermitHTML(
       // report / AHJ climate ordinance extract). null ⇒ operator-entered wind/snow
       // stay OBSERVATION/OVERRIDE ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires.
       environmentalSource: snapshotAuthority?.environmentalSource ?? null,
+      // AAC WS-1 — the two sockets the build ALREADY accepted and nobody ever
+      // resolved (audit §5 "two wiring gaps"). They are threaded now, so the
+      // owning resolvers (AAC-4 grounding ingestion / AAC-5 framing review
+      // record) plug in without touching this call site. Both null today ⇒
+      // byte-identical snapshot.
+      groundingDocumentEvidence: snapshotAuthority?.groundingDocumentEvidence ?? null,
+      framingEngineerReview: snapshotAuthority?.framingEngineerReview ?? null,
+      framingReviewDigest: snapshotAuthority?.framingReviewDigest ?? null,
+      // AAC WS-1 — the per-requirement resolution state, attached to each
+      // registry record's payload and rendered by the EXISTING RS-1 payload
+      // machinery. Absent (harness / tests / no lifecycle) ⇒ payloads and the
+      // digest are unchanged.
+      resolutionStates: snapshotAuthority?.resolution?.states ?? null,
+      // AAC WS-2 / WS-6 — the automatic-resolution AUTHORITY records: the
+      // canonical equipment identity (+ superseded audit history + the
+      // reconciliation audit id), the per-module exact-datasheet coverage, and
+      // the configured personnel (designer only). They are the evidence for the
+      // requirements the lifecycle CLEARED — a cleared requirement emits no
+      // blocker, so the payload trail alone would lose it. All null on a
+      // no-lifecycle / no-DB run ⇒ the snapshot field is omitted ⇒ digest
+      // unchanged.
+      canonicalEquipment: snapshotAuthority?.canonicalEquipment ?? null,
+      moduleDatasheetBinding: snapshotAuthority?.moduleDatasheetBinding ?? null,
+      projectPersonnel: snapshotAuthority?.projectPersonnel ?? null,
+      // AAC WS-3 / WS-4 — the RETRIEVED authority records. All null on a
+      // no-lifecycle / no-network run ⇒ the snapshot field is omitted ⇒ digest
+      // unchanged and every requirement stays exactly as unresolved as before.
+      projectLegalAuthority: snapshotAuthority?.projectLegalAuthority ?? null,
+      codeAdoptionAuthority: snapshotAuthority?.codeAdoptionAuthority ?? null,
+      environmentalRetrieval: snapshotAuthority?.environmentalRetrieval ?? null,
+      // AAC WS-8 / WS-9 — the STRUCTURAL SEPARATION authorities. Each is null on
+      // a no-lifecycle / no-network / no-DB run, so the snapshot field is
+      // omitted and the digest is unchanged; the racking, rail and framing
+      // requirements then stay exactly as unresolved as they were before.
+      //   • structuralDocumentRetrieval — what was fetched, hashed and archived
+      //   • documentRegistryFacts       — makes the AUTHORITATIVE verdict reachable
+      //   • rackingAssemblySelection    — the rail trace (design fact, not a document)
+      //   • framingRetrieval            — the honest AUTO→PROFESSIONAL transition
+      //   • engineeringReview           — the digest-bound licensed approval, READ only
+      structuralDocumentRetrieval: snapshotAuthority?.structuralDocumentRetrieval ?? null,
+      documentRegistryFacts: snapshotAuthority?.documentRegistryFacts ?? null,
+      rackingAssemblySelection: snapshotAuthority?.rackingAssemblySelection ?? null,
+      framingRetrieval: snapshotAuthority?.framingRetrieval ?? null,
+      engineeringReview: snapshotAuthority?.engineeringReview ?? null,
     });
     const violations = validatePermitDesignSnapshot(snapshot);
     const blocking = blockingViolations(violations);
@@ -1211,15 +1291,24 @@ export function generatePermitHTML(
 
   // Dynamic page assembly — numbering derives from the list, so conditional
   // sheets can never desync pageNum/TOTAL or the cover index again.
+  // ── AAC WS-10 — the OUTPUT PROFILE. 'full' (default) is the pre-WS-10
+  // internal package, byte-identical. 'permit' is the AHJ submittal: RS-1(.n),
+  // the SCHED continuations, APP-A and the unsigned CERT/PE-1 placeholders drop
+  // out of the drawing set, PV-6 composes onto PV-5, and DS-n move to the
+  // manufacturer attachment appendix. buildSheetManifest branches identically,
+  // so page count == sheet index under BOTH profiles.
+  const _profile = resolvePlansetProfile(input);
+  const _permitProfile = _profile === 'permit';
+  const _certDone = certificationIsCompleted(input);
   const pageFns: Array<(n: number, t: number) => string> = [
     (n, t) => pageCoverSheet(input, cad, n, t),                        // PV-0: Cover (all systems)
-    (n, t) => pageReviewStatus(input, cad, n, t),                      // RS-1: Review status — root gate table + child requirements (RGM §5)
+    ...(_permitProfile ? [] : [(n: number, t: number) => pageReviewStatus(input, cad, n, t)]),  // RS-1: Review status — root gate table + child requirements (RGM §5)
     // RGM §5: RS-1.1 … RS-1.n — formal continuations of the review-status
     // registry. The count comes from the SAME layout function the sheet manifest
     // uses (reviewStatusContPageCount over the snapshot registry), so the cover
     // index and the rendered page set can never disagree.
-    ...Array.from({ length: _rsContCount }, (_unused, ci) =>
-      (n: number, t: number) => pageReviewStatus(input, cad, n, t, ci)),
+    ...(_permitProfile ? [] : Array.from({ length: _rsContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageReviewStatus(input, cad, n, t, ci))),
     // PV-1 (standalone site plan) folded into the array sheet 2026-07-08 —
     // the roof/array drawing now carries the integrated site context (parcel,
     // street, driveway, service equipment). Renamed PV-2→PV-1, PV-2B→PV-1B.
@@ -1251,21 +1340,35 @@ export function generatePermitHTML(
     (n, t) => pageSingleLineDiagram(input, cad, n, t, storedSldSvg),   // E-1: SLD — the electrical section's key sheet, first
     (n, t) => pageNECCompliance(input, cad, n, t),                     // PV-4A: NEC (hybrid-aware: per-sub circuit schedules)
     (n, t) => pageConductorSchedule(input, cad, n, t),                 // PV-4B: Conductor (hybrid-aware: per-sub sections)
-    (n, t) => pageWarningLabels(input, cad, n, t),                     // PV-5: Labels (system-aware)
-    (n, t) => pageDisconnectDirectory(input, cad, n, t),              // PV-6: Disconnect directory + emergency placard (system-aware)
+    // PV-5: Labels (system-aware). WS-10 permit profile: PV-6's plaque composes
+    // onto this ONE sheet (see pageWarningLabels `merged`).
+    (n, t) => pageWarningLabels(input, cad, n, t, _permitProfile ? { merged: true } : undefined),
+    ...(_permitProfile ? [] : [(n: number, t: number) => pageDisconnectDirectory(input, cad, n, t)]),  // PV-6: Disconnect directory + emergency placard (system-aware)
     (n, t) => pageEquipmentSchedule(input, cad, n, t),                 // SCHED (hybrid-aware: per-sub rows)
-    ...Array.from({ length: _schedContCount }, (_unused, ci) =>
-      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci)),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
-    (n, t) => pageSpecSheetReference(input, cad, n, t),                // APP-A (all)
-    // DS-n: full-page REAL manufacturer datasheets (module/inverter/battery),
-    // one per selected-equipment id that has an image on file (manufacturer_assets).
-    ...equipmentDatasheetPageFns(input, cad),
-    (n, t) => pageEngineerCert(input, cad, n, t),                      // CERT (all)
-    (n, t) => _w5Hybrid
-      ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
-      : pagePELetter(input, cad, n, t),                                // PE-1 (hybrid = primary sub letter, subset params)
-    ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))), // PE-1G / PE-1F
-    ...(includeInternalValidation ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
+    ...(_permitProfile ? [] : Array.from({ length: _schedContCount }, (_unused, ci) =>
+      (n: number, t: number) => pageEquipmentScheduleCont(input, cad, n, t, ci))),  // SCHED-2 … SCHED-(N+1): BOM continuation (W9/§15 multi-page)
+    ...(_permitProfile ? [] : [(n: number, t: number) => pageSpecSheetReference(input, cad, n, t)]),   // APP-A (all)
+    // DS-n (FULL profile): full-page REAL manufacturer datasheets, inline after
+    // APP-A exactly as before. The permit profile emits them at the END as the
+    // manufacturer attachment appendix (below).
+    ...(_permitProfile ? [] : equipmentDatasheetPageFns(input, cad)),
+    // CERT / PE-1 — the certification sheets. WS-10: the permit profile carries
+    // them ONLY when a digest-bound approval covering this snapshot exists; an
+    // unsigned placeholder is an internal status page, not a permit document,
+    // and the requirement it represents stays in the registry either way.
+    ...(_permitProfile && !_certDone ? [] : [
+      (n: number, t: number) => pageEngineerCert(input, cad, n, t),    // CERT (all)
+      (n: number, t: number) => (_w5Hybrid
+        ? _w5LetterFor(_w5Primary, 'PE-1')(n, t)
+        : pagePELetter(input, cad, n, t)),                             // PE-1 (hybrid = primary sub letter, subset params)
+      ..._w5Extras.map(sec => _w5LetterFor(sec.key, hybridSheetId('PE-1', sec.key))), // PE-1G / PE-1F
+    ]),
+    ...(includeInternalValidation && !_permitProfile ? [(n: number, t: number) => pageValidationSummary(input, canonical, cad, n, t)] : []),  // VAL-1: internal QA only
+    // ── MANUFACTURER ATTACHMENT APPENDIX (permit profile) ────────────────────
+    // The DS-n manufacturer pages follow the drawing set as an appendix — the
+    // manifest tags them section:'appendix' so the cover indexes them under
+    // their own heading rather than numbering them as drawing sheets.
+    ...(_permitProfile ? equipmentDatasheetPageFns(input, cad) : []),
   ];
   const TOTAL = pageFns.length + (includeCADAppendixPreview ? 1 : 0);
   const pages = pageFns.map((f, i) => f(i + 1, TOTAL));

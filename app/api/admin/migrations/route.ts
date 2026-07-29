@@ -242,6 +242,8 @@ export async function POST(req: NextRequest) {
     'execute-reviewed-batch',   // mutation: run selected batch, stop-on-first-failure
     'execute-registry-113',     // mutation: TARGETED deployment of ONLY migration 113 (document registry)
     'execute-reconciliation-114', // mutation: TARGETED deployment of ONLY migration 114 (reconciliation audit + digest invalidations)
+    'execute-personnel-115',    // mutation: TARGETED deployment of ONLY migration 115 (personnel roles of record — AAC WS-6)
+    'execute-engineering-review-116', // mutation: TARGETED deployment of ONLY migration 116 (digest-bound engineering review — AAC WS-8/WS-9)
   ];
   if (!action || !validActions.includes(action)) {
     return NextResponse.json(
@@ -310,7 +312,11 @@ export async function POST(req: NextRequest) {
   // destructive before any permit is issued (targetedRegistryDeployment.ts).
   const isRegistry113 = action === 'execute-registry-113';
   const isReconciliation114 = action === 'execute-reconciliation-114';
-  const isRegistryDeploy = isRegistry113 || isReconciliation114;
+  // AAC WS-6 — migration 115 (personnel_roles + project_personnel_assignments),
+  // the same pure additive CREATE-TABLE-only shape, through the same static gate.
+  const isPersonnel115 = action === 'execute-personnel-115';
+  const isEngineeringReview116 = action === 'execute-engineering-review-116';
+  const isRegistryDeploy = isRegistry113 || isReconciliation114 || isPersonnel115 || isEngineeringReview116;
   const isOperatorReadonly = isReadiness || isEvidence || isPrepareBatch || isActivationStatus || isPrepareExec || isPrepareExecBatch;
 
   // Determine the migration action type for authorization.
@@ -614,7 +620,10 @@ export async function POST(req: NextRequest) {
       // is ignored). It NEVER runs any other migration, never "all pending", and
       // never marks the historical baseline verified. Idempotent: if the
       // table(s) already exist it is a safe no-op.
-      const identifier = isRegistry113 ? '113' : '114';
+      const identifier = isRegistry113 ? '113'
+        : isReconciliation114 ? '114'
+        : isPersonnel115 ? '115'
+        : '116';
       const spec = REGISTRY_DEPLOYMENT[identifier];
       const reason = (body?.reason as string | undefined)?.trim();
       if (!reason) {

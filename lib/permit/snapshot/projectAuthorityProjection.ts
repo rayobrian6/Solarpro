@@ -61,7 +61,7 @@ export interface ProjectAuthorityProjection {
   issuedForPermitGatePasses: boolean;
   issueDate: string | null;
   revisionHistory: ProjectAuthorityRecord['revisionHistory'];
-  sheetIndex: { id: string; title: string }[];
+  sheetIndex: { id: string; title: string; section?: 'drawing' | 'appendix' }[];
   governingCodesRef: ProjectAuthorityRecord['governingCodesRef'] | null;
   generalNotes: string[];
   snapshotId: string | null;

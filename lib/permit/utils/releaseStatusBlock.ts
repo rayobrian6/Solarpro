@@ -25,6 +25,7 @@ import {
 } from '../snapshot/releaseGates';
 import { peekSnapshot } from '../snapshot/read';
 import { escapeH } from './drawing';
+import { isPermitProfile } from '../plansetProfile';
 
 const FINDING_LABEL: Record<string, string> = {
   TECHNICAL_CONFLICT: 'TECHNICAL CONFLICT',
@@ -45,6 +46,37 @@ export function releaseStatusBlockHtml(input: PermitInput, opts?: { compact?: bo
   if (!open.length && !notReady) return '';
 
   const total = model.summary.unresolvedRequirementCount + model.summary.advisoryCount;
+
+  // ── AAC WS-10 — the PERMIT profile prints ONE concise release status ───────
+  // The gate-count line, the open gates named, and one pointer to the in-app
+  // review record (RS-1 is not in the permit set, so pointing at it would be a
+  // dangling reference). Nothing is softened: the same headline, the same
+  // PENDING ENGINEERING REVIEW / NOT FOR PERMIT SUBMISSION identity, the same
+  // counts, and every open gate is still named. What is dropped is the repeated
+  // HIERARCHY explanation — that lesson belongs in the review record, not on
+  // every submittal.
+  if (isPermitProfile(input)) {
+    const names = open.map(g => `${escapeH(g.title)} (${g.unresolvedCount})`).join(' &nbsp;·&nbsp; ');
+    return `
+  <div class="release-status-block" data-release-status-block="1" data-release-status-profile="permit"
+       style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid #b91c1c;background:#fef2f2;padding:${opts?.compact ? '4px 8px' : '8px 12px'};page-break-inside:avoid;">
+    <div data-release-headline="1" style="font-weight:900;font-size:12.5px;letter-spacing:0.6px;color:#b91c1c;text-align:center;">
+      RELEASE STATUS &mdash; ${escapeH(releaseHeadline(model.summary))}
+    </div>
+    <div style="font-weight:900;font-size:10px;letter-spacing:0.6px;color:#b91c1c;text-align:center;margin-top:1px;">
+      PENDING ENGINEERING REVIEW &mdash; NOT FOR PERMIT SUBMISSION
+    </div>
+    <div style="font-size:8px;color:#7f1d1d;text-align:center;line-height:1.3;margin-top:2px;">
+      <span data-release-open-gate-count="${model.summary.openGateCount}" style="font-weight:900;">${model.summary.openGateCount}</span> open release gate${model.summary.openGateCount === 1 ? '' : 's'}
+      / <span data-release-requirement-count="${model.summary.unresolvedRequirementCount}" style="font-weight:900;">${model.summary.unresolvedRequirementCount}</span> unresolved requirement${model.summary.unresolvedRequirementCount === 1 ? '' : 's'}
+      &mdash; ${names || '—'}
+    </div>
+    <div data-release-record-pointer="1" style="margin-top:2px;font-weight:900;font-size:8.5px;letter-spacing:0.5px;color:#111;text-align:center;">
+      SEE THE PROJECT REVIEW RECORD IN THE APPLICATION FOR ALL ${total} REQUIREMENT${total === 1 ? '' : 'S'} AND THEIR RESOLUTION EVIDENCE
+    </div>
+  </div>`;
+  }
+
   // the OPEN gates, NUMBERED, each with its own unresolved child count. Two
   // columns so seven gates cost four lines on a dense cover sheet.
   const gateItems = open.map((g, i) => `

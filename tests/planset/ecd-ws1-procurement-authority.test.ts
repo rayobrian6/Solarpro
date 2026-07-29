@@ -255,10 +255,14 @@ describe('W1-B — ProcurementAuthorityState consolidation', () => {
   });
 
   it('a requirement whose declared impact EXCLUDES procurement can never block a row', () => {
-    // CONDUIT-FILL-PENDING / FRAMING-AUTHORITY-UNVERIFIED / CODE-AUTHORITY-
-    // INCOMPLETE are all OPEN on this package and all declare procurement:false.
+    // FRAMING-AUTHORITY-UNVERIFIED / CODE-AUTHORITY-INCOMPLETE are OPEN on this
+    // package and both declare procurement:false. (CONDUIT-FILL-PENDING was the
+    // third anchor until AAC WS-7 made the NEC Ch.9 fill actually reach the
+    // snapshot; it is now RESOLVED, so it can no longer witness this rule — the
+    // two survivors do, and the assertion that it never blocks a row stands.)
     const openCodes = (fixture.snap.permitReadiness.registry ?? []).filter(b => !b.resolved).map(b => b.code);
-    expect(openCodes).toContain('CONDUIT-FILL-PENDING');
+    expect(openCodes).toContain('FRAMING-AUTHORITY-UNVERIFIED');
+    expect(openCodes).toContain('CODE-AUTHORITY-INCOMPLETE');
     const all = fixture.bom.flatMap(r => r.procurement!.blockingRequirementCodes);
     expect(all).not.toContain('CONDUIT-FILL-PENDING');
     expect(all).not.toContain('FRAMING-AUTHORITY-UNVERIFIED');
@@ -538,9 +542,17 @@ describe('ECD WS-1 cross-cutting', () => {
       expect(c.CANDIDATE_NON_ORDERABLE).toBeGreaterThan(0);
       expect(c.QUANTITY_PENDING).toBeGreaterThan(0);
     }
-    // the insufficiency mode moves EXACTLY the trunk-cable row A→C
-    expect(i.VERIFIED_ORDERABLE).toBe(f.VERIFIED_ORDERABLE - 1);
-    expect(i.CANDIDATE_NON_ORDERABLE).toBe(f.CANDIDATE_NON_ORDERABLE + 1);
+    // AAC WS-5 (2026-07-27): the base fixture ALSO carries a Q-Cable deficit now
+    // — branch B2's ordered drops cannot span its 24.4 ft sub-array bridge, which
+    // the old AGGREGATE-only sufficiency check hid behind the other two branches.
+    // So the synthetic allowance no longer MOVES a row between the two modes; it
+    // only enlarges the same deficit. The invariant that still holds (and is the
+    // point of this case) is that the trunk-cable row is non-orderable in the
+    // insufficiency mode and the two distributions stay consistent.
+    expect(i.VERIFIED_ORDERABLE).toBe(f.VERIFIED_ORDERABLE);
+    expect(i.CANDIDATE_NON_ORDERABLE).toBe(f.CANDIDATE_NON_ORDERABLE);
+    const trunkI = insufficient.bom.find(r => r.category === 'trunk_cable');
+    expect(trunkI?.procurement?.orderable, 'trunk row must be non-orderable in the insufficiency mode').toBe(false);
   });
 
   it('procurementAuthorityOf never returns VERIFIED_ORDERABLE for an unclassified row', () => {

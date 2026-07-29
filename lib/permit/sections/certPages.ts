@@ -87,8 +87,19 @@ export function certificationGateBanner(input: PermitInput): string {
   // states the count and RS-1 prints every requirement in full.
   const _shownReasons = _allReasons.slice(0, 6);
   const _moreReasons = _allReasons.length - _shownReasons.length;
+  // AAC WS-9 — PER-BULLET LENGTH CAP. The box is a FIXED-height element on a
+  // fixed page; a requirement message is not. As automation clears the short
+  // requirements the six survivors get LONGER (they are the ones carrying real
+  // enumerated detail — segment ids, candidate shortlists), and an uncapped
+  // bullet silently clipped the cert footer under `overflow:hidden`. The cap is
+  // deterministic and loses nothing: RS-1 prints every requirement in full, and
+  // the truncation says so on the bullet itself.
+  const _CERT_REASON_CHARS = 200;
+  const _capReason = (m: string): string => (m.length <= _CERT_REASON_CHARS
+    ? m
+    : `${m.slice(0, _CERT_REASON_CHARS).replace(/\s+\S*$/, '')}… (full text on RS-1)`);
   const _reasons = _shownReasons
-    .map(b => `<li style="margin:0 0 1px 0;">${String(b.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')
+    .map(b => `<li style="margin:0 0 1px 0;">${_capReason(String(b.message)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('')
     // RGM §4 — the remainder is a PACKAGE-level statement ⇒ requirement (child)
     // semantics with the root-gate total stated on its own line above.
     + (_moreReasons > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_moreReasons} more unresolved release requirement${_moreReasons === 1 ? '' : 's'} — see sheet RS-1 (REVIEW STATUS)</li>` : '');

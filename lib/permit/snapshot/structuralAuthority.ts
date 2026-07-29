@@ -25,7 +25,7 @@ import type { MountingSystemSpec } from '@/lib/mounting-hardware-db';
 import { classifyMountTopology } from '@/lib/mounting-hardware-db';
 import { buildDrawingTransform, coordMetaFor, dominantAxisDeg } from './coordinateAuthority';
 import { buildRackingAssembly, type RackingCapacityDocumentEvidence } from './rackingAssembly';
-import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, evaluateDocumentApplicability, type DocumentRegistryFacts } from '@/lib/manufacturer-assets-db';
 import {
   runSnapshotStructuralEngine, reconcileReactions, type FramingInputs,
   type StructuralReactionReconciliation,
@@ -67,6 +67,10 @@ export interface StructuralAuthorityCtx {
    *  UNVERIFIED ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires (the honest live
    *  outcome). */
   environmentalSource?: EnvironmentalLoadSourceEvidence | null;
+  /** AAC WS-4 — the RETRIEVAL record behind that source (query inputs, returned
+   *  values, override history, archival state). Null for an archived-document
+   *  source or an unresolved run ⇒ the authority record is unchanged. */
+  environmentalRetrieval?: import('./resolution/environmentalRetrieval').EnvironmentalRetrievalRecord | null;
   /** §2 (BAR) — the location basis the wind/snow values were (or should be) looked
    *  up against, printed with the values so no reader treats an operator entry as
    *  a resolved lookup. */
@@ -99,6 +103,15 @@ export interface StructuralAuthorityCtx {
   framingReviewDigest?: string | null;
   /** the exact project/building applicability key the framing document must cover. */
   framingProjectApplicabilityKey?: string | null;
+  /** AAC WS-8 (audit §7.7) — REAL registry facts (archived / sha256 / status)
+   *  keyed `${category}:${equipmentId}`, resolved by racking-documents@v1.
+   *  Every prior call site passed `null` here, which made the AUTHORITATIVE
+   *  document verdict structurally unreachable. Absent ⇒ unchanged behaviour. */
+  documentRegistryFacts?: Record<string, DocumentRegistryFacts> | null;
+  /** AAC WS-8 — the rail-selection trace. Present ⇒ PENDING-RACKING-ASSEMBLY-
+   *  SELECTION is decided from it (a real design fact) rather than from the
+   *  capacity-document echo it used to duplicate. */
+  rackingAssemblySelection?: import('./resolution/railSelection').RailSelectionVerdict | null;
 }
 
 export interface StructuralAuthorityBundle {
@@ -726,6 +739,7 @@ function buildEnv(ctx: StructuralAuthorityCtx, run: StructuralResultV4 | null): 
     projectOrAhj: ctx.projectJurisdiction ?? null,
     sourceEvidence: ctx.environmentalSource ?? null,
     capturedAtIso: ctx.environmentalCapturedAtIso ?? null,
+    retrievalRecord: ctx.environmentalRetrieval ?? null,
   });
   const verified = environmentalLoadAuthority.verificationStatus === 'verified';
   const windSource = verified
@@ -733,12 +747,18 @@ function buildEnv(ctx: StructuralAuthorityCtx, run: StructuralResultV4 | null): 
     : ctx.windValuePresent
       ? 'OPERATOR-ENTERED — NOT VERIFIED (observation/override; no archived climate-hazard source)'
       : 'code-minimum default (ASCE 7-22 §26.5) — UNVERIFIED, no AHJ wind authority';
+  // AAC WS-4 — DISPLAYED VALUES DERIVE FROM THE RECORD. Before this, StructuralEnv
+  // echoed the raw ctx scalars while environmentalLoadAuthority carried the
+  // verified-source values, so a verified retrieval could disagree with the number
+  // printed beside it. The authority record is now the single source for all four
+  // scalars; with no verified source it returns exactly the ctx values, so an
+  // unresolved build is byte-identical.
   return {
-    ultimateWindSpeedMph: ctx.windSpeedMph,
+    ultimateWindSpeedMph: environmentalLoadAuthority.ultimateWindSpeedMph,
     windSpeedSource: windSource,
-    exposureCategory: ctx.exposure,
-    riskCategory: ctx.riskCategory,
-    groundSnowPsf: ctx.snowPsf,
+    exposureCategory: environmentalLoadAuthority.exposureCategory,
+    riskCategory: environmentalLoadAuthority.riskCategory,
+    groundSnowPsf: environmentalLoadAuthority.groundSnowLoadPsf,
     roofSnowPsf: run ? r3(run.snow.roofSnowLoadPsf) : null,
     buildingHeightFt: ctx.meanRoofHeightFt,
     componentCladdingZones: run?.wind.roofZone ? [String(run.wind.roofZone)] : [],
@@ -827,16 +847,35 @@ function collectBlockers(
     assemblyVerification?: { railSku?: string; overall?: string };
     railSku?: string | null; railModel?: string | null;
   } | null;
+  // ── AAC WS-8 STRUCTURAL SEPARATION (audit §2.8) ──────────────────────────
+  // This code used to fire on `_railUnpinned || _assemblyPending`. The
+  // `_assemblyPending` leg was a pure DUPLICATE of the capacity-document
+  // predicate that RACKING-CAPACITY-SOURCE-NOT-ARCHIVED / -APPLICABILITY-GAP
+  // already emit — one document, three codes, and a SELECTION-typed requirement
+  // that a document could satisfy. WS-8 forbids bundling: this requirement is
+  // now the RAIL SELECTION and nothing else, and a document can never clear it.
+  //
+  // The verdict comes from the rail-selection trace when the resolver ran (it
+  // probes every store a rail could live in), and falls back to the record's own
+  // honest unpinned flags when it did not — identical behaviour for the
+  // rail leg, so no golden moves on that account.
   const _railUnpinned = !!a.rackingAssembly?.mixedManufacturer
     && (a.rackingAssembly?.railSku == null)
     && (a.rackingAssembly?.railModel == null || /PENDING/i.test(a.rackingAssembly.railModel));
-  const _assemblyPending = _rk?.assemblyVerification?.overall === 'pending';
-  if (a.rackingAssembly && (_railUnpinned || _assemblyPending)) {
+  const _sel = ctx.rackingAssemblySelection ?? null;
+  const _railUnselected = _sel ? _sel.state === 'unselected' : _railUnpinned;
+  if (a.rackingAssembly && _railUnselected) {
+    const _shortlist = _sel && _sel.eligibleCandidateCount > 0
+      ? ' Span-screened listed candidates: '
+        + _sel.candidates.filter(c => c.refusedReason == null)
+          .map(c => `${c.manufacturer} ${c.railModel} (${c.maxSpanIn}" max span)`).join(', ')
+        + '. The catalog carries no rail part number, so the orderable SKU comes from the distributor line item.'
+      : '';
     b.push({ code: 'PENDING-RACKING-ASSEMBLY-SELECTION',
-      message: 'No verified exact racking assembly — '
-        + (_railUnpinned ? 'rail/splice SKU is unpinned (PENDING SELECTION); ' : '')
-        + 'PENDING RACKING ASSEMBLY SELECTION, NOT FOR PERMIT SUBMISSION. Pin the exact rail/splice SKU, '
-        + 'archive the capacity/compatibility authority, and resolve span/cantilever source before permit-ready.' });
+      message: 'Rail / splice SKU is UNSELECTED for this mixed-manufacturer assembly — PENDING RACKING ASSEMBLY '
+        + 'SELECTION, NOT FOR PERMIT SUBMISSION. This is a design + procurement decision, not a document: no rail is '
+        + 'recorded in the project record, the canonical equipment store or the mount product, and the engine does not '
+        + 'choose between compatible manufacturers.' + _shortlist });
   }
   // §13 (CO-C) — FASTENER-ASSEMBLY-UNVERIFIED. The roof-attachment fastener
   // assembly is mount-BASE hardware, verifiable independent of the rail selection,
@@ -854,21 +893,27 @@ function collectBlockers(
       structuralAuthorityGaps?: { code: string; severity: string }[];
     } | null;
     if (ra) {
-      const _CAP_GATE = new Set([
-        'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
-        'RACKING-CAPACITY-APPLICABILITY-GAP',
-        'ATTACHMENT-CAPACITY-SOURCE-MISSING',
-      ]);
-      const _capGated = (ra.structuralAuthorityGaps ?? [])
-        .some(g => g.severity === 'blocking' && _CAP_GATE.has(g.code));
+      // ── AAC WS-8 (audit §2.11) — THE `_capGated` ECHO IS DELETED. ─────────
+      // This block used to AND in `_capGated`: whether any RACKING-CAPACITY-*
+      // gap was open. That made a requirement documented — here and in
+      // severityPolicy — as "mount-BASE hardware, verifiable independent of the
+      // rail selection" into a pure downstream echo of the rail-capacity
+      // document. It fired on assemblies whose fastener element was already
+      // fully verified (model + count + embedment + an ICC-ES evaluation
+      // report), inflating the RG-4 count with a duplicate of §2.9/§2.10.
+      //
+      // The predicate is now what the documentation always claimed: the mount's
+      // OWN fastener element must be complete AND carry a source document. The
+      // capacity-document question stays with the two codes that own it.
       const _fastenerSource = ra.datasheetSource ?? ra.capacitySource ?? ctx.mountSystem?.iccEsReport ?? null;
-      const _fastenerVerified = !_capGated
-        && ra.assemblyVerification?.fastener === 'verified'
-        && !!_fastenerSource;
+      const _fastenerVerified = ra.assemblyVerification?.fastener === 'verified' && !!_fastenerSource;
       if (!_fastenerVerified) {
+        const _why = ra.assemblyVerification?.fastener !== 'verified'
+          ? 'the fastener element is incomplete (model / count / embedment not all established on the mount record)'
+          : 'no withdrawal-capacity source document is recorded for the mount base';
         b.push({ code: 'FASTENER-ASSEMBLY-UNVERIFIED',
-          message: 'Roof-attachment fastener assembly UNVERIFIED — withdrawal-capacity source not archived / capacity gated. '
-            + 'Mount-base authority, independent of rail selection (related to but distinct from PENDING-RACKING-ASSEMBLY-SELECTION).' });
+          message: `Roof-attachment fastener assembly UNVERIFIED — ${_why}. Mount-BASE authority, decided independently of `
+            + 'the rail selection and of the rail-capacity document.' });
       }
     }
   }
@@ -880,7 +925,13 @@ function collectBlockers(
   // authoritative — block permit-ready. No alias record is fabricated here.
   if (ctx.mountSystem) {
     const _asset = getManufacturerAsset(ctx.mountSystem.id, 'racking_detail');
-    const _appl = evaluateDocumentApplicability(ctx.mountSystem.model, _asset, null);
+    // AAC WS-8 (audit §7.7) — REAL registry facts, so AUTHORITATIVE is reachable.
+    // Every call site used to pass `null` for the 4th argument, which meant the
+    // strictest document verdict could never be produced no matter what was
+    // archived. racking-documents@v1 supplies facts ONLY for a VERSION-EXACT
+    // archived document, so this can never manufacture a verdict.
+    const _facts = ctx.documentRegistryFacts?.[`racking_detail:${ctx.mountSystem.id}`] ?? null;
+    const _appl = evaluateDocumentApplicability(ctx.mountSystem.model, _asset, null, _facts);
     // ECD §8 — fires on the 7-state verdict: applicability NOT established.
     if (_asset && !_appl.applicabilityVerified) {
       b.push({ code: 'EQUIPMENT-DOCUMENT-APPLICABILITY',

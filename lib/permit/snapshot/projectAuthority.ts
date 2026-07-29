@@ -325,7 +325,7 @@ export interface ProjectAuthorityRecord {
   revisionHistory: ProjectRevisionEntry[];
   /** THE actual generated sheet manifest (buildSheetManifest) — never a
    *  hardcoded index. */
-  sheetIndex: { id: string; title: string }[];
+  sheetIndex: { id: string; title: string; section?: 'drawing' | 'appendix' }[];
   /** a REFERENCE to snapshot.codeAuthority (single source) — NO edition literal. */
   governingCodesRef: { source: string; schemaVersion: string; verificationStatus: string; ahjName: string | null };
   generalNotes: string[];
@@ -358,8 +358,22 @@ export interface ProjectAuthorityBuildArgs {
    *  source / the document-registry operator path. Default (undefined/false) ⇒
    *  every present field is 'unverified-derived'. Never fabricated true here. */
   authorityVerified?: boolean;
+  /** AAC WS-3 — PER-FIELD verification states established by a RETRIEVAL
+   *  (project-authority@v1). Each entry replaces the all-or-nothing
+   *  `authorityVerified` for that one field, so "the address was matched by an
+   *  official source but the APN has no parcel record" is expressible instead of
+   *  collapsing to a single boolean.
+   *
+   *  A retrieval may only make a field MORE verified, never less: a field the
+   *  retrieval did not establish keeps the `authorityVerified` outcome. Nothing
+   *  here can fabricate a `verified` — the resolver sets it only when an official
+   *  source returned that field for this exact address. */
+  authorityFieldVerification?: Partial<ProjectAuthorityVerification>;
+  /** AAC WS-3 — per-field basis sentences, printed with the record so a reviewer
+   *  sees WHY each field is in its state. */
+  authorityFieldBasis?: Partial<Record<keyof ProjectAuthorityVerification, string>>;
   // sheet index (THE generated manifest) + governing-codes reference
-  sheetIndex: { id: string; title: string }[];
+  sheetIndex: { id: string; title: string; section?: 'drawing' | 'appendix' }[];
   governingCodes: { schemaVersion: string; verificationStatus: string; ahjName: string | null };
   generalNotes: string[];
   // §12 derivation inputs
@@ -403,14 +417,24 @@ export function buildProjectAuthority(args: ProjectAuthorityBuildArgs): ProjectA
   // from the operator/document-registry path (args.authorityVerified); postal
   // inference (county/city/AHJ/fire from ZIP) is NEVER verification.
   const _verified = args.authorityVerified === true;
-  const _fieldState = (present: boolean): FieldVerificationState =>
-    !present ? 'unknown' : _verified ? 'verified' : 'unverified-derived';
+  const _retrieved = args.authorityFieldVerification ?? {};
+  const _fieldState = (
+    key: keyof ProjectAuthorityVerification, present: boolean,
+  ): FieldVerificationState => {
+    // AAC WS-3 — a RETRIEVAL's per-field verdict wins where it exists. It is
+    // produced only from an official-source match (project-authority@v1), so it
+    // can raise a field to 'verified' and can also honestly report 'unknown'
+    // (e.g. no parcel source published an APN). It never invents a value.
+    const r = _retrieved[key];
+    if (r) return r;
+    return !present ? 'unknown' : _verified ? 'verified' : 'unverified-derived';
+  };
   const authorityVerification: ProjectAuthorityVerification = {
-    address: _fieldState(!!args.installationAddress),
-    apn: _fieldState(!!args.parcelApn),
-    municipalBoundary: _fieldState(!!(args.county || args.city || args.stateCode)),
-    ahjName: _fieldState(!!args.ahjName),
-    fireAuthority: _fieldState(!!args.ahjName),   // fire authority derives with the AHJ
+    address: _fieldState('address', !!args.installationAddress),
+    apn: _fieldState('apn', !!args.parcelApn),
+    municipalBoundary: _fieldState('municipalBoundary', !!(args.county || args.city || args.stateCode)),
+    ahjName: _fieldState('ahjName', !!args.ahjName),
+    fireAuthority: _fieldState('fireAuthority', !!args.ahjName),   // derives with the AHJ
   };
   const authorityAnyUnverified = Object.values(authorityVerification).some(st => st === 'unverified-derived');
 
@@ -442,7 +466,12 @@ export function buildProjectAuthority(args: ProjectAuthorityBuildArgs): ProjectA
     },
     issuedForPermitGate: gate,
     revisionHistory,
-    sheetIndex: args.sheetIndex.map(s => ({ id: s.id, title: s.title })),
+    // AAC WS-10 — `section` distinguishes the numbered drawing sheets from the
+    // manufacturer attachment appendix; omitted (undefined) for drawing sheets so
+    // the FULL-profile record is byte-identical to the pre-WS-10 authority.
+    sheetIndex: args.sheetIndex.map(s => (s.section === 'appendix'
+      ? { id: s.id, title: s.title, section: 'appendix' as const }
+      : { id: s.id, title: s.title })),
     governingCodesRef: {
       source: 'snapshot.codeAuthority',
       schemaVersion: args.governingCodes.schemaVersion,

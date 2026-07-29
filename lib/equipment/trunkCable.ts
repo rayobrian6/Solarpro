@@ -34,6 +34,42 @@ export interface TrunkCableSpec {
   conductors: number;
   /** Purchasable unit in the real channel. Drops = connector sections. */
   soldBy: 'drop' | 'ft';
+  /** AAC WS-5 — the SELECTION default for this orientation (what
+   *  resolveTrunkCablePlan picks). The remaining listed variants stay in the
+   *  catalog as the ALTERNATE-STOCK option space the Q-Cable procurement engine
+   *  evaluates (audit §2.16: "the catalog already holds seven cable variants;
+   *  trunkCable.ts reaches two"). */
+  isDefaultForOrientation?: boolean;
+  /** connectors per purchasable box/reel (datasheet). null ⇒ not published. */
+  connectorCountPerBox?: number | null;
+  /** the module class the manufacturer states the pitch is intended for. */
+  forCells?: string | null;
+  /** datasheet / distributor source for this variant. */
+  source?: string;
+}
+
+/** Raw (unconnectorized) cable stock — the source for field-fabricated jumpers
+ *  built with the field-wireable connector pair. Present only where the brand
+ *  publishes one. */
+export interface TrunkRawCableSpec {
+  sku: string;
+  description: string;
+  gaugeAwg: number;
+  lengthFt: number | null;
+  source: string;
+}
+
+/** The manufacturer's DOCUMENTED rule for what happens at a transition and at an
+ *  unused molded connector. The Q-Cable procurement engine may only treat a dead
+ *  drop as cappable when the brand publishes this rule — never by assumption. */
+export interface TrunkSpliceInstallRule {
+  /** continuous cable + service loop at row transitions (no field splice). */
+  continuousCableWithServiceLoop: boolean;
+  /** every unused molded connector is closed with a listed sealing cap. */
+  sealingCapPerUnusedConnector: boolean;
+  splicesPerRowTransition: number;
+  splicesPerRoofPlaneBridge: number;
+  source: string;
 }
 
 export interface TrunkAccessorySku {
@@ -57,6 +93,11 @@ export interface TrunkCableSystem {
   deviceBranchLimits?: Record<string, number>;
   branchOcpdA: number;
   notes?: string[];
+  /** AAC WS-5 — raw cable stock (jumper fabrication), where published. */
+  rawCable?: TrunkRawCableSpec | null;
+  /** AAC WS-5 — the DOCUMENTED transition / unused-connector rule. Absent ⇒ the
+   *  procurement engine may NOT treat a dead drop as cappable for this brand. */
+  spliceInstallRule?: TrunkSpliceInstallRule | null;
 }
 
 // ── Catalog (sourced 2026-07-10; see lib/data/equipment/trunk-cable-*.json) ──
@@ -65,10 +106,32 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'Enphase',
     ecosystem: 'IQ Q-Cable',
+    // AAC WS-5 — the FULL listed variant set from
+    // lib/data/equipment/trunk-cable-enphase.json (datasheet DSH-00247-1.0).
+    // The two `isDefaultForOrientation` entries are what the resolver SELECTS
+    // (unchanged behaviour); the remaining five are the alternate-stock option
+    // space the Q-Cable procurement engine evaluates against a deficit.
     cables: [
-      { sku: 'Q-12-10-240', orientation: 'portrait',  connectorSpacingFt: 4.25, gaugeAwg: 12, conductors: 2, soldBy: 'drop' },
-      { sku: 'Q-12-17-240', orientation: 'landscape', connectorSpacingFt: 6.56, gaugeAwg: 12, conductors: 2, soldBy: 'drop' },
+      { sku: 'Q-12-10-240', orientation: 'portrait',  connectorSpacingFt: 4.25, gaugeAwg: 12, conductors: 2, soldBy: 'drop', isDefaultForOrientation: true,  connectorCountPerBox: 240, forCells: '60/72-cell modules, portrait orientation', source: 'DSH-00247-1.0 (1.3 m); distributor 51" O.C.' },
+      { sku: 'Q-12-12-240', orientation: 'portrait',  connectorSpacingFt: 4.9,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 240, forCells: 'wider portrait / larger modules', source: 'DSH-00247-1.0 (1.5 m)' },
+      { sku: 'Q-12-17-240', orientation: 'landscape', connectorSpacingFt: 6.56, gaugeAwg: 12, conductors: 2, soldBy: 'drop', isDefaultForOrientation: true,  connectorCountPerBox: 240, forCells: '60/72-cell modules, landscape orientation', source: 'DSH-00247-1.0 (2.0 m); distributor 78.7" O.C.' },
+      { sku: 'Q-12-18-240', orientation: 'landscape', connectorSpacingFt: 6.9,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 240, forCells: 'wider landscape / larger modules', source: 'DSH-00247-1.0 (2.1 m)' },
+      { sku: 'Q-12-20-200', orientation: 'landscape', connectorSpacingFt: 7.5,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 200, forCells: 'large-format landscape modules', source: 'DSH-00247-1.0 (2.3 m)' },
+      { sku: 'Q-12-22-200', orientation: 'landscape', connectorSpacingFt: 8.2,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 200, forCells: 'large-format landscape modules', source: 'DSH-00247-1.0 (2.5 m)' },
+      { sku: 'Q-12-25-200', orientation: 'landscape', connectorSpacingFt: 9.1,  gaugeAwg: 12, conductors: 2, soldBy: 'drop', connectorCountPerBox: 200, forCells: 'large-format landscape modules', source: 'DSH-00247-1.0 (2.8 m)' },
     ],
+    rawCable: {
+      sku: 'Q-12-RAW-300', description: '300 m of 12 AWG cable with NO connectors — jumper stock used with the field-wireable connector pair',
+      gaugeAwg: 12, lengthFt: Math.round(300 * 3.28084), source: 'DSH-00247-1.0',
+    },
+    spliceInstallRule: {
+      continuousCableWithServiceLoop: true,
+      sealingCapPerUnusedConnector: true,
+      splicesPerRowTransition: 0,
+      splicesPerRoofPlaneBridge: 1,
+      source: 'Enphase IQ Cable accessories Data Sheet DSH-00247-1.0 (spliceInstallRule) — '
+        + 'row transitions use continuous cable + a service loop; every unused molded connector is closed with a Q-SEAL-10 sealing cap.',
+    },
     connectors: {
       male:       { sku: 'Q-CONN-10M', description: 'IQ Field-Wireable Connector (Male)' },
       female:     { sku: 'Q-CONN-10F', description: 'IQ Field-Wireable Connector (Female)' },
@@ -192,6 +255,45 @@ export interface TrunkPlan {
   sealingCaps: number;                 // 1 per branch (service-loop unused drops)
 }
 
+/** The brand system for a micro manufacturer (case-insensitive), or null. */
+export function findTrunkCableSystem(brand: string | null | undefined): TrunkCableSystem | null {
+  const brandKey = (brand ?? '').trim().toLowerCase();
+  if (!brandKey) return null;
+  return TRUNK_CABLE_SYSTEMS.find(s => brandKey.includes(s.brand.toLowerCase())
+    || s.brand.toLowerCase().includes(brandKey)) ?? null;
+}
+
+/**
+ * AAC WS-5 — every LISTED cable variant of a system that can physically serve an
+ * array whose module centre-to-centre pitch is `modulePitchFt`.
+ *
+ * THE APPLICABILITY RULE (physical, not a preference): the molded connector
+ * pitch must REACH the next module, i.e. `connectorSpacingFt >= modulePitchFt`.
+ * A shorter pitch cannot span the gap; a longer pitch is installable (the excess
+ * is absorbed as slack / a service loop per the manufacturer's own transition
+ * rule) but wastes cable, so `orientationMatch` is reported and the ranking
+ * prefers the variant the manufacturer states for this orientation. Nothing is
+ * excluded silently: every variant is returned with its verdict.
+ */
+export function listTrunkCableVariants(
+  system: TrunkCableSystem,
+  opts: { orientation: TrunkOrientation; modulePitchFt?: number | null },
+): { cable: TrunkCableSpec; applicable: boolean; orientationMatch: boolean; reason: string | null }[] {
+  const pitchNeeded = typeof opts.modulePitchFt === 'number' && Number.isFinite(opts.modulePitchFt) && opts.modulePitchFt > 0
+    ? opts.modulePitchFt : null;
+  return system.cables.map(cable => {
+    const orientationMatch = cable.orientation === opts.orientation || cable.orientation === 'fixed';
+    const reaches = pitchNeeded == null ? true : cable.connectorSpacingFt >= pitchNeeded;
+    return {
+      cable,
+      applicable: reaches,
+      orientationMatch,
+      reason: reaches ? null
+        : `connector pitch ${cable.connectorSpacingFt} ft is SHORTER than the ${pitchNeeded!.toFixed(2)} ft module centre-to-centre pitch — the cable cannot reach the next module`,
+    };
+  });
+}
+
 export function resolveTrunkCablePlan(input: TrunkPlanInput): TrunkPlan | null {
   const brandKey = (input.brand || '').trim().toLowerCase();
   const system = TRUNK_CABLE_SYSTEMS.find(s => brandKey.includes(s.brand.toLowerCase())
@@ -199,7 +301,11 @@ export function resolveTrunkCablePlan(input: TrunkPlanInput): TrunkPlan | null {
   if (!system || input.deviceCount <= 0) return null;
 
   const orientation: TrunkOrientation = input.orientation === 'landscape' ? 'landscape' : 'portrait';
-  const cable = system.cables.find(c => c.orientation === orientation)
+  // AAC WS-5 — the catalog now carries EVERY listed variant, so the SELECTION
+  // pins the datasheet default for the orientation explicitly (previously the
+  // array held exactly one entry per orientation and `find` was unambiguous).
+  const cable = system.cables.find(c => c.orientation === orientation && c.isDefaultForOrientation)
+    ?? system.cables.find(c => c.orientation === orientation)
     ?? system.cables.find(c => c.orientation === 'fixed')
     ?? system.cables[0];
 

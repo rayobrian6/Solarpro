@@ -38,6 +38,50 @@ const CANONICAL_KEY_BY_FIELD: Record<string, string> = {
 
 export interface ReconcileValidation { ok: boolean; error?: string; }
 
+/**
+ * AAC-7 §1(a) — THE MIRROR STORES A RECONCILIATION MUST ALSO RE-ALIGN.
+ *
+ * Before this, `reconcileEquipmentIdentity` rewrote ONLY the top-level
+ * `projects.selected_equipment` key. The superseded record on the live Braidon
+ * project lives in `engineering_config.subSystems.roof.panelId` (the doctrine
+ * owner of the per-subsystem map, lib/db/projects.ts:763-770) and in the
+ * `selected_equipment.subSystems` mirror of it, so EVERY generation re-detected
+ * the identical divergence and appended another immutable audit row plus two
+ * invalidation rows — a reconciliation that never reconciled.
+ *
+ * The repair is the one the DB layer already performs one level down (the P0-11
+ * "recompute-if-contradicts" mirror repair, lib/db/projects.ts:565-613): a mirror
+ * record that CONTRADICTS the authoritative id is re-aligned to it, in the same
+ * transaction as the audit row.
+ *
+ * It is deliberately NOT a blanket re-alignment of every subsystem: per-subsystem
+ * equipment is a first-class product feature (a hybrid may legitimately carry a
+ * different module per subsystem), so the caller passes the EXACT records its
+ * precedence verdict superseded, and nothing else is touched.
+ */
+export type MirrorStore = 'selected_equipment' | 'engineering_config';
+
+export interface MirrorRealignment {
+  store: MirrorStore;
+  /** the subsystem key inside `subSystems` (roof | ground | fence | …). */
+  subsystemKey: string;
+  /** the field inside the subsystem entry (panelId | inverterId | …). */
+  key: string;
+  /** the value being replaced, for the audit record (never used as a predicate). */
+  previousValue: string | null;
+}
+
+/** subSystems entry field for a conflictField — the per-sub mirror of
+ *  CANONICAL_KEY_BY_FIELD. Same key names; kept separate so a future divergence
+ *  between the two shapes is explicit rather than accidental. */
+export const SUBSYSTEM_KEY_BY_FIELD: Record<string, string> = {
+  module_model: 'panelId',
+  inverter_model: 'inverterId',
+  microinverter_model: 'inverterId',
+  racking_assembly: 'mountingId',
+  battery_model: 'batteryId',
+};
+
 /** PURE validation of a reconciliation request. */
 export function validateReconciliationRequest(req: ReconciliationRequest): ReconcileValidation {
   if (!req.projectId || !req.projectId.trim()) return { ok: false, error: 'projectId is required' };
@@ -76,7 +120,14 @@ export function previousValuesOf(req: ReconciliationRequest): EquipmentSourceVal
  */
 export async function reconcileEquipmentIdentity(
   req: ReconciliationRequest,
-  knownSnapshot?: { digest?: string | null; snapshotId?: string | null; engineeringApprovalRef?: string | null },
+  knownSnapshot?: {
+    digest?: string | null;
+    snapshotId?: string | null;
+    engineeringApprovalRef?: string | null;
+    /** AAC-7 §1(a) — the superseded MIRROR records to re-align in this same
+     *  transaction (see MirrorRealignment). Omitted ⇒ prior behaviour exactly. */
+    realign?: MirrorRealignment[];
+  },
 ): Promise<ReconciliationResult> {
   const v = validateReconciliationRequest(req);
   if (!v.ok) throw new Error(v.error);
@@ -104,6 +155,31 @@ export async function reconcileEquipmentIdentity(
     nextSelected[canonicalKey] = chosen.value;
     nextSelected['source'] = 'reconciliation';
     nextSelected['updatedAt'] = reconciledAt;
+  }
+
+  // ── AAC-7 §1(a): re-align the superseded MIRROR records ────────────────────
+  // `selected_equipment.subSystems.<k>.<field>` folds into the object we are
+  // already writing (one UPDATE, still atomic); `engineering_config.subSystems`
+  // gets its own guarded jsonb_set in the same transaction.
+  const realign = (knownSnapshot?.realign ?? []).filter(r => r.subsystemKey && r.key);
+  const subField = SUBSYSTEM_KEY_BY_FIELD[req.conflictField] ?? null;
+  const realigned: Array<MirrorRealignment & { newValue: string }> = [];
+  for (const r of realign) {
+    if (subField && r.key !== subField) continue;   // never touch another identity field
+    realigned.push({ ...r, newValue: String(chosen.value) });
+  }
+  for (const r of realigned.filter(x => x.store === 'selected_equipment')) {
+    const subs = (nextSelected.subSystems && typeof nextSelected.subSystems === 'object')
+      ? { ...(nextSelected.subSystems as Record<string, unknown>) } : null;
+    if (!subs) continue;
+    const entry = subs[r.subsystemKey];
+    if (!entry || typeof entry !== 'object') continue;   // never CREATE a record
+    const next = { ...(entry as Record<string, unknown>) };
+    if (next[r.key] === chosen.value) continue;
+    next[r.key] = chosen.value;
+    next['updatedAt'] = reconciledAt;
+    subs[r.subsystemKey] = next;
+    nextSelected.subSystems = subs;
   }
 
   // Invalidation records: the old snapshot digest + engineering approval are stale.
@@ -154,7 +230,16 @@ export async function reconcileEquipmentIdentity(
         ) VALUES (
           ${auditId}, ${req.projectId}, ${req.conflictField}, ${req.subsystemKey ?? null},
           ${JSON.stringify(req.sources)}, ${req.chosenSource}, ${JSON.stringify({ value: chosen.value, label: chosen.label ?? null })},
-          ${JSON.stringify({ presented: previous, priorCanonical: { key: canonicalKey, value: priorCanonicalValue } })},
+          ${JSON.stringify({
+            presented: previous,
+            priorCanonical: { key: canonicalKey, value: priorCanonicalValue },
+            realignedMirrors: realigned.map(r => ({
+              store: r.store, path: r.store === 'engineering_config'
+                ? `engineering_config.subSystems.${r.subsystemKey}.${r.key}`
+                : `projects.selected_equipment.subSystems.${r.subsystemKey}.${r.key}`,
+              previousValue: r.previousValue, newValue: r.newValue,
+            })),
+          })},
           ${req.reason}, ${req.operatorId}, ${req.operatorName ?? null}, ${reconciledAt}, 'applied',
           ${invalidationRecordJson}
         )
@@ -166,6 +251,35 @@ export async function reconcileEquipmentIdentity(
         UPDATE projects
         SET selected_equipment = ${JSON.stringify(nextSelected)}::jsonb
         WHERE id = ${req.projectId}
+      `);
+    }
+    // AAC-7 §1(a) — the engineering_config half of the mirror re-alignment.
+    // `create_missing = false` and the IS DISTINCT FROM guard together mean this
+    // can only ever CORRECT an existing contradicting record: it never creates a
+    // subsystem entry, never invents a field, and is a no-op once aligned (which
+    // is what makes repeat generation idempotent).
+    for (const r of realigned.filter(x => x.store === 'engineering_config')) {
+      queries.push(txn`
+        UPDATE projects
+        SET engineering_config = jsonb_set(
+              engineering_config,
+              ARRAY['subSystems', ${r.subsystemKey}, ${r.key}]::text[],
+              to_jsonb(${r.newValue}::text),
+              false)
+        WHERE id = ${req.projectId}
+          AND engineering_config IS NOT NULL
+          AND engineering_config -> 'subSystems' -> ${r.subsystemKey} ->> ${r.key}
+              IS DISTINCT FROM ${r.newValue}
+      `);
+      queries.push(txn`
+        UPDATE projects
+        SET engineering_config = jsonb_set(
+              engineering_config,
+              ARRAY['subSystems', ${r.subsystemKey}, 'updatedAt']::text[],
+              to_jsonb(${reconciledAt}::text),
+              false)
+        WHERE id = ${req.projectId}
+          AND engineering_config -> 'subSystems' -> ${r.subsystemKey} IS NOT NULL
       `);
     }
     for (const inv of invalidations) {
@@ -195,6 +309,73 @@ export async function reconcileEquipmentIdentity(
     reconciledAt,
     invalidations,
     status: 'applied',
+    realignedMirrors: realigned.map(r => ({
+      store: r.store,
+      path: r.store === 'engineering_config'
+        ? `engineering_config.subSystems.${r.subsystemKey}.${r.key}`
+        : `projects.selected_equipment.subSystems.${r.subsystemKey}.${r.key}`,
+      previousValue: r.previousValue,
+      newValue: r.newValue,
+    })),
+  };
+}
+
+/**
+ * AAC-7 §1(a) — the newest APPLIED reconciliation for (project, field, value).
+ *
+ * The idempotence half: once the mirrors are re-aligned a later generation finds
+ * no persisted divergence and must NOT write a second audit row. It still needs
+ * an audit REFERENCE to clear the requirement (releaseGates.deriveRequirementStatus:
+ * `resolved` without `resolutionAuditRef` stays OPEN), so it cites the row the
+ * original reconciliation already wrote.
+ */
+export async function findAppliedReconciliation(
+  projectId: string,
+  conflictField: string,
+  chosenValue: string,
+): Promise<{ id: string; reconciledAt: string; operatorId: string } | null> {
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT id, reconciled_at, operator_id
+    FROM equipment_reconciliation_audit
+    WHERE project_id = ${projectId}
+      AND conflict_field = ${conflictField}
+      AND status = 'applied'
+      AND chosen_value ->> 'value' = ${chosenValue}
+    ORDER BY reconciled_at DESC
+    LIMIT 1
+  `;
+  const r = (rows as any[])[0];
+  return r ? { id: String(r.id), reconciledAt: String(r.reconciled_at), operatorId: String(r.operator_id) } : null;
+}
+
+/**
+ * AAC WS-2 — read the TWO equipment stores a canonical-selection decision needs,
+ * in ONE query: the canonical `projects.selected_equipment` record (migration
+ * 101, which the permit POST never read — audit Path 1 "Critical") and
+ * `engineering_config.subSystems`, the doctrine owner of the per-subsystem
+ * equipment map (lib/db/projects.ts:763-770).
+ *
+ * READ-ONLY. Throws the raw Postgres error like every other function here; the
+ * permit path reads it through the resolver's shared `safeDbRead` guard.
+ */
+export async function readProjectEquipmentStores(projectId: string): Promise<{
+  selectedEquipment: Record<string, unknown> | null;
+  engineeringSubSystems: Record<string, unknown> | null;
+} | null> {
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT selected_equipment,
+           engineering_config -> 'subSystems' AS engineering_sub_systems
+    FROM projects WHERE id = ${projectId} LIMIT 1
+  `;
+  const r = (rows as any[])[0];
+  if (!r) return null;
+  const obj = (v: unknown): Record<string, unknown> | null =>
+    (v && typeof v === 'object' && !Array.isArray(v)) ? (v as Record<string, unknown>) : null;
+  return {
+    selectedEquipment: obj(r.selected_equipment),
+    engineeringSubSystems: obj(r.engineering_sub_systems),
   };
 }
 

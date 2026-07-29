@@ -57,6 +57,12 @@ export interface ReconciliationResult {
   reconciledAt: string;
   invalidations: InvalidationRecord[];
   status: 'applied' | 'failed';
+  /** AAC-7 §1(a) — the superseded MIRROR records re-aligned in the same
+   *  transaction (empty when the caller passed none). Without this the canonical
+   *  update landed on `projects.selected_equipment` while the subsystem mirrors
+   *  kept contradicting it, so every regeneration re-detected the same conflict
+   *  and appended another audit row. */
+  realignedMirrors?: Array<{ store: string; path: string; previousValue: string | null; newValue: string }>;
 }
 
 /** One invalidation the reconciliation produced. The closer wires digest-checks

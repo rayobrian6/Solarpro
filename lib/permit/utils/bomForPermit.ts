@@ -1018,6 +1018,54 @@ export function generateBOMForPermit(
     }
   }
 
+  // ── 5f.2 AAC WS-5 — PROCUREMENT CONSUMES THE TOPOLOGY OBJECT ────────────────
+  // bom-engine-v4 orders the trunk by DROP COUNT (one connector-drop per micro)
+  // because it is a pre-snapshot engine with no geometry. The Q-Cable topology
+  // object is the ONE derivation of the ordered cable, and the drop count is its
+  // LOWER BOUND: orderedSections = max(drops, ceil(required ÷ pitch)). Where the
+  // as-routed path needs more sections than one per micro (a row / array
+  // transition longer than the molded pitch), the order rises to the topology's
+  // section count and the surplus molded connectors become DEAD DROPS, each
+  // closed with the manufacturer's listed sealing cap. Both rows are corrected
+  // here from the same object, so the schedule, the BOM and the sheets can never
+  // state two different quantities again.
+  const _topoBom = peekSnapshot(input)?.electrical?.qcableTopology ?? null;
+  const _compositionAdopted =
+    peekSnapshot(input)?.electrical?.procurementSufficiency?.adoptedOptionId === 'derived-stock-order-composition';
+  if (_topoBom?.present && _topoBom.connectorSpacingFt && _compositionAdopted) {
+    const _sections = _topoBom.totals.orderedSections;
+    const _drops = _topoBom.totals.dropCount;
+    if (_sections > _drops) {
+      for (const it of merged) {
+        if (it.category !== 'trunk_cable') continue;
+        it.quantity = _sections;
+        it.formula = `${_drops} drop(s) + ${_sections - _drops} transition section(s) = ${_sections} connector section(s) `
+          + `(${_topoBom.totals.procurementLengthFt} ft at ${_topoBom.connectorSpacingFt} ft pitch)`;
+        it.derivedFrom = 'Q-Cable topology object (as-routed cable path — drops are the lower bound)';
+        it.description = `${it.description ?? ''} ORDERED FROM THE CABLE TOPOLOGY: ${_sections} section(s) `
+          + `= max(${_drops} drops, as-routed path ÷ ${_topoBom.connectorSpacingFt} ft pitch); `
+          + `${_topoBom.totals.rowTransitionCount} row + ${_topoBom.totals.arrayTransitionCount} array transition(s) consume more than one section.`;
+        log.push(`[bomForPermit] WS-5 trunk_cable quantity from topology: ${_drops} drops → ${_sections} sections (${_topoBom.totals.procurementLengthFt} ft)`);
+      }
+    }
+    if (_topoBom.deadDropTreatment.established && _topoBom.totals.sealingCapsRequired > 0) {
+      for (const it of merged) {
+        if (it.category !== 'sealing_cap') continue;
+        it.quantity = _topoBom.totals.sealingCapsRequired;
+        // ESTABLISHED, not pending: the unused-connector count is now a
+        // topology fact (ordered sections − occupied drops), not a field guess.
+        it.quantityState = 'established';
+        it.quantityStateLabel = undefined;
+        it.formula = `${_sections} ordered connector(s) − ${_drops} occupied drop(s) = ${_topoBom.totals.sealingCapsRequired} unused connector(s)`;
+        it.derivedFrom = 'Q-Cable topology object (dead drops) + the manufacturer unused-connector rule';
+        it.description = `${_topoBom.deadDropTreatment.sku ?? 'Sealing cap'} — one per UNUSED molded connector. `
+          + `TOPOLOGY-DERIVED, NOT 1-per-branch: ${_sections} drops ordered (connector sections) − ${_drops} occupied by micros `
+          + `= ${_topoBom.totals.sealingCapsRequired} unused connector(s), each capped. Basis: ${_topoBom.deadDropTreatment.basis}`;
+        log.push(`[bomForPermit] WS-5 sealing_cap quantity from topology dead drops: ${_topoBom.totals.sealingCapsRequired}`);
+      }
+    }
+  }
+
   // ── 5g. ECD §5 (W1-F) — the SUPPLY-SIDE TAP CONNECTOR row states its
   // CANDIDATE status from the AUTHORITY, not from prose baked into the engine.
   // bom-engine-v4 is a PRE-snapshot engine, so (exactly as 5e/5f) the seam is

@@ -26,6 +26,7 @@
 import type {
   BranchCablePath, ListedCableAssembly, CableExtensionSolution,
   ProcurementResolutionOption, ProcurementSufficiency,
+  QCableSolutionEvaluation, QCableTopology,
 } from './types';
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
@@ -160,6 +161,13 @@ export interface BuildProcurementSufficiencyArgs {
   /** candidate resolution solutions (empty on live today). */
   solutions?: CableExtensionSolution[];
   provenanceSource?: string;
+  // ── AAC WS-5 (2026-07-27) — the deterministic topology + its option-space
+  //    evaluation. Optional so every existing caller (tests, harnesses) is
+  //    unchanged; when supplied the gate RECORDS the evaluation instead of
+  //    announcing a bare deficit, and the drop-count basis stays visible beside
+  //    the adopted composition so the two reconcile on the artifact itself. ────
+  topology?: QCableTopology | null;
+  evaluation?: QCableSolutionEvaluation | null;
 }
 
 /**
@@ -217,13 +225,21 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
       + 'A manufacturer-documented allowance would RAISE this threshold (making the gate stricter).';
 
   const thresholdFt = round1(totalDesigned + requiredServiceLoopAllowanceFt);
-  const rawInsufficient = procurement < thresholdFt;
-  const deficitFt = rawInsufficient ? round1(thresholdFt - procurement) : 0;
-  const affectedBranchIds = rawInsufficient
-    ? branchPaths
-        .filter(p => (p.designedInstalledLengthFt ?? 0) > (p.procurementLengthFt ?? 0))
-        .map(p => p.branchId)
-    : [];
+  // AAC WS-5 — PER BRANCH **and** aggregate. A cable sufficient in aggregate
+  // while ONE branch's ordered footage is short of that branch's as-routed path
+  // is NOT sufficient: the branches are separate continuous runs and footage
+  // cannot move between them. (Before this the gate compared the sums only, so a
+  // short branch hid behind a long one.)
+  const shortBranches = branchPaths.filter(p =>
+    (p.designedInstalledLengthFt ?? 0) > (p.procurementLengthFt ?? 0));
+  const aggregateShort = procurement < thresholdFt;
+  const rawInsufficient = aggregateShort || shortBranches.length > 0;
+  const perBranchDeficitFt = shortBranches.reduce(
+    (s, p) => s + ((p.designedInstalledLengthFt ?? 0) - (p.procurementLengthFt ?? 0)), 0);
+  const deficitFt = rawInsufficient
+    ? round1(Math.max(aggregateShort ? thresholdFt - procurement : 0, perBranchDeficitFt))
+    : 0;
+  const affectedBranchIds = rawInsufficient ? shortBranches.map(p => p.branchId) : [];
   // When no single branch individually exceeds (only the Σ does), name all branches.
   const affected = affectedBranchIds.length ? affectedBranchIds : (rawInsufficient ? branchPaths.map(p => p.branchId) : []);
 
@@ -246,20 +262,36 @@ export function buildProcurementSufficiency(args: BuildProcurementSufficiencyArg
   }
 
   const insufficient = rawInsufficient && clearedBySolutionId == null;
+  // AAC WS-5 — the ADOPTED order composition (auto-adoptable only: same listed
+  // cable, same layout, same branch assignment) is already reflected in
+  // `procurement` above, because the caller passes the composed per-branch
+  // footage. Its identity is recorded so the artifact states WHY the ordered
+  // quantity differs from the drop-count basis.
+  const adoptedOptionId = args.evaluation?.adoptedOptionId ?? null;
+  /** did the ORDER AS PLACED (drop-count basis) already cover everything? If it
+   *  did, nothing was resolved — the design was simply sufficient. */
+  const stockAsOrderedViable = args.evaluation
+    ? (args.evaluation.options.find(o => o.optionId === 'stock-as-ordered')?.viable ?? true) : true;
   const verificationStatus: ProcurementSufficiency['verificationStatus'] =
-    !rawInsufficient ? 'sufficient'
+    !rawInsufficient
+      ? ((adoptedOptionId === 'derived-stock-order-composition' && !stockAsOrderedViable)
+          ? 'resolved-by-derived-order-composition' : 'sufficient')
       : clearedBySolutionId != null ? 'resolved-by-verified-solution'
         : 'insufficient-unresolved';
 
   return {
     present: true, assemblyId: assembly.assemblyId, sku: assembly.sku,
     connectorSpacingFt: pitch, wasteFactor: waste,
-    perBranch, totalDesignedInstalledFt: totalDesigned, procurementLengthFt: procurement, procurementDerivation,
+    perBranch, totalDesignedInstalledFt: totalDesigned, procurementLengthFt: procurement,
+    procurementDerivation: args.topology ? args.topology.derivation : procurementDerivation,
     requiredServiceLoopAllowanceFt, allowanceProvenance, allowanceNote,
     thresholdFt, deficitFt, insufficient, affectedBranchIds: affected,
     resolutionOptions: resolutionOptions(clearingKind),
     manufacturerDocumentAuthority: null,
     verificationStatus, solutions, clearedBySolutionId, clearance,
+    dropBasisProcurementLengthFt: args.topology?.totals.dropBasisProcurementLengthFt ?? null,
+    solutionEvaluation: args.evaluation ?? null,
+    adoptedOptionId,
     provenance,
   };
 }
@@ -286,5 +318,27 @@ export function procurementInsufficiencyPayload(ps: ProcurementSufficiency): Rec
     resolutionOptions: ps.resolutionOptions,
     manufacturerDocumentAuthority: ps.manufacturerDocumentAuthority,
     verificationStatus: ps.verificationStatus,
+    // ── AAC WS-5 — the OPTION EVALUATION rides in the payload. The blocker no
+    //    longer states a bare shortage: it states every option the engine
+    //    evaluated, each option's per-branch and aggregate numbers, the ranked
+    //    viable set, the recommendation and the precise unresolved reason. ────
+    dropBasisProcurementLengthFt: ps.dropBasisProcurementLengthFt ?? null,
+    adoptedOptionId: ps.adoptedOptionId ?? null,
+    optionEvaluation: ps.solutionEvaluation
+      ? {
+          sizingRequirementFt: ps.solutionEvaluation.sizingRequirementFt,
+          currentProcurementFt: ps.solutionEvaluation.currentProcurementFt,
+          measuredDeficitFt: ps.solutionEvaluation.measuredDeficitFt,
+          recommendedOptionId: ps.solutionEvaluation.recommendedOptionId,
+          unresolvedReason: ps.solutionEvaluation.unresolvedReason,
+          residualFieldDependent: ps.solutionEvaluation.residualFieldDependent,
+          options: ps.solutionEvaluation.options.map(o => ({
+            optionId: o.optionId, kind: o.kind, title: o.title, viable: o.viable, rank: o.rank,
+            autoAdoptable: o.autoAdoptable, adopted: o.adopted, changesPhysicalDesign: o.changesPhysicalDesign,
+            aggregateRequiredFt: o.aggregateRequiredFt, aggregateProvidedFt: o.aggregateProvidedFt,
+            perBranch: o.perBranch, requiresAction: o.requiresAction, blockingReasons: o.blockingReasons,
+          })),
+        }
+      : null,
   };
 }

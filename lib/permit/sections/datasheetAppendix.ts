@@ -11,7 +11,10 @@ import type { PermitInput } from '../types';
 import { titleBlock } from '../utils/titleBlock';
 import { escapeH } from '../utils/drawing';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, BATTERIES } from '@/lib/equipment-db';
-import { getManufacturerAsset, getManufacturerAssetsByCategory, evaluateDocumentApplicability, type ManufacturerAsset, type DocumentApplicability } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, getManufacturerAssetsByCategory, type ManufacturerAsset, type DocumentApplicability } from '@/lib/manufacturer-assets-db';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability } from '@/lib/permit/snapshot/documentAuthority';
+import { peekSnapshot } from '@/lib/permit/snapshot/read';
 import { getRegistryEntryV4 } from '@/lib/equipment-registry-v4';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { resolveModuleDatasheetExactness, type ModuleDatasheetExactness } from '../snapshot/equipmentProjection';
@@ -90,7 +93,14 @@ export function resolveEquipmentDatasheets(input: PermitInput): DatasheetEntry[]
   // probably applicable but unproven). No alias is fabricated.
   const _mountAsset = getManufacturerAsset(mountId, 'racking_detail');
   const _mountSys = mountId ? getMountingSystemById(mountId) : undefined;
-  const _mountAppl = evaluateDocumentApplicability(_mountSys?.model ?? _mountAsset?.model, _mountAsset, null);
+  // AAC WS-9 RENDERER PURITY — projected from the frozen snapshot region, with
+  // the real registry facts the retrieval resolver established. Never decided
+  // here, and never with a `null` facts argument.
+  const _mountAppl = sheetDocumentApplicability({
+    region: peekSnapshot(input)?.equipmentDocumentAuthority ?? null,
+    category: 'racking_detail', equipmentId: mountId,
+    selectedModel: _mountSys?.model ?? _mountAsset?.model, asset: _mountAsset,
+  });
   push('RACKING MOUNT', _mountAsset, { docApplicability: _mountAppl });
 
   // 2. The RAIL product datasheet for rail-paired mounts (e.g. RT-MINI pad +

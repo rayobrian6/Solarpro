@@ -22,6 +22,20 @@ export interface AhjRecord {
   address?: string;
   // NEC
   necVersion: '2017' | '2020' | '2023';
+  // ── AAC WS-3 (2026-07-27) — the OTHER adopted code editions ────────────────
+  // The curated/expanded tables carry NONE of these (they are `undefined` there,
+  // which is the honest state: this table has no adoption ordinance, no effective
+  // date and no hash, so it can never clear CODE-AUTHORITY-INCOMPLETE on its own).
+  // They are populated ONLY by a live SunSpec/Orange Button registry retrieval
+  // (mapRegistryToAhjRecord), whose response carries BuildingCode /
+  // ResidentialCode / FireCode — previously received and discarded.
+  ibcVersion?: string;
+  ircVersion?: string;
+  ifcVersion?: string;
+  /** the exact endpoint the editions were retrieved from (registry_live only). */
+  codeSourceUrl?: string;
+  /** ISO timestamp of the retrieval (registry_live only). */
+  codeRetrievedAtIso?: string;
   localAmendments: string[];
   // Permit
   permitRequired: boolean;

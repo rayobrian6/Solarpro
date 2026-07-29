@@ -7,7 +7,9 @@
 // COVER); SVG variant for the drawing sheets (PV-1 / PV-3).
 // ═══════════════════════════════════════════════════════════════════════════
 import type { PermitDesignSnapshot } from '../snapshot/types';
+import type { PermitInput } from '../types';
 import { structuralBanner, type StructuralBanner } from '../snapshot/structuralProjection';
+import { isPermitProfile, sheetIsDirectlyGated } from '../plansetProfile';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -16,10 +18,18 @@ const esc = (s: string): string =>
  *  warn). Pass either a snapshot or a pre-computed banner. */
 export function structuralBannerHtml(
   src: PermitDesignSnapshot | StructuralBanner | null | undefined,
-  opts?: { compact?: boolean },
+  opts?: { compact?: boolean; input?: PermitInput | null; sheetId?: string | null },
 ): string {
   const b: StructuralBanner = isBanner(src) ? src : structuralBanner(src ?? null);
   if (!b.show) return '';
+  // AAC WS-10 — in the PERMIT profile the package headline is stated ONCE, on
+  // the cover. A sheet keeps its banner only while its OWN content is gated —
+  // i.e. an unresolved requirement in the registry names this sheet in its
+  // affectedSheets. Structural sheets therefore keep the banner while a
+  // structural gate is open; a sheet with no gated content stops repeating the
+  // package status. Nothing is hidden: the requirement is still in the
+  // registry, still counted by the gates, and still named on the cover line.
+  if (opts?.input && isPermitProfile(opts.input) && !sheetIsDirectlyGated(opts.input, opts.sheetId)) return '';
   // W10 (RP-D): render the UNION of every active blocker (b.blockers already IS
   // the union from the registry) — NEVER the structural-else-everything ternary
   // that hid the equipment-identity / code / tap / fill / identity blockers.
@@ -33,14 +43,23 @@ export function structuralBannerHtml(
   // never "N more active release blockers" (which read as N independent
   // failures). The requirement rows themselves are unchanged — every active
   // requirement the old banner enumerated is still enumerated here.
+  // AAC WS-10 — RS-1 is not in the permit set, so a banner that survives there
+  // points at the record that DOES hold every requirement (the in-app review
+  // record). Same count, same requirements — only the reference is corrected;
+  // a dangling "see sheet RS-1" would be a lie about the package.
+  const _permit = !!opts?.input && isPermitProfile(opts.input);
+  const _registryRef = _permit ? 'see the project review record in the application' : 'see sheet RS-1 (REVIEW STATUS)';
   const reasons = _shown.map(x => `<li style="margin:0 0 1px 0;">${esc(x.message)}</li>`).join('')
-    + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more unresolved release requirement${_more === 1 ? '' : 's'} — see sheet RS-1 (REVIEW STATUS)</li>` : '');
+    + (_more > 0 ? `<li style="margin:0 0 1px 0;font-style:italic;">+ ${_more} more unresolved release requirement${_more === 1 ? '' : 's'} — ${_registryRef}</li>` : '');
   const pad = opts?.compact ? '4px 8px' : '8px 12px';
   // RGM §4 — the package TOTAL line, single-sourced from the release-gate model
   // (releasePackageLine on the projection). Rendered above the requirement rows
   // so a reviewer reads "7 root gates" before the 19 child requirements.
-  const gateLine = b.releasePackageLine
-    ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:#7f1d1d;text-align:center;margin-top:2px;">${esc(b.releasePackageLine)}</div>`
+  const _packageLine = b.releasePackageLine && _permit
+    ? b.releasePackageLine.replace('SEE RS-1 FOR ALL', 'SEE THE PROJECT REVIEW RECORD FOR ALL')
+    : b.releasePackageLine;
+  const gateLine = _packageLine
+    ? `<div data-release-package-line="1" style="font-weight:900;font-size:8.5px;letter-spacing:0.4px;color:#7f1d1d;text-align:center;margin-top:2px;">${esc(_packageLine)}</div>`
     : '';
   return `
   <div class="struct-review-banner" style="margin:${opts?.compact ? '4px 0' : '6px 0'};border:2px solid #b91c1c;background:#fef2f2;padding:${pad};page-break-inside:avoid;">

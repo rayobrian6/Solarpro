@@ -33,10 +33,24 @@ import { neon } from '@neondatabase/serverless';
 export const REGISTRY_DEPLOYMENT: Record<string, { expectedTables: string[] }> = {
   '113': { expectedTables: ['manufacturer_document_registry'] },
   '114': { expectedTables: ['equipment_reconciliation_audit', 'snapshot_digest_invalidations'] },
+  // AAC WS-6 (2026-07-27) — the personnel-roles store: the designer / preparer /
+  // reviewer / engineer-of-record / approving-engineer roles of record. Same
+  // shape of migration as 113/114 (pure additive CREATE TABLE / CREATE INDEX
+  // IF NOT EXISTS, no ALTER, no seeded rows, no vendor default), so it goes
+  // through the same statically-verified, identifier-scoped permit.
+  '115': { expectedTables: ['personnel_roles', 'project_personnel_assignments'] },
+  // AAC WS-8 / WS-9 (2026-07-27) — the digest-bound engineering-review record.
+  // What makes ENGINEERING-REVIEW-PENDING clearable by a REAL licensed workflow
+  // instead of being structurally unclearable. Same migration shape as 113-115
+  // (pure additive CREATE TABLE / CREATE INDEX IF NOT EXISTS, no ALTER, no
+  // seeded rows, and — critically — no seeded approval), so it goes through the
+  // same statically-verified, identifier-scoped permit. Run AFTER 115: the
+  // reviewer role vocabulary it enforces is migration 115's.
+  '116': { expectedTables: ['engineering_review_records'] },
 };
 
 /** The migration identifiers this module governs, in ceremony order. */
-export const REGISTRY_SEQUENCE = ['113', '114'] as const;
+export const REGISTRY_SEQUENCE = ['113', '114', '115', '116'] as const;
 
 function getRawSql() {
   const url = process.env.DATABASE_URL;

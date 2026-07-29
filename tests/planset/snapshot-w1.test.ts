@@ -22,6 +22,10 @@ export function baseSnapshot(): PermitDesignSnapshot {
     ({ kind, edition, standard: kind.toUpperCase(), source: 'ahj-record' as const,
        provenance: { source: 'test' } });
   return {
+    // AAC WS-9 — the equipment-document authority region is decided once in the
+    // pure build; a hand-rolled test snapshot carries the empty map (no assets
+    // are being cited by this fixture).
+    equipmentDocumentAuthority: { entries: {}, registryFacts: {}, aliases: {} },
     // W4 §1 — a VERIFIED code-authority record (test-only) so V11 passes with no
     // CODE-AUTHORITY-INCOMPLETE blocker required.
     codeAuthority: {

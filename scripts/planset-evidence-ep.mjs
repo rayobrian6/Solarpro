@@ -206,11 +206,26 @@ gate(12, 'equipment-document-applicability',
   `applicabilityBlocker=${docApplBlocker} ds3MarkedNonAuthoritative=${g12_ds3NonAuth}`, null);
 
 // ═══ GATE 13 — every visible pending authority is in the registry. ═══════════
+// AAC-5 RE-VOCABULARY: the WS-8 structural separation deleted the `_capGated`
+// echo, so FASTENER-ASSEMBLY-UNVERIFIED no longer fires on an assembly whose
+// mount base is fully verified and whose OPEN question is the rail-capacity
+// DOCUMENT. The rendered "PENDING VERIFIED FASTENER ASSEMBLY" line is still
+// correct there (the projection is capacity-gated), but the requirement that
+// governs it now lives in the capacity vocabulary. The gate's intent — nothing
+// renders as pending without a REGISTERED requirement behind it — is unchanged;
+// it now accepts EITHER owner and names which one it found. Registry silence in
+// both vocabularies remains a failure.
 const fastenerVisible = html.includes('PENDING VERIFIED FASTENER ASSEMBLY');
-const fastenerRegistered = registryCodes.includes('FASTENER-ASSEMBLY-UNVERIFIED');
+const FASTENER_GOVERNING_CODES = [
+  'FASTENER-ASSEMBLY-UNVERIFIED',
+  'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+  'RACKING-CAPACITY-APPLICABILITY-GAP',
+  'ATTACHMENT-CAPACITY-SOURCE-MISSING',
+];
+const fastenerGoverning = FASTENER_GOVERNING_CODES.filter(c => registryCodes.includes(c));
 gate(13, 'visible-pending-authority-in-registry',
-  !fastenerVisible || fastenerRegistered,
-  `fastenerPendingVisible=${fastenerVisible} FASTENER-ASSEMBLY-UNVERIFIED-in-registry=${fastenerRegistered}`, null);
+  !fastenerVisible || fastenerGoverning.length > 0,
+  `fastenerPendingVisible=${fastenerVisible} governingRequirementsInRegistry=${fastenerGoverning.join(',') || 'none'}`, null);
 
 // ═══ GATE 14 — unverified spacing never "maximum allowed". ═══════════════════
 const g14_maxOc = /48"?\s*max(?:imum)?\s*(?:allowed\s*)?O\.?C/i.test(html)
@@ -316,9 +331,26 @@ gate(20, 'evidence-equals-rendered', mismatches.length === 0,
 // The §Q gate. In BOTH modes the sufficiency object must be present and CONSISTENT
 // with the registry (insufficient ⇔ QCABLE-PROCUREMENT-INSUFFICIENT blocker), and
 // when short the deficit + NON-ORDERABLE + PROCUREMENT INSUFFICIENCY must render on
-// PV-4B/SCHED/RS-1. Mode expectation (Ray's honest states): the FROZEN FIXTURE
-// (original) is SUFFICIENT (no blocker); the LIVE design is SHORT (blocker PRESENT).
+// PV-4B/SCHED/RS-1.
+//
+// AAC-4 (WS-5) SUPERSEDES THE OLD MODE EXPECTATION. This gate used to hardcode
+// "the frozen fixture is SUFFICIENT, the live design is SHORT". That encoded the
+// answer of the AGGREGATE-only sufficiency check. The WS-5 topology engine
+// evaluates PER BRANCH, and the frozen fixture is the textbook case the campaign
+// was built to catch: 152 ft ordered vs 140.5 ft designed is sufficient IN
+// AGGREGATE while branch B2 (58.3 ft designed vs 49 ft procured) is 9.3 ft short.
+// Asserting the old expectation would demand the engine go back to hiding a real
+// per-branch deficit. The mode expectation is therefore replaced by the ENGINE'S
+// OWN verdict plus the two things that make it non-vacuous: the per-branch basis
+// must be populated, and an insufficiency must NAME the branches it comes from.
 const g21_present = !!_ps && _ps.present === true;
+const g21_perBranchPopulated = g21_present && Array.isArray(_ps.perBranch) && _ps.perBranch.length > 0
+  && _ps.perBranch.every(b => b.branchId && b.designedInstalledLengthFt != null && b.procurementLengthFt != null);
+// an insufficiency must be attributable: which branch(es), and a threshold that
+// is not merely the aggregate sum restated.
+const g21_deficitAttributed = !g21_present || !_ps.insufficient
+  || (Array.isArray(_ps.affectedBranchIds) && _ps.affectedBranchIds.length > 0
+      && _ps.affectedBranchIds.every(id => _ps.perBranch.some(b => b.branchId === id)));
 const g21_consistent = g21_present && (!!_ps.insufficient === _qcableBlocker);
 const g21_renderedWhenShort = !g21_present || !_ps.insufficient
   || (new RegExp(`${_ps.deficitFt}\\s*ft`).test(html)
@@ -326,16 +358,20 @@ const g21_renderedWhenShort = !g21_present || !_ps.insufficient
       && /QCABLE-PROCUREMENT-INSUFFICIENT/.test(html));
 const g21_allowanceHonest = !g21_present
   || (_ps.requiredServiceLoopAllowanceFt === 0 && _ps.allowanceProvenance === 'no-allowance-authority-recorded');
-const g21_modeOk = MODE === 'live'
-  ? (g21_present && _ps.insufficient === true && _qcableBlocker)
-  : (g21_present && _ps.insufficient === false && !_qcableBlocker);
 gate(21, 'qcable-procurement-sufficiency',
-  g21_present && g21_consistent && g21_renderedWhenShort && g21_allowanceHonest && g21_modeOk,
+  g21_present && g21_consistent && g21_renderedWhenShort && g21_allowanceHonest
+  && g21_perBranchPopulated && g21_deficitAttributed,
   `mode=${MODE} present=${g21_present} insufficient=${_ps ? _ps.insufficient : null} blocker=${_qcableBlocker} `
   + `designed=${_ps ? _ps.totalDesignedInstalledFt : null} proc=${_ps ? _ps.procurementLengthFt : null} `
-  + `deficit=${_ps ? _ps.deficitFt : null} consistent=${g21_consistent} renderedWhenShort=${g21_renderedWhenShort} `
-  + `allowanceHonest=${g21_allowanceHonest} modeOk=${g21_modeOk}`,
-  _ps ? { insufficient: _ps.insufficient, deficitFt: _ps.deficitFt, verificationStatus: _ps.verificationStatus } : null);
+  + `deficit=${_ps ? _ps.deficitFt : null} branches=${_ps && _ps.perBranch ? _ps.perBranch.length : 0} `
+  + `affected=${_ps && _ps.affectedBranchIds ? (_ps.affectedBranchIds.join(',') || 'none') : 'none'} `
+  + `consistent=${g21_consistent} renderedWhenShort=${g21_renderedWhenShort} `
+  + `allowanceHonest=${g21_allowanceHonest} perBranchPopulated=${g21_perBranchPopulated} `
+  + `deficitAttributed=${g21_deficitAttributed}`,
+  _ps ? {
+    insufficient: _ps.insufficient, deficitFt: _ps.deficitFt, verificationStatus: _ps.verificationStatus,
+    perBranch: _ps.perBranch, affectedBranchIds: _ps.affectedBranchIds,
+  } : null);
 
 // ═══ GATE 22 — BAR WS-E electrical gates, CHAINED (fail-closed). ══════════════
 // docs/BLOCKER-AUTHORITY-RECONCILIATION-DIRECTIVE.md §4/§5/§7/§8 (permanent gates

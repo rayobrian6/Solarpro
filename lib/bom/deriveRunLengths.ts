@@ -355,12 +355,17 @@ export interface BranchCablePathResult {
   derivation: string;
 }
 
-/** Deterministic nearest-neighbour ordering length (ft) through a point set,
- *  starting at the min-x (then min-y) extreme. Returns the summed centre-to-centre
- *  path distance (0 for <2 points). */
-function nearestNeighbourPathFt(pts: { x: number; y: number }[]): number {
+/**
+ * THE deterministic cable ordering through a branch's micro positions: a
+ * nearest-neighbour chain from the min-x (then min-y) extreme. Returns the
+ * ORDER (indices into `pts`) — the single source both the length derivation
+ * below and the AAC WS-5 Q-Cable topology engine
+ * (lib/permit/snapshot/qcableTopology.ts) consume, so the two can never disagree
+ * about which module the cable reaches next.
+ */
+export function orderBranchCableChain(pts: { x: number; y: number }[]): number[] {
   const n = pts.length;
-  if (n < 2) return 0;
+  if (n === 0) return [];
   let start = 0;
   for (let i = 1; i < n; i++) {
     if (pts[i].x < pts[start].x || (pts[i].x === pts[start].x && pts[i].y < pts[start].y)) start = i;
@@ -379,12 +384,26 @@ function nearestNeighbourPathFt(pts: { x: number; y: number }[]): number {
     order.push(best);
     used[best] = true;
   }
-  let len = 0;
-  for (let i = 1; i < order.length; i++) {
-    const a = pts[order[i - 1]], c = pts[order[i]];
-    len += Math.hypot(a.x - c.x, a.y - c.y);
+  return order;
+}
+
+/** The per-hop centre-to-centre distances along `orderBranchCableChain`. */
+export function branchChainSegmentsFt(pts: { x: number; y: number }[], order?: number[]): number[] {
+  const ord = order ?? orderBranchCableChain(pts);
+  const out: number[] = [];
+  for (let i = 1; i < ord.length; i++) {
+    const a = pts[ord[i - 1]], c = pts[ord[i]];
+    out.push(Math.hypot(a.x - c.x, a.y - c.y));
   }
-  return len;
+  return out;
+}
+
+/** Deterministic nearest-neighbour ordering length (ft) through a point set,
+ *  starting at the min-x (then min-y) extreme. Returns the summed centre-to-centre
+ *  path distance (0 for <2 points). */
+function nearestNeighbourPathFt(pts: { x: number; y: number }[]): number {
+  if (pts.length < 2) return 0;
+  return branchChainSegmentsFt(pts).reduce((s, d) => s + d, 0);
 }
 
 /**

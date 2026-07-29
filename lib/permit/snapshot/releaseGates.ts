@@ -37,6 +37,10 @@
 
 import type { PermitInput } from '../types';
 import type { PermitDesignSnapshot, PermitReadinessBlocker } from './types';
+// AAC WS-1 — resolution/types is a LEAF (its own imports are all type-only), so
+// this edge is safe: the lifecycle imports THIS module for the declarations and
+// nothing in resolution/types imports back.
+import { RESOLUTION_MODES, isAutomaticMode, type ResolutionMode } from './resolution/types';
 import { SEVERITY_POLICY, type SeverityImpact } from './severityPolicy';
 import { peekSnapshot } from './read';
 
@@ -318,6 +322,33 @@ export interface RequirementDeclaration {
   title: string;
   /** which result this unresolved input blocks (required for RG-5 children). */
   affects?: string;
+
+  // ── AAC WS-1 — THE RESOLUTION-MODE DECLARATION (additive; the release-gate
+  //    projection above is unchanged by these fields). One mode per requirement,
+  //    from the AAC-0 source-path audit's honest classification (§2, §4.1). ────
+  /** the directive's five-class resolution mode. An ADMINISTRATIVE hold is an
+   *  OPERATOR_CONFIRMATION whose findingType is already ADMINISTRATIVE_HOLD —
+   *  the domain convention that exists, not a duplicate enum value. */
+  resolutionMode: ResolutionMode;
+  /** SPLIT codes: the mode of the portion that legitimately REMAINS after the
+   *  automatic portion resolves (audit's "correct mode — split" rows). */
+  residualMode?: ResolutionMode;
+  /** the resolver that OWNS clearing this code TODAY. null ⇒ the owning resolver
+   *  arrives in a later phase (`resolverPhase`); the lifecycle surfaces that
+   *  loudly as RESOLVER-NOT-IMPLEMENTED evidence and never treats the
+   *  requirement as silently final. */
+  resolverId?: string | null;
+  /** which AAC phase delivers the owning resolver (documentary). */
+  resolverPhase?: string;
+  /** WHERE the owning resolver runs. 'lifecycle' (default) = the async resolver
+   *  stage in the permit route (store / provider / document reads). 'derived' =
+   *  the SYNCHRONOUS design-geometry stage inside the snapshot build
+   *  (resolution/derived.ts), which is the only point at which the CAD model,
+   *  the canonical electrical engine result and the branch assignment exist.
+   *  Both stages share the framework's clearance/evidence/audit-ref contract. */
+  resolverStage?: 'lifecycle' | 'derived';
+  /** WHY this mode — the audit anchor. Required (validateReleaseGateMap). */
+  modeBasis: string;
 }
 
 export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = {
@@ -327,18 +358,36 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   'CODE-AUTHORITY-INCOMPLETE': {
     gateId: 'RG-1', findingType: 'PENDING_AUTHORITY',
     title: 'Adopted code editions not established from an archived AHJ adoption document',
+    resolutionMode: 'AUTO_RETRIEVED', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: 'code-authority@v1', resolverPhase: 'AAC-3 (delivered)',
+    modeBasis: 'Audit §2.1 — lookupAhjFromRegistry already RETURNS BuildingCode/FireCode/ResidentialCode per lat/lng and '
+      + 'mapRegistryToAhjRecord discarded them (ahjRegistry.ts:83, FIXED in AAC-3). The retrieval now carries the adopted '
+      + 'editions with source URL, retrieval timestamp, SHA-256 and confidence; the curated ahj-national record is admitted '
+      + 'as a CORROBORATOR only and can never establish an edition alone. OPERATOR_CONFIRMATION only for boundary conflicts '
+      + '/ disagreeing sources, with both sources shown.',
   },
   // Address / APN / municipal boundary / AHJ / fire authority are operator-posted
   // or postally inferred. Postal inference is not verification.
   'PROJECT-AUTHORITY-UNVERIFIED': {
     gateId: 'RG-1', findingType: 'PENDING_AUTHORITY',
     title: 'Project legal authority (address, APN, boundary, AHJ, fire) not verified from an official source',
+    resolutionMode: 'AUTO_RETRIEVED', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: 'project-authority@v1', resolverPhase: 'AAC-3 (delivered)',
+    modeBasis: 'Audit §2.2 — lib/enrichment/propertyEnricher.ts (ATTOM → Census → Nominatim) existed and was simply not '
+      + 'called from the permit path; AAC-3 wires it as project-authority@v1 and adds the municipal-boundary evidence the '
+      + 'chain was discarding. Postal inference is still NOT verification: a field clears only when an official source '
+      + 'returned it for this exact address. OPERATOR_CONFIRMATION for incorporated/unincorporated ambiguity or a '
+      + 'county/AHJ disagreement.',
   },
   // §7 MANDATED: a non-production project name is an ADMINISTRATIVE HOLD — it is
   // NOT a structural or electrical failure and must never be presented as one.
   'PROJECT-NAME-NONPRODUCTION': {
     gateId: 'RG-1', findingType: 'ADMINISTRATIVE_HOLD',
     title: 'Non-production project identity (name contains "TEST")',
+    resolutionMode: 'OPERATOR_CONFIRMATION', resolverId: null,
+    modeBasis: 'Audit §2.3 / §3.4 — ADMINISTRATIVE (the finding type already says so). The engine cannot invent a production '
+      + 'name and must never rename a user project, so there is no automatic mode: one operator field edit. Re-sourcing the permit '
+      + 'identity to the verified property record (§2.2) is a Ray decision, not an engine demotion.',
   },
 
   // ── RG-2 EQUIPMENT_RECONCILIATION (2 + 1 advisory) ────────────────────────
@@ -347,12 +396,23 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   'EQUIPMENT-IDENTITY-CONFLICT': {
     gateId: 'RG-2', findingType: 'TECHNICAL_CONFLICT',
     title: 'Stored module identity conflicts with the fleet module of record',
+    resolutionMode: 'AUTO_DERIVED', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: 'canonical-equipment-selection@v1', resolverPhase: 'AAC-2 (delivered)',
+    modeBasis: 'Audit §2.4 / WS-2 — one live fleet selection vs one stale mirror is a RANKING, not a conflict; '
+      + 'reconcileEquipmentIdentity (reconcile.ts:77) already performs it and is never called from the permit path. It stays '
+      + 'OPERATOR_CONFIRMATION ONLY when two genuinely EXPLICIT user selections disagree.',
   },
   // The on-file document is a family/range page — the exact-wattage source is
   // absent. A missing DOCUMENT, not a failed value.
   'MODULE-EXACT-DATASHEET-PENDING': {
     gateId: 'RG-2', findingType: 'PENDING_DOCUMENT',
     title: 'Exact-wattage module datasheet not on file (family/range page only)',
+    resolutionMode: 'AUTO_DERIVED', residualMode: 'AUTO_RETRIEVED',
+    resolverId: 'module-datasheet-binding@v1', resolverPhase: 'AAC-2 (derived half delivered; exact-datasheet retrieval AAC-3/AAC-5)',
+    modeBasis: 'Audit §2.5 — the selected wattage is never compared against the parsed [lo,hi] range the document title '
+      + 'already states (equipmentProjection.ts:186-215). Derived: the range check (delivered — a covering series sheet is now '
+      + 'distinguishable from a non-covering one, and the attempted registry binding + precisely-named missing document are on '
+      + 'the record). Retrieved: the registry binding naming the exact page/column.',
   },
   // Advisory (severityPolicy: touches no acceptance axis) — the finding type is
   // forced to ADVISORY from the registry severity, and it is counted in
@@ -360,107 +420,209 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   'EQUIPMENT-DOCUMENT-UNVERIFIED': {
     gateId: 'RG-2', findingType: 'ADVISORY',
     title: 'Microinverter manufacturer datasheet not archived (parameters already from the equipment record)',
+    resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'Audit §2.5 note — a manufacturer datasheet archival, identical in class to the other document blockers. '
+      + 'Advisory by severity policy (touches no acceptance axis); not active on Braidon.',
   },
 
   // ── RG-3 ENVIRONMENTAL_LOAD_AUTHORITY (1) ─────────────────────────────────
   'ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED': {
     gateId: 'RG-3', findingType: 'PENDING_AUTHORITY',
     title: 'Wind / exposure / risk / snow criteria not established from an archived climate-hazard source',
+    resolutionMode: 'AUTO_RETRIEVED',
+    resolverId: 'environmental-load-authority@v1', resolverPhase: 'AAC-3 (delivered)',
+    modeBasis: 'Audit §2.6 — the EnvironmentalLoadAuthority RECORD already satisfied WS-4 completely; only the retrieval + '
+      + 'archival were missing. AAC-3 adds both: climate-hazard-document@v1 looks for an archived, currency-reviewed source '
+      + 'first (it outranks a fresh read and is the durable cache), and environmental-load-authority@v1 otherwise retrieves '
+      + 'wind / ground snow / seismic / elevation from the ASCE 7 hazard datasets + USGS, archives the retrieval, and makes '
+      + 'the CALCULATED as well as the displayed values derive from the record. Operator entry remains an '
+      + 'OBSERVATION/OVERRIDE and is audited beside the retrieval, never in place of it.',
   },
   // legacy alias (subsumed by the above; classifyBlockerDomain still maps it)
   'WIND-SNOW-AUTHORITY-UNRESOLVED': {
     gateId: 'RG-3', findingType: 'PENDING_AUTHORITY',
     title: 'Wind / snow design criteria unresolved (legacy code — superseded by ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED)',
+    resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-3',
+    modeBasis: 'Legacy alias of ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED; same mode, retired emitter.',
   },
 
   // ── RG-4 STRUCTURAL_ASSEMBLY_AUTHORITY (6 Braidon + the rest of the lane) ──
   'FRAMING-AUTHORITY-UNVERIFIED': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Framing CAPACITY authority not established (operator-entered geometry is observation, not capacity)',
+    resolutionMode: 'AUTO_RETRIEVED', residualMode: 'PROFESSIONAL_APPROVAL',
+    resolverId: 'framing-capacity-document@v1',
+    resolverPhase: 'AAC-5 (delivered — retrieval attempt + review path B wired; residual is PROFESSIONAL_APPROVAL)',
+    modeBasis: 'Audit §2.7 SPLIT — (a) AUTO_RETRIEVED where a truss design drawing / manufacturer structural calc exists '
+      + 'for the building (wired now); (b) an AUTO_DERIVED prescriptive IRC/AWC span tier over the captured FramingObservation '
+      + 'geometry (AAC-5); (c) PROFESSIONAL_APPROVAL for a stick-framed existing residence with neither — licensed judgement, correctly.',
   },
   'PENDING-RACKING-ASSEMBLY-SELECTION': {
     gateId: 'RG-4', findingType: 'PENDING_SELECTION',
     title: 'Exact racking assembly (rail / splice SKU) not selected',
+    resolutionMode: 'AUTO_DERIVED', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: 'racking-assembly-selection@v1', resolverPhase: 'AAC-5 (delivered — split from the capacity predicate)',
+    modeBasis: 'Audit §2.8 — TWO requirements wore one name and AAC-5 SPLIT them: the `_assemblyPending` leg was a pure '
+      + 'duplicate of the capacity-document predicate (§2.9) and no longer emits this code, so this requirement is now the '
+      + 'RAIL SELECTION alone. racking-assembly-selection@v1 probes every store a rail could live in — the project record, '
+      + 'projects.selected_equipment, engineering_config.subSystems, and the mount product itself — and RESOLVES the code '
+      + 'when the selected mount is a single-manufacturer railed system (the rail is inherent in the product) or is '
+      + 'rail-less. For a MIXED-MANUFACTURER mount no rail exists in any store and the catalog RailSpec carries no part '
+      + 'number, so the residual is a genuine design + procurement decision the engine must not fabricate '
+      + '(OPERATOR_CONFIRMATION). What automation still owes, and now delivers, is that the operator never RESEARCHES: the '
+      + 'resolver derives the span-screened candidate list from the mount own documented compatibility statement, so the '
+      + 'remaining act is one pick from a scored shortlist.',
   },
   'FASTENER-ASSEMBLY-UNVERIFIED': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Roof-attachment fastener assembly withdrawal-capacity authority not established',
+    resolutionMode: 'AUTO_RETRIEVED',
+    resolverId: 'racking-documents@v1', resolverPhase: 'AAC-5 (delivered — the _capGated echo is deleted)',
+    modeBasis: 'Audit §2.11 — the fastener assembly is ALREADY verified for the mount base (lag/screw model + count + '
+      + 'embedment + the ICC-ES evaluation report); it fired purely as a `_capGated` echo of §2.9, contradicting its own '
+      + 'documentation that the mount-BASE fastener is verifiable independent of the rail selection. AAC-5 deletes the echo '
+      + 'term, so this code now fires ONLY when the fastener element itself is incomplete or carries no source document — '
+      + 'which is what the severity policy always said it meant.',
   },
   // §7 MANDATED: capacity NOT YET ESTABLISHED from verified authority — a PENDING
   // DOCUMENT. Never failure wording; no capacity has been shown to be inadequate.
   'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED': {
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'Racking capacity source document not archived — capacity not yet established',
+    resolutionMode: 'AUTO_RETRIEVED',
+    resolverId: 'racking-documents@v1', resolverPhase: 'AAC-5 (delivered — retrieval + hash + archival)',
+    modeBasis: 'Audit §2.9 — ONE manufacturer PDF. racking-documents@v1 now FETCHES the published stamped letter (per state '
+      + 'and per adopted ASCE edition), refuses a soft-404 HTML body, hashes the exact bytes and archives them through the '
+      + 'document registry. Retrieval establishes EXISTENCE and BYTES; the pure evaluateRackingCapacityClearance predicate '
+      + 'still decides whether the archived document covers the selected assembly, and the registry still decides '
+      + 'verification — a fetched PDF is evidence, never a clearance.',
   },
   'RACKING-CAPACITY-APPLICABILITY-GAP': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Archived capacity source does not cover the exact selected assembly / jurisdiction',
+    resolutionMode: 'AUTO_RETRIEVED',
+    resolverId: 'racking-documents@v1', resolverPhase: 'AAC-5 (delivered — genuinely re-predicated)',
+    modeBasis: 'Audit §2.10 — this used to fire from the SAME single `if (!rtCleared)` as §2.9: two codes from one '
+      + 'predicate. AAC-5 gives it its own. §2.9 is now ARCHIVAL (is the source document archived and hash-bound at all) '
+      + 'and this code is APPLICABILITY (does the archived source cover the exact selected model, assembly and '
+      + 'jurisdiction). The two are genuinely different questions, and the live manufacturer case proves it: the stamped '
+      + 'letter is retrievable and archivable, and it covers the SUCCESSOR product — so archival can succeed while '
+      + 'applicability legitimately remains one bounded confirmation.',
   },
   'EQUIPMENT-DOCUMENT-APPLICABILITY': {
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'Cited manufacturer document covers a different product version than the selected mount',
+    resolutionMode: 'AUTO_RETRIEVED', resolverId: 'racking-documents@v1',
+    resolverPhase: 'AAC-5 (delivered — version-exact retrieval, no fabricated alias)',
+    modeBasis: 'Audit §2.12 — the on-file asset cites a NEWER-version manual for the selected mount. The research AAC-5 was '
+      + 'asked to do was whether the manufacturer publishes a cross-reference bringing the older product under the newer '
+      + 'document: it does NOT (only a generational marketing statement, with the older product still listed and still '
+      + 'carrying its own standalone manual). So no alias is fabricated. The correct automation is delivered instead: '
+      + 'racking-documents@v1 retrieves and archives the VERSION-EXACT manual, which also supplies the real '
+      + 'DocumentRegistryFacts (archive + hash + status) that left the AUTHORITATIVE verdict unreachable while all seven '
+      + 'call sites passed null.',
   },
   // ── the remainder of the structural lane (not active on Braidon, mapped so no
   //    known code can ever reach RG-UNMAPPED) ───────────────────────────────
+  // NOTE on this block: none of these is active on Braidon. Each carries the
+  // honest mode its resolution WOULD take, so no declared code can reach the
+  // lifecycle without a classification (validateReleaseGateMap enforces it).
   'ATTACHMENT-CAPACITY-SOURCE-MISSING': {
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'No published allowable attachment-capacity source resolved for the assembly',
+    resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'A published manufacturer capacity source — the same retrieval class as §2.9. Not active on Braidon.',
   },
   'FASTENER-CONFIG-MISSING': {
     gateId: 'RG-4', findingType: 'PENDING_SELECTION',
     title: 'Exact fastener configuration (model / count / embedment) incomplete',
+    resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'The mount record already carries fastener model / count / embedment (mounting-hardware-db); a gap is a '
+      + 'catalog completion, not an operator question. Not active on Braidon.',
   },
   'MIXED-MANUFACTURER-ASSEMBLY-UNSUPPORTED': {
     gateId: 'RG-4', findingType: 'TECHNICAL_CONFLICT',
     title: 'Mixed-manufacturer racking assembly without documented compatibility authority',
+    resolutionMode: 'AUTO_RETRIEVED', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'A documented cross-manufacturer compatibility statement is retrievable; absent one, the assembly choice is a '
+      + 'genuine operator/designer decision. Not active on Braidon.',
   },
   // Standing rule: product-name topology inference is PROHIBITED — the topology
   // must be DECLARED, so this is a pending selection, never an inference gap.
   'MOUNT-TOPOLOGY-UNKNOWN': {
     gateId: 'RG-4', findingType: 'PENDING_SELECTION',
     title: 'Mounting topology not declared (neither verified rail-paired nor verified rail-less)',
+    resolutionMode: 'OPERATOR_CONFIRMATION', resolverId: null,
+    modeBasis: 'STANDING RULE — product-name topology inference is PROHIBITED. The topology must be DECLARED, so this can '
+      + 'never become an automatic mode.',
   },
   'DIRECT-MOUNT-GEOMETRY-MISSING': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Rail-less attachment coordinates could not be derived — mount geometry authority absent',
+    resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'Attachment coordinates are derived from the canonical module geometry (coordinateAuthority); a gap is a '
+      + 'derivation failure, not a field observation. Not active on Braidon.',
   },
   'REACTIONS-UNTRACEABLE': {
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Module instances present but no canonical attachment objects — reactions not traceable',
+    resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'An internal object-model gap the engine must close from its own geometry. Not active on Braidon.',
   },
   'RAIL-QUANTITY-UNTRACEABLE': {
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Rail-based assembly with no canonical rail objects — rail quantities not traceable',
+    resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'An internal object-model gap the engine must close from its own geometry. Not active on Braidon.',
   },
   // A COMPUTED result exceeds a capacity: a verified engineering deficiency.
   'STRUCTURAL-UTILIZATION-EXCEEDED': {
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Structural utilization exceeded — computed demand exceeds allowable capacity',
+    resolutionMode: 'PROFESSIONAL_APPROVAL', resolverId: null,
+    modeBasis: 'A COMPUTED capacity exceedance. The engine must never auto-clear it; the resolution is a design revision '
+      + 'plus licensed structural judgement.',
   },
   'STRUCTURAL-BOM-RECONCILIATION-FAILED': {
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Structural BOM quantities do not reconcile with the canonical objects',
+    resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'An internal reconciliation defect between two engine outputs — never operator work. Not active on Braidon.',
   },
   'STRUCTURAL-REACTION-RECONCILIATION-FAILED': {
     gateId: 'RG-4', findingType: 'VERIFIED_DEFICIENCY',
     title: 'Attachment reactions do not reconcile with the applied load',
+    resolutionMode: 'AUTO_DERIVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'An internal reconciliation defect between two engine outputs — never operator work. Not active on Braidon.',
   },
   'SITE-GEOMETRY-MISSING': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'No canonical roof-plane geometry available',
+    resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'Roof-plane geometry comes from the aerial/site-survey provider chain (Nearmap / Google Solar / EagleView), '
+      + 'all already wired elsewhere in the route. Not active on Braidon.',
   },
   'MODULE-DIMENSIONS-UNVERIFIED': {
     gateId: 'RG-4', findingType: 'PENDING_DOCUMENT',
     title: 'Selected module record lacks exact catalog dimensions',
+    resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-2',
+    modeBasis: 'Catalog dimensions come from the module datasheet binding (the same retrieval as §2.5). Not active on Braidon.',
   },
   'RACKING-CAPACITY-ULTIMATE-BASIS-REFUSED': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Ultimate-basis capacity refused as an ASD allowable — stamped report not verified',
+    resolutionMode: 'AUTO_RETRIEVED', resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'A stamped report stating an ASD allowable is a retrieval; an ultimate value is never silently converted. '
+      + 'Not active on Braidon.',
   },
   // legacy alias for FRAMING-AUTHORITY-UNVERIFIED
   'STRUCTURAL-FRAMING-UNVERIFIED': {
     gateId: 'RG-4', findingType: 'PENDING_AUTHORITY',
     title: 'Framing unverified (legacy code — superseded by FRAMING-AUTHORITY-UNVERIFIED)',
+    resolutionMode: 'AUTO_RETRIEVED', residualMode: 'PROFESSIONAL_APPROVAL',
+    resolverId: null, resolverPhase: 'AAC-5',
+    modeBasis: 'Legacy alias of FRAMING-AUTHORITY-UNVERIFIED; same split classification, retired emitter.',
   },
 
   // ── RG-5 ELECTRICAL_FIELD_AND_CALCULATION_CLOSURE (`affects` MANDATORY) ────
@@ -473,6 +635,14 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
       'Voltage-drop results and the procurement conductor / raceway FOOTAGE (length-dependent results only). '
       + 'Ampacity, OCPD sizing, terminal ratings and equipment selection do not depend on route length and are NOT '
       + 'blocked by this requirement.',
+    resolutionMode: 'AUTO_DERIVED', residualMode: 'FIELD_VERIFICATION',
+    resolverId: 'route-length@v1', resolverPhase: 'AAC-4 (delivered — narrowed to the un-routed residual)',
+    resolverStage: 'derived',
+    modeBasis: 'Audit §2.13 SPLIT — the BRANCH section IS true geometry (branchCablePaths carry lengthProvenance '
+      + '"geometry-derived") and was lumped in by a hardcoded literal `cad-derived-estimate` at build.ts:394. AAC-4 sets the '
+      + 'branch cable path\'s lengthSource truthfully (cad-route) and NARROWS this requirement to its honest residual: the '
+      + 'feeder / home-run / service runs whose physical route is genuinely absent from the CAD model, named segment by '
+      + 'segment in the blocker payload. FIELD_VERIFICATION for that residual only.',
   },
   'CONDUIT-FILL-PENDING': {
     gateId: 'RG-5', findingType: 'FIELD_VERIFICATION',
@@ -480,6 +650,14 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
     affects:
       'The conduit-FILL result itself (NEC Ch.9 Table 1) and any derating that depends on it. A PENDING fill must '
       + 'never be presented as a passing zero-error result on PV-4A / PV-4B.',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'conduit-fill@v1', resolverPhase: 'AAC-4 (delivered)', resolverStage: 'derived',
+    modeBasis: 'Audit §2.14 — the NEC Ch.9 Table 1 calculation EXISTS AND RUNS in the permit path; its result was discarded by '
+      + 'four field-name mismatches in computeSystemProjection.ts:30-32,53-58 and build.ts:401 (row `contains/segments` on a row '
+      + 'that has neither; `fillPercent` vs `fillPct`; `conduitFillPercent` vs `conduitFillPct`; `passes` vs `pass`). AAC-4 fixes '
+      + 'the projection seam and conduit-fill@v1 validates completeness (raceway type + trade size, conductor set, insulation, '
+      + 'adopted code edition) and records the computed result as evidence. WS-7: an unexecuted calculation is never field '
+      + 'verification — here it had been executed and thrown away.',
   },
   'TAP-CONDUCTOR-LENGTH-PENDING': {
     gateId: 'RG-5', findingType: 'FIELD_VERIFICATION',
@@ -487,6 +665,10 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
     affects:
       'The NEC 705.11(C) ≤10-ft tap-length VERIFICATION only. The tap conductor ampacity / OCPD and the '
       + 'interconnection method are established independently and are not blocked by this requirement.',
+    resolutionMode: 'FIELD_VERIFICATION', residualMode: 'AUTO_DERIVED',
+    resolverId: null, resolverPhase: 'AAC-4 (survey-field tier)',
+    modeBasis: 'Audit §2.15 — LEGITIMATE field verification: the tap point → fused disconnect run on the EXISTING service is '
+      + 'not in any CAD model. It becomes AUTO_DERIVED only for projects whose site-survey capture carries a measured tap length.',
   },
   'FEEDER-RACEWAY-AUTHORITY': {
     gateId: 'RG-5', findingType: 'PENDING_SELECTION',
@@ -494,6 +676,11 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
     affects:
       'The feeder raceway schedule, its fill result and the raceway bonding method. Conductor ampacity and OCPD '
       + 'sizing are established independently.',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'raceway-authority@v1', resolverPhase: 'AAC-4 (delivered)', resolverStage: 'derived',
+    modeBasis: 'The raceway type/size for the canonical feeder is deterministic from the conductor set + environment — the same '
+      + 'engine that computes conduit fill. Never an operator question. raceway-authority@v1 decides it from the engine\'s own '
+      + 'feeder segment and records the verdict as evidence.',
   },
   'BRANCH-RACEWAY-AUTHORITY': {
     gateId: 'RG-5', findingType: 'PENDING_AUTHORITY',
@@ -501,6 +688,11 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
     affects:
       'The branch-circuit grouping, the shared home-run fill / derating and any per-section wiring-method callout. '
       + 'Branch OCPD and micro-count limits are unaffected.',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'raceway-authority@v1', resolverPhase: 'AAC-4 (delivered)', resolverStage: 'derived',
+    modeBasis: 'The two physical branch sections (open-air Q-Cable trunk + shared home-run raceway) are derivable from the '
+      + 'canonical layout geometry the engine already holds; raceway-authority@v1 evaluates the sectioned model (shared '
+      + 'home-run raceway with a documented shared-circuit count + fill, open-air trunk not stamped in-conduit) and evidences it.',
   },
   'RACEWAY-SEGMENT-CONFLICT': {
     gateId: 'RG-5', findingType: 'TECHNICAL_CONFLICT',
@@ -508,6 +700,11 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
     affects:
       'Every raceway-schedule row for the conflicting segment id and its fill result — one physical run must carry '
       + 'ONE raceway.',
+    resolutionMode: 'AUTO_DERIVED', residualMode: 'OPERATOR_CONFIRMATION',
+    resolverId: 'raceway-authority@v1', resolverPhase: 'AAC-4 (delivered)', resolverStage: 'derived',
+    modeBasis: 'One physical run carries one raceway — a deterministic reconciliation of the engine\'s own segment records, '
+      + 'performed and evidenced by raceway-authority@v1. OPERATOR_CONFIRMATION only when two genuinely intentional raceway '
+      + 'selections disagree.',
   },
 
   // ── RG-6 QCABLE_SYSTEM_CLOSURE (2) ────────────────────────────────────────
@@ -519,6 +716,13 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
     affects:
       'The orderable base cable quantity and the installed-path representation. Cleared ONLY by a VERIFIED listed '
       + 'cable-extension product, an alternate listed cable that envelopes the path, or a route revision.',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'qcable-solution@v1', resolverPhase: 'AAC-4 (delivered)', resolverStage: 'derived',
+    modeBasis: 'Audit §2.16 — the engine EVALUATES the option space (the stock order as placed, a geometry-derived order '
+      + 'composition of the same listed cable, every alternate listed connector pitch in the catalog, a verified listed '
+      + 'extension, a cable-end relocation, a branch reassignment, and the genuine field-route residual) and produces a '
+      + 'complete solution or a precise unresolved reason — never a bare deficit. qcable-topology@v1 derives the topology '
+      + 'object it reasons over; cable-extension-solutions@v1 (async) contributes the registry-backed extension half.',
   },
   'QCABLE-GROUNDING-AUTHORITY-UNVERIFIED': {
     gateId: 'RG-6', findingType: 'PENDING_AUTHORITY',
@@ -526,6 +730,12 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
     affects:
       'The equipment-grounding method, the NEC 250.122 / 690.43(C) conclusion and the candidate EGC quantity '
       + '(design quantity, non-orderable) — a conductor count can never establish it.',
+    resolutionMode: 'AUTO_RETRIEVED', residualMode: 'PROFESSIONAL_APPROVAL',
+    resolverId: null, resolverPhase: 'AAC-4',
+    modeBasis: 'Audit §2.17 — `opts.groundingDocumentEvidence` is a pre-shaped socket the build accepts and nobody resolved; '
+      + 'AAC-1 wires the socket through the bundle, AAC-4 adds the ingestion resolver. HIGHEST RISK IN THE SET: the exact-sku '
+      + 'applicability scope may be unsatisfiable if Enphase publishes only family documents — in which case retrieval fails '
+      + 'HONESTLY and this becomes professional judgement. `exact-sku` is never relaxed to clear a count.',
   },
 
   // ── RG-7 PROFESSIONAL_RELEASE (2) ─────────────────────────────────────────
@@ -533,6 +743,13 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   'DESIGNER-OF-RECORD-MISSING': {
     gateId: 'RG-7', findingType: 'ADMINISTRATIVE_HOLD',
     title: 'No designer / engineer-of-record assigned',
+    resolutionMode: 'AUTO_DERIVED',
+    resolverId: 'project-personnel-designer@v1', resolverPhase: 'AAC-2 (delivered — requires migration 115)',
+    modeBasis: 'Audit §2.18 / WS-6 — the designer is a CONFIGURATION fact; asking for it per project is exactly the "never ask '
+      + 'for what the platform knows" violation. The personnel-roles store is migration 115 (no `designer` column existed in any '
+      + 'prior migration); until it is run the resolver reports a RETRYABLE store-unavailable failure with the exact operator step. '
+      + 'HARD BOUNDARY: a configured designer clears the DESIGNER role only — it may never fabricate an EOR, PE, signature, seal '
+      + 'or digest approval (enforced by AUTO_POPULATABLE_ROLES).',
   },
   // §7 MANDATED: PROFESSIONAL_RELEASE, derived from the ABSENCE of a digest-bound
   // approval record (certification.engineeringReviewApproved / the review record
@@ -542,6 +759,15 @@ export const REQUIREMENT_DECLARATIONS: Record<string, RequirementDeclaration> = 
   'ENGINEERING-REVIEW-PENDING': {
     gateId: 'RG-7', findingType: 'PROFESSIONAL_RELEASE',
     title: 'No approved engineering-review record covering the current snapshot digest',
+    resolutionMode: 'PROFESSIONAL_APPROVAL', resolverId: null,
+    resolverPhase: 'AAC-5 (delivered — migration 116 makes it CLEARABLE; the mode stays PROFESSIONAL_APPROVAL forever)',
+    modeBasis: 'Audit §2.19 — legitimate and permanent PROFESSIONAL_APPROVAL, and the engine must NEVER hold a resolver for '
+      + 'it. The real defect was that it was structurally UNCLEARABLE: no table, no API, no UI, and '
+      + 'certification.engineeringReviewApproved hardcoded false. AAC-5 builds the digest-bound record (migration 116 '
+      + 'engineering_review_records plus the admin API), so a licensed engineer of record CAN clear it — bound to an exact '
+      + 'snapshot digest, with a licence number and state, a stated scope, and append-only supersession. The AUTO_DERIVED '
+      + 'infrastructure resolver engineering-review-record@v1 only READS that store; it claims no requirement code and can '
+      + 'never approve.',
   },
 };
 
@@ -1219,6 +1445,19 @@ export function validateReleaseGateMap(): string[] {
     // RG-5 contract (§3 gate 5): each child states which result it affects.
     if (gate.gateCategory === 'ELECTRICAL_CLOSURE' && !d.affects?.trim()) {
       errors.push(`${code}: an ELECTRICAL_CLOSURE requirement must declare which result it affects`);
+    }
+    // ── AAC WS-1 — every declared requirement carries EXACTLY ONE resolution
+    //    mode, with a stated basis. A mode without a basis is an unsupported
+    //    claim; a non-automatic mode may never own an auto-resolver. ──────────
+    if (!(RESOLUTION_MODES as readonly string[]).includes(d.resolutionMode)) {
+      errors.push(`${code}: invalid resolutionMode ${String(d.resolutionMode)}`);
+    }
+    if (!d.modeBasis?.trim()) errors.push(`${code}: resolutionMode ${d.resolutionMode} declared with no modeBasis`);
+    if (d.resolverId && !isAutomaticMode(d.resolutionMode)) {
+      errors.push(`${code}: ${d.resolutionMode} is not an automatic mode and may not declare resolverId ${d.resolverId}`);
+    }
+    if (d.residualMode && !(RESOLUTION_MODES as readonly string[]).includes(d.residualMode)) {
+      errors.push(`${code}: invalid residualMode ${String(d.residualMode)}`);
     }
     // a code declared ADVISORY must be classified advisory by THE severity authority
     if (d.findingType === 'ADVISORY') {

@@ -264,19 +264,46 @@ if (wse.status === null || wseReport == null) {
 
 // ═══ GATE 8 — unverified fasteners are NON-ORDERABLE ════════════════════════
 // The rendered-truth source of the fastener verification state: the CANONICAL
-// registry blocker + the racking assembly's own verification record. (The
+// registry requirements + the racking assembly's own verification record. (The
 // FastenerAssembly projection is derived at render time, so the harness reads the
 // snapshot facts it derives from — never a second derivation of its own.)
+//
+// AAC-5 RE-VOCABULARY (this gate was written before the WS-8 structural
+// separation): FASTENER-ASSEMBLY-UNVERIFIED no longer echoes the rail-capacity
+// document, so on an assembly whose mount base IS verified the code legitimately
+// leaves the registry while `assemblyVerification.overall` stays 'pending' on the
+// capacity document. The old proxy `overall !== 'verified'` therefore no longer
+// tracked the fastener element, and its RS-1 assertion demanded a code that is no
+// longer emitted. The gate's INTENT is unchanged and is asserted against the
+// CURRENT mechanism: the non-orderable decision is exactly
+// structuralProjection.projectFastenerAssembly's — capacity-gated OR the mount's
+// own fastener element unverified OR no withdrawal-capacity source — and while
+// non-orderable RS-1 must disclose the requirement that GOVERNS it, in whichever
+// of the two separated vocabularies actually owns it.
 const ra = snap.structural?.rackingAssembly ?? null;
 const faBlockerActive = registry.some(r => r.code === 'FASTENER-ASSEMBLY-UNVERIFIED');
+// structuralProjection.CAPACITY_GATE_BLOCKER_CODES — mirrored, not re-derived.
+const CAPACITY_GATE_CODES = [
+  'RACKING-CAPACITY-SOURCE-NOT-ARCHIVED',
+  'RACKING-CAPACITY-APPLICABILITY-GAP',
+  'ATTACHMENT-CAPACITY-SOURCE-MISSING',
+];
+const _rackGaps = ra?.structuralAuthorityGaps ?? [];
+const capacityGated = CAPACITY_GATE_CODES.some(c => registry.some(r => r.code === c))
+  || _rackGaps.some(g => g.severity === 'blocking' && CAPACITY_GATE_CODES.includes(g.code));
+const faSource = ra?.datasheetSource ?? ra?.capacitySource ?? null;
 const fa = ra ? {
   fastenerVerification: ra.assemblyVerification?.fastener ?? null,
   overall: ra.assemblyVerification?.overall ?? null,
   screwLagModel: ra.screwLagModel ?? null,
-  datasheetSource: ra.datasheetSource ?? ra.capacitySource ?? null,
-  verification: faBlockerActive ? 'unverified' : (ra.assemblyVerification?.fastener ?? null),
+  datasheetSource: faSource,
+  capacityGated,
+  verification: (faBlockerActive || capacityGated) ? 'unverified'
+    : (ra.assemblyVerification?.fastener === 'verified' && faSource ? 'verified' : 'unverified'),
 } : null;
-const faUnverified = faBlockerActive || !ra || ra.assemblyVerification?.overall !== 'verified';
+// the same three-term predicate the RENDERER uses to decide `nonOrderable`
+const faUnverified = !ra || faBlockerActive || capacityGated
+  || ra.assemblyVerification?.fastener !== 'verified' || !faSource;
 const NON_ORDERABLE = 'DESIGN QUANTITY — NON-ORDERABLE / PENDING VERIFIED FASTENER ASSEMBLY';
 const faFlagged = noB64.includes('data-fastener-orderable="false"');
 const faLabel = noB64.includes(NON_ORDERABLE) || noB64.includes(NON_ORDERABLE.replace('—', '&mdash;'));
@@ -286,16 +313,26 @@ const SPEC_LEAKS = [
   /structural wood screw,\s*~?3\.5"/i,
 ];
 const specLeaks = faUnverified ? SPEC_LEAKS.filter(re => re.test(noB64)).map(String) : [];
-// the calculated quantity is RETAINED (design quantity), just not orderable
-const faBlockerShown = !faUnverified || rs1.includes('FASTENER-ASSEMBLY-UNVERIFIED');
+// The GOVERNING requirement must be visible on the RS surface. Which code owns it
+// depends on WHY the assembly is non-orderable — the mount base (FASTENER-
+// ASSEMBLY-UNVERIFIED) or the capacity document (the two RACKING-CAPACITY codes /
+// ATTACHMENT-CAPACITY-SOURCE-MISSING). Silence in BOTH vocabularies is the
+// violation this gate exists to catch.
+const faGoverningCodes = [
+  ...(faBlockerActive ? ['FASTENER-ASSEMBLY-UNVERIFIED'] : []),
+  ...CAPACITY_GATE_CODES.filter(c => registry.some(r => r.code === c)),
+];
+const faGoverningShown = faGoverningCodes.filter(c => rs1.includes(c));
+const faBlockerShown = !faUnverified || faGoverningShown.length > 0;
 gate(8, 'unverified-fasteners-non-orderable',
   !faUnverified
     ? (!faFlagged || faLabel)
     : (faFlagged && faLabel && specLeaks.length === 0 && faBlockerShown
        && !noB64.includes('data-fastener-orderable="true"')),
-  `verification=${fa?.verification ?? 'absent'} flagged=${faFlagged} label=${faLabel} `
-  + `specLeaks=${specLeaks.join(' | ') || 'none'} blockerOnRs1=${faBlockerShown}`,
-  { fastenerAssembly: fa, specLeaks });
+  `verification=${fa?.verification ?? 'absent'} capacityGated=${capacityGated} flagged=${faFlagged} label=${faLabel} `
+  + `specLeaks=${specLeaks.join(' | ') || 'none'} governing=${faGoverningCodes.join(',') || 'none'} `
+  + `governingOnRs1=${faGoverningShown.join(',') || 'none'}`,
+  { fastenerAssembly: fa, specLeaks, governingCodes: faGoverningCodes, governingShownOnRs1: faGoverningShown });
 
 // ═══ GATE 12 — report == rendered (zero mismatches) ═════════════════════════
 const mismatches = [];

@@ -60,7 +60,7 @@ export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number,
   return `
   <div class="page">
     ${titleBlock(input, 'PV-1', 'SITE & ROOF PLAN — MODULE LAYOUT & FIRE SETBACKS', pageNum, totalPages)}
-    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: 'PV-1' })}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -90,7 +90,7 @@ export function pageGroundArrayPlan(input: PermitInput, cad: CADModel, pageNum: 
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SITE & GROUND ARRAY PLAN', pageNum, totalPages)}
-    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: opts?.sheetId ?? 'PV-1' })}
     ${composeDrawPage(comp, drawingSvg, secondarySvg)}
   </div>`;
 }
@@ -125,7 +125,7 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1', opts?.title ?? 'SOLAR FENCE ELEVATION & PLAN', pageNum, totalPages)}
-    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: opts?.sheetId ?? 'PV-1' })}
     ${composeDrawPage(comp, primarySvg, secondarySvg)}
   </div>`;
 }
@@ -596,7 +596,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   return `
   <div class="page">
     ${titleBlock(input, opts?.sheetId ?? 'PV-1B', `${_isMicro ? 'AC BRANCH CIRCUIT LAYOUT' : 'ARRAY GEOMETRY & STRING LAYOUT'}${opts?.titleSuffix ?? ''}`, pageNum, totalPages)}
-    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: opts?.sheetId ?? 'PV-1B' })}
     <!-- PIPELINE v47.343: PV-2B now uses draw-zone/data-zone layout -->
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->

@@ -136,6 +136,12 @@ describe('§2 — climate-hazard document class resolves the authority (closer w
     expect(environmentalSourceVerified(ev, 'MADISON COUNTY, IL')).toBe(true);
     const auth = buildEnvironmentalLoadAuthority({
       ...OPERATOR_INPUT, projectOrAhj: 'MADISON COUNTY, IL', sourceEvidence: ev,
+      // AAC WS-4: the authority now also checks that the source was retrieved AT
+      // THIS SITE (a coordinate change invalidates it). This document's claims
+      // carry the real Braidon coordinates, so the project's must be the same
+      // point — the rounded 38.7/-90.04 in OPERATOR_INPUT is ~690 m away and is
+      // correctly refused. Same site ⇒ verified, exactly as before.
+      coordinates: { lat: 38.7061678, lng: -90.0461651 },
     });
     expect(auth.verificationStatus).toBe('verified');
     // the DOCUMENT's value wins over the operator entry once verified

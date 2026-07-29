@@ -212,14 +212,14 @@ describe('Phase 1A: Manifest discovery (real lib/migrations/)', () => {
     expect(extractDescription('001_initial_schema.sql')).toBe('initial schema');
   });
 
-  it('discovers 111 SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries)', () => {
+  it('discovers 113 SQL files from lib/migrations/ (101 baseline + 105-108 governance/nearmap + 109-112 data-authority backfills + 113/114 authority registries + 115 personnel roles + 116 engineering review)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.count).toBe(111);
+    expect(manifest.count).toBe(113);
   });
 
-  it('highest prefix is 114', () => {
+  it('highest prefix is 116', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('114');
+    expect(manifest.highestPrefix).toBe('116');
   });
 
   it('detects duplicate prefix 074 and disambiguates as 074a/074b', () => {
@@ -1165,7 +1165,7 @@ describe('Phase 1A: Historical reconciliation', () => {
 
   it('migration 105 exists (organization authority foundation), 106 exists (lifecycle correction), 107 exists (audit org context), and 108 exists (nearmap cache idx)', () => {
     const manifest = discoverMigrationFiles();
-    expect(manifest.highestPrefix).toBe('114');
+    expect(manifest.highestPrefix).toBe('116');
     const has105 = manifest.files.some((f: any) => f.prefix === '105');
     expect(has105).toBe(true);
     const has106 = manifest.files.some((f: any) => f.prefix === '106');

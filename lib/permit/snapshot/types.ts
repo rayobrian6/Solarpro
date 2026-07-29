@@ -492,6 +492,260 @@ export interface CableExtensionSolution {
   bomLineIds?: string[];
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AAC WS-5 (2026-07-27) — THE DETERMINISTIC Q-CABLE TOPOLOGY OBJECT.
+//
+// The directive's field list, derived ONCE from the canonical layout geometry
+// (module centres + branch assignment + roof-plane ids + row indices) and the
+// brand catalog. Every downstream reader — the procurement-sufficiency gate, the
+// BOM trunk/terminator/sealing-cap rows, PV-4B / E-1 / SCHED, RS-1 — consumes
+// THIS object; nothing re-derives a cable length from a renderer estimate.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The transition class of the cable segment ARRIVING at a drop. Derived from
+ *  the canonical geometry, never from a length threshold guess: a roof-plane id
+ *  change is an ARRAY transition, a row-index change within a plane is a ROW
+ *  transition, everything else is a plain in-row hop. */
+export type QCableTransitionClass = 'in-row' | 'row-transition' | 'array-transition' | 'branch-start';
+
+/** One micro connection point (drop) on a branch cable, in cable order. */
+export interface QCableDropRecord {
+  /** 1-based position along the branch cable. */
+  index: number;
+  moduleInstanceId: string | null;
+  roofPlaneId: string | null;
+  row: number | null;
+  col: number | null;
+  /** canonical plan-feet centre of the module this micro is mounted under. */
+  xFt: number;
+  yFt: number;
+  /** centre-to-centre cable distance from the PREVIOUS drop (null at the start). */
+  segmentFromPreviousFt: number | null;
+  transition: QCableTransitionClass;
+  /** molded connector sections the arriving segment consumes (ceil(len ÷ pitch)). */
+  sectionsFromPrevious: number;
+  /** molded connectors landing INSIDE the arriving segment with no micro to serve
+   *  — the DEAD DROPS. Each is closed with the manufacturer's listed sealing cap. */
+  deadDropsInSegment: number;
+}
+
+/** A physical end of a branch cable and how it is closed out. */
+export interface QCableEndRecord {
+  endId: string;
+  branchId: string;
+  kind: 'homerun-transition' | 'far-end';
+  atDropIndex: number;
+  xFt: number;
+  yFt: number;
+  /** 'field-wireable-connector' at the home-run transition, 'terminator' at the
+   *  far end (the manufacturer's single-use watertight cable-end cap). */
+  treatment: 'terminator' | 'homerun-transition' | 'not-established';
+  treatmentSku: string | null;
+  basis: string;
+}
+
+/** A sub-array / roof-plane BRIDGE inside a branch: a hop whose gap exceeds the
+ *  molded connector pitch AND crosses to another plane. The manufacturer's
+ *  documented method for this case is NOT more molded cable — it is a
+ *  custom-length JUMPER fabricated from raw cable with a field-wireable
+ *  connector pair (the same datasheet that documents the service-loop + sealing
+ *  cap treatment for a within-plane transition). */
+export interface QCableBridgeRequirement {
+  branchId: string;
+  atDropIndex: number;
+  gapFt: number;
+  fromRoofPlaneId: string | null;
+  toRoofPlaneId: string | null;
+  /** raw cable the jumper consumes (gap × waste). */
+  rawCableFt: number;
+  rawCableSku: string | null;
+  connectorPairs: number;
+  connectorMaleSku: string | null;
+  connectorFemaleSku: string | null;
+  /** the manufacturer rule this requirement comes from. */
+  basis: string;
+  /** a jumper is a SEPARATE listed product added to the design: per the standing
+   *  ECD W1-E ruling it is ESTABLISHED only by a verified cable-extension
+   *  solution, never by the engine's own assertion. */
+  established: boolean;
+}
+
+export interface QCableBranchTopology {
+  branchId: string;
+  branchLabel: string;
+  moduleCount: number;
+  dropCount: number;
+  /** the cable ORDER — module instance ids, first to last. */
+  orderedModuleIds: string[];
+  drops: QCableDropRecord[];
+  /** the per-hop centre-to-centre distances, in cable order. */
+  interModuleSegmentsFt: number[];
+  rowTransitionCount: number;
+  rowTransitionFt: number;
+  arrayTransitionCount: number;
+  arrayTransitionFt: number;
+  branchStartDropIndex: number;
+  branchEndDropIndex: number;
+  /** the home-run transition (which cable end leaves the array for the J-box).
+   *  `established:false` when the transition POINT is not carried in the CAD
+   *  model — the lead-in is then the manufacturer pitch, stated as such. */
+  homerunTransition: {
+    atEnd: 'start' | 'end';
+    leadInFt: number;
+    established: boolean;
+    basis: string;
+  };
+  cableEnds: QCableEndRecord[];
+  /** the branch's share of the DOCUMENTED service-loop allowance (path-
+   *  proportional; Σ over branches equals the total exactly — counted ONCE). */
+  serviceLoopAllowanceShareFt: number;
+  /** sub-array / roof-plane bridges inside this branch (documented jumper). */
+  bridgeRequirements: QCableBridgeRequirement[];
+  /** Σ inter-module segments + the home-run lead-in — the AS-ROUTED length. */
+  installedLengthFt: number;
+  /** the portion of the as-routed length the MOLDED cable carries: installed
+   *  minus the bridge gaps a documented jumper spans. */
+  moldedPathLengthFt: number;
+  /** molded path × waste + allowance share — what the ordered cable must cover. */
+  requiredLengthFt: number;
+  /** ordered connector sections = max(dropCount, ceil(required ÷ pitch)). */
+  orderedSections: number;
+  /** ordered sections × pitch — the procurement footage for this branch. */
+  procurementLengthFt: number;
+  /** ordered sections − drops: connectors with no micro ⇒ sealing caps. */
+  deadDropCount: number;
+  sealingCapsRequired: number;
+  terminatorsRequired: number;
+  /** true when this branch's ordered cable covers its own requirement. An
+   *  aggregate that covers Σ while one branch is short is NOT sufficient. */
+  sufficient: boolean;
+  geometryCoverage: 'geometry-derived' | 'estimated' | 'none';
+  confidence: number;
+  derivation: string;
+}
+
+export interface QCableTopology {
+  present: boolean;
+  assemblyId: string | null;
+  /** the SELECTED listed cable variant. */
+  sku: string | null;
+  systemBrand: string | null;
+  ecosystem: string | null;
+  connectorSpacingFt: number | null;
+  wasteFactor: number;
+  /** the array's module centre-to-centre pitch (the reach a connector must span). */
+  modulePitchFt: number | null;
+  orientation: 'portrait' | 'landscape';
+  branches: QCableBranchTopology[];
+  /** every sub-array / plane bridge in the design (the jumper requirements). */
+  bridgeRequirements: QCableBridgeRequirement[];
+  totals: {
+    branchCount: number;
+    dropCount: number;
+    installedLengthFt: number;
+    /** the molded-cable portion (installed − Σ bridge gaps). */
+    moldedPathLengthFt: number;
+    requiredLengthFt: number;
+    bridgeCount: number;
+    bridgeGapFt: number;
+    jumperRawCableFt: number;
+    jumperConnectorPairs: number;
+    orderedSections: number;
+    procurementLengthFt: number;
+    /** Σ dropCount × pitch × waste — the DROP-COUNT lower bound of the same
+     *  derivation (what the BOM ordered before the topology existed). */
+    dropBasisProcurementLengthFt: number;
+    deadDropCount: number;
+    sealingCapsRequired: number;
+    terminatorsRequired: number;
+    rowTransitionCount: number;
+    arrayTransitionCount: number;
+  };
+  serviceLoopAllowanceFt: number;
+  allowanceProvenance: string;
+  /** the manufacturer's documented dead-drop treatment, or null when the brand
+   *  publishes none (in which case dead drops are NOT treated as cappable). */
+  deadDropTreatment: {
+    established: boolean;
+    method: 'listed-sealing-cap' | 'not-established';
+    sku: string | null;
+    basis: string;
+  };
+  /** extension stock the brand publishes (raw cable + field-wireable pair). */
+  extensionStock: {
+    rawCableSku: string | null;
+    fieldWireableMaleSku: string | null;
+    fieldWireableFemaleSku: string | null;
+    basis: string | null;
+  };
+  geometryCoverage: 'geometry-derived' | 'partial' | 'estimated' | 'none';
+  confidence: number;
+  /** the portion of the topology that genuinely depends on field observation. */
+  fieldDependentPortion: string[];
+  derivation: string;
+  provenance: Provenance;
+}
+
+/** ONE evaluated resolution option for a Q-Cable procurement deficit. Every
+ *  option carries its PER-BRANCH and AGGREGATE verdicts — an option that covers
+ *  the aggregate while leaving one branch short is NOT viable. */
+export interface QCableSolutionOption {
+  optionId: string;
+  kind:
+    | 'stock-as-ordered'
+    | 'derived-stock-order-composition'
+    | 'alternate-listed-cable'
+    | 'verified-listed-extension'
+    | 'raw-cable-jumper'
+    | 'cable-end-placement'
+    | 'branch-reassignment'
+    | 'field-route-residual';
+  title: string;
+  description: string;
+  viable: boolean;
+  /** true ⇔ adopting it changes NOTHING physical about the design (an order
+   *  composition, not a layout / product / branch change). */
+  autoAdoptable: boolean;
+  adopted: boolean;
+  changesPhysicalDesign: boolean;
+  perBranch: { branchId: string; requiredFt: number; providedFt: number; sufficient: boolean }[];
+  aggregateRequiredFt: number;
+  aggregateProvidedFt: number;
+  aggregateSufficient: boolean;
+  /** the exact operator/design action adoption would require (null when none). */
+  requiresAction: string | null;
+  blockingReasons: string[];
+  evidenceRefs: string[];
+  /** lower ranks first; null ⇒ not ranked (non-viable). */
+  rank: number | null;
+  payload: Record<string, unknown> | null;
+}
+
+/** THE option-space evaluation for a Q-Cable procurement deficit. This is what
+ *  replaces "announce the shortage": the engine states every option, its exact
+ *  numbers, which one it recommends, what it adopted, and the precise residual. */
+export interface QCableSolutionEvaluation {
+  evaluated: boolean;
+  /** the deficit measured against the CURRENT (drop-count) order. */
+  measuredDeficitFt: number;
+  /** the ORDER-SIZING requirement: Σ per-branch (as-routed installed × waste) +
+   *  the documented service-loop allowance. It is STRICTER than the sufficiency
+   *  gate's own threshold (Σ installed + allowance, no waste), which remains the
+   *  minimum the ordered cable must cover — an option that satisfies this
+   *  satisfies the gate by construction. */
+  sizingRequirementFt: number;
+  currentProcurementFt: number;
+  options: QCableSolutionOption[];
+  recommendedOptionId: string | null;
+  adoptedOptionId: string | null;
+  /** a complete solution is established (adopted, or a verified selected one). */
+  resolved: boolean;
+  /** null when resolved; otherwise the PRECISE reason (never a bare deficit). */
+  unresolvedReason: string | null;
+  residualFieldDependent: string[];
+  derivation: string;
+}
+
 /** One of the enumerated resolution options for the deficit, each honestly marked
  *  SELECTED / NOT SELECTED. Rendered on RS-1 as the blocker's resolution menu. */
 export interface ProcurementResolutionOption {
@@ -536,9 +790,25 @@ export interface ProcurementSufficiency {
   resolutionOptions: ProcurementResolutionOption[];
   /** ALWAYS null — no manufacturer-documented extension authority is archived. */
   manufacturerDocumentAuthority: null;
-  verificationStatus: 'sufficient' | 'insufficient-unresolved' | 'resolved-by-verified-solution';
+  verificationStatus: 'sufficient' | 'insufficient-unresolved' | 'resolved-by-verified-solution'
+    /** AAC WS-5 — the measured deficit is covered by an AUTO-ADOPTED order
+     *  composition of the SAME listed cable (more connector sections + the
+     *  manufacturer's listed sealing caps for the resulting dead drops). Nothing
+     *  physical about the design changes; only the ordered quantity. */
+    | 'resolved-by-derived-order-composition';
   solutions: CableExtensionSolution[];
   clearedBySolutionId: string | null;
+  // ── AAC WS-5 (2026-07-27) — the OPTION EVALUATION. Optional/additive so every
+  //    existing construction site and every pre-AAC snapshot serialises
+  //    unchanged. ────────────────────────────────────────────────────────────
+  /** Σ dropCount × pitch × waste — the drop-count basis the BOM ordered before
+   *  the topology engine existed. Present so the two numbers reconcile through
+   *  ONE derivation on the artifact itself. */
+  dropBasisProcurementLengthFt?: number | null;
+  /** the engine's evaluation of the whole option space (never a bare deficit). */
+  solutionEvaluation?: QCableSolutionEvaluation | null;
+  /** the option the engine ADOPTED (auto-adoptable only), or null. */
+  adoptedOptionId?: string | null;
   /** the clearance evaluation of the clearing solution (null when none attempted). */
   clearance: { cleared: boolean; missing: string[]; reasons: string[] } | null;
   provenance: Provenance;
@@ -927,6 +1197,40 @@ export interface EnvironmentalLoadAuthority {
   /** archived-evidence reference (documentId/hash) when a verified source exists. */
   evidenceRef: string | null;
   provenance: Provenance;
+
+  // ── AAC WS-4 (2026-07-27) — the directive's EnvironmentalAuthorityRecord field
+  //    set, added ADDITIVELY to the record that already existed rather than as a
+  //    second record (audit §2.6: "The record model already satisfies WS-4
+  //    completely. Do not rebuild the record."). Every field is OPTIONAL and is
+  //    OMITTED when no retrieval ran, so canonicalJson drops it and an unresolved
+  //    build hashes exactly as before. ─────────────────────────────────────────
+  /** SHA-256 of the retrieval payload — the record's own integrity anchor. */
+  sourceHash?: string | null;
+  /** 0..1 provider confidence in the retrieved values. */
+  confidence?: number | null;
+  /** the EXACT inputs the hazard services were queried with. */
+  queryInputs?: {
+    lat: number; lng: number; asceEdition: string; riskCategory: string;
+    riskCategorySource: string; riskCategoryBasis: string; siteClass: string; addressUsed: string | null;
+  } | null;
+  /** the EXACT values the services returned, unrounded and before any override. */
+  returnedValues?: {
+    windSpeedMph: number | null; windMriYears: number; groundSnowLoadPsf: number | null;
+    seismicSdc: string | null; seismicSs: number | null; seismicS1: number | null;
+    seismicSds: number | null; seismicSd1: number | null; elevationFt: number | null;
+  } | null;
+  /** STRUCTURED override history. `operatorOverrides` above stays as the flat
+   *  field-name list every existing consumer reads; this is the audited detail:
+   *  value, retrieved value (never destroyed), reason, authority source, actor,
+   *  timestamp, and whether the operator value was the stricter of the two. */
+  overrideHistory?: import('./resolution/environmentalRetrieval').EnvironmentalOverrideEntry[];
+  /** why the source is CURRENT (a live read is current by construction; an
+   *  archived document needs a recorded review). */
+  currencyBasis?: string | null;
+  /** live retrieval vs documented fixture replay — stated, never implied. */
+  retrievalProof?: 'live-retrieval' | 'fixture' | null;
+  /** the durable registry copy of the retrieval, when one could be written. */
+  archivedDocumentId?: string | null;
 }
 
 export type LimitState =
@@ -1160,6 +1464,20 @@ export interface PermitDesignSnapshot {
      *  `insufficient` and unresolved, the build emits the BLOCKING
      *  QCABLE-PROCUREMENT-INSUFFICIENT registry entry. Null for non-micro. */
     procurementSufficiency?: ProcurementSufficiency | null;
+    /** AAC WS-5 (2026-07-27): THE deterministic Q-Cable topology object — ordered
+     *  drops, inter-module segments, row/array transitions, cable ends, dead
+     *  drops, installed vs procurement length, geometry coverage and the
+     *  field-dependent portion. Procurement, the BOM trunk/terminator/cap rows
+     *  and every sheet length CONSUME it (one derivation). Null for non-micro /
+     *  unknown trunk brand. */
+    qcableTopology?: QCableTopology | null;
+    /** AAC WS-7 (2026-07-27): the COMPUTED NEC Chapter 9 Table 1 conduit-fill
+     *  authority for the canonical feeder raceway — raceway identity, conductor
+     *  set, insulation, adopted code edition, the percentage and the ≤40 %
+     *  verdict. `state:'incomplete'` names the missing input instead of a silent
+     *  null (which is what fired CONDUIT-FILL-PENDING on a calculation that had
+     *  already run). Null when no canonical engine result exists. */
+    conduitFillAuthority?: import('./conduitFillAuthority').ConduitFillAuthorityRecord | null;
     /** GROUNDING AUTHORITY CORRECTION (2026-07-25): THE canonical, DOCUMENT-BASED
      *  three-outcome grounding authority for the OPEN-AIR microinverter branch /
      *  listed-cable-assembly section ONLY. Conductor count can never select an
@@ -1283,6 +1601,75 @@ export interface PermitDesignSnapshot {
     ready: boolean;
     blockers: { code: string; message: string }[];
     registry: PermitReadinessBlocker[];
+  };
+
+  /** AAC WS-9 — THE equipment-document applicability verdicts, decided ONCE in
+   *  the pure build and projected by every sheet.
+   *
+   *  Retires the WS-9 violation the audit found (§7.12): five renderer files
+   *  independently re-deciding document applicability inside the render pass,
+   *  each with its own selected-model argument and every one of them passing
+   *  `null` for the registry facts — which is what made the AUTHORITATIVE
+   *  verdict structurally unreachable (§7.7). One determination, real facts,
+   *  frozen with the snapshot. */
+  equipmentDocumentAuthority: import('./documentAuthority').EquipmentDocumentAuthority;
+
+  /** AAC WS-2 / WS-6 — the AUTOMATIC-RESOLUTION AUTHORITIES.
+   *
+   *  A requirement that the resolver lifecycle CLEARED produces no blocker, so
+   *  its evidence would otherwise vanish from the artifact. These records are the
+   *  evidence-per-auto-cleared-requirement the directive demands: the canonical
+   *  equipment identity with its superseded audit history and the reconciliation
+   *  audit id, the per-module exact-datasheet coverage + the registry binding
+   *  attempt, and the configured personnel roles (designer only — never an EOR,
+   *  licence, signature or seal).
+   *
+   *  OPTIONAL and OMITTED when no lifecycle resolved anything (harness / test /
+   *  DB-unavailable run): canonicalJson drops undefined, so the snapshot digest
+   *  of an unresolved build is byte-identical to the pre-AAC-2 digest. When a
+   *  reconciliation DOES occur the digest legitimately moves — that is exactly
+   *  what snapshot_digest_invalidations records. */
+  resolutionAuthority?: {
+    canonicalEquipment: import('./resolution/equipmentSelection').CanonicalEquipmentAuthority | null;
+    moduleDatasheetBinding: import('./resolution/datasheetBinding').ModuleDatasheetBindingAuthority | null;
+    projectPersonnel: import('@/lib/personnel/types').ProjectPersonnelAuthority | null;
+    /** AAC WS-3 — the project's LEGAL identity retrieved from an official source
+     *  (normalised address, parcel/APN, county + FIPS, municipal boundary), with
+     *  per-field verification states, the boundary evidence sentence, the exact
+     *  endpoints queried, the retrieval timestamp, a payload SHA-256 and a
+     *  confidence. THE evidence for a cleared PROJECT-AUTHORITY-UNVERIFIED. */
+    projectLegalAuthority?: import('./resolution/jurisdictionAuthority').ProjectLegalAuthorityRecord | null;
+    /** AAC WS-3 — the ADOPTED code editions (NEC/IBC/IRC/IFC) retrieved from the
+     *  AHJ registry, each with the registry field it came from, the raw
+     *  enumeration, its corroborator and any conflicting source. THE evidence for
+     *  a cleared CODE-AUTHORITY-INCOMPLETE. */
+    codeAdoptionAuthority?: import('./resolution/jurisdictionAuthority').CodeAdoptionAuthorityRecord | null;
+    /** AAC WS-4 — the climate-hazard RETRIEVAL record: query inputs (coordinates,
+     *  ASCE edition, risk category + its basis, site class), returned values
+     *  (wind, snow, seismic, elevation), every dataset with its endpoint, the
+     *  exposure basis, the override history (originals preserved) and the
+     *  registry-archival state. THE evidence for a cleared
+     *  ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED. */
+    environmentalRetrieval?: import('./resolution/environmentalRetrieval').EnvironmentalRetrievalRecord | null;
+    /** AAC WS-8 — the published-document RETRIEVAL record: every source
+     *  attempted with its exact HTTP outcome, the content hash of what came
+     *  back, the archival result, whether the document covers the SELECTED
+     *  model, and the cross-reference research finding that explains why no
+     *  alias was created. THE evidence for the racking document requirements —
+     *  and, when one legitimately remains, for exactly why. */
+    structuralDocumentRetrieval?: import('./resolution/structuralDocuments').StructuralDocumentRetrievalRecord | null;
+    /** AAC WS-8 — the rail-selection trace: which stores were probed for a rail
+     *  and what each held, whether the rail is inherent in the mount product or
+     *  genuinely unselected, and the span-screened candidate shortlist that
+     *  bounds the operator's remaining pick to ONE choice. */
+    rackingAssemblySelection?: import('./resolution/railSelection').RailSelectionVerdict | null;
+    /** AAC WS-8 — the framing-capacity retrieval ATTEMPT and its honest
+     *  AUTO_RETRIEVED → PROFESSIONAL_APPROVAL mode transition, with the reason
+     *  each document class is not publicly obtainable for this building. */
+    framingRetrieval?: import('./resolution/types').SnapshotAuthorityInputs['framingRetrieval'];
+    /** AAC WS-9 — the digest-bound engineering-review coverage read from
+     *  migration 116: who approved, under which licence, for which digest. */
+    engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
   };
 }
 

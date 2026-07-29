@@ -44,6 +44,8 @@ import {
 import { metersToFt } from '../../cad/geometry';
 import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
 import { projectStructural } from '../../permit/snapshot/structuralProjection';
+// AAC WS-9 — THE site design-load seam (no wind/snow literal in drafting).
+import { resolveSiteDesignLoads } from '../../permit/snapshot/siteDesignLoads';
 import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { getMountingSystemById } from '../../mounting-hardware-db';
 
@@ -878,13 +880,15 @@ export function drawGroundStructural(
   const _canonWind = Number((project as unknown as {
     _canonical?: { site?: { windSpeed?: number } };
   })?._canonical?.site?.windSpeed) || 0;
-  // W3 §7 — single-sourced from the snapshot env (115 = standalone-only guard).
-  const windSpeedMph  = projectStructural(ctx?.snapshot).windSpeedMph
-    ?? engineering.windSpeedMph
-    ?? (_canonWind > 0 ? _canonWind : undefined)
-    ?? project?.ahjWindSpeedMph
-    ?? 115;
-  const groundSnowPsf = projectStructural(ctx?.snapshot).groundSnowPsf ?? engineering.groundSnowPsf  ?? project?.ahjGroundSnowPsf  ?? 0;
+  // AAC WS-9 — ONE seam for both values, with an explicit basis.
+  const _siteLoads    = resolveSiteDesignLoads({
+    snapshot: ctx?.snapshot ?? null,
+    complianceWindMph: engineering.windSpeedMph ?? (_canonWind > 0 ? _canonWind : undefined),
+    complianceSnowPsf: engineering.groundSnowPsf,
+    ahjWindMph: project?.ahjWindSpeedMph, ahjSnowPsf: project?.ahjGroundSnowPsf,
+  });
+  const windSpeedMph  = _siteLoads.windSpeedMph;
+  const groundSnowPsf = _siteLoads.groundSnowPsf;
 
   const totalPanels = cad?.totalPanels ?? engineering.totalPanels ?? 0;
   const dcKw        = cad?.totalDcKw   ?? engineering.totalDcKw   ?? 0;

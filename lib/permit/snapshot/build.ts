@@ -37,11 +37,18 @@ import { utilityDisplayName } from '../utils/helpers';   // §15(b) — human ut
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { planMicroBranches, microMaxPerBranch, microBranchMaxOcpdA, type BranchPlanPanel } from '../utils/branching';
 import { getDesignTemps } from '../utils/designTemps';
-import { resolveTrunkCablePlan } from '@/lib/equipment/trunkCable';
+import { resolveTrunkCablePlan, findTrunkCableSystem } from '@/lib/equipment/trunkCable';
 import { deriveBranchCablePaths } from '@/lib/bom/deriveRunLengths';
+// AAC WS-5 — the deterministic Q-Cable topology + procurement SOLUTION engine.
+import { buildQCableTopology, evaluateQCableSolutions } from './qcableTopology';
+// AAC WS-7 — the conduit-fill completeness + result authority (NEC Ch.9 T1).
+import { evaluateConduitFillAuthority, type ConduitFillEvaluation } from './conduitFillAuthority';
+// AAC WS-5/WS-7 — the SYNC design-geometry resolver stage (framework contract).
+import { runDerivedResolutionStage, mergeResolutionStates } from './resolution/derived';
 import { SOLAR_PANELS, MICROINVERTERS, STRING_INVERTERS, getPanelById } from '@/lib/equipment-db';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
 import { getManufacturerAsset, evaluateDocumentApplicability } from '@/lib/manufacturer-assets-db';
+import { buildEquipmentDocumentAuthority } from './documentAuthority';
 // ECD §7 (WS-2) — racking BONDING authority (requirement vs method).
 import { buildRackingBondingAuthority } from './rackingBonding';
 import { buildComputeSystemShadow } from '../utils/computedRuns';
@@ -55,6 +62,16 @@ import {
   GROUNDING_AUTHORITY_BLOCKER_CODE, type GroundingDocumentEvidence,
 } from './groundingAuthority';
 import type { CableExtensionSolution, ProcurementSufficiency } from './types';
+// AAC WS-1 — resolution state → blocker payload (existing RS-1 machinery).
+import type { RequirementResolutionState } from './resolution/types';
+import { resolutionStatePayload } from './resolution/evidence';
+// AAC WS-2 / WS-6 — the automatic-resolution authority records (evidence for the
+// requirements the lifecycle CLEARED; a cleared requirement emits no blocker).
+import type { CanonicalEquipmentAuthority } from './resolution/equipmentSelection';
+import type { ModuleDatasheetBindingAuthority } from './resolution/datasheetBinding';
+import type { ProjectPersonnelAuthority } from '@/lib/personnel/types';
+import type { ProjectLegalAuthorityRecord, CodeAdoptionAuthorityRecord } from './resolution/jurisdictionAuthority';
+import type { EnvironmentalRetrievalRecord } from './resolution/environmentalRetrieval';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 
 const fuzz = <T extends { model: string }>(list: T[], model?: string | null): T | undefined => {
@@ -92,6 +109,25 @@ export function buildPermitDesignSnapshot(
     framingEngineerReview?: FramingEngineerReviewEvidence | null;
     framingReviewDigest?: string | null;
     framingProjectApplicabilityKey?: string | null;
+    /** AAC WS-8 — the published-document RETRIEVAL record (every source
+     *  attempted, HTTP outcome, content hash, archival result, whether the
+     *  document covers the SELECTED model, and the cross-reference finding).
+     *  Evidence only: it never clears a requirement by itself. */
+    structuralDocumentRetrieval?: import('./resolution/structuralDocuments').StructuralDocumentRetrievalRecord | null;
+    /** AAC WS-8 (audit §7.7) — REAL DocumentRegistryFacts keyed
+     *  `${category}:${equipmentId}`. Absent ⇒ the AUTHORITATIVE verdict stays
+     *  unreachable, exactly as before this seam. */
+    documentRegistryFacts?: Record<string, import('@/lib/manufacturer-assets-db').DocumentRegistryFacts> | null;
+    /** AAC WS-8 — the rail-selection trace (probes, inherent-vs-unselected,
+     *  span-screened candidates). Decides PENDING-RACKING-ASSEMBLY-SELECTION. */
+    rackingAssemblySelection?: import('./resolution/railSelection').RailSelectionVerdict | null;
+    /** AAC WS-8 — the framing retrieval attempt + its AUTO_RETRIEVED →
+     *  PROFESSIONAL_APPROVAL mode transition. Evidence only. */
+    framingRetrieval?: import('./resolution/types').SnapshotAuthorityInputs['framingRetrieval'];
+    /** AAC WS-9 — the digest-bound engineering-review coverage READ from
+     *  migration 116. The ONLY thing that can make ENGINEERING-REVIEW-PENDING
+     *  clearable, and it is never written by the engine. */
+    engineeringReview?: import('@/lib/engineeringReview/types').EngineeringReviewCoverage | null;
     /** §Q — canonical Q-Cable procurement-deficit resolution solutions, async-
      *  resolved by the caller (operator selection + verified lib/documents record).
      *  Empty/undefined ⇒ no solution ⇒ QCABLE-PROCUREMENT-INSUFFICIENT stays firing
@@ -115,6 +151,28 @@ export function buildPermitDesignSnapshot(
      *  document ⇒ the outcome is PENDING_MANUFACTURER_AUTHORITY and
      *  QCABLE-GROUNDING-AUTHORITY-UNVERIFIED fires (the honest live outcome). */
     groundingDocumentEvidence?: GroundingDocumentEvidence | null;
+    /** AAC WS-1 — the per-requirement RequirementResolutionState produced by the
+     *  async resolution lifecycle, keyed by requirement code. Attached to each
+     *  registry record's PAYLOAD (rendered by the existing RS-1 payload
+     *  machinery — no visual redesign). Absent ⇒ payloads unchanged ⇒ the
+     *  snapshot digest of a harness/test build is byte-identical. */
+    resolutionStates?: Record<string, RequirementResolutionState> | null;
+    /** AAC WS-2 / WS-6 — the automatic-resolution AUTHORITY records (canonical
+     *  equipment identity + superseded history + reconciliation audit id, module
+     *  exact-datasheet coverage, configured personnel). Recorded on the snapshot
+     *  as the evidence for the requirements the lifecycle CLEARED (a cleared
+     *  requirement emits no blocker, so its evidence needs a home). Absent ⇒ the
+     *  field is omitted entirely ⇒ digest unchanged. */
+    canonicalEquipment?: CanonicalEquipmentAuthority | null;
+    moduleDatasheetBinding?: ModuleDatasheetBindingAuthority | null;
+    projectPersonnel?: ProjectPersonnelAuthority | null;
+    /** AAC WS-3 / WS-4 — the RETRIEVED authority records. Each carries its
+     *  source URL, retrieval timestamp, payload SHA-256 and confidence, and each
+     *  is the evidence for a requirement the lifecycle CLEARED. All absent ⇒ the
+     *  snapshot field is omitted entirely ⇒ digest unchanged. */
+    projectLegalAuthority?: ProjectLegalAuthorityRecord | null;
+    codeAdoptionAuthority?: CodeAdoptionAuthorityRecord | null;
+    environmentalRetrieval?: EnvironmentalRetrievalRecord | null;
   },
 ): PermitDesignSnapshot {
   const { project, system, compliance } = input;
@@ -398,7 +456,14 @@ export function buildPermitDesignSnapshot(
       verificationStatus: 'cad-derived-estimate',
       raceway: _isOpenAir ? 'FREE_AIR' : (r.conduitType ?? null),
       tradeSizeIn: r.conduitSize ?? null,
-      fillPct: isFinite(r.conduitFillPercent) ? r.conduitFillPercent : null,
+      // AAC WS-7 — the SAME field-name mismatch class as computeSystemProjection:
+      // `RunSegment` carries `conduitFillPct` (computed-system.ts:186), never
+      // `conduitFillPercent`, so every routeSegment fill was nulled while the
+      // NEC Ch.9 Table 1 value sat on the run. Open-air runs legitimately carry
+      // no fill (0 % is meaningless without a raceway) ⇒ null.
+      fillPct: _isOpenAir ? null
+        : (isFinite(r.conduitFillPct) ? Math.round(r.conduitFillPct * 10) / 10
+          : (isFinite(r.physicalRaceway?.fillPct) ? r.physicalRaceway.fillPct : null)),
       installationMethod: _isOpenAir ? 'free-air (NEC 690.31(C))' : (r.conduitType ? 'in-conduit' : null),
       conductorGauge: r.wireGauge ?? null,
       conductorCount: isFinite(r.conductorCount) ? r.conductorCount : null,
@@ -743,6 +808,9 @@ export function buildPermitDesignSnapshot(
     // through lib/documents). null on live ⇒ operator-entered values stay
     // UNVERIFIED ⇒ ENVIRONMENTAL-LOAD-AUTHORITY-UNVERIFIED fires.
     environmentalSource: opts?.environmentalSource ?? null,
+    // AAC WS-4 — the retrieval detail behind that source (query inputs, returned
+    // values, override history, archival state). Null ⇒ record unchanged.
+    environmentalRetrieval: opts?.environmentalRetrieval ?? null,
     environmentalCoordinates: (proj.lat != null || proj.lng != null)
       ? { lat: proj.lat ?? null, lng: proj.lng ?? null } : null,
     environmentalAddressUsed: proj.address ?? null,
@@ -765,6 +833,11 @@ export function buildPermitDesignSnapshot(
     framingReviewDigest: opts?.framingReviewDigest ?? null,
     framingProjectApplicabilityKey: opts?.framingProjectApplicabilityKey
       ?? (opts?.projectId ?? (proj.projectId ?? null)),
+    // AAC WS-8 — real registry facts (AUTHORITATIVE becomes reachable) + the
+    // rail-selection trace (PENDING-RACKING-ASSEMBLY-SELECTION stops echoing the
+    // capacity document and becomes the design question it always was).
+    documentRegistryFacts: opts?.documentRegistryFacts ?? null,
+    rackingAssemblySelection: opts?.rackingAssemblySelection ?? null,
   });
 
   // ═══ §6/§7 (closeout 07-23) LISTED CABLE ASSEMBLY + GEOMETRIC CABLE PATHS ══
@@ -777,6 +850,10 @@ export function buildPermitDesignSnapshot(
   let listedCableAssembly: import('./types').ListedCableAssembly | null = null;
   let branchCablePaths: import('./types').BranchCablePath[] = [];
   let procurementSufficiency: ProcurementSufficiency | null = null;
+  /** AAC WS-5 — THE deterministic Q-Cable topology object + its option-space
+   *  evaluation. Procurement, the BOM and every sheet length consume THESE. */
+  let qcableTopology: import('./types').QCableTopology | null = null;
+  let qcableEvaluation: import('./types').QCableSolutionEvaluation | null = null;
   /** the EXACT selected micro SKU/model the grounding authority must be resolved
    *  for (never a family label) — hoisted out of the micro block below. */
   let _selectedMicroSku: string | null = null;
@@ -800,13 +877,23 @@ export function buildPermitDesignSnapshot(
     });
     const _pitch = _trunkPlan?.cable.connectorSpacingFt ?? null;
     // module centre coordinates grouped by branch (canonical plan-ft frame).
+    // AAC WS-5 — the SAME grouping now also carries each device's identity, roof
+    // plane and row/col index, so the topology engine can classify a row vs an
+    // array transition from the canonical layout indices instead of guessing at
+    // a length threshold. `_centersByBranch` stays the exact {x,y} shape
+    // deriveBranchCablePaths consumes (byte-identical lengths).
     const _centersByBranch = new Map<string, { x: number; y: number }[]>();
+    const _devicesByBranch = new Map<string, import('./qcableTopology').QCableModulePoint[]>();
     for (const mi of structAuth.moduleInstances) {
       const pts = mi.polygon?.points ?? [];
       if (!pts.length || !mi.branchId) continue;
       const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
       const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
       (_centersByBranch.get(mi.branchId) ?? _centersByBranch.set(mi.branchId, []).get(mi.branchId)!).push({ x: cx, y: cy });
+      (_devicesByBranch.get(mi.branchId) ?? _devicesByBranch.set(mi.branchId, []).get(mi.branchId)!).push({
+        moduleInstanceId: mi.instanceId, roofPlaneId: mi.roofPlaneId ?? null,
+        row: mi.row ?? null, col: mi.col ?? null, xFt: cx, yFt: cy,
+      });
     }
     const _paths = deriveBranchCablePaths(
       branches.map(b => ({ branchId: b.branchId, branchLabel: b.label, moduleCount: b.moduleCount,
@@ -860,13 +947,76 @@ export function buildPermitDesignSnapshot(
     // installed path ⇒ QCABLE-PROCUREMENT-INSUFFICIENT (pushed below). Cleared only
     // by a VERIFIED CableExtensionSolution (opts.cableExtensionSolutions — empty on
     // live today ⇒ the blocker stays active). Pure/deterministic → digest-safe.
+    // ═══ AAC WS-5 (2026-07-27) — THE DETERMINISTIC TOPOLOGY + SOLUTION ENGINE ══
+    // Built BEFORE the sufficiency gate, because the gate now inspects a
+    // COMPLETED resolution instead of announcing a shortage. The topology is the
+    // one derivation every consumer reads (procurement, BOM, PV-4B, E-1, SCHED).
+    const _trunkSystem = _trunkPlan?.system ?? findTrunkCableSystem(_microMfr);
+    // the array's module centre-to-centre pitch — the reach a molded connector
+    // must span. Taken from the canonical module footprint + the dominant
+    // orientation (portrait ⇒ the module WIDTH is the along-row dimension).
+    const _mi0 = structAuth.moduleInstances[0] ?? null;
+    const _modulePitchFt = _mi0
+      ? (_orient === 'portrait' ? (_mi0.widthIn ?? 0) : (_mi0.heightIn ?? 0)) / 12
+      : null;
+    const _wasteFactor = branchCablePaths[0]?.wasteFactor ?? 1.15;
+    if (_trunkSystem && _trunkPlan?.cable) {
+      qcableTopology = buildQCableTopology({
+        system: _trunkSystem,
+        cable: _trunkPlan.cable,
+        orientation: _orient,
+        modulePitchFt: _modulePitchFt && _modulePitchFt > 0 ? _modulePitchFt : null,
+        branches: branches.map(b => ({
+          branchId: b.branchId, branchLabel: b.label, moduleCount: b.moduleCount,
+          modules: _devicesByBranch.get(b.branchId) ?? [],
+        })),
+        wasteFactor: _wasteFactor,
+        serviceLoopAllowance: opts?.qcableServiceLoopAllowance ?? null,
+        assemblyId: listedCableAssembly?.assemblyId ?? null,
+      });
+    }
+    if (qcableTopology && _trunkSystem) {
+      qcableEvaluation = evaluateQCableSolutions({
+        topology: qcableTopology,
+        system: _trunkSystem,
+        selectedSystem: `${_microMfr} ${_microModel}`.trim() || (listedCableAssembly?.wiringMethodLabel ?? 'micro AC trunk'),
+        cableExtensionSolutions: opts?.cableExtensionSolutions ?? [],
+        maxDevicesPerBranch: microMaxPerBranch(_microModel, _microMfr)
+          ?? _trunkSystem.maxDevicesPerBranch,
+        extensionLookupNote: (opts?.cableExtensionSolutions ?? []).length === 0
+          ? 'no operator-selected listed extension product, and the document registry returned no verified extension document (manufacturer_document_registry — migration 113)'
+          : null,
+        // D-1 (2026-07-20): plane containment is a PREFERENCE; the branch count
+        // stays at the manufacturer minimum and a chunk-boundary crossing is permitted.
+        planeContainmentPreferred: true,
+      });
+    }
+    // §Q — the sufficiency gate. When the engine ADOPTED an auto-adoptable order
+    // composition (same listed cable, same layout, same branch assignment — only
+    // the ordered section count and the listed sealing caps change), the
+    // procurement basis IS that composition, and the gate is measured against
+    // it. Nothing physical changed, so this is a procurement decision the engine
+    // may take; every other option requires a design/product action and is
+    // reported, ranked, in the payload instead.
+    const _adopted = qcableEvaluation?.options.find(o => o.adopted) ?? null;
+    const _adoptedPerBranch = new Map((_adopted?.perBranch ?? []).map(p => [p.branchId, p.providedFt]));
     procurementSufficiency = buildProcurementSufficiency({
       assembly: listedCableAssembly,
-      branchPaths: branchCablePaths,
+      branchPaths: _adopted
+        ? branchCablePaths.map(p => ({ ...p, procurementLengthFt: _adoptedPerBranch.get(p.branchId) ?? p.procurementLengthFt }))
+        : branchCablePaths,
       selectedSystem: `${_microMfr} ${_microModel}`.trim() || (listedCableAssembly?.wiringMethodLabel ?? 'micro / Q Cable'),
       solutions: opts?.cableExtensionSolutions ?? [],
       serviceLoopAllowance: opts?.qcableServiceLoopAllowance ?? null,
+      topology: qcableTopology,
+      evaluation: qcableEvaluation,
     });
+    // ONLY when the composition was ADOPTED does the ordered footage change; the
+    // assembly's own claim then states the SAME number (one derivation, no second
+    // basis). With no adoption the drop-count order stands, unchanged.
+    if (listedCableAssembly && _adopted && procurementSufficiency?.procurementLengthFt != null) {
+      listedCableAssembly.cableLengthFt = Math.round(procurementSufficiency.procurementLengthFt);
+    }
 
     // §7/§10 — patch the canonical BRANCH_RUN route segment length taxonomy so
     // PV-4B/E-1 project the geometric designed-installed length (not the 68-ft
@@ -887,6 +1037,15 @@ export function buildPermitDesignSnapshot(
       _branchSeg.wasteFactor = branchCablePaths[0]?.wasteFactor ?? null;
       _branchSeg.lengthProvenance = _geom ? 'geometry-derived' : 'estimated';
       _branchSeg.verificationState = 'cad-derived-estimate';
+      // AAC WS-5/§2.13 — TRUTHFUL PER-SEGMENT SOURCE. The open-air branch trunk
+      // has no raceway to route around: its physical path IS the ordered chain
+      // through the micro positions the CAD model carries, so its length source
+      // is a CAD ROUTE, not a heuristic estimate. (The VERIFICATION state stays
+      // 'cad-derived-estimate' — nothing short of a field measurement is
+      // verified — so no downstream claim is strengthened by this.) Only the
+      // runs whose route genuinely is not in the model keep the estimate source,
+      // and ROUTE-LENGTH-ESTIMATE now names exactly those.
+      if (_geom) _branchSeg.lengthSource = 'cad-route';
     }
   }
 
@@ -914,6 +1073,10 @@ export function buildPermitDesignSnapshot(
     utilityName: proj.utilityName ?? null,
     utilityId: null,
     capturedAtIso: _capturedIso,
+    // AAC WS-3 — the RETRIEVED adopted-code authority (code-authority@v1). Null
+    // ⇒ IBC/IRC/IFC stay unknown, verifiedBy/sourceHash stay null and the record
+    // stays `incomplete` — byte-identical to the pre-AAC-3 behaviour.
+    codeAdoption: opts?.codeAdoptionAuthority ?? null,
   });
   // adoptedCodes MUST mirror the code-authority record (single source). A null
   // (unknown) adoption becomes '—' — never a fabricated year (V11 forbids a
@@ -994,11 +1157,115 @@ export function buildPermitDesignSnapshot(
       })
     : [];
 
-  // §14 — project legal authority is NEVER verified from an official source here
-  // (no document-registry / operator verification path is wired into this pure
-  // build). Postal inference is not verification, so this stays false and the
-  // per-field states resolve to 'unverified-derived'. Never fabricate true.
-  const _projectAuthorityVerified = false;
+  // §14 / AAC WS-3 — project legal authority. The pure build still never
+  // verifies anything itself: postal inference is not verification. What CAN
+  // verify it is the async retrieval resolver (project-authority@v1), whose
+  // record is threaded in through opts. With no retrieval this is `false`, the
+  // per-field states resolve to 'unverified-derived' and the behaviour is
+  // byte-identical to before. Never fabricated true.
+  const _projectAuthorityVerified = opts?.projectLegalAuthority?.verified === true;
+
+  // ═══ AAC WS-9 — DIGEST-BOUND ENGINEERING REVIEW ════════════════════════════
+  // `certification.engineeringReviewApproved` was the literal `false` and
+  // ENGINEERING-REVIEW-PENDING was pushed with no `if`, so the requirement could
+  // not be cleared by any workflow that existed. It is now decided from the
+  // migration-116 review store, READ (never written) by
+  // engineering-review-record@v1 and threaded in through opts.
+  //
+  // THE COVERAGE RULE, fail-closed at every step: an approval must be ACTIVE,
+  // recorded by a LICENSED role, and bound to a digest. `covered` here means the
+  // resolver matched the project's PRIOR snapshot digest — the CURRENT digest
+  // does not exist until this build finishes — and the existing consumers
+  // (certPages, validate V13, the issue-state gate) re-check
+  // `reviewedDigest === meta.digest`, so a review of a stale set never releases
+  // a changed one. Absent opts ⇒ null ⇒ uncovered ⇒ byte-identical to before.
+  const _reviewCoverage = opts?.engineeringReview ?? null;
+  const _engineeringReviewCovered = _reviewCoverage?.covered === true
+    && !!_reviewCoverage.reviewedDigest
+    && !!_reviewCoverage.reviewerLicense;
+
+  // ═══ AAC WS-7 — CONDUIT-FILL AUTHORITY (the computed NEC Ch.9 T1 result) ════
+  // The calculation runs in the canonical engine; the projection seam now
+  // carries it (four field-name mismatches fixed). This evaluator decides the
+  // requirement from that result plus the completeness of its inputs — the ONE
+  // place CONDUIT-FILL-PENDING is decided.
+  const _feederSeg = routeSegments.find(r => r.segmentId === String(feederRun?.id ?? ''))
+    ?? routeSegments.find(r => /COMBINER_TO_DISCO|INV_TO_DISCO/.test(r.segmentId))
+    ?? null;
+  const conduitFillEvaluation: ConduitFillEvaluation | null = cs
+    ? evaluateConduitFillAuthority({
+        segmentId: _feederSeg?.segmentId ?? (feederRun ? String(feederRun.id) : null),
+        racewayType: (elec?.conduitFill as { conduitType?: string } | undefined)?.conduitType
+          ?? feederRun?.conduitType ?? _feederSeg?.raceway ?? null,
+        racewaySize: (elec?.conduitFill as { conduitSize?: string } | undefined)?.conduitSize
+          ?? feederRun?.conduitSize ?? _feederSeg?.tradeSizeIn ?? null,
+        conductorCount: (isFinite(feederRun?.conductorCount) ? feederRun.conductorCount : null)
+          ?? _feederSeg?.conductorCount ?? null,
+        conductorGauge: feederRun?.wireGauge ?? _feederSeg?.conductorGauge ?? null,
+        insulation: feederRun?.insulation ?? _feederSeg?.insulation ?? null,
+        egcGauge: feederRun?.egcGauge ?? _feederSeg?.egcGauge ?? null,
+        codeEdition: codeAuthority.editions.nec.edition ?? null,
+        computedFillPct: (elec?.conduitFill as { fillPercent?: number } | undefined)?.fillPercent
+          ?? (isFinite(feederRun?.conduitFillPct) ? feederRun.conduitFillPct : null) ?? null,
+        computedPass: (elec?.conduitFill as { passes?: boolean } | undefined)?.passes
+          ?? feederRun?.conduitFillPass ?? null,
+      })
+    : null;
+
+  // ═══ AAC WS-5/WS-7 — the RG-5 raceway verdicts, decided ONCE (the derived
+  // resolver records them as evidence and the registry below consumes the same
+  // booleans — one derivation, two consumers). ════════════════════════════════
+  const _feederRacewayResolved = !!(feederRun?.conduitType);
+  const _branchRacewayVerdict = ((): { ambiguous: boolean; reasons: string[] } => {
+    if (!cs?.isMicro) return { ambiguous: false, reasons: [] };
+    const openAir = routeSegments.find(r => r.segmentId === 'BRANCH_RUN');
+    const homerun = physicalRaceways.find(rw => /BRANCH-HOMERUN/.test(rw.physicalRacewayId));
+    const homerunSeg = routeSegments.find(r => r.segmentId === 'BRANCH_HOMERUN_RUN');
+    const reasons: string[] = [];
+    if (!homerun) reasons.push('no shared branch home-run raceway object');
+    else {
+      if (!(homerun.sharedCircuitCount >= 1)) reasons.push('the shared home-run raceway carries no shared-circuit count');
+      if (homerun.fillPct == null) reasons.push('the shared home-run raceway carries no computed fill (NEC Ch.9, Table 1)');
+    }
+    if (openAir != null && openAir.raceway != null && openAir.raceway !== 'FREE_AIR') {
+      reasons.push('the open-air Q-Cable trunk is stamped in-conduit');
+    }
+    if (homerunSeg != null && (homerunSeg.raceway == null || homerunSeg.raceway === 'FREE_AIR')) {
+      reasons.push('the home-run section is not modeled in-conduit');
+    }
+    return { ambiguous: reasons.length > 0, reasons };
+  })();
+  const _racewaySegmentConflicts = ((): string[] => {
+    const bySeg = new Map<string, Set<string>>();
+    for (const r of routeSegments) {
+      const key = `${r.raceway ?? '—'}|${r.tradeSizeIn ?? '—'}`;
+      const s = bySeg.get(r.segmentId) ?? new Set<string>();
+      s.add(key); bySeg.set(r.segmentId, s);
+    }
+    return [...bySeg.entries()].filter(([, s]) => s.size > 1).map(([id]) => id);
+  })();
+
+  // ═══ AAC WS-5/WS-7 — THE DERIVED (DESIGN-GEOMETRY) RESOLVER STAGE ══════════
+  // Runs BEFORE the registry is built, on the framework's own contract (same
+  // ClearanceResult, same evidence record, same audit-ref rule). Its states
+  // merge OVER the async lifecycle's states, so a requirement whose owning
+  // resolver runs here is never reported as "resolver not implemented" and its
+  // clearance carries a real audit reference.
+  const _derivedResolution = runDerivedResolutionStage({
+    nowIso: String(_capturedIso || ''),
+    conduitFill: conduitFillEvaluation,
+    routeSegments,
+    physicalRaceways,
+    feederRacewayResolved: _feederRacewayResolved,
+    isMicro: !!cs?.isMicro,
+    branchRacewayAmbiguous: _branchRacewayVerdict.ambiguous,
+    branchRacewayReasons: _branchRacewayVerdict.reasons,
+    racewaySegmentConflicts: _racewaySegmentConflicts,
+    qcableTopology,
+    qcableEvaluation,
+    procurementSufficiency,
+  });
+  const _resolutionStates = mergeResolutionStates(opts?.resolutionStates ?? null, _derivedResolution.states);
 
   // ═══ W4 §12 / W10 (RP-D) PERMIT-READINESS REGISTRY ═════════════════════════
   // ONE canonical, structured registry of EVERY active release blocker
@@ -1053,6 +1320,17 @@ export function buildPermitDesignSnapshot(
       // emitter's requested severity (over/META) is advisory INTENT only and can
       // never downgrade a code the policy classifies blocking.
       const _sev = classifyBlockerSeverity(code);
+      // AAC WS-1 — a requirement's RESOLUTION STATE travels with the requirement.
+      // It rides in the EXISTING payload slot (renderBlockerPayload → the generic
+      // component prints honest key/value pairs), so nothing about RS-1's layout
+      // changes; the payload SCHEMA gains the resolution fields. When no
+      // lifecycle ran (harness / test / GET without authority) the payload is
+      // exactly what it was, so the digest does not churn.
+      const _resState = _resolutionStates[code] ?? null;
+      const _basePayload = over?.payload ?? null;
+      const _payload = _resState
+        ? { ...(_basePayload ?? {}), ...resolutionStatePayload(_resState) }
+        : _basePayload;
       registry.push({
         code,
         severity: _sev.severity,
@@ -1062,7 +1340,7 @@ export function buildPermitDesignSnapshot(
         affectedSheets: over?.affectedSheets ?? m?.sheets ?? (isStruct ? STRUCT_DEFAULT.sheets : []),
         explanation,
         resolutionAction: over?.resolutionAction ?? m?.resolution ?? (isStruct ? STRUCT_DEFAULT.resolution : 'Resolve the missing authority before permit-ready.'),
-        payload: over?.payload ?? null,
+        payload: _payload,
         provenance: over?.provenance ?? { source: 'snapshot build (permitReadiness)', ref: null },
         createdAtIso: _capturedIso,
         createdVersion: String(PLANSET_ENGINE_VERSION),
@@ -1071,11 +1349,29 @@ export function buildPermitDesignSnapshot(
       });
     };
 
-    // Req. 3: no authoritative routed geometry exists — segment lengths are
-    // CAD-derived ESTIMATES. Identified, never silently used as authority-grade.
-    if (routeSegments.some(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement')) {
-      push('ROUTE-LENGTH-ESTIMATE',
-        'Electrical run lengths are CAD-derived estimates — authoritative routed geometry or field measurement required for permit-ready status');
+    // AAC WS-5/§2.13 SPLIT — the requirement is NARROWED to its honest residual.
+    // The branch cable path IS routed geometry (module coordinates → ordered
+    // cable chain), and its segment now says so (lengthSource 'cad-route'). What
+    // remains is the feeder / home-run / service runs whose physical route no
+    // record carries — named segment by segment, never "all run lengths".
+    {
+      const _residual = routeSegments.filter(r => r.lengthSource !== 'cad-route' && r.lengthSource !== 'field-measurement');
+      const _derivedSegs = routeSegments.filter(r => r.lengthSource === 'cad-route' || r.lengthSource === 'field-measurement');
+      if (_residual.length > 0) {
+        push('ROUTE-LENGTH-ESTIMATE',
+          `${_residual.length} of ${routeSegments.length} electrical run(s) have no routed geometry in the CAD model and require a field-measured route: `
+            + `${_residual.map(r => `${r.segmentId} (${r.electricalFunction ?? 'run'})`).join(', ')}`
+            + (_derivedSegs.length ? `. ${_derivedSegs.length} run(s) ARE geometry-derived and are not blocked: ${_derivedSegs.map(r => r.segmentId).join(', ')}.` : ''),
+          {
+            payload: {
+              residualSegmentIds: _residual.map(r => r.segmentId),
+              residualSegments: _residual.map(r => ({ segmentId: r.segmentId, electricalFunction: r.electricalFunction ?? null, oneWayFt: r.oneWayFt, lengthSource: r.lengthSource })),
+              geometryDerivedSegmentIds: _derivedSegs.map(r => r.segmentId),
+            },
+            resolutionAction:
+              'Record a CAD-routed or field-measured length for the NAMED runs only (the branch cable path is already derived from the module coordinates).',
+          });
+      }
     }
     // Req. 7: stored equipment-identity conflict (e.g. Braidon subSystems
     // panelId vs fleet model) BLOCKS permit-ready until operator reconciliation.
@@ -1084,16 +1380,33 @@ export function buildPermitDesignSnapshot(
     for (const c of equipmentIdentityConflicts) push('EQUIPMENT-IDENTITY-CONFLICT', c);
     // §14 carry-forward: missing feeder raceway/conduit type authority stays
     // visible and blocking (never weakened by W3).
-    if (cs && !(feederRun?.conduitType)) {
+    if (cs && !_feederRacewayResolved) {
       push('FEEDER-RACEWAY-AUTHORITY',
         'Feeder raceway/conduit type not resolved on the canonical feeder segment — raceway + bonding authority required');
     }
     // W10a: conduit fill PENDING was only ever a schedule-cell literal (counted as
     // "0 errors" on PV-4A). §17 — emit it as a BLOCKING blocker (unresolved required
     // conduit fill can hide a thermal-derating/ampacity violation; never a pass).
-    if (cs && ((elec?.conduitFill as any)?.fillPercent == null)) {
+    // AAC WS-7 — decided by the conduit-fill AUTHORITY (the computed NEC Ch.9
+    // Table 1 result + input completeness), never by a projection field that was
+    // silently null. A PRESENT computed fill clears it; a genuinely missing
+    // input fires it and NAMES the input.
+    if (cs && conduitFillEvaluation && !conduitFillEvaluation.cleared) {
       push('CONDUIT-FILL-PENDING',
-        'Feeder conduit fill is PENDING (not computed) — it must never be presented as a passing zero-error result on PV-4A/PV-4B');
+        `Feeder conduit fill is NOT ESTABLISHED — ${conduitFillEvaluation.reasons.join('; ')}. `
+          + 'It must never be presented as a passing zero-error result on PV-4A/PV-4B.',
+        {
+          payload: {
+            missingInputs: conduitFillEvaluation.missing,
+            racewayType: conduitFillEvaluation.record.racewayType,
+            racewaySize: conduitFillEvaluation.record.racewaySize,
+            conductorSet: conduitFillEvaluation.record.conductorSet,
+            codeEdition: conduitFillEvaluation.record.codeEdition,
+            necBasis: conduitFillEvaluation.record.necBasis,
+          },
+          resolutionAction:
+            'Supply the named raceway / conductor / code-edition input — the fill itself is COMPUTED (NEC Chapter 9, Tables 1/4/5), never field-measured.',
+        });
     }
     // §4 BRANCH-RACEWAY coverage gate. A micro design's AC branch route is TWO
     // physical sections: the open-air Q-Cable trunk (no raceway) and the shared
@@ -1101,38 +1414,19 @@ export function buildPermitDesignSnapshot(
     // canonical model does not carry that shared raceway (with a documented
     // shared-circuit count + fill), the branch grouping is AMBIGUOUS — block
     // (never let a sheet describe a multi-method branch with one merged string).
-    if (cs?.isMicro) {
-      const _branchOpenAir = routeSegments.find(r => r.segmentId === 'BRANCH_RUN');
-      const _homerun = physicalRaceways.find(rw => /BRANCH-HOMERUN/.test(rw.physicalRacewayId));
-      const _homerunSeg = routeSegments.find(r => r.segmentId === 'BRANCH_HOMERUN_RUN');
-      const _ambiguous =
-        !_homerun ||
-        !(_homerun.sharedCircuitCount >= 1) ||
-        _homerun.fillPct == null ||
-        // the open-air Q-Cable trunk must NOT be stamped in-conduit (the merge bug)
-        (_branchOpenAir != null && _branchOpenAir.raceway != null && _branchOpenAir.raceway !== 'FREE_AIR') ||
-        // the home-run section must be in-conduit (not free-air)
-        (_homerunSeg != null && (_homerunSeg.raceway == null || _homerunSeg.raceway === 'FREE_AIR'));
-      if (_ambiguous) {
-        push('BRANCH-RACEWAY-AUTHORITY',
-          'Micro AC branch raceway model is incomplete/ambiguous — the shared jbox→combiner home-run raceway (with documented shared-circuit count + fill) and the open-air Q-Cable trunk must be modeled as distinct physical sections');
-      }
+    // AAC WS-5 — the verdict is computed ONCE above (raceway-authority@v1 records
+    // the same booleans as evidence); the registry consumes it.
+    if (cs?.isMicro && _branchRacewayVerdict.ambiguous) {
+      push('BRANCH-RACEWAY-AUTHORITY',
+        'Micro AC branch raceway model is incomplete/ambiguous — the shared jbox→combiner home-run raceway (with documented shared-circuit count + fill) and the open-air Q-Cable trunk must be modeled as distinct physical sections: '
+          + _branchRacewayVerdict.reasons.join('; '));
     }
     // §2/gate 3 — a single physical segment id must resolve to exactly ONE raceway
     // type + size. Defends against a merged segment re-introducing two wiring
     // methods (the PVC-vs-EMT / open-air-vs-conduit contradiction) at the source.
-    {
-      const _bySeg = new Map<string, Set<string>>();
-      for (const r of routeSegments) {
-        const key = `${r.raceway ?? '—'}|${r.tradeSizeIn ?? '—'}`;
-        const s = _bySeg.get(r.segmentId) ?? new Set<string>();
-        s.add(key); _bySeg.set(r.segmentId, s);
-      }
-      const _conflicts = [..._bySeg.entries()].filter(([, s]) => s.size > 1).map(([id]) => id);
-      if (_conflicts.length > 0) {
-        push('RACEWAY-SEGMENT-CONFLICT',
-          `Segment id(s) ${_conflicts.join(', ')} resolve to more than one raceway type/size — one physical run must carry ONE raceway`);
-      }
+    if (_racewaySegmentConflicts.length > 0) {
+      push('RACEWAY-SEGMENT-CONFLICT',
+        `Segment id(s) ${_racewaySegmentConflicts.join(', ')} resolve to more than one raceway type/size — one physical run must carry ONE raceway`);
     }
     // W10a: tap-conductor length is PENDING (no CAD/field datum) — the ≤10-ft
     // NEC 705.11(C) rule cannot be evaluated. §17 — surface it as a BLOCKING
@@ -1258,9 +1552,28 @@ export function buildPermitDesignSnapshot(
         provenance: { source: e.provenance.source, ref: e.provenance.equipmentRecordId ?? e.provenance.documentRecordId ?? null },
       });
     }
-    // D-6: engineering review is ALWAYS pending at build (no approved record).
-    push('ENGINEERING-REVIEW-PENDING',
-      'No approved engineering-review record covering this snapshot digest (D-6)');
+    // ── D-6 · AAC WS-9 — ENGINEERING REVIEW IS NOW CONDITIONAL ──────────────
+    // It used to be pushed with NO `if` at all, matching a hardcoded
+    // `certification.engineeringReviewApproved: false`. That made a legitimate
+    // PROFESSIONAL_APPROVAL requirement structurally UNCLEARABLE — no table, no
+    // API, no UI existed to record the approval that would clear it.
+    //
+    // Migration 116 (engineering_review_records) + the admin API give a licensed
+    // engineer of record a real way to record a digest-bound approval, and
+    // engineering-review-record@v1 READS it. The requirement now fires unless an
+    // ACTIVE approval by a LICENSED reviewer covers this project's snapshot.
+    //
+    // FAIL-CLOSED, three ways: an unreadable store is never coverage; an
+    // approval for a DIFFERENT digest is never coverage (checked again at
+    // certPages / validate against meta.digest); and the engine can never write
+    // an approval — it only reads one.
+    if (!_engineeringReviewCovered) {
+      push('ENGINEERING-REVIEW-PENDING',
+        _reviewCoverage?.storeUnavailable
+          ? 'No approved engineering-review record covering this snapshot digest (D-6) — the review store could not be '
+            + 'read, and an unreadable store never satisfies a professional-release gate'
+          : `No approved engineering-review record covering this snapshot digest (D-6). ${_reviewCoverage?.basis ?? ''}`.trim());
+    }
 
     // Back-compat: the code/message list is the BLOCKING subset, single-sourced
     // from the registry — the issue-state derivation, gates, and prior consumers
@@ -1290,10 +1603,19 @@ export function buildPermitDesignSnapshot(
       })();
   const _paInvRec = microInverters[0] ?? stringInverters[0] ?? null;
   const _paHasBattery = (proj.batteryCount ?? 0) > 0 && !!proj.batteryModel;
-  // Engineering-review record (certification): always absent at build (the D-6
-  // gate). deriveIssueState reads it → currently PENDING; the pure function is
-  // tested across all 8 states + the digest-invalidation case independently.
-  const _paReview: IssueStateReview | null = null;
+  // ── AAC WS-9 — the engineering-review record is no longer HARDCODED absent ──
+  // It used to be the literal `null` (with the comment "always absent at build"),
+  // which is what made the review requirement unclearable and forced
+  // deriveIssueState permanently to PENDING. It now projects the SAME
+  // digest-bound coverage the requirement itself is decided from, so the stored
+  // issue state and the registry can never disagree (validator V33).
+  //
+  // Still fail-closed: null unless a LICENSED reviewer's active approval names a
+  // digest, and deriveIssueState independently re-checks that digest against the
+  // one the sheets carry.
+  const _paReview: IssueStateReview | null = _engineeringReviewCovered && _reviewCoverage?.reviewedDigest
+    ? { reviewedDigest: _reviewCoverage.reviewedDigest }
+    : null;
   const _paAuthGapBlockers = _permitReadiness.blockers.filter(b => classifyBlockerDomain(b.code) !== 'review');
   // §15(d) — production identity: the project name must NOT contain "TEST" and a
   // designer/engineer-of-record must be present, or the ISSUED-FOR-PERMIT gate
@@ -1359,7 +1681,27 @@ export function buildPermitDesignSnapshot(
     contractor: proj.contractor ?? proj.installerName ?? proj.installer ?? null,
     issueDate: proj.date ?? null,
     county: proj.county ?? null,                        // §14 municipal-boundary provenance
-    authorityVerified: _projectAuthorityVerified,       // §14 — false (no official-source path)
+    authorityVerified: _projectAuthorityVerified,       // §14 / AAC WS-3
+    // AAC WS-3 — the RETRIEVED per-field verification states. Absent (no
+    // retrieval) ⇒ the §14 all-or-nothing behaviour is byte-identical.
+    authorityFieldVerification: opts?.projectLegalAuthority
+      ? {
+          address: opts.projectLegalAuthority.fields.address.state,
+          apn: opts.projectLegalAuthority.fields.apn.state,
+          municipalBoundary: opts.projectLegalAuthority.fields.municipalBoundary.state,
+          ahjName: opts.projectLegalAuthority.fields.ahjName.state,
+          fireAuthority: opts.projectLegalAuthority.fields.fireAuthority.state,
+        }
+      : undefined,
+    authorityFieldBasis: opts?.projectLegalAuthority
+      ? {
+          address: opts.projectLegalAuthority.fields.address.basis,
+          apn: opts.projectLegalAuthority.fields.apn.basis,
+          municipalBoundary: opts.projectLegalAuthority.fields.municipalBoundary.basis,
+          ahjName: opts.projectLegalAuthority.fields.ahjName.basis,
+          fireAuthority: opts.projectLegalAuthority.fields.fireAuthority.basis,
+        }
+      : undefined,
     // RGM §5 — the sheet index must include the RS-1.n review-status
     // continuation sheets, whose count depends on THIS registry. The snapshot is
     // still being assembled here, so the FINAL registry is handed over
@@ -1494,6 +1836,12 @@ export function buildPermitDesignSnapshot(
       listedCableAssembly,
       branchCablePaths,
       procurementSufficiency,
+      // AAC WS-5 — THE deterministic Q-Cable topology object (ordered drops,
+      // transitions, cable ends, dead drops, installed vs procurement length,
+      // geometry coverage, field-dependent portion). Every consumer reads THIS.
+      qcableTopology,
+      // AAC WS-7 — the computed NEC Ch.9 Table 1 conduit-fill authority record.
+      conduitFillAuthority: conduitFillEvaluation?.record ?? null,
       // ECD §5 (W1-F) — the tap-CONNECTION authority. Null for load-side designs.
       supplySideTapConnection: buildSupplySideTapConnectionAuthority({
         interconnectionMethod: String(proj.interconnectionMethod ?? 'LOAD_SIDE'),
@@ -1607,8 +1955,87 @@ export function buildPermitDesignSnapshot(
       feederContinuousA: cs?.acContinuousCurrentA ?? auth.poi?.requiredA ?? null,
       provenance: { source: 'snapshot builder (Σ over snapshot objects)' },
     },
-    certification: { engineeringReviewApproved: false, engineer: null },
+    // ── AAC WS-9 · EQUIPMENT-DOCUMENT AUTHORITY (renderer purity) ────────────
+    // Five renderer files used to call getManufacturerAsset +
+    // evaluateDocumentApplicability INSIDE the render pass, each re-deciding an
+    // applicability question the snapshot had already decided, each with its own
+    // choice of selected model, and every one of them passing `null` for
+    // registryFacts — which is exactly why AUTHORITATIVE was unreachable. The
+    // determination now happens ONCE, here, with the REAL facts the retrieval
+    // resolver established, and the sheets project it.
+    equipmentDocumentAuthority: buildEquipmentDocumentAuthority(
+      [
+        { category: 'module_spec', equipmentId: modules[0]?.catalogId ?? null, selectedModel: modules[0]?.model ?? null },
+        {
+          category: 'inverter_spec',
+          equipmentId: (microInverters[0] ?? stringInverters[0])?.catalogId ?? null,
+          selectedModel: (microInverters[0] ?? stringInverters[0])?.model ?? null,
+          fallbackCategories: ['microinverter_spec', 'optimizer_spec'],
+        },
+        {
+          category: 'racking_detail',
+          equipmentId: (proj.mountingSystemId as string | undefined) ?? null,
+          selectedModel: mountDb?.model ?? null,
+        },
+      ],
+      opts?.documentRegistryFacts ?? null,
+      null,   // the alias store stays EMPTY: no cross-reference is fabricated.
+    ),
+    // AAC WS-9 — the certification record now PROJECTS the digest-bound review
+    // when one exists, in the EXISTING `false | { reviewedDigest; approvedAtIso }`
+    // shape certPages / validate / the V13 issue gate already consume. The
+    // consumers re-check `reviewedDigest === meta.digest`, so a review recorded
+    // against a prior digest still fails closed — which is the whole point of
+    // binding an approval to bytes.
+    certification: {
+      // ONE predicate for the certification, the requirement AND the issue state
+      // (`_paReview`). They cannot disagree, so validator V33 (stored issue state
+      // must equal the derived one) can never be tripped by a partially-accepted
+      // review record — e.g. `covered: true` with no licence recorded.
+      engineeringReviewApproved: _engineeringReviewCovered && _reviewCoverage?.reviewedDigest
+        ? { reviewedDigest: _reviewCoverage.reviewedDigest, approvedAtIso: _reviewCoverage.approvedAtIso ?? '' }
+        : false,
+      engineer: _engineeringReviewCovered && _reviewCoverage
+        ? {
+            name: _reviewCoverage.reviewerName,
+            license: _reviewCoverage.reviewerLicense,
+            state: _reviewCoverage.reviewerLicenseState,
+            role: _reviewCoverage.reviewerRole,
+          } as never
+        : null,
+    },
     permitReadiness: _permitReadiness,
+    // AAC WS-2 / WS-6 — evidence for the AUTO-CLEARED requirements. OMITTED
+    // entirely when the lifecycle resolved nothing, so canonicalJson drops it and
+    // an unresolved (harness / no-DB) build hashes exactly as before.
+    ...(opts?.canonicalEquipment || opts?.moduleDatasheetBinding || opts?.projectPersonnel
+      || opts?.projectLegalAuthority || opts?.codeAdoptionAuthority || opts?.environmentalRetrieval
+      || opts?.structuralDocumentRetrieval || opts?.rackingAssemblySelection || opts?.framingRetrieval
+      || opts?.engineeringReview
+      ? {
+          resolutionAuthority: {
+            canonicalEquipment: opts?.canonicalEquipment ?? null,
+            moduleDatasheetBinding: opts?.moduleDatasheetBinding ?? null,
+            projectPersonnel: opts?.projectPersonnel ?? null,
+            // AAC WS-3 / WS-4 — the retrieved authority records live in the SAME
+            // evidence home AAC-2 established, so every auto-cleared requirement
+            // has exactly one place a reviewer looks for its proof.
+            projectLegalAuthority: opts?.projectLegalAuthority ?? null,
+            codeAdoptionAuthority: opts?.codeAdoptionAuthority ?? null,
+            environmentalRetrieval: opts?.environmentalRetrieval ?? null,
+            // AAC WS-8 / WS-9 — the STRUCTURAL evidence lands in the same home:
+            // what was retrieved and hashed, what the rail trace found, why the
+            // framing retrieval could not succeed, and who (if anyone) approved
+            // this digest. A requirement the lifecycle cleared leaves its proof
+            // here; a requirement that legitimately remains leaves its exact
+            // reason here too.
+            structuralDocumentRetrieval: opts?.structuralDocumentRetrieval ?? null,
+            rackingAssemblySelection: opts?.rackingAssemblySelection ?? null,
+            framingRetrieval: opts?.framingRetrieval ?? null,
+            engineeringReview: opts?.engineeringReview ?? null,
+          },
+        }
+      : {}),
   };
 
   const digest = computeSnapshotDigest(snapshot as unknown as Record<string, unknown>);

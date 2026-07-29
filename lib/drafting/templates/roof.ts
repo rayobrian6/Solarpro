@@ -32,7 +32,9 @@ import { projectStructural, projectAttachmentInstallationAuthority } from '../..
 // hardware schedule used to hardcode 'UL 2703 INTEGRATED — NEC 690.43' in BOTH
 // the verified AND the assembly-PENDING branch.
 import { projectRackingBondingAuthority } from '../../permit/snapshot/rackingBonding';
-import { getManufacturerAsset, evaluateDocumentApplicability } from '../../manufacturer-assets-db';
+import { getManufacturerAsset } from '../../manufacturer-assets-db';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability, type EquipmentDocumentAuthority } from '../../permit/snapshot/documentAuthority';
 import { projectCodeAuthority } from '../../permit/snapshot/codeAuthorityProjection';
 import { applyAffine, fitAffine, emitPlacementManifestComment } from '../../permit/snapshot/coordinateAuthority';
 import type { PlacementEntry } from '../../permit/snapshot/types';
@@ -2055,7 +2057,13 @@ export function drawRoofStructural(
   const _attD = (() => {
     const _mid = (project as any).mountingSystemId as string | undefined;
     const _asset = _mid ? getManufacturerAsset(_mid, 'racking_detail') : null;
-    const _appl = _asset ? evaluateDocumentApplicability(_mSelD?.model ?? _asset.model, _asset, null) : null;
+    // AAC WS-9 RENDERER PURITY — projected from the frozen snapshot region.
+    const _appl = _asset ? sheetDocumentApplicability({
+      region: (ctx?.snapshot as { equipmentDocumentAuthority?: EquipmentDocumentAuthority } | undefined)
+        ?.equipmentDocumentAuthority ?? null,
+      category: 'racking_detail', equipmentId: _mid,
+      selectedModel: _mSelD?.model ?? _asset.model, asset: _asset,
+    }) : null;
     return projectAttachmentInstallationAuthority(
       ctx?.snapshot ?? null, _mid ?? null,
       _asset ? { model: _asset.model, docTitle: _asset.docTitle } : null,

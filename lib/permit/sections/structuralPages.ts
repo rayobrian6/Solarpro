@@ -18,6 +18,7 @@ import {
   type StructuralProjection,
 } from '../snapshot/structuralProjection';
 import { structuralBannerHtml } from '../utils/structuralBanner';
+import { isPermitProfile } from '../plansetProfile';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel, necNextStandardOcpd } from '../utils/helpers';
 import type { CanonicalInput } from '../types';
@@ -27,7 +28,9 @@ import { buildConductorAuthority, type SubSystemConductorAuthority } from '../ut
 import { isHybridPlanset, primarySubKey, SUB_LABEL, inverterSubKey } from './subSystemSheets';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
-import { getManufacturerAsset, evaluateDocumentApplicability, DOCUMENT_APPLICABILITY_CHIP } from '@/lib/manufacturer-assets-db';
+import { getManufacturerAsset, DOCUMENT_APPLICABILITY_CHIP } from '@/lib/manufacturer-assets-db';
+// AAC WS-9 — the ONE document-applicability seam every sheet may use.
+import { sheetDocumentApplicability } from '@/lib/permit/snapshot/documentAuthority';
 import {
   extractStructuralInputFromCAD,
   deriveStructuralBOM,
@@ -75,7 +78,12 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
     const src = rackAsset.docTitle || (rackAsset.sourceUrl ? new URL(rackAsset.sourceUrl).hostname : '');
     // §12 — is the cited document APPLICABLE to the selected mount version?
     const _mountSys = mountId ? getMountingSystemById(mountId) : undefined;
-    const _appl = evaluateDocumentApplicability(_mountSys?.model ?? rackAsset.model, rackAsset, null);
+    // AAC WS-9 RENDERER PURITY — projected, not re-decided (audit §7.12).
+    const _appl = sheetDocumentApplicability({
+      region: peekSnapshot(input)?.equipmentDocumentAuthority ?? null,
+      category: 'racking_detail', equipmentId: mountId,
+      selectedModel: _mountSys?.model ?? rackAsset.model, asset: rackAsset,
+    });
     // Provenance as a GENERAL NOTE in the data rail — a one-line citation must
     // not consume a whole secondary-view band of the draw zone.
     comp.generalNotes = [
@@ -92,7 +100,7 @@ export function pageRoofStructural(input: PermitInput, cad: CADModel, pageNum: n
   return `
   <div class="page">
     ${titleBlock(input, 'PV-3', 'ATTACHMENT DETAIL — MOUNTING & CROSS-SECTION', pageNum, totalPages)}
-    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true })}
+    ${structuralBannerHtml(projectStructuralFromInput(input).banner, { compact: true, input, sheetId: 'PV-3' })}
     ${composeDrawPage(comp, drawingSvg)}
   </div>`;
 }
@@ -219,7 +227,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — SOLAR FENCE', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner)}
+      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C' })}
       <div class="section-title">Structural Analysis — ${asce} §29.4 (Fence-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -493,7 +501,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — GROUND MOUNT', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner)}
+      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C' })}
       <div class="section-title">Structural Analysis — ${asce} §27 (Ground-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -805,7 +813,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   <div class="page">
     ${titleBlock(input, 'PV-4C', 'STRUCTURAL CALCULATION SHEET — ROOF MOUNT', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner)}
+      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C' })}
       <div class="section-title">Structural Analysis — ${asce} §26/27 (Roof-Mounted PV)</div>
 
       <div class="struct-grid">
@@ -905,7 +913,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
       <!-- page-fit: this continuation strip is the LAST block on PV-4C, so its box
            model is the sheet's fit margin. Tightened (BAR) after the §2 environmental
            provenance tags + the restored 20 psf snow row pushed the sheet 6px over. -->
-      <div style="padding:2px 5px;margin-top:1px;font-size:7.2px;line-height:1.22;border:var(--border);background:#f4f4f4;">
+      <div style="padding:1px 5px;margin-top:0;font-size:7px;line-height:1.18;border:var(--border);background:#f4f4f4;">
         <strong>CONTINUED ON PV-4C.1:</strong> the roof-attachment standard detail, the governing ASD load combination (${asce} §2.4),
         the structural interpretation and the roof structural PAGE CONCLUSION continue on sheet <strong>PV-4C.1</strong>.
       </div>
@@ -918,7 +926,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   <div class="page">
     ${titleBlock(input, 'PV-4C.1', 'STRUCTURAL CALCULATIONS (CONT.) — DETAIL · LOAD COMBINATION · CONCLUSION', pageNum, totalPages)}
     <div class="page-content">
-      ${structuralBannerHtml(_proj.banner)}
+      ${structuralBannerHtml(_proj.banner, { input, sheetId: 'PV-4C.1' })}
       <div class="section-title">Roof Structural Calculations (Continued from PV-4C) — ${asce} §26/27 (Roof-Mounted PV)</div>
 
       <!-- Standard Detail: Roof Attachment -->
@@ -1457,7 +1465,7 @@ const bomSubOrd = (s?: string) => (s && s in BOM_SUB_ORDER ? BOM_SUB_ORDER[s] : 
 const bomSubLabel = (s?: string) =>
   s === 'roof' ? 'ROOF' : s === 'ground' ? 'GROUND' : s === 'fence' ? 'FENCE' : '—';
 
-function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY, opts?: { bySub?: boolean }): string {
+function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.POSITIVE_INFINITY, opts?: { bySub?: boolean; continuationLabel?: (from: number, to: number) => string }): string {
   if (!bom || bom.length === 0) {
     return '<!-- No BOM data — permit generated without BOM integration -->';
   }
@@ -1595,7 +1603,13 @@ function renderBOMTable(bom: PermitInput['bom'], startRow = 0, maxRows = Number.
   if (endRow < flat.length) {
     // More rows follow on the next continuation sheet — say so instead of clipping.
     html += '<tr style="background:#000;color:#fff;font-weight:bold;">';
-    html += '<td colspan="' + nCols + '" style="text-align:center;letter-spacing:1px;">CONTINUED ON NEXT SHEET — ITEMS ' + (endRow + 1) + '–' + flat.length + '</td>';
+    // AAC WS-10 — the permit profile has no SCHED continuation sheets, so the
+    // row says where the remaining procurement lines ACTUALLY are (the in-app,
+    // snapshot-bound BOM) instead of pointing at a sheet that is not in the set.
+    const _contLabel = opts?.continuationLabel
+      ? opts.continuationLabel(endRow + 1, flat.length)
+      : 'CONTINUED ON NEXT SHEET — ITEMS ' + (endRow + 1) + '–' + flat.length;
+    html += '<td colspan="' + nCols + '" style="text-align:center;letter-spacing:1px;">' + _contLabel + '</td>';
     html += '</tr>';
     html += '</tbody></table>';
     return html;
@@ -2155,7 +2169,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
           : `<span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>`}
       </div>`}
 
-      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid })}
+      ${renderBOMTable(bom, 0, SCHED_BOM_ROWS_FIRST, { bySub: _schedHybrid,
+        ...(isPermitProfile(input) ? { continuationLabel: (from: number, to: number) =>
+          `ITEMS ${from}–${to} — FULL PROCUREMENT BILL OF MATERIALS IN THE PROJECT RECORD (SNAPSHOT-BOUND; NOT A PERMIT DOCUMENT)` } : {}) })}
 
 
       <!-- System-Specific Hardware Schedule -->

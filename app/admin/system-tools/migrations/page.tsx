@@ -238,18 +238,21 @@ export default function MigrationConsolePage() {
       {/* Targeted authority-registry deployment (current priority) — migrations 113 + 114 */}
       <section className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
         <div className="flex items-center gap-3 mb-1">
-          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 + 114</h2>
+          <h2 className="text-lg font-semibold text-white">Deploy authority registries — migrations 113 + 114 + 115</h2>
           <Pill ok={null}>SCOPED</Pill>
         </div>
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm font-semibold px-3 py-2 mb-3">
-          Run <b>113 first</b>, verify it applied, <b>then 114</b>. Each is idempotent (a second run is a safe no-op).
-          Targeted deployment only — the historical baseline remains incomplete and is NOT advanced.
+          Run <b>113 first</b>, verify it applied, <b>then 114</b>, <b>then 115</b>. Each is idempotent (a second run is a safe
+          no-op). Targeted deployment only — the historical baseline remains incomplete and is NOT advanced.
         </div>
         <p className="text-xs text-slate-400 mb-3">
           Each button runs <b>only</b> its one migration through the canonical runner under a bounded, identifier-scoped
           permit. <b>113</b> creates <code>manufacturer_document_registry</code> (the versioned authority-document store).
           <b> 114</b> creates <code>equipment_reconciliation_audit</code> + <code>snapshot_digest_invalidations</code> (the
-          immutable reconciliation-audit tables). Server-side each is statically verified <b>idempotent CREATE-TABLE-only</b>
+          immutable reconciliation-audit tables). <b>115</b> creates <code>personnel_roles</code> +
+          <code>project_personnel_assignments</code> (the designer / preparer / reviewer / engineer-of-record / approving-engineer
+          roles of record — until it exists the planset asks for the designer on every project).
+          Server-side each is statically verified <b>idempotent CREATE-TABLE-only</b>
           and <b>non-destructive</b> (no DROP / DELETE / TRUNCATE / ALTER / UPDATE / INSERT), creates exactly the expected
           table(s), success is read back from the ledger + run history + the actual tables, and the window auto-relocks.
           Neither runs any other migration, and neither marks the historical baseline verified. Requires super_admin + MFA +
@@ -263,6 +266,12 @@ export default function MigrationConsolePage() {
           <RegistryButton id="114" label="Run migration 114…" tables="equipment_reconciliation_audit + snapshot_digest_invalidations"
             busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
             action="execute-reconciliation-114" onResult={(v) => setRegistry((s) => ({ ...s, ['114']: v }))} result={registry['114']} />
+          <RegistryButton id="115" label="Run migration 115…" tables="personnel_roles + project_personnel_assignments"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-personnel-115" onResult={(v) => setRegistry((s) => ({ ...s, ['115']: v }))} result={registry['115']} />
+          <RegistryButton id="116" label="Run migration 116…" tables="engineering_review_records"
+            busy={!!busy} isProd={!!rd?.isProduction} openMutation={openMutation} logMsg={logMsg}
+            action="execute-engineering-review-116" onResult={(v) => setRegistry((s) => ({ ...s, ['116']: v }))} result={registry['116']} />
         </div>
       </section>
 

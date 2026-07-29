@@ -181,6 +181,23 @@ export interface ModuleDatasheetExactness {
   familyRange: [number, number] | null;
   /** rendered-state text for the page banner. */
   stateLabel: 'EXACT' | 'FAMILY-DATASHEET-PENDING' | 'NO-DOCUMENT';
+
+  // ── AAC WS-2 (additive; stateLabel semantics deliberately UNCHANGED so no
+  //    rendered sheet and no digest moves) ─────────────────────────────────────
+  /** Does the on-file family/range document actually COVER the selected wattage?
+   *  Audit §2.5: the selected wattage was never compared against the parsed
+   *  [lo,hi] the document title already states, so a 400 W module with a
+   *  "385-405 W" sheet and a 400 W module with a "500-600 W" sheet were treated
+   *  identically. `true` ⇒ the manufacturer's own series sheet covers this
+   *  wattage (Qcells publishes one series sheet with a per-wattage column);
+   *  `false` ⇒ the document genuinely does not cover the selection;
+   *  `null` ⇒ not applicable (exact sheet, no document, or unknown wattage). */
+  coversSelectedWatts: boolean | null;
+  /** WHY, in one sentence — the precise reason, never "pending". */
+  coverageBasis: string;
+  /** The document that is genuinely MISSING, named exactly (empty when the
+   *  requirement is not document-blocked). */
+  missingDocument: string | null;
 }
 
 const WATT_RANGE_RE = /(\d{3,4})\s*[–—-]\s*(\d{3,4})\s*W/i;
@@ -200,16 +217,44 @@ export function resolveModuleDatasheetExactness(
   const asset = rec ? getManufacturerAsset(rec.id, 'module_spec') : null;
   const watts = (typeof selectedWatts === 'number' && Number.isFinite(selectedWatts)) ? selectedWatts : null;
   if (!asset) {
-    return { asset: null, selectedWatts: watts, isExact: false, familyRange: null, stateLabel: 'NO-DOCUMENT' };
+    return {
+      asset: null, selectedWatts: watts, isExact: false, familyRange: null, stateLabel: 'NO-DOCUMENT',
+      coversSelectedWatts: null,
+      coverageBasis: `no manufacturer module_spec document is on file for '${moduleModel ?? 'unresolved module'}'`,
+      missingDocument: `manufacturer module datasheet for '${moduleModel ?? 'the selected module'}'`,
+    };
   }
   const m = (asset.docTitle ?? '').match(WATT_RANGE_RE) ?? (asset.model ?? '').match(WATT_RANGE_RE);
   if (m) {
     const lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
     if (Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
-      return { asset, selectedWatts: watts, isExact: false, familyRange: [lo, hi], stateLabel: 'FAMILY-DATASHEET-PENDING' };
+      // AAC WS-2 — the RANGE COMPARISON the audit found missing. It changes no
+      // stateLabel: a covering series sheet is still not the exact-wattage
+      // BINDING (which names the page/column and is the AUTO_RETRIEVED half), so
+      // the requirement legitimately remains — but the reason it remains is now
+      // precise, and the two genuinely different situations are distinguishable.
+      const covers = watts == null ? null : (watts >= lo && watts <= hi);
+      return {
+        asset, selectedWatts: watts, isExact: false, familyRange: [lo, hi],
+        stateLabel: 'FAMILY-DATASHEET-PENDING',
+        coversSelectedWatts: covers,
+        coverageBasis: watts == null
+          ? `the on-file document '${asset.docTitle ?? asset.model}' states a ${lo}-${hi} W series range, and the selected module wattage is unknown`
+          : covers
+            ? `the on-file series document '${asset.docTitle ?? asset.model}' covers ${lo}-${hi} W and the selected ${watts} W falls INSIDE that range — the exact-wattage column exists in this document but no registry binding names it`
+            : `the on-file document '${asset.docTitle ?? asset.model}' covers ${lo}-${hi} W, and the selected ${watts} W is OUTSIDE that range — this document is not the source for the selected module`,
+        missingDocument: covers
+          ? `registry binding (document_class 'module_datasheet') naming the exact ${watts} W page/column of '${asset.docTitle ?? asset.model}'`
+          : `manufacturer datasheet covering exactly ${watts ?? '?'} W for '${asset.model ?? moduleModel}'`,
+      };
     }
   }
-  return { asset, selectedWatts: watts, isExact: true, familyRange: null, stateLabel: 'EXACT' };
+  return {
+    asset, selectedWatts: watts, isExact: true, familyRange: null, stateLabel: 'EXACT',
+    coversSelectedWatts: true,
+    coverageBasis: `the on-file document '${asset.docTitle ?? asset.model}' is the exact-model datasheet (no series wattage range in its title)`,
+    missingDocument: null,
+  };
 }
 
 // ─── Equipment / document blockers (for the snapshot readiness registry) ─────

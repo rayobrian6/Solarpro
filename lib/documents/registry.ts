@@ -538,6 +538,12 @@ export function toCableExtensionEvidence(
 export async function resolveCableExtensionSolutions(args: {
   selectedExtensionSkus?: string[] | null;
   jurisdiction?: string | null;
+  /** AAC WS-5 — the operator SELECTION record per SKU (quantity, placement,
+   *  representation, VD recalculation, added length). Absent fields are carried
+   *  through UNSET so `evaluateCableExtensionClearance` names exactly which
+   *  condition is missing — a partially-complete solution is REPORTED, never
+   *  fabricated into a clearing one. */
+  selections?: Record<string, CableExtensionSelectionRecord> | null;
 }): Promise<CableExtensionSolution[]> {
   const skus = (args.selectedExtensionSkus ?? []).filter(s => typeof s === 'string' && s.trim().length > 0);
   if (skus.length === 0) return [];   // no operator selection ⇒ no solution
@@ -549,13 +555,62 @@ export async function resolveCableExtensionSolutions(args: {
       equipmentModel: sku,
       jurisdiction: args.jurisdiction ?? null,
     });
-    // Only the document authority is resolvable here; the rest of the canonical
-    // solution fields require an operator selection record that is not yet wired,
-    // so we emit nothing (never a partially-fabricated clearing solution).
+    // AAC WS-5 / audit §7.2 — THE NEVER-PUSHES DEFECT. This loop used to
+    // `continue` on a null document and then fall out of the function without a
+    // single `out.push(...)` on ANY path, so it returned `[]` under all inputs
+    // and the blocker it gates was unclearable through every wired path. The
+    // registry-backed solution is now CONSTRUCTED here from the resolved
+    // document + the operator selection record, with every unmet condition left
+    // FALSE/NULL so the pure evaluator (evaluateCableExtensionClearance) is
+    // still the single gate that decides whether it clears anything.
     if (!doc) continue;
-    // A verified document alone does NOT clear the blocker (quantity/location/
-    // drawings/VD are still required) — but if a full selection record existed it
-    // would be constructed here. Today: skip (fail-closed).
+    const sel = args.selections?.[sku] ?? null;
+    out.push({
+      solutionId: `ext-${sku}`,
+      kind: sel?.kind ?? 'verified-jumper-extension',
+      selectedSku: sku,
+      quantity: sel?.quantity ?? null,
+      addedLengthFt: sel?.addedLengthFt ?? null,
+      locations: sel?.locations ?? [],
+      compatibilityVerified: sel?.compatibilityVerified === true,
+      compatibleSystemNote: sel?.compatibleSystemNote ?? doc.applicabilityNotes ?? null,
+      manufacturerDocument: toCableExtensionEvidence(doc, sku),
+      representedInDrawings: sel?.representedInDrawings === true,
+      representedInSchedules: sel?.representedInSchedules === true,
+      representedInBom: sel?.representedInBom === true,
+      vdInstallationRecalculated: sel?.vdInstallationRecalculated === true,
+      note: sel?.note ?? null,
+      provenance: {
+        source: 'resolveCableExtensionSolutions (manufacturer_document_registry + operator selection record)',
+        ref: doc.id,
+      },
+      selected: sel?.selected === true,
+      manufacturer: doc.manufacturerOrIssuer ?? null,
+      cableSegmentIds: sel?.cableSegmentIds ?? [],
+      applicability: doc.applicabilityNotes ?? null,
+      verificationState: doc.verificationState === 'verified' ? 'verified' : 'pending-document',
+      bomLineIds: sel?.bomLineIds ?? [],
+    });
   }
   return out;
+}
+
+/** AAC WS-5 — the operator-side half of a cable-extension solution. Every field
+ *  is optional: what is absent stays absent, and the pure clearance evaluator
+ *  names it. Nothing here is ever defaulted to a satisfying value. */
+export interface CableExtensionSelectionRecord {
+  kind?: CableExtensionSolution['kind'];
+  quantity?: number | null;
+  addedLengthFt?: number | null;
+  locations?: string[];
+  cableSegmentIds?: string[];
+  compatibilityVerified?: boolean;
+  compatibleSystemNote?: string | null;
+  representedInDrawings?: boolean;
+  representedInSchedules?: boolean;
+  representedInBom?: boolean;
+  vdInstallationRecalculated?: boolean;
+  selected?: boolean;
+  note?: string | null;
+  bomLineIds?: string[];
 }

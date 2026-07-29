@@ -23,7 +23,14 @@ import {
 } from '@/lib/permit/snapshot/severityPolicy';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
-const PROMOTED = ['CONDUIT-FILL-PENDING', 'TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING'] as const;
+// §17's permit-critical promotions. CONDUIT-FILL-PENDING was one of them until
+// AAC WS-7 (2026-07-27) fixed the projection seam that discarded the computed
+// NEC Ch.9 Table 1 fill: the requirement is now RESOLVED on this fixture (the
+// calculation exists, runs, and its result reaches the snapshot), so it is no
+// longer an ACTIVE promoted blocker. Its severity POLICY is unchanged and is
+// still asserted in the policy table above; what changed is the fixture's truth.
+// The AAC-4 case below proves the fill is computed rather than absent.
+const PROMOTED = ['TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING'] as const;
 
 function renderWith(mut?: (fx: any) => void): { html: string; snap: PermitDesignSnapshot } {
   const input: any = clone(braidonOriginalAuditFixture);
@@ -101,6 +108,16 @@ describe('§17 — permit-critical advisories are promoted to blockers on the sn
   it('the promoted codes now appear in the back-compat BLOCKING blockers list', () => {
     const codes = snap.permitReadiness.blockers.map(b => b.code);
     for (const code of PROMOTED) expect(codes).toContain(code);
+  });
+
+  // AAC WS-7 — the anti-vacuity counterpart: CONDUIT-FILL-PENDING is absent
+  // because the fill was COMPUTED, not because the requirement was softened.
+  it('CONDUIT-FILL-PENDING is absent because the NEC Ch.9 Table 1 fill is COMPUTED', () => {
+    expect(reg.find(r => r.code === 'CONDUIT-FILL-PENDING')).toBeFalsy();
+    const cf = (snap.electrical as unknown as { conduitFillAuthority?: { state?: string; fillPct?: number | null; limitPct?: number } }).conduitFillAuthority;
+    expect(cf?.state).toBe('computed');
+    expect(typeof cf?.fillPct).toBe('number');
+    expect(cf!.fillPct!).toBeLessThanOrEqual(cf!.limitPct!);
   });
 });
 

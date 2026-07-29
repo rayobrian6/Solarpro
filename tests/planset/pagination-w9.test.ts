@@ -28,9 +28,14 @@ import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
-function render(): { html: string; snap: PermitDesignSnapshot } {
+function render(profile?: 'permit' | 'full'): { html: string; snap: PermitDesignSnapshot } {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-22T12:00:00Z';
+  // AAC WS-10 — the page-fit contract is PROFILE-AWARE: the FULL internal
+  // package and the compact PERMIT submittal must BOTH fit. Default (no
+  // argument) stays the full profile, so every pre-WS-10 assertion below is
+  // unchanged.
+  if (profile) input.plansetProfile = profile;
   const html = generatePermitHTML(input);
   return { html, snap: input._snapshot as PermitDesignSnapshot };
 }
@@ -130,8 +135,18 @@ describe('§18 — RS-1 prints every active blocker at the enlarged (≥6.5pt) s
   it('EVERY active registry blocker code is present on the rendered set (none abbreviated away)', () => {
     for (const b of registry) {
       expect(html, `blocker ${b.code} missing from RS-1`).toContain(b.code);
-      // its resolution action / authority path is preserved verbatim (not truncated)
-      if (b.resolutionAction) expect(html).toContain(b.resolutionAction);
+      // its resolution action / authority path is preserved verbatim (not
+      // truncated). RS-1 HTML-escapes the cell, so the comparison escapes too —
+      // otherwise a resolution containing a quote (QCABLE-PROCUREMENT-
+      // INSUFFICIENT: '"Jumpers required" … does NOT clear this') can never
+      // match its own rendered form.
+      const escaped = (s: string): string => s
+        .replace(/&(?![a-zA-Z0-9#]+;)/g, '&amp;')
+        .replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      if (b.resolutionAction) {
+        expect(html, `blocker ${b.code} resolution truncated`).toContain(escaped(b.resolutionAction));
+      }
     }
   });
 });
@@ -157,7 +172,9 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
       return;
     }
     try {
-      const { html, snap } = render();
+      // WS-10: both profiles are measured in the same browser session.
+      for (const profile of ['full', 'permit'] as const) {
+      const { html, snap } = render(profile);
       const page = await browser.newPage({ viewport: { width: 1700, height: 1120 }, deviceScaleFactor: 1 });
       await page.setContent(html, { waitUntil: 'load' });
       const report = await page.evaluate(() => {
@@ -232,7 +249,7 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
         .map(r => ({ ...r, id: snap.projectAuthority.sheetIndex[r.i]?.id ?? String(r.i) }))
         .filter(r => r.internalWorstPx > INTERNAL_TOL_PX);
       const iDetail = internalClips.map(r => `${r.id}: +${r.internalWorstPx}px [${r.internalWorst}]`).join('  |  ');
-      expect(internalClips, `internal-clipped sheets: ${iDetail}`).toEqual([]);
+      expect(internalClips, `[${profile}] internal-clipped sheets: ${iDetail}`).toEqual([]);
 
       // A page is CLIPPED when a non-SVG element extends meaningfully past the
       // printable box. Clean full-bleed sheets sit ≤ ~0.38in below the content
@@ -245,7 +262,9 @@ describe('W9 Chromium — no logical sheet clips content past the printable box'
         .map(r => ({ ...r, id: snap.projectAuthority.sheetIndex[r.i]?.id ?? String(r.i) }))
         .filter(r => r.belowByIn > CLIP_TOL_IN);
       const detail = clipped.map(r => `${r.id}: +${r.belowByIn}in [${r.worst}]`).join('  |  ');
-      expect(clipped, `clipped sheets: ${detail}`).toEqual([]);
+      expect(clipped, `[${profile}] clipped sheets: ${detail}`).toEqual([]);
+      await page.close();
+      }
     } finally {
       await browser.close();
     }

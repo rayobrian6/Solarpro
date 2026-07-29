@@ -27,9 +27,33 @@ export function mapComputedSystemToCompliance(cs: CS, ctx: ComplianceProjectionC
   const dcRun = runMap['DC_STRING_RUN'] ?? null;
   const isSupply = String(ctx.interconnectionMethod).toUpperCase().includes('SUPPLY');
 
-  const conduitRow = ((cs as any).conduitSchedule ?? []).find((r: any) =>
-    String(r?.contains ?? r?.segments ?? '').includes('COMBINER_TO_DISCO')
-    || String(r?.contains ?? r?.segments ?? '').includes('INV_TO_DISCO')) ?? null;
+  // AAC WS-7 (2026-07-27) — THE FOUR FIELD-NAME MISMATCHES THAT DISCARDED A
+  // CORRECTLY COMPUTED NEC Ch.9 TABLE 1 FILL (audit §2.14 / §7.1).
+  //
+  // A `ConduitScheduleRow` (computed-system.ts:330-345) carries `raceway / from /
+  // to / conduitType / conduitSize / fillPct / pass`. It has NEITHER `contains`
+  // NOR `segments`, so the old find() never matched and `conduitRow` was ALWAYS
+  // null; the fallback then read `feeder.conduitFillPercent` and
+  // `conduitRow.passes`, neither of which exists either (`RunSegment` carries
+  // `conduitFillPct` / `conduitFillPass`, the row carries `pass`). The projected
+  // fill was therefore always undefined and CONDUIT-FILL-PENDING fired on a
+  // calculation that HAD RUN. The row is now located the only way the schedule
+  // makes possible — by the feeder run's own from/to endpoints, which
+  // computeSystem copies verbatim into the row (computed-system.ts:2406-2419) —
+  // and every field is read by its REAL name.
+  const conduitRow = feeder
+    ? (((cs as any).conduitSchedule ?? []).find((r: any) =>
+        String(r?.from ?? '') === String(feeder.from ?? '')
+        && String(r?.to ?? '') === String(feeder.to ?? '')) ?? null)
+    : null;
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  /** the computed NEC Ch.9 Table 1 fill for the feeder raceway (row first, then
+   *  the run segment that produced the row — ONE derivation, two carriers). */
+  const feederFillPct = num(conduitRow?.fillPct) ?? num(feeder?.conduitFillPct);
+  /** the FILL verdict specifically (≤40 %), never the run's overall pass. */
+  const feederFillPass: boolean | undefined =
+    typeof feeder?.conduitFillPass === 'boolean' ? feeder.conduitFillPass
+      : (typeof conduitRow?.pass === 'boolean' ? conduitRow.pass : undefined);
 
   return {
     acConductorCallout: feeder?.conductorCallout ?? (feeder?.wireGauge ? `${feeder.wireGauge} THWN-2` : undefined),
@@ -53,8 +77,8 @@ export function mapComputedSystemToCompliance(cs: CS, ctx: ComplianceProjectionC
     conduitFill: {
       conduitType: feeder?.conduitType,
       conduitSize: feeder?.conduitSize,
-      fillPercent: conduitRow?.fillPercent ?? feeder?.conduitFillPercent,
-      passes: conduitRow?.passes ?? feeder?.overallPass,
+      fillPercent: feederFillPct,
+      passes: feederFillPass,
     },
     summary: { totalDcKw: cs.totalDcKw, totalAcKw: cs.totalAcKw, dcAcRatio: cs.dcAcRatio },
     acSizing: {
@@ -62,7 +86,7 @@ export function mapComputedSystemToCompliance(cs: CS, ctx: ComplianceProjectionC
       conductorGauge: feeder?.wireGauge,
       conductorAmpacity: feeder?.effectiveAmpacity,
       conduitSize: feeder?.conduitSize,
-      conduitFillPct: conduitRow?.fillPercent,
+      conduitFillPct: feederFillPct,
       groundingConductor: feeder?.egcGauge,
     },
     inverters: cs.strings?.length ? [{

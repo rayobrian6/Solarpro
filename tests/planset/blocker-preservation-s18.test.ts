@@ -90,9 +90,14 @@ describe('§18 — legitimate project blockers are preserved (Braidon state)', (
 
   it('the §17 promoted codes coexist with the legitimate blockers (both present, all blocking)', () => {
     const blockingCodes = new Set(reg.filter(r => r.severity === 'blocking').map(r => r.code));
-    for (const code of ['CONDUIT-FILL-PENDING', 'TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING']) {
+    // AAC WS-7 (2026-07-27): CONDUIT-FILL-PENDING is no longer among them — the
+    // NEC Ch.9 Table 1 fill is COMPUTED and reaches the snapshot, so the
+    // requirement is resolved rather than promoted. Asserted positively below.
+    for (const code of ['TAP-CONDUCTOR-LENGTH-PENDING', 'MODULE-EXACT-DATASHEET-PENDING']) {
       expect(blockingCodes.has(code), `${code} promoted`).toBe(true);
     }
+    expect(blockingCodes.has('CONDUIT-FILL-PENDING'), 'conduit fill is computed, not pending').toBe(false);
+    expect((snap.electrical as unknown as { conduitFillAuthority?: { state?: string } }).conduitFillAuthority?.state).toBe('computed');
     for (const code of LEGIT_BLOCKERS) expect(blockingCodes.has(code), `${code} preserved`).toBe(true);
   });
 });

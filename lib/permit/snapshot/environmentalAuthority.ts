@@ -19,6 +19,7 @@ import type {
   EnvironmentalLoadAuthority, EnvironmentalLoadBasis, EnvironmentalVerificationStatus,
   Provenance,
 } from './types';
+import type { EnvironmentalRetrievalRecord } from './resolution/environmentalRetrieval';
 
 /** Evidence for the ARCHIVED-SOURCE path — the shape lib/documents projects from a
  *  resolved climate-hazard RegistryDocument. A verified record clears the blocker. */
@@ -64,6 +65,11 @@ export interface EnvironmentalLoadAuthorityInput {
    *  outcome). */
   sourceEvidence?: EnvironmentalLoadSourceEvidence | null;
   capturedAtIso: string | null;
+  /** AAC WS-4 — the full retrieval record (query inputs, returned values,
+   *  datasets, override history, archival state). Present ONLY when a live/fixture
+   *  hazard retrieval produced the source evidence; a registry-document source
+   *  leaves it null and the record is byte-identical to before. */
+  retrievalRecord?: EnvironmentalRetrievalRecord | null;
 }
 
 const numOrNull = (n: number | null | undefined): number | null =>
@@ -79,15 +85,50 @@ function applicabilityCovers(docApplic: string | null, key: string | null | unde
   return docApplic.toLowerCase().includes(String(key).toLowerCase());
 }
 
+/**
+ * AAC WS-4 — THE COORDINATE-INVALIDATION TOLERANCE, in degrees.
+ *
+ * A hazard authority is retrieved FOR A POINT. If the project's coordinates move
+ * away from the point the source was retrieved at, the source no longer covers
+ * the site and the authority is INVALIDATED — this is the directive's mandated
+ * "a coordinate change invalidates the record".
+ *
+ * 0.001° ≈ 110 m at this latitude. The justification for a tolerance rather than
+ * exact equality: the ASCE 7 hazard rasters are ~1 km cells and both the USGS
+ * seismic and elevation services are point services on the same order, so a
+ * sub-cell coordinate refinement (the aerial pipeline's house-centre correction)
+ * cannot change the retrieved values. Anything larger is a different site.
+ */
+export const ENVIRONMENTAL_COORDINATE_TOLERANCE_DEG = 0.001;
+
+/** Does an archived/retrieved source still cover THESE coordinates? Unknown on
+ *  either side ⇒ the coordinate test is not applicable and applicability alone
+ *  governs (the pre-AAC behaviour for documents that carry no coordinates). */
+export function environmentalCoordinatesCover(
+  evidence: { lat: number | null; lng: number | null } | null | undefined,
+  project: { lat: number | null; lng: number | null } | null | undefined,
+): boolean {
+  const eLat = numOrNull(evidence?.lat), eLng = numOrNull(evidence?.lng);
+  const pLat = numOrNull(project?.lat), pLng = numOrNull(project?.lng);
+  if (eLat == null || eLng == null || pLat == null || pLng == null) return true;
+  return Math.abs(eLat - pLat) <= ENVIRONMENTAL_COORDINATE_TOLERANCE_DEG
+    && Math.abs(eLng - pLng) <= ENVIRONMENTAL_COORDINATE_TOLERANCE_DEG;
+}
+
 /** True IFF the evidence is a VERIFIED, archived, currency-reviewed climate-hazard
- *  source that covers wind + snow + exposure/risk for this project. Any missing
- *  input (no source, missing coverage, unarchived, stale/not-currency-reviewed,
- *  wrong applicability) ⇒ NOT verified (fail-closed). */
+ *  source that covers wind + snow + exposure/risk for this project, AT THIS
+ *  PROJECT'S COORDINATES. Any missing input (no source, missing coverage,
+ *  unarchived, stale/not-currency-reviewed, wrong applicability, coordinates
+ *  moved) ⇒ NOT verified (fail-closed). */
 export function environmentalSourceVerified(
   e: EnvironmentalLoadSourceEvidence | null | undefined,
   projectOrAhj: string | null | undefined,
+  projectCoordinates?: { lat: number | null; lng: number | null } | null,
 ): boolean {
   if (!e) return false;
+  // AAC WS-4 — a source retrieved for a DIFFERENT point does not cover this
+  // site. Omitting the argument keeps the pre-AAC behaviour exactly.
+  if (projectCoordinates !== undefined && !environmentalCoordinatesCover(e.coordinates, projectCoordinates)) return false;
   return e.verificationState === 'verified'
     && e.archivedInRepo === true
     && !!e.sha256
@@ -127,8 +168,15 @@ export function buildEnvironmentalLoadAuthority(
   const snow = numOrNull(input.groundSnowPsf);
   const exposure = strOrNull(input.exposureCategory);
   const risk = strOrNull(input.riskCategory);
-  const verified = environmentalSourceVerified(input.sourceEvidence, input.projectOrAhj);
+  // AAC WS-4 — the coordinate test is applied HERE (the record knows the
+  // project's coordinates), so an archived/retrieved source whose point has
+  // moved can no longer verify this project.
+  const verified = environmentalSourceVerified(input.sourceEvidence, input.projectOrAhj, input.coordinates);
   const e = input.sourceEvidence ?? null;
+  // The retrieval detail rides only when the source evidence it produced is the
+  // one that VERIFIED the record — a retrieval that failed the gate must not
+  // decorate an unverified record with retrieval fields.
+  const r = verified ? (input.retrievalRecord ?? null) : null;
 
   const windSpeedBasis = basisFor(wind != null, input.windOperatorEntered, verified);
   const snowLoadBasis = basisFor(snow != null, input.snowOperatorEntered, verified);
@@ -171,6 +219,20 @@ export function buildEnvironmentalLoadAuthority(
     projectOrAhj: strOrNull(input.projectOrAhj),
     evidenceRef: verified ? (e?.sha256 ? `${e?.documentId}#${e?.sha256.slice(0, 12)}` : (e?.documentId ?? null)) : null,
     provenance: { source: 'environmental-load authority gate (BAR §2)', note },
+    // AAC WS-4 — the retrieval detail, ADDITIVE and omitted entirely when no
+    // retrieval ran (canonicalJson drops undefined ⇒ digest unchanged).
+    ...(r
+      ? {
+          sourceHash: r.sourceHash,
+          confidence: r.confidence,
+          queryInputs: r.queryInputs,
+          returnedValues: r.returnedValues,
+          overrideHistory: r.overrideHistory,
+          currencyBasis: r.currencyBasis,
+          retrievalProof: r.proof,
+          archivedDocumentId: r.registryArchival.documentId,
+        }
+      : {}),
   } satisfies EnvironmentalLoadAuthority;
 }
 
