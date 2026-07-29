@@ -15,7 +15,7 @@ Closure document for the AUTOMATION AUTHORITY CLOSURE campaign
 - Commit: the single campaign commit on `dev` — "Automation authority closure:
   resolver lifecycle, live retrieval providers, deterministic engines,
   permit-profile compaction" (113 files, +25 748 / −477). Its hash is
-  **`HASH_PLACEHOLDER`** (recorded by the one-line follow-up commit below — a
+  **`c01e9293`** (recorded by the one-line follow-up commit below — a
   document cannot contain the hash of the commit that contains it).
 
 ---
