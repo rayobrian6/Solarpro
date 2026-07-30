@@ -15,6 +15,8 @@ import {
   REGISTRY_DEPLOYMENT,
   REGISTRY_SEQUENCE,
 } from '../lib/migrations/targetedRegistryDeployment';
+import { TARGETED_RECOVERY_ALLOWLIST, isTargetedPermitValid } from '../lib/migrations/runner';
+import { discoverMigrationFiles } from '../lib/migrations/manifest';
 
 const SQL_113 = readFileSync(join(process.cwd(), 'lib', 'migrations', '113_manufacturer_document_registry.sql'), 'utf8');
 const SQL_114 = readFileSync(join(process.cwd(), 'lib', 'migrations', '114_equipment_reconciliation_audit.sql'), 'utf8');
@@ -141,5 +143,53 @@ describe('targetedRegistryDeployment — static analysis (pure)', () => {
     const s = analyzeRegistryMigration('114', bad, ['equipment_reconciliation_audit', 'snapshot_digest_invalidations']);
     expect(s.ok).toBe(false);
     expect(s.problems.some((p) => /snapshot_digest_invalidations/.test(p))).toBe(true);
+  });
+});
+
+// ═══ FOUR-GATE PARITY ═══════════════════════════════════════════════
+// A targeted identifier must pass FOUR independent gates to be runnable:
+//   1. REGISTRY_DEPLOYMENT spec (expected tables)
+//   2. a migration FILE in the canonical manifest
+//   3. an API action + console button (app-level; covered by the route/page)
+//   4. runner.TARGETED_RECOVERY_ALLOWLIST — the permit allowlist
+// Migration 117 had 1, 2 and 3 and NOT 4. The permit was rejected, the lifecycle
+// gate then refused execution, and the operator saw MIGRATION_BASELINE_REQUIRED
+// — an error that says nothing about an allowlist. These tests make that
+// specific drift impossible to ship again.
+describe('targeted deployment — four-gate parity', () => {
+  it('every governed identifier is on the runner permit allowlist', () => {
+    for (const id of REGISTRY_SEQUENCE) {
+      expect(TARGETED_RECOVERY_ALLOWLIST.has(id),
+        `migration ${id} has a deployment spec but is NOT on TARGETED_RECOVERY_ALLOWLIST — its permit will be `
+        + 'rejected and the run will fail with MIGRATION_BASELINE_REQUIRED').toBe(true);
+    }
+  });
+
+  it('the allowlist holds nothing the deployment spec does not govern', () => {
+    for (const id of TARGETED_RECOVERY_ALLOWLIST) {
+      expect(REGISTRY_DEPLOYMENT[id], `${id} is permit-runnable but has no deployment spec / static gate`).toBeTruthy();
+    }
+  });
+
+  it('every governed identifier resolves to a real file in the canonical manifest', () => {
+    const manifest = discoverMigrationFiles();
+    for (const id of REGISTRY_SEQUENCE) {
+      expect(manifest.files.some(f => f.identifier === id), `migration ${id} is governed but absent from the manifest`).toBe(true);
+    }
+  });
+
+  it('a valid permit is accepted for EVERY governed identifier', () => {
+    for (const id of REGISTRY_SEQUENCE) {
+      const permit = { identifier: id, issuedAtMs: Date.now(), ttlMs: 3 * 60 * 1000, reason: 'parity test' };
+      expect(isTargetedPermitValid(permit, id), `permit rejected for ${id}`).toBe(true);
+    }
+  });
+
+  it('a permit still cannot cross identifiers or cover an ungoverned one', () => {
+    const permit = { identifier: '117', issuedAtMs: Date.now(), ttlMs: 60_000, reason: 'x' };
+    expect(isTargetedPermitValid(permit, '116')).toBe(false);   // identifier mismatch
+    expect(isTargetedPermitValid({ ...permit, identifier: '102' }, '102')).toBe(false); // not allowlisted
+    expect(isTargetedPermitValid({ ...permit, ttlMs: 60 * 60 * 1000 }, '117')).toBe(false); // TTL over cap
+    expect(isTargetedPermitValid({ ...permit, issuedAtMs: Date.now() - 120_000 }, '117')).toBe(false); // expired
   });
 });
