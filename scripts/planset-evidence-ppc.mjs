@@ -117,8 +117,14 @@ const _PRED_INSTALLED =
   /\b(installed|install|is run|are run|run with|routed with|with circuit conductors|shall be run|provide|provided|is required|are required|required by)\b/i;
 const _QUAL_PENDING =
   /not asserted|pending manufacturer authority|pending exact manufacturer authority|candidate design quantity|non-orderable|not established|not determinative|not part of the approved installation|pending\b/i;
+// An explicitly NEGATED statement is not an assertion. The qualifier run is
+// bounded (<=3 words) because the CLOSED outcome renders
+// "NO ADDITIONAL OPEN-AIR EGC INSTALLED IN THIS SECTION" - a negation the
+// original single-qualifier form read as an installed-EGC assertion, which is
+// the opposite of what it says. Bounded so a real assertion can never borrow a
+// negator from an unrelated earlier clause.
 const _QUAL_NEGATED =
-  /\bno\s+(additional\s+|separate\s+|raceway\s+)?(equipment grounding conductor|egc|grounding conductor)\b|\bis not (installed|required|asserted)\b|\bnone (is |are )?(installed|required)\b/i;
+  /\bno\s+(?:(?:additional|separate|raceway|open[- ]air|branch|extra|further|dedicated|listed)\s+){0,3}(?:equipment grounding conductor|egc|grounding conductor)\b|\bis not (?:installed|required|asserted)\b|\bnone (?:is |are )?(?:installed|required)\b/i;
 
 function installedOpenAirEgcAssertions(sourceHtml) {
   const out = [];
@@ -147,13 +153,22 @@ function installedOpenAirEgcAssertions(sourceHtml) {
     '<div>Open-air branch: a #10 AWG copper equipment grounding conductor is installed alongside the Q-Cable trunk.</div>').length > 0;
   const probe3 = installedOpenAirEgcAssertions(
     '<div>Provide an equipment grounding conductor run with the open-air branch trunk.</div>').length > 0;
+  // NON-VACUITY for the widened negation window: the SAME qualifier words in a
+  // POSITIVE statement must still be caught, so tolerating
+  // "NO ADDITIONAL OPEN-AIR EGC INSTALLED" cannot become a licence to assert one.
+  const probe4 = installedOpenAirEgcAssertions(
+    '<div>An additional open-air EGC is installed with the Q-Cable branch trunk.</div>').length > 0;
+  // and the honest CLOSED rendering must NOT be flagged
+  const probe5 = installedOpenAirEgcAssertions(
+    '<td>AC BRANCH B1 — Q-CABLE TRUNK (OPEN AIR)</td><td>OPEN-AIR GROUNDING METHOD: LISTED INTEGRATED '
+    + 'METHOD (NEC 690.43(C) / 110.3(B)) — NO ADDITIONAL OPEN-AIR EGC INSTALLED IN THIS SECTION</td>').length === 0;
   const mandated = noB64.includes('OPEN-AIR GROUNDING METHOD: PENDING MANUFACTURER AUTHORITY')
     && noB64.includes('INSTALLED OPEN-AIR EGC: NOT ASSERTED');
   gate(1, 'pending-grounding-cannot-assert-installed-egc',
-    assertions.length === 0 && probe1 && probe2 && probe3 && (!pending || mandated),
+    assertions.length === 0 && probe1 && probe2 && probe3 && probe4 && probe5 && (!pending || mandated),
     `groundingOutcome=${gnd?.outcome ?? 'absent'} assertions=${assertions.length} `
-    + `scannerProbes=${[probe1, probe2, probe3].filter(Boolean).length}/3 mandatedRenderPresent=${mandated}`,
-    { assertions: assertions.slice(0, 10), scannerNonVacuous: { retiredLiteral: probe1, paraphraseWithSize: probe2, predicateOnly: probe3 } });
+    + `scannerProbes=${[probe1, probe2, probe3, probe4, probe5].filter(Boolean).length}/5 mandatedRenderPresent=${mandated}`,
+    { assertions: assertions.slice(0, 10), scannerNonVacuous: { retiredLiteral: probe1, paraphraseWithSize: probe2, predicateOnly: probe3, qualifiedPositive: probe4, honestClosedRendering: probe5 } });
   if (!pending) vacuous.push('gate 1 (grounding not pending on this input)');
 }
 

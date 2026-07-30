@@ -18,6 +18,8 @@ import { deriveIssueState } from './projectAuthority';
 import { getMountingSystemById, classifyMountTopology } from '@/lib/mounting-hardware-db';
 // P13 WS-1 (V45) — conductor-area comparison for the minimum-vs-selected gate.
 import { meetsOrExceedsMinimum, conductorAreaRank } from './groundingDesignStandard';
+// V46 — the canonical location authority (state derived once, never a sentinel).
+import { parsePostalStateCode, isUnknownStateSentinel } from './locationAuthority';
 
 const SHEETS_ELECTRICAL = ['E-1', 'PV-4A', 'PV-4B', 'PV-5', 'PV-6', 'SCHED', 'BOM'];
 
@@ -816,6 +818,85 @@ export function validatePermitDesignSnapshot(s: PermitDesignSnapshot): SnapshotV
         'grounding builder', SHEETS_ELECTRICAL,
         `${g.segmentRole} installs ${installed} above the ${minimum} minimum with no stated selection `
         + 'source/reason — a larger conductor must say who chose it and why');
+    }
+  }
+
+  // ═══ V46 — A KNOWN STATE MAY NOT BE LOST BETWEEN THE ADDRESS AND THE FROZEN
+  // SNAPSHOT ══════════════════════════════════════════════════════════════════
+  //
+  // Planset 14 printed `Unknown` in ~20 places on a project whose address ends
+  // "GRANITE CITY, IL 62040" and whose project record carries state='IL'. Nothing
+  // failed: the client-computed compliance.jurisdiction.state held the truthy
+  // sentinel 'Unknown', every fallback accepted it, and the canonical value sat
+  // unread two fields away. This invariant makes that silence impossible.
+  //
+  // It is a PROPERTY of the data, not of this project: a US postal address that
+  // carries a recognized two-letter state code must produce a state on the frozen
+  // record. An address that genuinely carries none leaves the record null, and
+  // null prints '—' — that is honest and is NOT a violation.
+  {
+    const pa = (s as unknown as { projectAuthority?: {
+      installationAddress: string | null; stateCode: string | null; stateName: string | null;
+      stateAuthority?: { conflicts: string[]; source: string };
+    } }).projectAuthority;
+    if (pa) {
+      const STATE_SHEETS = ['PV-0', 'PE-1', 'CERT', 'title-block (all sheets)'];
+      const postal = parsePostalStateCode(pa.installationAddress);
+      if (postal && !pa.stateCode) {
+        add('V46', 'projectAuthority.stateCode', pa.stateCode,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `the installation address "${pa.installationAddress}" carries the recognized state code `
+          + `${postal}, but the frozen project location reports no state — a known value was dropped `
+          + 'between the address and the snapshot');
+      }
+      // Both forms or neither: a code without a name means a projection somewhere
+      // has to invent the display string.
+      if (pa.stateCode && !pa.stateName) {
+        add('V46', 'projectAuthority.stateName', pa.stateName,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `stateCode=${pa.stateCode} is present but stateName is absent and could not be normalized`);
+      }
+      if (pa.stateName && !pa.stateCode) {
+        add('V46', 'projectAuthority.stateCode', pa.stateCode,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `stateName=${pa.stateName} is present but the canonical two-letter code is absent`);
+      }
+      // A sentinel must never survive normalization onto the record.
+      for (const [path, val] of [['stateCode', pa.stateCode], ['stateName', pa.stateName]] as const) {
+        if (isUnknownStateSentinel(val)) {
+          add('V46', `projectAuthority.${path}`, val, 'resolveProjectStateAuthority', STATE_SHEETS,
+            `the frozen project location carries the sentinel "${val}" — 'Unknown' is not a state`);
+        }
+      }
+      // Two sources that both named a state and named DIFFERENT ones. The winner
+      // is recorded; the loser is never silent.
+      //
+      // BLOCKING only for the AUTHORITATIVE sources — the project record, its
+      // postal address and the bound AHJ registry row. Those three disagreeing is
+      // a real location question an operator must settle.
+      //
+      // The posted `compliance.jurisdiction` is a CLIENT-COMPUTED artifact (the
+      // very field that shipped 'Unknown'), no sheet reads it any more, and
+      // generation repairs it in place — so a disagreement there is REPORTED, not
+      // blocking. Refusing to generate over a stale client field would be the
+      // same mistake in the other direction.
+      const conflicts = pa.stateAuthority?.conflicts ?? [];
+      const authoritative = conflicts.filter(c => !c.startsWith('compliance.jurisdiction='));
+      const advisory = conflicts.filter(c => c.startsWith('compliance.jurisdiction='));
+      if (authoritative.length) {
+        add('V46', 'projectAuthority.stateAuthority.conflicts', authoritative,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `the project state resolved to ${pa.stateCode} from ${pa.stateAuthority?.source}, but `
+          + `${authoritative.join(', ')} named a different state — an operator must reconcile the `
+          + 'location before this package can carry a jurisdiction');
+      }
+      if (advisory.length) {
+        add('V46', 'projectAuthority.stateAuthority.conflicts', advisory,
+          'resolveProjectStateAuthority', STATE_SHEETS,
+          `the posted compliance jurisdiction (${advisory.join(', ')}) disagrees with the canonical `
+          + `state ${pa.stateCode}; the canonical value governs and the posted record was repaired`,
+          'deferred');
+      }
     }
   }
 

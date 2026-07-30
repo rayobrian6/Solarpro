@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit/index';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { pendingGroundingAuthority } from '../fixtures/synthetic-pending-grounding';
 import type { SnapshotAuthorityInputs } from '@/lib/permit/snapshot/authorityInputs';
 import type { PermitDesignSnapshot, CableExtensionSolution } from '@/lib/permit/snapshot/types';
 import { SUPPLY_SIDE_TAP_CANDIDATE_LABEL } from '@/lib/permit/snapshot/types';
@@ -49,21 +50,37 @@ const INSUFFICIENT_AUTHORITY: SnapshotAuthorityInputs = {
 
 interface Generated { html: string; bom: PermitBOMItem[]; snap: PermitDesignSnapshot }
 
-function generate(opts?: { insufficient?: boolean; solutions?: CableExtensionSolution[] }): Generated {
+function generate(opts?: {
+  insufficient?: boolean; solutions?: CableExtensionSolution[]; groundingPending?: boolean;
+}): Generated {
   const input: any = clone(braidonOriginalAuditFixture);
-  const auth: SnapshotAuthorityInputs | null = opts?.insufficient || opts?.solutions
+  let auth: SnapshotAuthorityInputs | null = opts?.insufficient || opts?.solutions
     ? { ...INSUFFICIENT_AUTHORITY, cableExtensionSolutions: opts?.solutions ?? [] }
     : null;
+  if (opts?.groundingPending) {
+    auth = { ...(auth ?? ({} as SnapshotAuthorityInputs)), ...pendingGroundingAuthority('wrongConnectorArchitecture') };
+  }
   const html = generatePermitHTML(input, undefined, auth);
   return { html, bom: (input.bom ?? []) as PermitBOMItem[], snap: input._snapshot as PermitDesignSnapshot };
 }
 
 let fixture: Generated;
 let insufficient: Generated;
+/** A package whose open-air grounding authority is PENDING, so the CANDIDATE
+ *  open-air EGC row (GRN-OPENAIR-…) exists to be identified. That row is emitted
+ *  ONLY while the method is unresolved — once the manufacturer states that no
+ *  separate EGC is required there is correctly no candidate conductor to order,
+ *  and on this project the archived Enphase IOM now states exactly that. The
+ *  ROW-IDENTITY property under test is about a row with no ordinal id, so it is
+ *  asserted where such a row genuinely exists. Pending is manufactured through the
+ *  build's authority socket with a synthetic document written for a different
+ *  branch architecture — never by forcing this project back to pending. */
+let groundingPending: Generated;
 
 beforeAll(() => {
   fixture = generate();
   insufficient = generate({ insufficient: true });
+  groundingPending = generate({ groundingPending: true });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -82,7 +99,7 @@ describe('W1-A — stable, content-derived bomLineId', () => {
   it('covers the two rows that had NO ordinal id at all (§Row-ID inventory 3)', () => {
     // the integrated combiner (appended after the V4 merge) and the open-air EGC
     const combiner = fixture.bom.find(r => r.derivedFrom === 'integrated-bos resolver');
-    const openAir = fixture.bom.find(r => String(r.partNumber).startsWith('GRN-OPENAIR'));
+    const openAir = groundingPending.bom.find(r => String(r.partNumber).startsWith('GRN-OPENAIR'));
     expect(combiner, 'integrated combiner row missing').toBeTruthy();
     expect(openAir, 'open-air branch EGC row missing').toBeTruthy();
     expect(combiner!.id, 'the combiner row still has no ORDINAL id (unchanged)').toBeUndefined();
@@ -141,10 +158,10 @@ describe('W1-A — stable, content-derived bomLineId', () => {
   });
 
   it('the cross-object reference is a REAL row id, not a part number (§6 crossover note)', () => {
-    const segs = (fixture.snap as any).electricalProjection ?? null;
+    const segs = (groundingPending.snap as any).electricalProjection ?? null;
     // the projection is exercised through the rendered package; assert on the
     // BOM side that the id the projection computes exists as a real row.
-    const openAir = fixture.bom.find(r => String(r.partNumber).startsWith('GRN-OPENAIR'))!;
+    const openAir = groundingPending.bom.find(r => String(r.partNumber).startsWith('GRN-OPENAIR'))!;
     const expected = bomLineIdFor({
       stageId: 'ac', category: 'wire', unit: 'ft', partNumber: openAir.partNumber,
     });

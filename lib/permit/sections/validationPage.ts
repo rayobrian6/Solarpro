@@ -11,6 +11,8 @@ import { isFence, isGround, isRoof, getEquipmentContext } from '@/lib/system';
 import { getInverterTopology, topologyToLegacy } from '@/lib/system/systemAccessors';
 import { topologyDisplayLabel } from '../utils/helpers';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
+import { projectProjectStateFromInput, projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import { escapeH } from '../utils/drawing';
 // PPC §3 (latent) — VAL-1 read `canonical.structure.attachSpacingIn`, a SECOND
 // spacing source (`project.attachmentSpacing || 48` at canonical.ts) with no
 // verification state, so VAL-1 could state a spacing the structural authority has
@@ -410,8 +412,13 @@ export function pageValidationSummary(
         <div style="border:var(--border);padding:var(--xs);background:#f8f9fa;">
           <div style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:3px;">Jurisdiction</div>
           <div style="font-size:8px;line-height:1.4;">
-            <div>AHJ: <strong>${jurisdiction.ahj || '—'}</strong></div>
-            <div>State: <strong>${jurisdiction.state || '—'}</strong></div>
+            <div>AHJ: <strong>${(() => { const _pa = projectProjectAuthorityFromInput(input);
+              // Single-sourced from the code authority, like every other sheet. The
+              // posted compliance.jurisdiction.ahj is the MAILING-city enrichment
+              // ("City of Granite City Building & Zoning") the boundary determination
+              // superseded; it must not reappear here beside the county authority.
+              return _pa.present ? _pa.tag('ahj') : escapeH(jurisdiction.ahj || '—'); })()}</strong></div>
+            <div>State: <strong>${projectProjectStateFromInput(input).tag('state-name')}</strong></div>
             <div>NEC: <strong>${_cpVal.tag('nec')}</strong></div>
           </div>
         </div>

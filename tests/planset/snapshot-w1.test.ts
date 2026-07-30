@@ -5,6 +5,7 @@ import { validatePermitDesignSnapshot, blockingViolations } from '@/lib/permit/s
 import { computeSnapshotDigest, snapshotIdFromDigest, canonicalJson, deepFreeze } from '@/lib/permit/snapshot/digest';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import { buildRackingBondingAuthority } from '@/lib/permit/snapshot/rackingBonding';
+import { resolveProjectStateAuthority } from '@/lib/permit/snapshot/locationAuthority';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
@@ -51,6 +52,8 @@ export function baseSnapshot(): PermitDesignSnapshot {
       schemaVersion: '1.0.0',
       projectName: 'Test PV System', customer: 'Test Client',
       installationAddress: '123 Test St', city: 'Test', stateCode: 'IL', zip: '60000',
+      stateName: 'Illinois',
+      stateAuthority: resolveProjectStateAuthority({ projectState: 'IL' }),
       parcelApn: 'APN-TEST', ahjName: 'Test AHJ', utilityName: 'Test Utility',
       systemType: 'ROOF MOUNT',
       capacities: { dcKw: 12.4, acKw: 10.82, moduleCount: 31 },

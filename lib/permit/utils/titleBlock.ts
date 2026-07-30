@@ -8,7 +8,7 @@ import { utilityDisplayName, resolveEquipment } from './helpers';
 import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
-import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import { projectProjectAuthorityFromInput, projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 import { projectRacewayDescriptor } from '../snapshot/electricalProjection';
 import type { PermitDesignSnapshot } from '../snapshot/types';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
@@ -74,7 +74,10 @@ export function titleBlock(
   // the truth matrix can prove cross-sheet identity + single-sourcing on EVERY
   // sheet's title block. (_snapshot propagates through subScopedInput's spread.)
   const pa = projectProjectAuthorityFromInput(input);
-  const state   = compliance.jurisdiction?.state || '—';
+  // THE canonical state (both forms derived once, frozen on the snapshot). The
+  // title block used to read compliance.jurisdiction.state, which is where the
+  // 'Unknown' sentinel entered all 16 sheets of Planset 14.
+  const st      = projectProjectStateFromInput(input);
   const ahj     = pa.ahj ?? compliance.jurisdiction?.ahj ?? project.ahj ?? '—';
   const utility = pa.utility ?? utilityDisplayName(project.utilityName || project.utilityMeter || '') ?? '—';
   const apn     = pa.apn ?? project.apn ?? '—';
@@ -144,7 +147,7 @@ export function titleBlock(
       <div class="tb-client">CLIENT: ${pa.present ? pa.tag('customer') : escapeH(project.clientName || '—')}</div>
       <div class="tb-meta">APN: ${pa.present ? pa.tag('apn') : escapeH(apn)}</div>
       <div class="tb-meta">UTILITY: ${pa.present ? pa.tag('utility') : escapeH(utility)}</div>
-      <div class="tb-meta">AHJ: ${pa.present ? pa.tag('ahj') : escapeH(ahj)} | ${escapeH(state)}</div>
+      <div class="tb-meta">AHJ: ${pa.present ? pa.tag('ahj') : escapeH(ahj)} | ${st.tag('state-name')}</div>
       <div class="tb-meta">ISSUE: ${pa.present ? pa.tag('issue-status') : 'PENDING'}</div>
     </div>
     <table class="tb-table">

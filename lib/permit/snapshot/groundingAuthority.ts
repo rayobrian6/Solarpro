@@ -487,6 +487,11 @@ export interface GroundingAuthorityResult {
   selectedCableAssemblySku: string | null;
   selectedModuleSku: string | null;
   selectedMountingBondingSystem: string | null;
+  /** P13 — the branch cabling / connector ARCHITECTURE the outcome was resolved
+   *  AGAINST, carried from the canonical selected cable assembly. Recorded so a
+   *  reviewer can see WHICH architecture the document was tested for; null ⇒ the
+   *  selection carried none, which is itself a fail-closed cause. */
+  selectedConnectorArchitecture: string | null;
   projectJurisdiction: string | null;
   // ── equipment facts: RECORDED, NEVER DETERMINATIVE (§2) ────────────────────
   equipmentInsulationClassification: string | null;
@@ -658,6 +663,7 @@ export function resolveOpenAirGroundingAuthority(
     selectedCableAssemblySku: args.selection.cableSku,
     selectedModuleSku: args.selection.moduleSku,
     selectedMountingBondingSystem: args.selection.mountingBondingSystem,
+    selectedConnectorArchitecture: args.selection.connectorArchitecture ?? null,
     projectJurisdiction: args.selection.jurisdiction,
     equipmentInsulationClassification: applicable
       ? (doc?.equipmentClassification ?? args.equipmentFacts.equipmentInsulationClassification)

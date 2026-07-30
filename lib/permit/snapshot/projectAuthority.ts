@@ -24,8 +24,9 @@
 //     change invalidates a prior approval unless a new review covers that digest.
 // ═══════════════════════════════════════════════════════════════════════════
 import type { Provenance } from './types';
+import { resolveProjectStateAuthority, type ProjectStateAuthority } from './locationAuthority';
 
-export const PROJECT_AUTHORITY_SCHEMA_VERSION = '1.0.0';
+export const PROJECT_AUTHORITY_SCHEMA_VERSION = '1.1.0';
 
 // ── §12 issue-state machine ──────────────────────────────────────────────────
 
@@ -296,6 +297,14 @@ export interface ProjectAuthorityRecord {
   customer: string | null;
   installationAddress: string | null;
   city: string | null; stateCode: string | null; zip: string | null;
+  /** THE canonical state, both forms, derived ONCE by resolveProjectStateAuthority
+   *  and frozen here. Every state projection on every sheet reads this record —
+   *  no sheet re-derives a state and no sheet reads the client-computed
+   *  compliance.jurisdiction.state (the field that carried 'Unknown' into
+   *  Planset 14 on a project whose address says IL). null ⇒ print '—'. */
+  stateName: string | null;
+  /** the derivation trace: which input won, what each offered, what disagreed. */
+  stateAuthority: ProjectStateAuthority;
   parcelApn: string | null;
   ahjName: string | null;
   utilityName: string | null;
@@ -341,6 +350,12 @@ export interface ProjectAuthorityBuildArgs {
   customer: string | null;
   installationAddress: string | null;
   city: string | null; stateCode: string | null; zip: string | null;
+  /** the bound AHJ registry record's state, offered as a derivation candidate
+   *  ONLY (it never overrides the project's own state or its postal address). */
+  ahjStateCode?: string | null;
+  /** the CLIENT-COMPUTED compliance jurisdiction state, offered LAST — the
+   *  field that shipped the 'Unknown' sentinel. */
+  complianceState?: string | null;
   parcelApn: string | null;
   /** from the canonical code-authority record (single source for AHJ name). */
   ahjName: string | null;
@@ -413,6 +428,16 @@ export function buildProjectAuthority(args: ProjectAuthorityBuildArgs): ProjectA
 
   const prov = (source: string, note?: string): Provenance => ({ source: 'buildProjectAuthority', ref: source, note });
 
+  // THE canonical state, derived ONCE for the whole package. Every sheet's state
+  // projection reads the record this produces; no renderer re-derives it and no
+  // renderer reads the posted compliance.jurisdiction.state.
+  const stateAuthority = resolveProjectStateAuthority({
+    projectState: args.stateCode,
+    address: args.installationAddress,
+    ahjStateCode: args.ahjStateCode ?? null,
+    complianceState: args.complianceState ?? null,
+  });
+
   // §14 — per-field legal-authority verification. Verified state can ONLY come
   // from the operator/document-registry path (args.authorityVerified); postal
   // inference (county/city/AHJ/fire from ZIP) is NEVER verification.
@@ -443,7 +468,11 @@ export function buildProjectAuthority(args: ProjectAuthorityBuildArgs): ProjectA
     projectName: args.projectName ?? null,
     customer: args.customer ?? null,
     installationAddress: args.installationAddress ?? null,
-    city: args.city ?? null, stateCode: args.stateCode ?? null, zip: args.zip ?? null,
+    // stateCode is the CANONICAL code, not the raw argument: a project record
+    // carrying the 'Unknown' sentinel (or a full name) normalizes here once.
+    city: args.city ?? null, stateCode: stateAuthority.stateCode, zip: args.zip ?? null,
+    stateName: stateAuthority.stateName,
+    stateAuthority,
     parcelApn: args.parcelApn ?? null,
     ahjName: args.ahjName ?? null,
     utilityName: args.utilityName ?? null,
@@ -481,6 +510,7 @@ export function buildProjectAuthority(args: ProjectAuthorityBuildArgs): ProjectA
     generalNotes: args.generalNotes,
     fieldProvenance: {
       identity: prov('permit-route enrichment', 'project.* posted values'),
+      state: prov(`resolveProjectStateAuthority (${stateAuthority.source})`, stateAuthority.basis),
       ahj: prov('snapshot.codeAuthority', 'AHJ name single-sourced from the code-authority record'),
       utility: prov('project.utilityName'),
       equipment: prov('snapshot.equipment', 'versioned equipment records — no vendor default'),

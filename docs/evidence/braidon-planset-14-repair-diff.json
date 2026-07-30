@@ -1,0 +1,80 @@
+{
+ "note": "Same stored permit_input.json, route-faithful regeneration, one resolver lifecycle. Before = dev b49d7333.",
+ "before": {
+  "snapshotId": "PDS-D476ECA7BD9B",
+  "digest": "d476eca7bd9b65761262822b87cc50ad31b8030cc0ded0d2a142fb538ef095f5",
+  "unresolved": 16,
+  "open": [
+   "CODE-AUTHORITY-INCOMPLETE",
+   "DESIGNER-OF-RECORD-MISSING",
+   "ENGINEERING-REVIEW-PENDING",
+   "EQUIPMENT-DOCUMENT-APPLICABILITY",
+   "FASTENER-ASSEMBLY-UNVERIFIED",
+   "FRAMING-AUTHORITY-UNVERIFIED",
+   "MODULE-EXACT-DATASHEET-PENDING",
+   "PENDING-RACKING-ASSEMBLY-SELECTION",
+   "PROJECT-AUTHORITY-UNVERIFIED",
+   "PROJECT-NAME-NONPRODUCTION",
+   "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED",
+   "QCABLE-PROCUREMENT-INSUFFICIENT",
+   "RACKING-CAPACITY-APPLICABILITY-GAP",
+   "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+   "ROUTE-LENGTH-ESTIMATE",
+   "TAP-CONDUCTOR-LENGTH-PENDING"
+  ],
+  "grounding": "PENDING_MANUFACTURER_AUTHORITY",
+  "verdict": "not-applicable",
+  "failures": [
+   "the selected connector architecture: nothing is selected on the project to verify the claim against"
+  ],
+  "connectorArchitecture": null,
+  "stateCode": "IL",
+  "stateName": null
+ },
+ "after": {
+  "snapshotId": "PDS-6E5372928F5D",
+  "digest": "6e5372928f5dc71966ed71a8d176900a90ab3a34f58d8a9290ed18f0255ef6fa",
+  "unresolved": 15,
+  "open": [
+   "CODE-AUTHORITY-INCOMPLETE",
+   "DESIGNER-OF-RECORD-MISSING",
+   "ENGINEERING-REVIEW-PENDING",
+   "EQUIPMENT-DOCUMENT-APPLICABILITY",
+   "FASTENER-ASSEMBLY-UNVERIFIED",
+   "FRAMING-AUTHORITY-UNVERIFIED",
+   "MODULE-EXACT-DATASHEET-PENDING",
+   "PENDING-RACKING-ASSEMBLY-SELECTION",
+   "PROJECT-AUTHORITY-UNVERIFIED",
+   "PROJECT-NAME-NONPRODUCTION",
+   "QCABLE-PROCUREMENT-INSUFFICIENT",
+   "RACKING-CAPACITY-APPLICABILITY-GAP",
+   "RACKING-CAPACITY-SOURCE-NOT-ARCHIVED",
+   "ROUTE-LENGTH-ESTIMATE",
+   "TAP-CONDUCTOR-LENGTH-PENDING"
+  ],
+  "grounding": "NO_SEPARATE_EGC_REQUIRED",
+  "verdict": "applicable",
+  "failures": [],
+  "connectorArchitecture": "iq-q-cable-drop-connector",
+  "stateCode": "IL",
+  "stateName": "Illinois",
+  "stateAuthority": {
+   "stateCode": "IL",
+   "stateName": "Illinois",
+   "source": "project.state",
+   "basis": "state IL derived from the project record's own state field",
+   "candidates": {
+    "projectState": "IL",
+    "postalAddress": "IL",
+    "ahjRecord": "IL",
+    "complianceJurisdiction": "IL"
+   },
+   "conflicts": [],
+   "droppedKnownValue": false
+  }
+ },
+ "requirementsClosed": [
+  "QCABLE-GROUNDING-AUTHORITY-UNVERIFIED"
+ ],
+ "requirementsOpened": []
+}

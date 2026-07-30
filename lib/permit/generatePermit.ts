@@ -11,6 +11,9 @@ import { getDesignTemps } from './utils/designTemps';
 import { buildComputeSystemShadow } from './utils/computedRuns';
 import { mapComputedSystemToCompliance } from './snapshot/computeSystemProjection';
 import { validatePermitDesignSnapshot, blockingViolations, SnapshotValidationError } from './snapshot/validate';
+import {
+  resolveProjectStateAuthority, normalizeStateCode, isUnknownStateSentinel,
+} from './snapshot/locationAuthority';
 import { deepFreeze } from './snapshot/digest';
 import { scanRenderedObjectIds, checkRenderedIdCoverage, parsePlacementManifests, checkRenderParity } from './snapshot/coordinateAuthority';
 import type { PermitDesignSnapshot } from './snapshot/types';
@@ -81,6 +84,38 @@ export function generatePermitHTML(
     totalDcKw: input.system?.totalDcKw ?? null,
     totalAcKw: input.system?.totalAcKw ?? null,
   };
+
+  // ── CANONICAL STATE, DERIVED ONCE, BEFORE ANYTHING READS IT ───────────────
+  // `compliance.jurisdiction` is a CLIENT-COMPUTED record frozen into the posted
+  // permit_input. When the client's getJurisdictionInfo() ran without an address
+  // it wrote the literal sentinel state:'Unknown' / stateCode:'UNKNOWN' — and the
+  // sentinel is truthy, so the route's `if (!state) state = sc` repair and every
+  // renderer's `|| '—'` fallback walked straight past it. That is how Planset 14
+  // printed "Unknown" ~20 times for a project whose address is
+  // "3 MELVIN DR APT A, GRANITE CITY, IL 62040" and whose record says IL.
+  //
+  // Sheets now read the canonical projection, not this record. It is repaired
+  // anyway — a frozen input that carries a sentinel beside the real value IS the
+  // stale-value-beside-current-value failure mode, and downstream/legacy readers
+  // (and the artifact a reviewer inspects) must not see it. The repair only ever
+  // REPLACES an unrecognized value; a recognized state is left exactly as posted.
+  {
+    const j = input.compliance?.jurisdiction as
+      { state?: string | null; stateCode?: string | null } | undefined;
+    if (j) {
+      const _st = resolveProjectStateAuthority({
+        projectState: (project as { state?: string | null }).state ?? null,
+        address: project.address ?? null,
+        complianceState: j.state ?? null,
+      });
+      if (_st.stateCode && normalizeStateCode(j.state) !== _st.stateCode) {
+        console.warn('[PLANSET] canonical state repair: compliance.jurisdiction.state',
+          JSON.stringify(j.state), '→', _st.stateName, `(${_st.basis})`);
+        j.state = _st.stateName;
+      }
+      if (_st.stateCode && normalizeStateCode(j.stateCode) !== _st.stateCode) j.stateCode = _st.stateCode;
+    }
+  }
 
   // ── P0-9: planset DATE = GENERATION date (server-side authority) ──────────
   // config.date is a design label only — a stale client date must never print
@@ -1480,6 +1515,65 @@ export function generatePermitHTML(
         sourceRecord: 'titleBlock', affectedProjections: [`page ${pn}`],
         message: `sheet ${pn} does not carry the snapshot stamp`, enforcement: 'blocking' as const,
       })));
+    }
+    // ═══ V47 — NO SHEET MAY PRINT A SENTINEL FOR A KNOWN STATE, AND NO TWO
+    // SHEETS MAY PRINT DIFFERENT STATES ════════════════════════════════════════
+    // V46 proves the frozen record holds the state; this proves the PAGES do.
+    // Planset 14's regression lived entirely in the projection layer — the record
+    // was right and 16 title blocks still said "Unknown" — so the render side
+    // needs its own check. Every state projection is tagged
+    // data-project-field="state-name|state-code"; they must agree, and none may
+    // be an 'Unknown'-class sentinel while the snapshot knows the state.
+    {
+      const _paRec = (input as unknown as { _snapshot?: { projectAuthority?: {
+        stateCode: string | null; stateName: string | null } } })._snapshot?.projectAuthority;
+      const _printed = new Map<string, Set<string>>();
+      for (const [, field, value] of pages.join('\n')
+        .matchAll(/data-project-field="(state-name|state-code)"[^>]*>([^<]*)</g)) {
+        (_printed.get(field) ?? _printed.set(field, new Set()).get(field)!).add(value.trim());
+      }
+      const _stateViol: import('./snapshot/types').SnapshotViolation[] = [];
+      for (const [field, values] of _printed) {
+        const known = field === 'state-code' ? _paRec?.stateCode : _paRec?.stateName;
+        for (const val of values) {
+          if (isUnknownStateSentinel(val)) {
+            _stateViol.push({
+              invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+              offendingValue: val, sourceRecord: 'sheet render (data-project-field)',
+              affectedProjections: [field],
+              message: `a sheet printed the sentinel "${val}" for ${field}`,
+              enforcement: 'blocking' as const,
+            });
+          } else if (known && val !== known && val !== '—') {
+            _stateViol.push({
+              invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+              offendingValue: val, sourceRecord: 'sheet render (data-project-field)',
+              affectedProjections: [field],
+              message: `a sheet printed ${field}="${val}" while the canonical record says "${known}"`,
+              enforcement: 'blocking' as const,
+            });
+          } else if (known && val === '—') {
+            _stateViol.push({
+              invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+              offendingValue: val, sourceRecord: 'sheet render (data-project-field)',
+              affectedProjections: [field],
+              message: `a sheet printed "—" for ${field} while the canonical record says "${known}" — a `
+                + 'renderer silently substituted an unknown for a known value',
+              enforcement: 'blocking' as const,
+            });
+          }
+        }
+        if (values.size > 1) {
+          _stateViol.push({
+            invariant: 'V47', authorityPath: `projectAuthority.${field === 'state-code' ? 'stateCode' : 'stateName'}`,
+            offendingValue: [...values], sourceRecord: 'sheet render (data-project-field)',
+            affectedProjections: [field],
+            message: `sheets display conflicting ${field} values: ${[...values].map(x => `"${x}"`).join(', ')}`,
+            enforcement: 'blocking' as const,
+          });
+        }
+      }
+      if (_stateViol.length) throw new SnapshotValidationError(_stateViol);
     }
     const v13Missing = pages
       .map((p, i) => (/tb-sheet-id">\s*(CERT|PE-1[GF]?)\s*</.test(p)

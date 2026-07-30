@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { pendingGroundingAuthority } from '../fixtures/synthetic-pending-grounding';
 import {
   structuralBanner, bannerRequirementsForSheet, projectStructuralFromInput,
 } from '@/lib/permit/snapshot/structuralProjection';
@@ -26,10 +27,10 @@ import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
-function gen(profile = 'design-review'): { html: string; snap: PermitDesignSnapshot; input: any } {
+function gen(profile = 'design-review', authority?: unknown): { html: string; snap: PermitDesignSnapshot; input: any } {
   const input: any = clone(braidonOriginalAuditFixture);
   input.plansetProfile = profile;
-  const html = generatePermitHTML(input);
+  const html = generatePermitHTML(input, undefined, (authority ?? null) as any);
   return { html, snap: input._snapshot, input };
 }
 
@@ -80,12 +81,50 @@ describe('WS-17 — a sheet enumerates the requirements gating ITS OWN content',
     expect(new Set(lists).size).toBe(lists.length);
   });
 
-  it('nothing is dropped: every sheet states the remainder count with a pointer', () => {
+  it('nothing is dropped: a gated sheet states its remainder count with a pointer', () => {
+    // The RULE is conditional, so the expectation is READ from the banner model
+    // per sheet instead of assumed. Asserting a remainder line unconditionally
+    // made the test depend on the registry never shrinking — closing ONE
+    // requirement anywhere can leave a sheet with no gated content of its own, at
+    // which point the compact profile correctly suppresses that sheet's banner
+    // entirely and states the package totals once, on the cover. The package
+    // total is re-asserted below, so nothing is dropped either way.
+    const banner = structuralBanner(DR.snap);
     for (const id of ['PV-1', 'PV-1B', 'PV-3', 'PE-1']) {
-      const b = bulletsOn(DR.html, id);
-      const rem = b.find(x => /more unresolved release requirement/.test(x));
+      const per = bannerRequirementsForSheet(banner, id);
+      const bullets = bulletsOn(DR.html, id);
+      const rem = bullets.find(x => /unresolved release requirement/.test(x)
+        && /elsewhere in this package/.test(x));
+      if (per.own.length === 0) {
+        // no gated content of its own ⇒ no requirement list at all on this sheet
+        expect(bullets.filter(x => /unresolved release requirement/.test(x))).toEqual([]);
+        continue;
+      }
+      if (per.otherCount > 0) {
+        expect(rem, `${id} has ${per.otherCount} other requirement(s) and no remainder line`).toBeTruthy();
+        // the printed remainder = this sheet's own capped overflow + the
+        // requirements that gate other sheets, so it can only be ≥ otherCount
+        const printed = Number(/\+\s*(\d+)\s+more/.exec(rem as string)?.[1] ?? NaN);
+        expect(printed).toBeGreaterThanOrEqual(per.otherCount);
+      } else {
+        expect(rem, `${id} printed a remainder line with nothing remaining`).toBeFalsy();
+      }
+    }
+  });
+
+  it('NON-VACUOUS: on a package with an extra open requirement, every one of those sheets prints it', () => {
+    // A grounding-PENDING package (synthetic wrong-architecture document through
+    // the build's authority socket — the live project stays closed on its real
+    // archived evidence) puts a requirement on RS-1/E-1/PV-4B that none of these
+    // four sheets owns, so all four must state the remainder.
+    const P = gen('design-review', pendingGroundingAuthority('wrongConnectorArchitecture'));
+    const banner = structuralBanner(P.snap);
+    for (const id of ['PV-1', 'PV-1B', 'PV-3', 'PE-1']) {
+      expect(bannerRequirementsForSheet(banner, id).otherCount,
+        `${id} owns the entire registry — the remainder case is not exercised`).toBeGreaterThan(0);
+      const rem = bulletsOn(P.html, id).find(x => /unresolved release requirement/.test(x)
+        && /elsewhere in this package/.test(x));
       expect(rem, `${id} has no remainder line`).toBeTruthy();
-      expect(rem as string).toMatch(/elsewhere in this package/);
     }
   });
 

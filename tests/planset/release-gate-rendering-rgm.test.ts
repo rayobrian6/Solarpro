@@ -18,6 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit/index';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { pendingGroundingAuthority } from '../fixtures/synthetic-pending-grounding';
 import type { PermitDesignSnapshot } from '@/lib/permit/snapshot/types';
 import {
   projectReleaseGates, releaseHeadline, releasePackageLine, topConfirmedConflict,
@@ -31,15 +32,22 @@ import { buildSheetManifest } from '@/lib/permit/sheetManifest';
 
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
-function render(mutate?: (fx: any) => void) {
+function render(mutate?: (fx: any) => void, authority?: unknown) {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-26T12:00:00Z';
   mutate?.(input);
-  const html = generatePermitHTML(input);
+  const html = generatePermitHTML(input, undefined, (authority ?? null) as any);
   return { html, input, snap: input._snapshot as PermitDesignSnapshot };
 }
 
 const PKG = render();
+/** A package whose open-air grounding authority is PENDING, so the
+ *  QCABLE-GROUNDING-AUTHORITY-UNVERIFIED requirement — and therefore its
+ *  schema-keyed payload component — is on RS-1 to be inspected. Pending is
+ *  manufactured through the build's authority socket with a synthetic document
+ *  written for a different branch architecture; the live project stays closed on
+ *  its real archived evidence. */
+const PENDING_PKG = render(undefined, pendingGroundingAuthority('wrongConnectorArchitecture'));
 const MODEL = projectReleaseGates(PKG.snap);
 // the SHEET wrapper only — `.page-content` must not split a sheet.
 const SHEET_SPLIT = /<div class="page(?=[ "])/;
@@ -143,7 +151,12 @@ describe('RGM §5 — every requirement renders in full beneath its ONE primary 
   });
 
   it('the per-record payload detail box is still keyed by canonical payload schema', () => {
-    expect(rs).toContain('data-blocker-payload-schema="qcable-grounding-authority"');
+    // read from the PENDING package: the grounding component exists only while
+    // that requirement is open, and what is under test is the KEYING, not whether
+    // this project happens to be pending.
+    const rsPending = rsAll(PENDING_PKG.html);
+    expect(rsPending).toContain('data-blocker-payload-schema="qcable-grounding-authority"');
+    expect(rsPending).not.toContain('data-blocker-payload-schema="undefined"');
     // AAC WS-5 (2026-07-27): the fixture DOES carry a Q-Cable deficit now (branch
     // B2's ordered drops cannot span its sub-array bridge — the per-branch check
     // the aggregate-only gate used to hide), so its own schema-keyed component

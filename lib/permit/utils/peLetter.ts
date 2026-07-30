@@ -5,6 +5,7 @@
 
 import type { PermitInput } from '../types';
 import { escapeH } from './drawing';
+import { projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 
 // TAC WS-16 — PE-1 sheet identity (title set + the digest-bound
 // certification predicate) lives in the LEAF module peLetterIdentity so the
@@ -52,14 +53,14 @@ export function _peFooter(): string {
 export function _peProjectInfo(input: PermitInput): string {
   const { project, compliance } = input;
   const ahj   = compliance.jurisdiction?.ahj || '—';
-  const state  = compliance.jurisdiction?.state || '—';
+  const st     = projectProjectStateFromInput(input);   // canonical, never 'Unknown'
   return `
   <div class="section-title">Project Information</div>
   <table class="info-table" class="mb-xs">
     <tr><td class="il">Project Name</td><td class="iv" colspan="3">${escapeH(project.projectName || '—')}</td></tr>
     <tr><td class="il">Client / Owner</td><td class="iv">${escapeH(project.clientName || '—')}</td><td class="il">Date</td><td class="iv">${escapeH(String(project.date ?? ''))}</td></tr>
     <tr><td class="il">Installation Address</td><td class="iv" colspan="3">${escapeH(project.address || '—')}</td></tr>
-    <tr><td class="il">AHJ</td><td class="iv">${ahj}</td><td class="il">State</td><td class="iv">${state}</td></tr>
+    <tr><td class="il">AHJ</td><td class="iv">${ahj}</td><td class="il">State</td><td class="iv">${st.tag('state-name')}</td></tr>
     <tr><td class="il">Permit No.</td><td class="iv">___________________</td><td class="il">APN</td><td class="iv">${project.apn || '___________________'}</td></tr>
   </table>`;
 }

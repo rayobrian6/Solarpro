@@ -77,9 +77,42 @@ export interface TrunkAccessorySku {
   description: string;
 }
 
+/**
+ * THE canonical branch-cabling / connector ARCHITECTURE identifier.
+ *
+ * P13 — a manufacturer document is written for ONE branch architecture, and a
+ * document for a different architecture cannot establish the grounding method
+ * for this one. Enphase publishes two IQ8 installation manuals: the Q-Cable
+ * drop-connector manual (IOM-00068-3.0-EN) and a separate "…with integrated MC4
+ * connectors" manual — same microinverter family, different wiring system,
+ * different document. So the architecture is EQUIPMENT IDENTITY and belongs on
+ * the same canonical object that supplies the cable SKU, the branch system, the
+ * connector family, the terminator, the field-wireable connector compatibility
+ * and the procurement inputs. It is never inferred from a product NAME, a
+ * display string or a document title.
+ *
+ *   'iq-q-cable-drop-connector' — Enphase IQ/Q-Cable: a continuous trunk with
+ *      molded drop connectors, one per micro. THE architecture this project uses.
+ *   'integrated-mc4'            — micros terminated in integrated MC4 leads. A
+ *      DIFFERENT architecture with its own manual; never equivalent.
+ *   'ap-ac-bus-drop-connector' / 'hoymiles-ac-trunk-modular' /
+ *   'nep-bdm-molded-t-trunk'    — the other catalogued brands' own systems.
+ */
+export type TrunkConnectorArchitecture =
+  | 'iq-q-cable-drop-connector'
+  | 'integrated-mc4'
+  | 'ap-ac-bus-drop-connector'
+  | 'hoymiles-ac-trunk-modular'
+  | 'nep-bdm-molded-t-trunk';
+
 export interface TrunkCableSystem {
   brand: string;                 // matched against the micro manufacturer
   ecosystem: string;             // display name, e.g. 'IQ Q-Cable', 'AC Bus'
+  /** THE branch cabling architecture this trunk system IS. Carried here because
+   *  this is the object that already defines the branch system, the connector
+   *  family and the terminator — the architecture is not a separate opinion
+   *  about the equipment, it is the equipment. */
+  connectorArchitecture: TrunkConnectorArchitecture;
   cables: TrunkCableSpec[];
   connectors: {
     male: TrunkAccessorySku;     // field-wireable splice, male side
@@ -106,6 +139,7 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'Enphase',
     ecosystem: 'IQ Q-Cable',
+    connectorArchitecture: 'iq-q-cable-drop-connector',
     // AAC WS-5 — the FULL listed variant set from
     // lib/data/equipment/trunk-cable-enphase.json (datasheet DSH-00247-1.0).
     // The two `isDefaultForOrientation` entries are what the resolver SELECTS
@@ -150,6 +184,7 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'APsystems',
     ecosystem: 'AC Bus',
+    connectorArchitecture: 'ap-ac-bus-drop-connector',
     cables: [
       // One molded drop per micro at a fixed ~2.4 m pitch — no orientation variants.
       { sku: 'DS3-AC-BUS', orientation: 'fixed', connectorSpacingFt: 7.9, gaugeAwg: 10, conductors: 3, soldBy: 'drop' },
@@ -172,6 +207,7 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'Hoymiles',
     ecosystem: 'AC Trunk (HMS)',
+    connectorArchitecture: 'hoymiles-ac-trunk-modular',
     cables: [
       // Bulk reel, pre-molded connectors, field-cut. 2 m pitch = the common variant
       // (1 m 12AWG and 4.2 m 10AWG reels also exist). 2P+PE, 600 V, IP68, UL 6703.
@@ -193,6 +229,7 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
   {
     brand: 'NEP',
     ecosystem: 'BDM Trunk',
+    connectorArchitecture: 'nep-bdm-molded-t-trunk',
     cables: [
       // BDM-800 "Trunk Version": molded-T continuous trunk, portrait/landscape
       // variants. Confirmed SKU = landscape 12 AWG (4.4 m between Ts, 12 T/roll);

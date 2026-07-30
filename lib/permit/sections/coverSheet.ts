@@ -14,7 +14,7 @@ import { hybridSubmissionGate } from './hybridReadiness';
 import { resolveInterconnection } from './electricalPages';
 import { projectStructuralFromInput } from '../snapshot/structuralProjection';
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
-import { projectProjectAuthorityFromInput } from '../snapshot/projectAuthorityProjection';
+import { projectProjectAuthorityFromInput, projectProjectStateFromInput } from '../snapshot/projectAuthorityProjection';
 import { computePlansetManifest } from '../plansetManifest';
 import { releaseStatusBlockHtml } from '../utils/releaseStatusBlock';
 // TAC WS-16 — the cover names the PE sheets in prose; the noun is state-derived
@@ -53,7 +53,11 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const ircVer  = cp.irc ?? 'PENDING';
   const ifcVer  = cp.ifc ?? 'PENDING';
   const asceVer = cp.asce ?? 'PENDING';
-  const state   = compliance.jurisdiction?.state || '';
+  // THE canonical state (both forms). The cover read compliance.jurisdiction.state,
+  // so the CITY/STATE cell, the vicinity-map address chip and the state-amendments
+  // code row all printed the 'Unknown' sentinel in Planset 14.
+  const st      = projectProjectStateFromInput(input);
+  const state   = st.name ?? '';
   const ahj     = pa.ahj ?? '';        // W4 §3: AHJ from projectAuthority
   const utility = pa.utility ?? '';    // W4 §3: utility from projectAuthority (already display-named)
   const apn     = pa.apn ?? '';
@@ -435,7 +439,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     rawInfoRow('PROJECT',  pa.tag('project-name'), pa.projectName),
     rawInfoRow('CLIENT',   pa.tag('customer'),     pa.customer),
     rawInfoRow('ADDRESS',  pa.tag('address'),      pa.address),
-    infoRow('CITY/STATE',  [project.city || '', state].filter(Boolean).join(', ')),
+    rawInfoRow('CITY/STATE',
+      [project.city ? escapeH(project.city) : '', st.name ? st.tag('state-name') : ''].filter(Boolean).join(', '),
+      [project.city || '', state].filter(Boolean).join(', ')),
     rawInfoRow('APN',      pa.tag('apn'),          pa.apn),
     rawInfoRow('AHJ',      pa.tag('ahj'),          pa.ahj),
     rawInfoRow('UTILITY',  pa.tag('utility'),      pa.utility),

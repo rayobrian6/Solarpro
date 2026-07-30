@@ -1103,6 +1103,9 @@ export function buildPermitDesignSnapshot(
           ? 'THHN/THWN-2 conductors; UL 9703 (cable assemblies) / UL 3003 (raw cable); permitted in free air per NEC 690.31(C)'
           : 'listed AC trunk cable assembly; permitted in free air per NEC 690.31(C)',
         wiringMethodLabel: _isEnphase ? 'ENPHASE Q CABLE (TC-ER)' : `${_sys.brand.toUpperCase()} AC TRUNK (TC-ER)`,
+        // P13 — carried from THE canonical trunk-cable system, never inferred from
+        // a brand string, a product name or a document title.
+        connectorArchitecture: _sys.connectorArchitecture,
         connectorSpacingFt: _cbl.connectorSpacingFt ?? null,
         maxBranchCurrentA: _sys.branchOcpdA ?? null,
         compatibleMicroModels: Object.keys(_sys.deviceBranchLimits ?? {}),
@@ -1313,16 +1316,14 @@ export function buildPermitDesignSnapshot(
           // dimension (a document written for the integrated-MC4 architecture
           // cannot establish the method for a drop-connector Q-Cable branch).
           //
-          // NOT YET DERIVED FROM THE SELECTED CABLE. Populating it flips the live
-          // Braidon open-air outcome PENDING -> NO_SEPARATE_EGC_REQUIRED on the
-          // archived IOM-00068-3.0-EN evidence (verified: 16 -> 15 requirements,
-          // racking/rail requirements correctly unaffected). Eight existing tests
-          // assert the LIVE package is PENDING and must be repointed at a
-          // synthetic pending snapshot first, preserving the property they guard
-          // (a pending package renders the non-assertion label on every branch
-          // row). Left null so the suite stays green and that flip lands as its
-          // own reviewed change.
-          connectorArchitecture: null,
+          // DERIVED FROM THE CANONICAL SELECTED CABLE ASSEMBLY — the same object
+          // that supplies the cable SKU, the branch system, the connector family,
+          // the terminator, the field-wireable connector compatibility and the
+          // procurement inputs. Not from a display string, not from the document
+          // title, and with NO default: a project whose micro brand has no
+          // catalogued trunk system yields null here and the authority stays
+          // PENDING, exactly as it must.
+          connectorArchitecture: listedCableAssembly?.connectorArchitecture ?? null,
         },
         equipmentFacts: {
           // RECORDED, NON-DETERMINATIVE (never reaches the outcome selector).
@@ -1887,6 +1888,14 @@ export function buildPermitDesignSnapshot(
     installationAddress: proj.address ?? null,
     city: proj.city ?? null,
     stateCode: typeof proj.state === 'string' ? proj.state : null,
+    // The canonical state is DERIVED inside buildProjectAuthority from these
+    // candidates, in this precedence. The AHJ record and the posted compliance
+    // jurisdiction are offered so a project record with an empty (or 'Unknown')
+    // state can still resolve — but neither may outrank the project's own state
+    // or its postal address, and neither may introduce a state the address
+    // contradicts (recorded as a conflict and caught by V46).
+    ahjStateCode: _ahjRecord?.stateCode ?? null,
+    complianceState: (compliance?.jurisdiction as { state?: string } | undefined)?.state ?? null,
     zip: proj.zip ?? null,
     parcelApn: proj.apn ?? null,
     ahjName: codeAuthority.ahjName,          // single-sourced from code authority

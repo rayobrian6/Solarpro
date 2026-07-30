@@ -428,6 +428,15 @@ export interface ListedCableAssembly {
   insulationListing: string | null;
   /** the wiring-method label the sheets show for the open-air section. */
   wiringMethodLabel: string;          // 'ENPHASE Q CABLE (TC-ER)'
+  /** P13 — THE branch cabling / connector ARCHITECTURE this assembly IS, carried
+   *  from the canonical trunk-cable system (the same object that supplies the SKU,
+   *  the branch system, the connector family, the terminator and the procurement
+   *  inputs). It is an APPLICABILITY DIMENSION: a manufacturer document written
+   *  for the integrated-MC4 architecture cannot establish the grounding method for
+   *  a drop-connector Q-Cable branch, and vice versa. Null ⇒ the brand's trunk
+   *  system is not catalogued, and the grounding authority stays PENDING — never
+   *  a default. */
+  connectorArchitecture: import('@/lib/equipment/trunkCable').TrunkConnectorArchitecture | null;
   /** molded connector drop spacing along the trunk (ft). */
   connectorSpacingFt: number | null;
   /** max branch current / OCPD the assembly is listed for (A). */

@@ -28,6 +28,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { generatePermitHTML } from '@/lib/permit';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import { braidonOriginalAuditFixture } from '../fixtures/braidon-original-audit-fixture';
+import { pendingGroundingAuthority } from '../fixtures/synthetic-pending-grounding';
 import { roofProject } from '../../test-fixtures/roofProject';
 import {
   projectE1PhysicalSchedule, projectGroundingSegments, projectOpenAirBranchGrounding,
@@ -76,7 +77,7 @@ const QUAL_NON_ASSERTION =
   /not asserted|pending manufacturer authority|pending exact manufacturer authority|candidate design quantity|non-orderable|not established|not determinative|not part of the approved installation|pending\b/i;
 /** An explicitly NEGATED statement is not an assertion. */
 const QUAL_NEGATED =
-  /\bno\s+(additional\s+|separate\s+|raceway\s+)?(equipment grounding conductor|egc|grounding conductor)\b|\bis not (installed|required|asserted)\b|\bnone (is |are )?(installed|required)\b/i;
+  /\bno\s+(?:(?:additional|separate|raceway|open[- ]air|branch|extra|further|dedicated|listed)\s+){0,3}(?:equipment grounding conductor|egc|grounding conductor)\b|\bis not (?:installed|required|asserted)\b|\bnone (?:is |are )?(?:installed|required)\b/i;
 
 const strip = (html: string): string => html
   .replace(/<!--[\s\S]*?-->/g, ' ')
@@ -128,23 +129,49 @@ export function installedOpenAirEgcAssertions(html: string): string[] {
 
 // ── one real rendered package from the FROZEN acceptance fixture ─────────────
 let PKG: { input: any; cad: any; snap: PermitDesignSnapshot };
+
+// ── and ONE genuinely-PENDING package ────────────────────────────────────────
+// The tests below guard what a package must render WHILE THE MANUFACTURER
+// AUTHORITY IS PENDING. They used to obtain that state by reading the live
+// project, which was pending only because no manufacturer document had been
+// retrieved yet — a fact about the evidence archive, not a safety property.
+// Retrieving the real Enphase IOM-00068-3.0-EN closed the live project (correctly)
+// and broke every one of them.
+//
+// The pending state is now MANUFACTURED, through the build's own authority socket
+// (`groundingDocumentEvidence`), with a synthetic document that is exactly
+// applicable in every dimension EXCEPT the branch connector architecture: it is
+// written for the integrated-MC4 architecture, and this project is a Q-Cable
+// drop-connector branch. That is a real, precise, non-applicability — the
+// specificity contract is exercised, not weakened — and the live project stays
+// closed on its real evidence.
+let PENDING_PKG: { input: any; cad: any; snap: PermitDesignSnapshot };
 beforeAll(() => {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-26T12:00:00Z';
   generatePermitHTML(input);
   PKG = { input, cad: generateCADLayout(input), snap: input._snapshot };
+
+  const pInput: any = clone(braidonOriginalAuditFixture);
+  pInput.generatedAtIso = '2026-07-26T12:00:00Z';
+  generatePermitHTML(pInput, undefined, pendingGroundingAuthority('wrongConnectorArchitecture') as any);
+  PENDING_PKG = { input: pInput, cad: generateCADLayout(pInput), snap: pInput._snapshot };
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §1 — the projection root: the E-1 bonding cell derives from the AUTHORITY
 // ═══════════════════════════════════════════════════════════════════════════
 describe('§1 — E-1 open-air branch bonding projects the grounding authority', () => {
-  it('the live outcome is PENDING and every open-air branch row renders the NON-ASSERTION label', () => {
-    const g = projectOpenAirBranchGrounding(PKG.snap);
+  it('a PENDING outcome renders the NON-ASSERTION label on every open-air branch row', () => {
+    const g = projectOpenAirBranchGrounding(PENDING_PKG.snap);
     expect(g.present).toBe(true);
     expect(g.outcome).toBe('PENDING_MANUFACTURER_AUTHORITY');
+    // pending for the ONE stated reason — the document covers a different branch
+    // architecture. If the specificity contract ever weakened, this fixture would
+    // stop being pending and this test would fail LOUDLY rather than pass emptily.
+    expect(g.authority?.applicabilityVerification.failures.join(' ')).toMatch(/connector architecture/i);
 
-    const sections = projectE1PhysicalSchedule(PKG.snap);
+    const sections = projectE1PhysicalSchedule(PENDING_PKG.snap);
     const branchRows = sections.filter(s => s.sectionId === 'BRANCH_RUN');
     expect(branchRows.length).toBeGreaterThan(0);
     for (const r of branchRows) {
@@ -257,13 +284,13 @@ describe('§1 — E-1 open-air branch bonding projects the grounding authority',
 // ═══════════════════════════════════════════════════════════════════════════
 describe('gate 1 — pending grounding produces ZERO installed-open-air-EGC assertions', () => {
   it('E-1 (SLD + physical schedule + grounding note) makes no installed assertion', () => {
-    const e1 = pageSingleLineDiagram(PKG.input, PKG.cad, 6, 21);
+    const e1 = pageSingleLineDiagram(PENDING_PKG.input, PENDING_PKG.cad, 6, 21);
     const viol = installedOpenAirEgcAssertions(e1);
     expect(viol, `E-1 installed-EGC assertions: ${JSON.stringify(viol, null, 1)}`).toEqual([]);
   });
 
   it('PV-4B (conductor schedule + assembly note + grounding rows) makes no installed assertion', () => {
-    const pv4b = pageConductorSchedule(PKG.input, PKG.cad, 7, 21);
+    const pv4b = pageConductorSchedule(PENDING_PKG.input, PENDING_PKG.cad, 7, 21);
     const viol = installedOpenAirEgcAssertions(pv4b);
     expect(viol, `PV-4B installed-EGC assertions: ${JSON.stringify(viol, null, 1)}`).toEqual([]);
   });
@@ -282,6 +309,31 @@ describe('gate 1 — pending grounding produces ZERO installed-open-air-EGC asse
   it('the scanner accepts the honest PENDING rendering', () => {
     const honest = `<div>AC BRANCH B1 — Q-CABLE TRUNK (OPEN AIR)</div><div>${GROUNDING_PENDING_BONDING_CELL_LABEL}</div>`;
     expect(installedOpenAirEgcAssertions(honest)).toEqual([]);
+  });
+
+  it('the scanner accepts the honest CLOSED rendering — a NEGATION is not an assertion', () => {
+    // The closed outcome states "NO ADDITIONAL OPEN-AIR EGC INSTALLED IN THIS
+    // SECTION". The negation window used to allow exactly ONE qualifier word, so
+    // "open-air" between the negator and the noun made the scanner read this
+    // statement as its own opposite.
+    const closed = '<td>AC BRANCH B1 — Q-CABLE TRUNK (OPEN AIR)</td>'
+      + '<td>OPEN-AIR GROUNDING METHOD: LISTED INTEGRATED METHOD (NEC 690.43(C) / 110.3(B)) '
+      + '— NO ADDITIONAL OPEN-AIR EGC INSTALLED IN THIS SECTION</td>';
+    expect(installedOpenAirEgcAssertions(closed)).toEqual([]);
+  });
+
+  it('NON-VACUOUS: the SAME qualifier words in a POSITIVE statement are still caught', () => {
+    // Widening the negation window may not become a licence to assert a conductor.
+    const positive = '<div>An additional open-air EGC is installed with the Q-Cable branch trunk.</div>';
+    expect(installedOpenAirEgcAssertions(positive).length).toBeGreaterThan(0);
+    const sized = '<div>A #10 AWG additional open-air equipment grounding conductor runs with the Q-Cable trunk.</div>';
+    expect(installedOpenAirEgcAssertions(sized).length).toBeGreaterThan(0);
+  });
+
+  it('the CLOSED live package makes no installed assertion either', () => {
+    // gate 1's rendered scan, run against the package that actually closed.
+    expect(installedOpenAirEgcAssertions(pageSingleLineDiagram(PKG.input, PKG.cad, 6, 21))).toEqual([]);
+    expect(installedOpenAirEgcAssertions(pageConductorSchedule(PKG.input, PKG.cad, 7, 21))).toEqual([]);
   });
 });
 
@@ -358,7 +410,7 @@ describe('§2 — RS-1 blocker payload components are schema-selected', () => {
   });
 
   it('the GROUNDING blocker renders the grounding payload with Ray’s full field list', () => {
-    const rs1 = renderReviewStatusSheets(PKG.input, PKG.cad);
+    const rs1 = renderReviewStatusSheets(PENDING_PKG.input, PENDING_PKG.cad);
     expect(rs1).toContain('QCABLE-GROUNDING-AUTHORITY-UNVERIFIED');
     expect(rs1).toContain('GROUNDING AUTHORITY PAYLOAD:');
     for (const field of [
@@ -394,7 +446,10 @@ describe('§2 — RS-1 blocker payload components are schema-selected', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe('§7 — the legacy project-level EGC row is gone; grounding rows are canonical objects', () => {
   it('the projected graph gives every object an id, its OWN raceway and its OWN length', () => {
-    const segs = projectGroundingSegments(PKG.snap);
+    // the open-air assertions below are the PENDING-state contract, so this reads
+    // the pending package; the id / basis / authority-state invariants hold on
+    // both and are re-asserted against the live package in the sibling test.
+    const segs = projectGroundingSegments(PENDING_PKG.snap);
     expect(segs.length).toBeGreaterThan(0);
     for (const s of segs) {
       expect(s.groundingSegmentId, 'grounding segment without an id').toBeTruthy();
@@ -509,6 +564,7 @@ const ASM = (): ListedCableAssembly => ({
   model: 'Q-12-10-240', sku: 'Q-12-10-240', skuNote: null,
   conductorConstruction: 'two-wire', conductorCount: 2, conductorGauge: '#12 AWG',
   insulationListing: 'TC-ER', wiringMethodLabel: 'ENPHASE Q CABLE (TC-ER)',
+  connectorArchitecture: 'iq-q-cable-drop-connector',
   connectorSpacingFt: 4.25, maxBranchCurrentA: 20, compatibleMicroModels: ['IQ8A'],
   cableLengthFt: 152, dropCount: 31, unusedDropCapSku: null, terminatorSku: null,
   sourceDocument: null, verificationStatus: 'catalog-sourced', provenance: { source: 'test' },
@@ -527,7 +583,11 @@ const PATH = (id: string, label: string, drops: number, designed: number, proc: 
 function insufficientInput() {
   const input: any = clone(braidonOriginalAuditFixture);
   input.generatedAtIso = '2026-07-26T12:00:00Z';
-  generatePermitHTML(input);
+  // §2's cross-check needs BOTH payload boxes on the same sheet, so this input is
+  // also built PENDING on grounding (synthetic wrong-architecture document — see
+  // PENDING_PKG). Without it the grounding blocker is correctly absent and the
+  // "each template renders only for its own blocker" assertion would be vacuous.
+  generatePermitHTML(input, undefined, pendingGroundingAuthority('wrongConnectorArchitecture') as any);
   const cad = generateCADLayout(input);
   const snap: any = clone(input._snapshot);
   // live-shaped geometry: designed 166.5 ft vs procurement 152 ft ⇒ 14.5 ft short

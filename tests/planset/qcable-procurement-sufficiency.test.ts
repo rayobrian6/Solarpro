@@ -33,6 +33,7 @@ const ASM = (): ListedCableAssembly => ({
   model: 'Q-12-10-240', sku: 'Q-12-10-240', skuNote: null,
   conductorConstruction: 'two-wire', conductorCount: 2, conductorGauge: '#12 AWG',
   insulationListing: 'TC-ER', wiringMethodLabel: 'ENPHASE Q CABLE (TC-ER)',
+  connectorArchitecture: 'iq-q-cable-drop-connector',
   connectorSpacingFt: 4.25, maxBranchCurrentA: 20, compatibleMicroModels: ['IQ8A'],
   cableLengthFt: 152, dropCount: 31, unusedDropCapSku: null, terminatorSku: null,
   sourceDocument: null, verificationStatus: 'catalog-sourced', provenance: { source: 'test' },

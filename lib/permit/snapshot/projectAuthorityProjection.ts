@@ -20,6 +20,9 @@ import type { PermitInput } from '../types';
 import type { PermitDesignSnapshot } from './types';
 import type { ProjectAuthorityRecord, ProjectIssueState } from './projectAuthority';
 import { peekSnapshot } from './read';
+import {
+  resolveProjectStateAuthority, stateNameForCode, type ProjectStateAuthority,
+} from './locationAuthority';
 
 /** Printed when a project value is unknown (null). Explicit, never blank. */
 export const PENDING_PROJECT_VALUE = 'PENDING';
@@ -35,7 +38,11 @@ export type ProjectField =
   | 'system-type' | 'dc-kw' | 'ac-kw' | 'module-count'
   | 'module-model' | 'inverter-model' | 'mount-model' | 'battery-model'
   | 'designer' | 'contractor' | 'issue-status' | 'engineer-review-status'
-  | 'snapshot-id' | 'digest';
+  | 'snapshot-id' | 'digest'
+  // THE canonical location projection. Tagged so the truth matrix can prove one
+  // state across every sheet, and so the render-level V47 invariant can find any
+  // sheet that printed an 'Unknown'-class sentinel for a known state.
+  | 'state-code' | 'state-name';
 
 export interface ProjectAuthorityProjection {
   present: boolean;
@@ -46,6 +53,10 @@ export interface ProjectAuthorityProjection {
   address: string | null;
   cityStateZip: string | null;
   apn: string | null;
+  /** canonical 2-letter state code ('IL'). null ⇒ genuinely unknown. */
+  stateCode: string | null;
+  /** canonical full state name ('Illinois'). null ⇒ genuinely unknown. */
+  stateName: string | null;
   ahj: string | null;
   utility: string | null;
   systemType: string | null;
@@ -120,6 +131,8 @@ export function projectProjectAuthority(
       case 'contractor': return record?.contractor ?? null;
       case 'issue-status': return record?.issueState ?? null;
       case 'engineer-review-status': return record?.engineerReviewStatus ?? null;
+      case 'state-code': return record?.stateCode ?? null;
+      case 'state-name': return record?.stateName ?? null;
       case 'snapshot-id': return snapshotId;
       case 'digest': return digest;
       default: return null;
@@ -134,6 +147,8 @@ export function projectProjectAuthority(
     address: record?.installationAddress ?? null,
     cityStateZip,
     apn: record?.parcelApn ?? null,
+    stateCode: record?.stateCode ?? null,
+    stateName: record?.stateName ?? null,
     ahj: record?.ahjName ?? null,
     utility: record?.utilityName ?? null,
     systemType: record?.systemType ?? null,
@@ -165,6 +180,79 @@ export function projectProjectAuthority(
  *  all PENDING, so a standalone path degrades honestly instead of fabricating. */
 export function projectProjectAuthorityFromInput(input: PermitInput): ProjectAuthorityProjection {
   return projectProjectAuthority(peekSnapshot(input));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE ONE STATE ACCESSOR every sheet consumes.
+//
+// Before this, thirteen renderers each read `compliance.jurisdiction?.state`
+// — a CLIENT-COMPUTED value frozen into the posted permit_input. When the
+// client computed it without an address it produced the literal 'Unknown', and
+// because that sentinel is truthy every `|| '—'` fallback printed it: 16 title
+// blocks, the cover CITY/STATE cell, the cover address chip, the governing-code
+// amendments row and the PE-1 project table, on a project whose address is
+// "…, GRANITE CITY, IL 62040" and whose record says IL.
+//
+// Now: the frozen snapshot's canonical record leads; a package built without a
+// snapshot re-derives from THE SAME pure resolver over the project's own
+// identity. `compliance.jurisdiction.state` is accepted only as the LAST
+// candidate and only after normalization, so the sentinel can never print again.
+// A genuinely unknown state stays null and every consumer prints '—'.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ProjectStateProjection {
+  /** canonical 2-letter code ('IL'), or null. Use for CODE lookups. */
+  code: string | null;
+  /** canonical full name ('Illinois'), or null. Use for DISPLAY. */
+  name: string | null;
+  /** display name, '—' when unknown. NEVER 'Unknown'. */
+  display: string;
+  /** display code, '—' when unknown. */
+  displayCode: string;
+  /** the derivation trace (which input won, what disagreed). */
+  authority: ProjectStateAuthority;
+  /** true ⇒ the value came from the frozen snapshot record. */
+  fromSnapshot: boolean;
+  /** HTML span carrying data-project-field="state-name"|"state-code" so the
+   *  truth matrix can prove ONE state across every sheet and V47 can catch any
+   *  sheet that printed a sentinel. Always emitted, snapshot or not. */
+  tag(field: 'state-name' | 'state-code'): string;
+}
+
+/** Printed for an unknown state. Explicit em-dash, never a word. */
+export const UNKNOWN_STATE_DISPLAY = '—';
+
+export function projectProjectState(
+  snap: PermitDesignSnapshot | null | undefined,
+  input: PermitInput,
+): ProjectStateProjection {
+  const record = (snap as unknown as { projectAuthority?: ProjectAuthorityRecord } | null)?.projectAuthority ?? null;
+  const fromSnapshot = !!record?.stateCode;
+  const authority: ProjectStateAuthority = fromSnapshot
+    ? (record!.stateAuthority ?? resolveProjectStateAuthority({ projectState: record!.stateCode }))
+    : resolveProjectStateAuthority({
+        projectState: (input?.project as { state?: string | null } | undefined)?.state ?? null,
+        address: (input?.project as { address?: string | null } | undefined)?.address ?? null,
+        complianceState: (input?.compliance?.jurisdiction as { state?: string } | undefined)?.state ?? null,
+      });
+  const code = fromSnapshot ? record!.stateCode : authority.stateCode;
+  const name = fromSnapshot ? (record!.stateName ?? stateNameForCode(record!.stateCode)) : authority.stateName;
+  const p: ProjectStateProjection = {
+    code, name,
+    display: name ?? UNKNOWN_STATE_DISPLAY,
+    displayCode: code ?? UNKNOWN_STATE_DISPLAY,
+    authority, fromSnapshot,
+    tag(field) {
+      const v = field === 'state-code' ? (code ?? UNKNOWN_STATE_DISPLAY) : (name ?? UNKNOWN_STATE_DISPLAY);
+      return `<span data-project-field="${field}">${esc(v)}</span>`;
+    },
+  };
+  return p;
+}
+
+/** Convenience for renderers holding only `input`. */
+export function projectProjectStateFromInput(input: PermitInput): ProjectStateProjection {
+  return projectProjectState(peekSnapshot(input), input);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

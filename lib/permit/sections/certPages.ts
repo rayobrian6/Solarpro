@@ -30,6 +30,7 @@ import { projectStructuralFromInput, bannerRequirementsForSheet, fmt, fmtStr, fi
 import { projectCodeAuthorityFromInput } from '../snapshot/codeAuthorityProjection';
 import {
   projectProjectAuthorityFromInput, projectIssueStateLanguageFromInput,
+  projectProjectStateFromInput,
 } from '../snapshot/projectAuthorityProjection';
 
 // D-6 / snapshot V13 / W4 Section 2 -- the digest-bound certification predicate
@@ -133,7 +134,7 @@ export function pageEngineerCert(input: PermitInput, cad: CADModel, pageNum: num
   const asce = cp.asceLabel;
   const necVer = cp.nec ?? 'PENDING';
   const ifcVer = cp.ifc ?? 'PENDING';
-  const state = compliance.jurisdiction?.state || '&mdash;';
+  const state = projectProjectStateFromInput(input).display;   // canonical, never 'Unknown'
   const ahj = compliance.jurisdiction?.ahj || '&mdash;';
   const system = input.system;
   const sysSize = system?.totalDcKw?.toFixed(2) ?? '&mdash;';
@@ -346,14 +347,14 @@ function _peProjectInfo(input: PermitInput): string {
   const { project, compliance } = input;
   const pa = projectProjectAuthorityFromInput(input); // W4 Section 3 -- AHJ single-sourced
   const ahj   = compliance.jurisdiction?.ahj || '—';
-  const state  = compliance.jurisdiction?.state || '—';
+  const st    = projectProjectStateFromInput(input);   // canonical, never 'Unknown'
   return `
   <div class="section-title">Project Information</div>
   <table class="info-table mb-xs">
     <tr><td class="il">Project Name</td><td class="iv" colspan="3">${escapeH(project.projectName || '—')}</td></tr>
     <tr><td class="il">Client / Owner</td><td class="iv">${escapeH(project.clientName || '—')}</td><td class="il">Date</td><td class="iv">${escapeH(String(project.date ?? ''))}</td></tr>
     <tr><td class="il">Installation Address</td><td class="iv" colspan="3">${escapeH(project.address || '—')}</td></tr>
-    <tr><td class="il">AHJ</td><td class="iv">${pa.present ? pa.tag('ahj') : escapeH(ahj)}</td><td class="il">State</td><td class="iv">${escapeH(state)}</td></tr>
+    <tr><td class="il">AHJ</td><td class="iv">${pa.present ? pa.tag('ahj') : escapeH(ahj)}</td><td class="il">State</td><td class="iv">${st.tag('state-name')}</td></tr>
     <tr><td class="il">Permit No.</td><td class="iv">___________________</td><td class="il">APN</td><td class="iv">${escapeH(project.apn || '___________________')}</td></tr>
   </table>`;
 }
@@ -386,7 +387,7 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
   const { project, system, compliance } = input;
   const necVer  = _cpF.nec ?? 'PENDING';
   const ibcVer  = _cpF.ibc ?? 'PENDING';
-  const state   = compliance.jurisdiction?.state || '—';
+  const state   = projectProjectStateFromInput(input).display;   // canonical, never 'Unknown'
   const structural = compliance.structural;
   const approved = certificationApproved(input);   // Section 2 gate
   // W3 Section 7/9 -- env single-sourced from the snapshot; fence overturning SF
@@ -492,7 +493,7 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
   const { project, system, compliance } = input;
   const necVer  = _cpG.nec ?? 'PENDING';
   const ibcVer  = _cpG.ibc ?? 'PENDING';
-  const state   = compliance.jurisdiction?.state || '—';
+  const state   = projectProjectStateFromInput(input).display;   // canonical, never 'Unknown'
   const structural = compliance.structural;
   const approved = certificationApproved(input);   // Section 2 gate
   // W3 Section 7 -- env single-sourced from the snapshot.
@@ -602,7 +603,7 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const _cpR = projectCodeAuthorityFromInput(input); const asce = _cpR.asceLabel;   // W4 Section 2
   const necVer  = _cpR.nec ?? 'PENDING';
   const ibcVer  = _cpR.ibc ?? 'PENDING';
-  const state   = compliance.jurisdiction?.state || '—';
+  const state   = projectProjectStateFromInput(input).display;   // canonical, never 'Unknown'
   const structural = compliance.structural;
   const approved = certificationApproved(input);   // Section 2 gate
   // W3 Section 5/7/9 -- env single-sourced; lag-bolt result from the snapshot
